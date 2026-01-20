@@ -73,15 +73,15 @@ dev-next-error category:
     #!/usr/bin/env bash
     case "{{category}}" in
         lexer|lex|l)
-            file="src/errors/lexer.rs"
+            file="crates/vole-frontend/src/errors/lexer.rs"
             prefix="E0"
             ;;
         parser|parse|p)
-            file="src/errors/parser.rs"
+            file="crates/vole-frontend/src/errors/parser.rs"
             prefix="E1"
             ;;
         sema|semantic|s)
-            file="src/errors/sema.rs"
+            file="crates/vole-sema/src/errors/mod.rs"
             prefix="E2"
             ;;
         *)
@@ -96,20 +96,20 @@ dev-next-error category:
 # Trace a keyword through the compiler pipeline
 dev-trace-keyword keyword:
     #!/usr/bin/env bash
-    echo "=== Lexer (frontend/lexer.rs, frontend/token.rs) ==="
-    grep -n -i "{{keyword}}" src/frontend/lexer.rs src/frontend/token.rs 2>/dev/null || echo "(not found)"
+    echo "=== Lexer (lexer.rs, token.rs) ==="
+    grep -n -i "{{keyword}}" crates/vole-frontend/src/lexer.rs crates/vole-frontend/src/token.rs 2>/dev/null || echo "(not found)"
     echo ""
-    echo "=== Parser (frontend/parser.rs, frontend/parse_*.rs) ==="
-    grep -n -i "{{keyword}}" src/frontend/parser.rs src/frontend/parse_*.rs 2>/dev/null || echo "(not found)"
+    echo "=== Parser (parser/, parse_*.rs) ==="
+    grep -rn -i "{{keyword}}" crates/vole-frontend/src/parser/ crates/vole-frontend/src/parse_*.rs 2>/dev/null || echo "(not found)"
     echo ""
-    echo "=== AST (frontend/ast.rs) ==="
-    grep -n -i "{{keyword}}" src/frontend/ast.rs 2>/dev/null || echo "(not found)"
+    echo "=== AST (ast.rs) ==="
+    grep -n -i "{{keyword}}" crates/vole-frontend/src/ast.rs 2>/dev/null || echo "(not found)"
     echo ""
-    echo "=== Sema (sema/) ==="
-    grep -n -i "{{keyword}}" src/sema/*.rs 2>/dev/null || echo "(not found)"
+    echo "=== Sema ==="
+    grep -rn -i "{{keyword}}" crates/vole-sema/src/ 2>/dev/null || echo "(not found)"
     echo ""
-    echo "=== Codegen (codegen/) ==="
-    grep -n -i "{{keyword}}" src/codegen/*.rs 2>/dev/null || echo "(not found)"
+    echo "=== Codegen ==="
+    grep -rn -i "{{keyword}}" crates/vole-codegen/src/ 2>/dev/null || echo "(not found)"
 
 # Show equivalent Void (Zig) reference file
 dev-void-ref path:
@@ -132,12 +132,12 @@ dev-void-ref path:
 dev-list-errors category="all":
     #!/usr/bin/env bash
     if [ "{{category}}" = "all" ]; then
-        files="src/errors/lexer.rs src/errors/parser.rs src/errors/sema.rs"
+        files="crates/vole-frontend/src/errors/lexer.rs crates/vole-frontend/src/errors/parser.rs crates/vole-sema/src/errors/mod.rs"
     else
         case "{{category}}" in
-            lexer|lex|l) files="src/errors/lexer.rs" ;;
-            parser|parse|p) files="src/errors/parser.rs" ;;
-            sema|semantic|s) files="src/errors/sema.rs" ;;
+            lexer|lex|l) files="crates/vole-frontend/src/errors/lexer.rs" ;;
+            parser|parse|p) files="crates/vole-frontend/src/errors/parser.rs" ;;
+            sema|semantic|s) files="crates/vole-sema/src/errors/mod.rs" ;;
             *) echo "Usage: just dev-list-errors [lexer|parser|sema|all]"; exit 1 ;;
         esac
     fi
@@ -154,22 +154,22 @@ dev-list-errors category="all":
 
 # List all token types
 dev-tokens:
-    @grep -A200 "^pub enum TokenType" src/frontend/token.rs | grep -E "^\s+\w+," | sed 's/,.*//' | sed 's/^\s*//'
+    @grep -A200 "^pub enum TokenType" crates/vole-frontend/src/token.rs | grep -E "^\s+\w+," | sed 's/,.*//' | sed 's/^\s*//'
 
 # List TODOs and FIXMEs in the codebase
 dev-todos:
     #!/usr/bin/env bash
     echo "=== TODO comments ==="
-    grep -rn "TODO" src/ --include="*.rs" | grep -v "target/" || echo "(none)"
+    grep -rn "TODO" src/ crates/ --include="*.rs" | grep -v "target/" || echo "(none)"
     echo ""
     echo "=== FIXME comments ==="
-    grep -rn "FIXME" src/ --include="*.rs" | grep -v "target/" || echo "(none)"
+    grep -rn "FIXME" src/ crates/ --include="*.rs" | grep -v "target/" || echo "(none)"
     echo ""
     echo "=== todo!() macros ==="
-    grep -rn "todo!()" src/ --include="*.rs" | grep -v "target/" || echo "(none)"
+    grep -rn "todo!()" src/ crates/ --include="*.rs" | grep -v "target/" || echo "(none)"
     echo ""
     echo "=== unimplemented!() macros ==="
-    grep -rn "unimplemented!()" src/ --include="*.rs" | grep -v "target/" || echo "(none)"
+    grep -rn "unimplemented!()" src/ crates/ --include="*.rs" | grep -v "target/" || echo "(none)"
 
 # Find test files related to a feature
 dev-test-for feature:
