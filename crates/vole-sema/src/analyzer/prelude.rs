@@ -53,15 +53,9 @@ impl Analyzer {
         if let Some(ref cache) = self.module_cache
             && let Some(cached) = cache.borrow().get(import_path)
         {
-            // Use cached analysis results - merge into shared db
-            // Note: We don't replace db.names because the shared db already contains
-            // all names from the cached module (since cache uses the same shared db).
-            // Replacing would lose NameIds created after the cache entry was made.
-            {
-                let mut db = self.db.borrow_mut();
-                db.entities.merge(&cached.entity_registry);
-                db.implements.merge(&cached.implement_registry);
-            }
+            // Use cached analysis results.
+            // Note: Registry data (types, methods, fields) is already in the shared
+            // CompilationDb - we only need to restore per-module metadata.
             for (name, func_type) in &cached.functions_by_name {
                 self.functions_by_name
                     .insert(name.clone(), func_type.clone());
@@ -139,10 +133,10 @@ impl Analyzer {
             tracing::warn!(import_path, ?errors, "prelude analysis errors");
         }
         if analyze_result.is_ok() {
-            // Cache the analysis results before merging
+            // Cache the analysis results.
+            // Note: Registry data is already in the shared CompilationDb - we only
+            // cache per-module metadata (expr_types, method_resolutions, etc.)
             if let Some(ref cache) = self.module_cache {
-                // TypeIds are valid across cache because arena is shared
-                let db = self.db.borrow();
                 cache.borrow_mut().insert(
                     import_path.to_string(),
                     CachedModule {
@@ -150,10 +144,7 @@ impl Analyzer {
                         interner: prelude_interner.clone(),
                         expr_types: sub_analyzer.expr_types.clone(),
                         method_resolutions: sub_analyzer.method_resolutions.clone_inner(),
-                        entity_registry: db.entities.clone(),
-                        implement_registry: db.implements.clone(),
                         functions_by_name: sub_analyzer.functions_by_name.clone(),
-                        name_table: db.names.clone(),
                     },
                 );
             }

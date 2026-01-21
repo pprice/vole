@@ -7,40 +7,42 @@
 //! - Test runner: 100+ files all importing the same prelude/stdlib
 //! - Large projects: Many files importing shared utilities
 //! - Incremental builds: Only re-analyze changed modules
+//!
+//! ## Design
+//!
+//! All analyzers using the cache share the same `Rc<RefCell<CompilationDb>>`.
+//! This means type definitions, methods, and names are automatically shared -
+//! we only need to cache per-module metadata like expression types and method
+//! resolutions (which are keyed by NodeId, which is per-program).
 
 use crate::compilation_db::CompilationDb;
 use crate::resolution::ResolvedMethod;
-use crate::type_arena::{TypeArena, TypeId};
+use crate::type_arena::TypeId;
 use crate::types::FunctionType;
-use crate::{EntityRegistry, ImplementRegistry};
 use rustc_hash::FxHashMap;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use vole_frontend::{Interner, NodeId, Program};
-use vole_identity::NameTable;
 
 /// Cached analysis results for a single module.
+///
+/// Note: Registry data (types, methods, fields) is NOT stored here - it lives
+/// in the shared CompilationDb. We only cache per-module metadata that is
+/// keyed by NodeId (which is program-specific).
 #[derive(Clone)]
 pub struct CachedModule {
-    /// Parsed program
+    /// Parsed program (needed for codegen)
     pub program: Program,
     /// Interner with symbols from this module
     pub interner: Interner,
-    /// Expression types from analysis.
-    /// Stored as TypeId (interned handles) - valid because TypeArena is shared
-    /// across all analyzers via Rc<RefCell<TypeArena>>.
+    /// Expression types from analysis (NodeId → TypeId).
+    /// TypeIds are valid because all analyzers share the same TypeArena.
     pub expr_types: HashMap<NodeId, TypeId>,
-    /// Method resolutions from analysis
+    /// Method resolutions from analysis (NodeId → ResolvedMethod)
     pub method_resolutions: HashMap<NodeId, ResolvedMethod>,
-    /// Entity registry contributions (types, methods, fields)
-    pub entity_registry: EntityRegistry,
-    /// Implement registry contributions
-    pub implement_registry: ImplementRegistry,
-    /// Functions registered by name
+    /// Functions registered by name (for cross-interner lookup)
     pub functions_by_name: FxHashMap<String, FunctionType>,
-    /// Name table state after analyzing this module (includes all NameIds used by registries)
-    pub name_table: NameTable,
 }
 
 /// Cache for module analysis results.
@@ -79,16 +81,7 @@ impl ModuleCache {
 
     /// Get the shared CompilationDb that must be used by all Analyzers using this cache.
     pub fn db(&self) -> Rc<RefCell<CompilationDb>> {
-        self.db.clone()
-    }
-
-    /// Get the shared TypeArena (for compatibility during migration).
-    pub fn type_arena(&self) -> Rc<RefCell<TypeArena>> {
-        // Return a reference to the TypeArena within the db
-        // This is a compatibility shim - callers should migrate to using db() directly
-        unimplemented!(
-            "type_arena() is deprecated - use db() and access db.borrow().types directly"
-        )
+        Rc::clone(&self.db)
     }
 
     /// Check if a module is cached.
