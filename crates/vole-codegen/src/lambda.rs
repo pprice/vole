@@ -11,9 +11,8 @@ use vole_frontend::{BinaryOp, Expr, ExprKind, FuncBody, LambdaExpr, NodeId, Symb
 use vole_sema::type_arena::{TypeArena, TypeId, TypeIdVec};
 
 use super::RuntimeFn;
-use super::compiler::ControlFlowCtx;
-use super::context::{Captures, Cg};
-use super::stmt::compile_func_body;
+use super::compiler::common::{compile_function_inner, FunctionCompileConfig};
+use super::context::Cg;
 use super::types::{
     CompileCtx, CompiledValue, resolve_type_expr_id, type_id_size, type_id_to_cranelift,
 };
@@ -290,45 +289,23 @@ fn compile_pure_lambda(
     let mut lambda_ctx = ctx.module.make_context();
     lambda_ctx.func.signature = sig.clone();
 
+    // Build params: Vec<(Symbol, TypeId, Type)>
+    let params: Vec<(Symbol, TypeId, Type)> = lambda
+        .params
+        .iter()
+        .enumerate()
+        .map(|(i, p)| (p.name, param_type_ids[i], param_types[i]))
+        .collect();
+
+    // Use compile_function_inner for the body compilation
     {
         let mut lambda_builder_ctx = FunctionBuilderContext::new();
-        let mut lambda_builder =
+        let lambda_builder =
             FunctionBuilder::new(&mut lambda_ctx.func, &mut lambda_builder_ctx);
 
-        let entry_block = lambda_builder.create_block();
-        lambda_builder.append_block_params_for_function_params(entry_block);
-        lambda_builder.switch_to_block(entry_block);
+        let config = FunctionCompileConfig::pure_lambda(&lambda.body, params, return_type_id);
 
-        let mut lambda_variables: HashMap<Symbol, (Variable, TypeId)> = HashMap::new();
-        let block_params = lambda_builder.block_params(entry_block).to_vec();
-        // Skip block_params[0] which is the closure pointer (unused for pure lambdas)
-        for (i, param) in lambda.params.iter().enumerate() {
-            let var = lambda_builder.declare_var(param_types[i]);
-            lambda_builder.def_var(var, block_params[i + 1]); // +1 to skip closure ptr
-            lambda_variables.insert(param.name, (var, param_type_ids[i]));
-        }
-
-        let mut cf_ctx = ControlFlowCtx::default();
-        let (terminated, expr_value) = compile_func_body(
-            &mut lambda_builder,
-            &lambda.body,
-            &mut lambda_variables,
-            &mut cf_ctx,
-            ctx,
-            None, // No captures for pure lambda
-            Some(return_type_id),
-        )?;
-
-        // Handle return
-        if let Some(value) = expr_value {
-            lambda_builder.ins().return_(&[value.value]);
-        } else if !terminated {
-            // Non-terminated block returns default i64(0) for lambdas
-            let zero = lambda_builder.ins().iconst(types::I64, 0);
-            lambda_builder.ins().return_(&[zero]);
-        }
-        lambda_builder.seal_all_blocks();
-        lambda_builder.finalize();
+        compile_function_inner(lambda_builder, ctx, config)?;
     }
 
     ctx.module
@@ -428,55 +405,29 @@ fn compile_lambda_with_captures(
     let mut lambda_ctx = ctx.module.make_context();
     lambda_ctx.func.signature = sig.clone();
 
+    // Build params: Vec<(Symbol, TypeId, Type)>
+    let params: Vec<(Symbol, TypeId, Type)> = lambda
+        .params
+        .iter()
+        .enumerate()
+        .map(|(i, p)| (p.name, param_type_ids[i], param_types[i]))
+        .collect();
+
+    // Use compile_function_inner for the body compilation
     {
         let mut lambda_builder_ctx = FunctionBuilderContext::new();
-        let mut lambda_builder =
+        let lambda_builder =
             FunctionBuilder::new(&mut lambda_ctx.func, &mut lambda_builder_ctx);
 
-        let entry_block = lambda_builder.create_block();
-        lambda_builder.append_block_params_for_function_params(entry_block);
-        lambda_builder.switch_to_block(entry_block);
-
-        let block_params = lambda_builder.block_params(entry_block).to_vec();
-        let closure_ptr = block_params[0];
-
-        let mut lambda_variables: HashMap<Symbol, (Variable, TypeId)> = HashMap::new();
-        for (i, param) in lambda.params.iter().enumerate() {
-            let var = lambda_builder.declare_var(param_types[i]);
-            lambda_builder.def_var(var, block_params[i + 1]);
-            lambda_variables.insert(param.name, (var, param_type_ids[i]));
-        }
-
-        let closure_var = lambda_builder.declare_var(ctx.pointer_type);
-        lambda_builder.def_var(closure_var, closure_ptr);
-
-        // Build captures for the closure
-        let captures = Some(Captures {
-            bindings: &capture_bindings,
-            closure_var,
-        });
-
-        let mut cf_ctx = ControlFlowCtx::default();
-        let (terminated, expr_value) = compile_func_body(
-            &mut lambda_builder,
+        let config = FunctionCompileConfig::capturing_lambda(
             &lambda.body,
-            &mut lambda_variables,
-            &mut cf_ctx,
-            ctx,
-            captures,
-            Some(return_type_id),
-        )?;
+            params,
+            &capture_bindings,
+            ctx.pointer_type,
+            return_type_id,
+        );
 
-        // Handle return
-        if let Some(value) = expr_value {
-            lambda_builder.ins().return_(&[value.value]);
-        } else if !terminated {
-            // Non-terminated block returns default i64(0) for lambdas
-            let zero = lambda_builder.ins().iconst(types::I64, 0);
-            lambda_builder.ins().return_(&[zero]);
-        }
-        lambda_builder.seal_all_blocks();
-        lambda_builder.finalize();
+        compile_function_inner(lambda_builder, ctx, config)?;
     }
 
     ctx.module

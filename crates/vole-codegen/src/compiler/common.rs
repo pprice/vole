@@ -2,19 +2,29 @@
 //
 // Shared function compilation infrastructure.
 // This module provides a unified helper for the common pattern across all
-// function compilation paths (top-level funcs, methods).
+// function compilation paths (top-level funcs, methods, lambdas).
 
 use std::collections::HashMap;
 
-use cranelift::prelude::{FunctionBuilder, InstBuilder, Type};
+use cranelift::prelude::{types, FunctionBuilder, InstBuilder, Type};
 use vole_frontend::{FuncBody, Symbol};
 use vole_sema::type_arena::TypeId;
 
 use crate::context::Captures;
+use crate::lambda::CaptureBinding;
 use crate::stmt::compile_func_body;
 use crate::types::CompileCtx;
 
 use super::ControlFlowCtx;
+
+/// What to return from a non-terminated block
+#[derive(Clone, Copy)]
+pub enum DefaultReturn {
+    /// Return nothing (for void functions): `return_(&[])`
+    Empty,
+    /// Return a zero i64 (for lambdas): `return_(&[iconst(i64, 0)])`
+    ZeroI64,
+}
 
 /// Configuration for compiling a function body.
 ///
@@ -27,10 +37,17 @@ pub struct FunctionCompileConfig<'a> {
     pub params: Vec<(Symbol, TypeId, Type)>,
     /// Self binding for methods: (name, vole_type_id, cranelift_type)
     pub self_binding: Option<(Symbol, TypeId, Type)>,
-    /// Captures for closures
-    pub captures: Option<Captures<'a>>,
+    /// Capture bindings for closures. If Some, the first block param is the closure pointer.
+    pub capture_bindings: Option<&'a HashMap<Symbol, CaptureBinding>>,
+    /// Cranelift type for the closure pointer (needed when capture_bindings is Some)
+    pub closure_ptr_type: Option<Type>,
     /// Return type (for nested return type context)
     pub return_type_id: Option<TypeId>,
+    /// Number of block params to skip before binding user params.
+    /// Used for lambdas where the first param is the closure pointer.
+    pub skip_block_params: usize,
+    /// What to return when the block doesn't terminate explicitly
+    pub default_return: DefaultReturn,
 }
 
 impl<'a> FunctionCompileConfig<'a> {
@@ -44,8 +61,11 @@ impl<'a> FunctionCompileConfig<'a> {
             body,
             params,
             self_binding: None,
-            captures: None,
+            capture_bindings: None,
+            closure_ptr_type: None,
             return_type_id,
+            skip_block_params: 0,
+            default_return: DefaultReturn::Empty,
         }
     }
 
@@ -60,8 +80,49 @@ impl<'a> FunctionCompileConfig<'a> {
             body,
             params,
             self_binding: Some(self_binding),
-            captures: None,
+            capture_bindings: None,
+            closure_ptr_type: None,
             return_type_id,
+            skip_block_params: 0,
+            default_return: DefaultReturn::Empty,
+        }
+    }
+
+    /// Create a config for a pure lambda (no captures, skips closure ptr param)
+    pub fn pure_lambda(
+        body: &'a FuncBody,
+        params: Vec<(Symbol, TypeId, Type)>,
+        return_type_id: TypeId,
+    ) -> Self {
+        Self {
+            body,
+            params,
+            self_binding: None,
+            capture_bindings: None,
+            closure_ptr_type: None,
+            return_type_id: Some(return_type_id),
+            skip_block_params: 1, // Skip the closure pointer
+            default_return: DefaultReturn::ZeroI64,
+        }
+    }
+
+    /// Create a config for a capturing lambda (has captures, skips closure ptr param)
+    pub fn capturing_lambda(
+        body: &'a FuncBody,
+        params: Vec<(Symbol, TypeId, Type)>,
+        capture_bindings: &'a HashMap<Symbol, CaptureBinding>,
+        closure_ptr_type: Type,
+        return_type_id: TypeId,
+    ) -> Self {
+        Self {
+            body,
+            params,
+            self_binding: None,
+            capture_bindings: Some(capture_bindings),
+            closure_ptr_type: Some(closure_ptr_type),
+            return_type_id: Some(return_type_id),
+            skip_block_params: 1, // Skip the closure pointer
+            default_return: DefaultReturn::ZeroI64,
         }
     }
 }
@@ -95,17 +156,32 @@ pub fn compile_function_inner(
 
     // Get block params
     let block_params = builder.block_params(entry_block).to_vec();
-    let mut param_offset = 0;
+    let mut param_offset = config.skip_block_params;
 
     // Build variables map
     let mut variables: HashMap<Symbol, (cranelift::prelude::Variable, TypeId)> = HashMap::new();
 
+    // Set up closure variable if this is a capturing lambda
+    // The closure pointer is at block_params[0] when skip_block_params > 0 and we have captures
+    let captures = if let (Some(bindings), Some(closure_ptr_type)) =
+        (config.capture_bindings, config.closure_ptr_type)
+    {
+        let closure_var = builder.declare_var(closure_ptr_type);
+        builder.def_var(closure_var, block_params[0]);
+        Some(Captures {
+            bindings,
+            closure_var,
+        })
+    } else {
+        None
+    };
+
     // Bind self if this is a method
     if let Some((self_sym, self_type_id, self_cranelift_type)) = config.self_binding {
         let self_var = builder.declare_var(self_cranelift_type);
-        builder.def_var(self_var, block_params[0]);
+        builder.def_var(self_var, block_params[param_offset]);
         variables.insert(self_sym, (self_var, self_type_id));
-        param_offset = 1;
+        param_offset += 1;
     }
 
     // Bind regular parameters
@@ -123,7 +199,7 @@ pub fn compile_function_inner(
         &mut variables,
         &mut cf_ctx,
         ctx,
-        config.captures,
+        captures,
         config.return_type_id,
     )?;
 
@@ -131,7 +207,15 @@ pub fn compile_function_inner(
     if let Some(value) = expr_value {
         builder.ins().return_(&[value.value]);
     } else if !terminated {
-        builder.ins().return_(&[]);
+        match config.default_return {
+            DefaultReturn::Empty => {
+                builder.ins().return_(&[]);
+            }
+            DefaultReturn::ZeroI64 => {
+                let zero = builder.ins().iconst(types::I64, 0);
+                builder.ins().return_(&[zero]);
+            }
+        }
     }
 
     builder.seal_all_blocks();

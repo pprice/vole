@@ -1,5 +1,5 @@
 // src/codegen/compiler/mod.rs
-mod common;
+pub(crate) mod common;
 mod impls;
 mod program;
 mod signatures;
