@@ -14,7 +14,7 @@ impl Analyzer {
         interner: &Interner,
     ) -> bool {
         // Use the core TypeId-based compatibility check
-        if types_compatible_core_id(from, to, &self.type_arena.borrow()) {
+        if types_compatible_core_id(from, to, &self.type_arena()) {
             return true;
         }
 
@@ -31,7 +31,7 @@ impl Analyzer {
     ) -> bool {
         // Extract interface info using TypeId
         let to_iface_id = {
-            let arena = self.type_arena.borrow();
+            let arena = self.type_arena();
             arena.unwrap_interface(to).map(|(id, _)| id)
         };
 
@@ -41,7 +41,7 @@ impl Analyzer {
 
         // Check interface extension
         let from_iface_id = {
-            let arena = self.type_arena.borrow();
+            let arena = self.type_arena();
             arena.unwrap_interface(from).map(|(id, _)| id)
         };
         if let Some(from_iface_id) = from_iface_id
@@ -57,7 +57,7 @@ impl Analyzer {
 
         // Check function type compatibility with functional interface
         let fn_info = {
-            let arena = self.type_arena.borrow();
+            let arena = self.type_arena();
             arena
                 .unwrap_function(from)
                 .map(|(params, ret, _)| (params.to_vec(), ret))
@@ -68,7 +68,7 @@ impl Analyzer {
             && fn_param_ids.len() == iface_fn.params_id.len()
         {
             // Use TypeId fields directly
-            let arena = self.type_arena.borrow();
+            let arena = self.type_arena();
             let params_match = fn_param_ids
                 .iter()
                 .zip(iface_fn.params_id.iter())
@@ -93,8 +93,11 @@ impl Analyzer {
             if !seen.insert(current) {
                 continue;
             }
-            let def = self.entity_registry.get_type(current);
-            for &parent_id in &def.extends {
+            let extends = {
+                let registry = self.entity_registry();
+                registry.get_type(current).extends.clone()
+            };
+            for parent_id in extends {
                 if parent_id == base {
                     return true;
                 }
@@ -129,9 +132,9 @@ impl Analyzer {
         // Collect invalid status first
         let invalid_params: Vec<bool> = params
             .iter()
-            .map(|&t| self.type_arena.borrow().is_invalid(t))
+            .map(|&t| self.type_arena().is_invalid(t))
             .collect();
-        let return_is_invalid = self.type_arena.borrow().is_invalid(return_type);
+        let return_is_invalid = self.type_arena().is_invalid(return_type);
 
         // Now format
         let params_str: Vec<String> = params

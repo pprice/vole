@@ -34,7 +34,7 @@ impl Analyzer {
                 let field_name = interner.resolve(*field);
 
                 let struct_info = {
-                    let arena = self.type_arena.borrow();
+                    let arena = self.type_arena();
                     if let Some((id, args)) = arena.unwrap_class(obj_ty_id) {
                         Some((id, args.clone(), true)) // is_class = true
                     } else if let Some((id, _)) = arena.unwrap_record(obj_ty_id) {
@@ -45,10 +45,14 @@ impl Analyzer {
                 };
 
                 if let Some((type_def_id, type_args_id, is_class)) = struct_info {
-                    let type_def = self.entity_registry.get_type(type_def_id);
+                    let (name_id, generic_info) = {
+                        let registry = self.entity_registry();
+                        let type_def = registry.get_type(type_def_id);
+                        (type_def.name_id, type_def.generic_info.clone())
+                    };
                     let type_name = self
-                        .name_table
-                        .last_segment_str(type_def.name_id)
+                        .name_table()
+                        .last_segment_str(name_id)
                         .unwrap_or_else(|| if is_class { "class" } else { "record" }.to_string());
 
                     if !is_class {
@@ -62,9 +66,9 @@ impl Analyzer {
                             *field_span,
                         );
                         (ArenaTypeId::INVALID, false, false)
-                    } else if let Some(ref generic_info) = type_def.generic_info {
+                    } else if let Some(ref generic_info) = generic_info {
                         if let Some(idx) = generic_info.field_names.iter().position(|name_id| {
-                            self.name_table.last_segment_str(*name_id).as_deref()
+                            self.name_table().last_segment_str(*name_id).as_deref()
                                 == Some(field_name)
                         }) {
                             // Substitute type args via arena if any
@@ -79,8 +83,7 @@ impl Analyzer {
                                     .zip(type_args_id.iter())
                                     .map(|(tp, &type_id)| (tp.name_id, type_id))
                                     .collect();
-                                self.type_arena
-                                    .borrow_mut()
+                                self.type_arena_mut()
                                     .substitute(field_type_id, &subs_id)
                             };
                             (resolved_type_id, true, true)
@@ -291,7 +294,7 @@ impl Analyzer {
                 let field_name = interner.resolve(*field);
 
                 let struct_info = {
-                    let arena = self.type_arena.borrow();
+                    let arena = self.type_arena();
                     if let Some((id, args)) = arena.unwrap_class(obj_ty_id) {
                         Some((id, args.clone(), true)) // is_class = true
                     } else if let Some((id, _)) = arena.unwrap_record(obj_ty_id) {
@@ -302,10 +305,14 @@ impl Analyzer {
                 };
 
                 if let Some((type_def_id, type_args_id, is_class)) = struct_info {
-                    let type_def = self.entity_registry.get_type(type_def_id);
+                    let (name_id, generic_info) = {
+                        let registry = self.entity_registry();
+                        let type_def = registry.get_type(type_def_id);
+                        (type_def.name_id, type_def.generic_info.clone())
+                    };
                     let type_name = self
-                        .name_table
-                        .last_segment_str(type_def.name_id)
+                        .name_table()
+                        .last_segment_str(name_id)
                         .unwrap_or_else(|| if is_class { "class" } else { "record" }.to_string());
 
                     if !is_class {
@@ -319,9 +326,9 @@ impl Analyzer {
                             *field_span,
                         );
                         ArenaTypeId::INVALID
-                    } else if let Some(ref generic_info) = type_def.generic_info {
+                    } else if let Some(ref generic_info) = generic_info {
                         if let Some(idx) = generic_info.field_names.iter().position(|name_id| {
-                            self.name_table.last_segment_str(*name_id).as_deref()
+                            self.name_table().last_segment_str(*name_id).as_deref()
                                 == Some(field_name)
                         }) {
                             // Substitute type args via arena if any
@@ -336,8 +343,7 @@ impl Analyzer {
                                     .zip(type_args_id.iter())
                                     .map(|(tp, &type_id)| (tp.name_id, type_id))
                                     .collect();
-                                self.type_arena
-                                    .borrow_mut()
+                                self.type_arena_mut()
                                     .substitute(field_type_id, &subs_id)
                             }
                         } else {

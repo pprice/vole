@@ -6,13 +6,16 @@
 
 use rustc_hash::FxHashMap;
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use crate::entity_defs::{Implementation, MethodDef, TypeDef};
 use crate::entity_registry::EntityRegistry;
 use crate::expression_data::ExpressionData;
 use crate::generic::{MonomorphCache, MonomorphInstance, MonomorphKey, StaticMethodMonomorphKey};
 use crate::implement_registry::{ExternalMethodInfo, ImplementRegistry};
 use crate::resolution::ResolvedMethod;
-use crate::type_arena::TypeId;
+use crate::type_arena::{TypeArena, TypeId};
 use vole_frontend::{Interner, NodeId, Program, Symbol};
 use vole_identity::{MethodId, ModuleId, NameId, NameTable, TypeDefId};
 
@@ -28,6 +31,7 @@ pub struct ProgramQuery<'a> {
     interner: &'a Interner,
     implement_registry: &'a ImplementRegistry,
     module_programs: &'a FxHashMap<String, (Program, Interner)>,
+    type_arena: &'a Rc<RefCell<TypeArena>>,
 }
 
 impl<'a> ProgramQuery<'a> {
@@ -39,6 +43,7 @@ impl<'a> ProgramQuery<'a> {
         interner: &'a Interner,
         implement_registry: &'a ImplementRegistry,
         module_programs: &'a FxHashMap<String, (Program, Interner)>,
+        type_arena: &'a Rc<RefCell<TypeArena>>,
     ) -> Self {
         Self {
             registry,
@@ -47,6 +52,7 @@ impl<'a> ProgramQuery<'a> {
             interner,
             implement_registry,
             module_programs,
+            type_arena,
         }
     }
 
@@ -313,9 +319,14 @@ impl<'a> ProgramQuery<'a> {
         let type_name_id = namer.function(self.main_module(), type_name)?;
         let type_def_id = self.registry.type_by_name(type_name_id)?;
         let method_name_id = self.method_name_id(method_name);
-        let method_id = self.registry.find_method_on_type(type_def_id, method_name_id)?;
+        let method_id = self
+            .registry
+            .find_method_on_type(type_def_id, method_name_id)?;
         let method_def = self.registry.get_method(method_id);
-        Some(method_def.signature.return_type_id)
+        // Get return type from arena via signature_id
+        let arena = self.type_arena.borrow();
+        let (_, ret, _) = arena.unwrap_function(method_def.signature_id)?;
+        Some(ret)
     }
 
     // =========================================================================

@@ -114,11 +114,13 @@ pub struct MethodKey {
     pub method_name: NameId,
 }
 
-/// Info for external (native) methods
-#[derive(Debug, Clone)]
+/// Info for external (native) methods.
+/// Both fields are interned as single-segment NameIds for cheap Copy.
+/// Use name_table.last_segment_str(field) to get the string value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ExternalMethodInfo {
-    pub module_path: String,
-    pub native_name: String,
+    pub module_path: NameId,
+    pub native_name: NameId,
 }
 
 /// Implementation of a method
@@ -186,7 +188,7 @@ impl ImplementRegistry {
             self.methods.insert(key.clone(), method.clone());
         }
         for (name, info) in &other.external_func_info {
-            self.external_func_info.insert(name.clone(), info.clone());
+            self.external_func_info.insert(name.clone(), *info);
         }
     }
 }

@@ -33,7 +33,7 @@ impl Analyzer {
         type_params: &[TypeParamInfo],
         inferred: &mut HashMap<NameId, ArenaTypeId>,
     ) {
-        let arena = self.type_arena.borrow();
+        let arena = self.type_arena();
 
         // If the pattern is a type param, bind it
         if let Some(name_id) = arena.unwrap_type_param(pattern_id) {
@@ -165,7 +165,7 @@ impl Analyzer {
     ) {
         // Only bind if it's one of our type params
         if type_params.iter().any(|tp| tp.name_id == name_id) {
-            let arena = self.type_arena.borrow();
+            let arena = self.type_arena();
 
             // Special case: if actual is Nil, check if the type param is already in
             // scope with the same name_id. If so, bind to the type param instead of Nil.
@@ -176,7 +176,7 @@ impl Analyzer {
                 {
                     // Preserve the type param - create a TypeParam TypeId
                     drop(arena);
-                    self.type_arena.borrow_mut().type_param(name_id)
+                    self.type_arena_mut().type_param(name_id)
                 } else {
                     actual_id
                 }

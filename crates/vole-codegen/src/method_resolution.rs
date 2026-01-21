@@ -101,8 +101,11 @@ pub(crate) fn resolve_method_target_id(
 
     if let Some(resolution) = effective_resolution {
         return match resolution {
-            ResolvedMethod::Direct { func_type, .. } => {
+            ResolvedMethod::Direct { func_type_id } => {
                 let arena = input.analyzed.type_arena.borrow();
+                let (_, return_type_id, _) = arena
+                    .unwrap_function(*func_type_id)
+                    .expect("direct method must have function type");
                 let type_name_id = get_type_name_id_from_type_id(
                     input.object_type_id,
                     &arena,
@@ -111,11 +114,10 @@ pub(crate) fn resolve_method_target_id(
                 let method_info = lookup_direct_method(type_name_id)?;
                 Ok(MethodTarget::Direct {
                     method_info,
-                    return_type: func_type.return_type_id,
+                    return_type: return_type_id,
                 })
             }
             ResolvedMethod::Implemented {
-                func_type,
                 func_type_id,
                 is_builtin,
                 external_info,
@@ -128,6 +130,15 @@ pub(crate) fn resolve_method_target_id(
                     )
                     .into());
                 }
+
+                // Get return type from arena
+                let return_type_id = {
+                    let arena = input.analyzed.type_arena.borrow();
+                    let (_, ret, _) = arena
+                        .unwrap_function(*func_type_id)
+                        .expect("implemented method must have function type");
+                    ret
+                };
 
                 // For interface types, we need vtable dispatch
                 if let Some((interface_type_id, _)) = input
@@ -153,8 +164,8 @@ pub(crate) fn resolve_method_target_id(
 
                 if let Some(ext_info) = external_info {
                     return Ok(MethodTarget::External {
-                        external_info: ext_info.clone(),
-                        return_type: func_type.return_type_id,
+                        external_info: *ext_info,
+                        return_type: return_type_id,
                     });
                 }
 
@@ -169,7 +180,7 @@ pub(crate) fn resolve_method_target_id(
                 let method_info = lookup_impl_method(type_id)?;
                 Ok(MethodTarget::Implemented {
                     method_info,
-                    return_type: func_type.return_type_id,
+                    return_type: return_type_id,
                 })
             }
             ResolvedMethod::FunctionalInterface { func_type_id, .. } => {
@@ -178,14 +189,23 @@ pub(crate) fn resolve_method_target_id(
                 })
             }
             ResolvedMethod::DefaultMethod {
-                func_type,
+                func_type_id,
                 external_info,
                 ..
             } => {
+                // Get return type from arena
+                let return_type_id = {
+                    let arena = input.analyzed.type_arena.borrow();
+                    let (_, ret, _) = arena
+                        .unwrap_function(*func_type_id)
+                        .expect("default method must have function type");
+                    ret
+                };
+
                 if let Some(ext_info) = external_info {
                     return Ok(MethodTarget::External {
-                        external_info: ext_info.clone(),
-                        return_type: func_type.return_type_id,
+                        external_info: *ext_info,
+                        return_type: return_type_id,
                     });
                 }
                 let arena = input.analyzed.type_arena.borrow();
@@ -197,7 +217,7 @@ pub(crate) fn resolve_method_target_id(
                 let method_info = lookup_direct_method(type_name_id)?;
                 Ok(MethodTarget::Default {
                     method_info,
-                    return_type: func_type.return_type_id,
+                    return_type: return_type_id,
                 })
             }
             ResolvedMethod::InterfaceMethod { func_type_id, .. } => {
@@ -286,9 +306,9 @@ pub(crate) fn resolve_method_target_id(
         }
 
         // If binding has external_info, use that directly
-        if let Some(external_info) = &binding.external_info {
+        if let Some(external_info) = binding.external_info {
             return Ok(MethodTarget::External {
-                external_info: external_info.clone(),
+                external_info,
                 return_type: binding.func_type.return_type_id,
             });
         }

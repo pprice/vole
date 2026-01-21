@@ -237,19 +237,19 @@ fn compile_pure_lambda(
     *ctx.lambda_counter += 1;
 
     // Try to get param and return types from sema analysis first
-    let (param_type_ids, return_type_id) =
-        if let Some(lambda_type_id) = ctx.get_expr_type(&node_id) {
-            let arena = ctx.arena.borrow();
-            if let Some((sema_params, ret_id, _)) = arena.unwrap_function(lambda_type_id) {
-                // Use sema-inferred types
-                (sema_params.to_vec(), ret_id)
-            } else {
-                drop(arena);
-                get_lambda_types_fallback(lambda, ctx)
-            }
+    let (param_type_ids, return_type_id) = if let Some(lambda_type_id) = ctx.get_expr_type(&node_id)
+    {
+        let arena = ctx.arena.borrow();
+        if let Some((sema_params, ret_id, _)) = arena.unwrap_function(lambda_type_id) {
+            // Use sema-inferred types
+            (sema_params.to_vec(), ret_id)
         } else {
+            drop(arena);
             get_lambda_types_fallback(lambda, ctx)
-        };
+        }
+    } else {
+        get_lambda_types_fallback(lambda, ctx)
+    };
 
     // Convert to Cranelift types
     let param_types: Vec<Type> = {
@@ -370,19 +370,19 @@ fn compile_lambda_with_captures(
     *ctx.lambda_counter += 1;
 
     // Try to get param and return types from sema analysis first
-    let (param_type_ids, return_type_id) =
-        if let Some(lambda_type_id) = ctx.get_expr_type(&node_id) {
-            let arena = ctx.arena.borrow();
-            if let Some((sema_params, ret_id, _)) = arena.unwrap_function(lambda_type_id) {
-                // Use sema-inferred types
-                (sema_params.to_vec(), ret_id)
-            } else {
-                drop(arena);
-                get_lambda_types_fallback(lambda, ctx)
-            }
+    let (param_type_ids, return_type_id) = if let Some(lambda_type_id) = ctx.get_expr_type(&node_id)
+    {
+        let arena = ctx.arena.borrow();
+        if let Some((sema_params, ret_id, _)) = arena.unwrap_function(lambda_type_id) {
+            // Use sema-inferred types
+            (sema_params.to_vec(), ret_id)
         } else {
+            drop(arena);
             get_lambda_types_fallback(lambda, ctx)
-        };
+        }
+    } else {
+        get_lambda_types_fallback(lambda, ctx)
+    };
 
     // Convert to Cranelift types
     let param_types: Vec<Type> = {
@@ -538,6 +538,7 @@ fn compile_lambda_with_captures(
 }
 
 /// Compile a lambda body (either expression or block)
+#[allow(clippy::too_many_arguments)]
 fn compile_lambda_body(
     builder: &mut FunctionBuilder,
     body: &LambdaBody,
@@ -598,7 +599,11 @@ fn compile_lambda_body(
 
 impl Cg<'_, '_, '_> {
     /// Compile a lambda expression
-    pub fn lambda(&mut self, lambda: &LambdaExpr, node_id: NodeId) -> Result<CompiledValue, String> {
+    pub fn lambda(
+        &mut self,
+        lambda: &LambdaExpr,
+        node_id: NodeId,
+    ) -> Result<CompiledValue, String> {
         compile_lambda(self.builder, lambda, self.vars, self.ctx, node_id)
     }
 }

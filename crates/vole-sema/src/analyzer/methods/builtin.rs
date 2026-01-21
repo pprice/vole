@@ -12,7 +12,7 @@ impl Analyzer {
         interner: &Interner,
     ) -> Option<FunctionType> {
         // Check for array types - extract element type before borrowing again
-        let array_elem = self.type_arena.borrow().unwrap_array(object_type_id);
+        let array_elem = self.type_arena().unwrap_array(object_type_id);
         if let Some(elem_ty_id) = array_elem {
             return match method_name {
                 // Array.length() -> i64

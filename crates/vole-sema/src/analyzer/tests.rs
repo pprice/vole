@@ -550,11 +550,10 @@ fn satisfies_interface_with_field() {
     // Get the Person type via Resolver and create TypeId
     let type_def_id = analyzer
         .resolver(&interner)
-        .resolve_type(person_sym, &analyzer.entity_registry)
+        .resolve_type(person_sym, &analyzer.entity_registry())
         .unwrap();
     let ty_id = analyzer
-        .type_arena
-        .borrow_mut()
+        .type_arena_mut()
         .record(type_def_id, smallvec::smallvec![]);
 
     // Check if Person satisfies Named
@@ -584,11 +583,10 @@ fn satisfies_interface_missing_field() {
     // Get the Point type via Resolver and create TypeId
     let type_def_id = analyzer
         .resolver(&interner)
-        .resolve_type(point_sym, &analyzer.entity_registry)
+        .resolve_type(point_sym, &analyzer.entity_registry())
         .unwrap();
     let ty_id = analyzer
-        .type_arena
-        .borrow_mut()
+        .type_arena_mut()
         .record(type_def_id, smallvec::smallvec![]);
 
     // Point does NOT satisfy Named (missing name field)
@@ -620,11 +618,10 @@ fn satisfies_interface_with_method() {
     // Get the User type via Resolver and create TypeId
     let type_def_id = analyzer
         .resolver(&interner)
-        .resolve_type(user_sym, &analyzer.entity_registry)
+        .resolve_type(user_sym, &analyzer.entity_registry())
         .unwrap();
     let ty_id = analyzer
-        .type_arena
-        .borrow_mut()
+        .type_arena_mut()
         .record(type_def_id, smallvec::smallvec![]);
 
     assert!(analyzer.satisfies_interface_id(ty_id, hashable_sym, &interner));

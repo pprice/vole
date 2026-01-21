@@ -24,9 +24,9 @@ impl Analyzer {
     pub(super) fn type_display_id(&self, id: ArenaTypeId) -> String {
         display_type_id(
             id,
-            &self.type_arena.borrow(),
-            &self.name_table,
-            &self.entity_registry,
+            &self.type_arena(),
+            &self.name_table(),
+            &self.entity_registry(),
         )
     }
 

@@ -30,7 +30,7 @@ impl Analyzer {
                             let ident_name = interner.resolve(*ident_sym);
                             if self
                                 .resolver(interner)
-                                .resolve_type(*ident_sym, &self.entity_registry)
+                                .resolve_type(*ident_sym, &self.entity_registry())
                                 .is_some()
                             {
                                 let let_name = interner.resolve(let_stmt.name);
@@ -164,7 +164,7 @@ impl Analyzer {
                     // Using TypeId - check if original type is a union
                     if let Some((sym, tested_type_id, Some(original_type_id))) = &narrowing_info {
                         let union_variants: Option<Vec<ArenaTypeId>> = {
-                            let arena = self.type_arena.borrow();
+                            let arena = self.type_arena();
                             arena.unwrap_union(*original_type_id).map(|v| v.to_vec())
                         };
                         if let Some(variants) = union_variants {
@@ -179,7 +179,7 @@ impl Analyzer {
                                 self.type_overrides.insert(*sym, remaining[0]);
                             } else if remaining.len() > 1 {
                                 // Multiple types remaining - narrow to smaller union
-                                let narrow_id = self.type_arena.borrow_mut().union(remaining);
+                                let narrow_id = self.type_arena_mut().union(remaining);
                                 self.type_overrides.insert(*sym, narrow_id);
                             }
                         }
@@ -253,7 +253,7 @@ impl Analyzer {
                     // If expected is fallible, extract success type for comparison
                     // A `return value` statement returns the success type, not the full fallible type
                     if let Some((success, _error)) =
-                        self.type_arena.borrow().unwrap_fallible(expected)
+                        self.type_arena().unwrap_fallible(expected)
                     {
                         success
                     } else {
@@ -332,7 +332,7 @@ impl Analyzer {
                     Neither,
                 }
                 let type_info = {
-                    let arena = self.type_arena.borrow();
+                    let arena = self.type_arena();
                     if let Some(elem_ids) = arena.unwrap_tuple(ty_id) {
                         TupleOrArray::Tuple(elem_ids.clone())
                     } else if let Some((elem_id, size)) = arena.unwrap_fixed_array(ty_id) {
@@ -427,7 +427,7 @@ impl Analyzer {
         // Look up the error type via resolver
         let type_id_opt = self
             .resolver(interner)
-            .resolve_type(stmt.error_name, &self.entity_registry);
+            .resolve_type(stmt.error_name, &self.entity_registry());
 
         let Some(type_id) = type_id_opt else {
             self.add_error(
@@ -440,8 +440,11 @@ impl Analyzer {
             return self.ty_invalid_id();
         };
 
-        let type_def = self.entity_registry.get_type(type_id);
-        if type_def.error_info.is_none() {
+        let has_error_info = {
+            let registry = self.entity_registry();
+            registry.get_type(type_id).error_info.is_some()
+        };
+        if !has_error_info {
             // Type exists but is not an error type
             self.add_error(
                 SemanticError::UndefinedError {
@@ -454,18 +457,25 @@ impl Analyzer {
         }
 
         // Get the error type name for error messages
-        let error_type_name = self
-            .name_table
-            .last_segment_str(self.entity_registry.name_id(type_id))
-            .unwrap_or_else(|| "error".to_string());
+        let error_type_name = {
+            let name_id = self.entity_registry().name_id(type_id);
+            self.name_table()
+                .last_segment_str(name_id)
+                .unwrap_or_else(|| "error".to_string())
+        };
 
-        let error_fields: Vec<(String, ArenaTypeId)> = self
-            .entity_registry
-            .fields_on_type(type_id)
+        // Collect field IDs first to avoid borrow conflicts in the loop
+        let field_ids: Vec<_> = self.entity_registry().fields_on_type(type_id).collect();
+        let error_fields: Vec<(String, ArenaTypeId)> = field_ids
+            .into_iter()
             .filter_map(|field_id| {
-                let field = self.entity_registry.get_field(field_id);
-                let name = self.name_table.last_segment_str(field.name_id)?;
-                Some((name, field.ty))
+                let (name_id, ty) = {
+                    let registry = self.entity_registry();
+                    let field = registry.get_field(field_id);
+                    (field.name_id, field.ty)
+                };
+                let name = self.name_table().last_segment_str(name_id)?;
+                Some((name, ty))
             })
             .collect();
 
@@ -519,20 +529,20 @@ impl Analyzer {
         // Verify that raised error type is compatible with declared error type
         let stmt_error_name = interner.resolve(stmt.error_name);
         let is_compatible = {
-            let arena = self.type_arena.borrow();
+            let arena = self.type_arena();
             if let Some(declared_type_def_id) = arena.unwrap_error(error_type) {
                 // Single error type - must match exactly
                 let name = self
-                    .name_table
-                    .last_segment_str(self.entity_registry.name_id(declared_type_def_id));
+                    .name_table()
+                    .last_segment_str(self.entity_registry().name_id(declared_type_def_id));
                 name.as_deref() == Some(stmt_error_name)
             } else if let Some(variants) = arena.unwrap_union(error_type) {
                 // Union of error types - raised error must be one of the variants
                 variants.iter().any(|&variant_id| {
                     if let Some(variant_type_def_id) = arena.unwrap_error(variant_id) {
                         let name = self
-                            .name_table
-                            .last_segment_str(self.entity_registry.name_id(variant_type_def_id));
+                            .name_table()
+                            .last_segment_str(self.entity_registry().name_id(variant_type_def_id));
                         name.as_deref() == Some(stmt_error_name)
                     } else {
                         false
@@ -545,7 +555,7 @@ impl Analyzer {
 
         if !is_compatible {
             // Extract types before calling type_display_id to avoid borrow conflict
-            let raised_type_id = self.type_arena.borrow_mut().error_type(type_id);
+            let raised_type_id = self.type_arena_mut().error_type(type_id);
             let declared_str = self.type_display_id(error_type);
             let raised_str = self.type_display_id(raised_type_id);
 
@@ -575,7 +585,7 @@ impl Analyzer {
         // Check the inner expression - must be fallible
         let inner_type_id = self.check_expr(inner_expr, _interner)?;
 
-        let fallible_info = self.type_arena.borrow().unwrap_fallible(inner_type_id);
+        let fallible_info = self.type_arena().unwrap_fallible(inner_type_id);
         let Some((success_type_id, error_type_id)) = fallible_info else {
             let found = self.type_display_id(inner_type_id);
             self.add_error(
@@ -629,7 +639,7 @@ impl Analyzer {
         }
 
         // Check if func_error is a union and error_type is a member
-        let arena = self.type_arena.borrow();
+        let arena = self.type_arena();
         if let Some(func_variants) = arena.unwrap_union(func_error_id) {
             if func_variants.contains(&error_type_id) {
                 return true;
@@ -655,7 +665,7 @@ impl Analyzer {
     ) {
         // Get type_def_id from the type using arena
         let type_def_id = {
-            let arena = self.type_arena.borrow();
+            let arena = self.type_arena();
             if let Some((type_def_id, _)) = arena.unwrap_record(ty_id) {
                 Some(type_def_id)
             } else if let Some((type_def_id, _)) = arena.unwrap_class(ty_id) {
@@ -671,12 +681,16 @@ impl Analyzer {
         };
 
         // Look up fields from entity_registry - clone to avoid borrow conflicts
-        let type_def = self.entity_registry.get_type(type_def_id);
-        let generic_info = match &type_def.generic_info {
-            Some(gi) => gi.clone(),
-            None => {
-                self.type_error_id("record or class with fields", ty_id, init_span);
-                return;
+        let generic_info = {
+            let registry = self.entity_registry();
+            let type_def = registry.get_type(type_def_id);
+            match &type_def.generic_info {
+                Some(gi) => gi.clone(),
+                None => {
+                    drop(registry);
+                    self.type_error_id("record or class with fields", ty_id, init_span);
+                    return;
+                }
             }
         };
 
@@ -690,7 +704,7 @@ impl Analyzer {
                 .iter()
                 .enumerate()
                 .find(|(_, name_id)| {
-                    self.name_table.last_segment_str(**name_id).as_deref() == Some(field_name_str)
+                    self.name_table().last_segment_str(**name_id).as_deref() == Some(field_name_str)
                 });
 
             if let Some((slot, _)) = found {

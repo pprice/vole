@@ -4,9 +4,9 @@
 use std::fmt::Write;
 
 use crate::{
-    AssignTarget, BinaryOp, Block, CompoundOp, Decl, ErrorDecl, Expr, ExprKind, FuncBody,
-    FuncDecl, Interner, LetInit, LetStmt, Param, PrimitiveType, Program, Stmt, StringPart,
-    TestCase, TestsDecl, TypeExpr, UnaryOp,
+    AssignTarget, BinaryOp, Block, CompoundOp, Decl, ErrorDecl, Expr, ExprKind, FuncBody, FuncDecl,
+    Interner, LetInit, LetStmt, Param, PrimitiveType, Program, Stmt, StringPart, TestCase,
+    TestsDecl, TypeExpr, UnaryOp,
 };
 
 /// Pretty-printer for AST nodes that resolves symbols via an Interner.

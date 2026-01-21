@@ -12,11 +12,12 @@ mod prelude;
 mod stmt;
 mod type_helpers;
 
-use crate::EntityRegistry;
 use crate::ExpressionData;
 pub use crate::ResolverEntityExt;
 use crate::analysis_cache::ModuleCache;
+use crate::compilation_db::CompilationDb;
 use crate::entity_defs::TypeDefKind;
+use crate::entity_registry::EntityRegistry;
 use crate::errors::{SemanticError, SemanticWarning};
 use crate::generic::{
     ClassMethodMonomorphKey, MonomorphInstance, MonomorphKey, StaticMethodMonomorphKey,
@@ -39,6 +40,58 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use vole_frontend::*;
 use vole_identity::{self, MethodId, ModuleId, NameId, NameTable, Namer, Resolver, TypeDefId};
+
+/// Guard that holds a borrow of the db and provides resolver access.
+/// This allows safe access to the resolver without exposing the RefCell directly.
+pub struct ResolverGuard<'a> {
+    _guard: std::cell::Ref<'a, CompilationDb>,
+    interner: &'a Interner,
+    module_id: ModuleId,
+}
+
+impl<'a> ResolverGuard<'a> {
+    fn new(db: &'a RefCell<CompilationDb>, interner: &'a Interner, module_id: ModuleId) -> Self {
+        let guard = db.borrow();
+        Self {
+            _guard: guard,
+            interner,
+            module_id,
+        }
+    }
+
+    /// Get the resolver. The lifetime is tied to this guard.
+    pub fn resolver(&self) -> Resolver<'_> {
+        // SAFETY: We hold the guard, so the borrow is valid
+        let names = unsafe { &*(&self._guard.names as *const NameTable) };
+        Resolver::new(self.interner, names, self.module_id, &[])
+    }
+
+    /// Resolve a Symbol to a TypeDefId through the resolution chain.
+    pub fn resolve_type(&self, sym: Symbol, registry: &EntityRegistry) -> Option<TypeDefId> {
+        use crate::resolve::ResolverEntityExt;
+        self.resolver().resolve_type(sym, registry)
+    }
+
+    /// Resolve a type with fallback to interface/class short name search.
+    pub fn resolve_type_or_interface(
+        &self,
+        sym: Symbol,
+        registry: &EntityRegistry,
+    ) -> Option<TypeDefId> {
+        use crate::resolve::ResolverEntityExt;
+        self.resolver().resolve_type_or_interface(sym, registry)
+    }
+
+    /// Resolve a type string with fallback to interface/class short name search.
+    pub fn resolve_type_str_or_interface(
+        &self,
+        name: &str,
+        registry: &EntityRegistry,
+    ) -> Option<TypeDefId> {
+        use crate::resolve::ResolverEntityExt;
+        self.resolver().resolve_type_str_or_interface(name, registry)
+    }
+}
 
 /// Check if a type param's constraint (found) satisfies a required constraint.
 /// Returns true if found has at least as strong constraints as required.
@@ -121,16 +174,10 @@ impl TypeWarning {
 pub struct AnalysisOutput {
     /// All expression-level metadata (types, method resolutions, generic calls)
     pub expression_data: ExpressionData,
-    /// Methods added via implement blocks (includes external_func_info)
-    pub implement_registry: ImplementRegistry,
     /// Parsed module programs and their interners (for compiling pure Vole functions)
     pub module_programs: FxHashMap<String, (Program, Interner)>,
-    /// Fully-qualified name interner for printable identities
-    pub name_table: NameTable,
-    /// Entity registry for type/method/field/function identity
-    pub entity_registry: EntityRegistry,
-    /// Shared type arena for interned types (needed by ExpressionData for type lookups)
-    pub type_arena: Rc<RefCell<TypeArena>>,
+    /// Shared compilation database containing all registries
+    pub db: Rc<RefCell<CompilationDb>>,
 }
 
 /// Saved state when entering a function/method check context.
@@ -178,8 +225,6 @@ pub struct Analyzer {
     /// Resolved types for each expression node (for codegen)
     /// Maps expression node IDs to their interned type handles for O(1) equality.
     expr_types: HashMap<NodeId, ArenaTypeId>,
-    /// Methods added via implement blocks
-    pub implement_registry: ImplementRegistry,
     /// Resolved method calls for codegen
     pub method_resolutions: MethodResolutions,
     /// Module loader for handling imports
@@ -207,34 +252,30 @@ pub struct Analyzer {
     /// When a method like `list.head()` is called on `List<i32>`, the generic return type `T`
     /// is substituted to `i32`. This map stores the concrete type so codegen doesn't recompute.
     substituted_return_types: HashMap<NodeId, ArenaTypeId>,
-    /// Fully-qualified name interner for printable identities
-    name_table: NameTable,
     /// Current module being analyzed (for proper NameId registration)
     current_module: ModuleId,
-    /// Entity registry for type/method/field/function identity
-    pub entity_registry: EntityRegistry,
     /// Stack of type parameter scopes for nested generic contexts.
     type_param_stack: TypeParamScopeStack,
     /// Optional shared cache for module analysis results.
     /// When set, modules are cached after analysis and reused across Analyzer instances.
     module_cache: Option<Rc<RefCell<ModuleCache>>>,
-    /// Shared type arena for interned types (O(1) equality, reduced allocations).
-    /// Shared via Rc<RefCell> so sub-analyzers use the same arena, making TypeIds
-    /// valid across all analyzers and eliminating conversion at cache boundaries.
-    pub type_arena: Rc<RefCell<TypeArena>>,
+    /// Unified compilation database containing all registries.
+    /// Shared via Rc<RefCell> so sub-analyzers use the same db, making TypeIds
+    /// valid across all analyzers and eliminating clone/merge operations.
+    pub db: Rc<RefCell<CompilationDb>>,
 }
 
 /// Result of looking up a method on a type via EntityRegistry
 pub struct MethodLookup {
     pub method_id: MethodId,
-    pub signature: FunctionType,
+    pub signature_id: ArenaTypeId,
 }
 
 impl Analyzer {
     pub fn new(_file: &str, _source: &str) -> Self {
-        // Create name_table first to get main_module
-        let name_table = NameTable::new();
-        let main_module = name_table.main_module();
+        // Create the shared CompilationDb
+        let db = Rc::new(RefCell::new(CompilationDb::new()));
+        let main_module = db.borrow().main_module();
 
         let mut analyzer = Self {
             scope: Scope::new(),
@@ -253,7 +294,6 @@ impl Analyzer {
             lambda_locals: Vec::new(),
             lambda_side_effects: Vec::new(),
             expr_types: HashMap::new(),
-            implement_registry: ImplementRegistry::new(),
             method_resolutions: MethodResolutions::new(),
             module_loader: ModuleLoader::new(),
             module_type_ids: FxHashMap::default(),
@@ -265,18 +305,11 @@ impl Analyzer {
             class_method_calls: HashMap::new(),
             static_method_calls: HashMap::new(),
             substituted_return_types: HashMap::new(),
-            name_table,
             current_module: main_module,
-            entity_registry: EntityRegistry::new(),
             type_param_stack: TypeParamScopeStack::new(),
             module_cache: None,
-            type_arena: Rc::new(RefCell::new(TypeArena::new())),
+            db,
         };
-
-        // Register primitives in EntityRegistry so they can have static methods
-        analyzer
-            .entity_registry
-            .register_primitives(&analyzer.name_table);
 
         // Register built-in interfaces and implementations
         // NOTE: This is temporary - will eventually come from stdlib/traits.void
@@ -288,14 +321,50 @@ impl Analyzer {
     /// Create an analyzer with a shared module cache.
     /// The cache is shared across multiple Analyzer instances to avoid
     /// re-analyzing the same modules (prelude, stdlib, user imports).
-    /// The analyzer uses the TypeArena from the cache to ensure TypeIds remain valid.
+    /// The analyzer uses the CompilationDb from the cache to ensure TypeIds remain valid.
     pub fn with_cache(_file: &str, _source: &str, cache: Rc<RefCell<ModuleCache>>) -> Self {
-        // Get the shared arena from the cache BEFORE borrowing cache again
-        let shared_arena = cache.borrow().type_arena();
-        let mut analyzer = Self::new(_file, _source);
-        analyzer.module_cache = Some(cache);
-        // Use the cache's arena instead of the freshly created one
-        analyzer.type_arena = shared_arena;
+        // Get the shared db from the cache BEFORE borrowing cache again
+        let shared_db = cache.borrow().db();
+        let main_module = shared_db.borrow().main_module();
+
+        let mut analyzer = Self {
+            scope: Scope::new(),
+            functions: HashMap::new(),
+            functions_by_name: FxHashMap::default(),
+            globals: HashMap::new(),
+            current_function_return: None,
+            found_return: false,
+            current_function_error_type: None,
+            current_generator_element_type: None,
+            current_static_method: None,
+            errors: Vec::new(),
+            warnings: Vec::new(),
+            type_overrides: HashMap::new(),
+            lambda_captures: Vec::new(),
+            lambda_locals: Vec::new(),
+            lambda_side_effects: Vec::new(),
+            expr_types: HashMap::new(),
+            method_resolutions: MethodResolutions::new(),
+            module_loader: ModuleLoader::new(),
+            module_type_ids: FxHashMap::default(),
+            module_programs: FxHashMap::default(),
+            module_expr_types: FxHashMap::default(),
+            module_method_resolutions: FxHashMap::default(),
+            loading_prelude: false,
+            generic_calls: HashMap::new(),
+            class_method_calls: HashMap::new(),
+            static_method_calls: HashMap::new(),
+            substituted_return_types: HashMap::new(),
+            current_module: main_module,
+            type_param_stack: TypeParamScopeStack::new(),
+            module_cache: Some(cache),
+            db: shared_db,
+        };
+
+        // Register built-in interfaces and implementations
+        // NOTE: This is temporary - will eventually come from stdlib/traits.void
+        analyzer.register_builtins();
+
         analyzer
     }
 
@@ -311,10 +380,22 @@ impl Analyzer {
 
     /// Get a resolver configured for the current module context.
     /// Uses the resolution chain: primitives -> current module -> builtin module.
-    pub fn resolver<'a>(&'a self, interner: &'a Interner) -> Resolver<'a> {
+    /// Note: Returns a Resolver that borrows the db's name_table.
+    /// The caller must ensure the returned Resolver doesn't outlive the borrow.
+    pub fn resolver_with_db<'a>(
+        &'a self,
+        interner: &'a Interner,
+        db: &'a CompilationDb,
+    ) -> Resolver<'a> {
         // For now, we don't track imports at the Analyzer level.
         // The resolver will check: primitives, current module, then builtin module.
-        Resolver::new(interner, &self.name_table, self.current_module, &[])
+        Resolver::new(interner, &db.names, self.current_module, &[])
+    }
+
+    /// Create a resolver for name resolution.
+    /// Note: The returned resolver holds a borrow of the db's name_table.
+    pub fn resolver<'a>(&'a self, interner: &'a Interner) -> ResolverGuard<'a> {
+        ResolverGuard::new(&self.db, interner, self.current_module)
     }
 
     /// Take ownership of the expression types (consuming self)
@@ -338,15 +419,11 @@ impl Analyzer {
             self.module_expr_types,
             self.module_method_resolutions,
             self.substituted_return_types,
-            self.type_arena.clone(),
         );
         AnalysisOutput {
             expression_data,
-            implement_registry: self.implement_registry,
             module_programs: self.module_programs,
-            name_table: self.name_table,
-            entity_registry: self.entity_registry,
-            type_arena: self.type_arena,
+            db: self.db,
         }
     }
 
@@ -355,6 +432,58 @@ impl Analyzer {
         self.expr_types.insert(expr.id, type_id);
         type_id
     }
+
+    // === Backward-compatible accessors for db fields ===
+    // These methods provide the old access patterns while using the shared db.
+
+    /// Get the type arena (read access)
+    #[inline]
+    fn type_arena(&self) -> std::cell::Ref<'_, TypeArena> {
+        std::cell::Ref::map(self.db.borrow(), |db| &db.types)
+    }
+
+    /// Get the type arena (write access) - borrows the entire db mutably
+    #[inline]
+    fn type_arena_mut(&self) -> std::cell::RefMut<'_, TypeArena> {
+        std::cell::RefMut::map(self.db.borrow_mut(), |db| &mut db.types)
+    }
+
+    /// Get the entity registry (read access)
+    #[inline]
+    fn entity_registry(&self) -> std::cell::Ref<'_, EntityRegistry> {
+        std::cell::Ref::map(self.db.borrow(), |db| &db.entities)
+    }
+
+    /// Get the entity registry (write access)
+    #[inline]
+    fn entity_registry_mut(&self) -> std::cell::RefMut<'_, EntityRegistry> {
+        std::cell::RefMut::map(self.db.borrow_mut(), |db| &mut db.entities)
+    }
+
+    /// Get the name table (read access)
+    #[inline]
+    fn name_table(&self) -> std::cell::Ref<'_, NameTable> {
+        std::cell::Ref::map(self.db.borrow(), |db| &db.names)
+    }
+
+    /// Get the name table (write access)
+    #[inline]
+    fn name_table_mut(&self) -> std::cell::RefMut<'_, NameTable> {
+        std::cell::RefMut::map(self.db.borrow_mut(), |db| &mut db.names)
+    }
+
+    /// Get the implement registry (read access)
+    #[inline]
+    fn implement_registry(&self) -> std::cell::Ref<'_, ImplementRegistry> {
+        std::cell::Ref::map(self.db.borrow(), |db| &db.implements)
+    }
+
+    /// Get the implement registry (write access)
+    #[inline]
+    fn implement_registry_mut(&self) -> std::cell::RefMut<'_, ImplementRegistry> {
+        std::cell::RefMut::map(self.db.borrow_mut(), |db| &mut db.implements)
+    }
+
 
     /// Check if we're currently inside a lambda
     fn in_lambda(&self) -> bool {
@@ -399,10 +528,13 @@ impl Analyzer {
     }
 
     fn module_name_id(&self, module_id: ModuleId, name: &str) -> Option<NameId> {
-        let module_path = self.name_table.module_path(module_id);
-        let (_, module_interner) = self.module_programs.get(module_path)?;
+        let module_path = {
+            let table = self.name_table();
+            table.module_path(module_id).to_string()
+        };
+        let (_, module_interner) = self.module_programs.get(&module_path)?;
         let sym = module_interner.lookup(name)?;
-        self.name_table.name_id(module_id, &[sym], module_interner)
+        self.name_table().name_id(module_id, &[sym], module_interner)
     }
 
     /// Create an interface TypeId by name (e.g., "Iterator").
@@ -415,31 +547,33 @@ impl Analyzer {
         // Look up interface by string name using resolver with interface fallback
         let type_def_id = self
             .resolver(interner)
-            .resolve_type_str_or_interface(name, &self.entity_registry)?;
-        let type_def = self.entity_registry.get_type(type_def_id);
+            .resolve_type_str_or_interface(name, &self.entity_registry())?;
+        let type_params_len = {
+            let registry = self.entity_registry();
+            registry.get_type(type_def_id).type_params.len()
+        };
 
         // Check type params match
-        if !type_def.type_params.is_empty() && type_def.type_params.len() != type_args_id.len() {
+        if type_params_len != 0 && type_params_len != type_args_id.len() {
             return Some(crate::type_arena::TypeId::INVALID);
         }
 
         // Create interface type directly in arena
         let type_args_vec: crate::type_arena::TypeIdVec = type_args_id.iter().copied().collect();
-        let type_id = self
-            .type_arena
-            .borrow_mut()
+        let type_id = self.type_arena_mut()
             .interface(type_def_id, type_args_vec);
         Some(type_id)
     }
 
     fn method_name_id(&mut self, name: Symbol, interner: &Interner) -> NameId {
-        let mut namer = Namer::new(&mut self.name_table, interner);
+        let mut name_table = self.name_table_mut();
+        let mut namer = Namer::new(&mut *name_table, interner);
         namer.method(name)
     }
 
     /// Look up a method NameId by string name (cross-interner safe)
     fn method_name_id_by_str(&self, name_str: &str, interner: &Interner) -> Option<NameId> {
-        vole_identity::method_name_id_by_str(&self.name_table, interner, name_str)
+        vole_identity::method_name_id_by_str(&*self.name_table(), interner, name_str)
     }
 
     /// Look up a method on a type via EntityRegistry
@@ -451,12 +585,15 @@ impl Analyzer {
     ) -> Option<MethodLookup> {
         let method_name_id = self.method_name_id(method_name, interner);
         let method_id = self
-            .entity_registry
+            .entity_registry()
             .find_method_on_type(type_def_id, method_name_id)?;
-        let method_def = self.entity_registry.get_method(method_id);
+        let signature_id = {
+            let registry = self.entity_registry();
+            registry.get_method(method_id).signature_id
+        };
         Some(MethodLookup {
             method_id,
-            signature: method_def.signature.clone(),
+            signature_id,
         })
     }
 
@@ -503,7 +640,7 @@ impl Analyzer {
         self.load_prelude(interner);
 
         // Populate well-known types after prelude has registered all interfaces
-        self.name_table.populate_well_known();
+        self.name_table_mut().populate_well_known();
 
         // Pass 0.5: Register type shells for forward reference support
         // This allows types to reference each other regardless of declaration order
@@ -516,7 +653,12 @@ impl Analyzer {
         self.collect_signatures(program, interner);
 
         // Populate well-known TypeDefIds now that interfaces are registered
-        crate::well_known::populate_type_def_ids(&mut self.name_table, &self.entity_registry);
+        // Destructure db to allow simultaneous mutable and immutable borrows of different fields
+        {
+            let mut db = self.db.borrow_mut();
+            let CompilationDb { ref mut names, ref entities, .. } = *db;
+            crate::well_known::populate_type_def_ids(names, entities);
+        }
 
         // Process global let declarations
         self.process_global_lets(program, interner)?;
@@ -545,13 +687,11 @@ impl Analyzer {
     ) -> ArenaTypeId {
         let module_id = self.current_module;
         let mut ctx = TypeResolutionContext {
-            entity_registry: &self.entity_registry,
+            db: &self.db,
             interner,
-            name_table: &mut self.name_table,
             module_id,
             type_params: self.type_param_stack.current(),
             self_type: self_type_id,
-            type_arena: &self.type_arena,
         };
         resolve_type_to_id(ty, &mut ctx)
     }
@@ -586,14 +726,14 @@ impl Analyzer {
     ) {
         // Lookup shell registered in register_all_type_shells
         let name_id = self
-            .name_table
+            .name_table_mut()
             .intern(self.current_module, &[name], interner);
         let type_id = self
-            .entity_registry
+            .entity_registry_mut()
             .type_by_name(name_id)
             .expect("alias shell registered in register_all_type_shells");
         // Set the aliased type (uses TypeId directly as alias index key)
-        self.entity_registry
+        self.entity_registry_mut()
             .set_aliased_type(type_id, aliased_type_id);
     }
 
@@ -615,7 +755,7 @@ impl Analyzer {
                             let ident_name = interner.resolve(*ident_sym);
                             if self
                                 .resolver(interner)
-                                .resolve_type(*ident_sym, &self.entity_registry)
+                                .resolve_type(*ident_sym, &self.entity_registry())
                                 .is_some()
                             {
                                 let let_name = interner.resolve(let_stmt.name);
@@ -691,16 +831,21 @@ impl Analyzer {
                 Decl::Class(class) => {
                     // Set up type param scope for generic class methods
                     // This allows method resolution to use constraint interfaces
-                    if !class.type_params.is_empty()
-                        && let Some(class_name_id) =
-                            self.name_table
-                                .name_id(self.current_module, &[class.name], interner)
-                        && let Some(type_def_id) = self.entity_registry.type_by_name(class_name_id)
-                        && let Some(generic_info) =
-                            self.entity_registry.get_generic_info(type_def_id)
-                    {
+                    let generic_type_params = if !class.type_params.is_empty() {
+                        let class_name_id = self.name_table()
+                            .name_id(self.current_module, &[class.name], interner);
+                        class_name_id.and_then(|class_name_id| {
+                            let registry = self.entity_registry();
+                            registry.type_by_name(class_name_id)
+                                .and_then(|type_def_id| registry.get_generic_info(type_def_id))
+                                .map(|gi| gi.type_params.clone())
+                        })
+                    } else {
+                        None
+                    };
+                    if let Some(ref type_params) = generic_type_params {
                         let mut scope = TypeParamScope::new();
-                        for tp in &generic_info.type_params {
+                        for tp in type_params {
                             scope.add(tp.clone());
                         }
                         self.type_param_stack.push_scope(scope);
@@ -717,22 +862,28 @@ impl Analyzer {
                     }
 
                     // Pop type param scope after checking methods
-                    if !class.type_params.is_empty() {
+                    if generic_type_params.is_some() {
                         self.type_param_stack.pop();
                     }
                     // Validate interface satisfaction via EntityRegistry
-                    if let Some(class_name_id) =
-                        self.name_table
-                            .name_id(self.current_module, &[class.name], interner)
-                        && let Some(type_def_id) = self.entity_registry.type_by_name(class_name_id)
-                    {
+                    let maybe_type_def_id = {
+                        let class_name_id = self.name_table()
+                            .name_id(self.current_module, &[class.name], interner);
+                        class_name_id.and_then(|class_name_id| {
+                            let registry = self.entity_registry();
+                            registry.type_by_name(class_name_id)
+                        })
+                    };
+                    if let Some(type_def_id) = maybe_type_def_id {
                         let type_methods = self.get_type_method_signatures(class.name, interner);
-                        for interface_id in
-                            self.entity_registry.get_implemented_interfaces(type_def_id)
-                        {
-                            let interface_def = self.entity_registry.get_type(interface_id);
-                            if let Some(iface_name_str) =
-                                self.name_table.last_segment_str(interface_def.name_id)
+                        let interface_ids = self.entity_registry().get_implemented_interfaces(type_def_id);
+                        for interface_id in interface_ids {
+                            let interface_name_id = {
+                                let registry = self.entity_registry();
+                                registry.get_type(interface_id).name_id
+                            };
+                            let iface_name_str = self.name_table().last_segment_str(interface_name_id);
+                            if let Some(iface_name_str) = iface_name_str
                                 && let Some(iface_name) = interner.lookup(&iface_name_str)
                             {
                                 self.validate_interface_satisfaction(
@@ -749,16 +900,23 @@ impl Analyzer {
                 Decl::Record(record) => {
                     // Set up type param scope for generic record methods
                     // This allows method resolution to use constraint interfaces
-                    if !record.type_params.is_empty()
-                        && let Some(record_name_id) =
-                            self.name_table
+                    let generic_type_params = if !record.type_params.is_empty() {
+                        let record_name_id = {
+                            self.name_table()
                                 .name_id(self.current_module, &[record.name], interner)
-                        && let Some(type_def_id) = self.entity_registry.type_by_name(record_name_id)
-                        && let Some(generic_info) =
-                            self.entity_registry.get_generic_info(type_def_id)
-                    {
+                        };
+                        record_name_id.and_then(|record_name_id| {
+                            let registry = self.entity_registry();
+                            registry.type_by_name(record_name_id)
+                                .and_then(|type_def_id| registry.get_generic_info(type_def_id))
+                                .map(|gi| gi.type_params.clone())
+                        })
+                    } else {
+                        None
+                    };
+                    if let Some(type_params) = &generic_type_params {
                         let mut scope = TypeParamScope::new();
-                        for tp in &generic_info.type_params {
+                        for tp in type_params {
                             scope.add(tp.clone());
                         }
                         self.type_param_stack.push_scope(scope);
@@ -780,18 +938,23 @@ impl Analyzer {
                     }
 
                     // Validate interface satisfaction via EntityRegistry
-                    if let Some(record_name_id) =
-                        self.name_table
-                            .name_id(self.current_module, &[record.name], interner)
-                        && let Some(type_def_id) = self.entity_registry.type_by_name(record_name_id)
-                    {
+                    let maybe_type_def_id = {
+                        let record_name_id = self.name_table()
+                            .name_id(self.current_module, &[record.name], interner);
+                        record_name_id.and_then(|name_id| {
+                            self.entity_registry().type_by_name(name_id)
+                        })
+                    };
+                    if let Some(type_def_id) = maybe_type_def_id {
                         let type_methods = self.get_type_method_signatures(record.name, interner);
-                        for interface_id in
-                            self.entity_registry.get_implemented_interfaces(type_def_id)
-                        {
-                            let interface_def = self.entity_registry.get_type(interface_id);
-                            if let Some(iface_name_str) =
-                                self.name_table.last_segment_str(interface_def.name_id)
+                        let interface_ids = self.entity_registry().get_implemented_interfaces(type_def_id);
+                        for interface_id in interface_ids {
+                            let interface_name_id = {
+                                let registry = self.entity_registry();
+                                registry.get_type(interface_id).name_id
+                            };
+                            let iface_name_str = self.name_table().last_segment_str(interface_name_id);
+                            if let Some(iface_name_str) = iface_name_str
                                 && let Some(iface_name) = interner.lookup(&iface_name_str)
                             {
                                 self.validate_interface_satisfaction(
@@ -824,10 +987,11 @@ impl Analyzer {
                             }
                             TypeExpr::Primitive(prim) => {
                                 // Get TypeDefId for primitive
-                                let name_id = self.name_table.primitives.from_ast(*prim);
-                                if let Some(type_def_id) =
-                                    self.entity_registry.type_by_name(name_id)
-                                {
+                                let type_def_id = {
+                                    let name_id = self.name_table().primitives.from_ast(*prim);
+                                    self.entity_registry().type_by_name(name_id)
+                                };
+                                if let Some(type_def_id) = type_def_id {
                                     for method in &statics.methods {
                                         self.check_static_method_with_type_def(
                                             method,
@@ -854,11 +1018,11 @@ impl Analyzer {
 
     fn analyze_error_decl(&mut self, decl: &ErrorDecl, interner: &Interner) {
         let name_id = self
-            .name_table
+            .name_table_mut()
             .intern(self.current_module, &[decl.name], interner);
 
         // Register in EntityRegistry first to get TypeDefId
-        let entity_type_id = self.entity_registry.register_type(
+        let entity_type_id = self.entity_registry_mut().register_type(
             name_id,
             TypeDefKind::ErrorType,
             self.current_module,
@@ -869,35 +1033,33 @@ impl Analyzer {
         };
 
         // Set error info for lookup
-        self.entity_registry
+        self.entity_registry_mut()
             .set_error_info(entity_type_id, error_info);
 
         // Register fields in EntityRegistry - resolve types directly to TypeId
-        let builtin_module = self.name_table.builtin_module();
+        let builtin_module = self.name_table_mut().builtin_module();
         let type_name_str = interner.resolve(decl.name);
         for (i, field) in decl.fields.iter().enumerate() {
             let field_name_str = interner.resolve(field.name);
             let field_name_id = self
-                .name_table
-                .intern_raw(builtin_module, &[field_name_str]);
+            .name_table_mut()
+            .intern_raw(builtin_module, &[field_name_str]);
             let full_field_name_id = self
-                .name_table
-                .intern_raw(self.current_module, &[type_name_str, field_name_str]);
+            .name_table_mut()
+            .intern_raw(self.current_module, &[type_name_str, field_name_str]);
 
             // Resolve field type directly to TypeId
             let module_id = self.current_module;
             let mut ctx = TypeResolutionContext {
-                entity_registry: &self.entity_registry,
+                db: &self.db,
                 interner,
-                name_table: &mut self.name_table,
                 module_id,
                 type_params: None,
                 self_type: None,
-                type_arena: &self.type_arena,
             };
             let field_type_id = resolve_type_to_id(&field.ty, &mut ctx);
 
-            self.entity_registry.register_field(
+            self.entity_registry_mut().register_field(
                 entity_type_id,
                 field_name_id,
                 full_field_name_id,
@@ -926,14 +1088,18 @@ impl Analyzer {
                     let sym = syms[0];
                     if let Some(type_def_id) = self
                         .resolver(interner)
-                        .resolve_type(sym, &self.entity_registry)
+                        .resolve_type(sym, &self.entity_registry())
                     {
-                        let type_def = self.entity_registry.get_type(type_def_id);
-                        if type_def.kind == TypeDefKind::Alias
-                            && let Some(aliased_type_id) = type_def.aliased_type
+                        let (kind, aliased_type) = {
+                            let registry = self.entity_registry();
+                            let type_def = registry.get_type(type_def_id);
+                            (type_def.kind, type_def.aliased_type)
+                        };
+                        if kind == TypeDefKind::Alias
+                            && let Some(aliased_type_id) = aliased_type
                         {
                             // Use TypeId directly
-                            let arena = self.type_arena.borrow();
+                            let arena = self.type_arena();
                             let type_ids =
                                 if let Some(variants) = arena.unwrap_union(aliased_type_id) {
                                     // It's a union - use the variant TypeIds
@@ -952,7 +1118,7 @@ impl Analyzer {
                     let iface_str = interner.resolve(*sym);
                     let iface_exists = self
                         .resolver(interner)
-                        .resolve_type_str_or_interface(iface_str, &self.entity_registry)
+                        .resolve_type_str_or_interface(iface_str, &self.entity_registry())
                         .is_some();
 
                     if !iface_exists {
@@ -970,13 +1136,11 @@ impl Analyzer {
             }
             TypeConstraint::Union(types) => {
                 let module_id = self.current_module;
-                let mut ctx = TypeResolutionContext::with_type_params_and_arena(
-                    &self.entity_registry,
+                let mut ctx = TypeResolutionContext::with_type_params(
+                    &self.db,
                     interner,
-                    &mut self.name_table,
                     module_id,
                     type_param_scope,
-                    &self.type_arena,
                 );
                 let resolved_ids = types
                     .iter()
@@ -986,20 +1150,18 @@ impl Analyzer {
             }
             TypeConstraint::Structural { fields, methods } => {
                 let module_id = self.current_module;
-                let mut ctx = TypeResolutionContext::with_type_params_and_arena(
-                    &self.entity_registry,
+                let mut ctx = TypeResolutionContext::with_type_params(
+                    &self.db,
                     interner,
-                    &mut self.name_table,
                     module_id,
                     type_param_scope,
-                    &self.type_arena,
                 );
                 // Convert AST structural to InternedStructural (TypeId-based)
                 let resolved_fields: smallvec::SmallVec<[(NameId, ArenaTypeId); 4]> = fields
                     .iter()
                     .map(|f| {
                         let name = ctx
-                            .name_table
+                            .name_table_mut()
                             .intern(ctx.module_id, &[f.name], ctx.interner);
                         let ty = resolve_type_to_id(&f.ty, &mut ctx);
                         (name, ty)
@@ -1011,7 +1173,7 @@ impl Analyzer {
                     .iter()
                     .map(|m| {
                         let name = ctx
-                            .name_table
+                            .name_table_mut()
                             .intern(ctx.module_id, &[m.name], ctx.interner);
                         let params = m
                             .params
@@ -1056,7 +1218,7 @@ impl Analyzer {
 
             // Check if found type is itself a type param with matching or stronger constraint
             let found_param = {
-                let arena = self.type_arena.borrow();
+                let arena = self.type_arena();
                 if let Some(found_name_id) = arena.unwrap_type_param(found_id) {
                     self.type_param_stack.get_by_name_id(found_name_id)
                 } else if let Some(type_param_id) = arena.unwrap_type_param_ref(found_id) {
@@ -1091,9 +1253,9 @@ impl Analyzer {
                 }
                 crate::generic::TypeConstraint::UnionId(variant_ids) => {
                     // TypeId-based - no conversion needed
-                    let expected_id = self.type_arena.borrow_mut().union(variant_ids.clone());
+                    let expected_id = self.type_arena_mut().union(variant_ids.clone());
                     let is_compatible = {
-                        let arena = self.type_arena.borrow();
+                        let arena = self.type_arena();
                         types_compatible_core_id(found_id, expected_id, &arena)
                     };
                     if !is_compatible {
@@ -1141,8 +1303,8 @@ impl Analyzer {
     ) {
         let impl_type_id = match ImplTypeId::from_type_id(
             target_type_id,
-            &self.type_arena.borrow(),
-            &self.entity_registry,
+            &self.type_arena(),
+            &self.entity_registry(),
         ) {
             Some(id) => id,
             None => return, // Skip non-registerable types
@@ -1151,16 +1313,15 @@ impl Analyzer {
         // Get EntityRegistry TypeDefId for the target type
         // Use impl_type_id.name_id() which we already have, avoiding name_id_for_type
         let entity_type_id = self
-            .type_arena
-            .borrow()
+            .type_arena()
             .type_def_id(target_type_id)
-            .or_else(|| self.entity_registry.type_by_name(impl_type_id.name_id()));
+            .or_else(|| self.entity_registry().type_by_name(impl_type_id.name_id()));
 
         // Get interface TypeDefId if implementing an interface
         let interface_type_id = trait_name.and_then(|name| {
             let iface_str = interner.resolve(name);
             self.resolver(interner)
-                .resolve_type_str_or_interface(iface_str, &self.entity_registry)
+                .resolve_type_str_or_interface(iface_str, &self.entity_registry())
         });
 
         for func in &external.functions {
@@ -1174,31 +1335,40 @@ impl Analyzer {
             // Resolve return type directly to TypeId
             let return_type_id = match &func.return_type {
                 Some(te) => self.resolve_type_id(te, interner),
-                None => self.type_arena.borrow().void(),
+                None => self.type_arena().void(),
             };
 
             let func_type = FunctionType::from_ids(&param_type_ids, return_type_id, false);
 
             // Determine native name: explicit or default to vole_name
-            let native_name = func
+            let native_name_str = func
                 .native_name
                 .clone()
                 .unwrap_or_else(|| interner.resolve(func.vole_name).to_string());
 
             // Register in implement registry
             let method_id = self.method_name_id(func.vole_name, interner);
+            // Extract name IDs before struct literal to avoid overlapping borrows
+            let (module_path, native_name) = {
+                let builtin_module = self.name_table_mut().builtin_module();
+                let mut name_table = self.name_table_mut();
+                (
+                    name_table.intern_raw(builtin_module, &[&external.module_path]),
+                    name_table.intern_raw(builtin_module, &[&native_name_str]),
+                )
+            };
             let external_info = ExternalMethodInfo {
-                module_path: external.module_path.clone(),
+                module_path,
                 native_name,
             };
-            self.implement_registry.register_method(
+            self.implement_registry_mut().register_method(
                 impl_type_id,
                 method_id,
                 MethodImpl {
                     trait_name,
                     func_type: func_type.clone(),
                     is_builtin: false,
-                    external_info: Some(external_info.clone()),
+                    external_info: Some(external_info),
                 },
             );
 
@@ -1208,7 +1378,7 @@ impl Analyzer {
                 // For trait implementations, use the interface type id
                 // For type extensions, use the type's own id as both
                 let binding_type_id = interface_type_id.unwrap_or(entity_type_id);
-                self.entity_registry.add_method_binding(
+                self.entity_registry_mut().add_method_binding(
                     entity_type_id,
                     binding_type_id,
                     MethodBinding {
@@ -1239,7 +1409,8 @@ impl Analyzer {
         self.found_return = false; // Reset for new function
 
         // Set error type context if this is a fallible function
-        if let Some((_success, error)) = self.type_arena.borrow().unwrap_fallible(return_type_id) {
+        let error_type = self.type_arena().unwrap_fallible(return_type_id).map(|(_, e)| e);
+        if let Some(error) = error_type {
             self.current_function_error_type = Some(error);
         }
 
@@ -1327,9 +1498,9 @@ impl Analyzer {
 
         // If we were inferring the return type, update the function signature
         if needs_inference {
-            let inferred_return_type = self.current_function_return.unwrap_or_else(|| {
-                self.type_arena.borrow().void()
-            });
+            let inferred_return_type = self
+                .current_function_return
+                .unwrap_or_else(|| self.type_arena().void());
 
             // Update the function signature with the inferred return type
             if let Some(existing) = self.functions.get_mut(&func.name) {
@@ -1337,11 +1508,13 @@ impl Analyzer {
             }
 
             // Also update in entity_registry
+            // Get func_id first, then drop borrow before mutating
             let name_id = self
-                .name_table
+                .name_table_mut()
                 .intern(self.current_module, &[func.name], interner);
-            if let Some(func_id) = self.entity_registry.function_by_name(name_id) {
-                self.entity_registry
+            let func_id = self.entity_registry().function_by_name(name_id);
+            if let Some(func_id) = func_id {
+                self.entity_registry_mut()
                     .update_function_return_type(func_id, inferred_return_type);
             }
         } else {
@@ -1373,13 +1546,13 @@ impl Analyzer {
     /// Extract the element type from an Iterator<T> type.
     fn extract_iterator_element_type_id(&self, ty_id: ArenaTypeId) -> Option<ArenaTypeId> {
         let interface_info = {
-            let arena = self.type_arena.borrow();
+            let arena = self.type_arena();
             arena
                 .unwrap_interface(ty_id)
                 .map(|(id, args)| (id, args.first().copied()))
         };
         let (type_def_id, first_arg) = interface_info?;
-        if !self.name_table.well_known.is_iterator_type_def(type_def_id) {
+        if !self.name_table().well_known.is_iterator_type_def(type_def_id) {
             return None;
         }
         first_arg
@@ -1394,11 +1567,20 @@ impl Analyzer {
         // Look up method type via Resolver
         let type_def_id = self
             .resolver(interner)
-            .resolve_type(type_name, &self.entity_registry)
+            .resolve_type(type_name, &self.entity_registry())
             .expect("type should be registered in EntityRegistry");
         let lookup = self
             .lookup_method(type_def_id, method.name, interner)
             .expect("method should be registered in EntityRegistry");
+
+        // Get signature components from arena
+        let (params_id, return_type_id) = {
+            let arena = self.type_arena();
+            let (params, ret, _) = arena
+                .unwrap_function(lookup.signature_id)
+                .expect("method signature must be a function type");
+            (params.clone(), ret)
+        };
 
         // Determine if we need to infer the return type
         let needs_inference = method.return_type.is_none();
@@ -1406,7 +1588,7 @@ impl Analyzer {
         let saved_ctx = if needs_inference {
             self.enter_function_context_inferring()
         } else {
-            self.enter_function_context(lookup.signature.return_type_id)
+            self.enter_function_context(return_type_id)
         };
 
         // Create scope with 'self' and parameters
@@ -1419,17 +1601,16 @@ impl Analyzer {
             .lookup("self")
             .expect("'self' should be interned during parsing");
         // Build self type directly as TypeId
-        let type_def = self.entity_registry.get_type(type_def_id);
-        let self_type_id = match type_def.kind {
-            TypeDefKind::Class => self
-                .type_arena
-                .borrow_mut()
+        let kind = {
+            let registry = self.entity_registry();
+            registry.get_type(type_def_id).kind
+        };
+        let self_type_id = match kind {
+            TypeDefKind::Class => self.type_arena_mut()
                 .class(type_def_id, crate::type_arena::TypeIdVec::new()),
-            TypeDefKind::Record => self
-                .type_arena
-                .borrow_mut()
+            TypeDefKind::Record => self.type_arena_mut()
                 .record(type_def_id, crate::type_arena::TypeIdVec::new()),
-            _ => self.type_arena.borrow().invalid(),
+            _ => self.type_arena().invalid(),
         };
         self.scope.define(
             self_sym,
@@ -1440,7 +1621,7 @@ impl Analyzer {
         );
 
         // Add parameters
-        for (param, &ty_id) in method.params.iter().zip(lookup.signature.params_id.iter()) {
+        for (param, &ty_id) in method.params.iter().zip(params_id.iter()) {
             self.scope.define(
                 param.name,
                 Variable {
@@ -1455,19 +1636,26 @@ impl Analyzer {
 
         // If we were inferring the return type, update the method signature
         if needs_inference {
-            let inferred_return_type = self.current_function_return.unwrap_or_else(|| {
-                self.type_arena.borrow().void()
-            });
+            let inferred_return_type = self
+                .current_function_return
+                .unwrap_or_else(|| self.type_arena().void());
 
             // Update the method's return type in EntityRegistry
-            self.entity_registry
-                .update_method_return_type(lookup.method_id, inferred_return_type);
+            {
+                let mut db = self.db.borrow_mut();
+                let CompilationDb { ref mut entities, ref mut types, .. } = *db;
+                entities.update_method_return_type(
+                    lookup.method_id,
+                    inferred_return_type,
+                    types,
+                );
+            }
         } else {
             // Check for missing return statement when return type is explicit and non-void
-            let is_void = lookup.signature.return_type_id.is_void();
+            let is_void = return_type_id.is_void();
             if !is_void && !self.found_return {
                 let method_name = interner.resolve(method.name).to_string();
-                let expected = self.type_display_id(lookup.signature.return_type_id);
+                let expected = self.type_display_id(return_type_id);
                 self.add_error(
                     SemanticError::MissingReturn {
                         name: method_name,
@@ -1535,7 +1723,7 @@ impl Analyzer {
         // Resolve type name and delegate to check_static_method_with_type_def
         let type_def_id = self
             .resolver(interner)
-            .resolve_type(type_name, &self.entity_registry)
+            .resolve_type(type_name, &self.entity_registry())
             .expect("type should be registered in EntityRegistry");
         self.check_static_method_with_type_def(method, type_def_id, interner)
     }
@@ -1555,13 +1743,24 @@ impl Analyzer {
 
         let method_name_id = self.method_name_id(method.name, interner);
         let method_id = self
-            .entity_registry
+            .entity_registry_mut()
             .find_static_method_on_type(type_def_id, method_name_id)
             .expect("static method should be registered in EntityRegistry");
-        let method_def = self.entity_registry.get_method(method_id);
-        let method_type = method_def.signature.clone();
-        let method_type_params = method_def.method_type_params.clone();
-        let saved_ctx = self.enter_function_context(method_type.return_type_id);
+        let (method_type_params, signature_id) = {
+            let registry = self.entity_registry();
+            let method_def = registry.get_method(method_id);
+            (method_def.method_type_params.clone(), method_def.signature_id)
+        };
+
+        // Get signature components from arena
+        let (params_id, return_type_id) = {
+            let arena = self.type_arena();
+            let (params, ret, _) = arena
+                .unwrap_function(signature_id)
+                .expect("method signature must be a function type");
+            (params.clone(), ret)
+        };
+        let saved_ctx = self.enter_function_context(return_type_id);
 
         // Mark that we're in a static method (for self-usage detection)
         self.current_static_method = Some(interner.resolve(method.name).to_string());
@@ -1577,7 +1776,7 @@ impl Analyzer {
         self.scope = Scope::with_parent(parent_scope);
 
         // Add parameters (no 'self' for static methods)
-        for (param, &ty_id) in method.params.iter().zip(method_type.params_id.iter()) {
+        for (param, &ty_id) in method.params.iter().zip(params_id.iter()) {
             self.scope.define(
                 param.name,
                 Variable {
@@ -1610,7 +1809,7 @@ impl Analyzer {
             self.scope = Scope::with_parent(parent_scope);
 
             // Tests implicitly return void
-            let void_id = self.type_arena.borrow().void();
+            let void_id = self.type_arena().void();
             let saved_ctx = self.enter_function_context(void_id);
 
             // Type check all statements in the test body
@@ -1687,7 +1886,7 @@ impl Analyzer {
         let mut external_funcs = HashSet::new();
         let module_interner = parser.into_interner();
 
-        let module_id = self.name_table.module_id(import_path);
+        let module_id = self.name_table_mut().module_id(import_path);
 
         for decl in &program.declarations {
             match decl {
@@ -1695,13 +1894,11 @@ impl Analyzer {
                     // Build function type from signature - resolve directly to TypeId
                     let func_type_id = {
                         let mut ctx = TypeResolutionContext {
-                            entity_registry: &self.entity_registry,
+                            db: &self.db,
                             interner: &module_interner,
-                            name_table: &mut self.name_table,
                             module_id,
                             type_params: None,
                             self_type: None,
-                            type_arena: &self.type_arena,
                         };
                         let param_ids: crate::type_arena::TypeIdVec = f
                             .params
@@ -1712,16 +1909,15 @@ impl Analyzer {
                             .return_type
                             .as_ref()
                             .map(|rt| resolve_type_to_id(rt, &mut ctx))
-                            .unwrap_or_else(|| self.type_arena.borrow().void());
-                        self.type_arena
-                            .borrow_mut()
+                            .unwrap_or_else(|| self.type_arena().void());
+                        self.type_arena_mut()
                             .function(param_ids, return_id, false)
                     };
 
                     // Store export by name string
                     let name_id = self
-                        .name_table
-                        .intern(module_id, &[f.name], &module_interner);
+            .name_table_mut()
+            .intern(module_id, &[f.name], &module_interner);
                     exports.insert(name_id, func_type_id);
                 }
                 Decl::Let(l) if !l.mutable => {
@@ -1732,9 +1928,9 @@ impl Analyzer {
                     };
                     // Infer type from literal for constants and store the value
                     let name_id = self
-                        .name_table
-                        .intern(module_id, &[l.name], &module_interner);
-                    let arena = self.type_arena.borrow();
+            .name_table_mut()
+            .intern(module_id, &[l.name], &module_interner);
+                    let arena = self.type_arena();
                     let (ty_id, const_val) = match &init_expr.kind {
                         ExprKind::FloatLiteral(v) => (arena.f64(), Some(ConstantValue::F64(*v))),
                         ExprKind::IntLiteral(v) => (arena.i64(), Some(ConstantValue::I64(*v))),
@@ -1756,13 +1952,11 @@ impl Analyzer {
                         // Resolve types directly to TypeId
                         let func_type_id = {
                             let mut ctx = TypeResolutionContext {
-                                entity_registry: &self.entity_registry,
+                                db: &self.db,
                                 interner: &module_interner,
-                                name_table: &mut self.name_table,
                                 module_id,
                                 type_params: None,
                                 self_type: None,
-                                type_arena: &self.type_arena,
                             };
                             let param_ids: crate::type_arena::TypeIdVec = func
                                 .params
@@ -1773,14 +1967,13 @@ impl Analyzer {
                                 .return_type
                                 .as_ref()
                                 .map(|rt| resolve_type_to_id(rt, &mut ctx))
-                                .unwrap_or_else(|| self.type_arena.borrow().void());
-                            self.type_arena
-                                .borrow_mut()
+                                .unwrap_or_else(|| self.type_arena().void());
+                            self.type_arena_mut()
                                 .function(param_ids, return_id, false)
                         };
 
                         let name_id =
-                            self.name_table
+                            self.name_table_mut()
                                 .intern(module_id, &[func.vole_name], &module_interner);
                         exports.insert(name_id, func_type_id);
                         // Mark as external function (FFI)
@@ -1798,7 +1991,7 @@ impl Analyzer {
         // Create TypeId from exports and register module metadata
         let exports_vec: smallvec::SmallVec<[(NameId, ArenaTypeId); 8]> =
             exports.into_iter().collect();
-        let mut arena = self.type_arena.borrow_mut();
+        let mut arena = self.type_arena_mut();
         // Register module metadata (constants, external_funcs) for method resolution
         arena.register_module_metadata(
             module_id,

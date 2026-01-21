@@ -67,18 +67,18 @@ impl Analyzer {
             }
 
             // Check if it's a generic function via EntityRegistry
+            // Split into separate borrows to avoid borrow conflicts
             let generic_info = {
                 let name_id = self
-                    .name_table
+                    .name_table_mut()
                     .intern(self.current_module, &[*sym], interner);
-                self.entity_registry
-                    .function_by_name(name_id)
-                    .and_then(|func_id| {
-                        self.entity_registry
-                            .get_function(func_id)
-                            .generic_info
-                            .clone()
-                    })
+                let func_id = self.entity_registry_mut().function_by_name(name_id);
+                func_id.and_then(|fid| {
+                    self.entity_registry_mut()
+                        .get_function(fid)
+                        .generic_info
+                        .clone()
+                })
             };
             if let Some(generic_def) = generic_info {
                 // Calling a generic function - infer type params and monomorphize
@@ -111,7 +111,7 @@ impl Analyzer {
                 let subs_hashbrown: hashbrown::HashMap<_, _> =
                     inferred_id.iter().map(|(&k, &v)| (k, v)).collect();
                 let (concrete_param_ids, concrete_return_id) = {
-                    let mut arena = self.type_arena.borrow_mut();
+                    let mut arena = self.type_arena_mut();
                     // Substitute all types using TypeId-based substitutions directly
                     let param_ids: Vec<_> = generic_def
                         .param_types
@@ -150,22 +150,24 @@ impl Analyzer {
                     "generic instantiation"
                 );
                 let type_keys: Vec<_> = type_args_id.to_vec();
-                let module_id = self.name_table.main_module();
+                let module_id = self.name_table().main_module();
                 let name_id = {
-                    let mut namer = Namer::new(&mut self.name_table, interner);
+                    let mut table = self.name_table_mut();
+                    let mut namer = Namer::new(&mut *table, interner);
                     namer.intern_symbol(module_id, *sym)
                 };
                 let key = MonomorphKey::new(name_id, type_keys);
 
-                if !self.entity_registry.monomorph_cache.contains(&key) {
-                    let id = self.entity_registry.monomorph_cache.next_unique_id();
-                    let module_id = self.name_table.module_of(name_id);
+                if !self.entity_registry_mut().monomorph_cache.contains(&key) {
+                    let id = self.entity_registry_mut().monomorph_cache.next_unique_id();
+                    let module_id = self.name_table().module_of(name_id);
                     let base_str = self
-                        .name_table
+                        .name_table()
                         .last_segment_str(name_id)
                         .unwrap_or_else(|| interner.resolve(*sym).to_string());
                     let mangled_name = {
-                        let mut namer = Namer::new(&mut self.name_table, interner);
+                        let mut table = self.name_table_mut();
+                        let mut namer = Namer::new(&mut *table, interner);
                         namer.monomorph_str(module_id, &base_str, id)
                     };
                     // Use inferred_id directly as substitutions (already TypeId-based)
@@ -173,7 +175,7 @@ impl Analyzer {
                     let substitutions: HashMap<NameId, ArenaTypeId> = inferred_id.clone();
                     let func_type =
                         FunctionType::from_ids(&concrete_param_ids, concrete_return_id, false);
-                    self.entity_registry.monomorph_cache.insert(
+                    self.entity_registry_mut().monomorph_cache.insert(
                         key.clone(),
                         MonomorphInstance {
                             original_name: name_id,
@@ -193,7 +195,7 @@ impl Analyzer {
 
             // Check if it's a variable with a function type (using TypeId path)
             if let Some(var_type_id) = self.get_variable_type_id(*sym) {
-                let arena = self.type_arena.borrow();
+                let arena = self.type_arena();
                 if let Some((params, ret, _is_closure)) = arena.unwrap_function(var_type_id) {
                     let params = params.clone();
                     drop(arena);
@@ -266,8 +268,7 @@ impl Analyzer {
         let callee_ty_id = self.check_expr(&call.callee, interner)?;
 
         let func_info = self
-            .type_arena
-            .borrow()
+            .type_arena()
             .unwrap_function(callee_ty_id)
             .map(|(params, ret, _is_closure)| (params.clone(), ret));
 

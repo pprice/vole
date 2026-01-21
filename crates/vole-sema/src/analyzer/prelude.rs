@@ -1,17 +1,15 @@
 //! Prelude file loading for standard library definitions.
 
 use super::Analyzer;
-use crate::EntityRegistry;
 use crate::analysis_cache::CachedModule;
 use crate::generic::TypeParamScopeStack;
-use crate::implement_registry::ImplementRegistry;
 use crate::module::ModuleLoader;
 use crate::resolution::MethodResolutions;
 use crate::scope::Scope;
 use rustc_hash::FxHashMap;
 use std::collections::HashMap;
+use std::rc::Rc;
 use vole_frontend::{Interner, Parser};
-use vole_identity::NameTable;
 
 impl Analyzer {
     /// Load prelude files (trait definitions and primitive type implementations)
@@ -55,10 +53,15 @@ impl Analyzer {
         if let Some(ref cache) = self.module_cache
             && let Some(cached) = cache.borrow().get(import_path)
         {
-            // Use cached analysis results
-            self.name_table = cached.name_table.clone();
-            self.entity_registry.merge(&cached.entity_registry);
-            self.implement_registry.merge(&cached.implement_registry);
+            // Use cached analysis results - merge into shared db
+            // Note: We don't replace db.names because the shared db already contains
+            // all names from the cached module (since cache uses the same shared db).
+            // Replacing would lose NameIds created after the cache entry was made.
+            {
+                let mut db = self.db.borrow_mut();
+                db.entities.merge(&cached.entity_registry);
+                db.implements.merge(&cached.implement_registry);
+            }
             for (name, func_type) in &cached.functions_by_name {
                 self.functions_by_name
                     .insert(name.clone(), func_type.clone());
@@ -92,9 +95,9 @@ impl Analyzer {
         prelude_interner.seed_builtin_symbols();
 
         // Get the module ID for this prelude file path
-        let prelude_module = self.name_table.module_id(import_path);
+        let prelude_module = self.name_table_mut().module_id(import_path);
 
-        // Create a sub-analyzer to analyze the prelude
+        // Create a sub-analyzer that shares the same db
         // Note: We don't call new() because that would try to load prelude again
         let mut sub_analyzer = Analyzer {
             scope: Scope::new(),
@@ -112,7 +115,6 @@ impl Analyzer {
             lambda_locals: Vec::new(),
             lambda_side_effects: Vec::new(),
             expr_types: HashMap::new(),
-            implement_registry: ImplementRegistry::new(),
             method_resolutions: MethodResolutions::new(),
             module_loader: ModuleLoader::new(),
             module_type_ids: FxHashMap::default(),
@@ -124,19 +126,12 @@ impl Analyzer {
             class_method_calls: HashMap::new(),
             static_method_calls: HashMap::new(),
             substituted_return_types: HashMap::new(),
-            name_table: NameTable::new(),
             current_module: prelude_module, // Use the prelude module path!
-            entity_registry: EntityRegistry::new(),
             type_param_stack: TypeParamScopeStack::new(),
             module_cache: None, // Sub-analyzers don't need the cache
-            type_arena: self.type_arena.clone(), // Share arena so TypeIds are valid
+            db: Rc::clone(&self.db), // Share the compilation db
             found_return: false,
         };
-
-        // Copy existing registries so prelude files can reference earlier definitions
-        sub_analyzer.name_table = self.name_table.clone();
-        sub_analyzer.entity_registry = self.entity_registry.clone();
-        sub_analyzer.implement_registry = self.implement_registry.clone();
 
         // Analyze the prelude file
         let analyze_result = sub_analyzer.analyze(&program, &prelude_interner);
@@ -147,6 +142,7 @@ impl Analyzer {
             // Cache the analysis results before merging
             if let Some(ref cache) = self.module_cache {
                 // TypeIds are valid across cache because arena is shared
+                let db = self.db.borrow();
                 cache.borrow_mut().insert(
                     import_path.to_string(),
                     CachedModule {
@@ -154,26 +150,19 @@ impl Analyzer {
                         interner: prelude_interner.clone(),
                         expr_types: sub_analyzer.expr_types.clone(),
                         method_resolutions: sub_analyzer.method_resolutions.clone_inner(),
-                        entity_registry: sub_analyzer.entity_registry.clone(),
-                        implement_registry: sub_analyzer.implement_registry.clone(),
+                        entity_registry: db.entities.clone(),
+                        implement_registry: db.implements.clone(),
                         functions_by_name: sub_analyzer.functions_by_name.clone(),
-                        name_table: sub_analyzer.name_table.clone(),
+                        name_table: db.names.clone(),
                     },
                 );
             }
 
-            // Merge the entity registry (types, methods, fields)
-            self.entity_registry.merge(&sub_analyzer.entity_registry);
-            // Merge the implement registry
-            self.implement_registry
-                .merge(&sub_analyzer.implement_registry);
             // Merge functions by name (for standalone external function declarations)
             // We use by_name because the Symbol lookup won't work across interners
             for (name, func_type) in sub_analyzer.functions_by_name {
                 self.functions_by_name.insert(name, func_type);
             }
-            // Keep name table in sync with prelude interned ids
-            self.name_table = sub_analyzer.name_table;
 
             // Store prelude program for codegen (needed for implement block compilation)
             self.module_programs

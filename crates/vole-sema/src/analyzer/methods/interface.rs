@@ -11,7 +11,7 @@ impl Analyzer {
         // Look up Stringable interface
         let type_def_id = self
             .resolver(interner)
-            .resolve_type_str_or_interface("Stringable", &self.entity_registry);
+            .resolve_type_str_or_interface("Stringable", &self.entity_registry());
         if let Some(type_def_id) = type_def_id {
             return self.satisfies_interface_by_type_def_id_typeid(ty_id, type_def_id, interner);
         }
@@ -27,7 +27,8 @@ impl Analyzer {
     ) -> bool {
         // Extract all data we need from the interface upfront to avoid borrow conflicts
         let (is_interface, field_ids, method_ids, extends) = {
-            let interface = self.entity_registry.get_type(interface_id);
+            let registry = self.entity_registry();
+            let interface = registry.get_type(interface_id);
             (
                 interface.kind == TypeDefKind::Interface,
                 interface.fields.clone(),
@@ -42,15 +43,17 @@ impl Analyzer {
 
         // Check required fields
         for field_id in field_ids {
-            let (field_name_str, field_type_id) = {
-                let field = self.entity_registry.get_field(field_id);
-                (
-                    self.name_table
-                        .last_segment_str(field.name_id)
-                        .unwrap_or_default(),
-                    field.ty,
-                )
+            // Get field data first
+            let (name_id, field_type_id) = {
+                let registry = self.entity_registry();
+                let field = registry.get_field(field_id);
+                (field.name_id, field.ty)
             };
+            // Then look up the name
+            let field_name_str = self
+                .name_table()
+                .last_segment_str(name_id)
+                .unwrap_or_default();
             if !self.type_has_field_by_str_id(ty_id, &field_name_str, field_type_id, interner) {
                 return false;
             }
@@ -58,19 +61,32 @@ impl Analyzer {
 
         // Check required methods (skip those with defaults)
         for method_id in method_ids {
-            let (has_default, method_name_str, signature) = {
-                let method = self.entity_registry.get_method(method_id);
-                (
-                    method.has_default,
-                    self.name_table
-                        .last_segment_str(method.name_id)
-                        .unwrap_or_default(),
-                    method.signature.clone(),
-                )
+            // Step 1: Get method data from registry
+            let (has_default, name_id, signature_id) = {
+                let registry = self.entity_registry();
+                let method = registry.get_method(method_id);
+                (method.has_default, method.name_id, method.signature_id)
             };
             if has_default {
                 continue;
             }
+            // Step 2: Get signature from arena
+            let signature = {
+                let arena = self.type_arena();
+                let (params, ret, is_closure) = arena
+                    .unwrap_function(signature_id)
+                    .expect("method signature must be a function type");
+                FunctionType {
+                    is_closure,
+                    params_id: params.clone(),
+                    return_type_id: ret,
+                }
+            };
+            // Step 3: Get method name from name table
+            let method_name_str = self
+                .name_table()
+                .last_segment_str(name_id)
+                .unwrap_or_default();
             // Use TypeId-based method checking
             if !self.type_has_method_by_str_id(ty_id, &method_name_str, &signature, interner) {
                 return false;
@@ -97,7 +113,7 @@ impl Analyzer {
     ) -> bool {
         // Get type_def_id and type_args from TypeId using arena queries
         let (type_def_id, type_args_id) = {
-            let arena = self.type_arena.borrow();
+            let arena = self.type_arena();
             if let Some((id, args)) = arena.unwrap_class(ty_id) {
                 (id, args.clone())
             } else if let Some((id, args)) = arena.unwrap_record(ty_id) {
@@ -107,9 +123,14 @@ impl Analyzer {
             }
         };
 
-        let type_def = self.entity_registry.get_type(type_def_id);
-        let Some(ref generic_info) = type_def.generic_info else {
-            return false;
+        // Clone generic_info to avoid holding borrow during subsequent operations
+        let generic_info = {
+            let registry = self.entity_registry();
+            let type_def = registry.get_type(type_def_id);
+            match type_def.generic_info.clone() {
+                Some(info) => info,
+                None => return false,
+            }
         };
 
         // Build type substitutions directly using TypeId
@@ -122,11 +143,10 @@ impl Analyzer {
 
         // Find field and check type compatibility using arena substitution
         for (i, name_id) in generic_info.field_names.iter().enumerate() {
-            if self.name_table.last_segment_str(*name_id).as_deref() == Some(field_name) {
+            if self.name_table().last_segment_str(*name_id).as_deref() == Some(field_name) {
                 let field_type_id = generic_info.field_types[i];
                 let substituted_field_type_id = self
-                    .type_arena
-                    .borrow_mut()
+                    .type_arena_mut()
                     .substitute(field_type_id, &substitutions);
                 return self.types_compatible_id(
                     substituted_field_type_id,
@@ -148,7 +168,7 @@ impl Analyzer {
     ) -> bool {
         // Get type_def_id from TypeId using arena queries
         let type_def_id = {
-            let arena = self.type_arena.borrow();
+            let arena = self.type_arena();
             if let Some((id, _)) = arena.unwrap_class(ty_id) {
                 Some(id)
             } else if let Some((id, _)) = arena.unwrap_record(ty_id) {
@@ -161,14 +181,14 @@ impl Analyzer {
         // For primitives/arrays, check implement registry (using TypeId)
         if type_def_id.is_none() {
             let impl_type_id = {
-                let arena = self.type_arena.borrow();
-                ImplTypeId::from_type_id(ty_id, &arena, &self.entity_registry)
+                let arena = self.type_arena();
+                ImplTypeId::from_type_id(ty_id, &arena, &self.entity_registry())
             };
             if let Some(impl_type_id) = impl_type_id
                 && let Some(method_id) = self.method_name_id_by_str(method_name, interner)
             {
                 return self
-                    .implement_registry
+                    .implement_registry()
                     .get_method(&impl_type_id, method_id)
                     .is_some();
             }
@@ -178,26 +198,44 @@ impl Analyzer {
         let type_def_id = type_def_id.expect("checked is_none above");
 
         // Check direct methods on the type via EntityRegistry
-        if let Some(method_name_id) = self.method_name_id_by_str(method_name, interner)
-            && let Some(method_id) = self
-                .entity_registry
-                .find_method_on_type(type_def_id, method_name_id)
-        {
-            let method_def = self.entity_registry.get_method(method_id);
-            if self.signatures_compatible_id(expected_sig, &method_def.signature) {
+        let maybe_method_id = {
+            if let Some(method_name_id) = self.method_name_id_by_str(method_name, interner) {
+                let registry = self.entity_registry();
+                registry.find_method_on_type(type_def_id, method_name_id)
+            } else {
+                None
+            }
+        };
+        if let Some(method_id) = maybe_method_id {
+            let signature_id = {
+                let registry = self.entity_registry();
+                registry.get_method(method_id).signature_id
+            };
+            let found_sig = {
+                let arena = self.type_arena();
+                let (params, ret, is_closure) = arena
+                    .unwrap_function(signature_id)
+                    .expect("method signature must be a function type");
+                FunctionType {
+                    is_closure,
+                    params_id: params.clone(),
+                    return_type_id: ret,
+                }
+            };
+            if self.signatures_compatible_id(expected_sig, &found_sig) {
                 return true;
             }
         }
 
         // Check implement registry (using TypeId)
         let impl_type_id = {
-            let arena = self.type_arena.borrow();
-            ImplTypeId::from_type_id(ty_id, &arena, &self.entity_registry)
+            let arena = self.type_arena();
+            ImplTypeId::from_type_id(ty_id, &arena, &self.entity_registry())
         };
         if let Some(impl_type_id) = impl_type_id
             && let Some(method_id) = self.method_name_id_by_str(method_name, interner)
             && self
-                .implement_registry
+                .implement_registry()
                 .get_method(&impl_type_id, method_id)
                 .is_some()
         {
@@ -224,7 +262,7 @@ impl Analyzer {
         // Look up interface via Resolver with interface fallback
         let type_def_id = self
             .resolver(interner)
-            .resolve_type_or_interface(interface_name, &self.entity_registry);
+            .resolve_type_or_interface(interface_name, &self.entity_registry());
 
         let Some(type_def_id) = type_def_id else {
             return false;
@@ -245,19 +283,20 @@ impl Analyzer {
         // Get the implementing type for Self substitution via Resolver
         let type_id_opt = self
             .resolver(interner)
-            .resolve_type(type_name, &self.entity_registry);
+            .resolve_type(type_name, &self.entity_registry());
         // Build implementing type directly as TypeId
         let implementing_type_id = if let Some(type_id) = type_id_opt {
-            let type_def = self.entity_registry.get_type(type_id);
-            match type_def.kind {
+            let kind = {
+                let registry = self.entity_registry();
+                registry.get_type(type_id).kind
+            };
+            match kind {
                 TypeDefKind::Class => Some(
-                    self.type_arena
-                        .borrow_mut()
+                    self.type_arena_mut()
                         .class(type_id, crate::type_arena::TypeIdVec::new()),
                 ),
                 TypeDefKind::Record => Some(
-                    self.type_arena
-                        .borrow_mut()
+                    self.type_arena_mut()
                         .record(type_id, crate::type_arena::TypeIdVec::new()),
                 ),
                 _ => None,
@@ -273,22 +312,24 @@ impl Analyzer {
         // Look up interface via Resolver with interface fallback
         let type_def_id = self
             .resolver(interner)
-            .resolve_type_or_interface(iface_name, &self.entity_registry);
+            .resolve_type_or_interface(iface_name, &self.entity_registry());
 
         if let Some(interface_type_id) = type_def_id {
             // Clone the data we need to avoid borrow conflicts
-            let iface = self.entity_registry.get_type(interface_type_id);
-            let method_ids = iface.methods.clone();
-            let extends = iface.extends.clone();
-            let interface_type_params = iface.type_params.clone();
+            let (method_ids, extends, interface_type_params) = {
+                let registry = self.entity_registry();
+                let iface = registry.get_type(interface_type_id);
+                (iface.methods.clone(), iface.extends.clone(), iface.type_params.clone())
+            };
 
             // Build substitution map for generic interface type parameters (TypeId-based)
             // E.g., MapLike<K, V> implemented as MapLike<i64, i64> → {K: i64, V: i64}
             let substitutions: hashbrown::HashMap<NameId, ArenaTypeId> =
                 if let Some(impl_type_id) = type_id_opt {
-                    let type_args = self
-                        .entity_registry
-                        .get_implementation_type_args(impl_type_id, interface_type_id);
+                    let type_args: Vec<_> = {
+                        let registry = self.entity_registry();
+                        registry.get_implementation_type_args(impl_type_id, interface_type_id).to_vec()
+                    };
                     interface_type_params
                         .iter()
                         .zip(type_args.iter())
@@ -302,23 +343,36 @@ impl Analyzer {
             let method_infos: Vec<(String, bool, FunctionType)> = method_ids
                 .iter()
                 .map(|&method_id| {
-                    let method = self.entity_registry.get_method(method_id);
+                    let (name_id, signature_id, has_default) = {
+                        let registry = self.entity_registry();
+                        let method = registry.get_method(method_id);
+                        (method.name_id, method.signature_id, method.has_default)
+                    };
                     let name = self
-                        .name_table
-                        .last_segment_str(method.name_id)
+                        .name_table()
+                        .last_segment_str(name_id)
                         .unwrap_or_default();
+
+                    // Get original signature from arena
+                    let (param_ids, return_id, is_closure) = {
+                        let arena = self.type_arena();
+                        let (params, ret, is_closure) = arena
+                            .unwrap_function(signature_id)
+                            .expect("method signature must be a function type");
+                        (params.to_vec(), ret, is_closure)
+                    };
+
                     // Apply type parameter substitution using TypeId-based arena substitution
                     let subst_sig = if substitutions.is_empty() {
-                        method.signature.clone()
+                        FunctionType {
+                            is_closure,
+                            params_id: param_ids.into(),
+                            return_type_id: return_id,
+                        }
                     } else {
-                        let sig = &method.signature;
-                        // Get param TypeIds
-                        let param_ids: Vec<ArenaTypeId> = sig.params_id.iter().copied().collect();
-                        let return_id = sig.return_type_id;
-
                         // Substitute using arena
                         let (subst_params, subst_ret) = {
-                            let mut arena = self.type_arena.borrow_mut();
+                            let mut arena = self.type_arena_mut();
                             let params: Vec<ArenaTypeId> = param_ids
                                 .iter()
                                 .map(|&p| arena.substitute(p, &substitutions))
@@ -328,9 +382,9 @@ impl Analyzer {
                         };
 
                         // Build FunctionType from substituted TypeIds
-                        FunctionType::from_ids(&subst_params, subst_ret, sig.is_closure)
+                        FunctionType::from_ids(&subst_params, subst_ret, is_closure)
                     };
-                    (name, method.has_default, subst_sig)
+                    (name, has_default, subst_sig)
                 })
                 .collect();
 
@@ -338,8 +392,11 @@ impl Analyzer {
             let parent_names: Vec<Option<String>> = extends
                 .iter()
                 .map(|&parent_id| {
-                    let parent_def = self.entity_registry.get_type(parent_id);
-                    self.name_table.last_segment_str(parent_def.name_id)
+                    let name_id = {
+                        let registry = self.entity_registry();
+                        registry.get_type(parent_id).name_id
+                    };
+                    self.name_table().last_segment_str(name_id)
                 })
                 .collect();
 
@@ -476,7 +533,7 @@ impl Analyzer {
                 .zip(found.params_id.iter())
                 .enumerate()
             {
-                let req_is_invalid = self.type_arena.borrow().is_invalid(req_param);
+                let req_is_invalid = self.type_arena().is_invalid(req_param);
                 let effective_req = if req_is_invalid {
                     implementing_type_id
                 } else {
@@ -500,7 +557,7 @@ impl Analyzer {
         }
 
         // Check return type
-        let return_is_invalid = self.type_arena.borrow().is_invalid(required_return);
+        let return_is_invalid = self.type_arena().is_invalid(required_return);
         let effective_return = if return_is_invalid {
             implementing_type_id
         } else {
@@ -535,7 +592,7 @@ impl Analyzer {
         let mut method_sigs = HashMap::new();
 
         let method_name_str = |method_id: NameId| {
-            self.name_table
+            self.name_table()
                 .last_segment_str(method_id)
                 .unwrap_or_default()
         };
@@ -543,17 +600,33 @@ impl Analyzer {
         // Methods defined directly on the type via Resolver
         let type_def_id_opt = self
             .resolver(interner)
-            .resolve_type(type_name, &self.entity_registry);
+            .resolve_type(type_name, &self.entity_registry());
         if let Some(type_def_id) = type_def_id_opt {
-            for method_id in self.entity_registry.methods_on_type(type_def_id) {
-                let method = self.entity_registry.get_method(method_id);
-                method_sigs.insert(method_name_str(method.name_id), method.signature.clone());
+            let method_ids: Vec<_> = self.entity_registry().methods_on_type(type_def_id).collect();
+            for method_id in method_ids {
+                let (signature_id, name_id) = {
+                    let registry = self.entity_registry();
+                    let method = registry.get_method(method_id);
+                    (method.signature_id, method.name_id)
+                };
+                let sig = {
+                    let arena = self.type_arena();
+                    let (params, ret, is_closure) = arena
+                        .unwrap_function(signature_id)
+                        .expect("method signature must be a function type");
+                    FunctionType {
+                        is_closure,
+                        params_id: params.clone(),
+                        return_type_id: ret,
+                    }
+                };
+                method_sigs.insert(method_name_str(name_id), sig);
             }
 
             // Methods from implement blocks
-            let name_id = self.entity_registry.get_type(type_def_id).name_id;
+            let name_id = self.entity_registry().get_type(type_def_id).name_id;
             let type_id = ImplTypeId::from_name_id(name_id);
-            for (method_name, method_impl) in self.implement_registry.get_methods_for_type(&type_id)
+            for (method_name, method_impl) in self.implement_registry().get_methods_for_type(&type_id)
             {
                 method_sigs.insert(method_name_str(method_name), method_impl.func_type.clone());
             }
@@ -575,7 +648,7 @@ impl Analyzer {
         // Check required fields - InternedStructural uses (NameId, TypeId) pairs
         for (field_name, field_type_id) in &structural.fields {
             let field_name_str = self
-                .name_table
+                .name_table()
                 .last_segment_str(*field_name)
                 .unwrap_or_default();
 
@@ -591,7 +664,7 @@ impl Analyzer {
         // Check required methods - InternedStructuralMethod uses TypeId directly
         for method in &structural.methods {
             let method_name_str = self
-                .name_table
+                .name_table()
                 .last_segment_str(method.name)
                 .unwrap_or_default();
 

@@ -18,13 +18,13 @@ impl Analyzer {
         self.lambda_side_effects.push(false);
 
         // Build type param scope for generic lambdas
-        let builtin_mod = self.name_table.builtin_module();
+        let builtin_mod = self.name_table_mut().builtin_module();
         let type_params: Vec<TypeParamInfo> = lambda
             .type_params
             .iter()
             .map(|tp| {
                 let tp_name_str = interner.resolve(tp.name);
-                let tp_name_id = self.name_table.intern_raw(builtin_mod, &[tp_name_str]);
+                let tp_name_id = self.name_table_mut().intern_raw(builtin_mod, &[tp_name_str]);
                 TypeParamInfo {
                     name: tp.name,
                     name_id: tp_name_id,
@@ -107,11 +107,8 @@ impl Analyzer {
         let body_type_id = match &lambda.body {
             LambdaBody::Expr(expr) => {
                 // For expression body, set up context if we have a declared/expected type
-                let saved = if let Some(ret_id) = return_type_for_context {
-                    Some(self.enter_function_context(ret_id))
-                } else {
-                    None
-                };
+                let saved =
+                    return_type_for_context.map(|ret_id| self.enter_function_context(ret_id));
 
                 let ty_id = match self.check_expr(expr, interner) {
                     Ok(ty_id) => ty_id,
@@ -134,8 +131,7 @@ impl Analyzer {
                 let _ = self.check_block(block, interner);
 
                 let ret = if inferring {
-                    self.current_function_return
-                        .unwrap_or(ArenaTypeId::VOID)
+                    self.current_function_return.unwrap_or(ArenaTypeId::VOID)
                 } else {
                     return_type_for_context.unwrap_or(ArenaTypeId::VOID)
                 };
@@ -182,8 +178,7 @@ impl Analyzer {
             .unwrap_or(body_type_id);
 
         // Build function type using arena
-        self.type_arena
-            .borrow_mut()
+        self.type_arena_mut()
             .function(param_type_ids, return_type_id, has_captures)
     }
 }

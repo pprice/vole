@@ -86,18 +86,25 @@ impl Cg<'_, '_, '_> {
                 .method_at_in_module(expr_id, self.ctx.current_module);
             if let Some(ResolvedMethod::Implemented {
                 external_info,
-                func_type,
+                func_type_id,
                 ..
             }) = resolution
             {
+                // Get return type from arena
+                let return_type_id = {
+                    let arena = self.ctx.arena.borrow();
+                    let (_, ret, _) = arena
+                        .unwrap_function(*func_type_id)
+                        .expect("module method must have function type");
+                    ret
+                };
+
                 // Compile arguments (no receiver for module functions)
                 let mut args = Vec::new();
                 for arg in &mc.args {
                     let compiled = self.expr(arg)?;
                     args.push(compiled.value);
                 }
-
-                let return_type_id = func_type.return_type_id;
 
                 if let Some(ext_info) = external_info {
                     // External FFI function
@@ -222,8 +229,13 @@ impl Cg<'_, '_, '_> {
                 return_type,
             } => {
                 // Use TypeId-based params for interface boxing check
-                let param_type_ids =
-                    resolution.map(|resolved| resolved.func_type().params_id.clone());
+                let param_type_ids = resolution.and_then(|resolved| {
+                    self.ctx
+                        .arena
+                        .borrow()
+                        .unwrap_function(resolved.func_type_id())
+                        .map(|(params, _, _)| params.clone())
+                });
                 let mut args: ArgVec = smallvec![obj.value];
                 if let Some(param_type_ids) = &param_type_ids {
                     for (arg, &param_type_id) in mc.args.iter().zip(param_type_ids.iter()) {
@@ -326,7 +338,13 @@ impl Cg<'_, '_, '_> {
         };
 
         // Use TypeId-based params for interface boxing check
-        let param_type_ids = resolution.map(|resolved| resolved.func_type().params_id.clone());
+        let param_type_ids = resolution.and_then(|resolved| {
+            self.ctx
+                .arena
+                .borrow()
+                .unwrap_function(resolved.func_type_id())
+                .map(|(params, _, _)| params.clone())
+        });
         let mut args: ArgVec = smallvec![obj.value];
         if let Some(param_type_ids) = &param_type_ids {
             for (arg, &param_type_id) in mc.args.iter().zip(param_type_ids.iter()) {
@@ -597,13 +615,12 @@ impl Cg<'_, '_, '_> {
         let method = self.ctx.analyzed.entity_registry.get_method(*method_id);
 
         // Get the external binding for this method
-        let external_info = self
+        let external_info = *self
             .ctx
             .analyzed
             .entity_registry
             .get_external_binding(*method_id)
-            .ok_or_else(|| format!("No external binding for Iterator.{}", method_name))?
-            .clone();
+            .ok_or_else(|| format!("No external binding for Iterator.{}", method_name))?;
 
         // Substitute the element type for T in the return type using arena substitute
         let substitutions: hashbrown::HashMap<NameId, TypeId> = iter_def
@@ -611,7 +628,13 @@ impl Cg<'_, '_, '_> {
             .iter()
             .map(|param| (*param, elem_type_id))
             .collect();
-        let method_return_id = method.signature.return_type_id;
+        let method_return_id = {
+            let arena = self.ctx.arena.borrow();
+            let (_, ret, _) = arena
+                .unwrap_function(method.signature_id)
+                .expect("method signature must be a function type");
+            ret
+        };
         let return_type_id = self
             .ctx
             .arena

@@ -4,11 +4,8 @@
 //! including type information, method resolutions, and generic instantiations.
 
 use rustc_hash::FxHashMap;
-use std::cell::RefCell;
 use std::collections::HashMap;
-use std::rc::Rc;
 
-use crate::TypeArena;
 use crate::generic::{ClassMethodMonomorphKey, MonomorphKey, StaticMethodMonomorphKey};
 use crate::resolution::ResolvedMethod;
 use crate::type_arena::TypeId;
@@ -37,8 +34,6 @@ pub struct ExpressionData {
     /// return type `T` is substituted to `i32`. This map stores the concrete type
     /// so codegen doesn't need to recompute the substitution.
     substituted_return_types: HashMap<NodeId, TypeId>,
-    /// Shared type arena for type queries
-    type_arena: Rc<RefCell<TypeArena>>,
 }
 
 impl Default for ExpressionData {
@@ -52,7 +47,6 @@ impl Default for ExpressionData {
             module_types: FxHashMap::default(),
             module_methods: FxHashMap::default(),
             substituted_return_types: HashMap::new(),
-            type_arena: Rc::new(RefCell::new(TypeArena::new())),
         }
     }
 }
@@ -74,7 +68,6 @@ impl ExpressionData {
         module_types: FxHashMap<String, HashMap<NodeId, TypeId>>,
         module_methods: FxHashMap<String, HashMap<NodeId, ResolvedMethod>>,
         substituted_return_types: HashMap<NodeId, TypeId>,
-        type_arena: Rc<RefCell<TypeArena>>,
     ) -> Self {
         Self {
             types,
@@ -85,7 +78,6 @@ impl ExpressionData {
             module_types,
             module_methods,
             substituted_return_types,
-            type_arena,
         }
     }
 
@@ -156,11 +148,6 @@ impl ExpressionData {
     /// Get mutable access to expression types
     pub fn types_mut(&mut self) -> &mut HashMap<NodeId, TypeId> {
         &mut self.types
-    }
-
-    /// Get the type arena (for callers that need to convert types)
-    pub fn type_arena(&self) -> &Rc<RefCell<TypeArena>> {
-        &self.type_arena
     }
 
     /// Get all method resolutions

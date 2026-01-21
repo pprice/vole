@@ -1,10 +1,9 @@
 //! Method registration and lookup for EntityRegistry.
 
-use crate::FunctionType;
 use crate::entity_defs::MethodDef;
 use crate::generic::TypeParamInfo;
 use crate::implement_registry::ExternalMethodInfo;
-use crate::type_arena::TypeId;
+use crate::type_arena::{TypeArena, TypeId};
 use std::collections::HashSet;
 use vole_identity::{MethodId, NameId, TypeDefId};
 
@@ -17,7 +16,6 @@ impl EntityRegistry {
         defining_type: TypeDefId,
         name_id: NameId,
         full_name_id: NameId,
-        signature: FunctionType,
         signature_id: TypeId,
         has_default: bool,
     ) -> MethodId {
@@ -25,7 +23,6 @@ impl EntityRegistry {
             defining_type,
             name_id,
             full_name_id,
-            signature,
             signature_id,
             has_default,
             None,
@@ -39,7 +36,6 @@ impl EntityRegistry {
         defining_type: TypeDefId,
         name_id: NameId,
         full_name_id: NameId,
-        signature: FunctionType,
         signature_id: TypeId,
         has_default: bool,
         external_binding: Option<ExternalMethodInfo>,
@@ -50,7 +46,6 @@ impl EntityRegistry {
             name_id,
             full_name_id,
             defining_type,
-            signature,
             signature_id,
             has_default,
             is_static: false,
@@ -75,7 +70,6 @@ impl EntityRegistry {
         defining_type: TypeDefId,
         name_id: NameId,
         full_name_id: NameId,
-        signature: FunctionType,
         signature_id: TypeId,
         has_default: bool,
         method_type_params: Vec<TypeParamInfo>,
@@ -84,7 +78,6 @@ impl EntityRegistry {
             defining_type,
             name_id,
             full_name_id,
-            signature,
             signature_id,
             has_default,
             None,
@@ -99,7 +92,6 @@ impl EntityRegistry {
         defining_type: TypeDefId,
         name_id: NameId,
         full_name_id: NameId,
-        signature: FunctionType,
         signature_id: TypeId,
         has_default: bool,
         external_binding: Option<ExternalMethodInfo>,
@@ -111,7 +103,6 @@ impl EntityRegistry {
             name_id,
             full_name_id,
             defining_type,
-            signature,
             signature_id,
             has_default,
             is_static: true,
@@ -156,11 +147,28 @@ impl EntityRegistry {
         &self.method_defs[id.index() as usize]
     }
 
-    /// Update the return type of a method (used for return type inference)
-    pub fn update_method_return_type(&mut self, method_id: MethodId, return_type: TypeId) {
-        self.method_defs[method_id.index() as usize]
-            .signature
-            .return_type_id = return_type;
+    /// Update the return type of a method (used for return type inference).
+    /// Creates a new function type in the arena with the updated return type.
+    pub fn update_method_return_type(
+        &mut self,
+        method_id: MethodId,
+        return_type: TypeId,
+        arena: &mut TypeArena,
+    ) {
+        let method = &self.method_defs[method_id.index() as usize];
+        let old_sig_id = method.signature_id;
+
+        // Get the old function's params and is_closure from arena
+        let (params, _old_ret, is_closure) = arena
+            .unwrap_function(old_sig_id)
+            .expect("method signature must be a function type");
+        let params = params.clone();
+
+        // Create new function type with updated return type
+        let new_sig_id = arena.function(params, return_type, is_closure);
+
+        // Update the method's signature_id
+        self.method_defs[method_id.index() as usize].signature_id = new_sig_id;
     }
 
     /// Get all methods defined directly on a type (not inherited)

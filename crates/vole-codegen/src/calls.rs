@@ -358,10 +358,18 @@ impl Cg<'_, '_, '_> {
                 .analyzed
                 .implement_registry
                 .get_external_func(callee_name)
-                && let Some(native_func) = self
-                    .ctx
-                    .native_registry
-                    .lookup(&ext_info.module_path, &ext_info.native_name)
+                && let (Some(module_path), Some(native_name)) = (
+                    self.ctx
+                        .analyzed
+                        .name_table
+                        .last_segment_str(ext_info.module_path),
+                    self.ctx
+                        .analyzed
+                        .name_table
+                        .last_segment_str(ext_info.native_name),
+                )
+                && let Some(native_func) =
+                    self.ctx.native_registry.lookup(&module_path, &native_name)
             {
                 // The func_type from the monomorph instance may have TypeParams that weren't
                 // inferred from arguments (like return type params). Apply class type
@@ -477,9 +485,17 @@ impl Cg<'_, '_, '_> {
             .implement_registry
             .get_external_func(callee_name);
         let native_func = ext_info.and_then(|info| {
-            self.ctx
-                .native_registry
-                .lookup(&info.module_path, &info.native_name)
+            let module_path = self
+                .ctx
+                .analyzed
+                .name_table
+                .last_segment_str(info.module_path)?;
+            let native_name = self
+                .ctx
+                .analyzed
+                .name_table
+                .last_segment_str(info.native_name)?;
+            self.ctx.native_registry.lookup(&module_path, &native_name)
         });
         if let Some(native_func) = native_func {
             // Compile arguments first

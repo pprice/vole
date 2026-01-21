@@ -629,15 +629,22 @@ fn compile_external_wrapper(
         ));
     }
 
+    // Get string names from NameId
+    let module_path = ctx
+        .analyzed
+        .name_table
+        .last_segment_str(external_info.module_path)
+        .ok_or_else(|| "module_path NameId has no segment".to_string())?;
+    let native_name = ctx
+        .analyzed
+        .name_table
+        .last_segment_str(external_info.native_name)
+        .ok_or_else(|| "native_name NameId has no segment".to_string())?;
+
     let native_func = ctx
         .native_registry
-        .lookup(&external_info.module_path, &external_info.native_name)
-        .ok_or_else(|| {
-            format!(
-                "native function {}::{} not found",
-                external_info.module_path, external_info.native_name
-            )
-        })?;
+        .lookup(&module_path, &native_name)
+        .ok_or_else(|| format!("native function {}::{} not found", module_path, native_name))?;
 
     let mut native_sig = ctx.module.make_signature();
     // For Iterator, the self param is now *mut UnifiedIterator (pointer)
@@ -874,14 +881,21 @@ fn resolve_vtable_target(
 
     // Apply substitutions to get concrete param/return types (using TypeId-based substitution)
     let (substituted_param_ids, substituted_return_id) = {
+        // First extract params and return type (immutable borrow)
+        let (params_vec, ret) = {
+            let arena = ctx.arena.borrow();
+            let (params, ret, _) = arena
+                .unwrap_function(interface_method.signature_id)
+                .expect("method signature must be a function type");
+            (params.to_vec(), ret)
+        };
+        // Now substitute with mutable borrow
         let mut arena = ctx.arena.borrow_mut();
-        let param_ids: Vec<TypeId> = interface_method
-            .signature
-            .params_id
+        let param_ids: Vec<TypeId> = params_vec
             .iter()
             .map(|&p| arena.substitute(p, substitutions))
             .collect();
-        let ret_id = arena.substitute(interface_method.signature.return_type_id, substitutions);
+        let ret_id = arena.substitute(ret, substitutions);
         (param_ids, ret_id)
     };
 
@@ -929,7 +943,7 @@ fn resolve_vtable_target(
         let param_type_ids = impl_.func_type.params_id.to_vec();
         let return_type_id = impl_.func_type.return_type_id;
         let returns_void = matches!(ctx.arena.borrow().get(return_type_id), SemaType::Void);
-        if let Some(external_info) = impl_.external_info.clone() {
+        if let Some(external_info) = impl_.external_info {
             return Ok(VtableMethod {
                 param_count: impl_.func_type.params_id.len(),
                 returns_void,
@@ -979,8 +993,12 @@ fn resolve_vtable_target(
             .entity_registry
             .find_method_on_type(type_def_id, method_name_id)
             .map(|m_id| {
-                let sig = &ctx.analyzed.entity_registry.get_method(m_id).signature;
-                (sig.params_id.to_vec(), sig.return_type_id)
+                let method = ctx.analyzed.entity_registry.get_method(m_id);
+                let arena = ctx.arena.borrow();
+                let (params, ret, _) = arena
+                    .unwrap_function(method.signature_id)
+                    .expect("method signature must be a function type");
+                (params.to_vec(), ret)
             })
             .unwrap_or_else(|| {
                 // Use substituted types as fallback (from interface method)
@@ -1017,15 +1035,20 @@ fn resolve_vtable_target(
         {
             // For external bindings, use the original interface method signature.
             // The Rust implementation handles type dispatch, so we don't need substituted types.
-            let param_type_ids = interface_method.signature.params_id.to_vec();
-            let return_type_id = interface_method.signature.return_type_id;
+            let (param_type_ids, return_type_id) = {
+                let arena = ctx.arena.borrow();
+                let (params, ret, _) = arena
+                    .unwrap_function(interface_method.signature_id)
+                    .expect("interface method signature must be a function type");
+                (params.to_vec(), ret)
+            };
             let returns_void = matches!(ctx.arena.borrow().get(return_type_id), SemaType::Void);
             return Ok(VtableMethod {
-                param_count: interface_method.signature.params_id.len(),
+                param_count: param_type_ids.len(),
                 returns_void,
                 param_type_ids,
                 return_type_id,
-                target: VtableMethodTarget::External(external_info.clone()),
+                target: VtableMethodTarget::External(*external_info),
             });
         }
         // TODO: Handle Vole body defaults when interface method bodies are supported

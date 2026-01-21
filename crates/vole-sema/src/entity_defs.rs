@@ -92,8 +92,7 @@ pub struct MethodDef {
     pub name_id: NameId,      // "next"
     pub full_name_id: NameId, // "Iterator::next"
     pub defining_type: TypeDefId,
-    pub signature: FunctionType,
-    /// Pre-interned TypeId for the signature (avoids codegen arena mutations)
+    /// Interned TypeId for the signature. Use TypeArena::unwrap_function() to get params/return.
     pub signature_id: TypeId,
     pub has_default: bool,
     /// Whether this is a static method (called on type, not instance)

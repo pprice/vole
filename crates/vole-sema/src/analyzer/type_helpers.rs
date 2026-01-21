@@ -91,25 +91,25 @@ impl Analyzer {
     /// Create an array TypeId
     #[inline]
     pub(crate) fn ty_array_id(&self, element_id: ArenaTypeId) -> ArenaTypeId {
-        self.type_arena.borrow_mut().array(element_id)
+        self.type_arena_mut().array(element_id)
     }
 
     /// Create a fixed-size array TypeId
     #[inline]
     pub(crate) fn ty_fixed_array_id(&self, element_id: ArenaTypeId, size: usize) -> ArenaTypeId {
-        self.type_arena.borrow_mut().fixed_array(element_id, size)
+        self.type_arena_mut().fixed_array(element_id, size)
     }
 
     /// Create a tuple TypeId
     #[inline]
     pub(crate) fn ty_tuple_id(&self, element_ids: Vec<ArenaTypeId>) -> ArenaTypeId {
-        self.type_arena.borrow_mut().tuple(element_ids)
+        self.type_arena_mut().tuple(element_ids)
     }
 
     /// Create an optional TypeId (T | nil)
     #[inline]
     pub(crate) fn ty_optional_id(&self, inner_id: ArenaTypeId) -> ArenaTypeId {
-        self.type_arena.borrow_mut().optional(inner_id)
+        self.type_arena_mut().optional(inner_id)
     }
 
     /// Create an invalid/error TypeId (no arena access)
@@ -200,7 +200,7 @@ impl Analyzer {
     #[inline]
     pub(crate) fn is_array_id(&self, id: ArenaTypeId) -> bool {
         use crate::type_arena::SemaType;
-        matches!(self.type_arena.borrow().get(id), SemaType::Array(_))
+        matches!(self.type_arena().get(id), SemaType::Array(_))
     }
 
     // ========== TypeId unwrapping helpers ==========
@@ -210,20 +210,19 @@ impl Analyzer {
     /// Get array element type if this is an array
     #[inline]
     pub(crate) fn unwrap_array_id(&self, id: ArenaTypeId) -> Option<ArenaTypeId> {
-        self.type_arena.borrow().unwrap_array(id)
+        self.type_arena().unwrap_array(id)
     }
 
     /// Get fixed array element type and size if this is a fixed array
     #[inline]
     pub(crate) fn unwrap_fixed_array_id(&self, id: ArenaTypeId) -> Option<(ArenaTypeId, usize)> {
-        self.type_arena.borrow().unwrap_fixed_array(id)
+        self.type_arena().unwrap_fixed_array(id)
     }
 
     /// Get tuple element types if this is a tuple
     #[inline]
     pub(crate) fn unwrap_tuple_id(&self, id: ArenaTypeId) -> Option<Vec<ArenaTypeId>> {
-        self.type_arena
-            .borrow()
+        self.type_arena()
             .unwrap_tuple(id)
             .map(|v| v.to_vec())
     }
@@ -231,38 +230,37 @@ impl Analyzer {
     /// Get runtime iterator element type if this is a runtime iterator
     #[inline]
     pub(crate) fn unwrap_runtime_iterator_id(&self, id: ArenaTypeId) -> Option<ArenaTypeId> {
-        self.type_arena.borrow().unwrap_runtime_iterator(id)
+        self.type_arena().unwrap_runtime_iterator(id)
     }
 
     /// Get inner type if this is an optional type (T | nil)
     #[inline]
     pub(crate) fn unwrap_optional_id(&self, id: ArenaTypeId) -> Option<ArenaTypeId> {
-        self.type_arena.borrow().unwrap_optional(id)
+        self.type_arena().unwrap_optional(id)
     }
 
     /// Check if TypeId is an optional type (T | nil)
     #[inline]
     pub(crate) fn is_optional_id(&self, id: ArenaTypeId) -> bool {
-        self.type_arena.borrow().unwrap_optional(id).is_some()
+        self.type_arena().unwrap_optional(id).is_some()
     }
 
     /// Get fallible (success, error) types if this is a fallible type
     #[inline]
     pub(crate) fn unwrap_fallible_id(&self, id: ArenaTypeId) -> Option<(ArenaTypeId, ArenaTypeId)> {
-        self.type_arena.borrow().unwrap_fallible(id)
+        self.type_arena().unwrap_fallible(id)
     }
 
     /// Check if TypeId is a fallible type
     #[inline]
     pub(crate) fn is_fallible_id(&self, id: ArenaTypeId) -> bool {
-        self.type_arena.borrow().unwrap_fallible(id).is_some()
+        self.type_arena().unwrap_fallible(id).is_some()
     }
 
     /// Check if TypeId is a runtime iterator type
     #[inline]
     pub(crate) fn is_runtime_iterator_id(&self, id: ArenaTypeId) -> bool {
-        self.type_arena
-            .borrow()
+        self.type_arena()
             .unwrap_runtime_iterator(id)
             .is_some()
     }

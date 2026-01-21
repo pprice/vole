@@ -8,9 +8,9 @@
 //! - Large projects: Many files importing shared utilities
 //! - Incremental builds: Only re-analyze changed modules
 
-use crate::TypeArena;
+use crate::compilation_db::CompilationDb;
 use crate::resolution::ResolvedMethod;
-use crate::type_arena::TypeId;
+use crate::type_arena::{TypeArena, TypeId};
 use crate::types::FunctionType;
 use crate::{EntityRegistry, ImplementRegistry};
 use rustc_hash::FxHashMap;
@@ -47,14 +47,14 @@ pub struct CachedModule {
 ///
 /// Thread-local cache that can be shared across multiple Analyzer instances.
 /// Use `Rc<RefCell<ModuleCache>>` to share between analyzers in the same thread.
-/// The cache includes a shared TypeArena so that TypeIds in cached entries remain
+/// The cache includes a shared CompilationDb so that TypeIds in cached entries remain
 /// valid across all Analyzers that use this cache.
 pub struct ModuleCache {
     /// Cached modules keyed by import path (e.g., "std:prelude/string", "std:math")
     entries: HashMap<String, CachedModule>,
-    /// Shared type arena - all analyzers using this cache must share this arena
+    /// Shared compilation database - all analyzers using this cache must share this db
     /// so that TypeIds in cached entries remain valid.
-    type_arena: Rc<RefCell<TypeArena>>,
+    db: Rc<RefCell<CompilationDb>>,
 }
 
 impl Default for ModuleCache {
@@ -64,11 +64,11 @@ impl Default for ModuleCache {
 }
 
 impl ModuleCache {
-    /// Create a new empty cache with a fresh TypeArena.
+    /// Create a new empty cache with a fresh CompilationDb.
     pub fn new() -> Self {
         Self {
             entries: HashMap::new(),
-            type_arena: Rc::new(RefCell::new(TypeArena::new())),
+            db: Rc::new(RefCell::new(CompilationDb::new())),
         }
     }
 
@@ -77,9 +77,16 @@ impl ModuleCache {
         Rc::new(RefCell::new(Self::new()))
     }
 
-    /// Get the shared TypeArena that must be used by all Analyzers using this cache.
+    /// Get the shared CompilationDb that must be used by all Analyzers using this cache.
+    pub fn db(&self) -> Rc<RefCell<CompilationDb>> {
+        self.db.clone()
+    }
+
+    /// Get the shared TypeArena (for compatibility during migration).
     pub fn type_arena(&self) -> Rc<RefCell<TypeArena>> {
-        self.type_arena.clone()
+        // Return a reference to the TypeArena within the db
+        // This is a compatibility shim - callers should migrate to using db() directly
+        unimplemented!("type_arena() is deprecated - use db() and access db.borrow().types directly")
     }
 
     /// Check if a module is cached.

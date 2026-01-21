@@ -181,12 +181,8 @@ fn print_func_body<'a>(
     interner: &Interner,
 ) -> DocBuilder<'a, Arena<'a>> {
     match body {
-        FuncBody::Block(block) => {
-            arena.text(" ").append(print_block(arena, block, interner))
-        }
-        FuncBody::Expr(expr) => {
-            arena.text(" => ").append(print_expr(arena, expr, interner))
-        }
+        FuncBody::Block(block) => arena.text(" ").append(print_block(arena, block, interner)),
+        FuncBody::Expr(expr) => arena.text(" => ").append(print_expr(arena, expr, interner)),
     }
 }
 

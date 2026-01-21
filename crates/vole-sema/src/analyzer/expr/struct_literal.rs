@@ -14,17 +14,21 @@ impl Analyzer {
         // Look up the type (class or record) via Resolver
         let type_id_opt = self
             .resolver(interner)
-            .resolve_type(struct_lit.name, &self.entity_registry);
+            .resolve_type(struct_lit.name, &self.entity_registry());
 
         // Check if this is a generic type (record or class with type parameters)
         // Non-generic types have generic_info for field storage but empty type_params
         if let Some(type_id) = type_id_opt {
-            let type_def = self.entity_registry.get_type(type_id);
-            if let Some(ref generic_info) = type_def.generic_info {
+            let (kind, generic_info_opt) = {
+                let registry = self.entity_registry();
+                let type_def = registry.get_type(type_id);
+                (type_def.kind, type_def.generic_info.clone())
+            };
+            if let Some(ref generic_info) = generic_info_opt {
                 // Only use generic literal checking if there are actual type parameters to infer
                 if !generic_info.type_params.is_empty() {
                     let generic_info = generic_info.clone();
-                    return match type_def.kind {
+                    return match kind {
                         TypeDefKind::Record => self.check_generic_struct_literal(
                             expr,
                             struct_lit,
@@ -45,33 +49,37 @@ impl Analyzer {
             }
         }
 
-        let get_fields_from_typedef =
-            |type_def: &crate::entity_defs::TypeDef| -> Vec<StructFieldId> {
-                type_def
-                    .generic_info
-                    .as_ref()
-                    .map(|gi| {
-                        gi.field_names
-                            .iter()
-                            .zip(gi.field_types.iter())
-                            .enumerate()
-                            .map(|(i, (&name_id, &ty))| StructFieldId {
-                                name_id,
-                                ty,
-                                slot: i,
-                            })
-                            .collect()
+        let get_fields_from_generic_info =
+            |gi: &GenericTypeInfo| -> Vec<StructFieldId> {
+                gi.field_names
+                    .iter()
+                    .zip(gi.field_types.iter())
+                    .enumerate()
+                    .map(|(i, (&name_id, &ty))| StructFieldId {
+                        name_id,
+                        ty,
+                        slot: i,
                     })
-                    .unwrap_or_default()
+                    .collect()
             };
 
         let (type_name, fields, result_type_id) = if let Some(type_id) = type_id_opt {
-            let type_def = self.entity_registry.get_type(type_id);
-            match type_def.kind {
+            // Extract type info before doing mutable operations
+            let (kind, generic_info, is_class_valid, is_record_valid) = {
+                let registry = self.entity_registry();
+                let type_def = registry.get_type(type_id);
+                (
+                    type_def.kind,
+                    type_def.generic_info.clone(),
+                    registry.build_class_type(type_id).is_some(),
+                    registry.build_record_type(type_id).is_some(),
+                )
+            };
+            let fields = generic_info.as_ref().map(|gi| get_fields_from_generic_info(gi)).unwrap_or_default();
+            match kind {
                 TypeDefKind::Class => {
-                    if self.entity_registry.build_class_type(type_id).is_some() {
-                        let fields = get_fields_from_typedef(type_def);
-                        let result_id = self.type_arena.borrow_mut().class(type_id, vec![]);
+                    if is_class_valid {
+                        let result_id = self.type_arena_mut().class(type_id, vec![]);
                         (
                             interner.resolve(struct_lit.name).to_string(),
                             fields,
@@ -89,9 +97,8 @@ impl Analyzer {
                     }
                 }
                 TypeDefKind::Record => {
-                    if self.entity_registry.build_record_type(type_id).is_some() {
-                        let fields = get_fields_from_typedef(type_def);
-                        let result_id = self.type_arena.borrow_mut().record(type_id, vec![]);
+                    if is_record_valid {
+                        let result_id = self.type_arena_mut().record(type_id, vec![]);
                         (
                             interner.resolve(struct_lit.name).to_string(),
                             fields,
@@ -138,7 +145,11 @@ impl Analyzer {
             .collect();
 
         for field in &fields {
-            if let Some(field_name) = self.name_table.last_segment_str(field.name_id)
+            let field_name = {
+                let table = self.name_table();
+                table.last_segment_str(field.name_id)
+            };
+            if let Some(field_name) = field_name
                 && !provided_fields.contains(&field_name)
             {
                 self.add_error(
@@ -156,7 +167,7 @@ impl Analyzer {
         for field_init in &struct_lit.fields {
             let field_init_name = interner.resolve(field_init.name);
             if let Some(expected_field) = fields.iter().find(|f| {
-                self.name_table
+                self.name_table()
                     .last_segment_str(f.name_id)
                     .is_some_and(|n| n == field_init_name)
             }) {
@@ -205,7 +216,7 @@ impl Analyzer {
         let mut actual_type_ids = Vec::new();
 
         for (i, field_name_id) in generic_info.field_names.iter().enumerate() {
-            if let Some(field_name_str) = self.name_table.last_segment_str(*field_name_id)
+            if let Some(field_name_str) = self.name_table().last_segment_str(*field_name_id)
                 && let Some(&actual_ty_id) = field_value_type_ids.get(&field_name_str)
             {
                 expected_type_ids.push(generic_info.field_types[i]);
@@ -232,7 +243,7 @@ impl Analyzer {
         let subs_hashbrown: hashbrown::HashMap<_, _> =
             inferred_id.iter().map(|(&k, &v)| (k, v)).collect();
         let concrete_field_type_ids: Vec<ArenaTypeId> = {
-            let mut arena = self.type_arena.borrow_mut();
+            let mut arena = self.type_arena_mut();
             generic_info
                 .field_types
                 .iter()
@@ -249,7 +260,7 @@ impl Analyzer {
 
         for field_name_id in &generic_info.field_names {
             let field_name_str = self
-                .name_table
+                .name_table()
                 .last_segment_str(*field_name_id)
                 .unwrap_or_default();
             if !provided_fields.contains(&field_name_str) {
@@ -269,7 +280,7 @@ impl Analyzer {
             let field_init_name_str = interner.resolve(field_init.name);
             // Find the field index - compare by string value since Symbols may differ
             if let Some(idx) = generic_info.field_names.iter().position(|name_id| {
-                self.name_table.last_segment_str(*name_id).as_deref() == Some(field_init_name_str)
+                self.name_table().last_segment_str(*name_id).as_deref() == Some(field_init_name_str)
             }) {
                 // Use TypeId directly for compatibility check
                 let actual_ty_id = *field_value_type_ids
@@ -299,8 +310,7 @@ impl Analyzer {
             .collect();
 
         Ok(self
-            .type_arena
-            .borrow_mut()
+            .type_arena_mut()
             .record(type_def_id, type_args_id.to_vec()))
     }
 
@@ -329,7 +339,7 @@ impl Analyzer {
         let mut actual_type_ids = Vec::new();
 
         for (i, field_name_id) in generic_info.field_names.iter().enumerate() {
-            if let Some(field_name_str) = self.name_table.last_segment_str(*field_name_id)
+            if let Some(field_name_str) = self.name_table().last_segment_str(*field_name_id)
                 && let Some(&actual_ty_id) = field_value_type_ids.get(&field_name_str)
             {
                 expected_type_ids.push(generic_info.field_types[i]);
@@ -356,7 +366,7 @@ impl Analyzer {
         let subs_hashbrown: hashbrown::HashMap<_, _> =
             inferred_id.iter().map(|(&k, &v)| (k, v)).collect();
         let concrete_field_type_ids: Vec<ArenaTypeId> = {
-            let mut arena = self.type_arena.borrow_mut();
+            let mut arena = self.type_arena_mut();
             generic_info
                 .field_types
                 .iter()
@@ -373,7 +383,7 @@ impl Analyzer {
 
         for field_name_id in &generic_info.field_names {
             let field_name_str = self
-                .name_table
+                .name_table()
                 .last_segment_str(*field_name_id)
                 .unwrap_or_default();
             if !provided_fields.contains(&field_name_str) {
@@ -393,7 +403,7 @@ impl Analyzer {
             let field_init_name_str = interner.resolve(field_init.name);
             // Find the field index - compare by string value since Symbols may differ
             if let Some(idx) = generic_info.field_names.iter().position(|name_id| {
-                self.name_table.last_segment_str(*name_id).as_deref() == Some(field_init_name_str)
+                self.name_table().last_segment_str(*name_id).as_deref() == Some(field_init_name_str)
             }) {
                 // Use TypeId directly for compatibility check
                 let actual_ty_id = *field_value_type_ids
@@ -429,15 +439,14 @@ impl Analyzer {
                 // GenericContainer { _ptr: ... } inside GenericContainer<K,V>.new()
                 if let Some(scope) = self.type_param_stack.current() {
                     // Look up by matching the type param name in the current scope
-                    let param_name = self.name_table.last_segment_str(param.name_id);
+                    let param_name = self.name_table().last_segment_str(param.name_id);
                     if let Some(param_name) = param_name {
                         for scope_param in scope.params() {
                             let scope_param_name =
-                                self.name_table.last_segment_str(scope_param.name_id);
+                                self.name_table().last_segment_str(scope_param.name_id);
                             if scope_param_name.as_deref() == Some(&param_name) {
                                 return self
-                                    .type_arena
-                                    .borrow_mut()
+                                    .type_arena_mut()
                                     .type_param(scope_param.name_id);
                             }
                         }
@@ -448,8 +457,7 @@ impl Analyzer {
             .collect();
 
         Ok(self
-            .type_arena
-            .borrow_mut()
+            .type_arena_mut()
             .class(type_def_id, type_args_id.to_vec()))
     }
 }

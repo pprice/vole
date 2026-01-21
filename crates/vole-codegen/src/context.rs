@@ -372,15 +372,29 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         args: &[Value],
         return_type_id: TypeId,
     ) -> Result<CompiledValue, String> {
+        // Get string names from NameId
+        let module_path = self
+            .ctx
+            .analyzed
+            .name_table
+            .last_segment_str(external_info.module_path)
+            .ok_or_else(|| "module_path NameId has no segment".to_string())?;
+        let native_name = self
+            .ctx
+            .analyzed
+            .name_table
+            .last_segment_str(external_info.native_name)
+            .ok_or_else(|| "native_name NameId has no segment".to_string())?;
+
         // Look up the native function in the registry
         let native_func = self
             .ctx
             .native_registry
-            .lookup(&external_info.module_path, &external_info.native_name)
+            .lookup(&module_path, &native_name)
             .ok_or_else(|| {
                 format!(
                     "Native function {}::{} not found in registry",
-                    external_info.module_path, external_info.native_name
+                    module_path, native_name
                 )
             })?;
 

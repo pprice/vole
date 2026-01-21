@@ -8,7 +8,8 @@ use std::rc::Rc;
 use vole_frontend::{Interner, Program};
 use vole_identity::NameTable;
 use vole_sema::{
-    AnalysisOutput, EntityRegistry, ExpressionData, ImplementRegistry, ProgramQuery, TypeArena,
+    AnalysisOutput, CompilationDb, EntityRegistry, ExpressionData, ImplementRegistry,
+    ProgramQuery, TypeArena,
 };
 
 /// Result of parsing and analyzing a source file.
@@ -32,15 +33,39 @@ pub struct AnalyzedProgram {
 impl AnalyzedProgram {
     /// Construct AnalyzedProgram from parsed program and analysis output.
     pub fn from_analysis(program: Program, interner: Interner, output: AnalysisOutput) -> Self {
+        // Extract components from the shared compilation database.
+        // If the db has a single owner (no cache), we can take ownership.
+        // If the db has multiple owners (cache holds a reference), we clone the inner data.
+        let (types, entities, implements, names) = match Rc::try_unwrap(output.db) {
+            Ok(cell) => {
+                let CompilationDb {
+                    types,
+                    entities,
+                    implements,
+                    names,
+                } = cell.into_inner();
+                (types, entities, implements, names)
+            }
+            Err(rc) => {
+                // Cache still holds a reference - clone the inner data
+                let db = rc.borrow();
+                (
+                    db.types.clone(),
+                    db.entities.clone(),
+                    db.implements.clone(),
+                    db.names.clone(),
+                )
+            }
+        };
         Self {
             program,
             interner,
             expression_data: output.expression_data,
-            implement_registry: output.implement_registry,
+            implement_registry: implements,
             module_programs: output.module_programs,
-            name_table: output.name_table,
-            entity_registry: output.entity_registry,
-            type_arena: output.type_arena,
+            name_table: names,
+            entity_registry: entities,
+            type_arena: Rc::new(RefCell::new(types)),
         }
     }
 
@@ -53,6 +78,7 @@ impl AnalyzedProgram {
             &self.interner,
             &self.implement_registry,
             &self.module_programs,
+            &self.type_arena,
         )
     }
 }

@@ -321,6 +321,7 @@ pub struct PrimitiveTypes {
 }
 
 /// Per-compilation type arena with automatic interning/deduplication.
+#[derive(Clone)]
 pub struct TypeArena {
     /// Interned types, indexed by TypeId
     types: Vec<SemaType>,
@@ -599,6 +600,9 @@ impl TypeArena {
     }
 
     /// Create a function type
+    /// Note: Function types are stored even if params/ret contain Invalid types.
+    /// This preserves the function structure for interface method signatures where
+    /// Self resolves to Invalid during initial collection.
     pub fn function(
         &mut self,
         params: impl Into<TypeIdVec>,
@@ -606,9 +610,6 @@ impl TypeArena {
         is_closure: bool,
     ) -> TypeId {
         let params = params.into();
-        if params.iter().any(|&p| self.is_invalid(p)) || self.is_invalid(ret) {
-            return self.invalid();
-        }
         self.intern(SemaType::Function {
             params,
             ret,

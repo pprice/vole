@@ -8,7 +8,7 @@ impl Analyzer {
             Pattern::Identifier { name, .. } => {
                 // Check if this identifier resolves to a type name
                 self.resolver(interner)
-                    .resolve_type(*name, &self.entity_registry)
+                    .resolve_type(*name, &self.entity_registry())
                     .is_some()
             }
             _ => false,
@@ -48,8 +48,7 @@ impl Analyzer {
 
         // For fallible types, require at least one error arm (using TypeId)
         let is_fallible = self
-            .type_arena
-            .borrow()
+            .type_arena()
             .unwrap_fallible(scrutinee_type_id)
             .is_some();
         if is_fallible {
@@ -76,7 +75,7 @@ impl Analyzer {
 
         // Get union variants if scrutinee is a union type (for wildcard narrowing)
         let union_variants: Option<Vec<ArenaTypeId>> = {
-            let arena = self.type_arena.borrow();
+            let arena = self.type_arena();
             arena.unwrap_union(scrutinee_type_id).map(|v| v.to_vec())
         };
 
@@ -105,7 +104,7 @@ impl Analyzer {
                     if remaining.len() == 1 {
                         Some(remaining[0])
                     } else if remaining.len() > 1 {
-                        Some(self.type_arena.borrow_mut().union(remaining))
+                        Some(self.type_arena_mut().union(remaining))
                     } else {
                         narrowed_type_id
                     }

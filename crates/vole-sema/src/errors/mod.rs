@@ -467,7 +467,10 @@ pub enum SemanticError {
     },
 
     #[error("cannot infer return type for function '{name}'")]
-    #[diagnostic(code(E2082), help("add explicit return type: func {name}(...) -> Type"))]
+    #[diagnostic(
+        code(E2082),
+        help("add explicit return type: func {name}(...) -> Type")
+    )]
     CannotInferReturnType {
         name: String,
         #[label("return type cannot be inferred")]

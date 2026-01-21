@@ -2,6 +2,7 @@
 
 pub mod analysis_cache;
 pub mod analyzer;
+pub mod compilation_db;
 pub mod compatibility;
 pub mod entity_defs;
 pub mod entity_registry;
@@ -22,6 +23,7 @@ pub mod well_known;
 
 pub use analysis_cache::{CachedModule, ModuleCache};
 pub use analyzer::{AnalysisOutput, Analyzer, TypeError, TypeWarning};
+pub use compilation_db::CompilationDb;
 pub use entity_defs::{FieldDef, FunctionDef, MethodDef, TypeDef, TypeDefKind};
 pub use entity_registry::EntityRegistry;
 pub use expression_data::ExpressionData;

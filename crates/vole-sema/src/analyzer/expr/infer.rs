@@ -63,7 +63,7 @@ impl Analyzer {
                     // Use the pre-interned TypeId fields from FunctionType
                     let params_id = &func_type.params_id;
                     let return_id = func_type.return_type_id;
-                    Ok(self.type_arena.borrow_mut().function(
+                    Ok(self.type_arena_mut().function(
                         params_id.clone(),
                         return_id,
                         func_type.is_closure,
@@ -212,8 +212,7 @@ impl Analyzer {
                 if elements.is_empty() {
                     // Empty array needs type annotation or we use unknown placeholder
                     let unknown_id = self
-                        .type_arena
-                        .borrow_mut()
+                        .type_arena_mut()
                         .placeholder(PlaceholderKind::Inference);
                     Ok(self.ty_array_id(unknown_id))
                 } else {
@@ -352,8 +351,7 @@ impl Analyzer {
                     self.check_expr(&is_expr.value, interner)?
                 };
                 let union_variants = self
-                    .type_arena
-                    .borrow()
+                    .type_arena()
                     .unwrap_union(value_type_id)
                     .cloned();
                 if let Some(variants) = union_variants
@@ -520,7 +518,7 @@ impl Analyzer {
         match &expr.kind {
             ExprKind::IntLiteral(value) => {
                 // Use TypeArena's literal_fits_id which handles primitives and unions
-                if self.type_arena.borrow().literal_fits_id(*value, hint) {
+                if self.type_arena().literal_fits_id(*value, hint) {
                     hint
                 } else {
                     self.ty_i64_id() // Default

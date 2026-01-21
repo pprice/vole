@@ -25,8 +25,7 @@ impl Analyzer {
             ExprKind::IntLiteral(value) => {
                 // Check if expected is a union type
                 let union_variants = expected.and_then(|id| {
-                    self.type_arena
-                        .borrow()
+                    self.type_arena()
                         .unwrap_union(id)
                         .map(|v| v.to_vec())
                 });
@@ -69,7 +68,7 @@ impl Analyzer {
                 }
 
                 if let Some(exp_id) = expected {
-                    if self.type_arena.borrow().literal_fits_id(*value, exp_id) {
+                    if self.type_arena().literal_fits_id(*value, exp_id) {
                         return Ok(exp_id);
                     }
                     let expected_str = self.type_display_id(exp_id);
@@ -110,7 +109,7 @@ impl Analyzer {
                         return Ok(exp_id);
                     }
                     // Check if union contains f64
-                    if let Some(variants) = self.type_arena.borrow().unwrap_union(exp_id)
+                    if let Some(variants) = self.type_arena().unwrap_union(exp_id)
                         && variants.contains(&ArenaTypeId::F64)
                     {
                         return Ok(ArenaTypeId::F64);
@@ -142,7 +141,7 @@ impl Analyzer {
             ExprKind::Lambda(lambda) => {
                 // Extract expected function type if available
                 let expected_fn = expected.and_then(|exp_id| {
-                    let arena = self.type_arena.borrow();
+                    let arena = self.type_arena();
                     if let Some((params, ret, _)) = arena.unwrap_function(exp_id) {
                         // Build FunctionType from TypeIds
                         Some(FunctionType::from_ids(params, ret, false))
@@ -335,7 +334,7 @@ impl Analyzer {
                 if let ExprKind::IntLiteral(value) = &un.operand.kind {
                     let negated = value.wrapping_neg();
                     if let Some(target) = expected
-                        && self.type_arena.borrow().literal_fits_id(negated, target)
+                        && self.type_arena().literal_fits_id(negated, target)
                     {
                         self.record_expr_type_id(&un.operand, target);
                         return Ok(target);
@@ -406,8 +405,7 @@ impl Analyzer {
         if let Some(exp_id) = expected {
             // Extract tuple elements upfront to avoid borrow conflict
             let tuple_elems = self
-                .type_arena
-                .borrow()
+                .type_arena()
                 .unwrap_tuple(exp_id)
                 .map(|e| e.to_vec());
             if let Some(expected_elems) = tuple_elems {
@@ -430,7 +428,7 @@ impl Analyzer {
             }
 
             // Extract array element type upfront to avoid borrow conflict
-            let array_elem = self.type_arena.borrow().unwrap_array(exp_id);
+            let array_elem = self.type_arena().unwrap_array(exp_id);
             if let Some(elem_expected) = array_elem {
                 if elements.is_empty() {
                     return Ok(exp_id);
@@ -450,8 +448,7 @@ impl Analyzer {
         if elements.is_empty() {
             // Empty array with unknown element type - use arena.placeholder directly
             let unknown_id = self
-                .type_arena
-                .borrow_mut()
+                .type_arena_mut()
                 .placeholder(PlaceholderKind::Inference);
             return Ok(self.ty_array_id(unknown_id));
         }
