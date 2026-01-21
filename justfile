@@ -30,13 +30,17 @@ snap:
 snap-release:
     cargo run --release --bin vole-snap -- test test/snapshot/
 
-# Run vole unit tests in debug mode
+# Run vole unit tests in debug mode (failures only)
 unit:
-    cargo run --bin vole -- test test/unit/
+    cargo run --bin vole -- test test/unit/ --report=failures
 
-# Run vole unit tests in release mode
+# Run vole unit tests in release mode (failures only)
 unit-release:
-    cargo run --release --bin vole -- test test/unit/
+    cargo run --release --bin vole -- test test/unit/ --report=failures
+
+# Run vole unit tests with verbose output (all tests)
+unit-verbose:
+    cargo run --bin vole -- test test/unit/
 
 # Run clippy lints
 clippy:
