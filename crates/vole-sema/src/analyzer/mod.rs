@@ -1878,8 +1878,8 @@ impl Analyzer {
             let void_id = self.type_arena().void();
             let saved_ctx = self.enter_function_context(void_id);
 
-            // Type check all statements in the test body
-            self.check_block(&test_case.body, interner)?;
+            // Type check the test body
+            self.check_func_body(&test_case.body, interner)?;
 
             // Restore scope
             if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {

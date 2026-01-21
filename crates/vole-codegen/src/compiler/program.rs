@@ -9,7 +9,7 @@ use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, InstBuilder, t
 use super::common::{FunctionCompileConfig, compile_function_inner};
 use super::{Compiler, ControlFlowCtx, SelfParam, TestInfo, TypeResolver};
 use crate::FunctionKey;
-use crate::stmt::{compile_block, compile_func_body};
+use crate::stmt::compile_func_body;
 use crate::types::{
     CompileCtx, function_name_id_with_interner, resolve_type_expr_to_id, type_id_to_cranelift,
 };
@@ -667,12 +667,14 @@ impl Compiler<'_> {
                     type_substitutions: None,
                     substitution_cache: RefCell::new(HashMap::new()),
                 };
-                let terminated = compile_block(
+                let (terminated, _) = compile_func_body(
                     &mut builder,
                     &test.body,
                     &mut variables,
                     &mut cf_ctx,
                     &mut ctx,
+                    None, // no captures
+                    None, // no nested return type
                 )?;
 
                 // If not already terminated, return 0 (test passed)
@@ -934,12 +936,14 @@ impl Compiler<'_> {
                 type_substitutions: None,
                 substitution_cache: RefCell::new(HashMap::new()),
             };
-            let terminated = compile_block(
+            let (terminated, _) = compile_func_body(
                 &mut builder,
                 &test.body,
                 &mut variables,
                 &mut cf_ctx,
                 &mut ctx,
+                None, // no captures
+                None, // no nested return type
             )?;
 
             // If not already terminated, return 0 (test passed)

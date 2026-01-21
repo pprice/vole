@@ -115,7 +115,12 @@ impl<'src> Parser<'src> {
         self.consume(TokenType::RBrace, "expected '}' to close tests block")?;
         let span = start_span.merge(self.previous.span);
 
-        Ok(Decl::Tests(TestsDecl { label, tests, span }))
+        Ok(Decl::Tests(TestsDecl {
+            label,
+            decls: Vec::new(),
+            tests,
+            span,
+        }))
     }
 
     fn let_decl(&mut self) -> Result<Decl, ParseError> {
@@ -580,10 +585,14 @@ impl<'src> Parser<'src> {
             ));
         };
 
-        let body = self.block()?;
-        let span = start_span.merge(body.span);
+        let block = self.block()?;
+        let span = start_span.merge(block.span);
 
-        Ok(TestCase { name, body, span })
+        Ok(TestCase {
+            name,
+            body: FuncBody::Block(block),
+            span,
+        })
     }
 
     /// Parse statics block: statics { methods, external blocks }

@@ -122,6 +122,11 @@ impl<'a> AstPrinter<'a> {
         }
 
         let inner = self.indented();
+        // Print scoped declarations
+        for decl in &tests.decls {
+            inner.write_decl(out, decl);
+        }
+        // Print test cases
         for test in &tests.tests {
             inner.write_test_case(out, test);
         }
@@ -152,7 +157,10 @@ impl<'a> AstPrinter<'a> {
     fn write_test_case(&self, out: &mut String, test: &TestCase) {
         self.write_indent(out);
         writeln!(out, "Test \"{}\"", test.name).unwrap();
-        self.indented().write_block(out, &test.body);
+        match &test.body {
+            FuncBody::Block(block) => self.indented().write_block(out, block),
+            FuncBody::Expr(expr) => self.indented().write_expr(out, expr),
+        }
     }
 
     fn write_param_inline(&self, out: &mut String, param: &Param) {

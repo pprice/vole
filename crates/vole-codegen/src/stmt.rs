@@ -23,6 +23,8 @@ use super::types::{
 };
 
 /// Compile a block of statements (wrapper for compatibility)
+/// TODO(vole-2vgz.5): Remove this function once all callers use compile_func_body
+#[allow(dead_code)]
 pub(super) fn compile_block(
     builder: &mut FunctionBuilder,
     block: &vole_frontend::Block,

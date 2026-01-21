@@ -11,7 +11,7 @@ use vole_frontend::{BinaryOp, Expr, ExprKind, FuncBody, LambdaExpr, NodeId, Symb
 use vole_sema::type_arena::{TypeArena, TypeId, TypeIdVec};
 
 use super::RuntimeFn;
-use super::compiler::common::{compile_function_inner, FunctionCompileConfig};
+use super::compiler::common::{FunctionCompileConfig, compile_function_inner};
 use super::context::Cg;
 use super::types::{
     CompileCtx, CompiledValue, resolve_type_expr_id, type_id_size, type_id_to_cranelift,
@@ -300,8 +300,7 @@ fn compile_pure_lambda(
     // Use compile_function_inner for the body compilation
     {
         let mut lambda_builder_ctx = FunctionBuilderContext::new();
-        let lambda_builder =
-            FunctionBuilder::new(&mut lambda_ctx.func, &mut lambda_builder_ctx);
+        let lambda_builder = FunctionBuilder::new(&mut lambda_ctx.func, &mut lambda_builder_ctx);
 
         let config = FunctionCompileConfig::pure_lambda(&lambda.body, params, return_type_id);
 
@@ -416,8 +415,7 @@ fn compile_lambda_with_captures(
     // Use compile_function_inner for the body compilation
     {
         let mut lambda_builder_ctx = FunctionBuilderContext::new();
-        let lambda_builder =
-            FunctionBuilder::new(&mut lambda_ctx.func, &mut lambda_builder_ctx);
+        let lambda_builder = FunctionBuilder::new(&mut lambda_ctx.func, &mut lambda_builder_ctx);
 
         let config = FunctionCompileConfig::capturing_lambda(
             &lambda.body,

@@ -1198,22 +1198,41 @@ fn print_tests_decl<'a>(
         arena.text("tests")
     };
 
-    if tests.tests.is_empty() {
+    if tests.decls.is_empty() && tests.tests.is_empty() {
         return label.append(arena.text(" {}"));
     }
 
+    // Print scoped declarations
+    let decl_docs: Vec<_> = tests
+        .decls
+        .iter()
+        .map(|decl| print_decl(arena, decl, interner))
+        .collect();
+
+    // Print test cases
     let test_docs: Vec<_> = tests
         .tests
         .iter()
         .map(|test| print_test_case(arena, test, interner))
         .collect();
 
-    // Separate test cases with blank lines
-    let tests_body = arena.intersperse(test_docs, arena.hardline().append(arena.hardline()));
+    // Combine: decls first, then blank line, then tests (if both present)
+    let body = if decl_docs.is_empty() {
+        arena.intersperse(test_docs, arena.hardline().append(arena.hardline()))
+    } else if test_docs.is_empty() {
+        arena.intersperse(decl_docs, arena.hardline().append(arena.hardline()))
+    } else {
+        let decls_body = arena.intersperse(decl_docs, arena.hardline().append(arena.hardline()));
+        let tests_body = arena.intersperse(test_docs, arena.hardline().append(arena.hardline()));
+        decls_body
+            .append(arena.hardline())
+            .append(arena.hardline())
+            .append(tests_body)
+    };
 
     label
         .append(arena.text(" {"))
-        .append(arena.hardline().append(tests_body).nest(INDENT))
+        .append(arena.hardline().append(body).nest(INDENT))
         .append(arena.hardline())
         .append(arena.text("}"))
 }
@@ -1227,8 +1246,7 @@ fn print_test_case<'a>(
     arena
         .text("test ")
         .append(print_string_literal(arena, &test.name))
-        .append(arena.text(" "))
-        .append(print_block(arena, &test.body, interner))
+        .append(print_func_body(arena, &test.body, interner))
 }
 
 /// Print a class declaration.

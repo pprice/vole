@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use cranelift::prelude::{types, FunctionBuilder, InstBuilder, Type};
+use cranelift::prelude::{FunctionBuilder, InstBuilder, Type, types};
 use vole_frontend::{FuncBody, Symbol};
 use vole_sema::type_arena::TypeId;
 
