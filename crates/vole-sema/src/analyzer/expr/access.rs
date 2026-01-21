@@ -1,3 +1,4 @@
+use rustc_hash::FxHashMap;
 use super::super::*;
 use crate::generic::{
     ClassMethodMonomorphInstance, ClassMethodMonomorphKey, StaticMethodMonomorphInstance,
@@ -518,7 +519,7 @@ impl Analyzer {
                     };
                     if let Some(ref generic_info) = generic_info {
                         // Build substitution map: T -> i32, etc.
-                        let subs: hashbrown::HashMap<_, _> = generic_info
+                        let subs: FxHashMap<_, _> = generic_info
                             .type_params
                             .iter()
                             .zip(type_args.iter())
@@ -695,8 +696,8 @@ impl Analyzer {
                 // Substitute inferred types into param types and return type using arena
                 let (substituted_param_ids, substituted_return_id) = {
                     let mut arena = self.type_arena_mut();
-                    // Convert to hashbrown::HashMap for arena.substitute()
-                    let inferred_hb: hashbrown::HashMap<NameId, ArenaTypeId> =
+                    // Convert to FxHashMap for arena.substitute()
+                    let inferred_hb: FxHashMap<NameId, ArenaTypeId> =
                         inferred.iter().map(|(&k, &v)| (k, v)).collect();
                     let params: Vec<ArenaTypeId> = param_type_ids
                         .iter()
@@ -989,7 +990,7 @@ impl Analyzer {
             let return_type_id: ArenaTypeId = func_type.return_type_id;
 
             // Create the substituted function type using arena substitution (TypeId-based)
-            let inferred_hb: hashbrown::HashMap<NameId, ArenaTypeId> =
+            let inferred_hb: FxHashMap<NameId, ArenaTypeId> =
                 inferred.iter().map(|(&k, &v)| (k, v)).collect();
             let (subst_param_ids, subst_return_id) = {
                 let mut arena = self.type_arena_mut();

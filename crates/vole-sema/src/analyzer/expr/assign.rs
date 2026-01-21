@@ -1,3 +1,4 @@
+use rustc_hash::FxHashMap;
 use super::super::*;
 use crate::type_arena::TypeId as ArenaTypeId;
 
@@ -77,7 +78,7 @@ impl Analyzer {
                                 field_type_id
                             } else {
                                 // Use type_args_id directly (already TypeIds)
-                                let subs_id: hashbrown::HashMap<_, _> = generic_info
+                                let subs_id: FxHashMap<_, _> = generic_info
                                     .type_params
                                     .iter()
                                     .zip(type_args_id.iter())
@@ -336,7 +337,7 @@ impl Analyzer {
                                 field_type_id
                             } else {
                                 // Use type_args_id directly (already TypeIds)
-                                let subs_id: hashbrown::HashMap<_, _> = generic_info
+                                let subs_id: FxHashMap<_, _> = generic_info
                                     .type_params
                                     .iter()
                                     .zip(type_args_id.iter())

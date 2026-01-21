@@ -1,3 +1,4 @@
+use rustc_hash::FxHashMap;
 use super::super::*;
 use crate::type_arena::TypeId as ArenaTypeId;
 use std::collections::HashMap;
@@ -108,7 +109,7 @@ impl Analyzer {
 
                 // Create the concrete function type by substituting via arena
                 // Convert std HashMap to hashbrown HashMap for arena.substitute
-                let subs_hashbrown: hashbrown::HashMap<_, _> =
+                let subs_hashbrown: FxHashMap<_, _> =
                     inferred_id.iter().map(|(&k, &v)| (k, v)).collect();
                 let (concrete_param_ids, concrete_return_id) = {
                     let mut arena = self.type_arena_mut();

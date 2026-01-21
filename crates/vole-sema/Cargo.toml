@@ -15,9 +15,6 @@ smallvec = "1.13"
 # Fast hashing for internal compiler maps (non-cryptographic)
 rustc-hash = "2.1"
 
-# High-performance hash map
-hashbrown = "0.16"
-
 # Error handling
 thiserror = "2.0"
 miette = { version = "7.4", features = ["fancy"] }

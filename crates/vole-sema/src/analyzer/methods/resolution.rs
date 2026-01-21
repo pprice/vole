@@ -2,6 +2,7 @@ use super::super::*;
 use crate::entity_defs::TypeDefKind;
 use crate::implement_registry::ImplTypeId;
 use crate::type_arena::TypeId as ArenaTypeId;
+use rustc_hash::FxHashMap;
 use vole_identity::{MethodId, TypeDefId, TypeParamId};
 
 impl Analyzer {
@@ -137,7 +138,7 @@ impl Analyzer {
                 let substitutions = if !type_args_id.is_empty() {
                     self.build_substitutions_id(type_def_id, &type_args_id)
                 } else {
-                    hashbrown::HashMap::new()
+                    FxHashMap::default()
                 };
                 // Get signature from arena
                 let method_sig = {
@@ -353,7 +354,7 @@ impl Analyzer {
         &self,
         type_def_id: TypeDefId,
         type_args_id: &[crate::type_arena::TypeId],
-    ) -> hashbrown::HashMap<NameId, crate::type_arena::TypeId> {
+    ) -> FxHashMap<NameId, crate::type_arena::TypeId> {
         self.entity_registry_mut()
             .substitution_map_id(type_def_id, type_args_id)
     }
@@ -362,7 +363,7 @@ impl Analyzer {
     fn apply_substitutions_id(
         &self,
         func_type: &FunctionType,
-        substitutions: &hashbrown::HashMap<NameId, crate::type_arena::TypeId>,
+        substitutions: &FxHashMap<NameId, crate::type_arena::TypeId>,
     ) -> FunctionType {
         if substitutions.is_empty() {
             return func_type.clone();

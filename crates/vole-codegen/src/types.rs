@@ -6,6 +6,7 @@
 use cranelift::prelude::*;
 use cranelift_codegen::ir::FuncRef;
 use cranelift_jit::JITModule;
+use rustc_hash::FxHashMap;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -162,8 +163,8 @@ impl<'a> CompileCtx<'a> {
             if let Some(&cached) = self.substitution_cache.borrow().get(&ty) {
                 return cached;
             }
-            // Convert std HashMap to hashbrown HashMap for arena compatibility
-            let subs: hashbrown::HashMap<NameId, TypeId> =
+            // Convert std HashMap to FxHashMap for arena compatibility
+            let subs: FxHashMap<NameId, TypeId> =
                 substitutions.iter().map(|(&k, &v)| (k, v)).collect();
             let result = self.arena.borrow_mut().substitute(ty, &subs);
             // Cache the result
@@ -233,8 +234,8 @@ pub(crate) fn resolve_type_expr_id(ty: &TypeExpr, ctx: &CompileCtx) -> TypeId {
 
     // Apply type substitutions if compiling a monomorphized context
     if let Some(substitutions) = ctx.type_substitutions {
-        // Convert std::collections::HashMap to hashbrown::HashMap for arena.substitute
-        let subs: hashbrown::HashMap<NameId, TypeId> =
+        // Convert std::collections::HashMap to FxHashMap for arena.substitute
+        let subs: FxHashMap<NameId, TypeId> =
             substitutions.iter().map(|(&k, &v)| (k, v)).collect();
         ctx.arena.borrow_mut().substitute(type_id, &subs)
     } else {

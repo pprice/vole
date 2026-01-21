@@ -1,6 +1,7 @@
 // src/codegen/structs/helpers.rs
 
 use cranelift::prelude::*;
+use rustc_hash::FxHashMap;
 
 use crate::errors::CodegenError;
 use crate::types::CompileCtx;
@@ -31,7 +32,7 @@ pub(crate) fn get_field_slot_and_type_id(
         .ok_or_else(|| CodegenError::not_found("generic_info", "type").to_string())?;
 
     // Build substitution map from type params to type args
-    let substitutions: hashbrown::HashMap<vole_identity::NameId, TypeId> = type_def
+    let substitutions: FxHashMap<vole_identity::NameId, TypeId> = type_def
         .type_params
         .iter()
         .zip(type_args.iter())

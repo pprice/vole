@@ -1,3 +1,4 @@
+use rustc_hash::FxHashMap;
 use super::super::*;
 use crate::entity_defs::GenericTypeInfo;
 use crate::type_arena::TypeId as ArenaTypeId;
@@ -242,7 +243,7 @@ impl Analyzer {
         );
 
         // Substitute inferred types into field types to get concrete field types via arena
-        let subs_hashbrown: hashbrown::HashMap<_, _> =
+        let subs_hashbrown: FxHashMap<_, _> =
             inferred_id.iter().map(|(&k, &v)| (k, v)).collect();
         let concrete_field_type_ids: Vec<ArenaTypeId> = {
             let mut arena = self.type_arena_mut();
@@ -365,7 +366,7 @@ impl Analyzer {
         );
 
         // Substitute inferred types into field types to get concrete field types via arena
-        let subs_hashbrown: hashbrown::HashMap<_, _> =
+        let subs_hashbrown: FxHashMap<_, _> =
             inferred_id.iter().map(|(&k, &v)| (k, v)).collect();
         let concrete_field_type_ids: Vec<ArenaTypeId> = {
             let mut arena = self.type_arena_mut();

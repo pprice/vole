@@ -2,6 +2,7 @@
 
 use crate::entity_defs::FieldDef;
 use crate::type_arena::TypeId as ArenaTypeId;
+use rustc_hash::FxHashMap;
 use vole_identity::{FieldId, NameId, TypeDefId};
 
 use super::EntityRegistry;
@@ -72,7 +73,7 @@ impl EntityRegistry {
         &self,
         type_def_id: TypeDefId,
         type_args_id: &[ArenaTypeId],
-    ) -> hashbrown::HashMap<NameId, ArenaTypeId> {
+    ) -> FxHashMap<NameId, ArenaTypeId> {
         let type_def = self.get_type(type_def_id);
         type_def
             .type_params

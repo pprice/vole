@@ -1421,7 +1421,6 @@ dependencies = [
  "cranelift-jit",
  "cranelift-module",
  "cranelift-native",
- "hashbrown 0.16.1",
  "rustc-hash",
  "smallvec",
  "tracing",
@@ -1460,7 +1459,6 @@ dependencies = [
 name = "vole-sema"
 version = "0.1.0"
 dependencies = [
- "hashbrown 0.16.1",
  "miette",
  "rustc-hash",
  "smallvec",

@@ -2,6 +2,7 @@
 
 use cranelift::prelude::*;
 use cranelift_module::Module;
+use rustc_hash::FxHashMap;
 use smallvec::{SmallVec, smallvec};
 
 use crate::RuntimeFn;
@@ -623,7 +624,7 @@ impl Cg<'_, '_, '_> {
             .ok_or_else(|| format!("No external binding for Iterator.{}", method_name))?;
 
         // Substitute the element type for T in the return type using arena substitute
-        let substitutions: hashbrown::HashMap<NameId, TypeId> = iter_def
+        let substitutions: FxHashMap<NameId, TypeId> = iter_def
             .type_params
             .iter()
             .map(|param| (*param, elem_type_id))

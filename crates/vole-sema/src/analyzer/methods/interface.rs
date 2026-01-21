@@ -1,6 +1,7 @@
 use crate::entity_defs::TypeDefKind;
 use crate::implement_registry::ImplTypeId;
 use crate::type_arena::TypeId as ArenaTypeId;
+use rustc_hash::FxHashMap;
 use vole_identity::{NameId, TypeDefId};
 
 use super::super::*;
@@ -134,7 +135,7 @@ impl Analyzer {
         };
 
         // Build type substitutions directly using TypeId
-        let substitutions: hashbrown::HashMap<_, _> = generic_info
+        let substitutions: FxHashMap<_, _> = generic_info
             .type_params
             .iter()
             .zip(type_args_id.iter())
@@ -328,7 +329,7 @@ impl Analyzer {
 
             // Build substitution map for generic interface type parameters (TypeId-based)
             // E.g., MapLike<K, V> implemented as MapLike<i64, i64> → {K: i64, V: i64}
-            let substitutions: hashbrown::HashMap<NameId, ArenaTypeId> =
+            let substitutions: FxHashMap<NameId, ArenaTypeId> =
                 if let Some(impl_type_id) = type_id_opt {
                     let type_args: Vec<_> = {
                         let registry = self.entity_registry();
@@ -342,7 +343,7 @@ impl Analyzer {
                         .map(|(param, arg)| (*param, *arg))
                         .collect()
                 } else {
-                    hashbrown::HashMap::new()
+                    FxHashMap::default()
                 };
 
             // Collect method info upfront (name_str, has_default, signature with substitutions applied)

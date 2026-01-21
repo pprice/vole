@@ -7,7 +7,7 @@
 // - TypeArena: per-compilation storage with automatic deduplication
 // - SemaType: the canonical type representation using TypeId for child types
 
-use hashbrown::HashMap;
+use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
 use crate::types::{ConstantValue, PlaceholderKind, PrimitiveType};
@@ -325,13 +325,13 @@ pub struct PrimitiveTypes {
 pub struct TypeArena {
     /// Interned types, indexed by TypeId
     types: Vec<SemaType>,
-    /// Deduplication map - hashbrown for better perf
-    intern_map: HashMap<SemaType, TypeId>,
+    /// Deduplication map - FxHashMap for better perf with small keys
+    intern_map: FxHashMap<SemaType, TypeId>,
     /// Pre-interned primitives for O(1) access
     pub primitives: PrimitiveTypes,
     /// Module metadata (constants, external_funcs) keyed by ModuleId.
     /// This data is not part of the type identity, but needed by codegen.
-    module_metadata: std::collections::HashMap<ModuleId, ModuleMetadata>,
+    module_metadata: FxHashMap<ModuleId, ModuleMetadata>,
 }
 
 impl std::fmt::Debug for TypeArena {
@@ -347,8 +347,8 @@ impl TypeArena {
     pub fn new() -> Self {
         let mut arena = Self {
             types: Vec::new(),
-            intern_map: HashMap::new(),
-            module_metadata: std::collections::HashMap::new(),
+            intern_map: FxHashMap::default(),
+            module_metadata: FxHashMap::default(),
             primitives: PrimitiveTypes {
                 // Temporary placeholders - will be filled in below
                 i8: TypeId(0),
@@ -1177,7 +1177,7 @@ impl TypeArena {
     /// all type parameters replaced.
     ///
     /// Automatically cached via interning: same input produces same TypeId.
-    pub fn substitute(&mut self, ty: TypeId, subs: &HashMap<NameId, TypeId>) -> TypeId {
+    pub fn substitute(&mut self, ty: TypeId, subs: &FxHashMap<NameId, TypeId>) -> TypeId {
         // Early exit if no substitutions
         if subs.is_empty() {
             return ty;
@@ -1747,7 +1747,7 @@ mod tests {
         let name_id = NameId::new_for_test(999);
         let t = arena.type_param(name_id);
 
-        let mut subs = HashMap::new();
+        let mut subs = FxHashMap::default();
         subs.insert(name_id, arena.i32());
 
         let result = arena.substitute(t, &subs);
@@ -1761,7 +1761,7 @@ mod tests {
         let t = arena.type_param(name_id);
         let arr_t = arena.array(t);
 
-        let mut subs = HashMap::new();
+        let mut subs = FxHashMap::default();
         subs.insert(name_id, arena.string());
 
         let result = arena.substitute(arr_t, &subs);
@@ -1777,7 +1777,7 @@ mod tests {
         let t = arena.type_param(name_id);
         let union_t = arena.union(smallvec::smallvec![t, nil]);
 
-        let mut subs = HashMap::new();
+        let mut subs = FxHashMap::default();
         subs.insert(name_id, arena.i32());
 
         let result1 = arena.substitute(union_t, &subs);
@@ -1795,7 +1795,7 @@ mod tests {
     fn substitute_empty_is_noop() {
         let mut arena = TypeArena::new();
         let arr = arena.array(arena.i32());
-        let empty_subs: HashMap<NameId, TypeId> = HashMap::new();
+        let empty_subs: FxHashMap<NameId, TypeId> = FxHashMap::default();
 
         let result = arena.substitute(arr, &empty_subs);
         assert_eq!(result, arr); // Exact same TypeId
@@ -1809,7 +1809,7 @@ mod tests {
 
         let arr = arena.array(arena.i32()); // No type params
 
-        let mut subs = HashMap::new();
+        let mut subs = FxHashMap::default();
         subs.insert(other_id, arena.string()); // Unrelated substitution
 
         let result = arena.substitute(arr, &subs);
@@ -1827,7 +1827,7 @@ mod tests {
         let u = arena.type_param(u_id);
         let func = arena.function(smallvec::smallvec![t], u, false);
 
-        let mut subs = HashMap::new();
+        let mut subs = FxHashMap::default();
         subs.insert(t_id, arena.i32());
         subs.insert(u_id, arena.string());
 
@@ -1846,7 +1846,7 @@ mod tests {
         let t = arena.type_param(t_id);
         let cls = arena.class(type_def_id, smallvec::smallvec![t]);
 
-        let mut subs = HashMap::new();
+        let mut subs = FxHashMap::default();
         subs.insert(t_id, arena.i64());
 
         let result = arena.substitute(cls, &subs);
@@ -1865,7 +1865,7 @@ mod tests {
         let inner_arr = arena.array(t);
         let outer_arr = arena.array(inner_arr);
 
-        let mut subs = HashMap::new();
+        let mut subs = FxHashMap::default();
         subs.insert(t_id, arena.bool());
 
         let result = arena.substitute(outer_arr, &subs);

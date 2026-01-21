@@ -1,4 +1,4 @@
-use hashbrown::HashMap;
+use rustc_hash::FxHashMap;
 use std::collections::HashSet;
 
 use cranelift::prelude::*;
@@ -41,7 +41,7 @@ struct VtableBuildState {
     /// Concrete type for wrapper compilation (interned TypeId)
     concrete_type: TypeId,
     /// Type substitutions for generic interfaces (interned TypeIds)
-    substitutions: HashMap<NameId, TypeId>,
+    substitutions: FxHashMap<NameId, TypeId>,
     /// Method IDs to compile wrappers for
     method_ids: Vec<MethodId>,
 }
@@ -49,9 +49,9 @@ struct VtableBuildState {
 #[derive(Debug, Default)]
 pub(crate) struct InterfaceVtableRegistry {
     /// Completed vtables (after Phase 3)
-    vtables: HashMap<InterfaceVtableKey, DataId>,
+    vtables: FxHashMap<InterfaceVtableKey, DataId>,
     /// In-progress vtables (during phased compilation)
-    pending: HashMap<InterfaceVtableKey, VtableBuildState>,
+    pending: FxHashMap<InterfaceVtableKey, VtableBuildState>,
     wrapper_counter: u32,
 }
 
@@ -146,7 +146,7 @@ impl InterfaceVtableRegistry {
 
         // Build substitution map from type param names to concrete type args (already TypeIds)
         let interface_def = ctx.analyzed.entity_registry.get_type(interface_type_def_id);
-        let substitutions: HashMap<NameId, TypeId> = interface_def
+        let substitutions: FxHashMap<NameId, TypeId> = interface_def
             .type_params
             .iter()
             .zip(interface_type_arg_ids.iter())
@@ -873,7 +873,7 @@ fn resolve_vtable_target(
     interface_name_id: NameId,
     concrete_type_id: TypeId,
     interface_method_id: MethodId,
-    substitutions: &HashMap<NameId, TypeId>,
+    substitutions: &FxHashMap<NameId, TypeId>,
 ) -> Result<VtableMethod, String> {
     // Get method info from EntityRegistry
     let interface_method = ctx.analyzed.entity_registry.get_method(interface_method_id);

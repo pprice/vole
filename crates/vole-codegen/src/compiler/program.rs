@@ -2,6 +2,8 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::Write;
 
+use rustc_hash::FxHashMap;
+
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, InstBuilder, types};
 
 use super::{Compiler, ControlFlowCtx, SelfParam, TestInfo, TypeResolver};
@@ -1609,13 +1611,13 @@ impl Compiler<'_> {
         // Fallback: use type_metadata (for non-generic types)
         if let Some(metadata) = self.type_metadata.get(&type_name) {
             // Apply substitutions to the stored vole_type
-            // Convert std HashMap to hashbrown HashMap for type_arena
-            let hashbrown_subs: hashbrown::HashMap<NameId, TypeId> =
+            // Convert std HashMap to FxHashMap for type_arena
+            let subs: FxHashMap<NameId, TypeId> =
                 substitutions.iter().map(|(&k, &v)| (k, v)).collect();
             self.analyzed
                 .type_arena
                 .borrow_mut()
-                .substitute(metadata.vole_type, &hashbrown_subs)
+                .substitute(metadata.vole_type, &subs)
         } else {
             // Final fallback
             self.analyzed.type_arena.borrow().primitives.i64
