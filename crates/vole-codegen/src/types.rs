@@ -760,6 +760,28 @@ pub(crate) const FALLIBLE_TAG_OFFSET: i32 = 0;
 /// Offset of the payload field in a fallible value (always 8, after the i64 tag)
 pub(crate) const FALLIBLE_PAYLOAD_OFFSET: i32 = 8;
 
+/// Load the tag field from a fallible value.
+/// The tag is an i64 at offset 0: 0 = success, 1+ = error variants.
+#[inline]
+pub(crate) fn load_fallible_tag(builder: &mut FunctionBuilder, value: Value) -> Value {
+    builder
+        .ins()
+        .load(types::I64, MemFlags::new(), value, FALLIBLE_TAG_OFFSET)
+}
+
+/// Load the payload field from a fallible value.
+/// The payload is at offset 8 (after the i64 tag).
+#[inline]
+pub(crate) fn load_fallible_payload(
+    builder: &mut FunctionBuilder,
+    value: Value,
+    payload_ty: Type,
+) -> Value {
+    builder
+        .ins()
+        .load(payload_ty, MemFlags::new(), value, FALLIBLE_PAYLOAD_OFFSET)
+}
+
 /// Get the error tag for a specific error type within a fallible type.
 /// Returns the 1-based index (tag 0 is reserved for success).
 ///

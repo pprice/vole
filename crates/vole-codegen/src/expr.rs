@@ -22,9 +22,9 @@ use super::structs::{
     convert_field_value_id, convert_to_i64_for_storage, get_field_slot_and_type_id,
 };
 use super::types::{
-    CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET,
-    array_element_tag_id, box_interface_value_id, fallible_error_tag_by_id, resolve_type_expr_id,
-    tuple_layout_id, type_id_to_cranelift,
+    CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, array_element_tag_id,
+    box_interface_value_id, fallible_error_tag_by_id, load_fallible_payload, load_fallible_tag,
+    resolve_type_expr_id, tuple_layout_id, type_id_to_cranelift,
 };
 use vole_sema::type_arena::TypeId;
 
@@ -1103,12 +1103,7 @@ impl Cg<'_, '_, '_> {
                 }
                 Pattern::Success { inner, .. } => {
                     // Check if tag == FALLIBLE_SUCCESS_TAG (0)
-                    let tag = self.builder.ins().load(
-                        types::I64,
-                        MemFlags::new(),
-                        scrutinee.value,
-                        FALLIBLE_TAG_OFFSET,
-                    );
+                    let tag = load_fallible_tag(&mut self.builder, scrutinee.value);
                     let is_success =
                         self.builder
                             .ins()
@@ -1125,12 +1120,8 @@ impl Cg<'_, '_, '_> {
                                 &self.ctx.arena.borrow(),
                                 self.ctx.pointer_type,
                             );
-                            let payload = self.builder.ins().load(
-                                payload_ty,
-                                MemFlags::new(),
-                                scrutinee.value,
-                                FALLIBLE_PAYLOAD_OFFSET,
-                            );
+                            let payload =
+                                load_fallible_payload(&mut self.builder, scrutinee.value, payload_ty);
 
                             // Handle inner pattern (usually an identifier binding)
                             if let Pattern::Identifier { name, .. } = inner_pat.as_ref() {
@@ -1144,12 +1135,7 @@ impl Cg<'_, '_, '_> {
                 }
                 Pattern::Error { inner, .. } => {
                     // Load the tag from fallible structure
-                    let tag = self.builder.ins().load(
-                        types::I64,
-                        MemFlags::new(),
-                        scrutinee.value,
-                        FALLIBLE_TAG_OFFSET,
-                    );
+                    let tag = load_fallible_tag(&mut self.builder, scrutinee.value);
                     self.compile_error_pattern(inner, &scrutinee, tag, &mut arm_variables)?
                 }
                 Pattern::Tuple { elements, .. } => {
@@ -1440,12 +1426,7 @@ impl Cg<'_, '_, '_> {
         };
 
         // Load the tag
-        let tag = self.builder.ins().load(
-            types::I64,
-            MemFlags::new(),
-            fallible.value,
-            FALLIBLE_TAG_OFFSET,
-        );
+        let tag = load_fallible_tag(&mut self.builder, fallible.value);
 
         // Check if success (tag == 0)
         let is_success = self
@@ -1477,12 +1458,7 @@ impl Cg<'_, '_, '_> {
         // Success block: extract payload and jump to merge
         self.builder.switch_to_block(success_block);
         self.builder.seal_block(success_block);
-        let payload = self.builder.ins().load(
-            payload_ty,
-            MemFlags::new(),
-            fallible.value,
-            FALLIBLE_PAYLOAD_OFFSET,
-        );
+        let payload = load_fallible_payload(&mut self.builder, fallible.value, payload_ty);
         let payload_arg = BlockArg::from(payload);
         self.builder.ins().jump(merge_block, &[payload_arg]);
 
@@ -1668,12 +1644,7 @@ impl Cg<'_, '_, '_> {
                 &self.ctx.arena.borrow(),
                 self.ctx.pointer_type,
             );
-            let payload = self.builder.ins().load(
-                payload_ty,
-                MemFlags::new(),
-                scrutinee.value,
-                FALLIBLE_PAYLOAD_OFFSET,
-            );
+            let payload = load_fallible_payload(&mut self.builder, scrutinee.value, payload_ty);
             let var = self.builder.declare_var(payload_ty);
             self.builder.def_var(var, payload);
             arm_variables.insert(name, (var, error_type_id));
