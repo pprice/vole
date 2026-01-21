@@ -1103,7 +1103,7 @@ impl Cg<'_, '_, '_> {
                 }
                 Pattern::Success { inner, .. } => {
                     // Check if tag == FALLIBLE_SUCCESS_TAG (0)
-                    let tag = load_fallible_tag(&mut self.builder, scrutinee.value);
+                    let tag = load_fallible_tag(self.builder, scrutinee.value);
                     let is_success =
                         self.builder
                             .ins()
@@ -1121,7 +1121,7 @@ impl Cg<'_, '_, '_> {
                                 self.ctx.pointer_type,
                             );
                             let payload =
-                                load_fallible_payload(&mut self.builder, scrutinee.value, payload_ty);
+                                load_fallible_payload(self.builder, scrutinee.value, payload_ty);
 
                             // Handle inner pattern (usually an identifier binding)
                             if let Pattern::Identifier { name, .. } = inner_pat.as_ref() {
@@ -1135,7 +1135,7 @@ impl Cg<'_, '_, '_> {
                 }
                 Pattern::Error { inner, .. } => {
                     // Load the tag from fallible structure
-                    let tag = load_fallible_tag(&mut self.builder, scrutinee.value);
+                    let tag = load_fallible_tag(self.builder, scrutinee.value);
                     self.compile_error_pattern(inner, &scrutinee, tag, &mut arm_variables)?
                 }
                 Pattern::Tuple { elements, .. } => {
@@ -1426,7 +1426,7 @@ impl Cg<'_, '_, '_> {
         };
 
         // Load the tag
-        let tag = load_fallible_tag(&mut self.builder, fallible.value);
+        let tag = load_fallible_tag(self.builder, fallible.value);
 
         // Check if success (tag == 0)
         let is_success = self
@@ -1458,7 +1458,7 @@ impl Cg<'_, '_, '_> {
         // Success block: extract payload and jump to merge
         self.builder.switch_to_block(success_block);
         self.builder.seal_block(success_block);
-        let payload = load_fallible_payload(&mut self.builder, fallible.value, payload_ty);
+        let payload = load_fallible_payload(self.builder, fallible.value, payload_ty);
         let payload_arg = BlockArg::from(payload);
         self.builder.ins().jump(merge_block, &[payload_arg]);
 
@@ -1644,7 +1644,7 @@ impl Cg<'_, '_, '_> {
                 &self.ctx.arena.borrow(),
                 self.ctx.pointer_type,
             );
-            let payload = load_fallible_payload(&mut self.builder, scrutinee.value, payload_ty);
+            let payload = load_fallible_payload(self.builder, scrutinee.value, payload_ty);
             let var = self.builder.declare_var(payload_ty);
             self.builder.def_var(var, payload);
             arm_variables.insert(name, (var, error_type_id));

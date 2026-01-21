@@ -545,6 +545,8 @@ impl Compiler<'_> {
                 &mut variables,
                 &mut cf_ctx,
                 &mut ctx,
+                None,
+                None,
             )?;
 
             // Add implicit return if no explicit return
@@ -656,6 +658,8 @@ impl Compiler<'_> {
                 &mut variables,
                 &mut cf_ctx,
                 &mut ctx,
+                None,
+                None,
             )?;
 
             // Add implicit return if no explicit return
@@ -932,6 +936,8 @@ impl Compiler<'_> {
                 &mut variables,
                 &mut cf_ctx,
                 &mut ctx,
+                None,
+                None,
             )?;
 
             // Add implicit return if no explicit return
@@ -1255,6 +1261,8 @@ impl Compiler<'_> {
                 &mut variables,
                 &mut cf_ctx,
                 &mut ctx,
+                None,
+                None,
             )?;
 
             // Add implicit return if no explicit return
@@ -1524,6 +1532,8 @@ impl Compiler<'_> {
                 &mut variables,
                 &mut cf_ctx,
                 &mut ctx,
+                None,
+                None,
             )?;
 
             // Add implicit return if no explicit return

@@ -235,8 +235,7 @@ pub(crate) fn resolve_type_expr_id(ty: &TypeExpr, ctx: &CompileCtx) -> TypeId {
     // Apply type substitutions if compiling a monomorphized context
     if let Some(substitutions) = ctx.type_substitutions {
         // Convert std::collections::HashMap to FxHashMap for arena.substitute
-        let subs: FxHashMap<NameId, TypeId> =
-            substitutions.iter().map(|(&k, &v)| (k, v)).collect();
+        let subs: FxHashMap<NameId, TypeId> = substitutions.iter().map(|(&k, &v)| (k, v)).collect();
         ctx.arena.borrow_mut().substitute(type_id, &subs)
     } else {
         type_id

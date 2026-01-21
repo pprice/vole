@@ -270,14 +270,14 @@ impl<'src> Parser<'src> {
 
                                 // Parse body - block or expression
                                 let body = if self.check(TokenType::LBrace) {
-                                    LambdaBody::Block(self.block()?)
+                                    FuncBody::Block(self.block()?)
                                 } else {
-                                    LambdaBody::Expr(Box::new(self.expression(0)?))
+                                    FuncBody::Expr(Box::new(self.expression(0)?))
                                 };
 
                                 let end_span = match &body {
-                                    LambdaBody::Block(b) => b.span,
-                                    LambdaBody::Expr(e) => e.span,
+                                    FuncBody::Block(b) => b.span,
+                                    FuncBody::Expr(e) => e.span,
                                 };
 
                                 return Ok(Expr {

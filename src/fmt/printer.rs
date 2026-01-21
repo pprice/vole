@@ -856,8 +856,8 @@ fn print_lambda_expr<'a>(
 
     // Print body
     let body = match &lambda.body {
-        LambdaBody::Expr(expr) => arena.text(" ").append(print_expr(arena, expr, interner)),
-        LambdaBody::Block(block) => arena.text(" ").append(print_block(arena, block, interner)),
+        FuncBody::Expr(expr) => arena.text(" ").append(print_expr(arena, expr, interner)),
+        FuncBody::Block(block) => arena.text(" ").append(print_block(arena, block, interner)),
     };
 
     params

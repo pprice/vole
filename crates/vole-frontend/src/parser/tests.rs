@@ -777,7 +777,7 @@ fn parse_lambda_block_body() {
     let program = result.unwrap();
     if let Decl::Let(let_stmt) = &program.declarations[0] {
         if let ExprKind::Lambda(lambda) = &let_stmt.init.as_expr().unwrap().kind {
-            assert!(matches!(lambda.body, LambdaBody::Block(_)));
+            assert!(matches!(lambda.body, FuncBody::Block(_)));
         } else {
             panic!("expected lambda expression");
         }

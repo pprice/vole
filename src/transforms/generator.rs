@@ -229,8 +229,8 @@ impl<'a> GeneratorTransformer<'a> {
                 self.expr_contains_yield(&range.start) || self.expr_contains_yield(&range.end)
             }
             ExprKind::Lambda(lambda) => match &lambda.body {
-                LambdaBody::Expr(e) => self.expr_contains_yield(e),
-                LambdaBody::Block(b) => self.block_contains_yield(b),
+                FuncBody::Expr(e) => self.expr_contains_yield(e),
+                FuncBody::Block(b) => self.block_contains_yield(b),
             },
             ExprKind::Try(inner) => self.expr_contains_yield(inner),
             ExprKind::InterpolatedString(parts) => parts.iter().any(|p| match p {
@@ -499,8 +499,8 @@ impl<'a> GeneratorTransformer<'a> {
                 self.collect_yields_from_expr(&range.end, yields);
             }
             ExprKind::Lambda(lambda) => match &lambda.body {
-                LambdaBody::Expr(e) => self.collect_yields_from_expr(e, yields),
-                LambdaBody::Block(b) => self.collect_yields_from_block(b, yields),
+                FuncBody::Expr(e) => self.collect_yields_from_expr(e, yields),
+                FuncBody::Block(b) => self.collect_yields_from_block(b, yields),
             },
             ExprKind::Try(inner) => {
                 self.collect_yields_from_expr(inner, yields);

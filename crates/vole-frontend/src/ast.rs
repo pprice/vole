@@ -754,7 +754,7 @@ pub struct LambdaExpr {
     pub type_params: Vec<TypeParam>,
     pub params: Vec<LambdaParam>,
     pub return_type: Option<TypeExpr>,
-    pub body: LambdaBody,
+    pub body: FuncBody,
     pub span: Span,
     /// Captured variables from enclosing scopes (populated during semantic analysis)
     pub captures: std::cell::RefCell<Vec<Capture>>,
@@ -768,13 +768,6 @@ pub struct LambdaParam {
     pub name: Symbol,
     pub ty: Option<TypeExpr>,
     pub span: Span,
-}
-
-/// Lambda body - expression or block
-#[derive(Debug, Clone)]
-pub enum LambdaBody {
-    Expr(Box<Expr>),
-    Block(Block),
 }
 
 /// Captured variable from enclosing scope

@@ -163,15 +163,15 @@ impl<'src> Parser<'src> {
         // Parse body - block or expression
         let body = if self.match_token(TokenType::FatArrow) {
             let expr = self.expression(0)?;
-            LambdaBody::Expr(Box::new(expr))
+            FuncBody::Expr(Box::new(expr))
         } else {
             let block = self.block()?;
-            LambdaBody::Block(block)
+            FuncBody::Block(block)
         };
 
         let end_span = match &body {
-            LambdaBody::Expr(e) => e.span,
-            LambdaBody::Block(b) => b.span,
+            FuncBody::Expr(e) => e.span,
+            FuncBody::Block(b) => b.span,
         };
         let lambda_span = start_span.merge(end_span);
 

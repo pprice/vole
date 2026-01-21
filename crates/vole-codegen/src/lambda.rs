@@ -7,11 +7,13 @@ use std::collections::HashMap;
 use cranelift::prelude::*;
 use cranelift_module::Module;
 
-use vole_frontend::{BinaryOp, Expr, ExprKind, LambdaBody, LambdaExpr, NodeId, Symbol};
+use vole_frontend::{BinaryOp, Expr, ExprKind, FuncBody, LambdaExpr, NodeId, Symbol};
 use vole_sema::type_arena::{TypeArena, TypeId, TypeIdVec};
 
 use super::RuntimeFn;
-use super::context::{Captures, Cg, ControlFlow};
+use super::compiler::ControlFlowCtx;
+use super::context::{Captures, Cg};
+use super::stmt::compile_func_body;
 use super::types::{
     CompileCtx, CompiledValue, resolve_type_expr_id, type_id_size, type_id_to_cranelift,
 };
@@ -51,13 +53,13 @@ pub(crate) fn build_capture_bindings(
 
 /// Infer the return type of a lambda expression body.
 pub(crate) fn infer_lambda_return_type(
-    body: &LambdaBody,
+    body: &FuncBody,
     param_types: &[(Symbol, TypeId)],
     ctx: &CompileCtx,
 ) -> TypeId {
     match body {
-        LambdaBody::Expr(expr) => infer_expr_type(expr, param_types, ctx),
-        LambdaBody::Block(_) => ctx.arena.borrow().primitives.i64,
+        FuncBody::Expr(expr) => infer_expr_type(expr, param_types, ctx),
+        FuncBody::Block(_) => ctx.arena.borrow().primitives.i64,
     }
 }
 
@@ -306,22 +308,24 @@ fn compile_pure_lambda(
             lambda_variables.insert(param.name, (var, param_type_ids[i]));
         }
 
-        let capture_bindings: HashMap<Symbol, CaptureBinding> = HashMap::new();
-
-        let mut lambda_cf = ControlFlow::new();
-        let result = compile_lambda_body(
+        let mut cf_ctx = ControlFlowCtx::default();
+        let (terminated, expr_value) = compile_func_body(
             &mut lambda_builder,
             &lambda.body,
             &mut lambda_variables,
-            &capture_bindings,
-            None,
-            &mut lambda_cf,
+            &mut cf_ctx,
             ctx,
-            return_type_id,
+            None, // No captures for pure lambda
+            Some(return_type_id),
         )?;
 
-        if let Some(result_val) = result {
-            lambda_builder.ins().return_(&[result_val.value]);
+        // Handle return
+        if let Some(value) = expr_value {
+            lambda_builder.ins().return_(&[value.value]);
+        } else if !terminated {
+            // Non-terminated block returns default i64(0) for lambdas
+            let zero = lambda_builder.ins().iconst(types::I64, 0);
+            lambda_builder.ins().return_(&[zero]);
         }
         lambda_builder.seal_all_blocks();
         lambda_builder.finalize();
@@ -446,20 +450,30 @@ fn compile_lambda_with_captures(
         let closure_var = lambda_builder.declare_var(ctx.pointer_type);
         lambda_builder.def_var(closure_var, closure_ptr);
 
-        let mut lambda_cf = ControlFlow::new();
-        let result = compile_lambda_body(
+        // Build captures for the closure
+        let captures = Some(Captures {
+            bindings: &capture_bindings,
+            closure_var,
+        });
+
+        let mut cf_ctx = ControlFlowCtx::default();
+        let (terminated, expr_value) = compile_func_body(
             &mut lambda_builder,
             &lambda.body,
             &mut lambda_variables,
-            &capture_bindings,
-            Some(closure_var),
-            &mut lambda_cf,
+            &mut cf_ctx,
             ctx,
-            return_type_id,
+            captures,
+            Some(return_type_id),
         )?;
 
-        if let Some(result_val) = result {
-            lambda_builder.ins().return_(&[result_val.value]);
+        // Handle return
+        if let Some(value) = expr_value {
+            lambda_builder.ins().return_(&[value.value]);
+        } else if !terminated {
+            // Non-terminated block returns default i64(0) for lambdas
+            let zero = lambda_builder.ins().iconst(types::I64, 0);
+            lambda_builder.ins().return_(&[zero]);
         }
         lambda_builder.seal_all_blocks();
         lambda_builder.finalize();
@@ -550,66 +564,6 @@ fn compile_lambda_with_captures(
         ty: ctx.pointer_type,
         type_id: func_type_id,
     })
-}
-
-/// Compile a lambda body (either expression or block)
-#[allow(clippy::too_many_arguments)]
-fn compile_lambda_body(
-    builder: &mut FunctionBuilder,
-    body: &LambdaBody,
-    variables: &mut HashMap<Symbol, (Variable, TypeId)>,
-    capture_bindings: &HashMap<Symbol, CaptureBinding>,
-    closure_var: Option<Variable>,
-    cf: &mut ControlFlow,
-    ctx: &mut CompileCtx,
-    return_type_id: TypeId,
-) -> Result<Option<CompiledValue>, String> {
-    // Set up function context for raise/try statements (same as regular functions)
-    let old_return_type = ctx.current_function_return_type;
-    ctx.current_function_return_type = Some(return_type_id);
-    match body {
-        LambdaBody::Expr(expr) => {
-            let result = if capture_bindings.is_empty() {
-                let mut cg = Cg::new(builder, variables, ctx, cf);
-                cg.expr(expr)?
-            } else {
-                let captures = Captures {
-                    bindings: capture_bindings,
-                    closure_var: closure_var.expect("closure_var required for captures"),
-                };
-                let mut cg = Cg::with_captures(builder, variables, ctx, cf, captures);
-                cg.expr(expr)?
-            };
-            // Restore old context
-            ctx.current_function_return_type = old_return_type;
-            Ok(Some(result))
-        }
-        LambdaBody::Block(block) => {
-            let terminated = if capture_bindings.is_empty() {
-                let mut cg = Cg::new(builder, variables, ctx, cf);
-                cg.block(block)?
-            } else {
-                let captures = Captures {
-                    bindings: capture_bindings,
-                    closure_var: closure_var.expect("closure_var required for captures"),
-                };
-                let mut cg = Cg::with_captures(builder, variables, ctx, cf, captures);
-                cg.block(block)?
-            };
-            // Restore old context
-            ctx.current_function_return_type = old_return_type;
-            if terminated {
-                Ok(None)
-            } else {
-                let zero = builder.ins().iconst(types::I64, 0);
-                Ok(Some(CompiledValue {
-                    value: zero,
-                    ty: types::I64,
-                    type_id: ctx.arena.borrow().primitives.i64,
-                }))
-            }
-        }
-    }
 }
 
 impl Cg<'_, '_, '_> {

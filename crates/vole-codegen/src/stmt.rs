@@ -12,7 +12,7 @@ use vole_frontend::{self, ExprKind, LetInit, Pattern, RaiseStmt, Stmt, Symbol};
 use vole_sema::type_arena::TypeId;
 
 use super::compiler::ControlFlowCtx;
-use super::context::{Cg, ControlFlow};
+use super::context::{Captures, Cg, ControlFlow};
 use super::structs::{
     convert_field_value_id, convert_to_i64_for_storage, get_field_slot_and_type_id,
 };
@@ -30,33 +30,69 @@ pub(super) fn compile_block(
     _cf_ctx: &mut ControlFlowCtx,
     ctx: &mut CompileCtx,
 ) -> Result<bool, String> {
+    compile_block_with_captures(builder, block, variables, _cf_ctx, ctx, None)
+}
+
+/// Compile a block of statements with optional capture context
+fn compile_block_with_captures(
+    builder: &mut FunctionBuilder,
+    block: &vole_frontend::Block,
+    variables: &mut HashMap<Symbol, (Variable, TypeId)>,
+    _cf_ctx: &mut ControlFlowCtx,
+    ctx: &mut CompileCtx,
+    captures: Option<Captures>,
+) -> Result<bool, String> {
     // Note: cf_ctx is ignored as top-level blocks don't have loops yet
     let mut cf = ControlFlow::new();
-    let mut cg = Cg::new(builder, variables, ctx, &mut cf);
+    let mut cg = Cg::new(builder, variables, ctx, &mut cf, captures);
     cg.block(block)
 }
 
 /// Compile a function body - either a block or a single expression
 /// Returns (terminated, optional_return_value)
+///
+/// Parameters:
+/// - `captures`: Optional capture context for closures
+/// - `nested_return_type`: If Some, saves/restores current_function_return_type (for nested lambdas)
+#[allow(clippy::too_many_arguments)]
 pub(super) fn compile_func_body(
     builder: &mut FunctionBuilder,
     body: &vole_frontend::FuncBody,
     variables: &mut HashMap<Symbol, (Variable, TypeId)>,
     cf_ctx: &mut ControlFlowCtx,
     ctx: &mut CompileCtx,
+    captures: Option<Captures>,
+    nested_return_type: Option<TypeId>,
 ) -> Result<(bool, Option<CompiledValue>), String> {
-    match body {
+    // Save and set return type context for nested functions (lambdas)
+    let old_return_type = if let Some(return_type) = nested_return_type {
+        let old = ctx.current_function_return_type;
+        ctx.current_function_return_type = Some(return_type);
+        Some(old)
+    } else {
+        None
+    };
+
+    let result = match body {
         vole_frontend::FuncBody::Block(block) => {
-            let terminated = compile_block(builder, block, variables, cf_ctx, ctx)?;
+            let terminated =
+                compile_block_with_captures(builder, block, variables, cf_ctx, ctx, captures)?;
             Ok((terminated, None))
         }
         vole_frontend::FuncBody::Expr(expr) => {
             let mut cf = ControlFlow::new();
-            let mut cg = Cg::new(builder, variables, ctx, &mut cf);
+            let mut cg = Cg::new(builder, variables, ctx, &mut cf, captures);
             let value = cg.expr(expr)?;
             Ok((true, Some(value)))
         }
+    };
+
+    // Restore return type context
+    if let Some(old) = old_return_type {
+        ctx.current_function_return_type = old;
     }
+
+    result
 }
 impl Cg<'_, '_, '_> {
     /// Pre-register a recursive lambda binding before compilation.

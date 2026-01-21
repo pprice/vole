@@ -1,4 +1,3 @@
-use rustc_hash::FxHashMap;
 use super::super::*;
 use crate::generic::{
     ClassMethodMonomorphInstance, ClassMethodMonomorphKey, StaticMethodMonomorphInstance,
@@ -6,6 +5,7 @@ use crate::generic::{
 };
 use crate::implement_registry::ExternalMethodInfo;
 use crate::type_arena::TypeId as ArenaTypeId;
+use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 use vole_identity::{NameId, TypeDefId};
 

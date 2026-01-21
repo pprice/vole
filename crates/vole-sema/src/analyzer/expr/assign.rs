@@ -1,6 +1,6 @@
-use rustc_hash::FxHashMap;
 use super::super::*;
 use crate::type_arena::TypeId as ArenaTypeId;
+use rustc_hash::FxHashMap;
 
 impl Analyzer {
     pub(super) fn check_assign_expr(

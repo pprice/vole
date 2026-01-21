@@ -676,10 +676,10 @@ impl<'a> AstPrinter<'a> {
                 inner.write_indent(out);
                 out.push_str("body:\n");
                 match &lambda.body {
-                    crate::LambdaBody::Expr(e) => {
+                    FuncBody::Expr(e) => {
                         inner.indented().write_expr(out, e);
                     }
-                    crate::LambdaBody::Block(block) => {
+                    FuncBody::Block(block) => {
                         inner.indented().write_block(out, block);
                     }
                 }

@@ -107,7 +107,7 @@ impl Analyzer {
         let return_type_for_context = declared_return_id.or(expected_return_id);
 
         let body_type_id = match &lambda.body {
-            LambdaBody::Expr(expr) => {
+            FuncBody::Expr(expr) => {
                 // For expression body, set up context if we have a declared/expected type
                 let saved =
                     return_type_for_context.map(|ret_id| self.enter_function_context(ret_id));
@@ -122,7 +122,7 @@ impl Analyzer {
                 }
                 ty_id
             }
-            LambdaBody::Block(block) => {
+            FuncBody::Block(block) => {
                 // For blocks, use the same function context as regular functions
                 let (saved, inferring) = if let Some(ret_id) = return_type_for_context {
                     (self.enter_function_context(ret_id), false)

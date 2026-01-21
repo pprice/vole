@@ -99,39 +99,20 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
 }
 
 impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
-    /// Create a new codegen context
+    /// Create a new codegen context with optional captures for closures
     pub fn new(
         builder: &'a mut FunctionBuilder<'b>,
         vars: &'a mut HashMap<Symbol, (Variable, TypeId)>,
         ctx: &'a mut CompileCtx<'ctx>,
         cf: &'a mut ControlFlow,
+        captures: Option<Captures<'a>>,
     ) -> Self {
         Self {
             builder,
             vars,
             ctx,
             cf,
-            captures: None,
-            self_capture: None,
-            call_cache: HashMap::new(),
-            field_cache: HashMap::new(),
-        }
-    }
-
-    /// Create a codegen context with capture information for closures
-    pub fn with_captures(
-        builder: &'a mut FunctionBuilder<'b>,
-        vars: &'a mut HashMap<Symbol, (Variable, TypeId)>,
-        ctx: &'a mut CompileCtx<'ctx>,
-        cf: &'a mut ControlFlow,
-        captures: Captures<'a>,
-    ) -> Self {
-        Self {
-            builder,
-            vars,
-            ctx,
-            cf,
-            captures: Some(captures),
+            captures,
             self_capture: None,
             call_cache: HashMap::new(),
             field_cache: HashMap::new(),
