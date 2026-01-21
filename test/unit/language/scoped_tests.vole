@@ -1,0 +1,50 @@
+// Test scoped declarations in tests blocks
+
+tests "scoped declarations" {
+    // Scoped helper function
+    func helper(x: i64) => x * 2
+
+    // Scoped record
+    record TestData {
+        value: i64,
+    }
+
+    // Scoped let binding
+    let constant = 42
+
+    test "use scoped function" {
+        assert(helper(21) == 42)
+    }
+
+    test "use scoped record" {
+        let d = TestData { value: 5 }
+        assert(d.value == 5)
+    }
+
+    test "use scoped constant" {
+        assert(constant == 42)
+    }
+}
+
+tests "expression test syntax" {
+    test "simple expression test" => assert(1 + 1 == 2)
+
+    test "expression with comparison" => assert(10 > 5)
+
+    test "expression test block" {
+        // Traditional block test still works
+        let x = 10
+        assert(x == 10)
+    }
+}
+
+tests "mixed scoped and expression" {
+    func triple(x: i64) => x * 3
+
+    test "expr using scoped func" => assert(triple(7) == 21)
+
+    test "block using scoped func" {
+        let result = triple(10)
+        assert(result == 30)
+    }
+}

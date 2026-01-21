@@ -116,4 +116,21 @@ pub enum ParserError {
         #[label("type annotation required")]
         span: SourceSpan,
     },
+
+    #[error("nested tests blocks are not allowed")]
+    #[diagnostic(
+        code(E1026),
+        help("tests blocks must be flat; use separate tests blocks instead")
+    )]
+    NestedTestsBlock {
+        #[label("nested tests block not allowed")]
+        span: SourceSpan,
+    },
+
+    #[error("declarations must appear before test cases")]
+    #[diagnostic(code(E1027), help("move this declaration before the first test case"))]
+    DeclarationAfterTest {
+        #[label("declaration not allowed after test cases")]
+        span: SourceSpan,
+    },
 }

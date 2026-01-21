@@ -106,8 +106,39 @@ impl<'src> Parser<'src> {
         self.consume(TokenType::LBrace, "expected '{' after 'tests'")?;
         self.skip_newlines();
 
+        // Parse scoped declarations first (until we see 'test' keyword or '}')
+        let mut decls = Vec::new();
+        while !self.check(TokenType::RBrace)
+            && !self.check(TokenType::Eof)
+            && !self.check(TokenType::KwTest)
+        {
+            // Check for nested tests blocks (not allowed)
+            if self.check(TokenType::KwTests) {
+                return Err(ParseError::new(
+                    ParserError::NestedTestsBlock {
+                        span: self.current.span.into(),
+                    },
+                    self.current.span,
+                ));
+            }
+
+            decls.push(self.declaration()?);
+            self.skip_newlines();
+        }
+
+        // Parse test cases
         let mut tests = Vec::new();
         while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
+            // Check for declarations after tests (not allowed)
+            if self.is_declaration_start() && !self.check(TokenType::KwTest) {
+                return Err(ParseError::new(
+                    ParserError::DeclarationAfterTest {
+                        span: self.current.span.into(),
+                    },
+                    self.current.span,
+                ));
+            }
+
             tests.push(self.test_case()?);
             self.skip_newlines();
         }
@@ -117,10 +148,26 @@ impl<'src> Parser<'src> {
 
         Ok(Decl::Tests(TestsDecl {
             label,
-            decls: Vec::new(),
+            decls,
             tests,
             span,
         }))
+    }
+
+    /// Check if the current token starts a declaration
+    fn is_declaration_start(&self) -> bool {
+        matches!(
+            self.current.ty,
+            TokenType::KwFunc
+                | TokenType::KwTests
+                | TokenType::KwLet
+                | TokenType::KwClass
+                | TokenType::KwRecord
+                | TokenType::KwInterface
+                | TokenType::KwImplement
+                | TokenType::KwError
+                | TokenType::KwExternal
+        )
     }
 
     fn let_decl(&mut self) -> Result<Decl, ParseError> {
@@ -585,14 +632,25 @@ impl<'src> Parser<'src> {
             ));
         };
 
-        let block = self.block()?;
-        let span = start_span.merge(block.span);
+        // Parse body: either `=> expr` or `{ ... }`
+        let body = if self.match_token(TokenType::FatArrow) {
+            // Expression body
+            let expr = self.parse_expression()?;
+            let span = start_span.merge(expr.span);
+            return Ok(TestCase {
+                name,
+                body: FuncBody::Expr(Box::new(expr)),
+                span,
+            });
+        } else {
+            // Block body
+            let block = self.block()?;
+            FuncBody::Block(block)
+        };
 
-        Ok(TestCase {
-            name,
-            body: FuncBody::Block(block),
-            span,
-        })
+        let span = start_span.merge(self.previous.span);
+
+        Ok(TestCase { name, body, span })
     }
 
     /// Parse statics block: statics { methods, external blocks }
