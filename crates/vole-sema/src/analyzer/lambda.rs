@@ -24,7 +24,9 @@ impl Analyzer {
             .iter()
             .map(|tp| {
                 let tp_name_str = interner.resolve(tp.name);
-                let tp_name_id = self.name_table_mut().intern_raw(builtin_mod, &[tp_name_str]);
+                let tp_name_id = self
+                    .name_table_mut()
+                    .intern_raw(builtin_mod, &[tp_name_str]);
                 TypeParamInfo {
                     name: tp.name,
                     name_id: tp_name_id,

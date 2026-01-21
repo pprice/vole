@@ -525,6 +525,19 @@ impl EntityRegistry {
     pub fn array_name_id(&self) -> Option<NameId> {
         self.array_name
     }
+
+    /// Clear monomorph caches.
+    ///
+    /// Call this at the start of each main program analysis when using a shared cache.
+    /// The monomorph caches store instances created during analysis of generic code,
+    /// and these instances are specific to each program being analyzed.
+    /// Prelude modules don't have generic classes that get monomorphized in the main
+    /// program, so clearing these caches between test files is safe.
+    pub fn clear_monomorph_caches(&mut self) {
+        self.monomorph_cache = MonomorphCache::new();
+        self.class_method_monomorph_cache = ClassMethodMonomorphCache::new();
+        self.static_method_monomorph_cache = StaticMethodMonomorphCache::new();
+    }
 }
 
 impl Default for EntityRegistry {

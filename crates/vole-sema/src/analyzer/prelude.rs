@@ -128,7 +128,7 @@ impl Analyzer {
             substituted_return_types: HashMap::new(),
             current_module: prelude_module, // Use the prelude module path!
             type_param_stack: TypeParamScopeStack::new(),
-            module_cache: None, // Sub-analyzers don't need the cache
+            module_cache: None,      // Sub-analyzers don't need the cache
             db: Rc::clone(&self.db), // Share the compilation db
             found_return: false,
         };

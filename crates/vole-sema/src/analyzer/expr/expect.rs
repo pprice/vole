@@ -24,11 +24,8 @@ impl Analyzer {
         match &expr.kind {
             ExprKind::IntLiteral(value) => {
                 // Check if expected is a union type
-                let union_variants = expected.and_then(|id| {
-                    self.type_arena()
-                        .unwrap_union(id)
-                        .map(|v| v.to_vec())
-                });
+                let union_variants =
+                    expected.and_then(|id| self.type_arena().unwrap_union(id).map(|v| v.to_vec()));
 
                 if let Some(variants) = union_variants {
                     // Find the smallest integer variant that fits this literal.
@@ -404,10 +401,7 @@ impl Analyzer {
         // Check if expecting a tuple type
         if let Some(exp_id) = expected {
             // Extract tuple elements upfront to avoid borrow conflict
-            let tuple_elems = self
-                .type_arena()
-                .unwrap_tuple(exp_id)
-                .map(|e| e.to_vec());
+            let tuple_elems = self.type_arena().unwrap_tuple(exp_id).map(|e| e.to_vec());
             if let Some(expected_elems) = tuple_elems {
                 if elements.len() != expected_elems.len() {
                     self.add_error(

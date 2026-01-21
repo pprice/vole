@@ -8,8 +8,8 @@ use std::rc::Rc;
 use vole_frontend::{Interner, Program};
 use vole_identity::NameTable;
 use vole_sema::{
-    AnalysisOutput, CompilationDb, EntityRegistry, ExpressionData, ImplementRegistry,
-    ProgramQuery, TypeArena,
+    AnalysisOutput, CompilationDb, EntityRegistry, ExpressionData, ImplementRegistry, ProgramQuery,
+    TypeArena,
 };
 
 /// Result of parsing and analyzing a source file.

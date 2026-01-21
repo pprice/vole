@@ -319,7 +319,11 @@ impl Analyzer {
             let (method_ids, extends, interface_type_params) = {
                 let registry = self.entity_registry();
                 let iface = registry.get_type(interface_type_id);
-                (iface.methods.clone(), iface.extends.clone(), iface.type_params.clone())
+                (
+                    iface.methods.clone(),
+                    iface.extends.clone(),
+                    iface.type_params.clone(),
+                )
             };
 
             // Build substitution map for generic interface type parameters (TypeId-based)
@@ -328,7 +332,9 @@ impl Analyzer {
                 if let Some(impl_type_id) = type_id_opt {
                     let type_args: Vec<_> = {
                         let registry = self.entity_registry();
-                        registry.get_implementation_type_args(impl_type_id, interface_type_id).to_vec()
+                        registry
+                            .get_implementation_type_args(impl_type_id, interface_type_id)
+                            .to_vec()
                     };
                     interface_type_params
                         .iter()
@@ -602,7 +608,10 @@ impl Analyzer {
             .resolver(interner)
             .resolve_type(type_name, &self.entity_registry());
         if let Some(type_def_id) = type_def_id_opt {
-            let method_ids: Vec<_> = self.entity_registry().methods_on_type(type_def_id).collect();
+            let method_ids: Vec<_> = self
+                .entity_registry()
+                .methods_on_type(type_def_id)
+                .collect();
             for method_id in method_ids {
                 let (signature_id, name_id) = {
                     let registry = self.entity_registry();
@@ -626,7 +635,8 @@ impl Analyzer {
             // Methods from implement blocks
             let name_id = self.entity_registry().get_type(type_def_id).name_id;
             let type_id = ImplTypeId::from_name_id(name_id);
-            for (method_name, method_impl) in self.implement_registry().get_methods_for_type(&type_id)
+            for (method_name, method_impl) in
+                self.implement_registry().get_methods_for_type(&type_id)
             {
                 method_sigs.insert(method_name_str(method_name), method_impl.func_type.clone());
             }

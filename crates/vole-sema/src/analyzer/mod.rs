@@ -89,7 +89,8 @@ impl<'a> ResolverGuard<'a> {
         registry: &EntityRegistry,
     ) -> Option<TypeDefId> {
         use crate::resolve::ResolverEntityExt;
-        self.resolver().resolve_type_str_or_interface(name, registry)
+        self.resolver()
+            .resolve_type_str_or_interface(name, registry)
     }
 }
 
@@ -484,7 +485,6 @@ impl Analyzer {
         std::cell::RefMut::map(self.db.borrow_mut(), |db| &mut db.implements)
     }
 
-
     /// Check if we're currently inside a lambda
     fn in_lambda(&self) -> bool {
         !self.lambda_captures.is_empty()
@@ -534,7 +534,8 @@ impl Analyzer {
         };
         let (_, module_interner) = self.module_programs.get(&module_path)?;
         let sym = module_interner.lookup(name)?;
-        self.name_table().name_id(module_id, &[sym], module_interner)
+        self.name_table()
+            .name_id(module_id, &[sym], module_interner)
     }
 
     /// Create an interface TypeId by name (e.g., "Iterator").
@@ -560,20 +561,19 @@ impl Analyzer {
 
         // Create interface type directly in arena
         let type_args_vec: crate::type_arena::TypeIdVec = type_args_id.iter().copied().collect();
-        let type_id = self.type_arena_mut()
-            .interface(type_def_id, type_args_vec);
+        let type_id = self.type_arena_mut().interface(type_def_id, type_args_vec);
         Some(type_id)
     }
 
     fn method_name_id(&mut self, name: Symbol, interner: &Interner) -> NameId {
         let mut name_table = self.name_table_mut();
-        let mut namer = Namer::new(&mut *name_table, interner);
+        let mut namer = Namer::new(&mut name_table, interner);
         namer.method(name)
     }
 
     /// Look up a method NameId by string name (cross-interner safe)
     fn method_name_id_by_str(&self, name_str: &str, interner: &Interner) -> Option<NameId> {
-        vole_identity::method_name_id_by_str(&*self.name_table(), interner, name_str)
+        vole_identity::method_name_id_by_str(&self.name_table(), interner, name_str)
     }
 
     /// Look up a method on a type via EntityRegistry
@@ -639,6 +639,16 @@ impl Analyzer {
         // This makes stdlib methods like "hello".length() available without explicit imports
         self.load_prelude(interner);
 
+        // Clear monomorph caches from any previous analysis.
+        // When using a shared ModuleCache across multiple test files, the entity_registry
+        // accumulates monomorph instances from previous files. These instances reference
+        // class/method definitions that exist only in those previous files, causing
+        // "method X not found in class/record Y" errors during codegen. Clearing these
+        // caches ensures each main program analysis starts fresh while still benefiting
+        // from cached prelude analysis (prelude modules don't have generic classes that
+        // get monomorphized in the main program).
+        self.entity_registry_mut().clear_monomorph_caches();
+
         // Populate well-known types after prelude has registered all interfaces
         self.name_table_mut().populate_well_known();
 
@@ -656,7 +666,11 @@ impl Analyzer {
         // Destructure db to allow simultaneous mutable and immutable borrows of different fields
         {
             let mut db = self.db.borrow_mut();
-            let CompilationDb { ref mut names, ref entities, .. } = *db;
+            let CompilationDb {
+                ref mut names,
+                ref entities,
+                ..
+            } = *db;
             crate::well_known::populate_type_def_ids(names, entities);
         }
 
@@ -832,11 +846,13 @@ impl Analyzer {
                     // Set up type param scope for generic class methods
                     // This allows method resolution to use constraint interfaces
                     let generic_type_params = if !class.type_params.is_empty() {
-                        let class_name_id = self.name_table()
-                            .name_id(self.current_module, &[class.name], interner);
+                        let class_name_id =
+                            self.name_table()
+                                .name_id(self.current_module, &[class.name], interner);
                         class_name_id.and_then(|class_name_id| {
                             let registry = self.entity_registry();
-                            registry.type_by_name(class_name_id)
+                            registry
+                                .type_by_name(class_name_id)
                                 .and_then(|type_def_id| registry.get_generic_info(type_def_id))
                                 .map(|gi| gi.type_params.clone())
                         })
@@ -867,8 +883,9 @@ impl Analyzer {
                     }
                     // Validate interface satisfaction via EntityRegistry
                     let maybe_type_def_id = {
-                        let class_name_id = self.name_table()
-                            .name_id(self.current_module, &[class.name], interner);
+                        let class_name_id =
+                            self.name_table()
+                                .name_id(self.current_module, &[class.name], interner);
                         class_name_id.and_then(|class_name_id| {
                             let registry = self.entity_registry();
                             registry.type_by_name(class_name_id)
@@ -876,13 +893,16 @@ impl Analyzer {
                     };
                     if let Some(type_def_id) = maybe_type_def_id {
                         let type_methods = self.get_type_method_signatures(class.name, interner);
-                        let interface_ids = self.entity_registry().get_implemented_interfaces(type_def_id);
+                        let interface_ids = self
+                            .entity_registry()
+                            .get_implemented_interfaces(type_def_id);
                         for interface_id in interface_ids {
                             let interface_name_id = {
                                 let registry = self.entity_registry();
                                 registry.get_type(interface_id).name_id
                             };
-                            let iface_name_str = self.name_table().last_segment_str(interface_name_id);
+                            let iface_name_str =
+                                self.name_table().last_segment_str(interface_name_id);
                             if let Some(iface_name_str) = iface_name_str
                                 && let Some(iface_name) = interner.lookup(&iface_name_str)
                             {
@@ -907,7 +927,8 @@ impl Analyzer {
                         };
                         record_name_id.and_then(|record_name_id| {
                             let registry = self.entity_registry();
-                            registry.type_by_name(record_name_id)
+                            registry
+                                .type_by_name(record_name_id)
                                 .and_then(|type_def_id| registry.get_generic_info(type_def_id))
                                 .map(|gi| gi.type_params.clone())
                         })
@@ -939,21 +960,26 @@ impl Analyzer {
 
                     // Validate interface satisfaction via EntityRegistry
                     let maybe_type_def_id = {
-                        let record_name_id = self.name_table()
-                            .name_id(self.current_module, &[record.name], interner);
-                        record_name_id.and_then(|name_id| {
-                            self.entity_registry().type_by_name(name_id)
-                        })
+                        let record_name_id = self.name_table().name_id(
+                            self.current_module,
+                            &[record.name],
+                            interner,
+                        );
+                        record_name_id
+                            .and_then(|name_id| self.entity_registry().type_by_name(name_id))
                     };
                     if let Some(type_def_id) = maybe_type_def_id {
                         let type_methods = self.get_type_method_signatures(record.name, interner);
-                        let interface_ids = self.entity_registry().get_implemented_interfaces(type_def_id);
+                        let interface_ids = self
+                            .entity_registry()
+                            .get_implemented_interfaces(type_def_id);
                         for interface_id in interface_ids {
                             let interface_name_id = {
                                 let registry = self.entity_registry();
                                 registry.get_type(interface_id).name_id
                             };
-                            let iface_name_str = self.name_table().last_segment_str(interface_name_id);
+                            let iface_name_str =
+                                self.name_table().last_segment_str(interface_name_id);
                             if let Some(iface_name_str) = iface_name_str
                                 && let Some(iface_name) = interner.lookup(&iface_name_str)
                             {
@@ -1042,11 +1068,11 @@ impl Analyzer {
         for (i, field) in decl.fields.iter().enumerate() {
             let field_name_str = interner.resolve(field.name);
             let field_name_id = self
-            .name_table_mut()
-            .intern_raw(builtin_module, &[field_name_str]);
+                .name_table_mut()
+                .intern_raw(builtin_module, &[field_name_str]);
             let full_field_name_id = self
-            .name_table_mut()
-            .intern_raw(self.current_module, &[type_name_str, field_name_str]);
+                .name_table_mut()
+                .intern_raw(self.current_module, &[type_name_str, field_name_str]);
 
             // Resolve field type directly to TypeId
             let module_id = self.current_module;
@@ -1160,9 +1186,9 @@ impl Analyzer {
                 let resolved_fields: smallvec::SmallVec<[(NameId, ArenaTypeId); 4]> = fields
                     .iter()
                     .map(|f| {
-                        let name = ctx
-                            .name_table_mut()
-                            .intern(ctx.module_id, &[f.name], ctx.interner);
+                        let name =
+                            ctx.name_table_mut()
+                                .intern(ctx.module_id, &[f.name], ctx.interner);
                         let ty = resolve_type_to_id(&f.ty, &mut ctx);
                         (name, ty)
                     })
@@ -1172,9 +1198,9 @@ impl Analyzer {
                 > = methods
                     .iter()
                     .map(|m| {
-                        let name = ctx
-                            .name_table_mut()
-                            .intern(ctx.module_id, &[m.name], ctx.interner);
+                        let name =
+                            ctx.name_table_mut()
+                                .intern(ctx.module_id, &[m.name], ctx.interner);
                         let params = m
                             .params
                             .iter()
@@ -1409,7 +1435,10 @@ impl Analyzer {
         self.found_return = false; // Reset for new function
 
         // Set error type context if this is a fallible function
-        let error_type = self.type_arena().unwrap_fallible(return_type_id).map(|(_, e)| e);
+        let error_type = self
+            .type_arena()
+            .unwrap_fallible(return_type_id)
+            .map(|(_, e)| e);
         if let Some(error) = error_type {
             self.current_function_error_type = Some(error);
         }
@@ -1552,7 +1581,11 @@ impl Analyzer {
                 .map(|(id, args)| (id, args.first().copied()))
         };
         let (type_def_id, first_arg) = interface_info?;
-        if !self.name_table().well_known.is_iterator_type_def(type_def_id) {
+        if !self
+            .name_table()
+            .well_known
+            .is_iterator_type_def(type_def_id)
+        {
             return None;
         }
         first_arg
@@ -1606,9 +1639,11 @@ impl Analyzer {
             registry.get_type(type_def_id).kind
         };
         let self_type_id = match kind {
-            TypeDefKind::Class => self.type_arena_mut()
+            TypeDefKind::Class => self
+                .type_arena_mut()
                 .class(type_def_id, crate::type_arena::TypeIdVec::new()),
-            TypeDefKind::Record => self.type_arena_mut()
+            TypeDefKind::Record => self
+                .type_arena_mut()
                 .record(type_def_id, crate::type_arena::TypeIdVec::new()),
             _ => self.type_arena().invalid(),
         };
@@ -1643,12 +1678,12 @@ impl Analyzer {
             // Update the method's return type in EntityRegistry
             {
                 let mut db = self.db.borrow_mut();
-                let CompilationDb { ref mut entities, ref mut types, .. } = *db;
-                entities.update_method_return_type(
-                    lookup.method_id,
-                    inferred_return_type,
-                    types,
-                );
+                let CompilationDb {
+                    ref mut entities,
+                    ref mut types,
+                    ..
+                } = *db;
+                entities.update_method_return_type(lookup.method_id, inferred_return_type, types);
             }
         } else {
             // Check for missing return statement when return type is explicit and non-void
@@ -1749,7 +1784,10 @@ impl Analyzer {
         let (method_type_params, signature_id) = {
             let registry = self.entity_registry();
             let method_def = registry.get_method(method_id);
-            (method_def.method_type_params.clone(), method_def.signature_id)
+            (
+                method_def.method_type_params.clone(),
+                method_def.signature_id,
+            )
         };
 
         // Get signature components from arena
@@ -1910,14 +1948,13 @@ impl Analyzer {
                             .as_ref()
                             .map(|rt| resolve_type_to_id(rt, &mut ctx))
                             .unwrap_or_else(|| self.type_arena().void());
-                        self.type_arena_mut()
-                            .function(param_ids, return_id, false)
+                        self.type_arena_mut().function(param_ids, return_id, false)
                     };
 
                     // Store export by name string
-                    let name_id = self
-            .name_table_mut()
-            .intern(module_id, &[f.name], &module_interner);
+                    let name_id =
+                        self.name_table_mut()
+                            .intern(module_id, &[f.name], &module_interner);
                     exports.insert(name_id, func_type_id);
                 }
                 Decl::Let(l) if !l.mutable => {
@@ -1927,9 +1964,9 @@ impl Analyzer {
                         LetInit::TypeAlias(_) => continue, // Type aliases handled separately
                     };
                     // Infer type from literal for constants and store the value
-                    let name_id = self
-            .name_table_mut()
-            .intern(module_id, &[l.name], &module_interner);
+                    let name_id =
+                        self.name_table_mut()
+                            .intern(module_id, &[l.name], &module_interner);
                     let arena = self.type_arena();
                     let (ty_id, const_val) = match &init_expr.kind {
                         ExprKind::FloatLiteral(v) => (arena.f64(), Some(ConstantValue::F64(*v))),
@@ -1968,13 +2005,14 @@ impl Analyzer {
                                 .as_ref()
                                 .map(|rt| resolve_type_to_id(rt, &mut ctx))
                                 .unwrap_or_else(|| self.type_arena().void());
-                            self.type_arena_mut()
-                                .function(param_ids, return_id, false)
+                            self.type_arena_mut().function(param_ids, return_id, false)
                         };
 
-                        let name_id =
-                            self.name_table_mut()
-                                .intern(module_id, &[func.vole_name], &module_interner);
+                        let name_id = self.name_table_mut().intern(
+                            module_id,
+                            &[func.vole_name],
+                            &module_interner,
+                        );
                         exports.insert(name_id, func_type_id);
                         // Mark as external function (FFI)
                         external_funcs.insert(name_id);

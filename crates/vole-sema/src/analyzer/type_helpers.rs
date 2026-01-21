@@ -222,9 +222,7 @@ impl Analyzer {
     /// Get tuple element types if this is a tuple
     #[inline]
     pub(crate) fn unwrap_tuple_id(&self, id: ArenaTypeId) -> Option<Vec<ArenaTypeId>> {
-        self.type_arena()
-            .unwrap_tuple(id)
-            .map(|v| v.to_vec())
+        self.type_arena().unwrap_tuple(id).map(|v| v.to_vec())
     }
 
     /// Get runtime iterator element type if this is a runtime iterator
@@ -260,8 +258,6 @@ impl Analyzer {
     /// Check if TypeId is a runtime iterator type
     #[inline]
     pub(crate) fn is_runtime_iterator_id(&self, id: ArenaTypeId) -> bool {
-        self.type_arena()
-            .unwrap_runtime_iterator(id)
-            .is_some()
+        self.type_arena().unwrap_runtime_iterator(id).is_some()
     }
 }

@@ -112,10 +112,20 @@ impl Analyzer {
                 self.find_method_via_entity_registry(type_def_id, method_name_id)
             {
                 // Extract all needed method data upfront
-                let (method_defining_type_id, method_signature_id, method_has_default, method_external_binding) = {
+                let (
+                    method_defining_type_id,
+                    method_signature_id,
+                    method_has_default,
+                    method_external_binding,
+                ) = {
                     let registry = self.entity_registry();
                     let method_def = registry.get_method(method_id);
-                    (method_def.defining_type, method_def.signature_id, method_def.has_default, method_def.external_binding.clone())
+                    (
+                        method_def.defining_type,
+                        method_def.signature_id,
+                        method_def.has_default,
+                        method_def.external_binding,
+                    )
                 };
                 let (defining_type_kind, defining_type_name_id) = {
                     let registry = self.entity_registry();
@@ -250,7 +260,9 @@ impl Analyzer {
             };
             let type_sym = self.get_type_symbol_by_name_id(type_name_id, interner);
             let method_name_str = interner.resolve(method_name);
-            let interface_ids = self.entity_registry().get_implemented_interfaces(type_def_id);
+            let interface_ids = self
+                .entity_registry()
+                .get_implemented_interfaces(type_def_id);
             for interface_id in interface_ids {
                 let (interface_name_id, method_ids) = {
                     let registry = self.entity_registry();
@@ -258,10 +270,20 @@ impl Analyzer {
                     (interface_def.name_id, interface_def.methods.clone())
                 };
                 for method_id in method_ids {
-                    let (method_name_id, method_has_default, method_signature_id, method_external_binding) = {
+                    let (
+                        method_name_id,
+                        method_has_default,
+                        method_signature_id,
+                        method_external_binding,
+                    ) = {
                         let registry = self.entity_registry();
                         let method = registry.get_method(method_id);
-                        (method.name_id, method.has_default, method.signature_id, method.external_binding.clone())
+                        (
+                            method.name_id,
+                            method.has_default,
+                            method.signature_id,
+                            method.external_binding,
+                        )
                     };
                     let def_method_name = self
                         .name_table()

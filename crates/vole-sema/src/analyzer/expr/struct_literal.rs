@@ -49,19 +49,18 @@ impl Analyzer {
             }
         }
 
-        let get_fields_from_generic_info =
-            |gi: &GenericTypeInfo| -> Vec<StructFieldId> {
-                gi.field_names
-                    .iter()
-                    .zip(gi.field_types.iter())
-                    .enumerate()
-                    .map(|(i, (&name_id, &ty))| StructFieldId {
-                        name_id,
-                        ty,
-                        slot: i,
-                    })
-                    .collect()
-            };
+        let get_fields_from_generic_info = |gi: &GenericTypeInfo| -> Vec<StructFieldId> {
+            gi.field_names
+                .iter()
+                .zip(gi.field_types.iter())
+                .enumerate()
+                .map(|(i, (&name_id, &ty))| StructFieldId {
+                    name_id,
+                    ty,
+                    slot: i,
+                })
+                .collect()
+        };
 
         let (type_name, fields, result_type_id) = if let Some(type_id) = type_id_opt {
             // Extract type info before doing mutable operations
@@ -75,7 +74,10 @@ impl Analyzer {
                     registry.build_record_type(type_id).is_some(),
                 )
             };
-            let fields = generic_info.as_ref().map(|gi| get_fields_from_generic_info(gi)).unwrap_or_default();
+            let fields = generic_info
+                .as_ref()
+                .map(get_fields_from_generic_info)
+                .unwrap_or_default();
             match kind {
                 TypeDefKind::Class => {
                     if is_class_valid {
@@ -445,9 +447,7 @@ impl Analyzer {
                             let scope_param_name =
                                 self.name_table().last_segment_str(scope_param.name_id);
                             if scope_param_name.as_deref() == Some(&param_name) {
-                                return self
-                                    .type_arena_mut()
-                                    .type_param(scope_param.name_id);
+                                return self.type_arena_mut().type_param(scope_param.name_id);
                             }
                         }
                     }

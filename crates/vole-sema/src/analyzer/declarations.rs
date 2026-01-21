@@ -146,7 +146,9 @@ impl Analyzer {
             let mut name_scope = TypeParamScope::new();
             for tp in &func.type_params {
                 let tp_name_str = interner.resolve(tp.name);
-                let tp_name_id = self.name_table_mut().intern_raw(builtin_mod, &[tp_name_str]);
+                let tp_name_id = self
+                    .name_table_mut()
+                    .intern_raw(builtin_mod, &[tp_name_str]);
                 name_scope.add(TypeParamInfo {
                     name: tp.name,
                     name_id: tp_name_id,
@@ -161,7 +163,9 @@ impl Analyzer {
                 .iter()
                 .map(|tp| {
                     let tp_name_str = interner.resolve(tp.name);
-                    let tp_name_id = self.name_table_mut().intern_raw(builtin_mod, &[tp_name_str]);
+                    let tp_name_id = self
+                        .name_table_mut()
+                        .intern_raw(builtin_mod, &[tp_name_str]);
                     let constraint = tp.constraint.as_ref().and_then(|c| {
                         self.resolve_type_param_constraint(c, &name_scope, interner, tp.span)
                     });
@@ -288,12 +292,15 @@ impl Analyzer {
 
             // Register methods in EntityRegistry (single source of truth)
             // Use class TypeId as Self for resolving method signatures
-            let self_type_id = self.type_arena_mut()
+            let self_type_id = self
+                .type_arena_mut()
                 .class(entity_type_id, TypeIdVec::new());
             let builtin_mod = self.name_table_mut().builtin_module();
             for method in &class.methods {
                 let method_name_str = interner.resolve(method.name);
-                let method_name_id = self.name_table_mut().intern_raw(builtin_mod, &[method_name_str]);
+                let method_name_id = self
+                    .name_table_mut()
+                    .intern_raw(builtin_mod, &[method_name_str]);
                 let full_method_name_id = self.name_table_mut().intern_raw(
                     self.current_module,
                     &[interner.resolve(class.name), method_name_str],
@@ -325,8 +332,9 @@ impl Analyzer {
                 let class_name_str = interner.resolve(class.name);
                 for method in &statics.methods {
                     let method_name_str = interner.resolve(method.name);
-                    let method_name_id =
-                        self.name_table_mut().intern_raw(builtin_mod, &[method_name_str]);
+                    let method_name_id = self
+                        .name_table_mut()
+                        .intern_raw(builtin_mod, &[method_name_str]);
                     let full_method_name_id = self
                         .name_table_mut()
                         .intern_raw(self.current_module, &[class_name_str, method_name_str]);
@@ -359,8 +367,9 @@ impl Analyzer {
                 let class_name_str = interner.resolve(class.name);
                 for func in &external.functions {
                     let method_name_str = interner.resolve(func.vole_name);
-                    let method_name_id =
-                        self.name_table_mut().intern_raw(builtin_mod, &[method_name_str]);
+                    let method_name_id = self
+                        .name_table_mut()
+                        .intern_raw(builtin_mod, &[method_name_str]);
                     let full_method_name_id = self
                         .name_table_mut()
                         .intern_raw(self.current_module, &[class_name_str, method_name_str]);
@@ -406,7 +415,9 @@ impl Analyzer {
             let mut name_scope = TypeParamScope::new();
             for tp in &class.type_params {
                 let tp_name_str = interner.resolve(tp.name);
-                let tp_name_id = self.name_table_mut().intern_raw(builtin_mod, &[tp_name_str]);
+                let tp_name_id = self
+                    .name_table_mut()
+                    .intern_raw(builtin_mod, &[tp_name_str]);
                 name_scope.add(TypeParamInfo {
                     name: tp.name,
                     name_id: tp_name_id,
@@ -422,7 +433,9 @@ impl Analyzer {
                 .iter()
                 .map(|tp| {
                     let tp_name_str = interner.resolve(tp.name);
-                    let tp_name_id = self.name_table_mut().intern_raw(builtin_mod, &[tp_name_str]);
+                    let tp_name_id = self
+                        .name_table_mut()
+                        .intern_raw(builtin_mod, &[tp_name_str]);
                     let constraint = tp.constraint.as_ref().and_then(|c| {
                         self.resolve_type_param_constraint(c, &name_scope, interner, tp.span)
                     });
@@ -522,11 +535,12 @@ impl Analyzer {
                 .iter()
                 .map(|tp| self.type_arena_mut().type_param(tp.name_id))
                 .collect();
-            let self_type_id = self.type_arena_mut()
-                .class(entity_type_id, type_arg_ids);
+            let self_type_id = self.type_arena_mut().class(entity_type_id, type_arg_ids);
             for method in &class.methods {
                 let method_name_str = interner.resolve(method.name);
-                let method_name_id = self.name_table_mut().intern_raw(builtin_mod, &[method_name_str]);
+                let method_name_id = self
+                    .name_table_mut()
+                    .intern_raw(builtin_mod, &[method_name_str]);
                 let full_method_name_id = self.name_table_mut().intern_raw(
                     self.current_module,
                     &[interner.resolve(class.name), method_name_str],
@@ -569,8 +583,9 @@ impl Analyzer {
                 let class_name_str = interner.resolve(class.name);
                 for method in &statics.methods {
                     let method_name_str = interner.resolve(method.name);
-                    let method_name_id =
-                        self.name_table_mut().intern_raw(builtin_mod, &[method_name_str]);
+                    let method_name_id = self
+                        .name_table_mut()
+                        .intern_raw(builtin_mod, &[method_name_str]);
                     let full_method_name_id = self
                         .name_table_mut()
                         .intern_raw(self.current_module, &[class_name_str, method_name_str]);
@@ -579,7 +594,9 @@ impl Analyzer {
                     let mut merged_scope = type_param_scope.clone();
                     for tp in &method.type_params {
                         let tp_name_str = interner.resolve(tp.name);
-                        let tp_name_id = self.name_table_mut().intern_raw(builtin_mod, &[tp_name_str]);
+                        let tp_name_id = self
+                            .name_table_mut()
+                            .intern_raw(builtin_mod, &[tp_name_str]);
                         merged_scope.add(TypeParamInfo {
                             name: tp.name,
                             name_id: tp_name_id,
@@ -595,8 +612,9 @@ impl Analyzer {
                         .iter()
                         .map(|tp| {
                             let tp_name_str = interner.resolve(tp.name);
-                            let tp_name_id =
-                                self.name_table_mut().intern_raw(builtin_mod, &[tp_name_str]);
+                            let tp_name_id = self
+                                .name_table_mut()
+                                .intern_raw(builtin_mod, &[tp_name_str]);
                             let constraint = tp.constraint.as_ref().and_then(|c| {
                                 self.resolve_type_param_constraint(
                                     c,
@@ -665,8 +683,9 @@ impl Analyzer {
                 let class_name_str = interner.resolve(class.name);
                 for func in &external.functions {
                     let method_name_str = interner.resolve(func.vole_name);
-                    let method_name_id =
-                        self.name_table_mut().intern_raw(builtin_mod, &[method_name_str]);
+                    let method_name_id = self
+                        .name_table_mut()
+                        .intern_raw(builtin_mod, &[method_name_str]);
                     let full_method_name_id = self
                         .name_table_mut()
                         .intern_raw(self.current_module, &[class_name_str, method_name_str]);
@@ -795,12 +814,15 @@ impl Analyzer {
 
             // Register methods in EntityRegistry (single source of truth)
             // Use record TypeId as Self for resolving method signatures
-            let self_type_id = self.type_arena_mut()
+            let self_type_id = self
+                .type_arena_mut()
                 .record(entity_type_id, TypeIdVec::new());
             let builtin_mod = self.name_table_mut().builtin_module();
             for method in &record.methods {
                 let method_name_str = interner.resolve(method.name);
-                let method_name_id = self.name_table_mut().intern_raw(builtin_mod, &[method_name_str]);
+                let method_name_id = self
+                    .name_table_mut()
+                    .intern_raw(builtin_mod, &[method_name_str]);
                 let full_method_name_id = self.name_table_mut().intern_raw(
                     self.current_module,
                     &[interner.resolve(record.name), method_name_str],
@@ -832,8 +854,9 @@ impl Analyzer {
                 let record_name_str = interner.resolve(record.name);
                 for method in &statics.methods {
                     let method_name_str = interner.resolve(method.name);
-                    let method_name_id =
-                        self.name_table_mut().intern_raw(builtin_mod, &[method_name_str]);
+                    let method_name_id = self
+                        .name_table_mut()
+                        .intern_raw(builtin_mod, &[method_name_str]);
                     let full_method_name_id = self
                         .name_table_mut()
                         .intern_raw(self.current_module, &[record_name_str, method_name_str]);
@@ -868,7 +891,9 @@ impl Analyzer {
             let mut name_scope = TypeParamScope::new();
             for tp in &record.type_params {
                 let tp_name_str = interner.resolve(tp.name);
-                let tp_name_id = self.name_table_mut().intern_raw(builtin_mod, &[tp_name_str]);
+                let tp_name_id = self
+                    .name_table_mut()
+                    .intern_raw(builtin_mod, &[tp_name_str]);
                 name_scope.add(TypeParamInfo {
                     name: tp.name,
                     name_id: tp_name_id,
@@ -884,7 +909,9 @@ impl Analyzer {
                 .iter()
                 .map(|tp| {
                     let tp_name_str = interner.resolve(tp.name);
-                    let tp_name_id = self.name_table_mut().intern_raw(builtin_mod, &[tp_name_str]);
+                    let tp_name_id = self
+                        .name_table_mut()
+                        .intern_raw(builtin_mod, &[tp_name_str]);
                     let constraint = tp.constraint.as_ref().and_then(|c| {
                         self.resolve_type_param_constraint(c, &name_scope, interner, tp.span)
                     });
@@ -985,8 +1012,7 @@ impl Analyzer {
                 .iter()
                 .map(|tp| self.type_arena_mut().type_param(tp.name_id))
                 .collect();
-            let self_type_id = self.type_arena_mut()
-                .record(entity_type_id, type_arg_ids);
+            let self_type_id = self.type_arena_mut().record(entity_type_id, type_arg_ids);
 
             for method in &record.methods {
                 // Resolve types directly to TypeId
@@ -1020,7 +1046,9 @@ impl Analyzer {
                 };
 
                 let method_name_str = interner.resolve(method.name);
-                let method_name_id = self.name_table_mut().intern_raw(builtin_mod, &[method_name_str]);
+                let method_name_id = self
+                    .name_table_mut()
+                    .intern_raw(builtin_mod, &[method_name_str]);
                 let full_method_name_id = self.name_table_mut().intern_raw(
                     self.current_module,
                     &[interner.resolve(record.name), method_name_str],
@@ -1041,8 +1069,9 @@ impl Analyzer {
                 let record_name_str = interner.resolve(record.name);
                 for method in &statics.methods {
                     let method_name_str = interner.resolve(method.name);
-                    let method_name_id =
-                        self.name_table_mut().intern_raw(builtin_mod, &[method_name_str]);
+                    let method_name_id = self
+                        .name_table_mut()
+                        .intern_raw(builtin_mod, &[method_name_str]);
                     let full_method_name_id = self
                         .name_table_mut()
                         .intern_raw(self.current_module, &[record_name_str, method_name_str]);
@@ -1051,7 +1080,9 @@ impl Analyzer {
                     let mut merged_scope = type_param_scope.clone();
                     for tp in &method.type_params {
                         let tp_name_str = interner.resolve(tp.name);
-                        let tp_name_id = self.name_table_mut().intern_raw(builtin_mod, &[tp_name_str]);
+                        let tp_name_id = self
+                            .name_table_mut()
+                            .intern_raw(builtin_mod, &[tp_name_str]);
                         merged_scope.add(TypeParamInfo {
                             name: tp.name,
                             name_id: tp_name_id,
@@ -1067,8 +1098,9 @@ impl Analyzer {
                         .iter()
                         .map(|tp| {
                             let tp_name_str = interner.resolve(tp.name);
-                            let tp_name_id =
-                                self.name_table_mut().intern_raw(builtin_mod, &[tp_name_str]);
+                            let tp_name_id = self
+                                .name_table_mut()
+                                .intern_raw(builtin_mod, &[tp_name_str]);
                             let constraint = tp.constraint.as_ref().and_then(|c| {
                                 self.resolve_type_param_constraint(
                                     c,
@@ -1208,7 +1240,9 @@ impl Analyzer {
         let mut name_scope = TypeParamScope::new();
         for tp in &interface_decl.type_params {
             let tp_name_str = interner.resolve(tp.name);
-            let tp_name_id = self.name_table_mut().intern_raw(builtin_mod, &[tp_name_str]);
+            let tp_name_id = self
+                .name_table_mut()
+                .intern_raw(builtin_mod, &[tp_name_str]);
             name_scope.add(TypeParamInfo {
                 name: tp.name,
                 name_id: tp_name_id,
@@ -1223,7 +1257,9 @@ impl Analyzer {
             .iter()
             .map(|tp| {
                 let tp_name_str = interner.resolve(tp.name);
-                let tp_name_id = self.name_table_mut().intern_raw(builtin_mod, &[tp_name_str]);
+                let tp_name_id = self
+                    .name_table_mut()
+                    .intern_raw(builtin_mod, &[tp_name_str]);
                 let constraint = tp.constraint.as_ref().and_then(|c| {
                     self.resolve_type_param_constraint(c, &name_scope, interner, tp.span)
                 });
@@ -1417,7 +1453,9 @@ impl Analyzer {
         // Register methods in EntityRegistry (with external bindings)
         for (_, method_name_str, params_id, return_type_id, has_default) in &method_data {
             let builtin_mod = self.name_table_mut().builtin_module();
-            let method_name_id = self.name_table_mut().intern_raw(builtin_mod, &[method_name_str]);
+            let method_name_id = self
+                .name_table_mut()
+                .intern_raw(builtin_mod, &[method_name_str]);
             let full_method_name_id = self
                 .name_table_mut()
                 .intern_raw(self.current_module, &[&name_str, method_name_str]);
@@ -1473,7 +1511,9 @@ impl Analyzer {
             for method in &statics_block.methods {
                 let method_name_str = interner.resolve(method.name).to_string();
                 let builtin_mod = self.name_table_mut().builtin_module();
-                let method_name_id = self.name_table_mut().intern_raw(builtin_mod, &[&method_name_str]);
+                let method_name_id = self
+                    .name_table_mut()
+                    .intern_raw(builtin_mod, &[&method_name_str]);
                 let full_method_name_id = self
                     .name_table_mut()
                     .intern_raw(self.current_module, &[&name_str, &method_name_str]);
@@ -1504,15 +1544,16 @@ impl Analyzer {
                     .intern(&mut self.type_arena_mut());
 
                 let external_binding = static_external_methods.get(&method_name_str).copied();
-                self.entity_registry_mut().register_static_method_with_binding(
-                    entity_type_id,
-                    method_name_id,
-                    full_method_name_id,
-                    signature_id,
-                    has_default,
-                    external_binding,
-                    Vec::new(), // Interface static methods, no method type params
-                );
+                self.entity_registry_mut()
+                    .register_static_method_with_binding(
+                        entity_type_id,
+                        method_name_id,
+                        full_method_name_id,
+                        signature_id,
+                        has_default,
+                        external_binding,
+                        Vec::new(), // Interface static methods, no method type params
+                    );
             }
         }
 
@@ -1520,7 +1561,9 @@ impl Analyzer {
         for (i, (field_name, field_type_id)) in resolved_fields.iter().enumerate() {
             let field_name_str = interner.resolve(*field_name).to_string();
             let builtin_mod = self.name_table_mut().builtin_module();
-            let field_name_id = self.name_table_mut().intern_raw(builtin_mod, &[&field_name_str]);
+            let field_name_id = self
+                .name_table_mut()
+                .intern_raw(builtin_mod, &[&field_name_str]);
             let full_field_name_id = self
                 .name_table_mut()
                 .intern_raw(self.current_module, &[&name_str, &field_name_str]);
@@ -1669,8 +1712,9 @@ impl Analyzer {
                     for method in &statics_block.methods {
                         let method_name_str = interner.resolve(method.name).to_string();
                         let builtin_mod = self.name_table_mut().builtin_module();
-                        let method_name_id =
-                            self.name_table_mut().intern_raw(builtin_mod, &[&method_name_str]);
+                        let method_name_id = self
+                            .name_table_mut()
+                            .intern_raw(builtin_mod, &[&method_name_str]);
                         let full_method_name_id = self
                             .name_table_mut()
                             .intern_raw(self.current_module, &[&type_name_str, &method_name_str]);
@@ -1705,8 +1749,9 @@ impl Analyzer {
                         for func in &external.functions {
                             let method_name_str = interner.resolve(func.vole_name).to_string();
                             let builtin_mod = self.name_table_mut().builtin_module();
-                            let method_name_id =
-                                self.name_table_mut().intern_raw(builtin_mod, &[&method_name_str]);
+                            let method_name_id = self
+                                .name_table_mut()
+                                .intern_raw(builtin_mod, &[&method_name_str]);
                             let full_method_name_id = self.name_table_mut().intern_raw(
                                 self.current_module,
                                 &[&type_name_str, &method_name_str],
@@ -1733,22 +1778,23 @@ impl Analyzer {
                                 .unwrap_or_else(|| method_name_str.clone());
                             let builtin_mod = self.name_table_mut().builtin_module();
 
-                            self.entity_registry_mut().register_static_method_with_binding(
-                                entity_type_id,
-                                method_name_id,
-                                full_method_name_id,
-                                signature_id,
-                                false,
-                                Some(ExternalMethodInfo {
-                                    module_path: self
-                                        .name_table_mut()
-                                        .intern_raw(builtin_mod, &[&external.module_path]),
-                                    native_name: self
-                                        .name_table_mut()
-                                        .intern_raw(builtin_mod, &[&native_name_str]),
-                                }),
-                                Vec::new(), // External static methods, no method type params
-                            );
+                            self.entity_registry_mut()
+                                .register_static_method_with_binding(
+                                    entity_type_id,
+                                    method_name_id,
+                                    full_method_name_id,
+                                    signature_id,
+                                    false,
+                                    Some(ExternalMethodInfo {
+                                        module_path: self
+                                            .name_table_mut()
+                                            .intern_raw(builtin_mod, &[&external.module_path]),
+                                        native_name: self
+                                            .name_table_mut()
+                                            .intern_raw(builtin_mod, &[&native_name_str]),
+                                    }),
+                                    Vec::new(), // External static methods, no method type params
+                                );
                         }
                     }
                 }
@@ -1762,9 +1808,9 @@ impl Analyzer {
         let builtin_mod = self.name_table_mut().builtin_module();
 
         for func in &ext_block.functions {
-            let name_id = self
-                .name_table_mut()
-                .intern(self.current_module, &[func.vole_name], interner);
+            let name_id =
+                self.name_table_mut()
+                    .intern(self.current_module, &[func.vole_name], interner);
 
             // For generic external functions, set up type param scope and register with GenericFuncInfo
             if !func.type_params.is_empty() {
@@ -1774,7 +1820,9 @@ impl Analyzer {
                     .iter()
                     .map(|tp| {
                         let tp_name_str = interner.resolve(tp.name);
-                        let tp_name_id = self.name_table_mut().intern_raw(builtin_mod, &[tp_name_str]);
+                        let tp_name_id = self
+                            .name_table_mut()
+                            .intern_raw(builtin_mod, &[tp_name_str]);
                         TypeParamInfo {
                             name: tp.name,
                             name_id: tp_name_id,
@@ -1842,7 +1890,9 @@ impl Analyzer {
                         module_path: self
                             .name_table_mut()
                             .intern_raw(builtin_mod, &[&ext_block.module_path]),
-                        native_name: self.name_table_mut().intern_raw(builtin_mod, &[&native_name_str]),
+                        native_name: self
+                            .name_table_mut()
+                            .intern_raw(builtin_mod, &[&native_name_str]),
                     },
                 );
             } else {

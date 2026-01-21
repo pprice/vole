@@ -86,7 +86,9 @@ impl ModuleCache {
     pub fn type_arena(&self) -> Rc<RefCell<TypeArena>> {
         // Return a reference to the TypeArena within the db
         // This is a compatibility shim - callers should migrate to using db() directly
-        unimplemented!("type_arena() is deprecated - use db() and access db.borrow().types directly")
+        unimplemented!(
+            "type_arena() is deprecated - use db() and access db.borrow().types directly"
+        )
     }
 
     /// Check if a module is cached.

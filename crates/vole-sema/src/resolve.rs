@@ -261,12 +261,8 @@ fn resolve_named_type_to_id(sym: Symbol, ctx: &mut TypeResolutionContext<'_>) ->
                 // Return aliased type directly
                 aliased_type.unwrap_or_else(|| ctx.type_arena_mut().invalid())
             }
-            TypeDefKind::Record => ctx
-                .type_arena_mut()
-                .record(type_def_id, TypeIdVec::new()),
-            TypeDefKind::Class => ctx
-                .type_arena_mut()
-                .class(type_def_id, TypeIdVec::new()),
+            TypeDefKind::Record => ctx.type_arena_mut().record(type_def_id, TypeIdVec::new()),
+            TypeDefKind::Class => ctx.type_arena_mut().class(type_def_id, TypeIdVec::new()),
             TypeDefKind::Interface => ctx
                 .type_arena_mut()
                 .interface(type_def_id, TypeIdVec::new()),
@@ -301,12 +297,8 @@ fn resolve_generic_type_to_id(
     if let Some((type_def_id, kind)) = lookup_result {
         match kind {
             TypeDefKind::Class => ctx.type_arena_mut().class(type_def_id, type_args_id),
-            TypeDefKind::Record => ctx
-                .type_arena_mut()
-                .record(type_def_id, type_args_id),
-            TypeDefKind::Interface => ctx
-                .type_arena_mut()
-                .interface(type_def_id, type_args_id),
+            TypeDefKind::Record => ctx.type_arena_mut().record(type_def_id, type_args_id),
+            TypeDefKind::Interface => ctx.type_arena_mut().interface(type_def_id, type_args_id),
             TypeDefKind::Alias | TypeDefKind::ErrorType | TypeDefKind::Primitive => {
                 // These types don't support type parameters
                 ctx.type_arena_mut().invalid()
@@ -358,7 +350,8 @@ fn resolve_structural_type_to_id(
         })
         .collect();
 
-    ctx.type_arena_mut().structural(resolved_fields, resolved_methods)
+    ctx.type_arena_mut()
+        .structural(resolved_fields, resolved_methods)
 }
 
 #[cfg(test)]

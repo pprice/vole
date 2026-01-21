@@ -153,7 +153,7 @@ impl Analyzer {
                 let module_id = self.name_table().main_module();
                 let name_id = {
                     let mut table = self.name_table_mut();
-                    let mut namer = Namer::new(&mut *table, interner);
+                    let mut namer = Namer::new(&mut table, interner);
                     namer.intern_symbol(module_id, *sym)
                 };
                 let key = MonomorphKey::new(name_id, type_keys);
@@ -167,7 +167,7 @@ impl Analyzer {
                         .unwrap_or_else(|| interner.resolve(*sym).to_string());
                     let mangled_name = {
                         let mut table = self.name_table_mut();
-                        let mut namer = Namer::new(&mut *table, interner);
+                        let mut namer = Namer::new(&mut table, interner);
                         namer.monomorph_str(module_id, &base_str, id)
                     };
                     // Use inferred_id directly as substitutions (already TypeId-based)

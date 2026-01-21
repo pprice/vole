@@ -256,7 +256,7 @@ impl Analyzer {
                                 if self.entity_registry().build_record_type(type_id).is_some() {
                                     let fields_ref = generic_info
                                         .as_ref()
-                                        .map(|gi| get_fields_from_info(gi))
+                                        .map(get_fields_from_info)
                                         .unwrap_or_default();
                                     let record_type_id =
                                         self.type_arena_mut().record(type_id, Vec::new());
@@ -269,7 +269,7 @@ impl Analyzer {
                                 if self.entity_registry().build_class_type(type_id).is_some() {
                                     let fields_ref = generic_info
                                         .as_ref()
-                                        .map(|gi| get_fields_from_info(gi))
+                                        .map(get_fields_from_info)
                                         .unwrap_or_default();
                                     let class_type_id =
                                         self.type_arena_mut().class(type_id, Vec::new());
@@ -295,8 +295,7 @@ impl Analyzer {
                                         }
                                     })
                                     .collect();
-                                let error_type_id =
-                                    self.type_arena_mut().error_type(type_id);
+                                let error_type_id = self.type_arena_mut().error_type(type_id);
                                 (Some(error_type_id), fields_ref)
                             }
                             _ => {
@@ -555,14 +554,12 @@ impl Analyzer {
                 type_def_id.and_then(|type_def_id| {
                     let kind = self.entity_registry().get_type(type_def_id).kind;
                     match kind {
-                        TypeDefKind::Class => self
-                            .type_arena_mut()
-                            .class(type_def_id, vec![])
-                            .into(),
-                        TypeDefKind::Record => self
-                            .type_arena_mut()
-                            .record(type_def_id, vec![])
-                            .into(),
+                        TypeDefKind::Class => {
+                            self.type_arena_mut().class(type_def_id, vec![]).into()
+                        }
+                        TypeDefKind::Record => {
+                            self.type_arena_mut().record(type_def_id, vec![]).into()
+                        }
                         _ => None,
                     }
                 })
@@ -579,14 +576,12 @@ impl Analyzer {
                 type_def_id.and_then(|type_def_id| {
                     let kind = self.entity_registry().get_type(type_def_id).kind;
                     match kind {
-                        TypeDefKind::Class => self
-                            .type_arena_mut()
-                            .class(type_def_id, vec![])
-                            .into(),
-                        TypeDefKind::Record => self
-                            .type_arena_mut()
-                            .record(type_def_id, vec![])
-                            .into(),
+                        TypeDefKind::Class => {
+                            self.type_arena_mut().class(type_def_id, vec![]).into()
+                        }
+                        TypeDefKind::Record => {
+                            self.type_arena_mut().record(type_def_id, vec![]).into()
+                        }
                         _ => None,
                     }
                 })

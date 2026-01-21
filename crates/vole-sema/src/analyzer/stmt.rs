@@ -252,9 +252,7 @@ impl Analyzer {
                 let expected_value_type_id = self.current_function_return.map(|expected| {
                     // If expected is fallible, extract success type for comparison
                     // A `return value` statement returns the success type, not the full fallible type
-                    if let Some((success, _error)) =
-                        self.type_arena().unwrap_fallible(expected)
-                    {
+                    if let Some((success, _error)) = self.type_arena().unwrap_fallible(expected) {
                         success
                     } else {
                         expected

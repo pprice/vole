@@ -386,12 +386,12 @@ impl Analyzer {
                 // Extract values before struct construction to avoid RefMut lifetime overlap
                 let builtin_module = self.name_table_mut().builtin_module();
                 let module_path_str = self.name_table().module_path(module_id).to_string();
-                let module_path_id =
-                    self.name_table_mut()
-                        .intern_raw(builtin_module, &[&module_path_str]);
-                let native_name_id =
-                    self.name_table_mut()
-                        .intern_raw(builtin_module, &[&method_name_str]);
+                let module_path_id = self
+                    .name_table_mut()
+                    .intern_raw(builtin_module, &[&module_path_str]);
+                let native_name_id = self
+                    .name_table_mut()
+                    .intern_raw(builtin_module, &[&method_name_str]);
                 Some(ExternalMethodInfo {
                     module_path: module_path_id,
                     native_name: native_name_id,
@@ -620,7 +620,10 @@ impl Analyzer {
             let (method_type_params, signature_id) = {
                 let registry = self.entity_registry();
                 let method_def = registry.get_method(method_id);
-                (method_def.method_type_params.clone(), method_def.signature_id)
+                (
+                    method_def.method_type_params.clone(),
+                    method_def.signature_id,
+                )
             };
 
             // Get signature components from arena

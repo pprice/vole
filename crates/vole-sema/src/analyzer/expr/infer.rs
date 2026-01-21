@@ -350,10 +350,7 @@ impl Analyzer {
                 } else {
                     self.check_expr(&is_expr.value, interner)?
                 };
-                let union_variants = self
-                    .type_arena()
-                    .unwrap_union(value_type_id)
-                    .cloned();
+                let union_variants = self.type_arena().unwrap_union(value_type_id).cloned();
                 if let Some(variants) = union_variants
                     && !variants.contains(&tested_type_id)
                 {

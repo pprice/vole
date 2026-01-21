@@ -13,7 +13,7 @@ use vole_frontend::NodeId;
 
 /// Encapsulates all NodeId-keyed metadata from semantic analysis.
 /// This includes expression types, method resolutions, and generic instantiation info.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ExpressionData {
     /// Type of each expression node (stored as interned TypeId handles)
     types: HashMap<NodeId, TypeId>,
@@ -34,21 +34,6 @@ pub struct ExpressionData {
     /// return type `T` is substituted to `i32`. This map stores the concrete type
     /// so codegen doesn't need to recompute the substitution.
     substituted_return_types: HashMap<NodeId, TypeId>,
-}
-
-impl Default for ExpressionData {
-    fn default() -> Self {
-        Self {
-            types: HashMap::new(),
-            methods: HashMap::new(),
-            generics: HashMap::new(),
-            class_method_generics: HashMap::new(),
-            static_method_generics: HashMap::new(),
-            module_types: FxHashMap::default(),
-            module_methods: FxHashMap::default(),
-            substituted_return_types: HashMap::new(),
-        }
-    }
 }
 
 impl ExpressionData {

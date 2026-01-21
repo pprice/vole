@@ -17,10 +17,17 @@ impl Analyzer {
 
     pub(super) fn register_builtin_methods(&mut self, interner: &Interner) {
         // Step 1: Collect all name IDs while holding name_table borrow
-        let (method_len, method_iter, std_intrinsics, array_iter_name, string_chars_iter_name, range_iter_name) = {
+        let (
+            method_len,
+            method_iter,
+            std_intrinsics,
+            array_iter_name,
+            string_chars_iter_name,
+            range_iter_name,
+        ) = {
             let builtin_module = self.name_table_mut().builtin_module();
             let mut name_table = self.name_table_mut();
-            let mut namer = Namer::new(&mut *name_table, interner);
+            let mut namer = Namer::new(&mut name_table, interner);
             (
                 namer.intern_raw(builtin_module, &["length"]),
                 namer.intern_raw(builtin_module, &["iter"]),
@@ -128,7 +135,7 @@ impl Analyzer {
         let (primitive_names, array_name) = {
             let builtin_module = self.name_table_mut().builtin_module();
             let mut name_table = self.name_table_mut();
-            let mut namer = Namer::new(&mut *name_table, interner);
+            let mut namer = Namer::new(&mut name_table, interner);
 
             let primitives: Vec<_> = [
                 PrimitiveTypeId::I8,
@@ -163,7 +170,8 @@ impl Analyzer {
 
         // Now register with entity_registry after dropping name_table borrow
         for (prim, name_id) in primitive_names {
-            self.entity_registry_mut().register_primitive_name(prim, name_id);
+            self.entity_registry_mut()
+                .register_primitive_name(prim, name_id);
         }
         self.entity_registry_mut().register_array_name(array_name);
     }
