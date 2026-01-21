@@ -22,9 +22,8 @@ use super::types::{
     type_id_size, type_id_to_cranelift,
 };
 
-/// Compile a block of statements (wrapper for compatibility)
-/// TODO(vole-2vgz.5): Remove this function once all callers use compile_func_body
-#[allow(dead_code)]
+/// Compile a block of statements.
+/// Used for compiling scoped let declarations in tests blocks.
 pub(super) fn compile_block(
     builder: &mut FunctionBuilder,
     block: &vole_frontend::Block,
