@@ -1798,7 +1798,14 @@ impl Analyzer {
                 .expect("method signature must be a function type");
             (params.clone(), ret)
         };
-        let saved_ctx = self.enter_function_context(return_type_id);
+
+        // Determine if we need to infer the return type
+        let needs_inference = method.return_type.is_none();
+        let saved_ctx = if needs_inference {
+            self.enter_function_context_inferring()
+        } else {
+            self.enter_function_context(return_type_id)
+        };
 
         // Mark that we're in a static method (for self-usage detection)
         self.current_static_method = Some(interner.resolve(method.name).to_string());
@@ -1825,7 +1832,28 @@ impl Analyzer {
         }
 
         // Check body
-        self.check_block(body, interner)?;
+        self.check_func_body(body, interner)?;
+
+        // If we were inferring the return type, update the method signature
+        if needs_inference {
+            // Get inferred type, defaulting to void if no return was found
+            let inferred_return_type = match self.current_function_return {
+                Some(ty) => ty,
+                None => self.type_arena().void(),
+            };
+
+            // Update the method signature with the inferred return type
+            // Destructure db to get both entities and types to avoid RefCell conflict
+            {
+                let mut db = self.db.borrow_mut();
+                let CompilationDb {
+                    ref mut entities,
+                    ref mut types,
+                    ..
+                } = *db;
+                entities.update_method_return_type(method_id, inferred_return_type, types);
+            }
+        }
 
         // Restore scope and context
         if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {

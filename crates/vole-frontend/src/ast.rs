@@ -162,8 +162,8 @@ pub struct InterfaceMethod {
     pub type_params: Vec<TypeParam>,
     pub params: Vec<Param>,
     pub return_type: Option<TypeExpr>,
-    pub body: Option<Block>, // None = abstract, Some = default implementation
-    pub is_default: bool,    // true if marked with 'default' keyword
+    pub body: Option<FuncBody>, // None = abstract, Some = default implementation (block or expr)
+    pub is_default: bool,       // true if marked with 'default' keyword
     pub span: Span,
 }
 

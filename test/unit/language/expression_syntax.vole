@@ -1,0 +1,268 @@
+// Test expression syntax (=> expr) for functions, methods, statics, and defaults
+
+// =============================================================================
+// Basic function expression syntax
+// =============================================================================
+
+func double(x: i64) => x * 2
+func add(a: i64, b: i64) => a + b
+func identity(x: i64) => x
+func always_true() => true
+func greeting() => "hello"
+
+// =============================================================================
+// Record with expression syntax static methods
+// =============================================================================
+
+record Point {
+    x: i64,
+    y: i64,
+
+    statics {
+        func origin() => Point { x: 0, y: 0 }
+        func unit_x() => Point { x: 1, y: 0 }
+        func unit_y() => Point { x: 0, y: 1 }
+        func create(x: i64, y: i64) => Point { x: x, y: y }
+        func sum(p1: Point, p2: Point) => Point { x: p1.x + p2.x, y: p1.y + p2.y }
+    }
+
+    // Instance methods with expression syntax
+    func magnitude_squared() => self.x * self.x + self.y * self.y
+    func is_origin() => self.x == 0 && self.y == 0
+}
+
+// =============================================================================
+// Class with expression syntax static and instance methods
+// =============================================================================
+
+class Counter {
+    value: i64,
+
+    statics {
+        func zero() => Counter { value: 0 }
+        func from(v: i64) => Counter { value: v }
+        func sum(a: Counter, b: Counter) => Counter { value: a.value + b.value }
+    }
+
+    func get() => self.value
+    func is_zero() => self.value == 0
+}
+
+// =============================================================================
+// Interface with expression syntax default methods
+// =============================================================================
+
+interface Numeric {
+    func value() -> i64
+
+    // Note: Interface default methods with expression syntax require explicit return types
+    // because return type inference for interface methods isn't yet implemented
+    default func double() -> i64 => self.value() * 2
+    default func triple() -> i64 => self.value() * 3
+    default func is_positive() -> bool => self.value() > 0
+    default func is_zero() -> bool => self.value() == 0
+    default func negate() -> i64 => -self.value()
+}
+
+record Number implements Numeric {
+    n: i64,
+
+    func value() -> i64 => self.n
+}
+
+// Interface with default method calling another default method
+interface Describable {
+    func name() -> string
+
+    default func description() -> string => self.name()
+    default func has_name() -> bool => self.name() != ""
+}
+
+record Item implements Describable {
+    title: string,
+
+    func name() -> string => self.title
+}
+
+// =============================================================================
+// Mixed block and expression syntax
+// =============================================================================
+
+record Mixed {
+    a: i64,
+    b: i64,
+
+    statics {
+        // Expression syntax
+        func simple() => Mixed { a: 1, b: 2 }
+
+        // Block syntax
+        func complex(x: i64) -> Mixed {
+            let computed = x * 2
+            return Mixed { a: computed, b: computed + 1 }
+        }
+    }
+
+    // Expression syntax
+    func sum() => self.a + self.b
+
+    // Block syntax
+    func product() -> i64 {
+        return self.a * self.b
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+tests "expression syntax - top level functions" {
+    test "simple expression function" {
+        assert(double(5) == 10)
+        assert(double(0) == 0)
+        assert(double(-3) == -6)
+    }
+
+    test "multiple parameter expression function" {
+        assert(add(3, 4) == 7)
+        assert(add(-1, 1) == 0)
+    }
+
+    test "identity expression function" {
+        assert(identity(42) == 42)
+    }
+
+    test "no-param expression function returning bool" {
+        assert(always_true() == true)
+    }
+
+    test "no-param expression function returning string" {
+        assert(greeting() == "hello")
+    }
+}
+
+tests "expression syntax - static methods" {
+    test "static expression method - no params" {
+        let p = Point.origin()
+        assert(p.x == 0)
+        assert(p.y == 0)
+    }
+
+    test "static expression method - unit vectors" {
+        let ux = Point.unit_x()
+        let uy = Point.unit_y()
+        assert(ux.x == 1 && ux.y == 0)
+        assert(uy.x == 0 && uy.y == 1)
+    }
+
+    test "static expression method - with params" {
+        let p = Point.create(10, 20)
+        assert(p.x == 10)
+        assert(p.y == 20)
+    }
+
+    test "static expression method - record params" {
+        let p1 = Point.create(1, 2)
+        let p2 = Point.create(3, 4)
+        let sum = Point.sum(p1, p2)
+        assert(sum.x == 4)
+        assert(sum.y == 6)
+    }
+
+    test "class static expression methods" {
+        let c = Counter.zero()
+        assert(c.get() == 0)
+
+        let c2 = Counter.from(42)
+        assert(c2.get() == 42)
+    }
+
+    test "class static expression method with class params" {
+        let a = Counter.from(10)
+        let b = Counter.from(20)
+        let total = Counter.sum(a, b)
+        assert(total.get() == 30)
+    }
+}
+
+tests "expression syntax - instance methods" {
+    test "record instance expression method" {
+        let p = Point.create(3, 4)
+        assert(p.magnitude_squared() == 25)
+    }
+
+    test "record instance expression method returning bool" {
+        let origin = Point.origin()
+        let other = Point.create(1, 0)
+        assert(origin.is_origin() == true)
+        assert(other.is_origin() == false)
+    }
+
+    test "class instance expression methods" {
+        let c = Counter.from(5)
+        assert(c.get() == 5)
+        assert(c.is_zero() == false)
+
+        let zero = Counter.zero()
+        assert(zero.is_zero() == true)
+    }
+}
+
+tests "expression syntax - interface default methods" {
+    test "default expression method - simple" {
+        let n = Number { n: 5 }
+        assert(n.double() == 10)
+        assert(n.triple() == 15)
+    }
+
+    test "default expression method - bool return" {
+        let pos = Number { n: 5 }
+        let neg = Number { n: -3 }
+        let zero = Number { n: 0 }
+
+        assert(pos.is_positive() == true)
+        assert(neg.is_positive() == false)
+        assert(zero.is_positive() == false)
+
+        assert(zero.is_zero() == true)
+        assert(pos.is_zero() == false)
+    }
+
+    test "default expression method - negate" {
+        let n = Number { n: 7 }
+        assert(n.negate() == -7)
+
+        let neg = Number { n: -3 }
+        assert(neg.negate() == 3)
+    }
+
+    test "default expression method returning string" {
+        let item = Item { title: "Widget" }
+        assert(item.description() == "Widget")
+    }
+
+    test "default expression method with comparison" {
+        let item = Item { title: "Widget" }
+        let empty = Item { title: "" }
+        assert(item.has_name() == true)
+        assert(empty.has_name() == false)
+    }
+}
+
+tests "expression syntax - mixed with block syntax" {
+    test "mixed static methods" {
+        let simple = Mixed.simple()
+        assert(simple.a == 1)
+        assert(simple.b == 2)
+
+        let complex = Mixed.complex(5)
+        assert(complex.a == 10)
+        assert(complex.b == 11)
+    }
+
+    test "mixed instance methods" {
+        let m = Mixed.simple()
+        assert(m.sum() == 3)      // expression syntax
+        assert(m.product() == 2)  // block syntax
+    }
+}

@@ -6,6 +6,7 @@ use rustc_hash::FxHashMap;
 
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, InstBuilder, types};
 
+use super::common::{FunctionCompileConfig, compile_function_inner};
 use super::{Compiler, ControlFlowCtx, SelfParam, TestInfo, TypeResolver};
 use crate::FunctionKey;
 use crate::stmt::{compile_block, compile_func_body};
@@ -456,14 +457,15 @@ impl Compiler<'_> {
         );
         self.jit.ctx.func.signature = sig;
 
-        // Collect param type ids (TypeId-native)
+        // Build params: Vec<(Symbol, TypeId, Type)>
+        // First collect type IDs (which may access arena internally)
         let query = self.query();
         let type_metadata = &self.type_metadata;
-        let param_type_ids: Vec<TypeId> = func
+        let param_info: Vec<(Symbol, TypeId)> = func
             .params
             .iter()
             .map(|p| {
-                resolve_type_expr_to_id(
+                let type_id = resolve_type_expr_to_id(
                     &p.ty,
                     query.registry(),
                     type_metadata,
@@ -471,16 +473,21 @@ impl Compiler<'_> {
                     query.name_table(),
                     module_id,
                     &self.analyzed.type_arena,
-                )
+                );
+                (p.name, type_id)
             })
             .collect();
-        let arena_ref = self.analyzed.type_arena.borrow();
-        let param_types: Vec<types::Type> = param_type_ids
-            .iter()
-            .map(|&ty| type_id_to_cranelift(ty, &arena_ref, self.pointer_type))
-            .collect();
-        drop(arena_ref);
-        let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
+        let params: Vec<(Symbol, TypeId, types::Type)> = {
+            let arena_ref = self.analyzed.type_arena.borrow();
+            param_info
+                .into_iter()
+                .map(|(name, type_id)| {
+                    let cranelift_type =
+                        type_id_to_cranelift(type_id, &arena_ref, self.pointer_type);
+                    (name, type_id, cranelift_type)
+                })
+                .collect()
+        };
 
         // Get function return type id (TypeId-native)
         let return_type_id = func
@@ -491,33 +498,10 @@ impl Compiler<'_> {
         // Get source file pointer
         let source_file_ptr = self.source_file_ptr();
 
-        // Create function builder
+        // Create function builder and compile
         let mut builder_ctx = FunctionBuilderContext::new();
         {
-            let mut builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-
-            let entry_block = builder.create_block();
-            builder.append_block_params_for_function_params(entry_block);
-            builder.switch_to_block(entry_block);
-
-            // Build variables map
-            let mut variables = HashMap::new();
-
-            // Bind parameters to variables
-            let params = builder.block_params(entry_block).to_vec();
-            for (((name, ty), type_id), val) in param_names
-                .iter()
-                .zip(param_types.iter())
-                .zip(param_type_ids.iter())
-                .zip(params.iter())
-            {
-                let var = builder.declare_var(*ty);
-                builder.def_var(var, *val);
-                variables.insert(*name, (var, *type_id));
-            }
-
-            // Compile function body with module's interner
-            let mut cf_ctx = ControlFlowCtx::default();
+            let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
                 interner: module_interner, // Use module's interner
@@ -539,25 +523,8 @@ impl Compiler<'_> {
                 type_substitutions: None,
                 substitution_cache: RefCell::new(HashMap::new()),
             };
-            let (terminated, expr_value) = compile_func_body(
-                &mut builder,
-                &func.body,
-                &mut variables,
-                &mut cf_ctx,
-                &mut ctx,
-                None,
-                None,
-            )?;
-
-            // Add implicit return if no explicit return
-            if let Some(value) = expr_value {
-                builder.ins().return_(&[value.value]);
-            } else if !terminated {
-                builder.ins().return_(&[]);
-            }
-
-            builder.seal_all_blocks();
-            builder.finalize();
+            let config = FunctionCompileConfig::top_level(&func.body, params, return_type_id);
+            compile_function_inner(builder, &mut ctx, config)?;
         }
 
         // Define the function
@@ -587,50 +554,32 @@ impl Compiler<'_> {
         );
         self.jit.ctx.func.signature = sig;
 
-        // Collect param type ids (TypeId-native)
-        let param_type_ids: Vec<TypeId> = func
+        // Build params: Vec<(Symbol, TypeId, Type)>
+        // First collect type IDs (may borrow arena internally), then convert to cranelift types
+        let param_info: Vec<(Symbol, TypeId)> = func
             .params
             .iter()
-            .map(|p| self.resolve_type_to_id(&p.ty))
+            .map(|p| (p.name, self.resolve_type_to_id(&p.ty)))
             .collect();
-        let arena_ref = self.analyzed.type_arena.borrow();
-        let param_types: Vec<types::Type> = param_type_ids
-            .iter()
-            .map(|&ty| type_id_to_cranelift(ty, &arena_ref, self.pointer_type))
-            .collect();
-        drop(arena_ref);
-        let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
+        let params: Vec<(Symbol, TypeId, types::Type)> = {
+            let arena_ref = self.analyzed.type_arena.borrow();
+            param_info
+                .into_iter()
+                .map(|(name, type_id)| {
+                    let cranelift_type =
+                        type_id_to_cranelift(type_id, &arena_ref, self.pointer_type);
+                    (name, type_id, cranelift_type)
+                })
+                .collect()
+        };
 
         // Get source file pointer before borrowing ctx.func
         let source_file_ptr = self.source_file_ptr();
 
-        // Create function builder
+        // Create function builder and compile
         let mut builder_ctx = FunctionBuilderContext::new();
         {
-            let mut builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-
-            let entry_block = builder.create_block();
-            builder.append_block_params_for_function_params(entry_block);
-            builder.switch_to_block(entry_block);
-
-            // Build variables map
-            let mut variables = HashMap::new();
-
-            // Bind parameters to variables
-            let params = builder.block_params(entry_block).to_vec();
-            for (((name, ty), type_id), val) in param_names
-                .iter()
-                .zip(param_types.iter())
-                .zip(param_type_ids.iter())
-                .zip(params.iter())
-            {
-                let var = builder.declare_var(*ty);
-                builder.def_var(var, *val);
-                variables.insert(*name, (var, *type_id));
-            }
-
-            // Compile function body
-            let mut cf_ctx = ControlFlowCtx::default();
+            let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
@@ -652,25 +601,8 @@ impl Compiler<'_> {
                 type_substitutions: None,
                 substitution_cache: RefCell::new(HashMap::new()),
             };
-            let (terminated, expr_value) = compile_func_body(
-                &mut builder,
-                &func.body,
-                &mut variables,
-                &mut cf_ctx,
-                &mut ctx,
-                None,
-                None,
-            )?;
-
-            // Add implicit return if no explicit return
-            if let Some(value) = expr_value {
-                builder.ins().return_(&[value.value]);
-            } else if !terminated {
-                builder.ins().return_(&[]);
-            }
-
-            builder.seal_all_blocks();
-            builder.finalize();
+            let config = FunctionCompileConfig::top_level(&func.body, params, return_type_id);
+            compile_function_inner(builder, &mut ctx, config)?;
         }
 
         // Define the function
@@ -1853,11 +1785,20 @@ impl Compiler<'_> {
                 type_substitutions: Some(&instance.substitutions),
                 substitution_cache: RefCell::new(HashMap::new()),
             };
-            let terminated =
-                compile_block(&mut builder, body, &mut variables, &mut cf_ctx, &mut ctx)?;
+            let (terminated, expr_value) = compile_func_body(
+                &mut builder,
+                body,
+                &mut variables,
+                &mut cf_ctx,
+                &mut ctx,
+                None,
+                None,
+            )?;
 
             // Add implicit return if no explicit return
-            if !terminated {
+            if let Some(value) = expr_value {
+                builder.ins().return_(&[value.value]);
+            } else if !terminated {
                 builder.ins().return_(&[]);
             }
 

@@ -1499,9 +1499,7 @@ fn print_interface_method<'a>(
         .append(return_type);
 
     if let Some(body) = &method.body {
-        signature
-            .append(arena.text(" "))
-            .append(print_block(arena, body, interner))
+        signature.append(print_func_body(arena, body, interner))
     } else {
         signature
     }

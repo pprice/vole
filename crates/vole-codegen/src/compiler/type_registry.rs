@@ -145,17 +145,47 @@ impl Compiler<'_> {
         register_instance_type(type_id, field_type_tags);
 
         // Collect method return types (TypeId-native)
+        // Get the TypeDefId for looking up method signatures from sema
+        let type_def_id = self
+            .query()
+            .try_name_id(module_id, &[class.name])
+            .and_then(|name_id| self.query().try_type_def_id(name_id));
+
         let func_module_id = self.func_registry.main_module();
         let mut method_infos = HashMap::new();
         for method in &class.methods {
-            let return_type = method
-                .return_type
-                .as_ref()
-                .map(|t| self.resolve_type_to_id(t))
-                .unwrap_or(TypeId::VOID);
-            let sig = self.build_signature(
+            let method_name_id = self.method_name_id(method.name);
+
+            // Get return type from EntityRegistry (handles inferred types) if no explicit return type
+            let return_type = if let Some(ref return_type_expr) = method.return_type {
+                self.resolve_type_to_id(return_type_expr)
+            } else if let Some(type_def_id) = type_def_id {
+                // Look up the inferred return type from sema
+                if let Some(method_id) = self
+                    .analyzed
+                    .entity_registry
+                    .find_method_on_type(type_def_id, method_name_id)
+                {
+                    let method_def = self.analyzed.entity_registry.get_method(method_id);
+                    let arena = self.analyzed.type_arena.borrow();
+                    if let Some((_, ret_type_id, _)) =
+                        arena.unwrap_function(method_def.signature_id)
+                    {
+                        ret_type_id
+                    } else {
+                        TypeId::VOID
+                    }
+                } else {
+                    TypeId::VOID
+                }
+            } else {
+                TypeId::VOID
+            };
+
+            // Build signature using the (possibly inferred) return type
+            let sig = self.build_signature_with_return_type_id(
                 &method.params,
-                method.return_type.as_ref(),
+                Some(return_type),
                 SelfParam::Pointer,
                 TypeResolver::Query,
             );
@@ -163,9 +193,8 @@ impl Compiler<'_> {
             let display_name = self.func_registry.display(func_key);
             let func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, func_id);
-            let method_id = self.query().method_name_id(method.name);
             method_infos.insert(
-                method_id,
+                method_name_id,
                 MethodInfo {
                     func_key,
                     return_type,
@@ -444,16 +473,38 @@ impl Compiler<'_> {
                 continue;
             }
 
-            let return_type = method
-                .return_type
-                .as_ref()
-                .map(|t| self.resolve_type_to_id(t))
-                .unwrap_or(TypeId::VOID);
+            let method_name_id = self.method_name_id(method.name);
 
-            // Create signature without self parameter
-            let sig = self.build_signature(
+            // Get return type from EntityRegistry (handles inferred types) if no explicit return type
+            let return_type = if let Some(ref return_type_expr) = method.return_type {
+                self.resolve_type_to_id(return_type_expr)
+            } else if let Some(type_def_id) = type_def_id {
+                // Look up the inferred return type from sema
+                if let Some(method_id) = self
+                    .analyzed
+                    .entity_registry
+                    .find_static_method_on_type(type_def_id, method_name_id)
+                {
+                    let method_def = self.analyzed.entity_registry.get_method(method_id);
+                    let arena = self.analyzed.type_arena.borrow();
+                    if let Some((_, ret_type_id, _)) =
+                        arena.unwrap_function(method_def.signature_id)
+                    {
+                        ret_type_id
+                    } else {
+                        TypeId::VOID
+                    }
+                } else {
+                    TypeId::VOID
+                }
+            } else {
+                TypeId::VOID
+            };
+
+            // Create signature using the (possibly inferred) return type
+            let sig = self.build_signature_with_return_type_id(
                 &method.params,
-                method.return_type.as_ref(),
+                Some(return_type),
                 SelfParam::None,
                 TypeResolver::Query,
             );
@@ -466,7 +517,6 @@ impl Compiler<'_> {
 
             // Register in static_method_infos for codegen lookup
             if let Some(type_def_id) = type_def_id {
-                let method_name_id = self.method_name_id(method.name);
                 self.static_method_infos.insert(
                     (type_def_id, method_name_id),
                     MethodInfo {

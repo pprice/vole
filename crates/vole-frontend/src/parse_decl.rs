@@ -394,9 +394,11 @@ impl<'src> Parser<'src> {
             None
         };
 
-        // Optional body (default implementation)
+        // Optional body (default implementation) - block or expression
         let body = if self.check(TokenType::LBrace) {
-            Some(self.block()?)
+            Some(FuncBody::Block(self.block()?))
+        } else if self.match_token(TokenType::FatArrow) {
+            Some(FuncBody::Expr(Box::new(self.expression(0)?)))
         } else {
             None
         };
