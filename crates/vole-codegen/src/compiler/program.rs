@@ -5,16 +5,20 @@ use std::io::Write;
 use rustc_hash::FxHashMap;
 
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, InstBuilder, types};
+use cranelift_module::{FuncId, Module};
 
 use super::common::{FunctionCompileConfig, compile_function_inner};
 use super::{Compiler, ControlFlowCtx, SelfParam, TestInfo, TypeResolver};
+
 use crate::FunctionKey;
-use crate::stmt::compile_func_body;
+use crate::RuntimeFn;
+use crate::stmt::{compile_block, compile_func_body};
 use crate::types::{
     CompileCtx, function_name_id_with_interner, resolve_type_expr_to_id, type_id_to_cranelift,
 };
 use vole_frontend::{
-    Decl, FuncDecl, InterfaceMethod, Interner, LetStmt, Program, Symbol, TestCase, TestsDecl,
+    Block, Decl, FuncDecl, InterfaceMethod, Interner, LetStmt, Program, Span, Stmt, Symbol,
+    TestCase, TestsDecl,
 };
 use vole_identity::NameId;
 use vole_sema::entity_defs::TypeDefKind;
@@ -23,6 +27,18 @@ use vole_sema::generic::{
     StaticMethodMonomorphInstance,
 };
 use vole_sema::type_arena::{TypeId, TypeIdVec};
+
+/// Information about a compiled scoped function, used to make it available in tests
+struct ScopedFuncInfo {
+    /// The function's name (Symbol) for looking up in variables
+    name: Symbol,
+    /// The compiled function ID
+    func_id: FuncId,
+    /// The function's return type
+    return_type_id: TypeId,
+    /// The function's parameter types
+    param_type_ids: Vec<TypeId>,
+}
 
 impl Compiler<'_> {
     fn main_function_key_and_name(&mut self, sym: Symbol) -> (FunctionKey, String) {
@@ -612,12 +628,157 @@ impl Compiler<'_> {
         Ok(())
     }
 
+    /// Compile a scoped function declaration (like a pure lambda).
+    /// Returns the FuncId and type information needed to make it callable in tests.
+    fn compile_scoped_function(&mut self, func: &FuncDecl) -> Result<ScopedFuncInfo, String> {
+        self.lambda_counter += 1;
+
+        // Get param types using the compiler's type resolution
+        let param_type_ids: Vec<TypeId> = func
+            .params
+            .iter()
+            .map(|p| self.resolve_type_to_id(&p.ty))
+            .collect();
+
+        // Get return type:
+        // 1. If declared, use the declared type
+        // 2. If expression body, get the type from sema (stored in expr_types)
+        // 3. Fall back to void
+        let return_type_id = if let Some(t) = &func.return_type {
+            self.resolve_type_to_id(t)
+        } else {
+            // For expression bodies, get the type from the body expression
+            match &func.body {
+                vole_frontend::FuncBody::Expr(expr) => {
+                    self.query().type_of(expr.id).unwrap_or(TypeId::VOID)
+                }
+                vole_frontend::FuncBody::Block(_) => TypeId::VOID,
+            }
+        };
+
+        // Convert to Cranelift types
+        let param_types: Vec<cranelift::prelude::Type> = {
+            let arena = self.analyzed.type_arena.borrow();
+            param_type_ids
+                .iter()
+                .map(|&ty| type_id_to_cranelift(ty, &arena, self.pointer_type))
+                .collect()
+        };
+
+        let return_type = type_id_to_cranelift(
+            return_type_id,
+            &self.analyzed.type_arena.borrow(),
+            self.pointer_type,
+        );
+
+        // Create closure calling convention signature (first param is closure ptr)
+        let mut sig = self.jit.module.make_signature();
+        sig.params
+            .push(cranelift::prelude::AbiParam::new(self.pointer_type)); // closure ptr
+        for &param_ty in &param_types {
+            sig.params.push(cranelift::prelude::AbiParam::new(param_ty));
+        }
+        sig.returns
+            .push(cranelift::prelude::AbiParam::new(return_type));
+
+        // Create unique function name
+        let scoped_func_name = format!("__scoped_{}_{}", self.lambda_counter, {
+            self.analyzed.interner.resolve(func.name)
+        });
+        let func_id = self
+            .jit
+            .module
+            .declare_function(&scoped_func_name, cranelift_module::Linkage::Local, &sig)
+            .map_err(|e| e.to_string())?;
+
+        // Compile the function body
+        let mut func_ctx = self.jit.module.make_context();
+        func_ctx.func.signature = sig.clone();
+
+        // Build params: Vec<(Symbol, TypeId, Type)>
+        let params: Vec<(Symbol, TypeId, cranelift::prelude::Type)> = func
+            .params
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (p.name, param_type_ids[i], param_types[i]))
+            .collect();
+
+        // Get source file pointer
+        let source_file_ptr = self.source_file_ptr();
+
+        {
+            let mut builder_ctx = FunctionBuilderContext::new();
+            let builder = FunctionBuilder::new(&mut func_ctx.func, &mut builder_ctx);
+
+            let mut ctx = CompileCtx {
+                analyzed: self.analyzed,
+                interner: &self.analyzed.interner,
+                arena: &self.analyzed.type_arena,
+                pointer_type: self.pointer_type,
+                module: &mut self.jit.module,
+                func_registry: &mut self.func_registry,
+                source_file_ptr,
+                globals: &self.globals,
+                lambda_counter: &mut self.lambda_counter,
+                type_metadata: &self.type_metadata,
+                impl_method_infos: &self.impl_method_infos,
+                static_method_infos: &self.static_method_infos,
+                interface_vtables: &self.interface_vtables,
+                current_function_return_type: Some(return_type_id),
+                native_registry: &self.native_registry,
+                current_module: None,
+                monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
+                type_substitutions: None,
+                substitution_cache: RefCell::new(HashMap::new()),
+            };
+
+            // Use pure lambda config (skip_block_params=1 for closure ptr)
+            let config = FunctionCompileConfig::pure_lambda(&func.body, params, return_type_id);
+            compile_function_inner(builder, &mut ctx, config)?;
+        }
+
+        self.jit
+            .module
+            .define_function(func_id, &mut func_ctx)
+            .map_err(|e| format!("Failed to define scoped function: {:?}", e))?;
+
+        Ok(ScopedFuncInfo {
+            name: func.name,
+            func_id,
+            return_type_id,
+            param_type_ids,
+        })
+    }
+
     /// Compile all tests in a tests block
     fn compile_tests(
         &mut self,
         tests_decl: &TestsDecl,
         test_count: &mut usize,
     ) -> Result<(), String> {
+        // Phase 1: Compile all scoped function declarations (once, before test loop)
+        let mut scoped_funcs: Vec<ScopedFuncInfo> = Vec::new();
+        for decl in &tests_decl.decls {
+            if let Decl::Function(func) = decl {
+                let info = self.compile_scoped_function(func)?;
+                scoped_funcs.push(info);
+            }
+        }
+
+        // Collect scoped let declarations for compiling in each test
+        let scoped_lets: Vec<&LetStmt> = tests_decl
+            .decls
+            .iter()
+            .filter_map(|d| {
+                if let Decl::Let(let_stmt) = d {
+                    Some(let_stmt)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Phase 2: Compile each test
         for test in &tests_decl.tests {
             let (name_id, func_key) = self.test_function_key(*test_count);
             let func_name = self.test_display_name(name_id);
@@ -641,11 +802,10 @@ impl Compiler<'_> {
                 let entry_block = builder.create_block();
                 builder.switch_to_block(entry_block);
 
-                // No parameters or variables for tests (they start fresh)
+                // Start with empty variables map
                 let mut variables = HashMap::new();
 
-                // Compile test body
-                let mut cf_ctx = ControlFlowCtx::default();
+                // Create CompileCtx for this test
                 let mut ctx = CompileCtx {
                     analyzed: self.analyzed,
                     interner: &self.analyzed.interner,
@@ -667,7 +827,65 @@ impl Compiler<'_> {
                     type_substitutions: None,
                     substitution_cache: RefCell::new(HashMap::new()),
                 };
-                let (terminated, _) = compile_func_body(
+
+                // Add scoped functions to variables map
+                for scoped_func in &scoped_funcs {
+                    // Get func_ref for this function in the current test's context
+                    let func_ref = ctx
+                        .module
+                        .declare_func_in_func(scoped_func.func_id, builder.func);
+                    let func_addr = builder.ins().func_addr(self.pointer_type, func_ref);
+
+                    // Wrap in Closure struct via vole_closure_alloc
+                    let alloc_id = ctx
+                        .func_registry
+                        .runtime_key(RuntimeFn::ClosureAlloc)
+                        .and_then(|key| ctx.func_registry.func_id(key))
+                        .ok_or_else(|| "vole_closure_alloc not found".to_string())?;
+                    let alloc_ref = ctx.module.declare_func_in_func(alloc_id, builder.func);
+                    let zero_captures = builder.ins().iconst(types::I64, 0);
+                    let alloc_call = builder.ins().call(alloc_ref, &[func_addr, zero_captures]);
+                    let closure_ptr = builder.inst_results(alloc_call)[0];
+
+                    // Create function type for the variable
+                    let func_type_id = {
+                        let mut arena = ctx.arena.borrow_mut();
+                        let param_ids: TypeIdVec =
+                            scoped_func.param_type_ids.iter().copied().collect();
+                        arena.function(param_ids, scoped_func.return_type_id, true) // is_closure=true
+                    };
+
+                    // Declare Cranelift variable and add to map
+                    let var = builder.declare_var(self.pointer_type);
+                    builder.def_var(var, closure_ptr);
+                    variables.insert(scoped_func.name, (var, func_type_id));
+                }
+
+                // Compile scoped let declarations in test context
+                let mut cf_ctx = ControlFlowCtx::default();
+                if !scoped_lets.is_empty() {
+                    // Create a synthetic block with the let statements
+                    let let_block = Block {
+                        stmts: scoped_lets
+                            .iter()
+                            .map(|s| Stmt::Let((*s).clone()))
+                            .collect(),
+                        span: Span::default(),
+                    };
+                    compile_block(
+                        &mut builder,
+                        &let_block,
+                        &mut variables,
+                        &mut cf_ctx,
+                        &mut ctx,
+                    )?;
+                }
+
+                // Compile test body
+                // Note: For FuncBody::Expr, terminated=true but the block isn't actually
+                // terminated (no return instruction). For FuncBody::Block, terminated=true
+                // only if there's an explicit return/break. So we check both.
+                let (block_terminated, expr_value) = compile_func_body(
                     &mut builder,
                     &test.body,
                     &mut variables,
@@ -677,8 +895,11 @@ impl Compiler<'_> {
                     None, // no nested return type
                 )?;
 
-                // If not already terminated, return 0 (test passed)
-                if !terminated {
+                // Add return if needed:
+                // - Expression bodies: always add return (expr_value is Some)
+                // - Block bodies: add return if block didn't explicitly terminate
+                let needs_return = expr_value.is_some() || !block_terminated;
+                if needs_return {
                     let zero = builder.ins().iconst(types::I64, 0);
                     builder.ins().return_(&[zero]);
                 }
