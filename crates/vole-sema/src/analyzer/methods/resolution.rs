@@ -520,16 +520,30 @@ impl Analyzer {
                         );
                         // Found the method - return InterfaceMethod resolution
                         // The actual dispatch will happen at runtime via vtable
+                        //
+                        // Substitute SelfType placeholders with the type parameter.
+                        // The interface signature has Self as placeholder, but when
+                        // called through a constraint T: Interface, Self should be T.
+                        let self_type_id = self.type_arena_mut().type_param(param_name_id);
                         let func_type = {
                             let arena = self.type_arena();
                             let (params, ret, is_closure) = arena
                                 .unwrap_function(method_signature_id)
                                 .expect("method signature must be a function type");
-                            FunctionType {
-                                is_closure,
-                                params_id: params.clone(),
-                                return_type_id: ret,
-                            }
+                            (params.clone(), ret, is_closure)
+                        };
+                        let (params, ret, is_closure) = func_type;
+                        // Substitute SelfType in params and return type
+                        let substituted_params: smallvec::SmallVec<[_; 4]> = params
+                            .iter()
+                            .map(|&p| self.type_arena_mut().substitute_self(p, self_type_id))
+                            .collect();
+                        let substituted_ret =
+                            self.type_arena_mut().substitute_self(ret, self_type_id);
+                        let func_type = FunctionType {
+                            is_closure,
+                            params_id: substituted_params,
+                            return_type_id: substituted_ret,
                         };
                         let func_type_id = func_type.intern(&mut self.type_arena_mut());
                         return Some(ResolvedMethod::InterfaceMethod {

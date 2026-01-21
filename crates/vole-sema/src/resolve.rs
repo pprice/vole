@@ -210,8 +210,9 @@ pub fn resolve_type_to_id(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) ->
         TypeExpr::SelfType => {
             // Self resolves to the implementing type when in a method context
             ctx.self_type.unwrap_or_else(|| {
-                // Self can't be used outside method context - return invalid
-                ctx.type_arena_mut().invalid()
+                // Self in interface signatures - use placeholder for later substitution
+                ctx.type_arena_mut()
+                    .placeholder(crate::types::PlaceholderKind::SelfType)
             })
         }
         TypeExpr::Fallible {
@@ -358,6 +359,7 @@ fn resolve_structural_type_to_id(
 mod tests {
     use super::*;
     use crate::compilation_db::CompilationDb;
+    use crate::type_arena::SemaType;
     use vole_frontend::PrimitiveType as FrontendPrimitiveType;
 
     fn with_empty_context<F, R>(interner: &Interner, f: F) -> R
@@ -475,8 +477,17 @@ mod tests {
     fn resolve_self_type() {
         let interner = Interner::new();
         with_empty_context(&interner, |ctx| {
-            // Self type is only valid in interface/implement context
-            assert!(resolve_type_to_id(&TypeExpr::SelfType, ctx).is_invalid());
+            // Self without context resolves to SelfType placeholder (for interface signatures)
+            let self_type_id = resolve_type_to_id(&TypeExpr::SelfType, ctx);
+            let arena = ctx.type_arena();
+            assert!(
+                matches!(
+                    arena.get(self_type_id),
+                    SemaType::Placeholder(crate::types::PlaceholderKind::SelfType)
+                ),
+                "Self should resolve to Placeholder(SelfType), got {:?}",
+                arena.get(self_type_id)
+            );
         });
     }
 

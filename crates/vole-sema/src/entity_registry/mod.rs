@@ -582,14 +582,8 @@ mod tests {
         let signature = FunctionType::from_ids(&[], arena.i32(), false);
         let signature_id = signature.intern(&mut arena);
 
-        let method_id = registry.register_method(
-            type_id,
-            method_name,
-            full_method_name,
-            signature,
-            signature_id,
-            false,
-        );
+        let method_id =
+            registry.register_method(type_id, method_name, full_method_name, signature_id, false);
 
         assert_eq!(
             registry.find_method_on_type(type_id, method_name),
@@ -689,14 +683,8 @@ mod tests {
         let signature = FunctionType::from_ids(&[], arena.void(), false);
         let signature_id = signature.intern(&mut arena);
 
-        let method_id = registry.register_method(
-            base_id,
-            method_name,
-            full_method_name,
-            signature,
-            signature_id,
-            false,
-        );
+        let method_id =
+            registry.register_method(base_id, method_name, full_method_name, signature_id, false);
         registry.add_extends(derived_id, base_id);
 
         // Method should be found on base directly

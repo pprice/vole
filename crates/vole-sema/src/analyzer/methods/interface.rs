@@ -426,7 +426,7 @@ impl Analyzer {
                     }
                     Some(found_sig) => {
                         // Method exists, check signature (substituting Self with implementing type)
-                        if !Self::signatures_match_entity_id(
+                        if !self.signatures_match_entity_id(
                             &signature.params_id,
                             signature.return_type_id,
                             found_sig,
@@ -483,6 +483,7 @@ impl Analyzer {
 
     /// Check if method signature matches.
     fn signatures_match_entity_id(
+        &self,
         required_params_id: &[ArenaTypeId],
         required_return_id: ArenaTypeId,
         found: &FunctionType,
@@ -492,11 +493,11 @@ impl Analyzer {
         if required_params_id.len() != found.params_id.len() {
             return false;
         }
-        // Check parameter types, substituting Self (TypeId::INVALID) with implementing_type_id
+        // Check parameter types, substituting Self (SelfType placeholder) with implementing_type_id
         for (&req_param_id, &found_param_id) in
             required_params_id.iter().zip(found.params_id.iter())
         {
-            let effective_req = if req_param_id.is_invalid() {
+            let effective_req = if self.type_arena().is_self_type(req_param_id) {
                 implementing_type_id
             } else {
                 req_param_id
@@ -505,8 +506,8 @@ impl Analyzer {
                 return false;
             }
         }
-        // Check return type, substituting Self (TypeId::INVALID) with implementing_type_id
-        let effective_return = if required_return_id.is_invalid() {
+        // Check return type, substituting Self (SelfType placeholder) with implementing_type_id
+        let effective_return = if self.type_arena().is_self_type(required_return_id) {
             implementing_type_id
         } else {
             required_return_id
@@ -539,14 +540,14 @@ impl Analyzer {
                 .zip(found.params_id.iter())
                 .enumerate()
             {
-                let req_is_invalid = self.type_arena().is_invalid(req_param);
-                let effective_req = if req_is_invalid {
+                let req_is_self = self.type_arena().is_self_type(req_param);
+                let effective_req = if req_is_self {
                     implementing_type_id
                 } else {
                     req_param
                 };
                 if effective_req != found_param {
-                    let expected_str = if req_is_invalid {
+                    let expected_str = if req_is_self {
                         "Self".to_string()
                     } else {
                         self.type_display_id(req_param)
@@ -563,14 +564,14 @@ impl Analyzer {
         }
 
         // Check return type
-        let return_is_invalid = self.type_arena().is_invalid(required_return);
-        let effective_return = if return_is_invalid {
+        let return_is_self = self.type_arena().is_self_type(required_return);
+        let effective_return = if return_is_self {
             implementing_type_id
         } else {
             required_return
         };
         if effective_return != found.return_type_id {
-            let expected_str = if return_is_invalid {
+            let expected_str = if return_is_self {
                 "Self".to_string()
             } else {
                 self.type_display_id(required_return)

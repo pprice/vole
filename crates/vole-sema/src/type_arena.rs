@@ -442,6 +442,15 @@ impl TypeArena {
         id == TypeId::INVALID
     }
 
+    /// Check if a TypeId represents a SelfType placeholder (used in interface signatures)
+    #[inline]
+    pub fn is_self_type(&self, id: TypeId) -> bool {
+        matches!(
+            self.get(id),
+            SemaType::Placeholder(PlaceholderKind::SelfType)
+        )
+    }
+
     // ========================================================================
     // Primitive accessors - O(1) lookup from pre-cached table
     // ========================================================================
@@ -599,10 +608,8 @@ impl TypeArena {
         self.intern(SemaType::RuntimeIterator(element))
     }
 
-    /// Create a function type
-    /// Note: Function types are stored even if params/ret contain Invalid types.
-    /// This preserves the function structure for interface method signatures where
-    /// Self resolves to Invalid during initial collection.
+    /// Create a function type.
+    /// Returns Invalid if any param or the return type is Invalid.
     pub fn function(
         &mut self,
         params: impl Into<TypeIdVec>,
@@ -610,6 +617,10 @@ impl TypeArena {
         is_closure: bool,
     ) -> TypeId {
         let params = params.into();
+        // Propagate invalid through function types
+        if params.iter().any(|p| self.is_invalid(*p)) || self.is_invalid(ret) {
+            return self.invalid();
+        }
         self.intern(SemaType::Function {
             params,
             ret,
@@ -1287,6 +1298,118 @@ impl TypeArena {
             | SemaType::Error { .. }
             | SemaType::Module(_)
             | SemaType::Placeholder(_) => ty,
+        }
+    }
+
+    /// Substitute SelfType placeholders with a concrete type.
+    ///
+    /// Used when resolving interface method signatures on type parameters:
+    /// the interface's `Self` type should be replaced with the receiver type.
+    pub fn substitute_self(&mut self, ty: TypeId, self_type: TypeId) -> TypeId {
+        // Clone the interned type to release the borrow
+        match self.get(ty).clone() {
+            // Substitute SelfType placeholder
+            SemaType::Placeholder(PlaceholderKind::SelfType) => self_type,
+
+            // Recursive substitution for compound types
+            SemaType::Array(elem) => {
+                let new_elem = self.substitute_self(elem, self_type);
+                self.array(new_elem)
+            }
+
+            SemaType::Union(variants) => {
+                let new_variants: TypeIdVec = variants
+                    .iter()
+                    .map(|&v| self.substitute_self(v, self_type))
+                    .collect();
+                self.union(new_variants)
+            }
+
+            SemaType::Tuple(elements) => {
+                let new_elements: TypeIdVec = elements
+                    .iter()
+                    .map(|&e| self.substitute_self(e, self_type))
+                    .collect();
+                self.tuple(new_elements)
+            }
+
+            SemaType::Function {
+                params,
+                ret,
+                is_closure,
+            } => {
+                let new_params: TypeIdVec = params
+                    .iter()
+                    .map(|&p| self.substitute_self(p, self_type))
+                    .collect();
+                let new_ret = self.substitute_self(ret, self_type);
+                self.function(new_params, new_ret, is_closure)
+            }
+
+            SemaType::Class {
+                type_def_id,
+                type_args,
+            } => {
+                let new_args: TypeIdVec = type_args
+                    .iter()
+                    .map(|&a| self.substitute_self(a, self_type))
+                    .collect();
+                self.class(type_def_id, new_args)
+            }
+
+            SemaType::Record {
+                type_def_id,
+                type_args,
+            } => {
+                let new_args: TypeIdVec = type_args
+                    .iter()
+                    .map(|&a| self.substitute_self(a, self_type))
+                    .collect();
+                self.record(type_def_id, new_args)
+            }
+
+            SemaType::Interface {
+                type_def_id,
+                type_args,
+            } => {
+                let new_args: TypeIdVec = type_args
+                    .iter()
+                    .map(|&a| self.substitute_self(a, self_type))
+                    .collect();
+                self.interface(type_def_id, new_args)
+            }
+
+            SemaType::RuntimeIterator(elem) => {
+                let new_elem = self.substitute_self(elem, self_type);
+                self.runtime_iterator(new_elem)
+            }
+
+            SemaType::FixedArray { element, size } => {
+                let new_elem = self.substitute_self(element, self_type);
+                self.fixed_array(new_elem, size)
+            }
+
+            SemaType::Fallible { success, error } => {
+                let new_success = self.substitute_self(success, self_type);
+                let new_error = self.substitute_self(error, self_type);
+                self.fallible(new_success, new_error)
+            }
+
+            // Types that don't contain SelfType placeholders
+            SemaType::Primitive(_)
+            | SemaType::TypeParam(_)
+            | SemaType::TypeParamRef(_)
+            | SemaType::Void
+            | SemaType::Nil
+            | SemaType::Done
+            | SemaType::Range
+            | SemaType::MetaType
+            | SemaType::Invalid { .. }
+            | SemaType::Error { .. }
+            | SemaType::Module(_)
+            | SemaType::Placeholder(PlaceholderKind::Inference)
+            | SemaType::Placeholder(PlaceholderKind::TypeParam(_))
+            | SemaType::Structural(_) => ty,
         }
     }
 }

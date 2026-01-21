@@ -215,14 +215,17 @@ fn parse_and_analyze(source: &str) -> (Program, Interner) {
 
 // Helper to extract lambda from first statement of main function
 fn get_first_lambda(program: &Program) -> &LambdaExpr {
+    use vole_frontend::FuncBody;
     for decl in &program.declarations {
         if let Decl::Function(func) = decl {
-            for stmt in &func.body.stmts {
-                if let Stmt::Let(let_stmt) = stmt
-                    && let Some(init_expr) = let_stmt.init.as_expr()
-                    && let ExprKind::Lambda(lambda) = &init_expr.kind
-                {
-                    return lambda;
+            if let FuncBody::Block(block) = &func.body {
+                for stmt in &block.stmts {
+                    if let Stmt::Let(let_stmt) = stmt
+                        && let Some(init_expr) = let_stmt.init.as_expr()
+                        && let ExprKind::Lambda(lambda) = &init_expr.kind
+                    {
+                        return lambda;
+                    }
                 }
             }
         }
