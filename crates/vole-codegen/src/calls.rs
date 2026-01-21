@@ -234,6 +234,15 @@ impl Cg<'_, '_, '_> {
             return self.call_closure(*var, *type_id, call);
         }
 
+        // Check if it's a captured closure (e.g., recursive lambda or captured function)
+        if self.has_captures()
+            && let Some(binding) = self.get_capture(&callee_sym).copied()
+            && self.ctx.arena.borrow().is_function(binding.vole_type)
+        {
+            let captured = self.load_capture(&binding)?;
+            return self.call_closure_value(captured.value, binding.vole_type, call);
+        }
+
         // Check if it's a functional interface variable
         if let Some((var, type_id)) = self.vars.get(&callee_sym)
             && let Some(iface_type_def_id) = self.interface_type_def_id(*type_id)

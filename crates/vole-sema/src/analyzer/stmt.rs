@@ -49,6 +49,29 @@ impl Analyzer {
                             .ty
                             .as_ref()
                             .map(|t| self.resolve_type_id(t, interner));
+
+                        // For recursive lambdas: if lambda has fully explicit types,
+                        // pre-register the variable so it's in scope during body analysis.
+                        // This enables recursive self-reference by making the binding
+                        // visible before the lambda body is analyzed.
+                        let preregistered = if let ExprKind::Lambda(lambda) = &init_expr.kind {
+                            if let Some(fn_type_id) = self.lambda_explicit_type_id(lambda, interner)
+                            {
+                                self.scope.define(
+                                    let_stmt.name,
+                                    Variable {
+                                        ty: fn_type_id,
+                                        mutable: let_stmt.mutable,
+                                    },
+                                );
+                                true
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        };
+
                         let init_type_id =
                             self.check_expr_expecting_id(init_expr, declared_type_id, interner)?;
 
@@ -71,15 +94,19 @@ impl Analyzer {
                             let aliased_type_id = self.resolve_type_id(type_expr, interner);
                             self.register_type_alias_id(let_stmt.name, aliased_type_id, interner);
                         }
-                        self.scope.define(
-                            let_stmt.name,
-                            Variable {
-                                ty: var_type_id,
-                                mutable: let_stmt.mutable,
-                            },
-                        );
 
-                        // Track as a local if inside a lambda
+                        // Only define if not already pre-registered for recursion
+                        if !preregistered {
+                            self.scope.define(
+                                let_stmt.name,
+                                Variable {
+                                    ty: var_type_id,
+                                    mutable: let_stmt.mutable,
+                                },
+                            );
+                        }
+                        // Track as a local if inside a lambda (even if preregistered)
+                        // This is needed so nested functions aren't incorrectly marked as captures
                         self.add_lambda_local(let_stmt.name);
                     }
                     LetInit::TypeAlias(type_expr) => {

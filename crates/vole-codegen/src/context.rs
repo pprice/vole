@@ -90,6 +90,8 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     pub ctx: &'a mut CompileCtx<'ctx>,
     pub cf: &'a mut ControlFlow,
     pub captures: Option<Captures<'a>>,
+    /// For recursive lambdas: the binding name that captures itself
+    pub self_capture: Option<Symbol>,
     /// Cache for pure runtime function calls: (func, args) -> result
     pub call_cache: HashMap<CallCacheKey, Value>,
     /// Cache for field access: (instance_ptr, slot) -> field_value
@@ -110,6 +112,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             ctx,
             cf,
             captures: None,
+            self_capture: None,
             call_cache: HashMap::new(),
             field_cache: HashMap::new(),
         }
@@ -129,6 +132,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             ctx,
             cf,
             captures: Some(captures),
+            self_capture: None,
             call_cache: HashMap::new(),
             field_cache: HashMap::new(),
         }

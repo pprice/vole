@@ -202,6 +202,12 @@ impl Analyzer {
                     // Calling a function-typed variable - conservatively mark side effects
                     if self.in_lambda() {
                         self.mark_lambda_has_side_effects();
+                        // Record capture if the callee is from outer scope
+                        if !self.is_lambda_local(*sym)
+                            && let Some(var) = self.scope.get(*sym)
+                        {
+                            self.record_capture(*sym, var.mutable);
+                        }
                     }
                     return self.check_call_args_id(&call.args, &params, ret, expr.span, interner);
                 }
@@ -214,6 +220,12 @@ impl Analyzer {
                         // Calling a functional interface - treat like a closure call
                         if self.in_lambda() {
                             self.mark_lambda_has_side_effects();
+                            // Record capture if the callee is from outer scope
+                            if !self.is_lambda_local(*sym)
+                                && let Some(var) = self.scope.get(*sym)
+                            {
+                                self.record_capture(*sym, var.mutable);
+                            }
                         }
                         return self.check_call_args_id(
                             &call.args,

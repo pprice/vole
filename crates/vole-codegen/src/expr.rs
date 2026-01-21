@@ -964,7 +964,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Load a captured variable from closure
-    fn load_capture(
+    pub(crate) fn load_capture(
         &mut self,
         binding: &super::lambda::CaptureBinding,
     ) -> Result<CompiledValue, String> {

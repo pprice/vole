@@ -59,6 +59,32 @@ pub(super) fn compile_func_body(
     }
 }
 impl Cg<'_, '_, '_> {
+    /// Pre-register a recursive lambda binding before compilation.
+    ///
+    /// For recursive lambdas (lambdas that capture themselves), we need the binding
+    /// in vars before compiling so capture bindings get the correct type.
+    /// Returns Some(var) if pre-registered, None otherwise.
+    fn preregister_recursive_lambda(
+        &mut self,
+        name: Symbol,
+        init_expr: &vole_frontend::Expr,
+    ) -> Option<Variable> {
+        let ExprKind::Lambda(lambda) = &init_expr.kind else {
+            return None;
+        };
+        let captures = lambda.captures.borrow();
+        if !captures.iter().any(|c| c.name == name) {
+            return None;
+        }
+        let func_type_id = self.ctx.get_expr_type(&init_expr.id)?;
+        let arena = self.ctx.arena.borrow();
+        let cranelift_ty = type_id_to_cranelift(func_type_id, &arena, self.ctx.pointer_type);
+        drop(arena);
+        let var = self.builder.declare_var(cranelift_ty);
+        self.vars.insert(name, (var, func_type_id));
+        Some(var)
+    }
+
     /// Compile a block of statements. Returns true if terminated (return/break).
     pub fn block(&mut self, block: &vole_frontend::Block) -> Result<bool, String> {
         let mut terminated = false;
@@ -80,7 +106,19 @@ impl Cg<'_, '_, '_> {
                     LetInit::Expr(e) => e,
                     LetInit::TypeAlias(_) => return Ok(false),
                 };
+
+                // Pre-register recursive lambdas so they can capture themselves
+                let preregistered_var = self.preregister_recursive_lambda(let_stmt.name, init_expr);
+
+                // Set self_capture context for recursive lambdas
+                if preregistered_var.is_some() {
+                    self.self_capture = Some(let_stmt.name);
+                }
+
                 let init = self.expr(init_expr)?;
+
+                // Clear self_capture context
+                self.self_capture = None;
 
                 let mut declared_type_id_opt = None;
                 let (mut final_value, mut final_type_id) = if let Some(ty_expr) = &let_stmt.ty {
@@ -159,13 +197,19 @@ impl Cg<'_, '_, '_> {
                     }
                 }
 
-                let arena = self.ctx.arena.borrow();
-                let cranelift_ty =
-                    type_id_to_cranelift(final_type_id, &arena, self.ctx.pointer_type);
-                drop(arena);
-                let var = self.builder.declare_var(cranelift_ty);
-                self.builder.def_var(var, final_value);
-                self.vars.insert(let_stmt.name, (var, final_type_id));
+                // Use preregistered var for recursive lambdas, otherwise declare new
+                if let Some(var) = preregistered_var {
+                    self.builder.def_var(var, final_value);
+                    // vars already has the entry from preregistration
+                } else {
+                    let arena = self.ctx.arena.borrow();
+                    let cranelift_ty =
+                        type_id_to_cranelift(final_type_id, &arena, self.ctx.pointer_type);
+                    drop(arena);
+                    let var = self.builder.declare_var(cranelift_ty);
+                    self.builder.def_var(var, final_value);
+                    self.vars.insert(let_stmt.name, (var, final_type_id));
+                }
                 Ok(false)
             }
 

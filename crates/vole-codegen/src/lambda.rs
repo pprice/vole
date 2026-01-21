@@ -203,12 +203,16 @@ pub(crate) fn infer_expr_type(
 }
 
 /// Compile a lambda expression - dispatches to pure or capturing version
+///
+/// `self_capture` is used for recursive lambdas - if the lambda captures its own binding,
+/// we need to use the closure pointer itself as the capture value.
 pub(super) fn compile_lambda(
     builder: &mut FunctionBuilder,
     lambda: &LambdaExpr,
     variables: &HashMap<Symbol, (Variable, TypeId)>,
     ctx: &mut CompileCtx,
     node_id: NodeId,
+    self_capture: Option<Symbol>,
 ) -> Result<CompiledValue, String> {
     let captures = lambda.captures.borrow();
     let has_captures = !captures.is_empty();
@@ -221,7 +225,7 @@ pub(super) fn compile_lambda(
     );
 
     if has_captures {
-        compile_lambda_with_captures(builder, lambda, variables, ctx, node_id)
+        compile_lambda_with_captures(builder, lambda, variables, ctx, node_id, self_capture)
     } else {
         compile_pure_lambda(builder, lambda, ctx, node_id)
     }
@@ -363,6 +367,7 @@ fn compile_lambda_with_captures(
     variables: &HashMap<Symbol, (Variable, TypeId)>,
     ctx: &mut CompileCtx,
     node_id: NodeId,
+    self_capture: Option<Symbol>,
 ) -> Result<CompiledValue, String> {
     let captures = lambda.captures.borrow();
     let num_captures = captures.len();
@@ -498,13 +503,23 @@ fn compile_lambda_with_captures(
     let heap_alloc_ref = ctx.module.declare_func_in_func(heap_alloc_id, builder.func);
 
     for (i, capture) in captures.iter().enumerate() {
-        let (var, vole_type_id) = variables
-            .get(&capture.name)
-            .ok_or_else(|| format!("Captured variable not found: {:?}", capture.name))?;
-        let current_value = builder.use_var(*var);
+        // For self-captures (recursive lambdas), use the closure pointer itself
+        let (current_value, vole_type_id) = if Some(capture.name) == self_capture {
+            // Self-capture: use the closure pointer we just created
+            let (_, ty) = variables
+                .get(&capture.name)
+                .ok_or_else(|| format!("Self-captured variable not found: {:?}", capture.name))?;
+            (closure_ptr, *ty)
+        } else {
+            // Normal capture: load from the variable
+            let (var, ty) = variables
+                .get(&capture.name)
+                .ok_or_else(|| format!("Captured variable not found: {:?}", capture.name))?;
+            (builder.use_var(*var), *ty)
+        };
 
         let size = type_id_size(
-            *vole_type_id,
+            vole_type_id,
             ctx.pointer_type,
             &ctx.analyzed.entity_registry,
             &ctx.arena.borrow(),
@@ -604,6 +619,13 @@ impl Cg<'_, '_, '_> {
         lambda: &LambdaExpr,
         node_id: NodeId,
     ) -> Result<CompiledValue, String> {
-        compile_lambda(self.builder, lambda, self.vars, self.ctx, node_id)
+        compile_lambda(
+            self.builder,
+            lambda,
+            self.vars,
+            self.ctx,
+            node_id,
+            self.self_capture,
+        )
     }
 }

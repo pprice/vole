@@ -183,4 +183,32 @@ impl Analyzer {
         self.type_arena_mut()
             .function(param_type_ids, return_type_id, has_captures)
     }
+
+    /// Check if a lambda has fully explicit type annotations and return its function type.
+    ///
+    /// This is used to pre-register recursive lambdas in scope before analyzing their body.
+    /// Returns `Some(type_id)` only if ALL param types AND return type are explicitly specified.
+    pub(crate) fn lambda_explicit_type_id(
+        &mut self,
+        lambda: &LambdaExpr,
+        interner: &Interner,
+    ) -> Option<ArenaTypeId> {
+        // Must have explicit return type
+        let return_type = lambda.return_type.as_ref()?;
+
+        // All params must have explicit types
+        let mut param_type_ids = Vec::with_capacity(lambda.params.len());
+        for param in &lambda.params {
+            let ty = param.ty.as_ref()?;
+            param_type_ids.push(self.resolve_type_id(ty, interner));
+        }
+
+        let return_type_id = self.resolve_type_id(return_type, interner);
+
+        // Build function type (assume closure since this is a lambda)
+        Some(
+            self.type_arena_mut()
+                .function(param_type_ids, return_type_id, true),
+        )
+    }
 }
