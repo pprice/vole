@@ -201,4 +201,26 @@ tests "nested functions" {
         }
         assert(factorial(5) == 120)
     }
+
+    test "nested expression-bodied with inferred return" {
+        func triple(x: i64) => x * 3
+        assert(triple(7) == 21)
+    }
+
+    test "nested expression-bodied with closure" {
+        let multiplier = 5
+        func multiplyBy(x: i64) => x * multiplier
+        assert(multiplyBy(8) == 40)
+    }
+
+    test "nested expression-bodied returning bool" {
+        func isPositive(x: i64) => x > 0
+        assert(isPositive(5) == true)
+        assert(isPositive(-3) == false)
+    }
+
+    test "nested expression-bodied returning string" {
+        func greet(name: string) => "Hello, " + name
+        assert(greet("World") == "Hello, World")
+    }
 }

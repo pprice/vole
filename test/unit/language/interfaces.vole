@@ -179,6 +179,48 @@ tests "implement blocks satisfy interfaces" {
     }
 }
 
+// Expression-bodied methods
+interface Doubler {
+    func double() -> i64
+}
+
+record Amount implements Doubler {
+    value: i64,
+
+    // Expression-bodied inline method
+    func double() -> i64 => self.value * 2
+}
+
+interface Tripler {
+    func triple() -> i64
+}
+
+record Quantity {
+    n: i64
+}
+
+// Expression-bodied implement block method
+implement Tripler for Quantity {
+    func triple() -> i64 => self.n * 3
+}
+
+tests "expression-bodied interface methods" {
+    test "inline expression-bodied method" {
+        let a = Amount { value: 21 }
+        assert(a.double() == 42)
+    }
+
+    test "implement block expression-bodied method" {
+        let q = Quantity { n: 14 }
+        assert(q.triple() == 42)
+    }
+
+    test "expression-bodied through interface value" {
+        let d: Doubler = Amount { value: 25 }
+        assert(d.double() == 50)
+    }
+}
+
 // Test built-in methods
 tests "built-in interface methods" {
     test "array.length returns correct size" {
