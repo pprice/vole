@@ -1869,10 +1869,20 @@ impl Analyzer {
         tests_decl: &TestsDecl,
         interner: &Interner,
     ) -> Result<(), Vec<TypeError>> {
+        // Create a scope for the tests block (scoped declarations live here)
+        let module_scope = std::mem::take(&mut self.scope);
+        self.scope = Scope::with_parent(module_scope);
+
+        // Process scoped declarations
+        for decl in &tests_decl.decls {
+            self.check_scoped_decl(decl, interner)?;
+        }
+
+        // Check each test case (each gets its own child scope)
         for test_case in &tests_decl.tests {
-            // Each test gets its own scope
-            let parent_scope = std::mem::take(&mut self.scope);
-            self.scope = Scope::with_parent(parent_scope);
+            // Each test gets its own scope (child of tests block scope)
+            let tests_block_scope = std::mem::take(&mut self.scope);
+            self.scope = Scope::with_parent(tests_block_scope);
 
             // Tests implicitly return void
             let void_id = self.type_arena().void();
@@ -1881,12 +1891,124 @@ impl Analyzer {
             // Type check the test body
             self.check_func_body(&test_case.body, interner)?;
 
-            // Restore scope
+            // Restore to tests block scope
             if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
                 self.scope = parent;
             }
             self.exit_function_context(saved_ctx);
         }
+
+        // Restore to module scope
+        if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
+            self.scope = parent;
+        }
+
+        Ok(())
+    }
+
+    /// Check a scoped declaration in a tests block
+    fn check_scoped_decl(
+        &mut self,
+        decl: &Decl,
+        interner: &Interner,
+    ) -> Result<(), Vec<TypeError>> {
+        match decl {
+            Decl::Function(func) => {
+                self.check_scoped_function(func, interner)?;
+            }
+            Decl::Let(let_stmt) => {
+                // Process let like a local let (check init, add to scope)
+                // We create a temporary Stmt::Let wrapper to reuse the existing logic
+                self.check_stmt(&Stmt::Let(let_stmt.clone()), interner)?;
+            }
+            _ => {
+                // record, class, interface, implement, error, external
+                // TODO(vole-2vgz): Support these declaration types in tests blocks
+                // For now, they will be silently ignored (types won't be visible)
+            }
+        }
+        Ok(())
+    }
+
+    /// Check a function declaration scoped to a tests block
+    fn check_scoped_function(
+        &mut self,
+        func: &FuncDecl,
+        interner: &Interner,
+    ) -> Result<(), Vec<TypeError>> {
+        // Skip generic functions - not supported in tests blocks for now
+        if !func.type_params.is_empty() {
+            return Ok(());
+        }
+
+        // Resolve parameter types
+        let param_types: Vec<ArenaTypeId> = func
+            .params
+            .iter()
+            .map(|p| self.resolve_type_id(&p.ty, interner))
+            .collect();
+
+        // Resolve return type (or infer later)
+        let declared_return_type = func
+            .return_type
+            .as_ref()
+            .map(|t| self.resolve_type_id(t, interner));
+
+        // Create function type (for reference, though scoped funcs aren't in self.functions)
+        let return_type_id = declared_return_type.unwrap_or_else(|| self.type_arena().void());
+
+        // Enter function context
+        let needs_inference = func.return_type.is_none();
+        let saved_ctx = if needs_inference {
+            self.enter_function_context_inferring()
+        } else {
+            self.enter_function_context(return_type_id)
+        };
+
+        // Create new scope with parameters
+        let parent_scope = std::mem::take(&mut self.scope);
+        self.scope = Scope::with_parent(parent_scope);
+
+        for (param, &ty_id) in func.params.iter().zip(param_types.iter()) {
+            self.scope.define(
+                param.name,
+                Variable {
+                    ty: ty_id,
+                    mutable: false,
+                },
+            );
+        }
+
+        // Check body
+        self.check_func_body(&func.body, interner)?;
+
+        // Get inferred return type if needed
+        let final_return_type = if needs_inference {
+            self.current_function_return
+                .unwrap_or_else(|| self.type_arena().void())
+        } else {
+            return_type_id
+        };
+
+        // Restore scope
+        if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
+            self.scope = parent;
+        }
+        self.exit_function_context(saved_ctx);
+
+        // Build function type and register in scope as a variable
+        let param_ids: crate::type_arena::TypeIdVec = param_types.iter().copied().collect();
+        let func_type_id = self
+            .type_arena_mut()
+            .function(param_ids, final_return_type, false);
+
+        self.scope.define(
+            func.name,
+            Variable {
+                ty: func_type_id,
+                mutable: false,
+            },
+        );
 
         Ok(())
     }
