@@ -7,14 +7,17 @@ use rustc_hash::FxHashMap;
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, InstBuilder, types};
 use cranelift_module::{FuncId, Module};
 
-use super::common::{FunctionCompileConfig, compile_function_inner};
+use super::common::{
+    FunctionCompileConfig, compile_function_inner, compile_function_inner_with_params,
+};
 use super::{Compiler, ControlFlowCtx, SelfParam, TestInfo, TypeResolver};
 
 use crate::FunctionKey;
 use crate::RuntimeFn;
 use crate::stmt::{compile_block, compile_func_body};
 use crate::types::{
-    CompileCtx, function_name_id_with_interner, resolve_type_expr_to_id, type_id_to_cranelift,
+    CompileCtx, ExplicitParams, FunctionCtx, function_name_id_with_interner,
+    resolve_type_expr_to_id, type_id_to_cranelift,
 };
 use vole_frontend::{
     Block, Decl, Expr, FuncDecl, InterfaceMethod, Interner, LetInit, LetStmt, Program, Span, Stmt,
@@ -529,9 +532,26 @@ impl Compiler<'_> {
         let mut builder_ctx = FunctionBuilderContext::new();
         {
             let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
+
+            // Create split contexts for the new compilation path
+            let function_ctx = FunctionCtx::module(return_type_id, module_id);
+            let explicit_params = ExplicitParams {
+                analyzed: self.analyzed,
+                interner: module_interner, // Module-specific interner
+                type_metadata: &self.type_metadata,
+                impl_method_infos: &self.impl_method_infos,
+                static_method_infos: &self.static_method_infos,
+                interface_vtables: &self.interface_vtables,
+                native_registry: &self.native_registry,
+                global_inits: module_global_inits, // Module-specific globals
+                source_file_ptr,
+                lambda_counter: &self.lambda_counter,
+            };
+
+            // CompileCtx still needed for mutable JIT infrastructure
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
-                interner: module_interner, // Use module's interner
+                interner: module_interner,
                 module: &mut self.jit.module,
                 func_registry: &mut self.func_registry,
                 source_file_ptr,
@@ -543,12 +563,19 @@ impl Compiler<'_> {
                 interface_vtables: &self.interface_vtables,
                 current_function_return_type: return_type_id,
                 native_registry: &self.native_registry,
-                current_module: Some(module_path), // We're compiling module code
+                current_module: Some(module_path),
                 type_substitutions: None,
                 substitution_cache: RefCell::new(HashMap::new()),
             };
+
             let config = FunctionCompileConfig::top_level(&func.body, params, return_type_id);
-            compile_function_inner(builder, &mut ctx, config)?;
+            compile_function_inner_with_params(
+                builder,
+                &mut ctx,
+                &function_ctx,
+                &explicit_params,
+                config,
+            )?;
         }
 
         // Define the function

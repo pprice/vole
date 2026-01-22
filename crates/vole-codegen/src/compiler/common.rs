@@ -12,7 +12,7 @@ use vole_sema::type_arena::TypeId;
 
 use crate::context::{Captures, Cg, ControlFlow};
 use crate::lambda::CaptureBinding;
-use crate::types::CompileCtx;
+use crate::types::{CompileCtx, ExplicitParams, FunctionCtx};
 
 /// What to return from a non-terminated block
 #[derive(Clone, Copy)]
@@ -131,7 +131,7 @@ impl<'a> FunctionCompileConfig<'a> {
 /// # Arguments
 /// * `builder` - The FunctionBuilder (mutably borrowed for setup)
 /// * `config` - Configuration specifying params, self binding, captures
-fn setup_function_entry<'a>(
+pub(crate) fn setup_function_entry<'a>(
     builder: &mut FunctionBuilder,
     config: &FunctionCompileConfig<'a>,
 ) -> (HashMap<Symbol, (Variable, TypeId)>, Option<Captures<'a>>) {
@@ -261,6 +261,57 @@ pub fn compile_function_inner(
         &mut variables,
         ctx,
         &mut cf,
+        captures,
+        config.return_type_id,
+    );
+
+    compile_function_body_with_cg(&mut cg, config.body, config.default_return)?;
+
+    // Cg borrow ends here, builder is accessible again
+    drop(cg);
+
+    builder.seal_all_blocks();
+    builder.finalize();
+
+    Ok(())
+}
+
+/// Compile the inner logic of a function using split contexts.
+///
+/// This is the transition API for migrating from CompileCtx to split context types.
+/// It takes CompileCtx for mutable JIT infrastructure (module, func_registry) but
+/// uses FunctionCtx and ExplicitParams for read-only data. CodegenCtx is NOT used
+/// because it would conflict with CompileCtx's mutable references.
+///
+/// # Arguments
+/// * `builder` - The FunctionBuilder for this function (consumed by finalize)
+/// * `ctx` - CompileCtx (provides mutable JIT infrastructure)
+/// * `function_ctx` - Split per-function state (return type, module id)
+/// * `explicit_params` - Split read-only lookup tables (can use module-specific interner!)
+/// * `config` - Configuration specifying the function to compile
+///
+/// # Returns
+/// Ok(()) on success, Err with message on failure
+#[allow(dead_code)] // Part of CompileCtx migration
+pub fn compile_function_inner_with_params<'ctx>(
+    mut builder: FunctionBuilder,
+    ctx: &mut CompileCtx<'ctx>,
+    function_ctx: &FunctionCtx<'ctx>,
+    explicit_params: &ExplicitParams<'ctx>,
+    config: FunctionCompileConfig,
+) -> Result<(), String> {
+    // Set up entry block and bind parameters
+    let (mut variables, captures) = setup_function_entry(&mut builder, &config);
+
+    // Create Cg with split contexts (no CodegenCtx - would conflict with ctx)
+    let mut cf = ControlFlow::new();
+    let mut cg = Cg::new_with_params(
+        &mut builder,
+        &mut variables,
+        ctx,
+        &mut cf,
+        function_ctx,
+        explicit_params,
         captures,
         config.return_type_id,
     );

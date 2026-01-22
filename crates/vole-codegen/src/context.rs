@@ -73,6 +73,28 @@ pub(crate) struct Captures<'a> {
 /// Key for caching pure runtime function calls
 pub type CallCacheKey = (RuntimeFn, SmallVec<[Value; 4]>);
 
+/// Helper macro to prefer split codegen_ctx over fallback ctx (same method name)
+macro_rules! split_cg {
+    ($self:expr, $method:ident()) => {
+        if let Some(cg_ctx) = &$self.codegen_ctx {
+            cg_ctx.$method()
+        } else {
+            $self.ctx.$method()
+        }
+    };
+}
+
+/// Helper macro to prefer split explicit_params field over fallback ctx method
+macro_rules! split_ep {
+    ($self:expr, $field:ident, $ctx_method:ident()) => {
+        if let Some(ep) = &$self.explicit_params {
+            ep.$field
+        } else {
+            $self.ctx.$ctx_method()
+        }
+    };
+}
+
 /// Unified codegen context - all state needed for code generation.
 ///
 /// Lifetimes:
@@ -193,6 +215,54 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
     }
 
+    /// Create a codegen context with explicit params during CompileCtx migration.
+    ///
+    /// This constructor is for the transition period where we need CompileCtx for
+    /// mutable JIT infrastructure (module, func_registry) but want to use the new
+    /// split context types for read-only data.
+    ///
+    /// CodegenCtx is NOT taken because it would conflict with CompileCtx's mutable
+    /// references to the same data. The accessors will use explicit_params for
+    /// read-only data and fall back to ctx for mutable operations.
+    ///
+    /// # Arguments
+    /// * `builder` - Cranelift FunctionBuilder for IR emission
+    /// * `vars` - Variable bindings for the current function
+    /// * `ctx` - CompileCtx (provides mutable JIT infrastructure)
+    /// * `cf` - Control flow context for loops
+    /// * `function_ctx` - Split per-function state
+    /// * `explicit_params` - Split read-only lookup tables
+    /// * `captures` - Optional closure captures
+    /// * `return_type` - Function return type
+    #[allow(dead_code)] // Part of incremental migration
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_params(
+        builder: &'a mut FunctionBuilder<'b>,
+        vars: &'a mut HashMap<Symbol, (Variable, TypeId)>,
+        ctx: &'a mut CompileCtx<'ctx>,
+        cf: &'a mut ControlFlow,
+        function_ctx: &'a FunctionCtx<'ctx>,
+        explicit_params: &'a ExplicitParams<'ctx>,
+        captures: Option<Captures<'a>>,
+        return_type: Option<TypeId>,
+    ) -> Self {
+        Self {
+            builder,
+            vars,
+            ctx,
+            cf,
+            captures,
+            self_capture: None,
+            call_cache: HashMap::new(),
+            field_cache: HashMap::new(),
+            return_type,
+            // CodegenCtx not used - would conflict with ctx's mutable refs
+            codegen_ctx: None,
+            function_ctx: Some(function_ctx),
+            explicit_params: Some(explicit_params),
+        }
+    }
+
     /// Check if we're in a closure context with captures
     pub fn has_captures(&self) -> bool {
         self.captures.is_some()
@@ -250,24 +320,23 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     // Allowed dead_code during incremental migration.
 
     /// Get the pointer type (Cranelift platform pointer)
-    #[allow(dead_code)]
     #[inline]
     pub fn ptr_type(&self) -> Type {
-        self.ctx.ptr_type()
+        split_cg!(self, ptr_type())
     }
 
     /// Get the query interface for the analyzed program
-    #[allow(dead_code)]
     #[inline]
     pub fn query(&self) -> vole_sema::ProgramQuery<'_> {
+        // Always use ctx.query() for now - CodegenCtx stores &ProgramQuery
+        // but we need to return an owned ProgramQuery
         self.ctx.query()
     }
 
     /// Borrow the type arena
-    #[allow(dead_code)]
     #[inline]
     pub fn arena(&self) -> std::cell::Ref<'_, vole_sema::type_arena::TypeArena> {
-        self.ctx.arena()
+        split_cg!(self, arena())
     }
 
     /// Get expression type by NodeId
@@ -285,14 +354,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Get type metadata map
-    #[allow(dead_code)]
     #[inline]
     pub fn type_metadata(&self) -> &'ctx HashMap<Symbol, super::types::TypeMetadata> {
-        self.ctx.type_meta()
+        split_ep!(self, type_metadata, type_meta())
     }
 
     /// Get impl method infos map
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Part of incremental migration
     #[inline]
     pub fn impl_method_infos(
         &self,
@@ -303,35 +371,49 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         ),
         super::types::MethodInfo,
     > {
-        self.ctx.impl_methods()
+        split_ep!(self, impl_method_infos, impl_methods())
     }
 
     /// Get global variable initializer by name
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Part of incremental migration
     #[inline]
     pub fn global_init(&self, name: Symbol) -> Option<&vole_frontend::Expr> {
-        self.ctx.global_init(name)
+        if let Some(ep) = &self.explicit_params {
+            ep.global_inits.get(&name)
+        } else {
+            self.ctx.global_init(name)
+        }
     }
 
     /// Get source file pointer for error reporting
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Part of incremental migration
     #[inline]
     pub fn source_file(&self) -> (*const u8, usize) {
-        self.ctx.source_file()
+        if let Some(ep) = &self.explicit_params {
+            ep.source_file_ptr
+        } else {
+            self.ctx.source_file()
+        }
     }
 
     /// Increment lambda counter and return new value
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Part of incremental migration
     #[inline]
     pub fn next_lambda_id(&self) -> usize {
-        self.ctx.next_lambda_id()
+        if let Some(ep) = &self.explicit_params {
+            let id = ep.lambda_counter.get();
+            ep.lambda_counter.set(id + 1);
+            id
+        } else {
+            self.ctx.next_lambda_id()
+        }
     }
 
     /// Get native function registry
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Part of incremental migration
     #[inline]
     pub fn native_registry(&self) -> &'ctx vole_runtime::NativeRegistry {
-        self.ctx.native_funcs()
+        split_ep!(self, native_registry, native_funcs())
     }
 
     /// Get FunctionCtx for split context operations
@@ -342,10 +424,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Get the interner for symbol resolution
-    #[allow(dead_code)]
     #[inline]
     pub fn interner(&self) -> &'ctx vole_frontend::Interner {
-        self.ctx.interner()
+        split_ep!(self, interner, interner())
     }
 
     // ========== Arena helpers ==========
