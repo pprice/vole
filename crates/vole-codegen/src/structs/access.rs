@@ -26,13 +26,7 @@ impl Cg<'_, '_, '_> {
         if let Some((module_id, exports)) = module_info {
             tracing::trace!(?module_id, "field access on module");
             let field_name = self.ctx.interner().resolve(fa.field);
-            let module_path = self
-                .ctx
-                .query()
-                .name_table_rc()
-                .borrow()
-                .module_path(module_id)
-                .to_string();
+            let module_path = self.name_table().module_path(module_id).to_string();
             let name_id = module_name_id(self.ctx.analyzed, module_id, field_name);
 
             // Look up constant value in module metadata

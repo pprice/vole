@@ -165,6 +165,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &self.ctx.analyzed.entity_registry
     }
 
+    /// Borrow the name table (shorter than query().name_table_rc().borrow())
+    #[inline]
+    pub fn name_table(&self) -> std::cell::Ref<'_, vole_identity::NameTable> {
+        self.ctx.query().name_table_rc().borrow()
+    }
+
     // ========== Arena helpers ==========
 
     /// Get an update interface for arena mutations.
@@ -403,7 +409,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ) -> Result<CompiledValue, String> {
         // Get string names from NameId and look up native function
         let native_func = {
-            let name_table = self.ctx.query().name_table_rc().borrow();
+            let name_table = self.name_table();
             let module_path = name_table
                 .last_segment_str(external_info.module_path)
                 .ok_or_else(|| "module_path NameId has no segment".to_string())?;

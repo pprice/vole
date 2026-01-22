@@ -25,7 +25,7 @@ use vole_sema::type_arena::TypeId;
 impl Cg<'_, '_, '_> {
     /// Look up a method NameId using the context's interner (which may be a module interner)
     fn method_name_id(&self, name: Symbol) -> NameId {
-        let name_table = self.ctx.query().name_table_rc().borrow();
+        let name_table = self.name_table();
         let namer = NamerLookup::new(&name_table, self.ctx.interner());
         namer.method(name).unwrap_or_else(|| {
             panic!(
@@ -997,7 +997,7 @@ impl Cg<'_, '_, '_> {
             .get(&(type_def_id, method_name_id))
             .ok_or_else(|| {
                 let type_def = self.ctx.query().get_type(type_def_id);
-                let name_table = self.ctx.query().name_table_rc().borrow();
+                let name_table = self.name_table();
                 let type_name = name_table.display(type_def.name_id);
                 let method_name = name_table.display(method_name_id);
                 let registered_keys: Vec<_> = self

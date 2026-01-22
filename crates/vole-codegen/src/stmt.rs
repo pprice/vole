@@ -580,10 +580,7 @@ impl Cg<'_, '_, '_> {
     fn is_iterator_type_id(&self, ty: TypeId) -> bool {
         let arena = self.ctx.arena();
         if let Some((type_def_id, _)) = arena.unwrap_interface(ty) {
-            self.ctx
-                .query()
-                .name_table_rc()
-                .borrow()
+            self.name_table()
                 .well_known
                 .is_iterator_type_def(type_def_id)
         } else {
@@ -961,7 +958,7 @@ impl Cg<'_, '_, '_> {
             raise_stmt.error_name,
             &self.ctx.arena(),
             self.ctx.interner(),
-            &self.ctx.query().name_table_rc().borrow(),
+            &self.name_table(),
             self.ctx.query().registry(),
         )
         .ok_or_else(|| {
@@ -995,7 +992,7 @@ impl Cg<'_, '_, '_> {
         // Get the error type_def_id to look up field order from EntityRegistry
         let raise_error_name = self.ctx.interner().resolve(raise_stmt.error_name);
         let arena = self.ctx.arena();
-        let name_table = self.ctx.query().name_table_rc().borrow();
+        let name_table = self.name_table();
         let error_type_def_id = if let Some(type_def_id) = arena.unwrap_error(error_type_id) {
             // Single error type
             let name = name_table.last_segment_str(self.ctx.query().type_name_id(type_def_id));
@@ -1041,10 +1038,7 @@ impl Cg<'_, '_, '_> {
         for (field_idx, field_def) in error_fields.iter().enumerate() {
             // Find the matching field in the raise statement
             let field_name = self
-                .ctx
-                .query()
-                .name_table_rc()
-                .borrow()
+                .name_table()
                 .last_segment_str(field_def.name_id)
                 .unwrap_or_default();
             let field_init = raise_stmt

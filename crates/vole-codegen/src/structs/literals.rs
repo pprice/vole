@@ -76,10 +76,7 @@ impl Cg<'_, '_, '_> {
                         .zip(generic_info.field_types.iter())
                         .map(|(name_id, ty_id)| {
                             (
-                                self.ctx
-                                    .query()
-                                    .name_table_rc()
-                                    .borrow()
+                                self.name_table()
                                     .last_segment_str(*name_id)
                                     .unwrap_or_default(),
                                 *ty_id,

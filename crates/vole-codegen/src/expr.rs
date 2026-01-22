@@ -1645,7 +1645,7 @@ impl Cg<'_, '_, '_> {
             return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
         };
 
-        let name_table = self.ctx.query().name_table_rc().borrow();
+        let name_table = self.name_table();
         let Some(error_tag) = fallible_error_tag_by_id(
             error_type_id,
             name,
@@ -1698,7 +1698,7 @@ impl Cg<'_, '_, '_> {
             return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
         };
 
-        let name_table = self.ctx.query().name_table_rc().borrow();
+        let name_table = self.name_table();
         let Some(error_tag) = fallible_error_tag_by_id(
             fallible_error_type_id,
             name,
@@ -1732,13 +1732,7 @@ impl Cg<'_, '_, '_> {
 
             // Find the field index and type in the error type
             let Some((field_idx, field_def)) = error_fields.iter().enumerate().find(|(_, f)| {
-                self.ctx
-                    .query()
-                    .name_table_rc()
-                    .borrow()
-                    .last_segment_str(f.name_id)
-                    .as_deref()
-                    == Some(field_name)
+                self.name_table().last_segment_str(f.name_id).as_deref() == Some(field_name)
             }) else {
                 continue;
             };
