@@ -202,11 +202,9 @@ impl<'a> CompileCtx<'a> {
     }
 
     // ========== Extraction methods for incremental migration ==========
-    // These methods will be used by subsequent migration tasks.
-    // Allow dead_code until callers are migrated.
+    // These methods are used during incremental migration to the new context system.
 
     /// Extract a FunctionCtx from this CompileCtx.
-    #[allow(dead_code)]
     /// Used during incremental migration to the new context system.
     pub fn function_ctx(&self) -> FunctionCtx<'a> {
         let module_id = self
@@ -222,34 +220,15 @@ impl<'a> CompileCtx<'a> {
 
     /// Extract a TypeCtx from this CompileCtx.
     /// Used during incremental migration to the new context system.
-    #[allow(dead_code)]
     pub fn type_ctx(&self) -> TypeCtx<'_> {
         TypeCtx::new(self.query(), self.ptr_type())
     }
 
     // ========== Delegation methods for incremental migration ==========
-    // These methods will be used by subsequent migration tasks.
-
-    /// Get the current function's return type.
-    /// Delegation method for migrating to FunctionCtx.
-    #[inline]
-    #[allow(dead_code)]
-    pub fn return_type(&self) -> Option<TypeId> {
-        self.current_function_return_type
-    }
-
-    /// Get the type substitutions for monomorphized context.
-    /// Delegation method for migrating to FunctionCtx.
-    #[inline]
-    #[allow(dead_code)]
-    pub fn substitutions(&self) -> Option<&'a HashMap<NameId, TypeId>> {
-        self.type_substitutions
-    }
 
     /// Get the current module path.
     /// Delegation method for migrating to FunctionCtx.
     #[inline]
-    #[allow(dead_code)]
     pub fn module_path(&self) -> Option<&'a str> {
         self.current_module
     }
@@ -293,20 +272,6 @@ impl<'a> CompileCtx<'a> {
         self.impl_method_infos
     }
 
-    /// Get static method info map.
-    #[inline]
-    #[allow(dead_code)]
-    pub fn static_methods(&self) -> &'a HashMap<(TypeDefId, NameId), MethodInfo> {
-        self.static_method_infos
-    }
-
-    /// Get interface vtable registry.
-    #[inline]
-    #[allow(dead_code)]
-    pub fn vtables(&self) -> &'a RefCell<crate::interface_vtable::InterfaceVtableRegistry> {
-        self.interface_vtables
-    }
-
     /// Get type metadata map.
     #[inline]
     pub fn type_meta(&self) -> &'a HashMap<Symbol, TypeMetadata> {
@@ -318,22 +283,13 @@ impl<'a> CompileCtx<'a> {
 
     /// Get mutable reference to JIT module.
     #[inline]
-    #[allow(dead_code)]
     pub fn jit_module(&mut self) -> &mut JITModule {
         self.module
     }
 
     /// Get mutable reference to function registry.
     #[inline]
-    #[allow(dead_code)]
     pub fn funcs(&mut self) -> &mut FunctionRegistry {
-        self.func_registry
-    }
-
-    /// Get immutable reference to function registry.
-    #[inline]
-    #[allow(dead_code)]
-    pub fn funcs_ref(&self) -> &FunctionRegistry {
         self.func_registry
     }
 
