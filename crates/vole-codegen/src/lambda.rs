@@ -116,7 +116,7 @@ pub(crate) fn infer_expr_type(
                     return *ty_id;
                 }
             }
-            for global in ctx.globals {
+            for global in ctx.global_vars() {
                 if global.name == *sym
                     && let Some(type_expr) = &global.ty
                 {
@@ -239,7 +239,7 @@ fn compile_pure_lambda(
     ctx: &mut CompileCtx,
     node_id: NodeId,
 ) -> Result<CompiledValue, String> {
-    *ctx.lambda_counter += 1;
+    let lambda_id = ctx.next_lambda_id();
 
     // Try to get param and return types from sema analysis first
     let (param_type_ids, return_type_id) = if let Some(lambda_type_id) = ctx.get_expr_type(&node_id)
@@ -276,7 +276,7 @@ fn compile_pure_lambda(
     }
     sig.returns.push(AbiParam::new(return_type));
 
-    let (name_id, func_key) = ctx.func_registry.intern_lambda_name(*ctx.lambda_counter);
+    let (name_id, func_key) = ctx.func_registry.intern_lambda_name(lambda_id);
     let lambda_name = ctx.func_registry.name_table_rc().borrow().display(name_id);
     let func_id = ctx
         .module
@@ -351,7 +351,7 @@ fn compile_lambda_with_captures(
     let captures = lambda.captures.borrow();
     let num_captures = captures.len();
 
-    *ctx.lambda_counter += 1;
+    let lambda_id = ctx.next_lambda_id();
 
     // Try to get param and return types from sema analysis first
     let (param_type_ids, return_type_id) = if let Some(lambda_type_id) = ctx.get_expr_type(&node_id)
@@ -387,7 +387,7 @@ fn compile_lambda_with_captures(
     }
     sig.returns.push(AbiParam::new(return_type));
 
-    let (name_id, func_key) = ctx.func_registry.intern_lambda_name(*ctx.lambda_counter);
+    let (name_id, func_key) = ctx.func_registry.intern_lambda_name(lambda_id);
     let lambda_name = ctx.func_registry.name_table_rc().borrow().display(name_id);
     let func_id = ctx
         .module

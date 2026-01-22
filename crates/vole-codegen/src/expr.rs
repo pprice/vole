@@ -134,7 +134,7 @@ impl Cg<'_, '_, '_> {
                 ty,
                 type_id: *type_id,
             })
-        } else if let Some(global) = self.ctx.globals.iter().find(|g| g.name == sym) {
+        } else if let Some(global) = self.ctx.global_vars().iter().find(|g| g.name == sym) {
             // Compile global's initializer inline (skip type aliases)
             let global_init = match &global.init {
                 LetInit::Expr(e) => e.clone(),
@@ -197,8 +197,7 @@ impl Cg<'_, '_, '_> {
 
         // Create a wrapper function that adapts the original function to closure calling convention.
         // The wrapper takes (closure_ptr, params...) and calls the original function with just (params...).
-        *self.ctx.lambda_counter += 1;
-        let wrapper_index = *self.ctx.lambda_counter;
+        let wrapper_index = self.ctx.next_lambda_id();
 
         // Build wrapper signature: (closure_ptr, params...) -> return_type
         let arena = self.ctx.arena();

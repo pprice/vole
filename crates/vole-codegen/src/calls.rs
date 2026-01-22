@@ -267,7 +267,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Check if it's a global lambda or global functional interface
-        if let Some(global) = self.ctx.globals.iter().find(|g| g.name == callee_sym) {
+        if let Some(global) = self.ctx.global_vars().iter().find(|g| g.name == callee_sym) {
             // First, compile the global to get its value (skip type aliases)
             let init_expr = match &global.init {
                 LetInit::Expr(e) => e,
@@ -732,7 +732,7 @@ impl Cg<'_, '_, '_> {
         self.builder.seal_block(fail_block);
 
         // vole_assert_fail(file_ptr, file_len, line)
-        let (file_ptr, file_len) = self.ctx.source_file_ptr;
+        let (file_ptr, file_len) = self.ctx.source_file();
         let file_ptr_val = self
             .builder
             .ins()

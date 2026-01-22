@@ -491,6 +491,28 @@ impl<'a> CompileCtx<'a> {
     pub fn module_path(&self) -> Option<&'a str> {
         self.current_module
     }
+
+    // ========== ExplicitParams delegation methods ==========
+    // These methods provide access to fields that will move to ExplicitParams.
+
+    /// Get source file pointer for error reporting.
+    #[inline]
+    pub fn source_file(&self) -> (*const u8, usize) {
+        self.source_file_ptr
+    }
+
+    /// Get global variable declarations.
+    #[inline]
+    pub fn global_vars(&self) -> &'a [LetStmt] {
+        self.globals
+    }
+
+    /// Increment lambda counter and return the new value.
+    #[inline]
+    pub fn next_lambda_id(&mut self) -> usize {
+        *self.lambda_counter += 1;
+        *self.lambda_counter
+    }
 }
 
 /// Resolve a type expression to a TypeId (uses CompileCtx for full context).
