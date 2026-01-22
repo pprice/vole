@@ -137,7 +137,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     #[allow(dead_code)]
     pub fn arena_rc(&self) -> &std::rc::Rc<std::cell::RefCell<vole_sema::type_arena::TypeArena>> {
-        self.ctx.arena
+        self.ctx.arena_rc()
     }
 
     /// Substitute type parameters (delegates to CompileCtx for now)
@@ -417,7 +417,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 .last_segment_str(external_info.native_name)
                 .ok_or_else(|| "native_name NameId has no segment".to_string())?;
             self.ctx
-                .native_registry
+                .native_funcs()
                 .lookup(&module_path, &native_name)
                 .ok_or_else(|| {
                     format!(
