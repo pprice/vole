@@ -9,13 +9,13 @@ mod expr;
 mod function_registry;
 mod interface_vtable;
 pub mod jit;
-mod vtable_ctx;
 mod lambda;
 mod method_resolution;
 mod ops;
 mod stmt;
 mod structs;
 mod types;
+mod vtable_ctx;
 
 pub use compiler::{Compiler, ControlFlowCtx, TestInfo};
 pub use function_registry::{FunctionKey, FunctionRegistry, RuntimeFn};

@@ -74,7 +74,8 @@ impl Cg<'_, '_, '_> {
         // Look up to_string method via query
         let method_id = self.query().method_name_id_by_str("to_string");
 
-        let method_impl = self.analyzed()
+        let method_impl = self
+            .analyzed()
             .implement_registry()
             .get_method(&impl_type_id, method_id)
             .ok_or_else(|| {
@@ -94,7 +95,8 @@ impl Cg<'_, '_, '_> {
 
         // Otherwise, it's a Vole method - look up the compiled function
         // Get the method key from impl_method_infos
-        let method_info = self.impl_methods()
+        let method_info = self
+            .impl_methods()
             .get(&(impl_type_id, method_id))
             .ok_or_else(|| "to_string method info not found in impl_method_infos".to_string())?;
 
@@ -479,8 +481,7 @@ impl Cg<'_, '_, '_> {
         let inner_type_id = arena
             .unwrap_optional(optional.type_id)
             .unwrap_or_else(|| arena.i64());
-        let payload_cranelift_type =
-            type_id_to_cranelift(inner_type_id, &arena, self.ptr_type());
+        let payload_cranelift_type = type_id_to_cranelift(inner_type_id, &arena, self.ptr_type());
         drop(arena);
         let payload =
             self.builder

@@ -21,21 +21,20 @@ impl Cg<'_, '_, '_> {
         // This is needed because module classes register with main interner Symbols,
         // but struct literals in module code use module interner Symbols
         let type_name = self.interner().resolve(sl.name);
-        let lookup_symbol = self.analyzed()
+        let lookup_symbol = self
+            .analyzed()
             .interner
             .lookup(type_name)
             .unwrap_or(sl.name);
-        let metadata = self.type_metadata()
+        let metadata = self
+            .type_metadata()
             .get(&lookup_symbol)
             .ok_or_else(|| format!("Unknown type: {}", type_name))?;
 
         let type_id = metadata.type_id;
         let field_count = metadata.field_slots.len() as u32;
         // Prefer the type from semantic analysis (handles generic instantiation)
-        let result_type_id = self
-            .query()
-            .type_of(expr.id)
-            .unwrap_or(metadata.vole_type);
+        let result_type_id = self.query().type_of(expr.id).unwrap_or(metadata.vole_type);
         let field_slots = metadata.field_slots.clone();
 
         let type_id_val = self.builder.ins().iconst(types::I32, type_id as i64);

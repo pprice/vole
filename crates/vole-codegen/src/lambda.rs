@@ -15,8 +15,8 @@ use super::RuntimeFn;
 use super::compiler::common::{FunctionCompileConfig, compile_function_inner_with_params};
 use super::context::Cg;
 use super::types::{
-    CompileCtx, CompiledValue, ExplicitParams, FunctionCtx,
-    resolve_type_expr_id, type_id_size, type_id_to_cranelift,
+    CompileCtx, CompiledValue, ExplicitParams, FunctionCtx, resolve_type_expr_id, type_id_size,
+    type_id_to_cranelift,
 };
 
 /// Information about a captured variable for lambda compilation

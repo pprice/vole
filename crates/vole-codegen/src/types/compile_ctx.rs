@@ -46,6 +46,7 @@ use super::{FunctionCtx, MethodInfo, TypeCtx, TypeMetadata};
 ///
 /// Note: `arena`, `pointer_type`, and `monomorph_cache` are derived from `analyzed`
 /// via accessor methods rather than stored as separate fields.
+#[allow(dead_code)]
 pub(crate) struct CompileCtx<'a> {
     /// Analyzed program containing expr_types, method_resolutions, etc.
     pub analyzed: &'a AnalyzedProgram,
@@ -81,6 +82,7 @@ pub(crate) struct CompileCtx<'a> {
     pub substitution_cache: RefCell<HashMap<TypeId, TypeId>>,
 }
 
+#[allow(dead_code)]
 impl<'a> CompileCtx<'a> {
     /// Get a query interface for the analyzed program
     #[inline]
@@ -351,7 +353,7 @@ impl<'a> CompileCtx<'a> {
 }
 
 impl<'a> crate::vtable_ctx::VtableCtx for CompileCtx<'a> {
-    fn analyzed(&self) -> &crate::AnalyzedProgram {
+    fn analyzed(&self) -> &AnalyzedProgram {
         self.analyzed
     }
 
@@ -387,7 +389,7 @@ impl<'a> crate::vtable_ctx::VtableCtx for CompileCtx<'a> {
         self.module
     }
 
-    fn funcs(&mut self) -> &mut crate::FunctionRegistry {
+    fn funcs(&mut self) -> &mut FunctionRegistry {
         self.func_registry
     }
 
@@ -401,13 +403,11 @@ impl<'a> crate::vtable_ctx::VtableCtx for CompileCtx<'a> {
         resolver.resolve_type_str_or_interface(name, self.analyzed.entity_registry())
     }
 
-    fn native_registry(&self) -> &vole_runtime::NativeRegistry {
+    fn native_registry(&self) -> &NativeRegistry {
         self.native_registry
     }
 
-    fn interface_vtables(
-        &self,
-    ) -> &RefCell<crate::interface_vtable::InterfaceVtableRegistry> {
+    fn interface_vtables(&self) -> &RefCell<crate::interface_vtable::InterfaceVtableRegistry> {
         self.interface_vtables
     }
 
@@ -415,9 +415,7 @@ impl<'a> crate::vtable_ctx::VtableCtx for CompileCtx<'a> {
         self.type_metadata
     }
 
-    fn impl_method_infos(
-        &self,
-    ) -> &HashMap<(vole_sema::implement_registry::ImplTypeId, NameId), MethodInfo> {
+    fn impl_method_infos(&self) -> &HashMap<(ImplTypeId, NameId), MethodInfo> {
         self.impl_method_infos
     }
 }

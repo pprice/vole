@@ -43,15 +43,16 @@ impl Cg<'_, '_, '_> {
     ) -> Result<CompiledValue, String> {
         // Check for static method call FIRST - don't try to compile the receiver
         // Convert ModuleId to module path string for method_at_in_module
-        let current_module_path = self.current_module().map(|mid| {
-            self.name_table().module_path(mid).to_string()
-        });
+        let current_module_path = self
+            .current_module()
+            .map(|mid| self.name_table().module_path(mid).to_string());
         if let Some(ResolvedMethod::Static {
             type_def_id,
             method_id,
             func_type_id,
             ..
-        }) = self.analyzed()
+        }) = self
+            .analyzed()
             .query()
             .method_at_in_module(expr_id, current_module_path.as_deref())
         {
@@ -72,17 +73,17 @@ impl Cg<'_, '_, '_> {
         // Handle module method calls (e.g., math.sqrt(16.0), math.lerp(...))
         // These go to either external native functions or pure Vole module functions
         // Extract module_id before the if-let to avoid holding arena borrow
-        let module_id_opt = self.arena()
-            .unwrap_module(obj.type_id)
-            .map(|m| m.module_id);
+        let module_id_opt = self.arena().unwrap_module(obj.type_id).map(|m| m.module_id);
         if let Some(module_id) = module_id_opt {
-            let module_path = self.analyzed()
+            let module_path = self
+                .analyzed()
                 .name_table()
                 .module_path(module_id)
                 .to_string();
             let name_id = module_name_id(self.analyzed(), module_id, method_name_str);
             // Get the method resolution (reuse current_module_path from above)
-            let resolution = self.analyzed()
+            let resolution = self
+                .analyzed()
                 .query()
                 .method_at_in_module(expr_id, current_module_path.as_deref());
             if let Some(ResolvedMethod::Implemented {
@@ -125,7 +126,9 @@ impl Cg<'_, '_, '_> {
                             module_path, method_name_str
                         )
                     })?;
-                    let func_ref = self.codegen_ctx.jit_module()
+                    let func_ref = self
+                        .codegen_ctx
+                        .jit_module()
                         .declare_func_in_func(func_id, self.builder.func);
                     let call_inst = self.builder.ins().call(func_ref, &args);
                     let results = self.builder.inst_results(call_inst);
@@ -191,9 +194,8 @@ impl Cg<'_, '_, '_> {
         let (method_info, return_type_id) = match target {
             MethodTarget::FunctionalInterface { func_type_id } => {
                 // Use TypeDefId directly for EntityRegistry-based dispatch
-                let interface_type_def_id = self.arena()
-                    .unwrap_interface(obj.type_id)
-                    .map(|(id, _)| id);
+                let interface_type_def_id =
+                    self.arena().unwrap_interface(obj.type_id).map(|(id, _)| id);
                 if let Some(interface_type_def_id) = interface_type_def_id {
                     let method_name_id = self.method_name_id(mc.method);
                     return self.interface_dispatch_call_args_by_type_def_id(
@@ -207,7 +209,8 @@ impl Cg<'_, '_, '_> {
                 // For functional interfaces, the object holds the function ptr or closure
                 // The actual is_closure status depends on the lambda's compilation.
                 // Get is_closure from the object's type if available, otherwise from func_type_id
-                let is_closure = self.arena()
+                let is_closure = self
+                    .arena()
                     .unwrap_function(obj.type_id)
                     .map(|(_, _, is_closure)| is_closure)
                     .or_else(|| {
@@ -284,17 +287,20 @@ impl Cg<'_, '_, '_> {
         };
 
         // Use sema's cached substituted return type if available (avoids recomputation)
-        let return_type_id = self.get_substituted_return_type(&expr_id)
+        let return_type_id = self
+            .get_substituted_return_type(&expr_id)
             .unwrap_or(return_type_id);
 
         // Check if this is a monomorphized class method call
         // If so, use the monomorphized method's func_key instead
-        let (method_func_ref, is_generic_class) = if let Some(monomorph_key) = self.analyzed()
+        let (method_func_ref, is_generic_class) = if let Some(monomorph_key) = self
+            .analyzed()
             .expression_data
             .get_class_method_generic(expr_id)
         {
             // Look up the monomorphized instance
-            if let Some(instance) = self.registry()
+            if let Some(instance) = self
+                .registry()
                 .class_method_monomorph_cache
                 .get(monomorph_key)
             {
@@ -307,7 +313,8 @@ impl Cg<'_, '_, '_> {
             }
         } else {
             // Not a monomorphized class method, use regular dispatch
-            let is_generic_class = self.arena()
+            let is_generic_class = self
+                .arena()
                 .unwrap_class(obj.type_id)
                 .map(|(_, type_args)| !type_args.is_empty())
                 .unwrap_or(false);
@@ -565,7 +572,8 @@ impl Cg<'_, '_, '_> {
         elem_type_id: TypeId,
     ) -> Result<CompiledValue, String> {
         // Look up the Iterator interface via CompileCtx
-        let iter_type_id = self.resolve_type_str_or_interface("Iterator")
+        let iter_type_id = self
+            .resolve_type_str_or_interface("Iterator")
             .ok_or_else(|| "Iterator interface not found in entity registry".to_string())?;
 
         let iter_def = self.query().get_type(iter_type_id);
@@ -586,7 +594,8 @@ impl Cg<'_, '_, '_> {
         let method = self.query().get_method(*method_id);
 
         // Get the external binding for this method
-        let external_info = *self.registry()
+        let external_info = *self
+            .registry()
             .get_external_binding(*method_id)
             .ok_or_else(|| format!("No external binding for Iterator.{}", method_name))?;
 
@@ -836,7 +845,8 @@ impl Cg<'_, '_, '_> {
         let sig_ref = self.builder.import_signature(sig);
 
         let heap_alloc_ref = {
-            let key = self.funcs()
+            let key = self
+                .funcs()
                 .runtime_key(RuntimeFn::HeapAlloc)
                 .ok_or_else(|| "heap allocator not registered".to_string())?;
             self.func_ref(key)?
@@ -919,10 +929,7 @@ impl Cg<'_, '_, '_> {
         // Check for monomorphized static method (for generic classes)
         if let Some(mono_key) = self.query().static_method_generic_at(expr_id) {
             // Look up the monomorphized instance
-            if let Some(instance) = self.registry()
-                .static_method_monomorph_cache
-                .get(mono_key)
-            {
+            if let Some(instance) = self.registry().static_method_monomorph_cache.get(mono_key) {
                 // Compile arguments with substituted param types (TypeId-based)
                 let param_type_ids = &instance.func_type.params_id;
                 let mut args = Vec::new();

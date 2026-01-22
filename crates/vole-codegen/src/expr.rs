@@ -85,7 +85,8 @@ impl Cg<'_, '_, '_> {
                 // At runtime this is just a placeholder - actual function calls
                 // go through the method resolution mechanism
                 // We need to retrieve the actual Module type from semantic analysis
-                let type_id = self.get_expr_type(&expr.id)
+                let type_id = self
+                    .get_expr_type(&expr.id)
                     .unwrap_or(self.arena().primitives.i64);
                 Ok(CompiledValue {
                     value: self.builder.ins().iconst(types::I64, 0),
@@ -136,7 +137,8 @@ impl Cg<'_, '_, '_> {
             // If the global has a declared interface type, box the value
             // Use GlobalDef.type_id instead of re-resolving TypeExpr
             let name_table = self.name_table();
-            let module_id = self.current_module()
+            let module_id = self
+                .current_module()
                 .unwrap_or_else(|| name_table.main_module());
             if let Some(name_id) = name_table.name_id(module_id, &[sym], self.interner()) {
                 drop(name_table);
@@ -212,13 +214,14 @@ impl Cg<'_, '_, '_> {
         }
 
         // Create wrapper function
-        let (wrapper_name_id, wrapper_func_key) =
-            self.funcs().intern_lambda_name(wrapper_index);
-        let wrapper_name = self.funcs()
+        let (wrapper_name_id, wrapper_func_key) = self.funcs().intern_lambda_name(wrapper_index);
+        let wrapper_name = self
+            .funcs()
             .name_table_rc()
             .borrow()
             .display(wrapper_name_id);
-        let wrapper_func_id = self.jit_module()
+        let wrapper_func_id = self
+            .jit_module()
             .declare_function(
                 &wrapper_name,
                 cranelift_module::Linkage::Local,
@@ -226,8 +229,7 @@ impl Cg<'_, '_, '_> {
             )
             .map_err(|e| e.to_string())?;
 
-        self.funcs()
-            .set_func_id(wrapper_func_key, wrapper_func_id);
+        self.funcs().set_func_id(wrapper_func_key, wrapper_func_id);
         self.funcs()
             .set_return_type(wrapper_func_key, return_type_id);
 
@@ -248,7 +250,8 @@ impl Cg<'_, '_, '_> {
             // block_params[0] is closure_ptr (ignored), block_params[1..] are the actual arguments
 
             // Get reference to original function
-            let orig_func_ref = self.jit_module()
+            let orig_func_ref = self
+                .jit_module()
                 .declare_func_in_func(orig_func_id, wrapper_builder.func);
 
             // Call original function with just the arguments (skip closure_ptr)
@@ -383,7 +386,8 @@ impl Cg<'_, '_, '_> {
 
         // Otherwise, create a dynamic array
         let arr_ptr = self.call_runtime(RuntimeFn::ArrayNew, &[])?;
-        let array_push_key = self.funcs()
+        let array_push_key = self
+            .funcs()
             .runtime_key(RuntimeFn::ArrayPush)
             .ok_or_else(|| "vole_array_push not found".to_string())?;
         let array_push_ref = self.func_ref(array_push_key)?;
@@ -471,7 +475,8 @@ impl Cg<'_, '_, '_> {
         expr: &Expr,
     ) -> Result<CompiledValue, String> {
         // Get the element type from semantic analysis
-        let elem_type_id = self.get_expr_type(&element.id)
+        let elem_type_id = self
+            .get_expr_type(&element.id)
             .unwrap_or(self.arena().primitives.i64);
 
         // Compile the element once
@@ -593,8 +598,7 @@ impl Cg<'_, '_, '_> {
             drop(arena);
             // Fixed array indexing
             let elem_size = 8i32; // All elements aligned to 8 bytes
-            let elem_cr_type =
-                type_id_to_cranelift(element_id, &self.arena(), self.ptr_type());
+            let elem_cr_type = type_id_to_cranelift(element_id, &self.arena(), self.ptr_type());
 
             // Calculate offset: base + (index * elem_size)
             let offset = if let ExprKind::IntLiteral(i) = &index.kind {
@@ -760,7 +764,7 @@ impl Cg<'_, '_, '_> {
         let tested_type_id = resolve_type_expr_id(
             &is_expr.type_expr,
             &type_ctx,
-            &func_ctx,
+            func_ctx,
             self.type_metadata(),
         );
 
@@ -875,11 +879,11 @@ impl Cg<'_, '_, '_> {
         let not_nil_block = self.builder.create_block();
         let merge_block = self.builder.create_block();
 
-        let inner_type_id = self.arena()
+        let inner_type_id = self
+            .arena()
             .unwrap_optional(value.type_id)
             .expect("unwrap expression requires optional type");
-        let cranelift_type =
-            type_id_to_cranelift(inner_type_id, &self.arena(), self.ptr_type());
+        let cranelift_type = type_id_to_cranelift(inner_type_id, &self.arena(), self.ptr_type());
         self.builder.append_block_param(merge_block, cranelift_type);
 
         self.builder
@@ -1042,12 +1046,8 @@ impl Cg<'_, '_, '_> {
                 Pattern::Type { type_expr, .. } => {
                     let type_ctx = self.type_ctx();
                     let func_ctx = self.function_ctx;
-                    let pattern_type_id = resolve_type_expr_id(
-                        type_expr,
-                        &type_ctx,
-                        &func_ctx,
-                        self.type_metadata(),
-                    );
+                    let pattern_type_id =
+                        resolve_type_expr_id(type_expr, &type_ctx, func_ctx, self.type_metadata());
                     self.compile_type_pattern_check(&scrutinee, pattern_type_id)?
                 }
                 Pattern::Literal(lit_expr) => {
@@ -1474,7 +1474,8 @@ impl Cg<'_, '_, '_> {
         let condition = self.expr(&if_expr.condition)?;
 
         // Get the result type from semantic analysis
-        let result_type_id = self.get_expr_type(&if_expr.then_branch.id)
+        let result_type_id = self
+            .get_expr_type(&if_expr.then_branch.id)
             .unwrap_or(self.arena().primitives.void);
 
         let is_void = self.arena().is_void(result_type_id);
@@ -1593,9 +1594,9 @@ impl Cg<'_, '_, '_> {
         arm_variables: &mut HashMap<Symbol, (Variable, TypeId)>,
     ) -> Result<Option<Value>, String> {
         // Check if this is an error type name via EntityRegistry
-        let is_error_type = self.resolve_type(name).is_some_and(|type_id| {
-            self.query().get_type(type_id).kind == TypeDefKind::ErrorType
-        });
+        let is_error_type = self
+            .resolve_type(name)
+            .is_some_and(|type_id| self.query().get_type(type_id).kind == TypeDefKind::ErrorType);
 
         if is_error_type {
             return self.compile_specific_error_type_pattern(name, scrutinee, tag);
@@ -1713,7 +1714,8 @@ impl Cg<'_, '_, '_> {
         let is_this_error = self.builder.ins().icmp_imm(IntCC::Equal, tag, error_tag);
 
         // Get fields from EntityRegistry
-        let error_fields: Vec<_> = self.query()
+        let error_fields: Vec<_> = self
+            .query()
             .fields_on_type(error_type_def_id)
             .map(|field_id| self.query().get_field(field_id).clone())
             .collect();

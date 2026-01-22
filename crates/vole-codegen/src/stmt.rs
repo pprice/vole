@@ -145,7 +145,7 @@ impl Cg<'_, '_, '_> {
                     let type_ctx = self.type_ctx();
                     let func_ctx = self.function_ctx;
                     let declared_type_id =
-                        resolve_type_expr_id(ty_expr, &type_ctx, &func_ctx, self.type_metadata());
+                        resolve_type_expr_id(ty_expr, &type_ctx, func_ctx, self.type_metadata());
                     declared_type_id_opt = Some(declared_type_id);
 
                     let arena = self.arena();
@@ -491,7 +491,8 @@ impl Cg<'_, '_, '_> {
         let arr = self.expr(&for_stmt.iterable)?;
 
         // Get element type using arena method
-        let elem_type_id = self.arena()
+        let elem_type_id = self
+            .arena()
             .unwrap_array(arr.type_id)
             .unwrap_or_else(|| self.arena().i64());
 
@@ -880,12 +881,8 @@ impl Cg<'_, '_, '_> {
                         self.call_runtime(RuntimeFn::InstanceGetField, &[value, slot_val])?;
                     // Borrow arena from explicit_params directly to avoid borrow conflict
                     let arena = self.explicit_params.analyzed.type_arena();
-                    let (result_val, cranelift_ty) = convert_field_value_id(
-                        self.builder,
-                        result_raw,
-                        field_type_id,
-                        &arena,
-                    );
+                    let (result_val, cranelift_ty) =
+                        convert_field_value_id(self.builder, result_raw, field_type_id, &arena);
                     drop(arena);
                     let var = self.builder.declare_var(cranelift_ty);
                     self.builder.def_var(var, result_val);

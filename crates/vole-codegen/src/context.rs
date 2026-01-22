@@ -73,7 +73,6 @@ pub(crate) struct Captures<'a> {
 /// Key for caching pure runtime function calls
 pub type CallCacheKey = (RuntimeFn, SmallVec<[Value; 4]>);
 
-
 /// Unified codegen context - all state needed for code generation.
 ///
 /// Lifetimes:
@@ -180,12 +179,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Get current module (as ModuleId)
     #[inline]
+    #[allow(dead_code)]
     pub fn current_module_id(&self) -> Option<vole_identity::ModuleId> {
         self.function_ctx.current_module
     }
 
     /// Get type substitutions
     #[inline]
+    #[allow(dead_code)]
     pub fn type_substitutions(&self) -> Option<&'ctx HashMap<vole_identity::NameId, TypeId>> {
         self.function_ctx.substitutions
     }
@@ -239,10 +240,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 .query()
                 .expr_data()
                 .module_types(module_path)
+                && let Some(ty) = module_types.get(node_id)
             {
-                if let Some(ty) = module_types.get(node_id) {
-                    return Some(*ty);
-                }
+                return Some(*ty);
             }
         }
         // Fall back to main program expr_types
@@ -352,6 +352,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Get interface vtable registry
     #[inline]
+    #[allow(dead_code)]
     pub fn interface_vtables(
         &self,
     ) -> &'ctx std::cell::RefCell<crate::interface_vtable::InterfaceVtableRegistry> {
@@ -361,7 +362,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Get monomorph cache from entity registry
     #[inline]
     pub fn monomorph_cache(&self) -> &'ctx vole_sema::generic::MonomorphCache {
-        &self.explicit_params.analyzed.entity_registry().monomorph_cache
+        &self
+            .explicit_params
+            .analyzed
+            .entity_registry()
+            .monomorph_cache
     }
 
     /// Get current module as Option<ModuleId> - use current_module_id() for new code
@@ -672,8 +677,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let ptr_type = self.ptr_type();
         let mut sig = self.jit_module().make_signature();
         for param_type in &native_func.signature.params {
-            sig.params
-                .push(AbiParam::new(native_type_to_cranelift(param_type, ptr_type)));
+            sig.params.push(AbiParam::new(native_type_to_cranelift(
+                param_type, ptr_type,
+            )));
         }
         if native_func.signature.return_type != NativeType::Nil {
             sig.returns.push(AbiParam::new(native_type_to_cranelift(
@@ -790,14 +796,17 @@ impl<'a, 'b, 'ctx> crate::vtable_ctx::VtableCtx for Cg<'a, 'b, 'ctx> {
         self.explicit_params.interface_vtables
     }
 
-    fn type_metadata(&self) -> &std::collections::HashMap<Symbol, super::types::TypeMetadata> {
+    fn type_metadata(&self) -> &HashMap<Symbol, super::types::TypeMetadata> {
         self.explicit_params.type_metadata
     }
 
     fn impl_method_infos(
         &self,
-    ) -> &std::collections::HashMap<
-        (vole_sema::implement_registry::ImplTypeId, vole_identity::NameId),
+    ) -> &HashMap<
+        (
+            vole_sema::implement_registry::ImplTypeId,
+            vole_identity::NameId,
+        ),
         super::types::MethodInfo,
     > {
         self.explicit_params.impl_method_infos

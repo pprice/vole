@@ -272,7 +272,8 @@ impl Compiler<'_> {
                 && let Some(method_name_id) =
                     method_name_id_with_interner(self.analyzed, interner, method.name)
             {
-                self.static_method_infos.insert((type_def_id, method_name_id), MethodInfo { func_key });
+                self.static_method_infos
+                    .insert((type_def_id, method_name_id), MethodInfo { func_key });
             }
         }
     }
@@ -344,7 +345,8 @@ impl Compiler<'_> {
                 && let Some(method_name_id) =
                     method_name_id_with_interner(self.analyzed, interner, method.name)
             {
-                self.static_method_infos.insert((type_def_id, method_name_id), MethodInfo { func_key });
+                self.static_method_infos
+                    .insert((type_def_id, method_name_id), MethodInfo { func_key });
             }
         }
     }
@@ -482,7 +484,8 @@ impl Compiler<'_> {
                     && let Some(method_name_id) =
                         method_name_id_with_interner(self.analyzed, interner, method.name)
                 {
-                    self.static_method_infos.insert((type_def_id, method_name_id), MethodInfo { func_key });
+                    self.static_method_infos
+                        .insert((type_def_id, method_name_id), MethodInfo { func_key });
                 }
             }
         }
@@ -1446,7 +1449,10 @@ impl Compiler<'_> {
     ) -> Result<(), String> {
         let type_name_str = module_interner.resolve(class.name);
         // Look up the actual module_id from the module_path (not main_module!)
-        let module_id = self.analyzed.name_table().module_id_if_known(module_path)
+        let module_id = self
+            .analyzed
+            .name_table()
+            .module_id_if_known(module_path)
             .unwrap_or_else(|| self.query().main_module());
         let func_module_id = self.func_registry.main_module();
 

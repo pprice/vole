@@ -25,6 +25,7 @@ use crate::{AnalyzedProgram, FunctionRegistry};
 ///
 /// This trait allows vtable operations to work with both CompileCtx (legacy)
 /// and Cg (new split context model).
+#[allow(dead_code)]
 pub trait VtableCtx {
     /// Get the analyzed program reference
     fn analyzed(&self) -> &AnalyzedProgram;
@@ -63,9 +64,7 @@ pub trait VtableCtx {
     fn native_registry(&self) -> &NativeRegistry;
 
     /// Get the interface vtable registry
-    fn interface_vtables(
-        &self,
-    ) -> &std::cell::RefCell<crate::interface_vtable::InterfaceVtableRegistry>;
+    fn interface_vtables(&self) -> &RefCell<crate::interface_vtable::InterfaceVtableRegistry>;
 
     /// Get type metadata map
     fn type_metadata(&self) -> &HashMap<Symbol, TypeMetadata>;
@@ -84,8 +83,14 @@ pub struct VtableCtxView<'a, 'ctx> {
 }
 
 impl<'a, 'ctx> VtableCtxView<'a, 'ctx> {
-    pub fn new(codegen_ctx: &'a mut CodegenCtx<'ctx>, explicit_params: &'a ExplicitParams<'ctx>) -> Self {
-        Self { codegen_ctx, explicit_params }
+    pub fn new(
+        codegen_ctx: &'a mut CodegenCtx<'ctx>,
+        explicit_params: &'a ExplicitParams<'ctx>,
+    ) -> Self {
+        Self {
+            codegen_ctx,
+            explicit_params,
+        }
     }
 }
 

@@ -84,7 +84,8 @@ impl Cg<'_, '_, '_> {
             return Ok(self.string_value(string_values[0]));
         }
 
-        let concat_key = self.funcs()
+        let concat_key = self
+            .funcs()
             .runtime_key(RuntimeFn::StringConcat)
             .ok_or_else(|| "vole_string_concat not found".to_string())?;
         let concat_func_ref = self.func_ref(concat_key)?;
@@ -360,7 +361,8 @@ impl Cg<'_, '_, '_> {
 
                 // For generic external functions, call them directly with type erasure
                 // They don't have compiled func_id, but we can look them up in native_registry
-                if let Some(ext_info) = self.analyzed()
+                if let Some(ext_info) = self
+                    .analyzed()
                     .implement_registry()
                     .get_external_func(callee_name)
                 {
@@ -392,7 +394,8 @@ impl Cg<'_, '_, '_> {
         // 3. If in module context, try FFI call
         let main_module = self.funcs_ref().main_module();
         let interner = self.interner();
-        let func_key = self.funcs()
+        let func_key = self
+            .funcs()
             .intern_qualified(main_module, &[callee_sym], interner);
         if let Some(func_id) = self.funcs_ref().func_id(func_key) {
             return self.call_func_id(func_key, func_id, call);
@@ -477,7 +480,8 @@ impl Cg<'_, '_, '_> {
 
         // Try prelude external functions (works in module context too)
         // Look up the external info (module path and native name) from implement_registry
-        let ext_info = self.analyzed()
+        let ext_info = self
+            .analyzed()
             .implement_registry()
             .get_external_func(callee_name);
         let native_func = ext_info.and_then(|info| {
@@ -887,10 +891,7 @@ impl Cg<'_, '_, '_> {
             let type_id = self.maybe_convert_iterator_return_type(type_id);
             Ok(CompiledValue {
                 value: results[0],
-                ty: native_type_to_cranelift(
-                    &native_func.signature.return_type,
-                    self.ptr_type(),
-                ),
+                ty: native_type_to_cranelift(&native_func.signature.return_type, self.ptr_type()),
                 type_id,
             })
         }

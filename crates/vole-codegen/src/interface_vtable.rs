@@ -7,11 +7,11 @@ use cranelift_module::{DataDescription, DataId, Linkage, Module};
 
 use crate::RuntimeFn;
 use crate::errors::CodegenError;
+use crate::types::{CodegenCtx, ExplicitParams};
 use crate::types::{
     CompiledValue, MethodInfo, method_name_id_by_str, type_id_to_cranelift,
     type_metadata_by_name_id, value_to_word, word_to_value_type_id,
 };
-use crate::types::{CodegenCtx, ExplicitParams};
 use crate::vtable_ctx::{VtableCtx, VtableCtxView};
 use vole_frontend::Symbol;
 use vole_identity::{MethodId, NameId, TypeDefId};
@@ -124,7 +124,7 @@ impl InterfaceVtableRegistry {
         // Resolve interface name to string for key (Symbol is interner-specific)
         let interface_name_str = ctx.interner().resolve(interface_name).to_string();
         let key = InterfaceVtableKey {
-            interface_name: interface_name_str.clone(),
+            interface_name: interface_name_str,
             concrete: concrete_key,
         };
 
@@ -586,9 +586,7 @@ fn compile_external_wrapper<C: VtableCtx>(
         let interface_iter_ptr = ctx
             .native_registry()
             .lookup("std:intrinsics", "interface_iter")
-            .ok_or_else(|| {
-                "native function std:intrinsics::interface_iter not found".to_string()
-            })?
+            .ok_or_else(|| "native function std:intrinsics::interface_iter not found".to_string())?
             .ptr;
         let mut iter_sig = ctx.jit_module().make_signature();
         iter_sig.params.push(AbiParam::new(ctx.ptr_type()));
@@ -811,7 +809,11 @@ pub(crate) fn box_interface_value_id<'a, 'ctx>(
         })?;
 
     // Check if value is already an interface
-    if explicit_params.analyzed.type_arena().is_interface(value.type_id) {
+    if explicit_params
+        .analyzed
+        .type_arena()
+        .is_interface(value.type_id)
+    {
         tracing::debug!("already interface, skip boxing");
         return Ok(value);
     }
@@ -891,7 +893,10 @@ fn resolve_vtable_target<C: VtableCtx>(
 ) -> Result<VtableMethod, String> {
     // Get method info from EntityRegistry
     let interface_method = ctx.query().get_method(interface_method_id);
-    let method_name_str = ctx.analyzed().name_table().display(interface_method.name_id);
+    let method_name_str = ctx
+        .analyzed()
+        .name_table()
+        .display(interface_method.name_id);
 
     // Apply substitutions to get concrete param/return types (using TypeId-based substitution)
     let (substituted_param_ids, substituted_return_id) = {
@@ -943,7 +948,9 @@ fn resolve_vtable_target<C: VtableCtx>(
 
     // Check implement registry for explicit implementations
     if let Some(method_name_id) = method_name_id
-        && let Some(impl_) = ctx.analyzed().implement_registry()
+        && let Some(impl_) = ctx
+            .analyzed()
+            .implement_registry()
             .get_method(&impl_type_id, method_name_id)
     {
         // Use TypeId fields (required)
