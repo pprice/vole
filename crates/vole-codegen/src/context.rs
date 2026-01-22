@@ -96,16 +96,20 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     pub call_cache: HashMap<CallCacheKey, Value>,
     /// Cache for field access: (instance_ptr, slot) -> field_value
     pub field_cache: HashMap<(Value, u32), Value>,
+    /// Return type of the current function (moved from CompileCtx for cleaner separation)
+    pub return_type: Option<TypeId>,
 }
 
 impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
-    /// Create a new codegen context with optional captures for closures
+    /// Create a new codegen context with optional captures for closures.
+    /// return_type is the function's return type (passed directly for cleaner separation).
     pub fn new(
         builder: &'a mut FunctionBuilder<'b>,
         vars: &'a mut HashMap<Symbol, (Variable, TypeId)>,
         ctx: &'a mut CompileCtx<'ctx>,
         cf: &'a mut ControlFlow,
         captures: Option<Captures<'a>>,
+        return_type: Option<TypeId>,
     ) -> Self {
         Self {
             builder,
@@ -116,6 +120,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             self_capture: None,
             call_cache: HashMap::new(),
             field_cache: HashMap::new(),
+            return_type,
         }
     }
 

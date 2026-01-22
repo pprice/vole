@@ -533,7 +533,7 @@ impl Compiler<'_> {
                 func_registry: &mut self.func_registry,
                 source_file_ptr,
                 global_inits: module_global_inits,
-                lambda_counter: &mut self.lambda_counter,
+                lambda_counter: &self.lambda_counter,
                 type_metadata: &self.type_metadata,
                 impl_method_infos: &self.impl_method_infos,
                 static_method_infos: &self.static_method_infos,
@@ -611,7 +611,7 @@ impl Compiler<'_> {
                 func_registry: &mut self.func_registry,
                 source_file_ptr,
                 global_inits: &self.global_inits,
-                lambda_counter: &mut self.lambda_counter,
+                lambda_counter: &self.lambda_counter,
                 type_metadata: &self.type_metadata,
                 impl_method_infos: &self.impl_method_infos,
                 static_method_infos: &self.static_method_infos,
@@ -637,7 +637,7 @@ impl Compiler<'_> {
     /// Compile a scoped function declaration (like a pure lambda).
     /// Returns the FuncId and type information needed to make it callable in tests.
     fn compile_scoped_function(&mut self, func: &FuncDecl) -> Result<ScopedFuncInfo, String> {
-        self.lambda_counter += 1;
+        self.lambda_counter.set(self.lambda_counter.get() + 1);
 
         // Get param types using the compiler's type resolution
         let param_type_ids: Vec<TypeId> = func
@@ -688,7 +688,7 @@ impl Compiler<'_> {
             .push(cranelift::prelude::AbiParam::new(return_type));
 
         // Create unique function name
-        let scoped_func_name = format!("__scoped_{}_{}", self.lambda_counter, {
+        let scoped_func_name = format!("__scoped_{}_{}", self.lambda_counter.get(), {
             self.analyzed.interner.resolve(func.name)
         });
         let func_id = self
@@ -725,7 +725,7 @@ impl Compiler<'_> {
                 func_registry: &mut self.func_registry,
                 source_file_ptr,
                 global_inits: &self.global_inits,
-                lambda_counter: &mut self.lambda_counter,
+                lambda_counter: &self.lambda_counter,
                 type_metadata: &self.type_metadata,
                 impl_method_infos: &self.impl_method_infos,
                 static_method_infos: &self.static_method_infos,
@@ -821,7 +821,7 @@ impl Compiler<'_> {
                     func_registry: &mut self.func_registry,
                     source_file_ptr,
                     global_inits: &self.global_inits,
-                    lambda_counter: &mut self.lambda_counter,
+                    lambda_counter: &self.lambda_counter,
                     type_metadata: &self.type_metadata,
                     impl_method_infos: &self.impl_method_infos,
                     static_method_infos: &self.static_method_infos,
@@ -1082,7 +1082,7 @@ impl Compiler<'_> {
                 func_registry: &mut self.func_registry,
                 source_file_ptr,
                 global_inits: &empty_global_inits,
-                lambda_counter: &mut self.lambda_counter,
+                lambda_counter: &self.lambda_counter,
                 type_metadata: &empty_type_metadata,
                 impl_method_infos: &self.impl_method_infos,
                 static_method_infos: &self.static_method_infos,
@@ -1155,7 +1155,7 @@ impl Compiler<'_> {
                 func_registry: &mut self.func_registry,
                 source_file_ptr,
                 global_inits: &empty_global_inits,
-                lambda_counter: &mut self.lambda_counter,
+                lambda_counter: &self.lambda_counter,
                 type_metadata: &empty_type_metadata,
                 impl_method_infos: &self.impl_method_infos,
                 static_method_infos: &self.static_method_infos,
@@ -1412,7 +1412,7 @@ impl Compiler<'_> {
                 func_registry: &mut self.func_registry,
                 source_file_ptr,
                 global_inits: &self.global_inits,
-                lambda_counter: &mut self.lambda_counter,
+                lambda_counter: &self.lambda_counter,
                 type_metadata: &self.type_metadata,
                 impl_method_infos: &self.impl_method_infos,
                 static_method_infos: &self.static_method_infos,
@@ -1683,7 +1683,7 @@ impl Compiler<'_> {
                 func_registry: &mut self.func_registry,
                 source_file_ptr,
                 global_inits: &self.global_inits,
-                lambda_counter: &mut self.lambda_counter,
+                lambda_counter: &self.lambda_counter,
                 type_metadata: &self.type_metadata,
                 impl_method_infos: &self.impl_method_infos,
                 static_method_infos: &self.static_method_infos,
@@ -2008,7 +2008,7 @@ impl Compiler<'_> {
                 func_registry: &mut self.func_registry,
                 source_file_ptr,
                 global_inits: &self.global_inits,
-                lambda_counter: &mut self.lambda_counter,
+                lambda_counter: &self.lambda_counter,
                 type_metadata: &self.type_metadata,
                 impl_method_infos: &self.impl_method_infos,
                 static_method_infos: &self.static_method_infos,

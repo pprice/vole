@@ -8,7 +8,7 @@ mod type_registry;
 
 pub use signatures::{SelfParam, TypeResolver};
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -34,8 +34,8 @@ pub struct Compiler<'a> {
     tests: Vec<TestInfo>,
     /// Global variable initializer expressions keyed by name
     global_inits: HashMap<Symbol, Expr>,
-    /// Counter for generating unique lambda names
-    lambda_counter: usize,
+    /// Counter for generating unique lambda names (interior mutability for cleaner API)
+    lambda_counter: Cell<usize>,
     /// NameIds for declared test functions by index
     test_name_ids: Vec<NameId>,
     /// Class and record metadata: name -> TypeMetadata
@@ -77,7 +77,7 @@ impl<'a> Compiler<'a> {
             pointer_type,
             tests: Vec::new(),
             global_inits: HashMap::new(),
-            lambda_counter: 0,
+            lambda_counter: Cell::new(0),
             test_name_ids: Vec::new(),
             type_metadata: HashMap::new(),
             impl_method_infos: HashMap::new(),
@@ -112,6 +112,25 @@ impl<'a> Compiler<'a> {
             &self.analyzed.type_arena,
         );
         crate::types::TypeCtx::new(query, self.pointer_type)
+    }
+
+    /// Get ExplicitParams - shared lookup tables for codegen.
+    /// This bundles the read-only data that's shared across all function compilations.
+    #[allow(dead_code)] // Part of CompileCtx migration
+    fn explicit_params(&self) -> crate::types::ExplicitParams<'_> {
+        crate::types::ExplicitParams {
+            analyzed: self.analyzed,
+            interner: &self.analyzed.interner,
+            type_metadata: &self.type_metadata,
+            impl_method_infos: &self.impl_method_infos,
+            static_method_infos: &self.static_method_infos,
+            interface_vtables: &self.interface_vtables,
+            native_registry: &self.native_registry,
+            global_inits: &self.global_inits,
+            monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
+            source_file_ptr: (std::ptr::null(), 0), // Set per-call
+            lambda_counter: &self.lambda_counter,
+        }
     }
 
     /// Intern a qualified function name (encapsulates borrow of interner + func_registry)
