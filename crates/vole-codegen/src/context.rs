@@ -353,26 +353,25 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         args: &[Value],
         return_type_id: TypeId,
     ) -> Result<CompiledValue, String> {
-        // Get string names from NameId
-        let name_table = self.ctx.analyzed.name_table.borrow();
-        let module_path = name_table
-            .last_segment_str(external_info.module_path)
-            .ok_or_else(|| "module_path NameId has no segment".to_string())?;
-        let native_name = name_table
-            .last_segment_str(external_info.native_name)
-            .ok_or_else(|| "native_name NameId has no segment".to_string())?;
-
-        // Look up the native function in the registry
-        let native_func = self
-            .ctx
-            .native_registry
-            .lookup(&module_path, &native_name)
-            .ok_or_else(|| {
-                format!(
-                    "Native function {}::{} not found in registry",
-                    module_path, native_name
-                )
-            })?;
+        // Get string names from NameId and look up native function
+        let native_func = {
+            let name_table = self.ctx.query().name_table_rc().borrow();
+            let module_path = name_table
+                .last_segment_str(external_info.module_path)
+                .ok_or_else(|| "module_path NameId has no segment".to_string())?;
+            let native_name = name_table
+                .last_segment_str(external_info.native_name)
+                .ok_or_else(|| "native_name NameId has no segment".to_string())?;
+            self.ctx
+                .native_registry
+                .lookup(&module_path, &native_name)
+                .ok_or_else(|| {
+                    format!(
+                        "Native function {}::{} not found in registry",
+                        module_path, native_name
+                    )
+                })?
+        };
 
         // Build the Cranelift signature from NativeSignature
         let mut sig = self.ctx.module.make_signature();

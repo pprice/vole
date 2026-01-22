@@ -67,12 +67,12 @@ impl Cg<'_, '_, '_> {
     fn call_to_string(&mut self, val: &CompiledValue) -> Result<Value, String> {
         let arena = self.ctx.arena();
         let impl_type_id =
-            ImplTypeId::from_type_id(val.type_id, &arena, &self.ctx.analyzed.entity_registry)
+            ImplTypeId::from_type_id(val.type_id, &arena, self.ctx.query().registry())
                 .ok_or_else(|| format!("Cannot find ImplTypeId for type_id {:?}", val.type_id))?;
         drop(arena);
 
         // Look up to_string method via query
-        let method_id = self.ctx.analyzed.query().method_name_id_by_str("to_string");
+        let method_id = self.ctx.query().method_name_id_by_str("to_string");
 
         let method_impl = self
             .ctx

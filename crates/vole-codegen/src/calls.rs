@@ -332,7 +332,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Check if this is a call to a generic function (via monomorphization)
-        let monomorph_key = self.ctx.analyzed.query().monomorph_for(call_expr_id);
+        let monomorph_key = self.ctx.query().monomorph_for(call_expr_id);
         tracing::trace!(
             call_expr_id = ?call_expr_id,
             callee = callee_name,
@@ -362,7 +362,7 @@ impl Cg<'_, '_, '_> {
                 .implement_registry
                 .get_external_func(callee_name)
             {
-                let name_table = self.ctx.analyzed.name_table.borrow();
+                let name_table = self.ctx.query().name_table_rc().borrow();
                 let module_path = name_table.last_segment_str(ext_info.module_path);
                 let native_name = name_table.last_segment_str(ext_info.native_name);
                 drop(name_table);
@@ -396,7 +396,7 @@ impl Cg<'_, '_, '_> {
 
         // Check module context for mangled name or FFI
         if let Some(module_path) = self.ctx.current_module {
-            let name_table = self.ctx.analyzed.name_table.borrow();
+            let name_table = self.ctx.query().name_table_rc().borrow();
             let module_id = name_table
                 .module_id_if_known(module_path)
                 .unwrap_or_else(|| name_table.main_module());
@@ -484,7 +484,7 @@ impl Cg<'_, '_, '_> {
             .implement_registry
             .get_external_func(callee_name);
         let native_func = ext_info.and_then(|info| {
-            let name_table = self.ctx.analyzed.name_table.borrow();
+            let name_table = self.ctx.query().name_table_rc().borrow();
             let module_path = name_table.last_segment_str(info.module_path)?;
             let native_name = name_table.last_segment_str(info.native_name)?;
             self.ctx.native_registry.lookup(&module_path, &native_name)

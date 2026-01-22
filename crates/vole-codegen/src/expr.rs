@@ -173,7 +173,7 @@ impl Cg<'_, '_, '_> {
         use cranelift::prelude::FunctionBuilderContext;
 
         // Look up the original function's FuncId using the name table
-        let query = self.ctx.analyzed.query();
+        let query = self.ctx.query();
         let name_id = query.function_name_id(query.main_module(), sym);
 
         let orig_func_key = self.ctx.func_registry.intern_name_id(name_id);
@@ -396,7 +396,7 @@ impl Cg<'_, '_, '_> {
     /// Compile an array or tuple literal
     fn array_literal(&mut self, elements: &[Expr], expr: &Expr) -> Result<CompiledValue, String> {
         // Check the inferred type from semantic analysis
-        let inferred_type_id = self.ctx.analyzed.query().type_of(expr.id);
+        let inferred_type_id = self.ctx.query().type_of(expr.id);
 
         // If it's a tuple, use stack allocation
         if let Some(type_id) = inferred_type_id {
@@ -459,7 +459,7 @@ impl Cg<'_, '_, '_> {
         let (total_size, offsets) = tuple_layout_id(
             elem_type_ids,
             self.ctx.pointer_type,
-            &self.ctx.analyzed.entity_registry,
+            self.ctx.query().registry(),
             &self.ctx.arena(),
         );
 
@@ -601,7 +601,7 @@ impl Cg<'_, '_, '_> {
                 let (_, offsets) = tuple_layout_id(
                     &elem_type_ids,
                     self.ctx.pointer_type,
-                    &self.ctx.analyzed.entity_registry,
+                    self.ctx.query().registry(),
                     &self.ctx.arena(),
                 );
                 let offset = offsets[i];
@@ -1143,7 +1143,7 @@ impl Cg<'_, '_, '_> {
                         let (_, offsets) = tuple_layout_id(
                             &elem_type_ids,
                             self.ctx.pointer_type,
-                            &self.ctx.analyzed.entity_registry,
+                            self.ctx.query().registry(),
                             &self.ctx.arena(),
                         );
                         for (i, pattern) in elements.iter().enumerate() {
@@ -1649,14 +1649,14 @@ impl Cg<'_, '_, '_> {
             return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
         };
 
-        let name_table = self.ctx.analyzed.name_table.borrow();
+        let name_table = self.ctx.query().name_table_rc().borrow();
         let Some(error_tag) = fallible_error_tag_by_id(
             error_type_id,
             name,
             &arena,
             self.ctx.interner(),
             &name_table,
-            &self.ctx.analyzed.entity_registry,
+            self.ctx.query().registry(),
         ) else {
             // Error type not found in fallible - will never match
             drop(name_table);
@@ -1702,14 +1702,14 @@ impl Cg<'_, '_, '_> {
             return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
         };
 
-        let name_table = self.ctx.analyzed.name_table.borrow();
+        let name_table = self.ctx.query().name_table_rc().borrow();
         let Some(error_tag) = fallible_error_tag_by_id(
             fallible_error_type_id,
             name,
             &arena,
             self.ctx.interner(),
             &name_table,
-            &self.ctx.analyzed.entity_registry,
+            self.ctx.query().registry(),
         ) else {
             // Error type not found in fallible
             drop(name_table);
@@ -1737,8 +1737,8 @@ impl Cg<'_, '_, '_> {
             // Find the field index and type in the error type
             let Some((field_idx, field_def)) = error_fields.iter().enumerate().find(|(_, f)| {
                 self.ctx
-                    .analyzed
-                    .name_table
+                    .query()
+                    .name_table_rc()
                     .borrow()
                     .last_segment_str(f.name_id)
                     .as_deref()

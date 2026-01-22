@@ -290,7 +290,7 @@ impl Cg<'_, '_, '_> {
                         let fallible_size = type_id_size(
                             ret_type_id,
                             self.ctx.pointer_type,
-                            &self.ctx.analyzed.entity_registry,
+                            self.ctx.query().registry(),
                             &self.ctx.arena(),
                         );
 
@@ -411,7 +411,7 @@ impl Cg<'_, '_, '_> {
                     self.for_range(for_stmt, range)
                 } else {
                     // Check if iterable is an Iterator type or string type using TypeId
-                    let iterable_type_id = self.ctx.analyzed.query().type_of(for_stmt.iterable.id);
+                    let iterable_type_id = self.ctx.query().type_of(for_stmt.iterable.id);
                     let is_iterator =
                         iterable_type_id.is_some_and(|id| self.is_iterator_type_id(id));
                     let is_string =
@@ -581,8 +581,8 @@ impl Cg<'_, '_, '_> {
         let arena = self.ctx.arena();
         if let Some((type_def_id, _)) = arena.unwrap_interface(ty) {
             self.ctx
-                .analyzed
-                .name_table
+                .query()
+                .name_table_rc()
                 .borrow()
                 .well_known
                 .is_iterator_type_def(type_def_id)
@@ -809,7 +809,7 @@ impl Cg<'_, '_, '_> {
         let union_size = type_id_size(
             union_type_id,
             self.ctx.pointer_type,
-            &self.ctx.analyzed.entity_registry,
+            self.ctx.query().registry(),
             &self.ctx.arena(),
         );
         let slot = self.builder.create_sized_stack_slot(StackSlotData::new(
@@ -862,7 +862,7 @@ impl Cg<'_, '_, '_> {
                     let (_, offsets) = tuple_layout_id(
                         &elem_type_ids,
                         self.ctx.pointer_type,
-                        &self.ctx.analyzed.entity_registry,
+                        self.ctx.query().registry(),
                         &self.ctx.arena(),
                     );
                     for (i, elem_pattern) in elements.iter().enumerate() {
@@ -887,7 +887,7 @@ impl Cg<'_, '_, '_> {
                     let elem_size = type_id_size(
                         element_id,
                         self.ctx.pointer_type,
-                        &self.ctx.analyzed.entity_registry,
+                        self.ctx.query().registry(),
                         &self.ctx.arena(),
                     )
                     .div_ceil(8)
@@ -961,8 +961,8 @@ impl Cg<'_, '_, '_> {
             raise_stmt.error_name,
             &self.ctx.arena(),
             self.ctx.interner(),
-            &self.ctx.analyzed.name_table.borrow(),
-            &self.ctx.analyzed.entity_registry,
+            &self.ctx.query().name_table_rc().borrow(),
+            self.ctx.query().registry(),
         )
         .ok_or_else(|| {
             format!(
@@ -975,7 +975,7 @@ impl Cg<'_, '_, '_> {
         let fallible_size = type_id_size(
             return_type_id,
             self.ctx.pointer_type,
-            &self.ctx.analyzed.entity_registry,
+            self.ctx.query().registry(),
             &self.ctx.arena(),
         );
 
@@ -995,7 +995,7 @@ impl Cg<'_, '_, '_> {
         // Get the error type_def_id to look up field order from EntityRegistry
         let raise_error_name = self.ctx.interner().resolve(raise_stmt.error_name);
         let arena = self.ctx.arena();
-        let name_table = self.ctx.analyzed.name_table.borrow();
+        let name_table = self.ctx.query().name_table_rc().borrow();
         let error_type_def_id = if let Some(type_def_id) = arena.unwrap_error(error_type_id) {
             // Single error type
             let name = name_table.last_segment_str(self.ctx.query().type_name_id(type_def_id));
@@ -1042,8 +1042,8 @@ impl Cg<'_, '_, '_> {
             // Find the matching field in the raise statement
             let field_name = self
                 .ctx
-                .analyzed
-                .name_table
+                .query()
+                .name_table_rc()
                 .borrow()
                 .last_segment_str(field_def.name_id)
                 .unwrap_or_default();

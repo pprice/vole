@@ -28,8 +28,8 @@ impl Cg<'_, '_, '_> {
             let field_name = self.ctx.interner().resolve(fa.field);
             let module_path = self
                 .ctx
-                .analyzed
-                .name_table
+                .query()
+                .name_table_rc()
                 .borrow()
                 .module_path(module_id)
                 .to_string();

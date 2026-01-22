@@ -38,7 +38,6 @@ impl Cg<'_, '_, '_> {
         // Prefer the type from semantic analysis (handles generic instantiation)
         let result_type_id = self
             .ctx
-            .analyzed
             .query()
             .type_of(expr.id)
             .unwrap_or(metadata.vole_type);
@@ -78,8 +77,8 @@ impl Cg<'_, '_, '_> {
                         .map(|(name_id, ty_id)| {
                             (
                                 self.ctx
-                                    .analyzed
-                                    .name_table
+                                    .query()
+                                    .name_table_rc()
                                     .borrow()
                                     .last_segment_str(*name_id)
                                     .unwrap_or_default(),
@@ -184,7 +183,7 @@ impl Cg<'_, '_, '_> {
         let union_size = type_id_size(
             union_type_id,
             self.ctx.pointer_type,
-            &self.ctx.analyzed.entity_registry,
+            self.ctx.query().registry(),
             &self.ctx.arena(),
         );
         let size_val = self
