@@ -377,6 +377,39 @@ impl<'a> ProgramQuery<'a> {
         Some(ret)
     }
 
+    /// Get a method's return type by TypeDefId and method NameId.
+    /// More efficient for codegen which already has these IDs.
+    #[must_use]
+    pub fn method_return_type_by_id(
+        &self,
+        type_def_id: TypeDefId,
+        method_name_id: NameId,
+    ) -> Option<TypeId> {
+        let method_id = self
+            .registry
+            .find_method_on_type(type_def_id, method_name_id)?;
+        let method_def = self.registry.get_method(method_id);
+        let arena = self.type_arena.borrow();
+        let (_, ret, _) = arena.unwrap_function(method_def.signature_id)?;
+        Some(ret)
+    }
+
+    /// Get a static method's return type by TypeDefId and method NameId.
+    #[must_use]
+    pub fn static_method_return_type_by_id(
+        &self,
+        type_def_id: TypeDefId,
+        method_name_id: NameId,
+    ) -> Option<TypeId> {
+        let method_id = self
+            .registry
+            .find_static_method_on_type(type_def_id, method_name_id)?;
+        let method_def = self.registry.get_method(method_id);
+        let arena = self.type_arena.borrow();
+        let (_, ret, _) = arena.unwrap_function(method_def.signature_id)?;
+        Some(ret)
+    }
+
     // =========================================================================
     // Well-known type checks
     // =========================================================================

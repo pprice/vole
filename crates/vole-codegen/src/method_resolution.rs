@@ -74,6 +74,7 @@ pub(crate) fn resolve_method_target_id(
     });
 
     // Helper closures for method lookup
+    // Returns (MethodInfo, TypeDefId) so we can look up return type from sema
     let lookup_direct_method = |type_name_id: NameId| {
         type_metadata_by_name_id(
             input.type_metadata,
@@ -81,8 +82,11 @@ pub(crate) fn resolve_method_target_id(
             &input.analyzed.entity_registry,
             &input.analyzed.type_arena.borrow(),
         )
-        .and_then(|meta| meta.method_infos.get(&input.method_id))
-        .copied()
+        .and_then(|meta| {
+            meta.method_infos
+                .get(&input.method_id)
+                .map(|info| (*info, meta.type_def_id))
+        })
         .ok_or_else(|| {
             format!(
                 "Method {} not found on type {:?}",
@@ -91,12 +95,39 @@ pub(crate) fn resolve_method_target_id(
         })
     };
 
+    // Helper to get method return type from sema
+    let get_return_type_from_sema = |type_def_id: TypeDefId, method_id: NameId| -> TypeId {
+        let Some(method_id) = input
+            .analyzed
+            .entity_registry
+            .find_method_on_type(type_def_id, method_id)
+        else {
+            return TypeId::VOID;
+        };
+        let method_def = input.analyzed.entity_registry.get_method(method_id);
+        let arena = input.analyzed.type_arena.borrow();
+        arena
+            .unwrap_function(method_def.signature_id)
+            .map(|(_, ret, _)| ret)
+            .unwrap_or(TypeId::VOID)
+    };
+
     let lookup_impl_method = |type_id: ImplTypeId| {
         input
             .impl_method_infos
             .get(&(type_id, input.method_id))
             .copied()
             .ok_or_else(|| format!("Unknown method {} on type", input.method_name_str,))
+    };
+
+    // Helper to get impl method return type from sema's implement_registry
+    let get_impl_return_type_from_sema = |type_id: &ImplTypeId| -> TypeId {
+        input
+            .analyzed
+            .implement_registry
+            .get_method(type_id, input.method_id)
+            .map(|impl_| impl_.func_type.return_type_id)
+            .unwrap_or(TypeId::VOID)
     };
 
     if let Some(resolution) = effective_resolution {
@@ -111,7 +142,7 @@ pub(crate) fn resolve_method_target_id(
                     &arena,
                     &input.analyzed.entity_registry,
                 )?;
-                let method_info = lookup_direct_method(type_name_id)?;
+                let (method_info, _type_def_id) = lookup_direct_method(type_name_id)?;
                 Ok(MethodTarget::Direct {
                     method_info,
                     return_type: return_type_id,
@@ -214,7 +245,7 @@ pub(crate) fn resolve_method_target_id(
                     &arena,
                     &input.analyzed.entity_registry,
                 )?;
-                let method_info = lookup_direct_method(type_name_id)?;
+                let (method_info, _type_def_id) = lookup_direct_method(type_name_id)?;
                 Ok(MethodTarget::Default {
                     method_info,
                     return_type: return_type_id,
@@ -323,9 +354,10 @@ pub(crate) fn resolve_method_target_id(
         &input.analyzed.entity_registry,
     ) && let Ok(method_info) = lookup_impl_method(type_id)
     {
+        let return_type = get_impl_return_type_from_sema(&type_id);
         return Ok(MethodTarget::Implemented {
             method_info,
-            return_type: method_info.return_type,
+            return_type,
         });
     }
 
@@ -335,11 +367,12 @@ pub(crate) fn resolve_method_target_id(
         input.object_type_id,
         &arena,
         &input.analyzed.entity_registry,
-    ) && let Ok(method_info) = lookup_direct_method(type_name_id)
+    ) && let Ok((method_info, type_def_id)) = lookup_direct_method(type_name_id)
     {
+        let return_type = get_return_type_from_sema(type_def_id, input.method_id);
         return Ok(MethodTarget::Direct {
             method_info,
-            return_type: method_info.return_type,
+            return_type,
         });
     }
 

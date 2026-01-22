@@ -282,15 +282,17 @@ pub(crate) struct TypeMetadata {
     pub field_slots: HashMap<String, usize>,
     /// The Vole type (Class or Record) - interned TypeId handle
     pub vole_type: TypeId,
+    /// TypeDefId for sema lookups (method return types, etc.)
+    pub type_def_id: TypeDefId,
     /// Method info: method name -> method info
     pub method_infos: HashMap<NameId, MethodInfo>,
 }
 
-/// Metadata for a compiled method (opaque function key + return type)
+/// Metadata for a compiled method (opaque function key)
+/// Return type is looked up from sema on demand.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct MethodInfo {
     pub func_key: crate::FunctionKey,
-    pub return_type: TypeId,
 }
 
 /// Look up TypeMetadata by NameId (cross-interner safe)

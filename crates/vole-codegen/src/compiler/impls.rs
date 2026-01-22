@@ -213,7 +213,6 @@ impl Compiler<'_> {
         impl_block: &ImplementBlock,
         interner: &Interner,
     ) {
-        let module_id = self.query().main_module();
         // Get type name string (works for primitives and named types)
         let Some(type_name) = self.get_type_name_from_expr(&impl_block.target_type) else {
             return; // Unsupported type for implement block
@@ -251,25 +250,6 @@ impl Compiler<'_> {
                 continue;
             }
 
-            let return_type = {
-                let name_table = self.analyzed.name_table.borrow();
-                method
-                    .return_type
-                    .as_ref()
-                    .map(|t| {
-                        resolve_type_expr_to_id(
-                            t,
-                            &self.analyzed.entity_registry,
-                            &self.type_metadata,
-                            interner,
-                            &name_table,
-                            module_id,
-                            &self.analyzed.type_arena,
-                        )
-                    })
-                    .unwrap_or(TypeId::VOID)
-            };
-
             // Create signature without self parameter
             let sig = self.build_signature(
                 &method.params,
@@ -292,13 +272,8 @@ impl Compiler<'_> {
                 && let Some(method_name_id) =
                     method_name_id_with_interner(self.analyzed, interner, method.name)
             {
-                self.static_method_infos.insert(
-                    (type_def_id, method_name_id),
-                    MethodInfo {
-                        func_key,
-                        return_type,
-                    },
-                );
+                self.static_method_infos
+                    .insert((type_def_id, method_name_id), MethodInfo { func_key });
             }
         }
     }
@@ -310,7 +285,6 @@ impl Compiler<'_> {
         impl_block: &ImplementBlock,
         interner: &Interner,
     ) {
-        let module_id = self.query().main_module();
         // Get type name string (works for primitives and named types)
         let Some(type_name) = self.get_type_name_from_expr(&impl_block.target_type) else {
             return; // Unsupported type for implement block
@@ -348,25 +322,6 @@ impl Compiler<'_> {
                 continue;
             }
 
-            let return_type = {
-                let name_table = self.analyzed.name_table.borrow();
-                method
-                    .return_type
-                    .as_ref()
-                    .map(|t| {
-                        resolve_type_expr_to_id(
-                            t,
-                            &self.analyzed.entity_registry,
-                            &self.type_metadata,
-                            interner,
-                            &name_table,
-                            module_id,
-                            &self.analyzed.type_arena,
-                        )
-                    })
-                    .unwrap_or(TypeId::VOID)
-            };
-
             // Create signature without self parameter
             let sig = self.build_signature(
                 &method.params,
@@ -390,13 +345,8 @@ impl Compiler<'_> {
                 && let Some(method_name_id) =
                     method_name_id_with_interner(self.analyzed, interner, method.name)
             {
-                self.static_method_infos.insert(
-                    (type_def_id, method_name_id),
-                    MethodInfo {
-                        func_key,
-                        return_type,
-                    },
-                );
+                self.static_method_infos
+                    .insert((type_def_id, method_name_id), MethodInfo { func_key });
             }
         }
     }
@@ -459,24 +409,6 @@ impl Compiler<'_> {
 
         // Declare methods as functions: TypeName::methodName (implement block convention)
         for method in &impl_block.methods {
-            let return_type = {
-                let name_table = self.analyzed.name_table.borrow();
-                method
-                    .return_type
-                    .as_ref()
-                    .map(|t| {
-                        resolve_type_expr_to_id(
-                            t,
-                            &self.analyzed.entity_registry,
-                            &self.type_metadata,
-                            interner,
-                            &name_table,
-                            module_id,
-                            &self.analyzed.type_arena,
-                        )
-                    })
-                    .unwrap_or(TypeId::VOID)
-            };
             let sig = self.build_signature(
                 &method.params,
                 method.return_type.as_ref(),
@@ -500,13 +432,8 @@ impl Compiler<'_> {
             if let Some(impl_id) = impl_type_id {
                 let method_id = method_name_id_with_interner(self.analyzed, interner, method.name)
                     .expect("implement method name_id should be registered");
-                self.impl_method_infos.insert(
-                    (impl_id, method_id),
-                    MethodInfo {
-                        func_key,
-                        return_type,
-                    },
-                );
+                self.impl_method_infos
+                    .insert((impl_id, method_id), MethodInfo { func_key });
             }
         }
 
@@ -535,25 +462,6 @@ impl Compiler<'_> {
                     continue;
                 }
 
-                let return_type = {
-                    let name_table = self.analyzed.name_table.borrow();
-                    method
-                        .return_type
-                        .as_ref()
-                        .map(|t| {
-                            resolve_type_expr_to_id(
-                                t,
-                                &self.analyzed.entity_registry,
-                                &self.type_metadata,
-                                interner,
-                                &name_table,
-                                module_id,
-                                &self.analyzed.type_arena,
-                            )
-                        })
-                        .unwrap_or(TypeId::VOID)
-                };
-
                 // Create signature without self parameter
                 let sig = self.build_signature(
                     &method.params,
@@ -576,13 +484,8 @@ impl Compiler<'_> {
                     && let Some(method_name_id) =
                         method_name_id_with_interner(self.analyzed, interner, method.name)
                 {
-                    self.static_method_infos.insert(
-                        (type_def_id, method_name_id),
-                        MethodInfo {
-                            func_key,
-                            return_type,
-                        },
-                    );
+                    self.static_method_infos
+                        .insert((type_def_id, method_name_id), MethodInfo { func_key });
                 }
             }
         }
@@ -1013,17 +916,19 @@ impl Compiler<'_> {
         let method_name_str = self.query().resolve_symbol(method.name).to_string();
         let module_id = self.query().main_module();
 
-        let method_info = metadata
-            .method_infos
-            .get(&self.method_name_id(method.name))
-            .ok_or_else(|| {
-                format!(
-                    "Internal error: method {} not registered on {}",
-                    method_name_str, type_name_str
-                )
-            })?;
+        let method_name_id = self.method_name_id(method.name);
+        let method_info = metadata.method_infos.get(&method_name_id).ok_or_else(|| {
+            format!(
+                "Internal error: method {} not registered on {}",
+                method_name_str, type_name_str
+            )
+        })?;
         let func_key = method_info.func_key;
-        let return_type_id_from_sema = method_info.return_type;
+        // Look up return type from sema (removes redundant storage in MethodInfo)
+        let return_type_id_from_sema = self
+            .query()
+            .method_return_type_by_id(metadata.type_def_id, method_name_id)
+            .unwrap_or(TypeId::VOID);
         let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
             let display = self.func_registry.display(func_key);
             format!("Internal error: method {} not declared", display)
@@ -1141,17 +1046,21 @@ impl Compiler<'_> {
         let method_name_str = self.query().resolve_symbol(method.name).to_string();
         let module_id = self.query().main_module();
 
-        let method_info = metadata
-            .method_infos
-            .get(&self.method_name_id(method.name))
-            .ok_or_else(|| {
-                format!(
-                    "Internal error: default method {} not registered on {}",
-                    method_name_str, type_name_str
-                )
-            })?;
+        let method_name_id = self.method_name_id(method.name);
+        let method_info = metadata.method_infos.get(&method_name_id).ok_or_else(|| {
+            format!(
+                "Internal error: default method {} not registered on {}",
+                method_name_str, type_name_str
+            )
+        })?;
         let func_key = method_info.func_key;
-        let return_type_id_from_sema = method_info.return_type;
+        // For default methods, the return type is explicit in the interface declaration
+        // We can't look it up on the implementing type since it's inherited
+        let return_type_id_from_sema = method
+            .return_type
+            .as_ref()
+            .map(|t| self.resolve_type_to_id(t))
+            .unwrap_or(TypeId::VOID);
         let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
             let display = self.func_registry.display(func_key);
             format!("Internal error: default method {} not declared", display)
@@ -1334,13 +1243,12 @@ impl Compiler<'_> {
                 )
             })?;
 
-            // Get the return type from static_method_infos (includes inferred types from sema)
+            // Get the return type from sema directly (removes redundant storage)
             let method_name_id = self.method_name_id(method.name);
             let return_type_id = type_def_id
                 .and_then(|type_def_id| {
-                    self.static_method_infos
-                        .get(&(type_def_id, method_name_id))
-                        .map(|info| info.return_type)
+                    self.query()
+                        .static_method_return_type_by_id(type_def_id, method_name_id)
                 })
                 .unwrap_or(TypeId::VOID);
 

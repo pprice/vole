@@ -96,6 +96,7 @@ impl Compiler<'_> {
                 type_id,
                 field_slots: HashMap::new(),
                 vole_type: vole_type_id,
+                type_def_id,
                 method_infos: HashMap::new(),
             },
         );
@@ -178,13 +179,7 @@ impl Compiler<'_> {
             let display_name = self.func_registry.display(func_key);
             let func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, func_id);
-            method_infos.insert(
-                method_name_id,
-                MethodInfo {
-                    func_key,
-                    return_type,
-                },
-            );
+            method_infos.insert(method_name_id, MethodInfo { func_key });
         }
 
         // Collect method names that the class directly defines
@@ -218,11 +213,6 @@ impl Compiler<'_> {
             if let Some(interface_decl) = self.find_interface_decl(program, interface_name) {
                 for method in &interface_decl.methods {
                     if method.body.is_some() && !direct_methods.contains(&method.name) {
-                        let return_type = method
-                            .return_type
-                            .as_ref()
-                            .map(|t| self.resolve_type_to_id(t))
-                            .unwrap_or(TypeId::VOID);
                         let sig = self.build_signature(
                             &method.params,
                             method.return_type.as_ref(),
@@ -234,13 +224,7 @@ impl Compiler<'_> {
                         let func_id = self.jit.declare_function(&display_name, &sig);
                         self.func_registry.set_func_id(func_key, func_id);
                         let method_id = self.query().method_name_id(method.name);
-                        method_infos.insert(
-                            method_id,
-                            MethodInfo {
-                                func_key,
-                                return_type,
-                            },
-                        );
+                        method_infos.insert(method_id, MethodInfo { func_key });
                     }
                 }
             }
@@ -251,18 +235,20 @@ impl Compiler<'_> {
             self.register_static_methods(statics, class.name);
         }
 
-        // Reuse the vole_type_id from pre_register (already interned)
-        let vole_type_id = self
+        // Reuse the vole_type_id and type_def_id from pre_register
+        let pre_registered = self
             .type_metadata
             .get(&class.name)
-            .expect("class should be pre-registered")
-            .vole_type;
+            .expect("class should be pre-registered");
+        let vole_type_id = pre_registered.vole_type;
+        let type_def_id = pre_registered.type_def_id;
         self.type_metadata.insert(
             class.name,
             TypeMetadata {
                 type_id,
                 field_slots,
                 vole_type: vole_type_id,
+                type_def_id,
                 method_infos,
             },
         );
@@ -297,6 +283,7 @@ impl Compiler<'_> {
                 type_id,
                 field_slots: HashMap::new(),
                 vole_type: vole_type_id,
+                type_def_id,
                 method_infos: HashMap::new(),
             },
         );
@@ -350,13 +337,7 @@ impl Compiler<'_> {
             let func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, func_id);
             let method_id = self.query().method_name_id(method.name);
-            method_infos.insert(
-                method_id,
-                MethodInfo {
-                    func_key,
-                    return_type,
-                },
-            );
+            method_infos.insert(method_id, MethodInfo { func_key });
         }
 
         // Collect method names that the record directly defines
@@ -390,11 +371,6 @@ impl Compiler<'_> {
             if let Some(interface_decl) = self.find_interface_decl(program, interface_name) {
                 for method in &interface_decl.methods {
                     if method.body.is_some() && !direct_methods.contains(&method.name) {
-                        let return_type = method
-                            .return_type
-                            .as_ref()
-                            .map(|t| self.resolve_type_to_id(t))
-                            .unwrap_or(TypeId::VOID);
                         let sig = self.build_signature(
                             &method.params,
                             method.return_type.as_ref(),
@@ -407,13 +383,7 @@ impl Compiler<'_> {
                         let func_id = self.jit.declare_function(&display_name, &sig);
                         self.func_registry.set_func_id(func_key, func_id);
                         let method_id = self.query().method_name_id(method.name);
-                        method_infos.insert(
-                            method_id,
-                            MethodInfo {
-                                func_key,
-                                return_type,
-                            },
-                        );
+                        method_infos.insert(method_id, MethodInfo { func_key });
                     }
                 }
             }
@@ -424,18 +394,20 @@ impl Compiler<'_> {
             self.register_static_methods(statics, record.name);
         }
 
-        // Reuse the vole_type_id from pre_register (already interned)
-        let vole_type_id = self
+        // Reuse the vole_type_id and type_def_id from pre_register
+        let pre_registered = self
             .type_metadata
             .get(&record.name)
-            .expect("record should be pre-registered")
-            .vole_type;
+            .expect("record should be pre-registered");
+        let vole_type_id = pre_registered.vole_type;
+        let type_def_id = pre_registered.type_def_id;
         self.type_metadata.insert(
             record.name,
             TypeMetadata {
                 type_id,
                 field_slots,
                 vole_type: vole_type_id,
+                type_def_id,
                 method_infos,
             },
         );
@@ -501,13 +473,8 @@ impl Compiler<'_> {
 
             // Register in static_method_infos for codegen lookup
             if let Some(type_def_id) = type_def_id {
-                self.static_method_infos.insert(
-                    (type_def_id, method_name_id),
-                    MethodInfo {
-                        func_key,
-                        return_type,
-                    },
-                );
+                self.static_method_infos
+                    .insert((type_def_id, method_name_id), MethodInfo { func_key });
             }
         }
     }
@@ -581,12 +548,6 @@ impl Compiler<'_> {
             let method_name_str = module_interner.resolve(method.name);
             tracing::debug!(type_name = %type_name_str, method_name = %method_name_str, "Processing instance method");
 
-            let return_type = method
-                .return_type
-                .as_ref()
-                .map(|t| self.resolve_type_to_id_with_interner(t, module_interner))
-                .unwrap_or(TypeId::VOID);
-
             let sig = self.build_signature(
                 &method.params,
                 method.return_type.as_ref(),
@@ -604,13 +565,7 @@ impl Compiler<'_> {
                 method_name_id_with_interner(self.analyzed, module_interner, method.name)
             {
                 tracing::debug!(type_name = %type_name_str, method_name = %method_name_str, ?method_name_id, "Registered instance method");
-                method_infos.insert(
-                    method_name_id,
-                    MethodInfo {
-                        func_key,
-                        return_type,
-                    },
-                );
+                method_infos.insert(method_name_id, MethodInfo { func_key });
             } else {
                 tracing::warn!(type_name = %type_name_str, method_name = %method_name_str, "Could not get method_name_id for instance method");
             }
@@ -638,6 +593,7 @@ impl Compiler<'_> {
                 type_id,
                 field_slots,
                 vole_type: vole_type_id,
+                type_def_id,
                 method_infos,
             },
         );
@@ -648,12 +604,6 @@ impl Compiler<'_> {
                 if method.body.is_none() {
                     continue;
                 }
-
-                let return_type = method
-                    .return_type
-                    .as_ref()
-                    .map(|t| self.resolve_type_to_id_with_interner(t, module_interner))
-                    .unwrap_or(TypeId::VOID);
 
                 let sig = self.build_signature(
                     &method.params,
@@ -677,13 +627,8 @@ impl Compiler<'_> {
                         method_name = %method_name_str,
                         "Registering static method"
                     );
-                    self.static_method_infos.insert(
-                        (type_def_id, method_name_id),
-                        MethodInfo {
-                            func_key,
-                            return_type,
-                        },
-                    );
+                    self.static_method_infos
+                        .insert((type_def_id, method_name_id), MethodInfo { func_key });
                 }
             }
         }
