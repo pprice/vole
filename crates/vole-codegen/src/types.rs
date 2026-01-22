@@ -393,6 +393,12 @@ impl<'a> CompileCtx<'a> {
         self.arena.borrow()
     }
 
+    /// Get the arena Rc (for functions that need the raw Rc<RefCell<TypeArena>>)
+    #[inline]
+    pub fn arena_rc(&self) -> &'a Rc<RefCell<TypeArena>> {
+        self.arena
+    }
+
     /// Get an update interface for arena mutations.
     /// Centralizes all borrow_mut() calls for cleaner code.
     #[inline]
@@ -652,7 +658,7 @@ pub(crate) fn resolve_type_expr_id(ty: &TypeExpr, ctx: &CompileCtx) -> TypeId {
         ctx.interner(),
         &name_table,
         module_id,
-        ctx.arena,
+        ctx.arena_rc(),
     );
     drop(name_table);
 

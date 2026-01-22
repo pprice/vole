@@ -236,8 +236,8 @@ impl Cg<'_, '_, '_> {
         let left_is_string = left_type_id == TypeId::STRING;
 
         // Convert operands
-        let left_val = convert_to_type(self.builder, left, result_ty, self.ctx.arena);
-        let right_val = convert_to_type(self.builder, right, result_ty, self.ctx.arena);
+        let left_val = convert_to_type(self.builder, left, result_ty, self.ctx.arena_rc());
+        let right_val = convert_to_type(self.builder, right, result_ty, self.ctx.arena_rc());
 
         let result = match op {
             BinaryOp::Add => {

@@ -363,7 +363,7 @@ impl Cg<'_, '_, '_> {
                         &compiled,
                         self.ctx.ptr_type(),
                         None, // No heap alloc needed for primitive conversions
-                        self.ctx.arena,
+                        self.ctx.arena_rc(),
                         self.registry(),
                     )?
                 } else {
@@ -381,7 +381,7 @@ impl Cg<'_, '_, '_> {
                         &compiled,
                         self.ctx.ptr_type(),
                         None, // No heap alloc needed for primitive conversions
-                        self.ctx.arena,
+                        self.ctx.arena_rc(),
                         self.registry(),
                     )?
                 } else {
@@ -885,7 +885,7 @@ impl Cg<'_, '_, '_> {
                 &compiled,
                 word_type,
                 Some(heap_alloc_ref),
-                self.ctx.arena,
+                self.ctx.arena_rc(),
                 self.registry(),
             )?;
             call_args.push(word);

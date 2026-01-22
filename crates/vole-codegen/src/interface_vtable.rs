@@ -391,7 +391,7 @@ impl InterfaceVtableRegistry {
                     },
                     ctx.ptr_type(),
                     Some(heap_alloc_ref),
-                    ctx.arena,
+                    ctx.arena_rc(),
                     ctx.registry(),
                 )?;
                 drop(arena);
@@ -813,7 +813,7 @@ pub(crate) fn box_interface_value_id(
         &value,
         ctx.ptr_type(),
         Some(heap_alloc_ref),
-        ctx.arena,
+        ctx.arena_rc(),
         ctx.registry(),
     )?;
 
@@ -921,7 +921,7 @@ fn resolve_vtable_target(
         // Use TypeId fields (required)
         let param_type_ids = impl_.func_type.params_id.to_vec();
         let return_type_id = impl_.func_type.return_type_id;
-        let returns_void = matches!(ctx.arena.borrow().get(return_type_id), SemaType::Void);
+        let returns_void = matches!(ctx.arena().get(return_type_id), SemaType::Void);
         if let Some(external_info) = impl_.external_info {
             return Ok(VtableMethod {
                 param_count: impl_.func_type.params_id.len(),
@@ -986,7 +986,7 @@ fn resolve_vtable_target(
     })();
 
     if let Some((method_info, param_type_ids, return_type_id)) = direct_method_result {
-        let returns_void = matches!(ctx.arena.borrow().get(return_type_id), SemaType::Void);
+        let returns_void = matches!(ctx.arena().get(return_type_id), SemaType::Void);
         return Ok(VtableMethod {
             param_count: param_type_ids.len(),
             returns_void,
@@ -1015,7 +1015,7 @@ fn resolve_vtable_target(
                     .expect("interface method signature must be a function type");
                 (params.to_vec(), ret)
             };
-            let returns_void = matches!(ctx.arena.borrow().get(return_type_id), SemaType::Void);
+            let returns_void = matches!(ctx.arena().get(return_type_id), SemaType::Void);
             return Ok(VtableMethod {
                 param_count: param_type_ids.len(),
                 returns_void,
