@@ -14,7 +14,7 @@ use std::rc::Rc;
 use crate::AnalyzedProgram;
 use crate::FunctionRegistry;
 use crate::errors::CodegenError;
-use vole_frontend::{Interner, LetStmt, NodeId, Symbol, TypeExpr};
+use vole_frontend::{Expr, Interner, NodeId, Symbol, TypeExpr};
 use vole_identity::{self, ModuleId, NameId, NameTable, NamerLookup, Resolver, TypeDefId};
 use vole_runtime::NativeRegistry;
 use vole_runtime::native_registry::NativeType;
@@ -351,8 +351,8 @@ pub(crate) struct CompileCtx<'a> {
     pub module: &'a mut JITModule,
     pub func_registry: &'a mut FunctionRegistry,
     pub source_file_ptr: (*const u8, usize),
-    /// Global variable declarations for lookup when identifier not in local scope
-    pub globals: &'a [LetStmt],
+    /// Global variable initializer expressions keyed by name
+    pub global_inits: &'a HashMap<Symbol, Expr>,
     /// Counter for generating unique lambda names
     pub lambda_counter: &'a mut usize,
     /// Class and record metadata for struct literals, field access, and method calls
@@ -554,10 +554,10 @@ impl<'a> CompileCtx<'a> {
         self.source_file_ptr
     }
 
-    /// Get global variable declarations.
+    /// Get global variable initializer by name.
     #[inline]
-    pub fn global_vars(&self) -> &'a [LetStmt] {
-        self.globals
+    pub fn global_init(&self, name: Symbol) -> Option<&Expr> {
+        self.global_inits.get(&name)
     }
 
     /// Increment lambda counter and return the new value.

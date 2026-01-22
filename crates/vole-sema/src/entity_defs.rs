@@ -7,6 +7,7 @@ use crate::FunctionType;
 use crate::generic::TypeParamInfo;
 use crate::implement_registry::ExternalMethodInfo;
 use crate::type_arena::TypeId;
+use vole_frontend::NodeId;
 use vole_identity::{FieldId, FunctionId, GlobalId, MethodId, ModuleId, NameId, TypeDefId};
 
 /// What kind of type definition this is
@@ -146,5 +147,6 @@ pub struct GlobalDef {
     pub name_id: NameId,
     pub type_id: TypeId, // Analyzed type, NOT TypeExpr
     pub module_id: ModuleId,
-    pub is_mutable: bool, // let (false) vs var (true)
+    pub is_mutable: bool,     // let (false) vs var (true)
+    pub init_node_id: NodeId, // NodeId of the initializer expression
 }

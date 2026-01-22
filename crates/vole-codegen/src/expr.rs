@@ -11,7 +11,7 @@ use crate::errors::CodegenError;
 use std::collections::HashMap;
 
 use vole_frontend::{
-    AssignTarget, BlockExpr, Expr, ExprKind, IfExpr, LetInit, MatchExpr, Pattern, RangeExpr,
+    AssignTarget, BlockExpr, Expr, ExprKind, IfExpr, MatchExpr, Pattern, RangeExpr,
     RecordFieldPattern, Symbol, UnaryOp,
 };
 use vole_sema::entity_defs::TypeDefKind;
@@ -131,12 +131,8 @@ impl Cg<'_, '_, '_> {
                 ty,
                 type_id: *type_id,
             })
-        } else if let Some(global) = self.ctx.global_vars().iter().find(|g| g.name == sym) {
-            // Compile global's initializer inline (skip type aliases)
-            let global_init = match &global.init {
-                LetInit::Expr(e) => e.clone(),
-                LetInit::TypeAlias(_) => return Err("cannot use type alias as a value".to_string()),
-            };
+        } else if let Some(global_init) = self.ctx.global_init(sym).cloned() {
+            // Compile global's initializer inline
             let mut value = self.expr(&global_init)?;
 
             // If the global has a declared interface type, box the value

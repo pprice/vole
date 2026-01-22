@@ -830,6 +830,7 @@ impl Analyzer {
                             var_type_id,
                             self.current_module,
                             let_stmt.mutable,
+                            init_expr.id,
                         );
                     }
                 }

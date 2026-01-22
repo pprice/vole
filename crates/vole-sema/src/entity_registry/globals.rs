@@ -2,6 +2,7 @@
 
 use crate::entity_defs::GlobalDef;
 use crate::type_arena::TypeId;
+use vole_frontend::NodeId;
 use vole_identity::{GlobalId, ModuleId, NameId};
 
 use super::EntityRegistry;
@@ -14,6 +15,7 @@ impl EntityRegistry {
         type_id: TypeId,
         module_id: ModuleId,
         is_mutable: bool,
+        init_node_id: NodeId,
     ) -> GlobalId {
         let id = GlobalId::new(self.global_defs.len() as u32);
         self.global_defs.push(GlobalDef {
@@ -22,6 +24,7 @@ impl EntityRegistry {
             type_id,
             module_id,
             is_mutable,
+            init_node_id,
         });
         self.global_by_name.insert(name_id, id);
         id

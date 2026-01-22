@@ -11,7 +11,7 @@ use crate::errors::CodegenError;
 
 /// SmallVec for call arguments - most calls have <= 8 args
 type ArgVec = SmallVec<[Value; 8]>;
-use vole_frontend::{CallExpr, ExprKind, LetInit, NodeId, StringPart};
+use vole_frontend::{CallExpr, ExprKind, NodeId, StringPart};
 use vole_runtime::native_registry::{NativeFunction, NativeType};
 use vole_sema::type_arena::{TypeArena, TypeId};
 
@@ -266,13 +266,9 @@ impl Cg<'_, '_, '_> {
         }
 
         // Check if it's a global lambda or global functional interface
-        if let Some(global) = self.ctx.global_vars().iter().find(|g| g.name == callee_sym) {
-            // First, compile the global to get its value (skip type aliases)
-            let init_expr = match &global.init {
-                LetInit::Expr(e) => e,
-                LetInit::TypeAlias(_) => return Err("cannot call a type alias".to_string()),
-            };
-            let lambda_val = self.expr(init_expr)?;
+        if let Some(init_expr) = self.ctx.global_init(callee_sym).cloned() {
+            // Compile the global's initializer to get its value
+            let lambda_val = self.expr(&init_expr)?;
 
             // Get declared type from GlobalDef (uses sema-resolved type, not TypeExpr)
             // Scope the name_table borrow to avoid conflicts with later mutable borrows

@@ -17,8 +17,8 @@ use crate::types::{
     CompileCtx, function_name_id_with_interner, resolve_type_expr_to_id, type_id_to_cranelift,
 };
 use vole_frontend::{
-    Block, Decl, FuncDecl, InterfaceMethod, Interner, LetStmt, Program, Span, Stmt, Symbol,
-    TestCase, TestsDecl,
+    Block, Decl, Expr, FuncDecl, InterfaceMethod, Interner, LetInit, LetStmt, Program, Span, Stmt,
+    Symbol, TestCase, TestsDecl,
 };
 use vole_identity::NameId;
 use vole_sema::entity_defs::TypeDefKind;
@@ -164,8 +164,10 @@ impl Compiler<'_> {
                     }
                 }
                 Decl::Let(let_stmt) => {
-                    // Collect global variable declarations
-                    self.globals.push(let_stmt.clone());
+                    // Store global initializer expressions (skip type aliases)
+                    if let LetInit::Expr(expr) = &let_stmt.init {
+                        self.global_inits.insert(let_stmt.name, expr.clone());
+                    }
                 }
                 Decl::Class(class) => {
                     self.finalize_class(class, program);
@@ -253,13 +255,15 @@ impl Compiler<'_> {
             tracing::debug!(module_path, "compile_module_functions: processing module");
             // Access module_programs directly to avoid borrow conflict with mutable self operations
             let (program, module_interner) = &self.analyzed.module_programs[module_path];
-            // Extract module globals (let statements)
-            let module_globals: Vec<LetStmt> = program
+            // Extract module global initializer expressions
+            let module_global_inits: HashMap<Symbol, Expr> = program
                 .declarations
                 .iter()
                 .filter_map(|decl| {
-                    if let Decl::Let(let_stmt) = decl {
-                        Some(let_stmt.clone())
+                    if let Decl::Let(let_stmt) = decl
+                        && let LetInit::Expr(expr) = &let_stmt.init
+                    {
+                        Some((let_stmt.name, expr.clone()))
                     } else {
                         None
                     }
@@ -334,7 +338,7 @@ impl Compiler<'_> {
                         name_id,
                         func,
                         module_interner,
-                        &module_globals,
+                        &module_global_inits,
                     )?;
                 }
             }
@@ -454,7 +458,7 @@ impl Compiler<'_> {
         name_id: NameId,
         func: &FuncDecl,
         module_interner: &Interner,
-        module_globals: &[LetStmt],
+        module_global_inits: &HashMap<Symbol, Expr>,
     ) -> Result<(), String> {
         let func_key = self.func_registry.intern_name_id(name_id);
         let display_name = self.query().display_name(name_id);
@@ -528,7 +532,7 @@ impl Compiler<'_> {
                 module: &mut self.jit.module,
                 func_registry: &mut self.func_registry,
                 source_file_ptr,
-                globals: module_globals, // Use module's globals
+                global_inits: module_global_inits,
                 lambda_counter: &mut self.lambda_counter,
                 type_metadata: &self.type_metadata,
                 impl_method_infos: &self.impl_method_infos,
@@ -606,7 +610,7 @@ impl Compiler<'_> {
                 module: &mut self.jit.module,
                 func_registry: &mut self.func_registry,
                 source_file_ptr,
-                globals: &self.globals,
+                global_inits: &self.global_inits,
                 lambda_counter: &mut self.lambda_counter,
                 type_metadata: &self.type_metadata,
                 impl_method_infos: &self.impl_method_infos,
@@ -720,7 +724,7 @@ impl Compiler<'_> {
                 module: &mut self.jit.module,
                 func_registry: &mut self.func_registry,
                 source_file_ptr,
-                globals: &self.globals,
+                global_inits: &self.global_inits,
                 lambda_counter: &mut self.lambda_counter,
                 type_metadata: &self.type_metadata,
                 impl_method_infos: &self.impl_method_infos,
@@ -816,7 +820,7 @@ impl Compiler<'_> {
                     module: &mut self.jit.module,
                     func_registry: &mut self.func_registry,
                     source_file_ptr,
-                    globals: &self.globals,
+                    global_inits: &self.global_inits,
                     lambda_counter: &mut self.lambda_counter,
                     type_metadata: &self.type_metadata,
                     impl_method_infos: &self.impl_method_infos,
@@ -1068,6 +1072,7 @@ impl Compiler<'_> {
             // Compile function body
             let mut cf_ctx = ControlFlowCtx::default();
             let empty_type_metadata = HashMap::new();
+            let empty_global_inits = HashMap::new();
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
@@ -1076,7 +1081,7 @@ impl Compiler<'_> {
                 module: &mut self.jit.module,
                 func_registry: &mut self.func_registry,
                 source_file_ptr,
-                globals: &[],
+                global_inits: &empty_global_inits,
                 lambda_counter: &mut self.lambda_counter,
                 type_metadata: &empty_type_metadata,
                 impl_method_infos: &self.impl_method_infos,
@@ -1140,6 +1145,7 @@ impl Compiler<'_> {
             // Compile test body
             let mut cf_ctx = ControlFlowCtx::default();
             let empty_type_metadata = HashMap::new();
+            let empty_global_inits = HashMap::new();
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
@@ -1148,7 +1154,7 @@ impl Compiler<'_> {
                 module: &mut self.jit.module,
                 func_registry: &mut self.func_registry,
                 source_file_ptr,
-                globals: &[],
+                global_inits: &empty_global_inits,
                 lambda_counter: &mut self.lambda_counter,
                 type_metadata: &empty_type_metadata,
                 impl_method_infos: &self.impl_method_infos,
@@ -1405,7 +1411,7 @@ impl Compiler<'_> {
                 module: &mut self.jit.module,
                 func_registry: &mut self.func_registry,
                 source_file_ptr,
-                globals: &self.globals,
+                global_inits: &self.global_inits,
                 lambda_counter: &mut self.lambda_counter,
                 type_metadata: &self.type_metadata,
                 impl_method_infos: &self.impl_method_infos,
@@ -1676,7 +1682,7 @@ impl Compiler<'_> {
                 module: &mut self.jit.module,
                 func_registry: &mut self.func_registry,
                 source_file_ptr,
-                globals: &self.globals,
+                global_inits: &self.global_inits,
                 lambda_counter: &mut self.lambda_counter,
                 type_metadata: &self.type_metadata,
                 impl_method_infos: &self.impl_method_infos,
@@ -2001,7 +2007,7 @@ impl Compiler<'_> {
                 module: &mut self.jit.module,
                 func_registry: &mut self.func_registry,
                 source_file_ptr,
-                globals: &self.globals,
+                global_inits: &self.global_inits,
                 lambda_counter: &mut self.lambda_counter,
                 type_metadata: &self.type_metadata,
                 impl_method_infos: &self.impl_method_infos,

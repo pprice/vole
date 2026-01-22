@@ -18,7 +18,7 @@ use crate::types::{MethodInfo, TypeMetadata};
 
 use crate::AnalyzedProgram;
 use crate::{FunctionRegistry, JitContext, RuntimeFn, interface_vtable::InterfaceVtableRegistry};
-use vole_frontend::{Interner, LetStmt, Symbol};
+use vole_frontend::{Expr, Interner, Symbol};
 use vole_identity::{NameId, TypeDefId};
 use vole_runtime::NativeRegistry;
 use vole_sema::{ImplTypeId, ProgramQuery, type_arena::TypeId};
@@ -32,8 +32,8 @@ pub struct Compiler<'a> {
     analyzed: &'a AnalyzedProgram,
     pointer_type: clif_types::Type,
     tests: Vec<TestInfo>,
-    /// Global variable declarations (let statements at module level)
-    globals: Vec<LetStmt>,
+    /// Global variable initializer expressions keyed by name
+    global_inits: HashMap<Symbol, Expr>,
     /// Counter for generating unique lambda names
     lambda_counter: usize,
     /// NameIds for declared test functions by index
@@ -76,7 +76,7 @@ impl<'a> Compiler<'a> {
             analyzed,
             pointer_type,
             tests: Vec::new(),
-            globals: Vec::new(),
+            global_inits: HashMap::new(),
             lambda_counter: 0,
             test_name_ids: Vec::new(),
             type_metadata: HashMap::new(),
