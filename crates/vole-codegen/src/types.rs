@@ -6,6 +6,7 @@
 use cranelift::prelude::*;
 use cranelift_codegen::ir::FuncRef;
 use cranelift_jit::JITModule;
+use cranelift_module::Module;
 use rustc_hash::FxHashMap;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -273,8 +274,6 @@ pub struct ExplicitParams<'a> {
     pub native_registry: &'a NativeRegistry,
     /// Global variable initializer expressions keyed by name
     pub global_inits: &'a HashMap<Symbol, Expr>,
-    /// Cache of monomorphized function instances
-    pub monomorph_cache: &'a MonomorphCache,
     /// Source file pointer for error reporting
     pub source_file_ptr: (*const u8, usize),
     /// Counter for generating unique lambda names (interior mutability)
@@ -294,7 +293,6 @@ impl<'a> ExplicitParams<'a> {
             interface_vtables: ctx.interface_vtables,
             native_registry: ctx.native_registry,
             global_inits: ctx.global_inits,
-            monomorph_cache: ctx.monomorph_cache,
             source_file_ptr: ctx.source_file_ptr,
             lambda_counter: ctx.lambda_counter,
         }
@@ -390,14 +388,14 @@ pub(crate) fn type_metadata_by_name_id<'a>(
 
 /// Context for compiling expressions and statements
 /// Bundles common parameters to reduce function argument count
+///
+/// Note: `arena`, `pointer_type`, and `monomorph_cache` are derived from `analyzed`
+/// via accessor methods rather than stored as separate fields.
 pub(crate) struct CompileCtx<'a> {
     /// Analyzed program containing expr_types, method_resolutions, etc.
     pub analyzed: &'a AnalyzedProgram,
     /// Interner for symbol resolution (may differ from analyzed.interner for module code)
     pub interner: &'a Interner,
-    /// Shared type arena for interned type access (same arena used by ExpressionData)
-    pub arena: &'a Rc<RefCell<TypeArena>>,
-    pub pointer_type: Type,
     pub module: &'a mut JITModule,
     pub func_registry: &'a mut FunctionRegistry,
     pub source_file_ptr: (*const u8, usize),
@@ -420,8 +418,6 @@ pub(crate) struct CompileCtx<'a> {
     /// Current module path when compiling module code (e.g., "std:math")
     /// None when compiling main program code
     pub current_module: Option<&'a str>,
-    /// Cache of monomorphized function instances
-    pub monomorph_cache: &'a MonomorphCache,
     /// Type substitutions for monomorphized class method compilation
     /// Maps type param NameId -> concrete TypeId (interned for O(1) equality)
     pub type_substitutions: Option<&'a HashMap<NameId, TypeId>>,
@@ -437,23 +433,35 @@ impl<'a> CompileCtx<'a> {
         self.analyzed.query()
     }
 
-    /// Borrow the type arena (API-compatible with CodegenCtx)
+    /// Borrow the type arena (derived from analyzed)
     #[inline]
     pub fn arena(&self) -> std::cell::Ref<'_, TypeArena> {
-        self.arena.borrow()
+        self.analyzed.type_arena()
     }
 
     /// Get the arena Rc (for functions that need the raw Rc<RefCell<TypeArena>>)
     #[inline]
-    pub fn arena_rc(&self) -> &'a Rc<RefCell<TypeArena>> {
-        self.arena
+    pub fn arena_rc(&self) -> &Rc<RefCell<TypeArena>> {
+        self.analyzed.type_arena_ref()
     }
 
     /// Get an update interface for arena mutations.
     /// Centralizes all borrow_mut() calls for cleaner code.
     #[inline]
     pub fn update(&self) -> vole_sema::ProgramUpdate<'_> {
-        vole_sema::ProgramUpdate::new(self.arena)
+        vole_sema::ProgramUpdate::new(self.analyzed.type_arena_ref())
+    }
+
+    /// Get the pointer type (derived from module target config)
+    #[inline]
+    pub fn ptr_type(&self) -> Type {
+        self.module.target_config().pointer_type()
+    }
+
+    /// Get the monomorph cache (derived from analyzed)
+    #[inline]
+    pub fn monomorph_cache(&self) -> &MonomorphCache {
+        &self.analyzed.entity_registry().monomorph_cache
     }
 
     /// Get the interner (API-compatible with CodegenCtx)
@@ -465,13 +473,7 @@ impl<'a> CompileCtx<'a> {
     /// Get the entity registry.
     #[inline]
     pub fn registry(&self) -> &'a EntityRegistry {
-        &self.analyzed.entity_registry
-    }
-
-    /// Get the name table (borrowed).
-    #[inline]
-    pub fn name_table(&self) -> std::cell::Ref<'_, NameTable> {
-        self.analyzed.name_table.borrow()
+        self.analyzed.entity_registry()
     }
 
     /// Substitute type parameters with concrete types using TypeId directly.
@@ -497,25 +499,25 @@ impl<'a> CompileCtx<'a> {
     /// Resolve a type via the resolution chain (primitive → module → builtin).
     /// This replaces calling resolver().resolve_type() which had lifetime issues.
     pub fn resolve_type(&self, sym: Symbol) -> Option<TypeDefId> {
-        let name_table = self.analyzed.name_table.borrow();
+        let name_table = self.analyzed.name_table();
         let module_id = self
             .current_module
             .and_then(|path| name_table.module_id_if_known(path))
             .unwrap_or_else(|| name_table.main_module());
         let resolver = Resolver::new(self.interner, &name_table, module_id, &[]);
-        resolver.resolve_type(sym, &self.analyzed.entity_registry)
+        resolver.resolve_type(sym, self.analyzed.entity_registry())
     }
 
     /// Resolve a type by string name, with fallback to interface/class short name search.
     /// This replaces calling resolver().resolve_type_str_or_interface() which had lifetime issues.
     pub fn resolve_type_str_or_interface(&self, name: &str) -> Option<TypeDefId> {
-        let name_table = self.analyzed.name_table.borrow();
+        let name_table = self.analyzed.name_table();
         let module_id = self
             .current_module
             .and_then(|path| name_table.module_id_if_known(path))
             .unwrap_or_else(|| name_table.main_module());
         let resolver = Resolver::new(self.interner, &name_table, module_id, &[]);
-        resolver.resolve_type_str_or_interface(name, &self.analyzed.entity_registry)
+        resolver.resolve_type_str_or_interface(name, self.analyzed.entity_registry())
     }
 
     /// Look up expression type, checking module-specific expr_types if compiling module code.
@@ -552,7 +554,7 @@ impl<'a> CompileCtx<'a> {
     pub fn function_ctx(&self) -> FunctionCtx<'a> {
         let module_id = self
             .current_module
-            .and_then(|path| self.analyzed.name_table.borrow().module_id_if_known(path));
+            .and_then(|path| self.analyzed.name_table().module_id_if_known(path));
         FunctionCtx {
             return_type: self.current_function_return_type,
             current_module: module_id,
@@ -565,7 +567,7 @@ impl<'a> CompileCtx<'a> {
     /// Used during incremental migration to the new context system.
     #[allow(dead_code)]
     pub fn type_ctx(&self) -> TypeCtx<'_> {
-        TypeCtx::new(self.query(), self.pointer_type)
+        TypeCtx::new(self.query(), self.ptr_type())
     }
 
     // ========== Delegation methods for incremental migration ==========
@@ -622,13 +624,6 @@ impl<'a> CompileCtx<'a> {
     // These provide read access to lookup tables used during codegen.
     // Allow dead_code until all callers are migrated.
 
-    /// Get monomorphization cache for looking up generic instances.
-    #[inline]
-    #[allow(dead_code)]
-    pub fn monomorph(&self) -> &'a MonomorphCache {
-        self.monomorph_cache
-    }
-
     /// Get native function registry for external calls.
     #[inline]
     pub fn native_funcs(&self) -> &'a NativeRegistry {
@@ -664,13 +659,6 @@ impl<'a> CompileCtx<'a> {
     // ========== Core CodegenCtx field delegation methods ==========
     // These provide access to the mutable JIT infrastructure.
 
-    /// Get Cranelift pointer type.
-    #[inline]
-    #[allow(dead_code)]
-    pub fn ptr_type(&self) -> Type {
-        self.pointer_type
-    }
-
     /// Get mutable reference to JIT module.
     #[inline]
     #[allow(dead_code)]
@@ -695,7 +683,7 @@ impl<'a> CompileCtx<'a> {
 
 /// Resolve a type expression to a TypeId (uses CompileCtx for full context).
 pub(crate) fn resolve_type_expr_id(ty: &TypeExpr, ctx: &CompileCtx) -> TypeId {
-    let name_table = ctx.name_table();
+    let name_table = ctx.analyzed.name_table();
     let module_id = ctx
         .current_module
         .and_then(|path| name_table.module_id_if_known(path))
@@ -732,9 +720,7 @@ pub(crate) fn module_name_id(
     let module_path = query.module_path(module_id);
     let (_, module_interner) = query.module_program(&module_path)?;
     let sym = module_interner.lookup(name)?;
-    analyzed
-        .name_table
-        .borrow()
+    analyzed.name_table()
         .name_id(module_id, &[sym], module_interner)
 }
 
@@ -744,7 +730,7 @@ pub(crate) fn method_name_id_with_interner(
     interner: &Interner,
     name: Symbol,
 ) -> Option<NameId> {
-    let name_table = analyzed.name_table.borrow();
+    let name_table = analyzed.name_table();
     let namer = NamerLookup::new(&name_table, interner);
     namer.method(name)
 }
@@ -755,7 +741,7 @@ pub(crate) fn method_name_id_by_str(
     interner: &Interner,
     name_str: &str,
 ) -> Option<NameId> {
-    let name_table = analyzed.name_table.borrow();
+    let name_table = analyzed.name_table();
     vole_identity::method_name_id_by_str(&name_table, interner, name_str)
 }
 
@@ -766,7 +752,7 @@ pub(crate) fn function_name_id_with_interner(
     module: ModuleId,
     name: Symbol,
 ) -> Option<NameId> {
-    let name_table = analyzed.name_table.borrow();
+    let name_table = analyzed.name_table();
     let namer = NamerLookup::new(&name_table, interner);
     namer.function(module, name)
 }

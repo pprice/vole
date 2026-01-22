@@ -152,7 +152,7 @@ impl Compiler<'_> {
                 }
                 Decl::Tests(tests_decl) => {
                     // Declare each test with a generated name and signature () -> i64
-                    let i64_type_id = self.analyzed.type_arena.borrow().primitives.i64;
+                    let i64_type_id = self.analyzed.type_arena().primitives.i64;
                     for _ in &tests_decl.tests {
                         let (name_id, func_key) = self.test_function_key(test_count);
                         let func_name = self.test_display_name(name_id);
@@ -363,7 +363,12 @@ impl Compiler<'_> {
             for decl in &program.declarations {
                 if let Decl::Class(class) = decl {
                     tracing::debug!(class_name = %module_interner.resolve(class.name), "Compiling module class methods");
-                    self.compile_module_class_methods(class, module_interner, module_path)?;
+                    self.compile_module_class_methods(
+                        class,
+                        module_interner,
+                        module_path,
+                        &module_global_inits,
+                    )?;
                 }
             }
         }
@@ -482,7 +487,7 @@ impl Compiler<'_> {
         let param_info: Vec<(Symbol, TypeId)> = {
             let query = self.query();
             let type_metadata = &self.type_metadata;
-            let name_table = self.analyzed.name_table.borrow();
+            let name_table = self.analyzed.name_table();
             func.params
                 .iter()
                 .map(|p| {
@@ -493,14 +498,14 @@ impl Compiler<'_> {
                         query.interner(),
                         &name_table,
                         module_id,
-                        &self.analyzed.type_arena,
+                        self.analyzed.type_arena_ref(),
                     );
                     (p.name, type_id)
                 })
                 .collect()
         };
         let params: Vec<(Symbol, TypeId, types::Type)> = {
-            let arena_ref = self.analyzed.type_arena.borrow();
+            let arena_ref = self.analyzed.type_arena();
             param_info
                 .into_iter()
                 .map(|(name, type_id)| {
@@ -527,8 +532,6 @@ impl Compiler<'_> {
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
                 interner: module_interner, // Use module's interner
-                arena: &self.analyzed.type_arena,
-                pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
                 func_registry: &mut self.func_registry,
                 source_file_ptr,
@@ -541,7 +544,6 @@ impl Compiler<'_> {
                 current_function_return_type: return_type_id,
                 native_registry: &self.native_registry,
                 current_module: Some(module_path), // We're compiling module code
-                monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
                 type_substitutions: None,
                 substitution_cache: RefCell::new(HashMap::new()),
             };
@@ -584,7 +586,7 @@ impl Compiler<'_> {
             .map(|p| (p.name, self.resolve_type_to_id(&p.ty)))
             .collect();
         let params: Vec<(Symbol, TypeId, types::Type)> = {
-            let arena_ref = self.analyzed.type_arena.borrow();
+            let arena_ref = self.analyzed.type_arena();
             param_info
                 .into_iter()
                 .map(|(name, type_id)| {
@@ -605,8 +607,6 @@ impl Compiler<'_> {
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
-                arena: &self.analyzed.type_arena,
-                pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
                 func_registry: &mut self.func_registry,
                 source_file_ptr,
@@ -619,7 +619,6 @@ impl Compiler<'_> {
                 current_function_return_type: return_type_id,
                 native_registry: &self.native_registry,
                 current_module: None,
-                monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
                 type_substitutions: None,
                 substitution_cache: RefCell::new(HashMap::new()),
             };
@@ -664,7 +663,7 @@ impl Compiler<'_> {
 
         // Convert to Cranelift types
         let param_types: Vec<cranelift::prelude::Type> = {
-            let arena = self.analyzed.type_arena.borrow();
+            let arena = self.analyzed.type_arena();
             param_type_ids
                 .iter()
                 .map(|&ty| type_id_to_cranelift(ty, &arena, self.pointer_type))
@@ -673,7 +672,7 @@ impl Compiler<'_> {
 
         let return_type = type_id_to_cranelift(
             return_type_id,
-            &self.analyzed.type_arena.borrow(),
+            &self.analyzed.type_arena(),
             self.pointer_type,
         );
 
@@ -719,8 +718,6 @@ impl Compiler<'_> {
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
-                arena: &self.analyzed.type_arena,
-                pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
                 func_registry: &mut self.func_registry,
                 source_file_ptr,
@@ -733,7 +730,6 @@ impl Compiler<'_> {
                 current_function_return_type: Some(return_type_id),
                 native_registry: &self.native_registry,
                 current_module: None,
-                monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
                 type_substitutions: None,
                 substitution_cache: RefCell::new(HashMap::new()),
             };
@@ -815,8 +811,6 @@ impl Compiler<'_> {
                 let mut ctx = CompileCtx {
                     analyzed: self.analyzed,
                     interner: &self.analyzed.interner,
-                    arena: &self.analyzed.type_arena,
-                    pointer_type: self.pointer_type,
                     module: &mut self.jit.module,
                     func_registry: &mut self.func_registry,
                     source_file_ptr,
@@ -829,7 +823,6 @@ impl Compiler<'_> {
                     current_function_return_type: None, // Tests don't have a declared return type
                     native_registry: &self.native_registry,
                     current_module: None,
-                    monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
                     type_substitutions: None,
                     substitution_cache: RefCell::new(HashMap::new()),
                 };
@@ -968,7 +961,7 @@ impl Compiler<'_> {
                     self.func_registry.set_return_type(func_key, return_type_id);
                 }
                 Decl::Tests(tests_decl) if include_tests => {
-                    let i64_type_id = self.analyzed.type_arena.borrow().primitives.i64;
+                    let i64_type_id = self.analyzed.type_arena().primitives.i64;
                     for _ in &tests_decl.tests {
                         let (name_id, func_key) = self.test_function_key(test_count);
                         let func_name = self.test_display_name(name_id);
@@ -1027,7 +1020,7 @@ impl Compiler<'_> {
             .iter()
             .map(|p| self.resolve_type_to_id(&p.ty))
             .collect();
-        let arena_ref = self.analyzed.type_arena.borrow();
+        let arena_ref = self.analyzed.type_arena();
         let param_types: Vec<types::Type> = param_type_ids
             .iter()
             .map(|&ty| type_id_to_cranelift(ty, &arena_ref, self.pointer_type))
@@ -1076,8 +1069,6 @@ impl Compiler<'_> {
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
-                arena: &self.analyzed.type_arena,
-                pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
                 func_registry: &mut self.func_registry,
                 source_file_ptr,
@@ -1090,7 +1081,6 @@ impl Compiler<'_> {
                 current_function_return_type: return_type_id,
                 native_registry: &self.native_registry,
                 current_module: None,
-                monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
                 type_substitutions: None,
                 substitution_cache: RefCell::new(HashMap::new()),
             };
@@ -1149,8 +1139,6 @@ impl Compiler<'_> {
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
-                arena: &self.analyzed.type_arena,
-                pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
                 func_registry: &mut self.func_registry,
                 source_file_ptr,
@@ -1163,7 +1151,6 @@ impl Compiler<'_> {
                 current_function_return_type: None, // Tests don't have a declared return type
                 native_registry: &self.native_registry,
                 current_module: None,
-                monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
                 type_substitutions: None,
                 substitution_cache: RefCell::new(HashMap::new()),
             };
@@ -1208,7 +1195,7 @@ impl Compiler<'_> {
         let return_type_id = func_type.return_type_id;
 
         // Create signature from the concrete function type (TypeId-native)
-        let arena_ref = self.analyzed.type_arena.borrow();
+        let arena_ref = self.analyzed.type_arena();
         let mut params = Vec::new();
         if has_self_param {
             params.push(self.pointer_type);
@@ -1243,9 +1230,7 @@ impl Compiler<'_> {
     /// Declare all monomorphized function instances
     fn declare_monomorphized_instances(&mut self) -> Result<(), String> {
         // Collect instances to avoid borrow issues
-        let instances = self
-            .analyzed
-            .entity_registry
+        let instances = self.analyzed.entity_registry()
             .monomorph_cache
             .collect_instances();
 
@@ -1253,15 +1238,10 @@ impl Compiler<'_> {
             // Skip external functions - they don't need JIT compilation
             // They're called directly via native_registry
             let func_name = self.query().display_name(instance.original_name);
-            let short_name = self
-                .analyzed
-                .name_table
-                .borrow()
+            let short_name = self.analyzed.name_table()
                 .last_segment_str(instance.original_name)
                 .unwrap_or_else(|| func_name.clone());
-            if self
-                .analyzed
-                .implement_registry
+            if self.analyzed.implement_registry()
                 .get_external_func(&short_name)
                 .is_some()
             {
@@ -1293,9 +1273,7 @@ impl Compiler<'_> {
             .collect();
 
         // Collect instances to avoid borrow issues
-        let instances = self
-            .analyzed
-            .entity_registry
+        let instances = self.analyzed.entity_registry()
             .monomorph_cache
             .collect_instances();
 
@@ -1305,15 +1283,10 @@ impl Compiler<'_> {
             let func_name = self.query().display_name(instance.original_name);
             // External functions are registered by their short name (e.g. "_generic_map_get")
             // not the fully qualified name (e.g. "main::_generic_map_get")
-            let short_name = self
-                .analyzed
-                .name_table
-                .borrow()
+            let short_name = self.analyzed.name_table()
                 .last_segment_str(instance.original_name)
                 .unwrap_or_else(|| func_name.clone());
-            if self
-                .analyzed
-                .implement_registry
+            if self.analyzed.implement_registry()
                 .get_external_func(&short_name)
                 .is_some()
             {
@@ -1354,7 +1327,7 @@ impl Compiler<'_> {
         let return_type_id = instance.func_type.return_type_id;
 
         // Create function signature from concrete types (TypeId-native)
-        let arena_ref = self.analyzed.type_arena.borrow();
+        let arena_ref = self.analyzed.type_arena();
         let params: Vec<types::Type> = param_type_ids
             .iter()
             .map(|&ty| type_id_to_cranelift(ty, &arena_ref, self.pointer_type))
@@ -1406,8 +1379,6 @@ impl Compiler<'_> {
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
-                arena: &self.analyzed.type_arena,
-                pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
                 func_registry: &mut self.func_registry,
                 source_file_ptr,
@@ -1420,7 +1391,6 @@ impl Compiler<'_> {
                 current_function_return_type: Some(return_type_id),
                 native_registry: &self.native_registry,
                 current_module: None,
-                monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
                 type_substitutions: None,
                 substitution_cache: RefCell::new(HashMap::new()),
             };
@@ -1455,9 +1425,7 @@ impl Compiler<'_> {
     /// Declare all monomorphized class method instances
     fn declare_class_method_monomorphized_instances(&mut self) -> Result<(), String> {
         // Collect instances to avoid borrow issues
-        let instances = self
-            .analyzed
-            .entity_registry
+        let instances = self.analyzed.entity_registry()
             .class_method_monomorph_cache
             .collect_instances();
 
@@ -1517,9 +1485,7 @@ impl Compiler<'_> {
             .collect();
 
         // Collect instances to avoid borrow issues
-        let instances = self
-            .analyzed
-            .entity_registry
+        let instances = self.analyzed.entity_registry()
             .class_method_monomorph_cache
             .collect_instances();
 
@@ -1604,7 +1570,7 @@ impl Compiler<'_> {
         let return_type_id = instance.func_type.return_type_id;
 
         // Create method signature (self + params) with concrete types (TypeId-native)
-        let arena_ref = self.analyzed.type_arena.borrow();
+        let arena_ref = self.analyzed.type_arena();
         let mut params = vec![self.pointer_type]; // self
         for &param_type_id in &param_type_ids {
             params.push(type_id_to_cranelift(
@@ -1677,8 +1643,6 @@ impl Compiler<'_> {
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
-                arena: &self.analyzed.type_arena,
-                pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
                 func_registry: &mut self.func_registry,
                 source_file_ptr,
@@ -1691,7 +1655,6 @@ impl Compiler<'_> {
                 current_function_return_type: Some(return_type_id),
                 native_registry: &self.native_registry,
                 current_module: None,
-                monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
                 type_substitutions: Some(&instance.substitutions),
                 substitution_cache: RefCell::new(HashMap::new()),
             };
@@ -1768,16 +1731,14 @@ impl Compiler<'_> {
                                 .get(&param.name_id)
                                 .copied()
                                 .unwrap_or_else(|| {
-                                    self.analyzed
-                                        .type_arena
-                                        .borrow_mut()
+                                    self.analyzed.type_arena_mut()
                                         .type_param(param.name_id)
                                 })
                         })
                         .collect();
 
                     // Determine if it's a class or record based on TypeDefKind
-                    let update = vole_sema::ProgramUpdate::new(&self.analyzed.type_arena);
+                    let update = vole_sema::ProgramUpdate::new(self.analyzed.type_arena_ref());
                     return match &type_def.kind {
                         TypeDefKind::Record => update.record(type_def_id, type_args_id),
                         TypeDefKind::Class => update.class(type_def_id, type_args_id),
@@ -1793,20 +1754,18 @@ impl Compiler<'_> {
             // Convert std HashMap to FxHashMap for type_arena
             let subs: FxHashMap<NameId, TypeId> =
                 substitutions.iter().map(|(&k, &v)| (k, v)).collect();
-            vole_sema::ProgramUpdate::new(&self.analyzed.type_arena)
+            vole_sema::ProgramUpdate::new(self.analyzed.type_arena_ref())
                 .substitute(metadata.vole_type, &subs)
         } else {
             // Final fallback
-            self.analyzed.type_arena.borrow().primitives.i64
+            self.analyzed.type_arena().primitives.i64
         }
     }
 
     /// Declare all monomorphized static method instances
     fn declare_static_method_monomorphized_instances(&mut self) -> Result<(), String> {
         // Collect instances to avoid borrow issues
-        let instances = self
-            .analyzed
-            .entity_registry
+        let instances = self.analyzed.entity_registry()
             .static_method_monomorph_cache
             .collect_instances();
 
@@ -1861,9 +1820,7 @@ impl Compiler<'_> {
             .collect();
 
         // Collect instances to avoid borrow issues
-        let instances = self
-            .analyzed
-            .entity_registry
+        let instances = self.analyzed.entity_registry()
             .static_method_monomorph_cache
             .collect_instances();
 
@@ -1941,7 +1898,7 @@ impl Compiler<'_> {
         let return_type_id = instance.func_type.return_type_id;
 
         // Create signature (no self parameter) with concrete types (TypeId-native)
-        let arena_ref = self.analyzed.type_arena.borrow();
+        let arena_ref = self.analyzed.type_arena();
         let params: Vec<types::Type> = param_type_ids
             .iter()
             .map(|&ty| type_id_to_cranelift(ty, &arena_ref, self.pointer_type))
@@ -2002,8 +1959,6 @@ impl Compiler<'_> {
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
-                arena: &self.analyzed.type_arena,
-                pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
                 func_registry: &mut self.func_registry,
                 source_file_ptr,
@@ -2016,7 +1971,6 @@ impl Compiler<'_> {
                 current_function_return_type: Some(return_type_id),
                 native_registry: &self.native_registry,
                 current_module: None,
-                monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
                 type_substitutions: Some(&instance.substitutions),
                 substitution_cache: RefCell::new(HashMap::new()),
             };

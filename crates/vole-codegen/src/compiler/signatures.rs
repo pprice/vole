@@ -46,7 +46,7 @@ impl Compiler<'_> {
 
         // Resolve param TypeIds
         let param_type_ids: SmallVec<[TypeId; 8]> = {
-            let name_table = self.analyzed.name_table.borrow();
+            let name_table = self.analyzed.name_table();
             match &resolver {
                 TypeResolver::Query => {
                     let query = self.query();
@@ -61,7 +61,7 @@ impl Compiler<'_> {
                                 query.interner(),
                                 &name_table,
                                 module_id,
-                                &self.analyzed.type_arena,
+                                self.analyzed.type_arena_ref(),
                             )
                         })
                         .collect()
@@ -73,12 +73,12 @@ impl Compiler<'_> {
                         .map(|param| {
                             resolve_type_expr_to_id(
                                 &param.ty,
-                                &self.analyzed.entity_registry,
+                                self.analyzed.entity_registry(),
                                 &self.type_metadata,
                                 interner,
                                 &name_table,
                                 module_id,
-                                &self.analyzed.type_arena,
+                                self.analyzed.type_arena_ref(),
                             )
                         })
                         .collect()
@@ -88,7 +88,7 @@ impl Compiler<'_> {
 
         // Resolve return TypeId
         let return_type_id = {
-            let name_table = self.analyzed.name_table.borrow();
+            let name_table = self.analyzed.name_table();
             return_type.map(|t| match &resolver {
                 TypeResolver::Query => {
                     let query = self.query();
@@ -100,26 +100,26 @@ impl Compiler<'_> {
                         query.interner(),
                         &name_table,
                         module_id,
-                        &self.analyzed.type_arena,
+                        self.analyzed.type_arena_ref(),
                     )
                 }
                 TypeResolver::Interner(interner) => {
                     let module_id = self.func_registry.main_module();
                     resolve_type_expr_to_id(
                         t,
-                        &self.analyzed.entity_registry,
+                        self.analyzed.entity_registry(),
                         &self.type_metadata,
                         interner,
                         &name_table,
                         module_id,
-                        &self.analyzed.type_arena,
+                        self.analyzed.type_arena_ref(),
                     )
                 }
             })
         };
 
         // Now convert TypeIds to Cranelift types (single arena borrow)
-        let arena_ref = self.analyzed.type_arena.borrow();
+        let arena_ref = self.analyzed.type_arena();
 
         // Build cranelift params starting with self if needed
         let mut cranelift_params: ParamVec = match (self_param, self_type_id) {
@@ -161,7 +161,7 @@ impl Compiler<'_> {
 
         // Resolve param TypeIds
         let param_type_ids: SmallVec<[TypeId; 8]> = {
-            let name_table = self.analyzed.name_table.borrow();
+            let name_table = self.analyzed.name_table();
             match &resolver {
                 TypeResolver::Query => {
                     let query = self.query();
@@ -176,7 +176,7 @@ impl Compiler<'_> {
                                 query.interner(),
                                 &name_table,
                                 module_id,
-                                &self.analyzed.type_arena,
+                                self.analyzed.type_arena_ref(),
                             )
                         })
                         .collect()
@@ -188,12 +188,12 @@ impl Compiler<'_> {
                         .map(|param| {
                             resolve_type_expr_to_id(
                                 &param.ty,
-                                &self.analyzed.entity_registry,
+                                self.analyzed.entity_registry(),
                                 &self.type_metadata,
                                 interner,
                                 &name_table,
                                 module_id,
-                                &self.analyzed.type_arena,
+                                self.analyzed.type_arena_ref(),
                             )
                         })
                         .collect()
@@ -202,7 +202,7 @@ impl Compiler<'_> {
         };
 
         // Now convert TypeIds to Cranelift types (single arena borrow)
-        let arena_ref = self.analyzed.type_arena.borrow();
+        let arena_ref = self.analyzed.type_arena();
 
         // Build cranelift params starting with self if needed
         let mut cranelift_params: ParamVec = match (self_param, self_type_id) {

@@ -62,10 +62,7 @@ pub(crate) fn resolve_method_target_id(
     use crate::structs::get_type_name_id_from_type_id;
 
     // Check if object is an interface
-    let is_interface = input
-        .analyzed
-        .type_arena
-        .borrow()
+    let is_interface = input.analyzed.type_arena()
         .is_interface(input.object_type_id);
 
     // Filter out InterfaceMethod resolution when the concrete type is not an interface.
@@ -79,8 +76,8 @@ pub(crate) fn resolve_method_target_id(
         type_metadata_by_name_id(
             input.type_metadata,
             type_name_id,
-            &input.analyzed.entity_registry,
-            &input.analyzed.type_arena.borrow(),
+            input.analyzed.entity_registry(),
+            &input.analyzed.type_arena(),
         )
         .and_then(|meta| {
             meta.method_infos
@@ -97,15 +94,13 @@ pub(crate) fn resolve_method_target_id(
 
     // Helper to get method return type from sema
     let get_return_type_from_sema = |type_def_id: TypeDefId, method_id: NameId| -> TypeId {
-        let Some(method_id) = input
-            .analyzed
-            .entity_registry
+        let Some(method_id) = input.analyzed.entity_registry()
             .find_method_on_type(type_def_id, method_id)
         else {
             return TypeId::VOID;
         };
-        let method_def = input.analyzed.entity_registry.get_method(method_id);
-        let arena = input.analyzed.type_arena.borrow();
+        let method_def = input.analyzed.entity_registry().get_method(method_id);
+        let arena = input.analyzed.type_arena();
         arena
             .unwrap_function(method_def.signature_id)
             .map(|(_, ret, _)| ret)
@@ -123,8 +118,7 @@ pub(crate) fn resolve_method_target_id(
     // Helper to get impl method return type from sema's implement_registry
     let get_impl_return_type_from_sema = |type_id: &ImplTypeId| -> TypeId {
         input
-            .analyzed
-            .implement_registry
+            .analyzed.implement_registry()
             .get_method(type_id, input.method_id)
             .map(|impl_| impl_.func_type.return_type_id)
             .unwrap_or(TypeId::VOID)
@@ -133,14 +127,14 @@ pub(crate) fn resolve_method_target_id(
     if let Some(resolution) = effective_resolution {
         return match resolution {
             ResolvedMethod::Direct { func_type_id } => {
-                let arena = input.analyzed.type_arena.borrow();
+                let arena = input.analyzed.type_arena();
                 let (_, return_type_id, _) = arena
                     .unwrap_function(*func_type_id)
                     .expect("direct method must have function type");
                 let type_name_id = get_type_name_id_from_type_id(
                     input.object_type_id,
                     &arena,
-                    &input.analyzed.entity_registry,
+                    input.analyzed.entity_registry(),
                 )?;
                 let (method_info, _type_def_id) = lookup_direct_method(type_name_id)?;
                 Ok(MethodTarget::Direct {
@@ -164,7 +158,7 @@ pub(crate) fn resolve_method_target_id(
 
                 // Get return type from arena
                 let return_type_id = {
-                    let arena = input.analyzed.type_arena.borrow();
+                    let arena = input.analyzed.type_arena();
                     let (_, ret, _) = arena
                         .unwrap_function(*func_type_id)
                         .expect("implemented method must have function type");
@@ -172,10 +166,7 @@ pub(crate) fn resolve_method_target_id(
                 };
 
                 // For interface types, we need vtable dispatch
-                if let Some((interface_type_id, _)) = input
-                    .analyzed
-                    .type_arena
-                    .borrow()
+                if let Some((interface_type_id, _)) = input.analyzed.type_arena()
                     .unwrap_interface(input.object_type_id)
                 {
                     let method_name_id = method_name_id_by_str(
@@ -202,8 +193,8 @@ pub(crate) fn resolve_method_target_id(
 
                 let type_id = ImplTypeId::from_type_id(
                     input.object_type_id,
-                    &input.analyzed.type_arena.borrow(),
-                    &input.analyzed.entity_registry,
+                    &input.analyzed.type_arena(),
+                    input.analyzed.entity_registry(),
                 )
                 .ok_or_else(|| {
                     format!("Cannot get ImplTypeId for method {}", input.method_name_str,)
@@ -226,7 +217,7 @@ pub(crate) fn resolve_method_target_id(
             } => {
                 // Get return type from arena
                 let return_type_id = {
-                    let arena = input.analyzed.type_arena.borrow();
+                    let arena = input.analyzed.type_arena();
                     let (_, ret, _) = arena
                         .unwrap_function(*func_type_id)
                         .expect("default method must have function type");
@@ -239,11 +230,11 @@ pub(crate) fn resolve_method_target_id(
                         return_type: return_type_id,
                     });
                 }
-                let arena = input.analyzed.type_arena.borrow();
+                let arena = input.analyzed.type_arena();
                 let type_name_id = get_type_name_id_from_type_id(
                     input.object_type_id,
                     &arena,
-                    &input.analyzed.entity_registry,
+                    input.analyzed.entity_registry(),
                 )?;
                 let (method_info, _type_def_id) = lookup_direct_method(type_name_id)?;
                 Ok(MethodTarget::Default {
@@ -253,10 +244,7 @@ pub(crate) fn resolve_method_target_id(
             }
             ResolvedMethod::InterfaceMethod { func_type_id, .. } => {
                 // This branch is only taken when object_type is an interface
-                let (interface_type_id, _) = input
-                    .analyzed
-                    .type_arena
-                    .borrow()
+                let (interface_type_id, _) = input.analyzed.type_arena()
                     .unwrap_interface(input.object_type_id)
                     .ok_or_else(|| "InterfaceMethod on non-interface type".to_string())?;
                 let method_name_id = method_name_id_by_str(
@@ -287,7 +275,7 @@ pub(crate) fn resolve_method_target_id(
     }
 
     // No resolution found - try implement block methods first, then direct methods.
-    let arena = input.analyzed.type_arena.borrow();
+    let arena = input.analyzed.type_arena();
 
     // First, try EntityRegistry method bindings
     if let Some(type_def_id) =
@@ -297,9 +285,7 @@ pub(crate) fn resolve_method_target_id(
             &input.analyzed.interner,
             input.method_name_str,
         )
-        && let Some(binding) = input
-            .analyzed
-            .entity_registry
+        && let Some(binding) = input.analyzed.entity_registry()
             .find_method_binding(type_def_id, method_name_id)
     {
         drop(arena);
@@ -307,8 +293,8 @@ pub(crate) fn resolve_method_target_id(
         // Found method binding in EntityRegistry - now get the compiled MethodInfo
         if let Some(type_id) = ImplTypeId::from_type_id(
             input.object_type_id,
-            &input.analyzed.type_arena.borrow(),
-            &input.analyzed.entity_registry,
+            &input.analyzed.type_arena(),
+            input.analyzed.entity_registry(),
         ) && let Some(method_info) = input
             .impl_method_infos
             .get(&(type_id, input.method_id))
@@ -323,8 +309,8 @@ pub(crate) fn resolve_method_target_id(
         // Fallback: try looking up by method_name_id from EntityRegistry
         if let Some(type_id) = ImplTypeId::from_type_id(
             input.object_type_id,
-            &input.analyzed.type_arena.borrow(),
-            &input.analyzed.entity_registry,
+            &input.analyzed.type_arena(),
+            input.analyzed.entity_registry(),
         ) && let Some(method_info) = input
             .impl_method_infos
             .get(&(type_id, method_name_id))
@@ -350,8 +336,8 @@ pub(crate) fn resolve_method_target_id(
     // Fallback: try impl_method_infos directly
     if let Some(type_id) = ImplTypeId::from_type_id(
         input.object_type_id,
-        &input.analyzed.type_arena.borrow(),
-        &input.analyzed.entity_registry,
+        &input.analyzed.type_arena(),
+        input.analyzed.entity_registry(),
     ) && let Ok(method_info) = lookup_impl_method(type_id)
     {
         let return_type = get_impl_return_type_from_sema(&type_id);
@@ -362,11 +348,11 @@ pub(crate) fn resolve_method_target_id(
     }
 
     // Try direct methods (methods defined inside class/record)
-    let arena = input.analyzed.type_arena.borrow();
+    let arena = input.analyzed.type_arena();
     if let Ok(type_name_id) = get_type_name_id_from_type_id(
         input.object_type_id,
         &arena,
-        &input.analyzed.entity_registry,
+        input.analyzed.entity_registry(),
     ) && let Ok((method_info, type_def_id)) = lookup_direct_method(type_name_id)
     {
         let return_type = get_return_type_from_sema(type_def_id, input.method_id);
@@ -397,7 +383,7 @@ fn get_type_def_id_for_codegen_id(
         SemaType::Record { type_def_id, .. } => return Some(*type_def_id),
         SemaType::Interface { type_def_id, .. } => return Some(*type_def_id),
         SemaType::Primitive(prim) => {
-            let name_table = analyzed.name_table.borrow();
+            let name_table = analyzed.name_table();
             let name_id = match prim {
                 PrimitiveType::I8 => name_table.primitives.i8,
                 PrimitiveType::I16 => name_table.primitives.i16,
@@ -413,7 +399,7 @@ fn get_type_def_id_for_codegen_id(
                 PrimitiveType::Bool => name_table.primitives.bool,
                 PrimitiveType::String => name_table.primitives.string,
             };
-            return analyzed.entity_registry.type_by_name(name_id);
+            return analyzed.entity_registry().type_by_name(name_id);
         }
         _ => {}
     }

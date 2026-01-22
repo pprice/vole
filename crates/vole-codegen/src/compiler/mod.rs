@@ -62,7 +62,7 @@ impl<'a> Compiler<'a> {
         let mut native_registry = NativeRegistry::new();
         vole_runtime::stdlib::register_stdlib(&mut native_registry);
 
-        let mut func_registry = FunctionRegistry::new(Rc::clone(&analyzed.name_table));
+        let mut func_registry = FunctionRegistry::new(Rc::clone(analyzed.name_table_ref()));
         for runtime in RuntimeFn::ALL {
             // Runtime functions are in imported_func_ids (Import linkage)
             if let Some(func_id) = jit.imported_func_ids.get(runtime.name()) {
@@ -103,13 +103,13 @@ impl<'a> Compiler<'a> {
     fn type_ctx_with_interner<'b>(&'b self, interner: &'b Interner) -> crate::types::TypeCtx<'b> {
         use vole_sema::ProgramQuery;
         let query = ProgramQuery::new(
-            &self.analyzed.entity_registry,
+            self.analyzed.entity_registry(),
             &self.analyzed.expression_data,
-            &self.analyzed.name_table,
+            self.analyzed.name_table_ref(),
             interner,
-            &self.analyzed.implement_registry,
+            self.analyzed.implement_registry(),
             &self.analyzed.module_programs,
-            &self.analyzed.type_arena,
+            self.analyzed.type_arena_ref(),
         );
         crate::types::TypeCtx::new(query, self.pointer_type)
     }
@@ -127,7 +127,6 @@ impl<'a> Compiler<'a> {
             interface_vtables: &self.interface_vtables,
             native_registry: &self.native_registry,
             global_inits: &self.global_inits,
-            monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
             source_file_ptr: (std::ptr::null(), 0), // Set per-call
             lambda_counter: &self.lambda_counter,
         }
@@ -171,8 +170,8 @@ impl<'a> Compiler<'a> {
     fn impl_type_id_from_type_id(&self, ty: TypeId) -> Option<ImplTypeId> {
         ImplTypeId::from_type_id(
             ty,
-            &self.analyzed.type_arena.borrow(),
-            &self.analyzed.entity_registry,
+            &self.analyzed.type_arena(),
+            self.analyzed.entity_registry(),
         )
     }
 

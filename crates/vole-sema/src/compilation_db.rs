@@ -30,7 +30,7 @@ use vole_identity::NameTable;
 ///     let method = db.entities.get_method(method_id);
 /// }
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CompilationDb {
     /// Interned type representations (TypeId -> SemaType)
     pub types: TypeArena,
@@ -70,5 +70,27 @@ impl CompilationDb {
 impl Default for CompilationDb {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Parts extracted from CompilationDb for codegen use.
+/// Types and names are wrapped in Rc<RefCell<>> for shared mutable access.
+pub struct CodegenDb {
+    pub types: std::rc::Rc<std::cell::RefCell<TypeArena>>,
+    pub entities: EntityRegistry,
+    pub implements: ImplementRegistry,
+    pub names: std::rc::Rc<std::cell::RefCell<NameTable>>,
+}
+
+impl CompilationDb {
+    /// Convert to a form suitable for codegen.
+    /// Types and names are wrapped in Rc<RefCell<>> for shared mutable access.
+    pub fn into_codegen(self) -> CodegenDb {
+        CodegenDb {
+            types: std::rc::Rc::new(std::cell::RefCell::new(self.types)),
+            entities: self.entities,
+            implements: self.implements,
+            names: std::rc::Rc::new(std::cell::RefCell::new(self.names)),
+        }
     }
 }

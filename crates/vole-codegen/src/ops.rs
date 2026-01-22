@@ -76,8 +76,7 @@ impl Cg<'_, '_, '_> {
 
         let method_impl = self
             .ctx
-            .analyzed
-            .implement_registry
+            .analyzed.implement_registry()
             .get_method(&impl_type_id, method_id)
             .ok_or_else(|| {
                 format!(

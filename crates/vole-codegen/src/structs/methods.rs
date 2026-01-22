@@ -78,9 +78,7 @@ impl Cg<'_, '_, '_> {
         if let Some(module_id) = module_id_opt {
             let module_path = self
                 .ctx
-                .analyzed
-                .name_table
-                .borrow()
+                .analyzed.name_table()
                 .module_path(module_id)
                 .to_string();
             let name_id = module_name_id(self.ctx.analyzed, module_id, method_name_str);
@@ -595,9 +593,7 @@ impl Cg<'_, '_, '_> {
             .find(|&&mid| {
                 let m = self.ctx.query().get_method(mid);
                 self.ctx
-                    .analyzed
-                    .name_table
-                    .borrow()
+                    .analyzed.name_table()
                     .last_segment_str(m.name_id)
                     .is_some_and(|n| n == method_name)
             })

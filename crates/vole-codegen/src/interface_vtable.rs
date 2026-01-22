@@ -152,7 +152,7 @@ impl InterfaceVtableRegistry {
         // Build vtable name and declare data
         let type_name = match concrete_key {
             InterfaceConcreteType::ImplTypeId(type_id) => {
-                ctx.name_table().display(type_id.name_id())
+                ctx.analyzed.name_table().display(type_id.name_id())
             }
             InterfaceConcreteType::Function { is_closure } => {
                 if is_closure {
@@ -247,7 +247,7 @@ impl InterfaceVtableRegistry {
 
         for (index, &method_id) in state.method_ids.iter().enumerate() {
             let method = ctx.query().get_method(method_id);
-            let method_name_str = ctx.name_table().display(method.name_id);
+            let method_name_str = ctx.analyzed.name_table().display(method.name_id);
             let target = resolve_vtable_target(
                 ctx,
                 state.interface_name_id,
@@ -617,7 +617,7 @@ fn compile_external_wrapper(
     }
 
     // Get string names from NameId
-    let name_table = ctx.name_table();
+    let name_table = ctx.analyzed.name_table();
     let module_path = name_table
         .last_segment_str(external_info.module_path)
         .ok_or_else(|| "module_path NameId has no segment".to_string())?;
@@ -780,8 +780,7 @@ pub(crate) fn box_interface_value_id(
 
     // Look up the interface Symbol name via EntityRegistry
     let interface_def = ctx.query().get_type(type_def_id);
-    let interface_name_str = ctx
-        .name_table()
+    let interface_name_str = ctx.analyzed.name_table()
         .last_segment_str(interface_def.name_id)
         .ok_or_else(|| format!("cannot get interface name string for {:?}", type_def_id))?;
     let interface_name = ctx.interner().lookup(&interface_name_str).ok_or_else(|| {
@@ -861,7 +860,7 @@ fn resolve_vtable_target(
 ) -> Result<VtableMethod, String> {
     // Get method info from EntityRegistry
     let interface_method = ctx.query().get_method(interface_method_id);
-    let method_name_str = ctx.name_table().display(interface_method.name_id);
+    let method_name_str = ctx.analyzed.name_table().display(interface_method.name_id);
 
     // Apply substitutions to get concrete param/return types (using TypeId-based substitution)
     let (substituted_param_ids, substituted_return_id) = {
@@ -914,8 +913,7 @@ fn resolve_vtable_target(
     // Check implement registry for explicit implementations
     if let Some(method_name_id) = method_name_id
         && let Some(impl_) = ctx
-            .analyzed
-            .implement_registry
+            .analyzed.implement_registry()
             .get_method(&impl_type_id, method_name_id)
     {
         // Use TypeId fields (required)

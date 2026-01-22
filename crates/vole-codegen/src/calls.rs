@@ -346,44 +346,54 @@ impl Cg<'_, '_, '_> {
             has_monomorph = monomorph_key.is_some(),
             "checking for generic function call"
         );
-        if let Some(monomorph_key) = monomorph_key
-            && let Some(instance) = self.ctx.monomorph().get(monomorph_key)
-        {
-            tracing::trace!(
-                instance_name = ?instance.original_name,
-                mangled_name = ?instance.mangled_name,
-                "found monomorph instance"
-            );
-            let func_key = self.ctx.funcs().intern_name_id(instance.mangled_name);
-            if let Some(func_id) = self.ctx.funcs().func_id(func_key) {
-                tracing::trace!("found func_id, using regular path");
-                return self.call_func_id(func_key, func_id, call);
-            }
-            tracing::trace!("no func_id, checking for external function");
+        if let Some(monomorph_key) = monomorph_key {
+            // Extract what we need from the monomorph cache before any mutable borrows
+            let instance_data = self.ctx.monomorph_cache().get(monomorph_key).map(|inst| {
+                (
+                    inst.original_name,
+                    inst.mangled_name,
+                    inst.func_type.return_type_id,
+                )
+            });
 
-            // For generic external functions, call them directly with type erasure
-            // They don't have compiled func_id, but we can look them up in native_registry
-            if let Some(ext_info) = self
-                .ctx
-                .analyzed
-                .implement_registry
-                .get_external_func(callee_name)
-            {
-                let name_table = self.name_table();
-                let module_path = name_table.last_segment_str(ext_info.module_path);
-                let native_name = name_table.last_segment_str(ext_info.native_name);
-                drop(name_table);
-                if let (Some(module_path), Some(native_name)) = (module_path, native_name)
-                    && let Some(native_func) =
-                        self.ctx.native_funcs().lookup(&module_path, &native_name)
+            if let Some((original_name, mangled_name, return_type_id)) = instance_data {
+                tracing::trace!(
+                    instance_name = ?original_name,
+                    mangled_name = ?mangled_name,
+                    "found monomorph instance"
+                );
+                let func_key = self.ctx.funcs().intern_name_id(mangled_name);
+                if let Some(func_id) = self.ctx.funcs().func_id(func_key) {
+                    tracing::trace!("found func_id, using regular path");
+                    return self.call_func_id(func_key, func_id, call);
+                }
+                tracing::trace!("no func_id, checking for external function");
+
+                // For generic external functions, call them directly with type erasure
+                // They don't have compiled func_id, but we can look them up in native_registry
+                if let Some(ext_info) = self
+                    .ctx
+                    .analyzed.implement_registry()
+                    .get_external_func(callee_name)
                 {
-                    // The func_type from the monomorph instance may have TypeParams that weren't
-                    // inferred from arguments (like return type params). Apply class type
-                    // substitutions to fully resolve the type.
-                    let return_type_id = self
-                        .ctx
-                        .substitute_type_id(instance.func_type.return_type_id);
-                    return self.compile_native_call_with_types(native_func, call, return_type_id);
+                    let name_table = self.name_table();
+                    let module_path = name_table.last_segment_str(ext_info.module_path);
+                    let native_name = name_table.last_segment_str(ext_info.native_name);
+                    drop(name_table);
+                    if let (Some(module_path), Some(native_name)) = (module_path, native_name)
+                        && let Some(native_func) =
+                            self.ctx.native_funcs().lookup(&module_path, &native_name)
+                    {
+                        // The func_type from the monomorph instance may have TypeParams that weren't
+                        // inferred from arguments (like return type params). Apply class type
+                        // substitutions to fully resolve the type.
+                        let return_type_id = self.ctx.substitute_type_id(return_type_id);
+                        return self.compile_native_call_with_types(
+                            native_func,
+                            call,
+                            return_type_id,
+                        );
+                    }
                 }
             }
         }
@@ -489,8 +499,7 @@ impl Cg<'_, '_, '_> {
         // Look up the external info (module path and native name) from implement_registry
         let ext_info = self
             .ctx
-            .analyzed
-            .implement_registry
+            .analyzed.implement_registry()
             .get_external_func(callee_name);
         let native_func = ext_info.and_then(|info| {
             let name_table = self.name_table();

@@ -13,7 +13,7 @@ use crate::types::{
 };
 use vole_frontend::ast::PrimitiveType as AstPrimitive;
 use vole_frontend::{
-    ClassDecl, FuncDecl, ImplementBlock, InterfaceMethod, Interner, RecordDecl, StaticsBlock,
+    ClassDecl, Expr, FuncDecl, ImplementBlock, InterfaceMethod, Interner, RecordDecl, StaticsBlock,
     Symbol, TypeExpr,
 };
 use vole_identity::ModuleId;
@@ -230,7 +230,7 @@ impl Compiler<'_> {
 
         // Get TypeDefId for this type
         let type_def_id = {
-            let name_table = self.analyzed.name_table.borrow();
+            let name_table = self.analyzed.name_table();
             match &impl_block.target_type {
                 TypeExpr::Primitive(p) => {
                     let name_id = name_table.primitives.from_ast(*p);
@@ -302,7 +302,7 @@ impl Compiler<'_> {
 
         // Get TypeDefId for this type
         let type_def_id = {
-            let name_table = self.analyzed.name_table.borrow();
+            let name_table = self.analyzed.name_table();
             match &impl_block.target_type {
                 TypeExpr::Primitive(p) => {
                     let name_id = name_table.primitives.from_ast(*p);
@@ -374,7 +374,7 @@ impl Compiler<'_> {
         let (self_type_id, impl_type_id) = match &impl_block.target_type {
             TypeExpr::Primitive(p) => {
                 let prim_type = vole_sema::PrimitiveType::from_ast(*p);
-                let type_id = self.analyzed.type_arena.borrow().primitive(prim_type);
+                let type_id = self.analyzed.type_arena().primitive(prim_type);
                 let impl_id = self.impl_type_id_from_type_id(type_id);
                 (type_id, impl_id)
             }
@@ -391,15 +391,15 @@ impl Compiler<'_> {
                 (metadata.vole_type, impl_id)
             }
             _ => {
-                let name_table = self.analyzed.name_table.borrow();
+                let name_table = self.analyzed.name_table();
                 let type_id = resolve_type_expr_to_id(
                     &impl_block.target_type,
-                    &self.analyzed.entity_registry,
+                    self.analyzed.entity_registry(),
                     &self.type_metadata,
                     interner,
                     &name_table,
                     module_id,
-                    &self.analyzed.type_arena,
+                    self.analyzed.type_arena_ref(),
                 );
                 drop(name_table);
                 let impl_id = self.impl_type_id_from_type_id(type_id);
@@ -441,7 +441,7 @@ impl Compiler<'_> {
         if let Some(ref statics) = impl_block.statics {
             // Get TypeDefId for this type
             let type_def_id = {
-                let name_table = self.analyzed.name_table.borrow();
+                let name_table = self.analyzed.name_table();
                 match &impl_block.target_type {
                     TypeExpr::Primitive(p) => {
                         let name_id = name_table.primitives.from_ast(*p);
@@ -507,7 +507,7 @@ impl Compiler<'_> {
         let self_type_id = match &impl_block.target_type {
             TypeExpr::Primitive(p) => {
                 let prim_type = vole_sema::PrimitiveType::from_ast(*p);
-                self.analyzed.type_arena.borrow().primitive(prim_type)
+                self.analyzed.type_arena().primitive(prim_type)
             }
             TypeExpr::Named(sym) => self
                 .type_metadata
@@ -521,15 +521,15 @@ impl Compiler<'_> {
                     )
                 }),
             _ => {
-                let name_table = self.analyzed.name_table.borrow();
+                let name_table = self.analyzed.name_table();
                 resolve_type_expr_to_id(
                     &impl_block.target_type,
-                    &self.analyzed.entity_registry,
+                    self.analyzed.entity_registry(),
                     &self.type_metadata,
                     &self.analyzed.interner,
                     &name_table,
                     module_id,
-                    &self.analyzed.type_arena,
+                    self.analyzed.type_arena_ref(),
                 )
             }
         };
@@ -627,16 +627,16 @@ impl Compiler<'_> {
 
             // Resolve return type as TypeId for context (needed for proper literal type inference)
             let return_type_id = {
-                let name_table = self.analyzed.name_table.borrow();
+                let name_table = self.analyzed.name_table();
                 method.return_type.as_ref().map(|t| {
                     resolve_type_expr_to_id(
                         t,
-                        &self.analyzed.entity_registry,
+                        self.analyzed.entity_registry(),
                         &self.type_metadata,
                         interner,
                         &name_table,
                         module_id,
-                        &self.analyzed.type_arena,
+                        self.analyzed.type_arena_ref(),
                     )
                 })
             };
@@ -652,25 +652,25 @@ impl Compiler<'_> {
 
             // Collect param types as TypeId (resolve once, use for both Cranelift type and variables)
             let param_type_ids: Vec<TypeId> = {
-                let name_table = self.analyzed.name_table.borrow();
+                let name_table = self.analyzed.name_table();
                 method
                     .params
                     .iter()
                     .map(|p| {
                         resolve_type_expr_to_id(
                             &p.ty,
-                            &self.analyzed.entity_registry,
+                            self.analyzed.entity_registry(),
                             &self.type_metadata,
                             interner,
                             &name_table,
                             module_id,
-                            &self.analyzed.type_arena,
+                            self.analyzed.type_arena_ref(),
                         )
                     })
                     .collect()
             };
             let param_cranelift_types: Vec<types::Type> = {
-                let arena = self.analyzed.type_arena.borrow();
+                let arena = self.analyzed.type_arena();
                 param_type_ids
                     .iter()
                     .map(|&id| type_id_to_cranelift(id, &arena, self.pointer_type))
@@ -713,8 +713,6 @@ impl Compiler<'_> {
                 let mut ctx = CompileCtx {
                     analyzed: self.analyzed,
                     interner: &self.analyzed.interner,
-                    arena: &self.analyzed.type_arena,
-                    pointer_type: self.pointer_type,
                     module: &mut self.jit.module,
                     func_registry: &mut self.func_registry,
                     source_file_ptr,
@@ -727,7 +725,6 @@ impl Compiler<'_> {
                     current_function_return_type: return_type_id,
                     native_registry: &self.native_registry,
                     current_module: module_path,
-                    monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
                     type_substitutions: None,
                     substitution_cache: RefCell::new(HashMap::new()),
                 };
@@ -799,14 +796,14 @@ impl Compiler<'_> {
         // Get the Cranelift type for self (using TypeId)
         let self_cranelift_type = type_id_to_cranelift(
             self_type_id,
-            &self.analyzed.type_arena.borrow(),
+            &self.analyzed.type_arena(),
             self.pointer_type,
         );
 
         // Build params: Vec<(Symbol, TypeId, Type)>
         // First collect type IDs (which may access arena internally)
         let param_info: Vec<(Symbol, TypeId)> = {
-            let name_table = self.analyzed.name_table.borrow();
+            let name_table = self.analyzed.name_table();
             method
                 .params
                 .iter()
@@ -816,12 +813,12 @@ impl Compiler<'_> {
                     } else {
                         resolve_type_expr_to_id(
                             &p.ty,
-                            &self.analyzed.entity_registry,
+                            self.analyzed.entity_registry(),
                             &self.type_metadata,
                             &self.analyzed.interner,
                             &name_table,
                             module_id,
-                            &self.analyzed.type_arena,
+                            self.analyzed.type_arena_ref(),
                         )
                     };
                     (p.name, type_id)
@@ -829,7 +826,7 @@ impl Compiler<'_> {
                 .collect()
         };
         let params: Vec<(Symbol, TypeId, types::Type)> = {
-            let arena_ref = self.analyzed.type_arena.borrow();
+            let arena_ref = self.analyzed.type_arena();
             param_info
                 .into_iter()
                 .map(|(name, type_id)| {
@@ -846,16 +843,16 @@ impl Compiler<'_> {
 
         // Compute the method's return type as TypeId for proper union wrapping
         let method_return_type_id = {
-            let name_table = self.analyzed.name_table.borrow();
+            let name_table = self.analyzed.name_table();
             method.return_type.as_ref().map(|t| {
                 resolve_type_expr_to_id(
                     t,
-                    &self.analyzed.entity_registry,
+                    self.analyzed.entity_registry(),
                     &self.type_metadata,
                     &self.analyzed.interner,
                     &name_table,
                     module_id,
-                    &self.analyzed.type_arena,
+                    self.analyzed.type_arena_ref(),
                 )
             })
         };
@@ -867,8 +864,6 @@ impl Compiler<'_> {
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
-                arena: &self.analyzed.type_arena,
-                pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
                 func_registry: &mut self.func_registry,
                 source_file_ptr,
@@ -881,7 +876,6 @@ impl Compiler<'_> {
                 current_function_return_type: method_return_type_id,
                 native_registry: &self.native_registry,
                 current_module: None,
-                monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
                 type_substitutions: None,
                 substitution_cache: RefCell::new(HashMap::new()),
             };
@@ -952,9 +946,9 @@ impl Compiler<'_> {
             let query = self.query();
             let registry = query.registry();
             let interner = query.interner();
-            let name_table = self.analyzed.name_table.borrow();
+            let name_table = self.analyzed.name_table();
             let type_metadata = &self.type_metadata;
-            let arena = &self.analyzed.type_arena;
+            let arena = self.analyzed.type_arena_ref();
             method
                 .params
                 .iter()
@@ -977,7 +971,7 @@ impl Compiler<'_> {
                 .collect()
         };
         let params: Vec<(Symbol, TypeId, types::Type)> = {
-            let arena_ref = self.analyzed.type_arena.borrow();
+            let arena_ref = self.analyzed.type_arena();
             param_info
                 .into_iter()
                 .map(|(name, type_id)| {
@@ -1000,8 +994,6 @@ impl Compiler<'_> {
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
-                arena: &self.analyzed.type_arena,
-                pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
                 func_registry: &mut self.func_registry,
                 source_file_ptr,
@@ -1014,7 +1006,6 @@ impl Compiler<'_> {
                 current_function_return_type: method_return_type_id,
                 native_registry: &self.native_registry,
                 current_module: None,
-                monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
                 type_substitutions: None,
                 substitution_cache: RefCell::new(HashMap::new()),
             };
@@ -1083,9 +1074,9 @@ impl Compiler<'_> {
             let query = self.query();
             let registry = query.registry();
             let interner = query.interner();
-            let name_table = self.analyzed.name_table.borrow();
+            let name_table = self.analyzed.name_table();
             let type_metadata = &self.type_metadata;
-            let arena = &self.analyzed.type_arena;
+            let arena = self.analyzed.type_arena_ref();
             method
                 .params
                 .iter()
@@ -1107,7 +1098,7 @@ impl Compiler<'_> {
                 .collect()
         };
         let param_types: Vec<types::Type> = {
-            let arena_ref = self.analyzed.type_arena.borrow();
+            let arena_ref = self.analyzed.type_arena();
             param_type_ids
                 .iter()
                 .map(|&ty_id| type_id_to_cranelift(ty_id, &arena_ref, self.pointer_type))
@@ -1166,8 +1157,6 @@ impl Compiler<'_> {
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
-                arena: &self.analyzed.type_arena,
-                pointer_type: self.pointer_type,
                 module: &mut self.jit.module,
                 func_registry: &mut self.func_registry,
                 source_file_ptr,
@@ -1180,7 +1169,6 @@ impl Compiler<'_> {
                 current_function_return_type: method_return_type_id,
                 native_registry: &self.native_registry,
                 current_module: None,
-                monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
                 type_substitutions: None,
                 substitution_cache: RefCell::new(HashMap::new()),
             };
@@ -1265,8 +1253,8 @@ impl Compiler<'_> {
             let param_type_ids: Vec<TypeId> = {
                 let query = self.query();
                 let type_metadata = &self.type_metadata;
-                let arena = &self.analyzed.type_arena;
-                let name_table = self.analyzed.name_table.borrow();
+                let arena = self.analyzed.type_arena_ref();
+                let name_table = self.analyzed.name_table();
                 method
                     .params
                     .iter()
@@ -1284,7 +1272,7 @@ impl Compiler<'_> {
                     .collect()
             };
             let param_types: Vec<types::Type> = {
-                let arena_ref = self.analyzed.type_arena.borrow();
+                let arena_ref = self.analyzed.type_arena();
                 param_type_ids
                     .iter()
                     .map(|&ty_id| type_id_to_cranelift(ty_id, &arena_ref, self.pointer_type))
@@ -1327,8 +1315,6 @@ impl Compiler<'_> {
                 let mut ctx = CompileCtx {
                     analyzed: self.analyzed,
                     interner: &self.analyzed.interner,
-                    arena: &self.analyzed.type_arena,
-                    pointer_type: self.pointer_type,
                     module: &mut self.jit.module,
                     func_registry: &mut self.func_registry,
                     source_file_ptr,
@@ -1341,7 +1327,6 @@ impl Compiler<'_> {
                     current_function_return_type: None,
                     native_registry: &self.native_registry,
                     current_module: None,
-                    monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
                     type_substitutions: None,
                     substitution_cache: RefCell::new(HashMap::new()),
                 };
@@ -1380,6 +1365,7 @@ impl Compiler<'_> {
         class: &ClassDecl,
         module_interner: &Interner,
         module_path: &str,
+        module_global_inits: &HashMap<Symbol, Expr>,
     ) -> Result<(), String> {
         let type_name_str = module_interner.resolve(class.name);
         let module_id = self.query().main_module();
@@ -1390,12 +1376,10 @@ impl Compiler<'_> {
             .type_metadata
             .values()
             .find(|meta| {
-                let arena = self.analyzed.type_arena.borrow();
+                let arena = self.analyzed.type_arena();
                 if let Some((type_def_id, _)) = arena.unwrap_class(meta.vole_type) {
                     let name_id = self.query().get_type(type_def_id).name_id;
-                    self.analyzed
-                        .name_table
-                        .borrow()
+                    self.analyzed.name_table()
                         .last_segment_str(name_id)
                         .is_some_and(|name| name == type_name_str)
                 } else {
@@ -1434,15 +1418,15 @@ impl Compiler<'_> {
             // Resolve param type IDs (TypeId-native)
             let param_type_ids: Vec<TypeId> = {
                 let type_metadata = &self.type_metadata;
-                let arena = &self.analyzed.type_arena;
-                let name_table = self.analyzed.name_table.borrow();
+                let arena = self.analyzed.type_arena_ref();
+                let name_table = self.analyzed.name_table();
                 method
                     .params
                     .iter()
                     .map(|p| {
                         resolve_type_expr_to_id(
                             &p.ty,
-                            &self.analyzed.entity_registry,
+                            self.analyzed.entity_registry(),
                             type_metadata,
                             module_interner,
                             &name_table,
@@ -1453,7 +1437,7 @@ impl Compiler<'_> {
                     .collect()
             };
             let param_types: Vec<types::Type> = {
-                let arena_ref = self.analyzed.type_arena.borrow();
+                let arena_ref = self.analyzed.type_arena();
                 param_type_ids
                     .iter()
                     .map(|&ty_id| type_id_to_cranelift(ty_id, &arena_ref, self.pointer_type))
@@ -1468,19 +1452,19 @@ impl Compiler<'_> {
                 .expect("'self' should be interned in module");
             // Resolve return type (TypeId-native)
             let return_type_id = {
-                let name_table = self.analyzed.name_table.borrow();
+                let name_table = self.analyzed.name_table();
                 method
                     .return_type
                     .as_ref()
                     .map(|t| {
                         resolve_type_expr_to_id(
                             t,
-                            &self.analyzed.entity_registry,
+                            self.analyzed.entity_registry(),
                             &self.type_metadata,
                             module_interner,
                             &name_table,
                             module_id,
-                            &self.analyzed.type_arena,
+                            self.analyzed.type_arena_ref(),
                         )
                     })
                     .unwrap_or(TypeId::VOID)
@@ -1523,12 +1507,10 @@ impl Compiler<'_> {
                 let mut ctx = CompileCtx {
                     analyzed: self.analyzed,
                     interner: module_interner,
-                    arena: &self.analyzed.type_arena,
-                    pointer_type: self.pointer_type,
                     module: &mut self.jit.module,
                     func_registry: &mut self.func_registry,
                     source_file_ptr,
-                    global_inits: &self.global_inits,
+                    global_inits: module_global_inits,
                     lambda_counter: &self.lambda_counter,
                     type_metadata: &self.type_metadata,
                     impl_method_infos: &self.impl_method_infos,
@@ -1537,7 +1519,6 @@ impl Compiler<'_> {
                     current_function_return_type: Some(return_type_id),
                     native_registry: &self.native_registry,
                     current_module: Some(module_path),
-                    monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
                     type_substitutions: None,
                     substitution_cache: RefCell::new(HashMap::new()),
                 };
@@ -1587,19 +1568,19 @@ impl Compiler<'_> {
 
                 // Resolve return type (TypeId-native)
                 let return_type_id = {
-                    let name_table = self.analyzed.name_table.borrow();
+                    let name_table = self.analyzed.name_table();
                     method
                         .return_type
                         .as_ref()
                         .map(|t| {
                             resolve_type_expr_to_id(
                                 t,
-                                &self.analyzed.entity_registry,
+                                self.analyzed.entity_registry(),
                                 &self.type_metadata,
                                 module_interner,
                                 &name_table,
                                 module_id,
-                                &self.analyzed.type_arena,
+                                self.analyzed.type_arena_ref(),
                             )
                         })
                         .unwrap_or(TypeId::VOID)
@@ -1617,15 +1598,15 @@ impl Compiler<'_> {
                 // Resolve param type IDs (TypeId-native)
                 let param_type_ids: Vec<TypeId> = {
                     let type_metadata = &self.type_metadata;
-                    let arena = &self.analyzed.type_arena;
-                    let name_table = self.analyzed.name_table.borrow();
+                    let arena = self.analyzed.type_arena_ref();
+                    let name_table = self.analyzed.name_table();
                     method
                         .params
                         .iter()
                         .map(|p| {
                             resolve_type_expr_to_id(
                                 &p.ty,
-                                &self.analyzed.entity_registry,
+                                self.analyzed.entity_registry(),
                                 type_metadata,
                                 module_interner,
                                 &name_table,
@@ -1636,7 +1617,7 @@ impl Compiler<'_> {
                         .collect()
                 };
                 let param_types: Vec<types::Type> = {
-                    let arena_ref = self.analyzed.type_arena.borrow();
+                    let arena_ref = self.analyzed.type_arena();
                     param_type_ids
                         .iter()
                         .map(|&ty_id| type_id_to_cranelift(ty_id, &arena_ref, self.pointer_type))
@@ -1680,12 +1661,10 @@ impl Compiler<'_> {
                     let mut ctx = CompileCtx {
                         analyzed: self.analyzed,
                         interner: module_interner,
-                        arena: &self.analyzed.type_arena,
-                        pointer_type: self.pointer_type,
                         module: &mut self.jit.module,
                         func_registry: &mut self.func_registry,
                         source_file_ptr,
-                        global_inits: &self.global_inits,
+                        global_inits: module_global_inits,
                         lambda_counter: &self.lambda_counter,
                         type_metadata: &self.type_metadata,
                         impl_method_infos: &self.impl_method_infos,
@@ -1694,7 +1673,6 @@ impl Compiler<'_> {
                         current_function_return_type: Some(return_type_id),
                         native_registry: &self.native_registry,
                         current_module: Some(module_path),
-                        monomorph_cache: &self.analyzed.entity_registry.monomorph_cache,
                         type_substitutions: None,
                         substitution_cache: RefCell::new(HashMap::new()),
                     };

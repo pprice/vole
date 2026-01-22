@@ -84,10 +84,7 @@ impl Compiler<'_> {
             .expect("class should be registered in entity registry");
 
         // Create a placeholder vole_type_id (will be replaced in finalize_class)
-        let vole_type_id = self
-            .analyzed
-            .type_arena
-            .borrow_mut()
+        let vole_type_id = self.analyzed.type_arena_mut()
             .class(type_def_id, TypeIdVec::new());
 
         self.type_metadata.insert(
@@ -123,7 +120,7 @@ impl Compiler<'_> {
             let field_type_id = self.resolve_type_to_id(&field.ty);
             field_type_tags.push(type_id_to_field_tag(
                 field_type_id,
-                &self.analyzed.type_arena.borrow(),
+                &self.analyzed.type_arena(),
             ));
         }
 
@@ -147,13 +144,11 @@ impl Compiler<'_> {
                 self.resolve_type_to_id(return_type_expr)
             } else if let Some(type_def_id) = type_def_id {
                 // Look up the inferred return type from sema
-                if let Some(method_id) = self
-                    .analyzed
-                    .entity_registry
+                if let Some(method_id) = self.analyzed.entity_registry()
                     .find_method_on_type(type_def_id, method_name_id)
                 {
                     let method_def = self.query().get_method(method_id);
-                    let arena = self.analyzed.type_arena.borrow();
+                    let arena = self.analyzed.type_arena();
                     if let Some((_, ret_type_id, _)) =
                         arena.unwrap_function(method_def.signature_id)
                     {
@@ -271,10 +266,7 @@ impl Compiler<'_> {
             .expect("record should be registered in entity registry");
 
         // Create a placeholder vole_type_id (will be replaced in finalize_record)
-        let vole_type_id = self
-            .analyzed
-            .type_arena
-            .borrow_mut()
+        let vole_type_id = self.analyzed.type_arena_mut()
             .record(type_def_id, TypeIdVec::new());
 
         self.type_metadata.insert(
@@ -310,7 +302,7 @@ impl Compiler<'_> {
             let field_type_id = self.resolve_type_to_id(&field.ty);
             field_type_tags.push(type_id_to_field_tag(
                 field_type_id,
-                &self.analyzed.type_arena.borrow(),
+                &self.analyzed.type_arena(),
             ));
         }
 
@@ -436,13 +428,11 @@ impl Compiler<'_> {
                 self.resolve_type_to_id(return_type_expr)
             } else if let Some(type_def_id) = type_def_id {
                 // Look up the inferred return type from sema
-                if let Some(method_id) = self
-                    .analyzed
-                    .entity_registry
+                if let Some(method_id) = self.analyzed.entity_registry()
                     .find_static_method_on_type(type_def_id, method_name_id)
                 {
                     let method_def = self.query().get_method(method_id);
-                    let arena = self.analyzed.type_arena.borrow();
+                    let arena = self.analyzed.type_arena();
                     if let Some((_, ret_type_id, _)) =
                         arena.unwrap_function(method_def.signature_id)
                     {
@@ -490,10 +480,8 @@ impl Compiler<'_> {
 
         // Look up the TypeDefId using the class name
         tracing::debug!(type_name = %type_name_str, "Looking up TypeDefId for module class");
-        let Some(type_def_id) = self
-            .analyzed
-            .entity_registry
-            .class_by_short_name(type_name_str, &self.analyzed.name_table.borrow())
+        let Some(type_def_id) = self.analyzed.entity_registry()
+            .class_by_short_name(type_name_str, &self.analyzed.name_table())
         else {
             tracing::warn!(type_name = %type_name_str, "Could not find TypeDefId for module class");
             return;
@@ -502,11 +490,9 @@ impl Compiler<'_> {
 
         // Skip if already registered - check by type name string to avoid Symbol collisions across interners
         let already_registered = self.type_metadata.values().any(|meta| {
-            let arena = self.analyzed.type_arena.borrow();
+            let arena = self.analyzed.type_arena();
             if let Some((type_def_id, _)) = arena.unwrap_class(meta.vole_type) {
-                self.analyzed
-                    .name_table
-                    .borrow()
+                self.analyzed.name_table()
                     .last_segment_str(self.query().type_name_id(type_def_id))
                     .is_some_and(|name| name == type_name_str)
             } else {
@@ -532,7 +518,7 @@ impl Compiler<'_> {
             let field_type_id = self.resolve_type_to_id_with_interner(&field.ty, module_interner);
             field_type_tags.push(type_id_to_field_tag(
                 field_type_id,
-                &self.analyzed.type_arena.borrow(),
+                &self.analyzed.type_arena(),
             ));
         }
 
@@ -582,10 +568,7 @@ impl Compiler<'_> {
             .lookup(type_name_str)
             .unwrap_or(class.name);
         tracing::debug!(type_name = %type_name_str, ?class.name, ?main_class_symbol, "Inserting type_metadata");
-        let vole_type_id = self
-            .analyzed
-            .type_arena
-            .borrow_mut()
+        let vole_type_id = self.analyzed.type_arena_mut()
             .class(type_def_id, TypeIdVec::new());
         self.type_metadata.insert(
             main_class_symbol,

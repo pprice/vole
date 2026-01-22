@@ -1027,8 +1027,7 @@ impl Cg<'_, '_, '_> {
         // Fields are stored sequentially at 8-byte intervals (i64 storage)
         for (field_idx, field_def) in error_fields.iter().enumerate() {
             // Find the matching field in the raise statement
-            let field_name = self
-                .name_table()
+            let field_name = self.name_table()
                 .last_segment_str(field_def.name_id)
                 .unwrap_or_default();
             let field_init = raise_stmt

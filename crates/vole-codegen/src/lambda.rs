@@ -118,7 +118,7 @@ pub(crate) fn infer_expr_type(
                 }
             }
             // Try to look up global via GlobalDef (uses NameId, not AST iteration)
-            let name_table = ctx.name_table();
+            let name_table = ctx.analyzed.name_table();
             let module_id = ctx
                 .module_path()
                 .and_then(|path| name_table.module_id_if_known(path))
