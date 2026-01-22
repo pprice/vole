@@ -17,9 +17,9 @@ use super::structs::{
     convert_field_value_id, convert_to_i64_for_storage, get_field_slot_and_type_id_cg,
 };
 use super::types::{
-    CompileCtx, CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET,
-    box_interface_value_id, fallible_error_tag_by_id, resolve_type_expr_id, tuple_layout_id,
-    type_id_size, type_id_to_cranelift,
+    CompileCtx, CompiledValue, ExplicitParams, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG,
+    FALLIBLE_TAG_OFFSET, FunctionCtx, box_interface_value_id, fallible_error_tag_by_id,
+    resolve_type_expr_id, tuple_layout_id, type_id_size, type_id_to_cranelift,
 };
 
 /// Compile a block of statements.
@@ -52,18 +52,20 @@ fn compile_block_with_captures(
 }
 
 /// Compile a function body - either a block or a single expression
-/// Returns (terminated, optional_return_value)
+/// Compile a function body with split contexts.
 ///
-/// Parameters:
-/// - `captures`: Optional capture context for closures
-/// - `nested_return_type`: If Some, overrides ctx's return type (for nested lambdas)
+/// This is the transition API that takes FunctionCtx and ExplicitParams alongside
+/// CompileCtx. The split contexts are passed to Cg::new_with_params.
+#[allow(dead_code)] // Part of CompileCtx migration
 #[allow(clippy::too_many_arguments)]
-pub(super) fn compile_func_body(
+pub(super) fn compile_func_body_with_params<'ctx>(
     builder: &mut FunctionBuilder,
     body: &vole_frontend::FuncBody,
     variables: &mut HashMap<Symbol, (Variable, TypeId)>,
-    cf_ctx: &mut ControlFlowCtx,
-    ctx: &mut CompileCtx,
+    _cf_ctx: &mut ControlFlowCtx,
+    ctx: &mut CompileCtx<'ctx>,
+    function_ctx: &FunctionCtx<'ctx>,
+    explicit_params: &ExplicitParams<'ctx>,
     captures: Option<Captures>,
     nested_return_type: Option<TypeId>,
 ) -> Result<(bool, Option<CompiledValue>), String> {
@@ -72,25 +74,38 @@ pub(super) fn compile_func_body(
 
     match body {
         vole_frontend::FuncBody::Block(block) => {
-            let terminated = compile_block_with_captures(
+            let mut cf = ControlFlow::new();
+            let mut cg = Cg::new_with_params(
                 builder,
-                block,
                 variables,
-                cf_ctx,
                 ctx,
+                &mut cf,
+                function_ctx,
+                explicit_params,
                 captures,
                 return_type,
-            )?;
+            );
+            let terminated = cg.block(block)?;
             Ok((terminated, None))
         }
         vole_frontend::FuncBody::Expr(expr) => {
             let mut cf = ControlFlow::new();
-            let mut cg = Cg::new(builder, variables, ctx, &mut cf, captures, return_type);
+            let mut cg = Cg::new_with_params(
+                builder,
+                variables,
+                ctx,
+                &mut cf,
+                function_ctx,
+                explicit_params,
+                captures,
+                return_type,
+            );
             let value = cg.expr(expr)?;
             Ok((true, Some(value)))
         }
     }
 }
+
 impl Cg<'_, '_, '_> {
     /// Pre-register a recursive lambda binding before compilation.
     ///

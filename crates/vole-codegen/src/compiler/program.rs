@@ -7,14 +7,12 @@ use rustc_hash::FxHashMap;
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, InstBuilder, types};
 use cranelift_module::{FuncId, Module};
 
-use super::common::{
-    FunctionCompileConfig, compile_function_inner, compile_function_inner_with_params,
-};
+use super::common::{FunctionCompileConfig, compile_function_inner_with_params};
 use super::{Compiler, ControlFlowCtx, SelfParam, TestInfo, TypeResolver};
 
 use crate::FunctionKey;
 use crate::RuntimeFn;
-use crate::stmt::{compile_block, compile_func_body};
+use crate::stmt::{compile_block, compile_func_body_with_params};
 use crate::types::{
     CompileCtx, ExplicitParams, FunctionCtx, function_name_id_with_interner,
     resolve_type_expr_to_id, type_id_to_cranelift,
@@ -631,6 +629,23 @@ impl Compiler<'_> {
         let mut builder_ctx = FunctionBuilderContext::new();
         {
             let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
+
+            // Create split contexts for the new compilation path
+            let function_ctx = FunctionCtx::main(return_type_id);
+            let explicit_params = ExplicitParams {
+                analyzed: self.analyzed,
+                interner: &self.analyzed.interner,
+                type_metadata: &self.type_metadata,
+                impl_method_infos: &self.impl_method_infos,
+                static_method_infos: &self.static_method_infos,
+                interface_vtables: &self.interface_vtables,
+                native_registry: &self.native_registry,
+                global_inits: &self.global_inits,
+                source_file_ptr,
+                lambda_counter: &self.lambda_counter,
+            };
+
+            // CompileCtx still needed for mutable JIT infrastructure
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
@@ -649,8 +664,15 @@ impl Compiler<'_> {
                 type_substitutions: None,
                 substitution_cache: RefCell::new(HashMap::new()),
             };
+
             let config = FunctionCompileConfig::top_level(&func.body, params, return_type_id);
-            compile_function_inner(builder, &mut ctx, config)?;
+            compile_function_inner_with_params(
+                builder,
+                &mut ctx,
+                &function_ctx,
+                &explicit_params,
+                config,
+            )?;
         }
 
         // Define the function
@@ -742,6 +764,22 @@ impl Compiler<'_> {
             let mut builder_ctx = FunctionBuilderContext::new();
             let builder = FunctionBuilder::new(&mut func_ctx.func, &mut builder_ctx);
 
+            // Create split contexts for the new compilation path
+            let function_ctx = FunctionCtx::main(Some(return_type_id));
+            let explicit_params = ExplicitParams {
+                analyzed: self.analyzed,
+                interner: &self.analyzed.interner,
+                type_metadata: &self.type_metadata,
+                impl_method_infos: &self.impl_method_infos,
+                static_method_infos: &self.static_method_infos,
+                interface_vtables: &self.interface_vtables,
+                native_registry: &self.native_registry,
+                global_inits: &self.global_inits,
+                source_file_ptr,
+                lambda_counter: &self.lambda_counter,
+            };
+
+            // CompileCtx still needed for mutable JIT infrastructure
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
@@ -763,7 +801,13 @@ impl Compiler<'_> {
 
             // Use pure lambda config (skip_block_params=1 for closure ptr)
             let config = FunctionCompileConfig::pure_lambda(&func.body, params, return_type_id);
-            compile_function_inner(builder, &mut ctx, config)?;
+            compile_function_inner_with_params(
+                builder,
+                &mut ctx,
+                &function_ctx,
+                &explicit_params,
+                config,
+            )?;
         }
 
         self.jit
@@ -834,7 +878,23 @@ impl Compiler<'_> {
                 // Start with empty variables map
                 let mut variables = HashMap::new();
 
-                // Create CompileCtx for this test
+                // Create split contexts for the new compilation path
+                let function_ctx = FunctionCtx::test();
+                let explicit_params = ExplicitParams {
+                    analyzed: self.analyzed,
+                    interner: &self.analyzed.interner,
+                    type_metadata: &self.type_metadata,
+                    impl_method_infos: &self.impl_method_infos,
+                    static_method_infos: &self.static_method_infos,
+                    interface_vtables: &self.interface_vtables,
+                    native_registry: &self.native_registry,
+                    global_inits: &self.global_inits,
+                    source_file_ptr,
+                    lambda_counter: &self.lambda_counter,
+                };
+
+                // CompileCtx still needed for mutable JIT infrastructure
+                // (also used by compile_block and ctx.* method calls below)
                 let mut ctx = CompileCtx {
                     analyzed: self.analyzed,
                     interner: &self.analyzed.interner,
@@ -890,6 +950,7 @@ impl Compiler<'_> {
                 }
 
                 // Compile scoped let declarations in test context
+                // Note: compile_block still uses CompileCtx (migration pending)
                 let mut cf_ctx = ControlFlowCtx::default();
                 if !scoped_lets.is_empty() {
                     // Create a synthetic block with the let statements
@@ -913,12 +974,14 @@ impl Compiler<'_> {
                 // Note: For FuncBody::Expr, terminated=true but the block isn't actually
                 // terminated (no return instruction). For FuncBody::Block, terminated=true
                 // only if there's an explicit return/break. So we check both.
-                let (block_terminated, expr_value) = compile_func_body(
+                let (block_terminated, expr_value) = compile_func_body_with_params(
                     &mut builder,
                     &test.body,
                     &mut variables,
                     &mut cf_ctx,
                     &mut ctx,
+                    &function_ctx,
+                    &explicit_params,
                     None, // no captures
                     None, // no nested return type
                 )?;
@@ -1093,6 +1156,23 @@ impl Compiler<'_> {
             let mut cf_ctx = ControlFlowCtx::default();
             let empty_type_metadata = HashMap::new();
             let empty_global_inits = HashMap::new();
+
+            // Create split contexts for the new compilation path
+            let function_ctx = FunctionCtx::main(return_type_id);
+            let explicit_params = ExplicitParams {
+                analyzed: self.analyzed,
+                interner: &self.analyzed.interner,
+                type_metadata: &empty_type_metadata,
+                impl_method_infos: &self.impl_method_infos,
+                static_method_infos: &self.static_method_infos,
+                interface_vtables: &self.interface_vtables,
+                native_registry: &self.native_registry,
+                global_inits: &empty_global_inits,
+                source_file_ptr,
+                lambda_counter: &self.lambda_counter,
+            };
+
+            // CompileCtx still needed for mutable JIT infrastructure
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
@@ -1111,12 +1191,15 @@ impl Compiler<'_> {
                 type_substitutions: None,
                 substitution_cache: RefCell::new(HashMap::new()),
             };
-            let (terminated, expr_value) = compile_func_body(
+
+            let (terminated, expr_value) = compile_func_body_with_params(
                 &mut builder,
                 &func.body,
                 &mut variables,
                 &mut cf_ctx,
                 &mut ctx,
+                &function_ctx,
+                &explicit_params,
                 None,
                 None,
             )?;
@@ -1163,6 +1246,23 @@ impl Compiler<'_> {
             let mut cf_ctx = ControlFlowCtx::default();
             let empty_type_metadata = HashMap::new();
             let empty_global_inits = HashMap::new();
+
+            // Create split contexts for the new compilation path
+            let function_ctx = FunctionCtx::test();
+            let explicit_params = ExplicitParams {
+                analyzed: self.analyzed,
+                interner: &self.analyzed.interner,
+                type_metadata: &empty_type_metadata,
+                impl_method_infos: &self.impl_method_infos,
+                static_method_infos: &self.static_method_infos,
+                interface_vtables: &self.interface_vtables,
+                native_registry: &self.native_registry,
+                global_inits: &empty_global_inits,
+                source_file_ptr,
+                lambda_counter: &self.lambda_counter,
+            };
+
+            // CompileCtx still needed for mutable JIT infrastructure
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
@@ -1181,12 +1281,15 @@ impl Compiler<'_> {
                 type_substitutions: None,
                 substitution_cache: RefCell::new(HashMap::new()),
             };
-            let (terminated, _) = compile_func_body(
+
+            let (terminated, _) = compile_func_body_with_params(
                 &mut builder,
                 &test.body,
                 &mut variables,
                 &mut cf_ctx,
                 &mut ctx,
+                &function_ctx,
+                &explicit_params,
                 None, // no captures
                 None, // no nested return type
             )?;
@@ -1415,6 +1518,23 @@ impl Compiler<'_> {
 
             // Compile function body
             let mut cf_ctx = ControlFlowCtx::default();
+
+            // Create split contexts for the new compilation path
+            let function_ctx = FunctionCtx::main(Some(return_type_id));
+            let explicit_params = ExplicitParams {
+                analyzed: self.analyzed,
+                interner: &self.analyzed.interner,
+                type_metadata: &self.type_metadata,
+                impl_method_infos: &self.impl_method_infos,
+                static_method_infos: &self.static_method_infos,
+                interface_vtables: &self.interface_vtables,
+                native_registry: &self.native_registry,
+                global_inits: &self.global_inits,
+                source_file_ptr,
+                lambda_counter: &self.lambda_counter,
+            };
+
+            // CompileCtx still needed for mutable JIT infrastructure
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
@@ -1433,12 +1553,15 @@ impl Compiler<'_> {
                 type_substitutions: None,
                 substitution_cache: RefCell::new(HashMap::new()),
             };
-            let (terminated, expr_value) = compile_func_body(
+
+            let (terminated, expr_value) = compile_func_body_with_params(
                 &mut builder,
                 &func.body,
                 &mut variables,
                 &mut cf_ctx,
                 &mut ctx,
+                &function_ctx,
+                &explicit_params,
                 None,
                 None,
             )?;
@@ -1683,6 +1806,25 @@ impl Compiler<'_> {
 
             // Compile method body
             let mut cf_ctx = ControlFlowCtx::default();
+
+            // Create split contexts for the new compilation path
+            // Note: Uses monomorphized FunctionCtx for type substitutions
+            let function_ctx =
+                FunctionCtx::monomorphized(Some(return_type_id), &instance.substitutions);
+            let explicit_params = ExplicitParams {
+                analyzed: self.analyzed,
+                interner: &self.analyzed.interner,
+                type_metadata: &self.type_metadata,
+                impl_method_infos: &self.impl_method_infos,
+                static_method_infos: &self.static_method_infos,
+                interface_vtables: &self.interface_vtables,
+                native_registry: &self.native_registry,
+                global_inits: &self.global_inits,
+                source_file_ptr,
+                lambda_counter: &self.lambda_counter,
+            };
+
+            // CompileCtx still needed for mutable JIT infrastructure
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
@@ -1701,12 +1843,15 @@ impl Compiler<'_> {
                 type_substitutions: Some(&instance.substitutions),
                 substitution_cache: RefCell::new(HashMap::new()),
             };
-            let (terminated, expr_value) = compile_func_body(
+
+            let (terminated, expr_value) = compile_func_body_with_params(
                 &mut builder,
                 &method.body,
                 &mut variables,
                 &mut cf_ctx,
                 &mut ctx,
+                &function_ctx,
+                &explicit_params,
                 None,
                 None,
             )?;
@@ -2002,6 +2147,25 @@ impl Compiler<'_> {
             })?;
 
             let mut cf_ctx = ControlFlowCtx::default();
+
+            // Create split contexts for the new compilation path
+            // Note: Uses monomorphized FunctionCtx for type substitutions
+            let function_ctx =
+                FunctionCtx::monomorphized(Some(return_type_id), &instance.substitutions);
+            let explicit_params = ExplicitParams {
+                analyzed: self.analyzed,
+                interner: &self.analyzed.interner,
+                type_metadata: &self.type_metadata,
+                impl_method_infos: &self.impl_method_infos,
+                static_method_infos: &self.static_method_infos,
+                interface_vtables: &self.interface_vtables,
+                native_registry: &self.native_registry,
+                global_inits: &self.global_inits,
+                source_file_ptr,
+                lambda_counter: &self.lambda_counter,
+            };
+
+            // CompileCtx still needed for mutable JIT infrastructure
             let mut ctx = CompileCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
@@ -2020,12 +2184,15 @@ impl Compiler<'_> {
                 type_substitutions: Some(&instance.substitutions),
                 substitution_cache: RefCell::new(HashMap::new()),
             };
-            let (terminated, expr_value) = compile_func_body(
+
+            let (terminated, expr_value) = compile_func_body_with_params(
                 &mut builder,
                 body,
                 &mut variables,
                 &mut cf_ctx,
                 &mut ctx,
+                &function_ctx,
+                &explicit_params,
                 None,
                 None,
             )?;
