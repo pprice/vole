@@ -438,6 +438,62 @@ impl<'a> CompileCtx<'a> {
             .expr_data()
             .get_substituted_return_type(*node_id)
     }
+
+    // ========== Extraction methods for incremental migration ==========
+    // These methods will be used by subsequent migration tasks.
+    // Allow dead_code until callers are migrated.
+
+    /// Extract a FunctionCtx from this CompileCtx.
+    #[allow(dead_code)]
+    /// Used during incremental migration to the new context system.
+    pub fn function_ctx(&self) -> FunctionCtx<'a> {
+        let module_id = self.current_module.and_then(|path| {
+            self.analyzed
+                .name_table
+                .borrow()
+                .module_id_if_known(path)
+        });
+        FunctionCtx {
+            return_type: self.current_function_return_type,
+            current_module: module_id,
+            substitutions: self.type_substitutions,
+            substitution_cache: RefCell::new(HashMap::new()),
+        }
+    }
+
+    /// Extract a TypeCtx from this CompileCtx.
+    /// Used during incremental migration to the new context system.
+    #[allow(dead_code)]
+    pub fn type_ctx(&self) -> TypeCtx<'_> {
+        TypeCtx::new(self.query(), self.pointer_type)
+    }
+
+    // ========== Delegation methods for incremental migration ==========
+    // These methods will be used by subsequent migration tasks.
+
+    /// Get the current function's return type.
+    /// Delegation method for migrating to FunctionCtx.
+    #[inline]
+    #[allow(dead_code)]
+    pub fn return_type(&self) -> Option<TypeId> {
+        self.current_function_return_type
+    }
+
+    /// Get the type substitutions for monomorphized context.
+    /// Delegation method for migrating to FunctionCtx.
+    #[inline]
+    #[allow(dead_code)]
+    pub fn substitutions(&self) -> Option<&'a HashMap<NameId, TypeId>> {
+        self.type_substitutions
+    }
+
+    /// Get the current module path.
+    /// Delegation method for migrating to FunctionCtx.
+    #[inline]
+    #[allow(dead_code)]
+    pub fn module_path(&self) -> Option<&'a str> {
+        self.current_module
+    }
 }
 
 /// Resolve a type expression to a TypeId (uses CompileCtx for full context).
