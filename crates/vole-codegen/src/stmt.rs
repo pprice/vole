@@ -265,7 +265,7 @@ impl Cg<'_, '_, '_> {
             }
 
             Stmt::Return(ret) => {
-                let return_type_id = self.ctx.current_function_return_type;
+                let return_type_id = self.ctx.return_type();
                 if let Some(value) = &ret.value {
                     let compiled = self.expr(value)?;
 
@@ -936,7 +936,7 @@ impl Cg<'_, '_, '_> {
         // Get the current function's return type - must be Fallible
         let return_type_id = self
             .ctx
-            .current_function_return_type
+            .return_type()
             .ok_or("raise statement used outside of a function with declared return type")?;
 
         // Extract the error type from the fallible return type

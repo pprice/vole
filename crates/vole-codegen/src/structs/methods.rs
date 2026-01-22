@@ -170,7 +170,7 @@ impl Cg<'_, '_, '_> {
         // If no resolution exists (e.g., inside default method bodies), fall back to type-based lookup
         // In monomorphized context, skip sema resolution because it was computed for the type parameter,
         // not the concrete type. Let resolve_method_target do dynamic resolution based on object_type.
-        let resolution = if self.ctx.type_substitutions.is_some() {
+        let resolution = if self.ctx.substitutions().is_some() {
             None
         } else {
             self.ctx

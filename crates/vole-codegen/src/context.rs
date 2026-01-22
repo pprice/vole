@@ -149,14 +149,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Get current module path (will move to FunctionCtx as ModuleId)
     #[inline]
     pub fn current_module(&self) -> Option<&'ctx str> {
-        self.ctx.current_module
+        self.ctx.module_path()
     }
 
     /// Get type substitutions (will move to FunctionCtx)
     #[inline]
     #[allow(dead_code)]
     pub fn type_substitutions(&self) -> Option<&'ctx HashMap<vole_identity::NameId, TypeId>> {
-        self.ctx.type_substitutions
+        self.ctx.substitutions()
     }
 
     /// Get entity registry reference

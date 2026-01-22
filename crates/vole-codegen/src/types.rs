@@ -447,12 +447,9 @@ impl<'a> CompileCtx<'a> {
     #[allow(dead_code)]
     /// Used during incremental migration to the new context system.
     pub fn function_ctx(&self) -> FunctionCtx<'a> {
-        let module_id = self.current_module.and_then(|path| {
-            self.analyzed
-                .name_table
-                .borrow()
-                .module_id_if_known(path)
-        });
+        let module_id = self
+            .current_module
+            .and_then(|path| self.analyzed.name_table.borrow().module_id_if_known(path));
         FunctionCtx {
             return_type: self.current_function_return_type,
             current_module: module_id,
@@ -517,7 +514,7 @@ pub(crate) fn resolve_type_expr_id(ty: &TypeExpr, ctx: &CompileCtx) -> TypeId {
     drop(name_table);
 
     // Apply type substitutions if compiling a monomorphized context
-    if let Some(substitutions) = ctx.type_substitutions {
+    if let Some(substitutions) = ctx.substitutions() {
         // Convert std::collections::HashMap to FxHashMap for arena.substitute
         let subs: FxHashMap<NameId, TypeId> = substitutions.iter().map(|(&k, &v)| (k, v)).collect();
         ctx.update().substitute(type_id, &subs)
