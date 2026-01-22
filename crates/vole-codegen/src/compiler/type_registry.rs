@@ -78,7 +78,9 @@ impl Compiler<'_> {
         let name_id = query.name_id(module_id, &[class.name]);
 
         // Look up the TypeDefId from EntityRegistry
-        let type_def_id = self.query().try_type_def_id(name_id)
+        let type_def_id = self
+            .query()
+            .try_type_def_id(name_id)
             .expect("class should be registered in entity registry");
 
         // Create a placeholder vole_type_id (will be replaced in finalize_class)
@@ -277,7 +279,9 @@ impl Compiler<'_> {
         let name_id = query.name_id(module_id, &[record.name]);
 
         // Look up the TypeDefId from EntityRegistry
-        let type_def_id = self.query().try_type_def_id(name_id)
+        let type_def_id = self
+            .query()
+            .try_type_def_id(name_id)
             .expect("record should be registered in entity registry");
 
         // Create a placeholder vole_type_id (will be replaced in finalize_record)
@@ -522,7 +526,7 @@ impl Compiler<'_> {
         let Some(type_def_id) = self
             .analyzed
             .entity_registry
-            .class_by_short_name(type_name_str, &*self.analyzed.name_table.borrow())
+            .class_by_short_name(type_name_str, &self.analyzed.name_table.borrow())
         else {
             tracing::warn!(type_name = %type_name_str, "Could not find TypeDefId for module class");
             return;

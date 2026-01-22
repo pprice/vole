@@ -136,8 +136,7 @@ impl InterfaceVtableRegistry {
         let interface_type_def_id = ctx
             .resolve_type_str_or_interface(interface_name_str)
             .ok_or_else(|| format!("unknown interface {:?}", interface_name_str))?;
-        let interface_name_id = ctx.query().get_type(interface_type_def_id)
-            .name_id;
+        let interface_name_id = ctx.query().get_type(interface_type_def_id).name_id;
 
         // Build substitution map from type param names to concrete type args (already TypeIds)
         let interface_def = ctx.query().get_type(interface_type_def_id);
@@ -871,7 +870,11 @@ fn resolve_vtable_target(
 ) -> Result<VtableMethod, String> {
     // Get method info from EntityRegistry
     let interface_method = ctx.query().get_method(interface_method_id);
-    let method_name_str = ctx.analyzed.name_table.borrow().display(interface_method.name_id);
+    let method_name_str = ctx
+        .analyzed
+        .name_table
+        .borrow()
+        .display(interface_method.name_id);
 
     // Apply substitutions to get concrete param/return types (using TypeId-based substitution)
     let (substituted_param_ids, substituted_return_id) = {

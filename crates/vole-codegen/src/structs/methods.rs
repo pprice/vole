@@ -26,7 +26,7 @@ impl Cg<'_, '_, '_> {
     /// Look up a method NameId using the context's interner (which may be a module interner)
     fn method_name_id(&self, name: Symbol) -> NameId {
         let name_table = self.ctx.analyzed.name_table.borrow();
-        let namer = NamerLookup::new(&*name_table, self.ctx.interner);
+        let namer = NamerLookup::new(&name_table, self.ctx.interner);
         namer.method(name).unwrap_or_else(|| {
             panic!(
                 "method name_id not found for '{}'",

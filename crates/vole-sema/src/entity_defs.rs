@@ -144,7 +144,7 @@ pub struct FunctionDef {
 pub struct GlobalDef {
     pub id: GlobalId,
     pub name_id: NameId,
-    pub type_id: TypeId,  // Analyzed type, NOT TypeExpr
+    pub type_id: TypeId, // Analyzed type, NOT TypeExpr
     pub module_id: ModuleId,
-    pub is_mutable: bool,  // let (false) vs var (true)
+    pub is_mutable: bool, // let (false) vs var (true)
 }

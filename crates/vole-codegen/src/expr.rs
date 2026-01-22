@@ -225,7 +225,12 @@ impl Cg<'_, '_, '_> {
         // Create wrapper function
         let (wrapper_name_id, wrapper_func_key) =
             self.ctx.func_registry.intern_lambda_name(wrapper_index);
-        let wrapper_name = self.ctx.func_registry.name_table_rc().borrow().display(wrapper_name_id);
+        let wrapper_name = self
+            .ctx
+            .func_registry
+            .name_table_rc()
+            .borrow()
+            .display(wrapper_name_id);
         let wrapper_func_id = self
             .ctx
             .module
@@ -1617,12 +1622,9 @@ impl Cg<'_, '_, '_> {
         arm_variables: &mut HashMap<Symbol, (Variable, TypeId)>,
     ) -> Result<Option<Value>, String> {
         // Check if this is an error type name via EntityRegistry
-        let is_error_type = self
-            .ctx
-            .resolve_type(name)
-            .is_some_and(|type_id| {
-                self.ctx.query().get_type(type_id).kind == TypeDefKind::ErrorType
-            });
+        let is_error_type = self.ctx.resolve_type(name).is_some_and(|type_id| {
+            self.ctx.query().get_type(type_id).kind == TypeDefKind::ErrorType
+        });
 
         if is_error_type {
             return self.compile_specific_error_type_pattern(name, scrutinee, tag);
@@ -1672,7 +1674,7 @@ impl Cg<'_, '_, '_> {
             name,
             &arena,
             self.ctx.interner,
-            &*name_table,
+            &name_table,
             &self.ctx.analyzed.entity_registry,
         ) else {
             // Error type not found in fallible - will never match
@@ -1697,17 +1699,14 @@ impl Cg<'_, '_, '_> {
         arm_variables: &mut HashMap<Symbol, (Variable, TypeId)>,
     ) -> Result<Option<Value>, String> {
         // Look up error type_def_id via EntityRegistry
-        let error_type_id = self
-            .ctx
-            .resolve_type(name)
-            .and_then(|type_id| {
-                let type_def = self.ctx.query().get_type(type_id);
-                if type_def.kind == TypeDefKind::ErrorType && type_def.error_info.is_some() {
-                    Some(type_id)
-                } else {
-                    None
-                }
-            });
+        let error_type_id = self.ctx.resolve_type(name).and_then(|type_id| {
+            let type_def = self.ctx.query().get_type(type_id);
+            if type_def.kind == TypeDefKind::ErrorType && type_def.error_info.is_some() {
+                Some(type_id)
+            } else {
+                None
+            }
+        });
 
         let Some(error_type_def_id) = error_type_id else {
             // Unknown error type
@@ -1728,7 +1727,7 @@ impl Cg<'_, '_, '_> {
             name,
             &arena,
             self.ctx.interner,
-            &*name_table,
+            &name_table,
             &self.ctx.analyzed.entity_registry,
         ) else {
             // Error type not found in fallible

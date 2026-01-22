@@ -262,7 +262,7 @@ impl Compiler<'_> {
                             &self.analyzed.entity_registry,
                             &self.type_metadata,
                             interner,
-                            &*name_table,
+                            &name_table,
                             module_id,
                             &self.analyzed.type_arena,
                         )
@@ -359,7 +359,7 @@ impl Compiler<'_> {
                             &self.analyzed.entity_registry,
                             &self.type_metadata,
                             interner,
-                            &*name_table,
+                            &name_table,
                             module_id,
                             &self.analyzed.type_arena,
                         )
@@ -447,7 +447,7 @@ impl Compiler<'_> {
                     &self.analyzed.entity_registry,
                     &self.type_metadata,
                     interner,
-                    &*name_table,
+                    &name_table,
                     module_id,
                     &self.analyzed.type_arena,
                 );
@@ -470,7 +470,7 @@ impl Compiler<'_> {
                             &self.analyzed.entity_registry,
                             &self.type_metadata,
                             interner,
-                            &*name_table,
+                            &name_table,
                             module_id,
                             &self.analyzed.type_arena,
                         )
@@ -546,7 +546,7 @@ impl Compiler<'_> {
                                 &self.analyzed.entity_registry,
                                 &self.type_metadata,
                                 interner,
-                                &*name_table,
+                                &name_table,
                                 module_id,
                                 &self.analyzed.type_arena,
                             )
@@ -624,7 +624,7 @@ impl Compiler<'_> {
                     &self.analyzed.entity_registry,
                     &self.type_metadata,
                     &self.analyzed.interner,
-                    &*name_table,
+                    &name_table,
                     module_id,
                     &self.analyzed.type_arena,
                 )
@@ -731,7 +731,7 @@ impl Compiler<'_> {
                         &self.analyzed.entity_registry,
                         &self.type_metadata,
                         interner,
-                        &*name_table,
+                        &name_table,
                         module_id,
                         &self.analyzed.type_arena,
                     )
@@ -759,7 +759,7 @@ impl Compiler<'_> {
                             &self.analyzed.entity_registry,
                             &self.type_metadata,
                             interner,
-                            &*name_table,
+                            &name_table,
                             module_id,
                             &self.analyzed.type_arena,
                         )
@@ -916,7 +916,7 @@ impl Compiler<'_> {
                             &self.analyzed.entity_registry,
                             &self.type_metadata,
                             &self.analyzed.interner,
-                            &*name_table,
+                            &name_table,
                             module_id,
                             &self.analyzed.type_arena,
                         )
@@ -950,7 +950,7 @@ impl Compiler<'_> {
                     &self.analyzed.entity_registry,
                     &self.type_metadata,
                     &self.analyzed.interner,
-                    &*name_table,
+                    &name_table,
                     module_id,
                     &self.analyzed.type_arena,
                 )
@@ -1062,7 +1062,7 @@ impl Compiler<'_> {
                             registry,
                             type_metadata,
                             interner,
-                            &*name_table,
+                            &name_table,
                             module_id,
                             arena,
                         )
@@ -1189,7 +1189,7 @@ impl Compiler<'_> {
                             registry,
                             type_metadata,
                             interner,
-                            &*name_table,
+                            &name_table,
                             module_id,
                             arena,
                         )
@@ -1368,7 +1368,7 @@ impl Compiler<'_> {
                             query.registry(),
                             type_metadata,
                             query.interner(),
-                            &*name_table,
+                            &name_table,
                             module_id,
                             arena,
                         )
@@ -1537,7 +1537,7 @@ impl Compiler<'_> {
                             &self.analyzed.entity_registry,
                             type_metadata,
                             module_interner,
-                            &*name_table,
+                            &name_table,
                             module_id,
                             arena,
                         )
@@ -1570,7 +1570,7 @@ impl Compiler<'_> {
                             &self.analyzed.entity_registry,
                             &self.type_metadata,
                             module_interner,
-                            &*name_table,
+                            &name_table,
                             module_id,
                             &self.analyzed.type_arena,
                         )
@@ -1689,7 +1689,7 @@ impl Compiler<'_> {
                                 &self.analyzed.entity_registry,
                                 &self.type_metadata,
                                 module_interner,
-                                &*name_table,
+                                &name_table,
                                 module_id,
                                 &self.analyzed.type_arena,
                             )
@@ -1720,7 +1720,7 @@ impl Compiler<'_> {
                                 &self.analyzed.entity_registry,
                                 type_metadata,
                                 module_interner,
-                                &*name_table,
+                                &name_table,
                                 module_id,
                                 arena,
                             )

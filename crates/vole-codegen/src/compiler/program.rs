@@ -487,7 +487,7 @@ impl Compiler<'_> {
                         query.registry(),
                         type_metadata,
                         query.interner(),
-                        &*name_table,
+                        &name_table,
                         module_id,
                         &self.analyzed.type_arena,
                     );

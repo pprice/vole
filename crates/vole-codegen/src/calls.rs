@@ -287,8 +287,7 @@ impl Cg<'_, '_, '_> {
                         .map(|(type_def_id, _type_args)| type_def_id)
                 };
                 if let Some(type_def_id) = iface_info
-                    && let Some(method_id) =
-                        self.ctx.query().is_functional_interface(type_def_id)
+                    && let Some(method_id) = self.ctx.query().is_functional_interface(type_def_id)
                 {
                     let method = self.ctx.query().get_method(method_id);
                     let func_type_id = method.signature_id;
@@ -317,8 +316,7 @@ impl Cg<'_, '_, '_> {
 
             // If it's an interface type (functional interface), call via vtable
             if let Some(type_def_id) = self.interface_type_def_id(lambda_val.type_id)
-                && let Some(method_id) =
-                    self.ctx.query().is_functional_interface(type_def_id)
+                && let Some(method_id) = self.ctx.query().is_functional_interface(type_def_id)
             {
                 let method = self.ctx.query().get_method(method_id);
                 let func_type_id = method.signature_id;
