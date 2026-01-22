@@ -26,16 +26,16 @@ impl Cg<'_, '_, '_> {
     /// Look up a method NameId using the context's interner (which may be a module interner)
     fn method_name_id(&self, name: Symbol) -> NameId {
         let name_table = self.ctx.analyzed.name_table.borrow();
-        let namer = NamerLookup::new(&name_table, self.ctx.interner);
+        let namer = NamerLookup::new(&name_table, self.ctx.interner());
         namer.method(name).unwrap_or_else(|| {
             panic!(
                 "method name_id not found for '{}'",
-                self.ctx.interner.resolve(name)
+                self.ctx.interner().resolve(name)
             )
         })
     }
 
-    #[tracing::instrument(skip(self, mc), fields(method = %self.ctx.interner.resolve(mc.method)))]
+    #[tracing::instrument(skip(self, mc), fields(method = %self.ctx.interner().resolve(mc.method)))]
     pub fn method_call(
         &mut self,
         mc: &MethodCallExpr,
@@ -58,14 +58,14 @@ impl Cg<'_, '_, '_> {
 
         // Handle range.iter() specially since range expressions can't be compiled to values directly
         if let ExprKind::Range(range) = &mc.object.kind {
-            let method_name = self.ctx.interner.resolve(mc.method);
+            let method_name = self.ctx.interner().resolve(mc.method);
             if method_name == "iter" {
                 return self.range_iter(range);
             }
         }
 
         let obj = self.expr(&mc.object)?;
-        let method_name_str = self.ctx.interner.resolve(mc.method);
+        let method_name_str = self.ctx.interner().resolve(mc.method);
 
         // Handle module method calls (e.g., math.sqrt(16.0), math.lerp(...))
         // These go to either external native functions or pure Vole module functions

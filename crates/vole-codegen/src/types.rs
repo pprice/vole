@@ -362,6 +362,12 @@ impl<'a> CompileCtx<'a> {
         self.arena.borrow_mut()
     }
 
+    /// Get the interner (API-compatible with CodegenCtx)
+    #[inline]
+    pub fn interner(&self) -> &'a Interner {
+        self.interner
+    }
+
     /// Substitute type parameters with concrete types using TypeId directly.
     /// Uses a cache to avoid repeated HashMap conversion and arena mutations.
     pub fn substitute_type_id(&self, ty: TypeId) -> TypeId {

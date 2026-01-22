@@ -20,7 +20,7 @@ impl Cg<'_, '_, '_> {
         // Resolve type name to main interner's Symbol for lookup
         // This is needed because module classes register with main interner Symbols,
         // but struct literals in module code use module interner Symbols
-        let type_name = self.ctx.interner.resolve(sl.name);
+        let type_name = self.ctx.interner().resolve(sl.name);
         let lookup_symbol = self
             .ctx
             .analyzed
@@ -96,12 +96,12 @@ impl Cg<'_, '_, '_> {
         };
 
         for init in &sl.fields {
-            let init_name = self.ctx.interner.resolve(init.name);
+            let init_name = self.ctx.interner().resolve(init.name);
             let slot = *field_slots.get(init_name).ok_or_else(|| {
                 format!(
                     "Unknown field: {} in type {}",
                     init_name,
-                    self.ctx.interner.resolve(sl.name)
+                    self.ctx.interner().resolve(sl.name)
                 )
             })?;
 

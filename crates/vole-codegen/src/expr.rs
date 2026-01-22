@@ -159,7 +159,7 @@ impl Cg<'_, '_, '_> {
             // Identifier refers to a named function - create a closure wrapper
             self.function_reference(sym, func_type_id)
         } else {
-            Err(CodegenError::not_found("variable", self.ctx.interner.resolve(sym)).into())
+            Err(CodegenError::not_found("variable", self.ctx.interner().resolve(sym)).into())
         }
     }
 
@@ -182,7 +182,7 @@ impl Cg<'_, '_, '_> {
             .func_registry
             .func_id(orig_func_key)
             .ok_or_else(|| {
-                CodegenError::not_found("function id for", self.ctx.interner.resolve(sym))
+                CodegenError::not_found("function id for", self.ctx.interner().resolve(sym))
                     .to_string()
             })?;
 
@@ -362,7 +362,7 @@ impl Cg<'_, '_, '_> {
                 }
 
                 let (var, var_type_id) = self.vars.get(sym).ok_or_else(|| {
-                    format!("undefined variable: {}", self.ctx.interner.resolve(*sym))
+                    format!("undefined variable: {}", self.ctx.interner().resolve(*sym))
                 })?;
                 let var = *var;
                 let var_type_id = *var_type_id;
@@ -1228,7 +1228,7 @@ impl Cg<'_, '_, '_> {
 
                         // Extract and bind fields
                         for field_pattern in fields {
-                            let field_name = self.ctx.interner.resolve(field_pattern.field_name);
+                            let field_name = self.ctx.interner().resolve(field_pattern.field_name);
                             let (slot, field_type_id) = get_field_slot_and_type_id_legacy(
                                 field_source_type_id,
                                 field_name,
@@ -1278,7 +1278,7 @@ impl Cg<'_, '_, '_> {
 
                         // Extract and bind fields
                         for field_pattern in fields {
-                            let field_name = self.ctx.interner.resolve(field_pattern.field_name);
+                            let field_name = self.ctx.interner().resolve(field_pattern.field_name);
                             let (slot, field_type_id) = get_field_slot_and_type_id_legacy(
                                 field_source_type_id,
                                 field_name,
@@ -1654,7 +1654,7 @@ impl Cg<'_, '_, '_> {
             error_type_id,
             name,
             &arena,
-            self.ctx.interner,
+            self.ctx.interner(),
             &name_table,
             &self.ctx.analyzed.entity_registry,
         ) else {
@@ -1707,7 +1707,7 @@ impl Cg<'_, '_, '_> {
             fallible_error_type_id,
             name,
             &arena,
-            self.ctx.interner,
+            self.ctx.interner(),
             &name_table,
             &self.ctx.analyzed.entity_registry,
         ) else {
@@ -1732,7 +1732,7 @@ impl Cg<'_, '_, '_> {
         // Error fields are stored inline in the fallible structure
         // Layout: tag at offset 0, fields at offset 8, 16, 24, ...
         for field_pattern in fields.iter() {
-            let field_name = self.ctx.interner.resolve(field_pattern.field_name);
+            let field_name = self.ctx.interner().resolve(field_pattern.field_name);
 
             // Find the field index and type in the error type
             let Some((field_idx, field_def)) = error_fields.iter().enumerate().find(|(_, f)| {

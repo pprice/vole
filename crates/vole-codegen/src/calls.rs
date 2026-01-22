@@ -217,7 +217,7 @@ impl Cg<'_, '_, '_> {
             _ => return self.indirect_call(call),
         };
 
-        let callee_name = self.ctx.interner.resolve(callee_sym);
+        let callee_name = self.ctx.interner().resolve(callee_sym);
 
         // Handle builtins
         match callee_name {
@@ -388,7 +388,7 @@ impl Cg<'_, '_, '_> {
         let func_key = self.ctx.func_registry.intern_qualified(
             self.ctx.func_registry.main_module(),
             &[callee_sym],
-            self.ctx.interner,
+            self.ctx.interner(),
         );
         if let Some(func_id) = self.ctx.func_registry.func_id(func_key) {
             return self.call_func_id(func_key, func_id, call);

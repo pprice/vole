@@ -907,7 +907,7 @@ impl Cg<'_, '_, '_> {
             Pattern::Record { fields, .. } => {
                 // Record destructuring - extract fields via runtime
                 for field_pattern in fields {
-                    let field_name = self.ctx.interner.resolve(field_pattern.field_name);
+                    let field_name = self.ctx.interner().resolve(field_pattern.field_name);
                     let (slot, field_type_id) =
                         get_field_slot_and_type_id_legacy(ty_id, field_name, self.ctx)?;
                     let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
@@ -960,14 +960,14 @@ impl Cg<'_, '_, '_> {
             error_type_id,
             raise_stmt.error_name,
             &self.ctx.arena(),
-            self.ctx.interner,
+            self.ctx.interner(),
             &self.ctx.analyzed.name_table.borrow(),
             &self.ctx.analyzed.entity_registry,
         )
         .ok_or_else(|| {
             format!(
                 "Error type {} not found in fallible type",
-                self.ctx.interner.resolve(raise_stmt.error_name)
+                self.ctx.interner().resolve(raise_stmt.error_name)
             )
         })?;
 
@@ -993,7 +993,7 @@ impl Cg<'_, '_, '_> {
             .stack_store(tag_val, slot, FALLIBLE_TAG_OFFSET);
 
         // Get the error type_def_id to look up field order from EntityRegistry
-        let raise_error_name = self.ctx.interner.resolve(raise_stmt.error_name);
+        let raise_error_name = self.ctx.interner().resolve(raise_stmt.error_name);
         let arena = self.ctx.arena();
         let name_table = self.ctx.analyzed.name_table.borrow();
         let error_type_def_id = if let Some(type_def_id) = arena.unwrap_error(error_type_id) {
@@ -1022,7 +1022,7 @@ impl Cg<'_, '_, '_> {
         .ok_or_else(|| {
             format!(
                 "Could not find error type info for {}",
-                self.ctx.interner.resolve(raise_stmt.error_name)
+                self.ctx.interner().resolve(raise_stmt.error_name)
             )
         })?;
         drop(name_table);
@@ -1050,7 +1050,7 @@ impl Cg<'_, '_, '_> {
             let field_init = raise_stmt
                 .fields
                 .iter()
-                .find(|f| self.ctx.interner.resolve(f.name) == field_name)
+                .find(|f| self.ctx.interner().resolve(f.name) == field_name)
                 .ok_or_else(|| format!("Missing field {} in raise statement", &field_name))?;
 
             // Compile the field value expression

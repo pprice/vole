@@ -12,7 +12,7 @@ use vole_frontend::{Expr, FieldAccessExpr, OptionalChainExpr, Symbol};
 use vole_sema::types::ConstantValue;
 
 impl Cg<'_, '_, '_> {
-    #[tracing::instrument(skip(self, fa), fields(field = %self.ctx.interner.resolve(fa.field)))]
+    #[tracing::instrument(skip(self, fa), fields(field = %self.ctx.interner().resolve(fa.field)))]
     pub fn field_access(&mut self, fa: &FieldAccessExpr) -> Result<CompiledValue, String> {
         let obj = self.expr(&fa.object)?;
 
@@ -25,7 +25,7 @@ impl Cg<'_, '_, '_> {
         };
         if let Some((module_id, exports)) = module_info {
             tracing::trace!(?module_id, "field access on module");
-            let field_name = self.ctx.interner.resolve(fa.field);
+            let field_name = self.ctx.interner().resolve(fa.field);
             let module_path = self
                 .ctx
                 .analyzed
@@ -106,7 +106,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Non-module field access - use TypeId-based helpers
-        let field_name = self.ctx.interner.resolve(fa.field);
+        let field_name = self.ctx.interner().resolve(fa.field);
         let (slot, field_type_id) =
             get_field_slot_and_type_id_legacy(obj.type_id, field_name, self.ctx)?;
 
@@ -164,7 +164,7 @@ impl Cg<'_, '_, '_> {
         let merge_block = self.builder.create_block();
 
         // Get the field type from the inner type using TypeId-based helper
-        let field_name = self.ctx.interner.resolve(oc.field);
+        let field_name = self.ctx.interner().resolve(oc.field);
         let (slot, field_type_id) =
             get_field_slot_and_type_id_legacy(inner_type_id, field_name, self.ctx)?;
 
@@ -261,7 +261,7 @@ impl Cg<'_, '_, '_> {
         let obj = self.expr(object)?;
         let value = self.expr(value_expr)?;
 
-        let field_name = self.ctx.interner.resolve(field);
+        let field_name = self.ctx.interner().resolve(field);
         let (slot, field_type_id) =
             get_field_slot_and_type_id_legacy(obj.type_id, field_name, self.ctx)?;
         let value = if self.ctx.arena().is_interface(field_type_id) {

@@ -559,7 +559,7 @@ impl Cg<'_, '_, '_> {
         let (var, var_type_id) = self
             .vars
             .get(&sym)
-            .ok_or_else(|| format!("undefined variable: {}", self.ctx.interner.resolve(sym)))?;
+            .ok_or_else(|| format!("undefined variable: {}", self.ctx.interner().resolve(sym)))?;
         let var = *var;
         let var_type_id = *var_type_id;
         let current_val = self.builder.use_var(var);
@@ -637,7 +637,7 @@ impl Cg<'_, '_, '_> {
     ) -> Result<CompiledValue, String> {
         let obj = self.expr(object)?;
 
-        let field_name = self.ctx.interner.resolve(field);
+        let field_name = self.ctx.interner().resolve(field);
         let (slot, field_type_id) =
             get_field_slot_and_type_id_legacy(obj.type_id, field_name, self.ctx)?;
 
