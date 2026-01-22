@@ -243,7 +243,7 @@ impl InterfaceVtableRegistry {
             .remove(&key)
             .ok_or_else(|| "vtable not declared - call get_or_declare first".to_string())?;
 
-        let word_bytes = ctx.pointer_type.bytes() as usize;
+        let word_bytes = ctx.ptr_type().bytes() as usize;
         let interface_name_str = ctx.interner.resolve(interface_name);
 
         // Phase 2: Compile wrappers
@@ -307,7 +307,7 @@ impl InterfaceVtableRegistry {
         method: &VtableMethod,
     ) -> Result<cranelift_module::FuncId, String> {
         // Build wrapper signature using param_count and returns_void directly
-        let word_type = ctx.pointer_type;
+        let word_type = ctx.ptr_type();
         let mut sig = ctx.module.make_signature();
         sig.params.push(AbiParam::new(word_type)); // self
         for _ in 0..method.param_count {
@@ -392,10 +392,10 @@ impl InterfaceVtableRegistry {
                     &mut builder,
                     &CompiledValue {
                         value: result,
-                        ty: type_id_to_cranelift(method.return_type_id, &arena, ctx.pointer_type),
+                        ty: type_id_to_cranelift(method.return_type_id, &arena, ctx.ptr_type()),
                         type_id: method.return_type_id,
                     },
-                    ctx.pointer_type,
+                    ctx.ptr_type(),
                     Some(heap_alloc_ref),
                     ctx.arena,
                     &ctx.analyzed.entity_registry,
@@ -439,7 +439,7 @@ fn compile_function_wrapper(
         builder,
         data_word,
         concrete_type_id,
-        ctx.pointer_type,
+        ctx.ptr_type(),
         &ctx.analyzed.entity_registry,
         &ctx.arena.borrow(),
     );
@@ -449,7 +449,7 @@ fn compile_function_wrapper(
             builder,
             *param_word,
             param_ty_id,
-            ctx.pointer_type,
+            ctx.ptr_type(),
             &ctx.analyzed.entity_registry,
             &ctx.arena.borrow(),
         ));
@@ -478,20 +478,20 @@ fn compile_function_wrapper(
         sig.params.push(AbiParam::new(type_id_to_cranelift(
             concrete_type_id,
             &arena,
-            ctx.pointer_type,
+            ctx.ptr_type(),
         )));
         for &param_type_id in param_type_ids.iter() {
             sig.params.push(AbiParam::new(type_id_to_cranelift(
                 param_type_id,
                 &arena,
-                ctx.pointer_type,
+                ctx.ptr_type(),
             )));
         }
         if ret_type_id != void_id {
             sig.returns.push(AbiParam::new(type_id_to_cranelift(
                 ret_type_id,
                 &arena,
-                ctx.pointer_type,
+                ctx.ptr_type(),
             )));
         }
         drop(arena);
@@ -506,14 +506,14 @@ fn compile_function_wrapper(
             sig.params.push(AbiParam::new(type_id_to_cranelift(
                 param_type_id,
                 &arena,
-                ctx.pointer_type,
+                ctx.ptr_type(),
             )));
         }
         if ret_type_id != void_id {
             sig.returns.push(AbiParam::new(type_id_to_cranelift(
                 ret_type_id,
                 &arena,
-                ctx.pointer_type,
+                ctx.ptr_type(),
             )));
         }
         drop(arena);
@@ -539,7 +539,7 @@ fn compile_method_wrapper(
         builder,
         data_word,
         concrete_type_id,
-        ctx.pointer_type,
+        ctx.ptr_type(),
         &ctx.analyzed.entity_registry,
         &ctx.arena.borrow(),
     );
@@ -550,7 +550,7 @@ fn compile_method_wrapper(
             builder,
             *param_word,
             param_ty_id,
-            ctx.pointer_type,
+            ctx.ptr_type(),
             &ctx.analyzed.entity_registry,
             &ctx.arena.borrow(),
         ));
@@ -589,12 +589,12 @@ fn compile_external_wrapper(
                 "native function std:intrinsics::interface_iter not found".to_string()
             })?;
         let mut iter_sig = ctx.module.make_signature();
-        iter_sig.params.push(AbiParam::new(ctx.pointer_type));
-        iter_sig.returns.push(AbiParam::new(ctx.pointer_type));
+        iter_sig.params.push(AbiParam::new(ctx.ptr_type()));
+        iter_sig.returns.push(AbiParam::new(ctx.ptr_type()));
         let iter_sig_ref = builder.import_signature(iter_sig);
         let iter_fn_ptr = builder
             .ins()
-            .iconst(ctx.pointer_type, interface_iter_fn.ptr as i64);
+            .iconst(ctx.ptr_type(), interface_iter_fn.ptr as i64);
         let iter_call = builder
             .ins()
             .call_indirect(iter_sig_ref, iter_fn_ptr, &[box_ptr]);
@@ -604,7 +604,7 @@ fn compile_external_wrapper(
             builder,
             data_word,
             concrete_type_id,
-            ctx.pointer_type,
+            ctx.ptr_type(),
             &ctx.analyzed.entity_registry,
             &ctx.arena.borrow(),
         )
@@ -617,7 +617,7 @@ fn compile_external_wrapper(
             builder,
             *param_word,
             param_ty_id,
-            ctx.pointer_type,
+            ctx.ptr_type(),
             &ctx.analyzed.entity_registry,
             &ctx.arena.borrow(),
         ));
@@ -642,9 +642,9 @@ fn compile_external_wrapper(
     // For Iterator, the self param is now *mut UnifiedIterator (pointer)
     let arena = ctx.arena.borrow();
     let self_param_type = if interface_name == "Iterator" {
-        ctx.pointer_type
+        ctx.ptr_type()
     } else {
-        type_id_to_cranelift(concrete_type_id, &arena, ctx.pointer_type)
+        type_id_to_cranelift(concrete_type_id, &arena, ctx.ptr_type())
     };
     native_sig.params.push(AbiParam::new(self_param_type));
     // Use type_id_to_cranelift for param types (handles Invalid gracefully via fallback)
@@ -652,7 +652,7 @@ fn compile_external_wrapper(
         native_sig.params.push(AbiParam::new(type_id_to_cranelift(
             param_type_id,
             &arena,
-            ctx.pointer_type,
+            ctx.ptr_type(),
         )));
     }
     // Add return type if not void
@@ -661,15 +661,13 @@ fn compile_external_wrapper(
         native_sig.returns.push(AbiParam::new(type_id_to_cranelift(
             return_type_id,
             &arena,
-            ctx.pointer_type,
+            ctx.ptr_type(),
         )));
     }
     drop(arena);
 
     let sig_ref = builder.import_signature(native_sig);
-    let func_ptr_val = builder
-        .ins()
-        .iconst(ctx.pointer_type, native_func.ptr as i64);
+    let func_ptr_val = builder.ins().iconst(ctx.ptr_type(), native_func.ptr as i64);
     let call = builder
         .ins()
         .call_indirect(sig_ref, func_ptr_val, &call_args);
@@ -813,7 +811,7 @@ pub(crate) fn box_interface_value_id(
         tracing::debug!("external-only interface, skip boxing");
         return Ok(CompiledValue {
             value: value.value,
-            ty: ctx.pointer_type,
+            ty: ctx.ptr_type(),
             type_id: interface_type_id,
         });
     }
@@ -822,7 +820,7 @@ pub(crate) fn box_interface_value_id(
     let data_word = value_to_word(
         builder,
         &value,
-        ctx.pointer_type,
+        ctx.ptr_type(),
         Some(heap_alloc_ref),
         ctx.arena,
         &ctx.analyzed.entity_registry,
@@ -840,10 +838,10 @@ pub(crate) fn box_interface_value_id(
         .borrow_mut()
         .ensure_compiled(ctx, interface_name, value.type_id)?;
     let vtable_gv = ctx.module.declare_data_in_func(vtable_id, builder.func);
-    let vtable_ptr = builder.ins().global_value(ctx.pointer_type, vtable_gv);
+    let vtable_ptr = builder.ins().global_value(ctx.ptr_type(), vtable_gv);
 
-    let word_bytes = ctx.pointer_type.bytes() as i64;
-    let size_val = builder.ins().iconst(ctx.pointer_type, word_bytes * 2);
+    let word_bytes = ctx.ptr_type().bytes() as i64;
+    let size_val = builder.ins().iconst(ctx.ptr_type(), word_bytes * 2);
     let alloc_call = builder.ins().call(heap_alloc_ref, &[size_val]);
     let iface_ptr = builder.inst_results(alloc_call)[0];
 
@@ -856,7 +854,7 @@ pub(crate) fn box_interface_value_id(
 
     Ok(CompiledValue {
         value: iface_ptr,
-        ty: ctx.pointer_type,
+        ty: ctx.ptr_type(),
         type_id: interface_type_id,
     })
 }

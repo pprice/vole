@@ -261,16 +261,16 @@ fn compile_pure_lambda(
         let arena = ctx.arena.borrow();
         param_type_ids
             .iter()
-            .map(|&ty| type_id_to_cranelift(ty, &arena, ctx.pointer_type))
+            .map(|&ty| type_id_to_cranelift(ty, &arena, ctx.ptr_type()))
             .collect()
     };
 
-    let return_type = type_id_to_cranelift(return_type_id, &ctx.arena.borrow(), ctx.pointer_type);
+    let return_type = type_id_to_cranelift(return_type_id, &ctx.arena.borrow(), ctx.ptr_type());
 
     // Always use closure calling convention for consistency with how all lambdas
     // are now wrapped in Closure structs. First param is the closure pointer.
     let mut sig = ctx.module.make_signature();
-    sig.params.push(AbiParam::new(ctx.pointer_type)); // closure ptr (ignored for pure lambdas)
+    sig.params.push(AbiParam::new(ctx.ptr_type())); // closure ptr (ignored for pure lambdas)
     for &param_ty in &param_types {
         sig.params.push(AbiParam::new(param_ty));
     }
@@ -312,7 +312,7 @@ fn compile_pure_lambda(
         .map_err(|e| format!("Failed to define lambda: {:?}", e))?;
 
     let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
-    let func_addr = builder.ins().func_addr(ctx.pointer_type, func_ref);
+    let func_addr = builder.ins().func_addr(ctx.ptr_type(), func_ref);
 
     // Always wrap lambdas in Closure structs for consistent calling convention.
     // This ensures iterator methods like .map() work correctly - they expect
@@ -334,7 +334,7 @@ fn compile_pure_lambda(
     };
     Ok(CompiledValue {
         value: closure_ptr,
-        ty: ctx.pointer_type,
+        ty: ctx.ptr_type(),
         type_id: func_type_id,
     })
 }
@@ -373,15 +373,15 @@ fn compile_lambda_with_captures(
         let arena = ctx.arena.borrow();
         param_type_ids
             .iter()
-            .map(|&ty| type_id_to_cranelift(ty, &arena, ctx.pointer_type))
+            .map(|&ty| type_id_to_cranelift(ty, &arena, ctx.ptr_type()))
             .collect()
     };
 
-    let return_type = type_id_to_cranelift(return_type_id, &ctx.arena.borrow(), ctx.pointer_type);
+    let return_type = type_id_to_cranelift(return_type_id, &ctx.arena.borrow(), ctx.ptr_type());
 
     // First param is the closure pointer
     let mut sig = ctx.module.make_signature();
-    sig.params.push(AbiParam::new(ctx.pointer_type));
+    sig.params.push(AbiParam::new(ctx.ptr_type()));
     for &param_ty in &param_types {
         sig.params.push(AbiParam::new(param_ty));
     }
@@ -419,7 +419,7 @@ fn compile_lambda_with_captures(
             &lambda.body,
             params,
             &capture_bindings,
-            ctx.pointer_type,
+            ctx.ptr_type(),
             return_type_id,
         );
 
@@ -431,7 +431,7 @@ fn compile_lambda_with_captures(
         .map_err(|e| format!("Failed to define lambda: {:?}", e))?;
 
     let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
-    let func_addr = builder.ins().func_addr(ctx.pointer_type, func_ref);
+    let func_addr = builder.ins().func_addr(ctx.ptr_type(), func_ref);
 
     // Allocate closure
     let alloc_id = ctx
@@ -481,7 +481,7 @@ fn compile_lambda_with_captures(
 
         let size = type_id_size(
             vole_type_id,
-            ctx.pointer_type,
+            ctx.ptr_type(),
             &ctx.analyzed.entity_registry,
             &ctx.arena.borrow(),
         );
@@ -507,7 +507,7 @@ fn compile_lambda_with_captures(
     };
     Ok(CompiledValue {
         value: closure_ptr,
-        ty: ctx.pointer_type,
+        ty: ctx.ptr_type(),
         type_id: func_type_id,
     })
 }
