@@ -315,8 +315,7 @@ impl Cg<'_, '_, '_> {
             // Look up the monomorphized instance
             if let Some(instance) = self
                 .ctx
-                .analyzed
-                .entity_registry
+                .registry()
                 .class_method_monomorph_cache
                 .get(monomorph_key)
             {
@@ -609,8 +608,7 @@ impl Cg<'_, '_, '_> {
         // Get the external binding for this method
         let external_info = *self
             .ctx
-            .analyzed
-            .entity_registry
+            .registry()
             .get_external_binding(*method_id)
             .ok_or_else(|| format!("No external binding for Iterator.{}", method_name))?;
 
@@ -950,8 +948,7 @@ impl Cg<'_, '_, '_> {
             // Look up the monomorphized instance
             if let Some(instance) = self
                 .ctx
-                .analyzed
-                .entity_registry
+                .registry()
                 .static_method_monomorph_cache
                 .get(mono_key)
             {

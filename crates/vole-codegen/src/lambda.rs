@@ -485,12 +485,7 @@ fn compile_lambda_with_captures(
             (builder.use_var(*var), *ty)
         };
 
-        let size = type_id_size(
-            vole_type_id,
-            ctx.ptr_type(),
-            &ctx.analyzed.entity_registry,
-            &ctx.arena(),
-        );
+        let size = type_id_size(vole_type_id, ctx.ptr_type(), ctx.registry(), &ctx.arena());
         let size_val = builder.ins().iconst(types::I64, size as i64);
 
         let alloc_call = builder.ins().call(heap_alloc_ref, &[size_val]);

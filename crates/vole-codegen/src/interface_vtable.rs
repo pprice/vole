@@ -102,17 +102,15 @@ impl InterfaceVtableRegistry {
             if let Some((_, _, is_closure)) = arena.unwrap_function(concrete_type_id) {
                 InterfaceConcreteType::Function { is_closure }
             } else {
-                let impl_type_id = ImplTypeId::from_type_id(
-                    concrete_type_id,
-                    &arena,
-                    &ctx.analyzed.entity_registry,
-                )
-                .ok_or_else(|| {
-                    format!(
-                        "cannot build vtable for unsupported type {:?}",
-                        concrete_type_id
-                    )
-                })?;
+                let impl_type_id =
+                    ImplTypeId::from_type_id(concrete_type_id, &arena, ctx.registry()).ok_or_else(
+                        || {
+                            format!(
+                                "cannot build vtable for unsupported type {:?}",
+                                concrete_type_id
+                            )
+                        },
+                    )?;
                 InterfaceConcreteType::ImplTypeId(impl_type_id)
             }
         };
@@ -148,15 +146,13 @@ impl InterfaceVtableRegistry {
             .collect();
 
         // Collect method IDs
-        let method_ids = collect_interface_methods_via_entity_registry(
-            interface_type_def_id,
-            &ctx.analyzed.entity_registry,
-        )?;
+        let method_ids =
+            collect_interface_methods_via_entity_registry(interface_type_def_id, ctx.registry())?;
 
         // Build vtable name and declare data
         let type_name = match concrete_key {
             InterfaceConcreteType::ImplTypeId(type_id) => {
-                ctx.analyzed.name_table.borrow().display(type_id.name_id())
+                ctx.name_table().display(type_id.name_id())
             }
             InterfaceConcreteType::Function { is_closure } => {
                 if is_closure {
@@ -213,17 +209,15 @@ impl InterfaceVtableRegistry {
             if let Some((_, _, is_closure)) = arena.unwrap_function(concrete_type_id) {
                 InterfaceConcreteType::Function { is_closure }
             } else {
-                let impl_type_id = ImplTypeId::from_type_id(
-                    concrete_type_id,
-                    &arena,
-                    &ctx.analyzed.entity_registry,
-                )
-                .ok_or_else(|| {
-                    format!(
-                        "cannot build vtable for unsupported type {:?}",
-                        concrete_type_id
-                    )
-                })?;
+                let impl_type_id =
+                    ImplTypeId::from_type_id(concrete_type_id, &arena, ctx.registry()).ok_or_else(
+                        || {
+                            format!(
+                                "cannot build vtable for unsupported type {:?}",
+                                concrete_type_id
+                            )
+                        },
+                    )?;
                 InterfaceConcreteType::ImplTypeId(impl_type_id)
             }
         };
@@ -253,7 +247,7 @@ impl InterfaceVtableRegistry {
 
         for (index, &method_id) in state.method_ids.iter().enumerate() {
             let method = ctx.query().get_method(method_id);
-            let method_name_str = ctx.analyzed.name_table.borrow().display(method.name_id);
+            let method_name_str = ctx.name_table().display(method.name_id);
             let target = resolve_vtable_target(
                 ctx,
                 state.interface_name_id,
@@ -398,7 +392,7 @@ impl InterfaceVtableRegistry {
                     ctx.ptr_type(),
                     Some(heap_alloc_ref),
                     ctx.arena,
-                    &ctx.analyzed.entity_registry,
+                    ctx.registry(),
                 )?;
                 drop(arena);
                 builder.ins().return_(&[word]);
@@ -440,7 +434,7 @@ fn compile_function_wrapper(
         data_word,
         concrete_type_id,
         ctx.ptr_type(),
-        &ctx.analyzed.entity_registry,
+        ctx.registry(),
         &ctx.arena(),
     );
     let mut args = Vec::with_capacity(param_type_ids.len() + 1);
@@ -450,7 +444,7 @@ fn compile_function_wrapper(
             *param_word,
             param_ty_id,
             ctx.ptr_type(),
-            &ctx.analyzed.entity_registry,
+            ctx.registry(),
             &ctx.arena(),
         ));
     }
@@ -539,7 +533,7 @@ fn compile_method_wrapper(
         data_word,
         concrete_type_id,
         ctx.ptr_type(),
-        &ctx.analyzed.entity_registry,
+        ctx.registry(),
         &ctx.arena(),
     );
     let mut call_args = Vec::with_capacity(1 + param_type_ids.len());
@@ -550,7 +544,7 @@ fn compile_method_wrapper(
             *param_word,
             param_ty_id,
             ctx.ptr_type(),
-            &ctx.analyzed.entity_registry,
+            ctx.registry(),
             &ctx.arena(),
         ));
     }
@@ -604,7 +598,7 @@ fn compile_external_wrapper(
             data_word,
             concrete_type_id,
             ctx.ptr_type(),
-            &ctx.analyzed.entity_registry,
+            ctx.registry(),
             &ctx.arena(),
         )
     };
@@ -617,13 +611,13 @@ fn compile_external_wrapper(
             *param_word,
             param_ty_id,
             ctx.ptr_type(),
-            &ctx.analyzed.entity_registry,
+            ctx.registry(),
             &ctx.arena(),
         ));
     }
 
     // Get string names from NameId
-    let name_table = ctx.analyzed.name_table.borrow();
+    let name_table = ctx.name_table();
     let module_path = name_table
         .last_segment_str(external_info.module_path)
         .ok_or_else(|| "module_path NameId has no segment".to_string())?;
@@ -787,9 +781,7 @@ pub(crate) fn box_interface_value_id(
     // Look up the interface Symbol name via EntityRegistry
     let interface_def = ctx.query().get_type(type_def_id);
     let interface_name_str = ctx
-        .analyzed
-        .name_table
-        .borrow()
+        .name_table()
         .last_segment_str(interface_def.name_id)
         .ok_or_else(|| format!("cannot get interface name string for {:?}", type_def_id))?;
     let interface_name = ctx.interner().lookup(&interface_name_str).ok_or_else(|| {
@@ -806,7 +798,7 @@ pub(crate) fn box_interface_value_id(
     }
 
     // Check if this is an external-only interface
-    if ctx.analyzed.entity_registry.is_external_only(type_def_id) {
+    if ctx.registry().is_external_only(type_def_id) {
         tracing::debug!("external-only interface, skip boxing");
         return Ok(CompiledValue {
             value: value.value,
@@ -822,7 +814,7 @@ pub(crate) fn box_interface_value_id(
         ctx.ptr_type(),
         Some(heap_alloc_ref),
         ctx.arena,
-        &ctx.analyzed.entity_registry,
+        ctx.registry(),
     )?;
 
     // Phase 1: Declare vtable
@@ -869,11 +861,7 @@ fn resolve_vtable_target(
 ) -> Result<VtableMethod, String> {
     // Get method info from EntityRegistry
     let interface_method = ctx.query().get_method(interface_method_id);
-    let method_name_str = ctx
-        .analyzed
-        .name_table
-        .borrow()
-        .display(interface_method.name_id);
+    let method_name_str = ctx.name_table().display(interface_method.name_id);
 
     // Apply substitutions to get concrete param/return types (using TypeId-based substitution)
     let (substituted_param_ids, substituted_return_id) = {
@@ -912,17 +900,13 @@ fn resolve_vtable_target(
         });
     }
 
-    let impl_type_id = ImplTypeId::from_type_id(
-        concrete_type_id,
-        &ctx.arena(),
-        &ctx.analyzed.entity_registry,
-    )
-    .ok_or_else(|| {
-        format!(
-            "cannot resolve interface method {} on type {:?}",
-            method_name_str, concrete_type_id
-        )
-    })?;
+    let impl_type_id = ImplTypeId::from_type_id(concrete_type_id, &ctx.arena(), ctx.registry())
+        .ok_or_else(|| {
+            format!(
+                "cannot resolve interface method {} on type {:?}",
+                method_name_str, concrete_type_id
+            )
+        })?;
     // Use string-based lookup for cross-interner safety (method_def is from stdlib interner)
     // This may return None for default interface methods that aren't explicitly implemented
     let method_name_id = method_name_id_by_str(ctx.analyzed, ctx.interner(), &method_name_str);
@@ -977,15 +961,14 @@ fn resolve_vtable_target(
         let meta = type_metadata_by_name_id(
             ctx.type_metadata,
             type_name_id,
-            &ctx.analyzed.entity_registry,
+            ctx.registry(),
             &ctx.arena(),
         )?;
         let method_info = meta.method_infos.get(&method_name_id).copied()?;
 
         // Look up method signature via EntityRegistry - require TypeId fields
         let (param_ids, ret_id) = ctx
-            .analyzed
-            .entity_registry
+            .registry()
             .find_method_on_type(type_def_id, method_name_id)
             .map(|m_id| {
                 let method = ctx.query().get_method(m_id);
@@ -1016,17 +999,12 @@ fn resolve_vtable_target(
     // Fall back to interface default if method has one
     if interface_method.has_default {
         // Check for default external binding via EntityRegistry
-        if let Some(interface_type_def_id) =
-            ctx.analyzed.entity_registry.type_by_name(interface_name_id)
+        if let Some(interface_type_def_id) = ctx.registry().type_by_name(interface_name_id)
             && let Some(method_name_id) = method_name_id
             && let Some(found_method_id) = ctx
-                .analyzed
-                .entity_registry
+                .registry()
                 .find_method_on_type(interface_type_def_id, method_name_id)
-            && let Some(external_info) = ctx
-                .analyzed
-                .entity_registry
-                .get_external_binding(found_method_id)
+            && let Some(external_info) = ctx.registry().get_external_binding(found_method_id)
         {
             // For external bindings, use the original interface method signature.
             // The Rust implementation handles type dispatch, so we don't need substituted types.

@@ -162,7 +162,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Get entity registry reference
     #[inline]
     pub fn registry(&self) -> &'ctx vole_sema::entity_registry::EntityRegistry {
-        &self.ctx.analyzed.entity_registry
+        self.ctx.registry()
     }
 
     /// Borrow the name table (shorter than query().name_table_rc().borrow())

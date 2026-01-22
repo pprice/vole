@@ -371,6 +371,18 @@ impl<'a> CompileCtx<'a> {
         self.interner
     }
 
+    /// Get the entity registry.
+    #[inline]
+    pub fn registry(&self) -> &'a EntityRegistry {
+        &self.analyzed.entity_registry
+    }
+
+    /// Get the name table (borrowed).
+    #[inline]
+    pub fn name_table(&self) -> std::cell::Ref<'_, NameTable> {
+        self.analyzed.name_table.borrow()
+    }
+
     /// Substitute type parameters with concrete types using TypeId directly.
     /// Uses a cache to avoid repeated HashMap conversion and arena mutations.
     pub fn substitute_type_id(&self, ty: TypeId) -> TypeId {
@@ -591,7 +603,7 @@ impl<'a> CompileCtx<'a> {
 
 /// Resolve a type expression to a TypeId (uses CompileCtx for full context).
 pub(crate) fn resolve_type_expr_id(ty: &TypeExpr, ctx: &CompileCtx) -> TypeId {
-    let name_table = ctx.analyzed.name_table.borrow();
+    let name_table = ctx.name_table();
     let module_id = ctx
         .current_module
         .and_then(|path| name_table.module_id_if_known(path))
@@ -600,7 +612,7 @@ pub(crate) fn resolve_type_expr_id(ty: &TypeExpr, ctx: &CompileCtx) -> TypeId {
     // Use the TypeId-native resolution function directly
     let type_id = resolve_type_expr_to_id(
         ty,
-        &ctx.analyzed.entity_registry,
+        ctx.registry(),
         ctx.type_metadata,
         ctx.interner(),
         &name_table,
