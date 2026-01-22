@@ -88,7 +88,7 @@ impl InterfaceVtableRegistry {
 
     /// Phase 1: Get or declare a vtable.
     /// Does not compile wrappers yet - call ensure_compiled() later.
-    #[tracing::instrument(skip(self, ctx, interface_type_arg_ids), fields(interface = %ctx.interner.resolve(interface_name)))]
+    #[tracing::instrument(skip(self, ctx, interface_type_arg_ids), fields(interface = %ctx.interner().resolve(interface_name)))]
     pub(crate) fn get_or_declare(
         &mut self,
         ctx: &mut CompileCtx,
@@ -132,7 +132,7 @@ impl InterfaceVtableRegistry {
         }
 
         // Resolve interface metadata
-        let interface_name_str = ctx.interner.resolve(interface_name);
+        let interface_name_str = ctx.interner().resolve(interface_name);
         let interface_type_def_id = ctx
             .resolve_type_str_or_interface(interface_name_str)
             .ok_or_else(|| format!("unknown interface {:?}", interface_name_str))?;
@@ -168,7 +168,7 @@ impl InterfaceVtableRegistry {
         };
         let vtable_name = format!(
             "__vole_iface_vtable_{}_{}",
-            ctx.interner.resolve(interface_name),
+            ctx.interner().resolve(interface_name),
             type_name
         );
         let data_id = ctx
@@ -177,7 +177,7 @@ impl InterfaceVtableRegistry {
             .map_err(|e| e.to_string())?;
 
         tracing::debug!(
-            interface = %ctx.interner.resolve(interface_name),
+            interface = %ctx.interner().resolve(interface_name),
             concrete_type = ?concrete_type_id,
             method_count = method_ids.len(),
             "declared vtable (phase 1)"
@@ -200,7 +200,7 @@ impl InterfaceVtableRegistry {
 
     /// Phase 2+3: Ensure a vtable is fully compiled.
     /// Must be called after get_or_declare() for the same key.
-    #[tracing::instrument(skip(self, ctx), fields(interface = %ctx.interner.resolve(interface_name)))]
+    #[tracing::instrument(skip(self, ctx), fields(interface = %ctx.interner().resolve(interface_name)))]
     pub(crate) fn ensure_compiled(
         &mut self,
         ctx: &mut CompileCtx,
@@ -244,7 +244,7 @@ impl InterfaceVtableRegistry {
             .ok_or_else(|| "vtable not declared - call get_or_declare first".to_string())?;
 
         let word_bytes = ctx.ptr_type().bytes() as usize;
-        let interface_name_str = ctx.interner.resolve(interface_name);
+        let interface_name_str = ctx.interner().resolve(interface_name);
 
         // Phase 2: Compile wrappers
         let mut data = DataDescription::new();
@@ -792,7 +792,7 @@ pub(crate) fn box_interface_value_id(
         .borrow()
         .last_segment_str(interface_def.name_id)
         .ok_or_else(|| format!("cannot get interface name string for {:?}", type_def_id))?;
-    let interface_name = ctx.interner.lookup(&interface_name_str).ok_or_else(|| {
+    let interface_name = ctx.interner().lookup(&interface_name_str).ok_or_else(|| {
         format!(
             "interface name '{}' not found in interner",
             interface_name_str
@@ -925,7 +925,7 @@ fn resolve_vtable_target(
     })?;
     // Use string-based lookup for cross-interner safety (method_def is from stdlib interner)
     // This may return None for default interface methods that aren't explicitly implemented
-    let method_name_id = method_name_id_by_str(ctx.analyzed, ctx.interner, &method_name_str);
+    let method_name_id = method_name_id_by_str(ctx.analyzed, ctx.interner(), &method_name_str);
 
     // Check implement registry for explicit implementations
     if let Some(method_name_id) = method_name_id

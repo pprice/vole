@@ -602,7 +602,7 @@ pub(crate) fn resolve_type_expr_id(ty: &TypeExpr, ctx: &CompileCtx) -> TypeId {
         ty,
         &ctx.analyzed.entity_registry,
         ctx.type_metadata,
-        ctx.interner,
+        ctx.interner(),
         &name_table,
         module_id,
         ctx.arena,
