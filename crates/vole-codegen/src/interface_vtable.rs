@@ -98,7 +98,7 @@ impl InterfaceVtableRegistry {
     ) -> Result<DataId, String> {
         // Build key for lookup using arena unwraps
         let concrete_key = {
-            let arena = ctx.arena.borrow();
+            let arena = ctx.arena();
             if let Some((_, _, is_closure)) = arena.unwrap_function(concrete_type_id) {
                 InterfaceConcreteType::Function { is_closure }
             } else {
@@ -209,7 +209,7 @@ impl InterfaceVtableRegistry {
     ) -> Result<DataId, String> {
         // Build key for lookup using arena unwraps
         let concrete_key = {
-            let arena = ctx.arena.borrow();
+            let arena = ctx.arena();
             if let Some((_, _, is_closure)) = arena.unwrap_function(concrete_type_id) {
                 InterfaceConcreteType::Function { is_closure }
             } else {
@@ -387,7 +387,7 @@ impl InterfaceVtableRegistry {
                     );
                 };
                 let heap_alloc_ref = runtime_heap_alloc_ref(ctx, &mut builder)?;
-                let arena = ctx.arena.borrow();
+                let arena = ctx.arena();
                 let word = value_to_word(
                     &mut builder,
                     &CompiledValue {
@@ -428,7 +428,7 @@ fn compile_function_wrapper(
     // For function wrappers, concrete_type_id is the function type itself.
     // Try to extract is_closure and ret_type from it, falling back to defaults.
     let (ret_type_id, is_closure) = {
-        let arena = ctx.arena.borrow();
+        let arena = ctx.arena();
         arena
             .unwrap_function(concrete_type_id)
             .map(|(_, ret, is_closure)| (ret, is_closure))
@@ -441,7 +441,7 @@ fn compile_function_wrapper(
         concrete_type_id,
         ctx.ptr_type(),
         &ctx.analyzed.entity_registry,
-        &ctx.arena.borrow(),
+        &ctx.arena(),
     );
     let mut args = Vec::with_capacity(param_type_ids.len() + 1);
     for (param_word, &param_ty_id) in params[1..].iter().zip(param_type_ids.iter()) {
@@ -451,14 +451,12 @@ fn compile_function_wrapper(
             param_ty_id,
             ctx.ptr_type(),
             &ctx.analyzed.entity_registry,
-            &ctx.arena.borrow(),
+            &ctx.arena(),
         ));
     }
 
-    let arena = ctx.arena.borrow();
-    let void_id = arena.void();
+    let void_id = ctx.arena().void();
     let (func_ptr, call_args, sig) = if is_closure {
-        drop(arena);
         let closure_get_key = ctx
             .funcs()
             .runtime_key(RuntimeFn::ClosureGetFunc)
@@ -474,7 +472,7 @@ fn compile_function_wrapper(
         let func_ptr = builder.inst_results(closure_call)[0];
 
         let mut sig = ctx.jit_module().make_signature();
-        let arena = ctx.arena.borrow();
+        let arena = ctx.arena();
         sig.params.push(AbiParam::new(type_id_to_cranelift(
             concrete_type_id,
             &arena,
@@ -502,6 +500,7 @@ fn compile_function_wrapper(
         (func_ptr, call_args, sig)
     } else {
         let mut sig = ctx.jit_module().make_signature();
+        let arena = ctx.arena();
         for &param_type_id in param_type_ids.iter() {
             sig.params.push(AbiParam::new(type_id_to_cranelift(
                 param_type_id,
@@ -541,7 +540,7 @@ fn compile_method_wrapper(
         concrete_type_id,
         ctx.ptr_type(),
         &ctx.analyzed.entity_registry,
-        &ctx.arena.borrow(),
+        &ctx.arena(),
     );
     let mut call_args = Vec::with_capacity(1 + param_type_ids.len());
     call_args.push(self_val);
@@ -552,7 +551,7 @@ fn compile_method_wrapper(
             param_ty_id,
             ctx.ptr_type(),
             &ctx.analyzed.entity_registry,
-            &ctx.arena.borrow(),
+            &ctx.arena(),
         ));
     }
     let func_id = ctx
@@ -606,7 +605,7 @@ fn compile_external_wrapper(
             concrete_type_id,
             ctx.ptr_type(),
             &ctx.analyzed.entity_registry,
-            &ctx.arena.borrow(),
+            &ctx.arena(),
         )
     };
 
@@ -619,7 +618,7 @@ fn compile_external_wrapper(
             param_ty_id,
             ctx.ptr_type(),
             &ctx.analyzed.entity_registry,
-            &ctx.arena.borrow(),
+            &ctx.arena(),
         ));
     }
 
@@ -640,7 +639,7 @@ fn compile_external_wrapper(
 
     let mut native_sig = ctx.jit_module().make_signature();
     // For Iterator, the self param is now *mut UnifiedIterator (pointer)
-    let arena = ctx.arena.borrow();
+    let arena = ctx.arena();
     let self_param_type = if interface_name == "Iterator" {
         ctx.ptr_type()
     } else {
@@ -778,7 +777,7 @@ pub(crate) fn box_interface_value_id(
 ) -> Result<CompiledValue, String> {
     // Extract interface info using arena
     let (type_def_id, type_args_ids) = {
-        let arena = ctx.arena.borrow();
+        let arena = ctx.arena();
         match arena.unwrap_interface(interface_type_id) {
             Some((type_def_id, type_args)) => (type_def_id, type_args.to_vec()),
             None => return Ok(value), // Not an interface type
@@ -801,7 +800,7 @@ pub(crate) fn box_interface_value_id(
     })?;
 
     // Check if value is already an interface
-    if ctx.arena.borrow().is_interface(value.type_id) {
+    if ctx.arena().is_interface(value.type_id) {
         tracing::debug!("already interface, skip boxing");
         return Ok(value);
     }
@@ -880,7 +879,7 @@ fn resolve_vtable_target(
     let (substituted_param_ids, substituted_return_id) = {
         // First extract params and return type (immutable borrow)
         let (params_vec, ret) = {
-            let arena = ctx.arena.borrow();
+            let arena = ctx.arena();
             let (params, ret, _) = arena
                 .unwrap_function(interface_method.signature_id)
                 .expect("method signature must be a function type");
@@ -898,12 +897,11 @@ fn resolve_vtable_target(
 
     // Check if concrete type is a function/closure
     let fn_info = ctx
-        .arena
-        .borrow()
+        .arena()
         .unwrap_function(concrete_type_id)
         .map(|(params, ret, is_closure)| (params.to_vec(), ret, is_closure));
     if let Some((param_ids, return_id, _)) = fn_info {
-        let arena = ctx.arena.borrow();
+        let arena = ctx.arena();
         let returns_void = matches!(arena.get(return_id), SemaType::Void);
         return Ok(VtableMethod {
             param_count: param_ids.len(),
@@ -916,7 +914,7 @@ fn resolve_vtable_target(
 
     let impl_type_id = ImplTypeId::from_type_id(
         concrete_type_id,
-        &ctx.arena.borrow(),
+        &ctx.arena(),
         &ctx.analyzed.entity_registry,
     )
     .ok_or_else(|| {
@@ -968,7 +966,7 @@ fn resolve_vtable_target(
     let direct_method_result: Option<(MethodInfo, Vec<TypeId>, TypeId)> = (|| {
         let method_name_id = method_name_id?;
         // Get type_def_id from concrete_type_id using arena unwraps
-        let arena = ctx.arena.borrow();
+        let arena = ctx.arena();
         let type_def_id = arena
             .unwrap_class(concrete_type_id)
             .map(|(id, _)| id)
@@ -980,7 +978,7 @@ fn resolve_vtable_target(
             ctx.type_metadata,
             type_name_id,
             &ctx.analyzed.entity_registry,
-            &ctx.arena.borrow(),
+            &ctx.arena(),
         )?;
         let method_info = meta.method_infos.get(&method_name_id).copied()?;
 
@@ -991,7 +989,7 @@ fn resolve_vtable_target(
             .find_method_on_type(type_def_id, method_name_id)
             .map(|m_id| {
                 let method = ctx.query().get_method(m_id);
-                let arena = ctx.arena.borrow();
+                let arena = ctx.arena();
                 let (params, ret, _) = arena
                     .unwrap_function(method.signature_id)
                     .expect("method signature must be a function type");
@@ -1033,7 +1031,7 @@ fn resolve_vtable_target(
             // For external bindings, use the original interface method signature.
             // The Rust implementation handles type dispatch, so we don't need substituted types.
             let (param_type_ids, return_type_id) = {
-                let arena = ctx.arena.borrow();
+                let arena = ctx.arena();
                 let (params, ret, _) = arena
                     .unwrap_function(interface_method.signature_id)
                     .expect("interface method signature must be a function type");

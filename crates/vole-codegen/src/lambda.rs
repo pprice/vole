@@ -58,13 +58,13 @@ pub(crate) fn infer_lambda_return_type(
 ) -> TypeId {
     match body {
         FuncBody::Expr(expr) => infer_expr_type(expr, param_types, ctx),
-        FuncBody::Block(_) => ctx.arena.borrow().primitives.i64,
+        FuncBody::Block(_) => ctx.arena().primitives.i64,
     }
 }
 
 /// Get lambda param and return types from explicit annotations or codegen inference (fallback when sema type unavailable)
 fn get_lambda_types_fallback(lambda: &LambdaExpr, ctx: &CompileCtx) -> (Vec<TypeId>, TypeId) {
-    let primitives = ctx.arena.borrow().primitives;
+    let primitives = ctx.arena().primitives;
 
     // Build param type ids from AST annotations, defaulting to i64
     let param_type_ids: Vec<TypeId> = lambda
@@ -99,7 +99,7 @@ pub(crate) fn infer_expr_type(
     param_types: &[(Symbol, TypeId)],
     ctx: &CompileCtx,
 ) -> TypeId {
-    let primitives = ctx.arena.borrow().primitives;
+    let primitives = ctx.arena().primitives;
 
     match &expr.kind {
         ExprKind::IntLiteral(_) => primitives.i64,
@@ -107,8 +107,8 @@ pub(crate) fn infer_expr_type(
         ExprKind::BoolLiteral(_) => primitives.bool,
         ExprKind::StringLiteral(_) => primitives.string,
         ExprKind::InterpolatedString(_) => primitives.string,
-        ExprKind::Nil => ctx.arena.borrow().nil(),
-        ExprKind::Done => ctx.arena.borrow().done(),
+        ExprKind::Nil => ctx.arena().nil(),
+        ExprKind::Done => ctx.arena().done(),
 
         ExprKind::Identifier(sym) => {
             for (name, ty_id) in param_types {
@@ -166,7 +166,7 @@ pub(crate) fn infer_expr_type(
 
         ExprKind::Call(call) => {
             let callee_ty = infer_expr_type(&call.callee, param_types, ctx);
-            let arena = ctx.arena.borrow();
+            let arena = ctx.arena();
             if let Some((_, ret_id, _)) = arena.unwrap_function(callee_ty) {
                 ret_id
             } else {
@@ -175,7 +175,7 @@ pub(crate) fn infer_expr_type(
         }
 
         ExprKind::Lambda(lambda) => {
-            let primitives = ctx.arena.borrow().primitives;
+            let primitives = ctx.arena().primitives;
             // Resolve param types directly to TypeIds
             let lambda_param_ids: TypeIdVec = lambda
                 .params
@@ -244,7 +244,7 @@ fn compile_pure_lambda(
     // Try to get param and return types from sema analysis first
     let (param_type_ids, return_type_id) = if let Some(lambda_type_id) = ctx.get_expr_type(&node_id)
     {
-        let arena = ctx.arena.borrow();
+        let arena = ctx.arena();
         if let Some((sema_params, ret_id, _)) = arena.unwrap_function(lambda_type_id) {
             // Use sema-inferred types
             (sema_params.to_vec(), ret_id)
@@ -258,14 +258,14 @@ fn compile_pure_lambda(
 
     // Convert to Cranelift types
     let param_types: Vec<Type> = {
-        let arena = ctx.arena.borrow();
+        let arena = ctx.arena();
         param_type_ids
             .iter()
             .map(|&ty| type_id_to_cranelift(ty, &arena, ctx.ptr_type()))
             .collect()
     };
 
-    let return_type = type_id_to_cranelift(return_type_id, &ctx.arena.borrow(), ctx.ptr_type());
+    let return_type = type_id_to_cranelift(return_type_id, &ctx.arena(), ctx.ptr_type());
 
     // Always use closure calling convention for consistency with how all lambdas
     // are now wrapped in Closure structs. First param is the closure pointer.
@@ -358,7 +358,7 @@ fn compile_lambda_with_captures(
     // Try to get param and return types from sema analysis first
     let (param_type_ids, return_type_id) = if let Some(lambda_type_id) = ctx.get_expr_type(&node_id)
     {
-        let arena = ctx.arena.borrow();
+        let arena = ctx.arena();
         if let Some((sema_params, ret_id, _)) = arena.unwrap_function(lambda_type_id) {
             // Use sema-inferred types
             (sema_params.to_vec(), ret_id)
@@ -372,14 +372,14 @@ fn compile_lambda_with_captures(
 
     // Convert to Cranelift types
     let param_types: Vec<Type> = {
-        let arena = ctx.arena.borrow();
+        let arena = ctx.arena();
         param_type_ids
             .iter()
             .map(|&ty| type_id_to_cranelift(ty, &arena, ctx.ptr_type()))
             .collect()
     };
 
-    let return_type = type_id_to_cranelift(return_type_id, &ctx.arena.borrow(), ctx.ptr_type());
+    let return_type = type_id_to_cranelift(return_type_id, &ctx.arena(), ctx.ptr_type());
 
     // First param is the closure pointer
     let mut sig = ctx.jit_module().make_signature();
@@ -399,7 +399,7 @@ fn compile_lambda_with_captures(
     ctx.funcs().set_func_id(func_key, func_id);
     ctx.funcs().set_return_type(func_key, return_type_id);
 
-    let capture_bindings = build_capture_bindings(&captures, variables, &ctx.arena.borrow());
+    let capture_bindings = build_capture_bindings(&captures, variables, &ctx.arena());
 
     let mut lambda_ctx = ctx.jit_module().make_context();
     lambda_ctx.func.signature = sig.clone();
@@ -489,7 +489,7 @@ fn compile_lambda_with_captures(
             vole_type_id,
             ctx.ptr_type(),
             &ctx.analyzed.entity_registry,
-            &ctx.arena.borrow(),
+            &ctx.arena(),
         );
         let size_val = builder.ins().iconst(types::I64, size as i64);
 

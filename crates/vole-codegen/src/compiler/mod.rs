@@ -21,7 +21,7 @@ use crate::{FunctionRegistry, JitContext, RuntimeFn, interface_vtable::Interface
 use vole_frontend::{Interner, LetStmt, Symbol};
 use vole_identity::{NameId, TypeDefId};
 use vole_runtime::NativeRegistry;
-use vole_sema::{ImplTypeId, ProgramQuery};
+use vole_sema::{ImplTypeId, ProgramQuery, type_arena::TypeId};
 
 pub use state::{ControlFlowCtx, TestInfo};
 
@@ -149,7 +149,7 @@ impl<'a> Compiler<'a> {
     }
 
     /// Get ImplTypeId from a TypeId
-    fn impl_type_id_from_type_id(&self, ty: vole_sema::type_arena::TypeId) -> Option<ImplTypeId> {
+    fn impl_type_id_from_type_id(&self, ty: TypeId) -> Option<ImplTypeId> {
         ImplTypeId::from_type_id(
             ty,
             &self.analyzed.type_arena.borrow(),
