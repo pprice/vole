@@ -116,11 +116,8 @@ impl Cg<'_, '_, '_> {
                 && !self.ctx.arena().is_union(narrowed_type_id)
             {
                 // Union layout: [tag:1][padding:7][payload]
-                let payload_ty = type_id_to_cranelift(
-                    narrowed_type_id,
-                    &self.ctx.arena(),
-                    self.ctx.pointer_type,
-                );
+                let payload_ty =
+                    type_id_to_cranelift(narrowed_type_id, &self.ctx.arena(), self.ctx.ptr_type());
                 let payload = self.builder.ins().load(payload_ty, MemFlags::new(), val, 8);
                 return Ok(CompiledValue {
                     value: payload,
@@ -203,17 +200,15 @@ impl Cg<'_, '_, '_> {
         let arena = self.ctx.arena();
         let param_types: Vec<Type> = param_ids
             .iter()
-            .map(|&t| type_id_to_cranelift(t, &arena, self.ctx.pointer_type))
+            .map(|&t| type_id_to_cranelift(t, &arena, self.ctx.ptr_type()))
             .collect();
 
-        let return_cr_type = type_id_to_cranelift(return_type_id, &arena, self.ctx.pointer_type);
+        let return_cr_type = type_id_to_cranelift(return_type_id, &arena, self.ctx.ptr_type());
         let is_void_return = arena.is_void(return_type_id);
         drop(arena);
 
         let mut wrapper_sig = self.ctx.module.make_signature();
-        wrapper_sig
-            .params
-            .push(AbiParam::new(self.ctx.pointer_type)); // closure ptr (ignored)
+        wrapper_sig.params.push(AbiParam::new(self.ctx.ptr_type())); // closure ptr (ignored)
         for &param_ty in &param_types {
             wrapper_sig.params.push(AbiParam::new(param_ty));
         }
@@ -297,7 +292,7 @@ impl Cg<'_, '_, '_> {
         let wrapper_func_addr = self
             .builder
             .ins()
-            .func_addr(self.ctx.pointer_type, wrapper_func_ref);
+            .func_addr(self.ctx.ptr_type(), wrapper_func_ref);
 
         // Wrap in a closure struct with zero captures
         let alloc_id = self
@@ -321,7 +316,7 @@ impl Cg<'_, '_, '_> {
         let closure_type_id = self.update().function(param_ids, return_type_id, true);
         Ok(CompiledValue {
             value: closure_ptr,
-            ty: self.ctx.pointer_type,
+            ty: self.ctx.ptr_type(),
             type_id: closure_type_id,
         })
     }
@@ -438,7 +433,7 @@ impl Cg<'_, '_, '_> {
         let array_type_id = inferred_type_id.unwrap_or_else(|| self.update().array(elem_type_id));
         Ok(CompiledValue {
             value: arr_ptr,
-            ty: self.ctx.pointer_type,
+            ty: self.ctx.ptr_type(),
             type_id: array_type_id,
         })
     }
@@ -453,7 +448,7 @@ impl Cg<'_, '_, '_> {
         // Calculate layout using TypeId-based function
         let (total_size, offsets) = tuple_layout_id(
             elem_type_ids,
-            self.ctx.pointer_type,
+            self.ctx.ptr_type(),
             self.ctx.query().registry(),
             &self.ctx.arena(),
         );
@@ -475,15 +470,12 @@ impl Cg<'_, '_, '_> {
         }
 
         // Return pointer to the tuple
-        let ptr = self
-            .builder
-            .ins()
-            .stack_addr(self.ctx.pointer_type, slot, 0);
+        let ptr = self.builder.ins().stack_addr(self.ctx.ptr_type(), slot, 0);
 
         // Use TypeId from ExpressionData (passed from caller)
         Ok(CompiledValue {
             value: ptr,
-            ty: self.ctx.pointer_type,
+            ty: self.ctx.ptr_type(),
             type_id: tuple_type_id,
         })
     }
@@ -524,10 +516,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Return pointer to the array
-        let ptr = self
-            .builder
-            .ins()
-            .stack_addr(self.ctx.pointer_type, slot, 0);
+        let ptr = self.builder.ins().stack_addr(self.ctx.ptr_type(), slot, 0);
 
         // Get the full type from sema, or create fixed array type from element type
         let type_id = self
@@ -537,7 +526,7 @@ impl Cg<'_, '_, '_> {
 
         Ok(CompiledValue {
             value: ptr,
-            ty: self.ctx.pointer_type,
+            ty: self.ctx.ptr_type(),
             type_id,
         })
     }
@@ -569,14 +558,11 @@ impl Cg<'_, '_, '_> {
         self.builder.ins().stack_store(end, slot, 8);
 
         // Return pointer to the slot
-        let ptr = self
-            .builder
-            .ins()
-            .stack_addr(self.ctx.pointer_type, slot, 0);
+        let ptr = self.builder.ins().stack_addr(self.ctx.ptr_type(), slot, 0);
 
         Ok(CompiledValue {
             value: ptr,
-            ty: self.ctx.pointer_type,
+            ty: self.ctx.ptr_type(),
             type_id: self.ctx.arena().range(),
         })
     }
@@ -595,14 +581,14 @@ impl Cg<'_, '_, '_> {
                 let i = *i as usize;
                 let (_, offsets) = tuple_layout_id(
                     &elem_type_ids,
-                    self.ctx.pointer_type,
+                    self.ctx.ptr_type(),
                     self.ctx.query().registry(),
                     &self.ctx.arena(),
                 );
                 let offset = offsets[i];
                 let elem_type_id = elem_type_ids[i];
                 let elem_cr_type =
-                    type_id_to_cranelift(elem_type_id, &self.ctx.arena(), self.ctx.pointer_type);
+                    type_id_to_cranelift(elem_type_id, &self.ctx.arena(), self.ctx.ptr_type());
 
                 let value =
                     self.builder
@@ -625,7 +611,7 @@ impl Cg<'_, '_, '_> {
             // Fixed array indexing
             let elem_size = 8i32; // All elements aligned to 8 bytes
             let elem_cr_type =
-                type_id_to_cranelift(element_id, &self.ctx.arena(), self.ctx.pointer_type);
+                type_id_to_cranelift(element_id, &self.ctx.arena(), self.ctx.ptr_type());
 
             // Calculate offset: base + (index * elem_size)
             let offset = if let ExprKind::IntLiteral(i) = &index.kind {
@@ -904,7 +890,7 @@ impl Cg<'_, '_, '_> {
             .unwrap_optional(value.type_id)
             .expect("unwrap expression requires optional type");
         let cranelift_type =
-            type_id_to_cranelift(inner_type_id, &self.ctx.arena(), self.ctx.pointer_type);
+            type_id_to_cranelift(inner_type_id, &self.ctx.arena(), self.ctx.ptr_type());
         self.builder.append_block_param(merge_block, cranelift_type);
 
         self.builder
@@ -1109,7 +1095,7 @@ impl Cg<'_, '_, '_> {
                             let payload_ty = type_id_to_cranelift(
                                 success_type_id,
                                 &self.ctx.arena(),
-                                self.ctx.pointer_type,
+                                self.ctx.ptr_type(),
                             );
                             let payload =
                                 load_fallible_payload(self.builder, scrutinee.value, payload_ty);
@@ -1137,7 +1123,7 @@ impl Cg<'_, '_, '_> {
                     {
                         let (_, offsets) = tuple_layout_id(
                             &elem_type_ids,
-                            self.ctx.pointer_type,
+                            self.ctx.ptr_type(),
                             self.ctx.query().registry(),
                             &self.ctx.arena(),
                         );
@@ -1148,7 +1134,7 @@ impl Cg<'_, '_, '_> {
                                 let elem_cr_type = type_id_to_cranelift(
                                     elem_type_id,
                                     &self.ctx.arena(),
-                                    self.ctx.pointer_type,
+                                    self.ctx.ptr_type(),
                                 );
                                 let value = self.builder.ins().load(
                                     elem_cr_type,
@@ -1371,7 +1357,7 @@ impl Cg<'_, '_, '_> {
 
         // Reduce back to the correct type based on result_type_id
         let arena = self.ctx.arena();
-        let target_cty = type_id_to_cranelift(result_type_id, &arena, self.ctx.pointer_type);
+        let target_cty = type_id_to_cranelift(result_type_id, &arena, self.ctx.ptr_type());
         drop(arena);
         let (result, result_ty) = if target_cty != types::I64 && target_cty.is_int() {
             (
@@ -1428,7 +1414,7 @@ impl Cg<'_, '_, '_> {
 
         // Get payload type for success using TypeId
         let arena = self.ctx.arena();
-        let payload_ty = type_id_to_cranelift(success_type_id, &arena, self.ctx.pointer_type);
+        let payload_ty = type_id_to_cranelift(success_type_id, &arena, self.ctx.ptr_type());
         drop(arena);
         self.builder.append_block_param(merge_block, payload_ty);
 
@@ -1488,7 +1474,7 @@ impl Cg<'_, '_, '_> {
 
         let is_void = self.ctx.arena().is_void(result_type_id);
         let result_cranelift_type =
-            type_id_to_cranelift(result_type_id, &self.ctx.arena(), self.ctx.pointer_type);
+            type_id_to_cranelift(result_type_id, &self.ctx.arena(), self.ctx.ptr_type());
 
         // Create basic blocks
         let then_block = self.builder.create_block();
@@ -1619,7 +1605,7 @@ impl Cg<'_, '_, '_> {
         // Extract error type and bind
         if let Some((_, error_type_id)) = self.ctx.arena().unwrap_fallible(scrutinee.type_id) {
             let payload_ty =
-                type_id_to_cranelift(error_type_id, &self.ctx.arena(), self.ctx.pointer_type);
+                type_id_to_cranelift(error_type_id, &self.ctx.arena(), self.ctx.ptr_type());
             let payload = load_fallible_payload(self.builder, scrutinee.value, payload_ty);
             let var = self.builder.declare_var(payload_ty);
             self.builder.def_var(var, payload);

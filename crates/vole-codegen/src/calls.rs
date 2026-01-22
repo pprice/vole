@@ -58,7 +58,7 @@ impl Cg<'_, '_, '_> {
         let value = compile_string_literal(
             self.builder,
             s,
-            self.ctx.pointer_type,
+            self.ctx.ptr_type(),
             self.ctx.module,
             self.ctx.func_registry,
         )?;
@@ -163,7 +163,7 @@ impl Cg<'_, '_, '_> {
 
         // Add block param for the result string
         self.builder
-            .append_block_param(merge_block, self.ctx.pointer_type);
+            .append_block_param(merge_block, self.ctx.ptr_type());
 
         self.builder
             .ins()
@@ -183,7 +183,7 @@ impl Cg<'_, '_, '_> {
             .find(|&&v| !arena.is_nil(v))
             .copied()
             .unwrap_or(TypeId::NIL);
-        let inner_cr_type = type_id_to_cranelift(inner_type_id, &arena, self.ctx.pointer_type);
+        let inner_cr_type = type_id_to_cranelift(inner_type_id, &arena, self.ctx.ptr_type());
         drop(arena);
 
         let inner_val = self
@@ -424,13 +424,13 @@ impl Cg<'_, '_, '_> {
                 for param_type in &native_func.signature.params {
                     sig.params.push(AbiParam::new(native_type_to_cranelift(
                         param_type,
-                        self.ctx.pointer_type,
+                        self.ctx.ptr_type(),
                     )));
                 }
                 if native_func.signature.return_type != NativeType::Nil {
                     sig.returns.push(AbiParam::new(native_type_to_cranelift(
                         &native_func.signature.return_type,
-                        self.ctx.pointer_type,
+                        self.ctx.ptr_type(),
                     )));
                 }
 
@@ -440,7 +440,7 @@ impl Cg<'_, '_, '_> {
                 let func_ptr_val = self
                     .builder
                     .ins()
-                    .iconst(self.ctx.pointer_type, func_ptr as i64);
+                    .iconst(self.ctx.ptr_type(), func_ptr as i64);
 
                 let call_inst = self
                     .builder
@@ -467,7 +467,7 @@ impl Cg<'_, '_, '_> {
                         value: results[0],
                         ty: native_type_to_cranelift(
                             &native_func.signature.return_type,
-                            self.ctx.pointer_type,
+                            self.ctx.ptr_type(),
                         ),
                         type_id,
                     });
@@ -503,13 +503,13 @@ impl Cg<'_, '_, '_> {
             for param_type in &native_func.signature.params {
                 sig.params.push(AbiParam::new(native_type_to_cranelift(
                     param_type,
-                    self.ctx.pointer_type,
+                    self.ctx.ptr_type(),
                 )));
             }
             if native_func.signature.return_type != NativeType::Nil {
                 sig.returns.push(AbiParam::new(native_type_to_cranelift(
                     &native_func.signature.return_type,
-                    self.ctx.pointer_type,
+                    self.ctx.ptr_type(),
                 )));
             }
 
@@ -519,7 +519,7 @@ impl Cg<'_, '_, '_> {
             let func_ptr_val = self
                 .builder
                 .ins()
-                .iconst(self.ctx.pointer_type, func_ptr as i64);
+                .iconst(self.ctx.ptr_type(), func_ptr as i64);
 
             let call_inst = self
                 .builder
@@ -547,7 +547,7 @@ impl Cg<'_, '_, '_> {
                     value: results[0],
                     ty: native_type_to_cranelift(
                         &native_func.signature.return_type,
-                        self.ctx.pointer_type,
+                        self.ctx.ptr_type(),
                     ),
                     type_id,
                 });
@@ -736,11 +736,11 @@ impl Cg<'_, '_, '_> {
         let file_ptr_val = self
             .builder
             .ins()
-            .iconst(self.ctx.pointer_type, file_ptr as i64);
+            .iconst(self.ctx.ptr_type(), file_ptr as i64);
         let file_len_val = self
             .builder
             .ins()
-            .iconst(self.ctx.pointer_type, file_len as i64);
+            .iconst(self.ctx.ptr_type(), file_len as i64);
         let line_val = self.builder.ins().iconst(types::I32, call_line as i64);
 
         self.call_runtime_void(
@@ -799,13 +799,13 @@ impl Cg<'_, '_, '_> {
 
         // Build signature (closure ptr + params)
         let mut sig = self.ctx.module.make_signature();
-        sig.params.push(AbiParam::new(self.ctx.pointer_type)); // closure ptr
+        sig.params.push(AbiParam::new(self.ctx.ptr_type())); // closure ptr
         for &param_type_id in params.iter() {
             let arena = self.ctx.arena();
             sig.params.push(AbiParam::new(type_id_to_cranelift(
                 param_type_id,
                 &arena,
-                self.ctx.pointer_type,
+                self.ctx.ptr_type(),
             )));
         }
         let arena = self.ctx.arena();
@@ -813,7 +813,7 @@ impl Cg<'_, '_, '_> {
             sig.returns.push(AbiParam::new(type_id_to_cranelift(
                 ret,
                 &arena,
-                self.ctx.pointer_type,
+                self.ctx.ptr_type(),
             )));
         }
         drop(arena);
@@ -868,13 +868,13 @@ impl Cg<'_, '_, '_> {
         for param_type in &native_func.signature.params {
             sig.params.push(AbiParam::new(native_type_to_cranelift(
                 param_type,
-                self.ctx.pointer_type,
+                self.ctx.ptr_type(),
             )));
         }
         if native_func.signature.return_type != NativeType::Nil {
             sig.returns.push(AbiParam::new(native_type_to_cranelift(
                 &native_func.signature.return_type,
-                self.ctx.pointer_type,
+                self.ctx.ptr_type(),
             )));
         }
 
@@ -883,7 +883,7 @@ impl Cg<'_, '_, '_> {
         let func_ptr_val = self
             .builder
             .ins()
-            .iconst(self.ctx.pointer_type, native_func.ptr as i64);
+            .iconst(self.ctx.ptr_type(), native_func.ptr as i64);
 
         let call_inst = self
             .builder
@@ -901,7 +901,7 @@ impl Cg<'_, '_, '_> {
                 value: results[0],
                 ty: native_type_to_cranelift(
                     &native_func.signature.return_type,
-                    self.ctx.pointer_type,
+                    self.ctx.ptr_type(),
                 ),
                 type_id,
             })

@@ -362,7 +362,7 @@ impl Cg<'_, '_, '_> {
                     value_to_word(
                         self.builder,
                         &compiled,
-                        self.ctx.pointer_type,
+                        self.ctx.ptr_type(),
                         None, // No heap alloc needed for primitive conversions
                         self.ctx.arena,
                         self.registry(),
@@ -380,7 +380,7 @@ impl Cg<'_, '_, '_> {
                     value_to_word(
                         self.builder,
                         &compiled,
-                        self.ctx.pointer_type,
+                        self.ctx.ptr_type(),
                         None, // No heap alloc needed for primitive conversions
                         self.ctx.arena,
                         self.registry(),
@@ -401,7 +401,7 @@ impl Cg<'_, '_, '_> {
             // Generic methods are compiled with TypeParam -> i64, but we may need
             // a different type (f64, bool, etc). Convert using word_to_value.
             let expected_ty =
-                type_id_to_cranelift(return_type_id, &self.ctx.arena(), self.ctx.pointer_type);
+                type_id_to_cranelift(return_type_id, &self.ctx.arena(), self.ctx.ptr_type());
             let actual_result = results[0];
             let actual_ty = self.builder.func.dfg.value_type(actual_result);
 
@@ -411,7 +411,7 @@ impl Cg<'_, '_, '_> {
                     self.builder,
                     actual_result,
                     return_type_id,
-                    self.ctx.pointer_type,
+                    self.ctx.ptr_type(),
                     self.registry(),
                     &self.ctx.arena(),
                 )
@@ -424,7 +424,7 @@ impl Cg<'_, '_, '_> {
             let (final_value, final_type) = if self.ctx.arena().is_union(return_type_id) {
                 let union_size = type_id_size(
                     return_type_id,
-                    self.ctx.pointer_type,
+                    self.ctx.ptr_type(),
                     self.registry(),
                     &self.ctx.arena(),
                 );
@@ -450,7 +450,7 @@ impl Cg<'_, '_, '_> {
                 let local_ptr = self
                     .builder
                     .ins()
-                    .stack_addr(self.ctx.pointer_type, local_slot, 0);
+                    .stack_addr(self.ctx.ptr_type(), local_slot, 0);
                 (local_ptr, expected_ty)
             } else {
                 (result_value, expected_ty)
@@ -485,7 +485,7 @@ impl Cg<'_, '_, '_> {
         let iter_type_id = self.update().runtime_iterator(i64_id);
         Ok(CompiledValue {
             value: result,
-            ty: self.ctx.pointer_type,
+            ty: self.ctx.ptr_type(),
             type_id: iter_type_id,
         })
     }
@@ -511,7 +511,7 @@ impl Cg<'_, '_, '_> {
                     let iter_type_id = self.update().runtime_iterator(elem_type_id);
                     Ok(Some(CompiledValue {
                         value: result,
-                        ty: self.ctx.pointer_type,
+                        ty: self.ctx.ptr_type(),
                         type_id: iter_type_id,
                     }))
                 }
@@ -533,7 +533,7 @@ impl Cg<'_, '_, '_> {
                     let iter_type_id = self.update().runtime_iterator(string_id);
                     Ok(Some(CompiledValue {
                         value: result,
-                        ty: self.ctx.pointer_type,
+                        ty: self.ctx.ptr_type(),
                         type_id: iter_type_id,
                     }))
                 }
@@ -562,7 +562,7 @@ impl Cg<'_, '_, '_> {
                 let iter_type_id = self.update().runtime_iterator(i64_id);
                 return Ok(Some(CompiledValue {
                     value: result,
-                    ty: self.ctx.pointer_type,
+                    ty: self.ctx.ptr_type(),
                     type_id: iter_type_id,
                 }));
             }
@@ -710,12 +710,12 @@ impl Cg<'_, '_, '_> {
             // Build the Cranelift signature for the closure call
             // First param is the closure pointer, then the user params
             let mut sig = self.ctx.module.make_signature();
-            sig.params.push(AbiParam::new(self.ctx.pointer_type)); // Closure pointer
+            sig.params.push(AbiParam::new(self.ctx.ptr_type())); // Closure pointer
             for param_id in param_ids.iter() {
                 sig.params.push(AbiParam::new(type_id_to_cranelift(
                     *param_id,
                     &self.ctx.arena(),
-                    self.ctx.pointer_type,
+                    self.ctx.ptr_type(),
                 )));
             }
             let is_void_return = self.ctx.arena().is_void(return_type_id);
@@ -723,7 +723,7 @@ impl Cg<'_, '_, '_> {
                 sig.returns.push(AbiParam::new(type_id_to_cranelift(
                     return_type_id,
                     &self.ctx.arena(),
-                    self.ctx.pointer_type,
+                    self.ctx.ptr_type(),
                 )));
             }
 
@@ -748,7 +748,7 @@ impl Cg<'_, '_, '_> {
                     ty: type_id_to_cranelift(
                         return_type_id,
                         &self.ctx.arena(),
-                        self.ctx.pointer_type,
+                        self.ctx.ptr_type(),
                     ),
                     type_id: return_type_id,
                 })
@@ -760,7 +760,7 @@ impl Cg<'_, '_, '_> {
                 sig.params.push(AbiParam::new(type_id_to_cranelift(
                     *param_id,
                     &self.ctx.arena(),
-                    self.ctx.pointer_type,
+                    self.ctx.ptr_type(),
                 )));
             }
             let is_void_return = self.ctx.arena().is_void(return_type_id);
@@ -768,7 +768,7 @@ impl Cg<'_, '_, '_> {
                 sig.returns.push(AbiParam::new(type_id_to_cranelift(
                     return_type_id,
                     &self.ctx.arena(),
-                    self.ctx.pointer_type,
+                    self.ctx.ptr_type(),
                 )));
             }
 
@@ -794,7 +794,7 @@ impl Cg<'_, '_, '_> {
                     ty: type_id_to_cranelift(
                         return_type_id,
                         &self.ctx.arena(),
-                        self.ctx.pointer_type,
+                        self.ctx.ptr_type(),
                     ),
                     type_id: return_type_id,
                 })
@@ -826,7 +826,7 @@ impl Cg<'_, '_, '_> {
         slot: usize,
         func_type_id: TypeId,
     ) -> Result<CompiledValue, String> {
-        let word_type = self.ctx.pointer_type;
+        let word_type = self.ctx.ptr_type();
         let word_bytes = word_type.bytes() as i32;
 
         // Unwrap function type to get params and return type
@@ -983,7 +983,7 @@ impl Cg<'_, '_, '_> {
                     let arena_ref = self.ctx.arena();
                     return Ok(CompiledValue {
                         value: results[0],
-                        ty: type_id_to_cranelift(return_type_id, &arena_ref, self.ctx.pointer_type),
+                        ty: type_id_to_cranelift(return_type_id, &arena_ref, self.ctx.ptr_type()),
                         type_id: return_type_id,
                     });
                 }
@@ -1045,7 +1045,7 @@ impl Cg<'_, '_, '_> {
         } else {
             Ok(CompiledValue {
                 value: results[0],
-                ty: type_id_to_cranelift(return_type_id, &self.ctx.arena(), self.ctx.pointer_type),
+                ty: type_id_to_cranelift(return_type_id, &self.ctx.arena(), self.ctx.ptr_type()),
                 type_id: return_type_id,
             })
         }

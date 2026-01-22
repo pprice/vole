@@ -483,7 +483,7 @@ impl Cg<'_, '_, '_> {
             .unwrap_optional(optional.type_id)
             .unwrap_or_else(|| arena.i64());
         let payload_cranelift_type =
-            type_id_to_cranelift(inner_type_id, &arena, self.ctx.pointer_type);
+            type_id_to_cranelift(inner_type_id, &arena, self.ctx.ptr_type());
         drop(arena);
         let payload =
             self.builder

@@ -176,7 +176,7 @@ impl Cg<'_, '_, '_> {
 
         let cranelift_type = {
             let arena = self.ctx.arena();
-            crate::types::type_id_to_cranelift(result_type_id, &arena, self.ctx.pointer_type)
+            crate::types::type_id_to_cranelift(result_type_id, &arena, self.ctx.ptr_type())
         };
         self.builder.append_block_param(merge_block, cranelift_type);
 
@@ -200,7 +200,7 @@ impl Cg<'_, '_, '_> {
         // Load the actual object from the union payload (offset 8)
         let inner_cranelift_type = {
             let arena = self.ctx.arena();
-            crate::types::type_id_to_cranelift(inner_type_id, &arena, self.ctx.pointer_type)
+            crate::types::type_id_to_cranelift(inner_type_id, &arena, self.ctx.ptr_type())
         };
         let inner_obj =
             self.builder

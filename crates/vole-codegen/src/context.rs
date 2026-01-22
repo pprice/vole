@@ -130,7 +130,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// This enables incremental migration from CompileCtx to TypeCtx + FunctionCtx.
     #[inline]
     pub fn type_ctx(&self) -> super::types::TypeCtx<'_> {
-        super::types::TypeCtx::new(self.ctx.query(), self.ctx.pointer_type)
+        super::types::TypeCtx::new(self.ctx.query(), self.ctx.ptr_type())
     }
 
     /// Get arena Rc for FunctionCtx operations (for future migration steps)
@@ -192,7 +192,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Convert a TypeId to a Cranelift type
     pub fn cranelift_type(&self, ty: TypeId) -> Type {
-        type_id_to_cranelift(ty, &self.ctx.arena(), self.ctx.pointer_type)
+        type_id_to_cranelift(ty, &self.ctx.arena(), self.ctx.ptr_type())
     }
 
     /// Unwrap an interface type, returning the TypeDefId if it is one
@@ -376,7 +376,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     pub fn string_value(&self, value: Value) -> CompiledValue {
         CompiledValue {
             value,
-            ty: self.ctx.pointer_type,
+            ty: self.ctx.ptr_type(),
             type_id: TypeId::STRING,
         }
     }
@@ -386,7 +386,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let arena = self.ctx.arena();
         CompiledValue {
             value,
-            ty: type_id_to_cranelift(type_id, &arena, self.ctx.pointer_type),
+            ty: type_id_to_cranelift(type_id, &arena, self.ctx.ptr_type()),
             type_id,
         }
     }
@@ -432,13 +432,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         for param_type in &native_func.signature.params {
             sig.params.push(AbiParam::new(native_type_to_cranelift(
                 param_type,
-                self.ctx.pointer_type,
+                self.ctx.ptr_type(),
             )));
         }
         if native_func.signature.return_type != NativeType::Nil {
             sig.returns.push(AbiParam::new(native_type_to_cranelift(
                 &native_func.signature.return_type,
-                self.ctx.pointer_type,
+                self.ctx.ptr_type(),
             )));
         }
 
@@ -450,7 +450,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let func_ptr_val = self
             .builder
             .ins()
-            .iconst(self.ctx.pointer_type, func_ptr as i64);
+            .iconst(self.ctx.ptr_type(), func_ptr as i64);
 
         // Emit the indirect call
         let call_inst = self
@@ -463,7 +463,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             Ok(self.void_value())
         } else {
             let arena = self.ctx.arena();
-            let cranelift_ty = type_id_to_cranelift(return_type_id, &arena, self.ctx.pointer_type);
+            let cranelift_ty = type_id_to_cranelift(return_type_id, &arena, self.ctx.ptr_type());
             drop(arena);
             Ok(CompiledValue {
                 value: results[0],

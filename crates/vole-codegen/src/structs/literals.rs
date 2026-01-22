@@ -134,7 +134,7 @@ impl Cg<'_, '_, '_> {
 
         Ok(CompiledValue {
             value: instance_ptr,
-            ty: self.ctx.pointer_type,
+            ty: self.ctx.ptr_type(),
             type_id: result_type_id,
         })
     }
@@ -179,14 +179,14 @@ impl Cg<'_, '_, '_> {
         // Allocate union storage on the heap
         let union_size = type_id_size(
             union_type_id,
-            self.ctx.pointer_type,
+            self.ctx.ptr_type(),
             self.ctx.query().registry(),
             &self.ctx.arena(),
         );
         let size_val = self
             .builder
             .ins()
-            .iconst(self.ctx.pointer_type, union_size as i64);
+            .iconst(self.ctx.ptr_type(), union_size as i64);
         let alloc_call = self.builder.ins().call(heap_alloc_ref, &[size_val]);
         let heap_ptr = self.builder.inst_results(alloc_call)[0];
 
@@ -205,7 +205,7 @@ impl Cg<'_, '_, '_> {
 
         Ok(CompiledValue {
             value: heap_ptr,
-            ty: self.ctx.pointer_type,
+            ty: self.ctx.ptr_type(),
             type_id: union_type_id,
         })
     }
