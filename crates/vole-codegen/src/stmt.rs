@@ -22,36 +22,6 @@ use super::types::{
     resolve_type_expr_id, tuple_layout_id, type_id_size, type_id_to_cranelift,
 };
 
-/// Compile a block of statements.
-/// Used for compiling scoped let declarations in tests blocks.
-pub(super) fn compile_block(
-    builder: &mut FunctionBuilder,
-    block: &vole_frontend::Block,
-    variables: &mut HashMap<Symbol, (Variable, TypeId)>,
-    _cf_ctx: &mut ControlFlowCtx,
-    ctx: &mut CompileCtx,
-) -> Result<bool, String> {
-    let return_type = ctx.current_function_return_type;
-    compile_block_with_captures(builder, block, variables, _cf_ctx, ctx, None, return_type)
-}
-
-/// Compile a block of statements with optional capture context
-fn compile_block_with_captures(
-    builder: &mut FunctionBuilder,
-    block: &vole_frontend::Block,
-    variables: &mut HashMap<Symbol, (Variable, TypeId)>,
-    _cf_ctx: &mut ControlFlowCtx,
-    ctx: &mut CompileCtx,
-    captures: Option<Captures>,
-    return_type: Option<TypeId>,
-) -> Result<bool, String> {
-    // Note: cf_ctx is ignored as top-level blocks don't have loops yet
-    let mut cf = ControlFlow::new();
-    let mut cg = Cg::new(builder, variables, ctx, &mut cf, captures, return_type);
-    cg.block(block)
-}
-
-/// Compile a function body - either a block or a single expression
 /// Compile a function body with split contexts.
 ///
 /// This is the transition API that takes FunctionCtx and ExplicitParams alongside

@@ -139,36 +139,6 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
 }
 
 impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
-    /// Create a new codegen context with optional captures for closures.
-    /// return_type is the function's return type (passed directly for cleaner separation).
-    ///
-    /// This is the legacy constructor using CompileCtx. For new code, prefer `new_split()`
-    /// which uses the split context types (CodegenCtx, FunctionCtx, ExplicitParams).
-    pub fn new(
-        builder: &'a mut FunctionBuilder<'b>,
-        vars: &'a mut HashMap<Symbol, (Variable, TypeId)>,
-        ctx: &'a mut CompileCtx<'ctx>,
-        cf: &'a mut ControlFlow,
-        captures: Option<Captures<'a>>,
-        return_type: Option<TypeId>,
-    ) -> Self {
-        Self {
-            builder,
-            vars,
-            ctx,
-            cf,
-            captures,
-            self_capture: None,
-            call_cache: HashMap::new(),
-            field_cache: HashMap::new(),
-            return_type,
-            // Split contexts not used in legacy mode
-            codegen_ctx: None,
-            function_ctx: None,
-            explicit_params: None,
-        }
-    }
-
     /// Create a new codegen context using split context types.
     ///
     /// This is the preferred constructor for new code. It takes the split contexts

@@ -11,10 +11,11 @@ use vole_frontend::{BinaryOp, Expr, ExprKind, FuncBody, LambdaExpr, NodeId, Symb
 use vole_sema::type_arena::{TypeArena, TypeId, TypeIdVec};
 
 use super::RuntimeFn;
-use super::compiler::common::{FunctionCompileConfig, compile_function_inner};
+use super::compiler::common::{FunctionCompileConfig, compile_function_inner_with_params};
 use super::context::Cg;
 use super::types::{
-    CompileCtx, CompiledValue, resolve_type_expr_id, type_id_size, type_id_to_cranelift,
+    CompileCtx, CompiledValue, ExplicitParams, FunctionCtx, resolve_type_expr_id, type_id_size,
+    type_id_to_cranelift,
 };
 
 /// Information about a captured variable for lambda compilation
@@ -307,14 +308,35 @@ fn compile_pure_lambda(
         .map(|(i, p)| (p.name, param_type_ids[i], param_types[i]))
         .collect();
 
-    // Use compile_function_inner for the body compilation
+    // Use compile_function_inner_with_params for the body compilation
     {
         let mut lambda_builder_ctx = FunctionBuilderContext::new();
         let lambda_builder = FunctionBuilder::new(&mut lambda_ctx.func, &mut lambda_builder_ctx);
 
         let config = FunctionCompileConfig::pure_lambda(&lambda.body, params, return_type_id);
 
-        compile_function_inner(lambda_builder, ctx, config)?;
+        // Create split contexts for lambda compilation
+        let function_ctx = FunctionCtx::main(Some(return_type_id));
+        let explicit_params = ExplicitParams {
+            analyzed: ctx.analyzed,
+            interner: ctx.interner,
+            type_metadata: ctx.type_metadata,
+            impl_method_infos: ctx.impl_method_infos,
+            static_method_infos: ctx.static_method_infos,
+            interface_vtables: ctx.interface_vtables,
+            native_registry: ctx.native_registry,
+            global_inits: ctx.global_inits,
+            source_file_ptr: ctx.source_file_ptr,
+            lambda_counter: ctx.lambda_counter,
+        };
+
+        compile_function_inner_with_params(
+            lambda_builder,
+            ctx,
+            &function_ctx,
+            &explicit_params,
+            config,
+        )?;
     }
 
     ctx.jit_module()
@@ -422,7 +444,7 @@ fn compile_lambda_with_captures(
         .map(|(i, p)| (p.name, param_type_ids[i], param_types[i]))
         .collect();
 
-    // Use compile_function_inner for the body compilation
+    // Use compile_function_inner_with_params for the body compilation
     {
         let mut lambda_builder_ctx = FunctionBuilderContext::new();
         let lambda_builder = FunctionBuilder::new(&mut lambda_ctx.func, &mut lambda_builder_ctx);
@@ -435,7 +457,28 @@ fn compile_lambda_with_captures(
             return_type_id,
         );
 
-        compile_function_inner(lambda_builder, ctx, config)?;
+        // Create split contexts for lambda compilation
+        let function_ctx = FunctionCtx::main(Some(return_type_id));
+        let explicit_params = ExplicitParams {
+            analyzed: ctx.analyzed,
+            interner: ctx.interner,
+            type_metadata: ctx.type_metadata,
+            impl_method_infos: ctx.impl_method_infos,
+            static_method_infos: ctx.static_method_infos,
+            interface_vtables: ctx.interface_vtables,
+            native_registry: ctx.native_registry,
+            global_inits: ctx.global_inits,
+            source_file_ptr: ctx.source_file_ptr,
+            lambda_counter: ctx.lambda_counter,
+        };
+
+        compile_function_inner_with_params(
+            lambda_builder,
+            ctx,
+            &function_ctx,
+            &explicit_params,
+            config,
+        )?;
     }
 
     ctx.jit_module()

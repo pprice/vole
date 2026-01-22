@@ -229,53 +229,6 @@ pub fn compile_function_body_with_cg(
     Ok(())
 }
 
-/// Compile the inner logic of a function: entry block, param binding, body, return handling.
-///
-/// This is the core compilation logic shared by all function compilation paths.
-/// The caller is responsible for:
-/// - Creating the FunctionBuilder with the correct context
-/// - Setting up the function signature
-/// - Calling define_function and clear after this returns
-///
-/// This function takes ownership of the builder because `finalize()` consumes it.
-///
-/// # Arguments
-/// * `builder` - The FunctionBuilder for this function (consumed by finalize)
-/// * `ctx` - The CompileCtx with all necessary context
-/// * `config` - Configuration specifying the function to compile
-///
-/// # Returns
-/// Ok(()) on success, Err with message on failure
-pub fn compile_function_inner(
-    mut builder: FunctionBuilder,
-    ctx: &mut CompileCtx,
-    config: FunctionCompileConfig,
-) -> Result<(), String> {
-    // Set up entry block and bind parameters
-    let (mut variables, captures) = setup_function_entry(&mut builder, &config);
-
-    // Create Cg and compile body using the new path
-    let mut cf = ControlFlow::new();
-    let mut cg = Cg::new(
-        &mut builder,
-        &mut variables,
-        ctx,
-        &mut cf,
-        captures,
-        config.return_type_id,
-    );
-
-    compile_function_body_with_cg(&mut cg, config.body, config.default_return)?;
-
-    // Cg borrow ends here, builder is accessible again
-    drop(cg);
-
-    builder.seal_all_blocks();
-    builder.finalize();
-
-    Ok(())
-}
-
 /// Compile the inner logic of a function using split contexts.
 ///
 /// This is the transition API for migrating from CompileCtx to split context types.

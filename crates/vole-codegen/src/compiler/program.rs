@@ -12,7 +12,8 @@ use super::{Compiler, ControlFlowCtx, SelfParam, TestInfo, TypeResolver};
 
 use crate::FunctionKey;
 use crate::RuntimeFn;
-use crate::stmt::{compile_block, compile_func_body_with_params};
+use crate::context::{Cg, ControlFlow};
+use crate::stmt::compile_func_body_with_params;
 use crate::types::{
     CompileCtx, ExplicitParams, FunctionCtx, function_name_id_with_interner,
     resolve_type_expr_to_id, type_id_to_cranelift,
@@ -950,7 +951,6 @@ impl Compiler<'_> {
                 }
 
                 // Compile scoped let declarations in test context
-                // Note: compile_block still uses CompileCtx (migration pending)
                 let mut cf_ctx = ControlFlowCtx::default();
                 if !scoped_lets.is_empty() {
                     // Create a synthetic block with the let statements
@@ -961,13 +961,19 @@ impl Compiler<'_> {
                             .collect(),
                         span: Span::default(),
                     };
-                    compile_block(
+                    // Compile the block using Cg with split contexts
+                    let mut cf = ControlFlow::new();
+                    let mut cg = Cg::new_with_params(
                         &mut builder,
-                        &let_block,
                         &mut variables,
-                        &mut cf_ctx,
                         &mut ctx,
-                    )?;
+                        &mut cf,
+                        &function_ctx,
+                        &explicit_params,
+                        None,
+                        None,
+                    );
+                    cg.block(&let_block)?;
                 }
 
                 // Compile test body
