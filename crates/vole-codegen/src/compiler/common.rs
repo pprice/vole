@@ -12,7 +12,7 @@ use vole_sema::type_arena::TypeId;
 
 use crate::context::{Captures, Cg, ControlFlow};
 use crate::lambda::CaptureBinding;
-use crate::types::{CompileCtx, ExplicitParams, FunctionCtx};
+use crate::types::{CodegenCtx, ExplicitParams, FunctionCtx};
 
 /// What to return from a non-terminated block
 #[derive(Clone, Copy)]
@@ -231,24 +231,23 @@ pub fn compile_function_body_with_cg(
 
 /// Compile the inner logic of a function using split contexts.
 ///
-/// This is the transition API for migrating from CompileCtx to split context types.
-/// It takes CompileCtx for mutable JIT infrastructure (module, func_registry) but
-/// uses FunctionCtx and ExplicitParams for read-only data. CodegenCtx is NOT used
-/// because it would conflict with CompileCtx's mutable references.
+/// This uses the new split context architecture:
+/// - CodegenCtx for mutable JIT infrastructure (module, func_registry)
+/// - FunctionCtx for per-function state (return type, module id)
+/// - ExplicitParams for read-only lookup tables
 ///
 /// # Arguments
 /// * `builder` - The FunctionBuilder for this function (consumed by finalize)
-/// * `ctx` - CompileCtx (provides mutable JIT infrastructure)
+/// * `codegen_ctx` - Mutable JIT infrastructure (module, func_registry)
 /// * `function_ctx` - Split per-function state (return type, module id)
-/// * `explicit_params` - Split read-only lookup tables (can use module-specific interner!)
+/// * `explicit_params` - Split read-only lookup tables
 /// * `config` - Configuration specifying the function to compile
 ///
 /// # Returns
 /// Ok(()) on success, Err with message on failure
-#[allow(dead_code)] // Part of CompileCtx migration
 pub fn compile_function_inner_with_params<'ctx>(
     mut builder: FunctionBuilder,
-    ctx: &mut CompileCtx<'ctx>,
+    codegen_ctx: &mut CodegenCtx<'ctx>,
     function_ctx: &FunctionCtx<'ctx>,
     explicit_params: &ExplicitParams<'ctx>,
     config: FunctionCompileConfig,
@@ -256,13 +255,13 @@ pub fn compile_function_inner_with_params<'ctx>(
     // Set up entry block and bind parameters
     let (mut variables, captures) = setup_function_entry(&mut builder, &config);
 
-    // Create Cg with split contexts (no CodegenCtx - would conflict with ctx)
+    // Create Cg with split contexts
     let mut cf = ControlFlow::new();
-    let mut cg = Cg::new_with_params(
+    let mut cg = Cg::new(
         &mut builder,
         &mut variables,
-        ctx,
         &mut cf,
+        codegen_ctx,
         function_ctx,
         explicit_params,
         captures,

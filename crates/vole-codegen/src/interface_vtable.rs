@@ -8,9 +8,11 @@ use cranelift_module::{DataDescription, DataId, Linkage, Module};
 use crate::RuntimeFn;
 use crate::errors::CodegenError;
 use crate::types::{
-    CompileCtx, CompiledValue, MethodInfo, method_name_id_by_str, type_id_to_cranelift,
+    CompiledValue, MethodInfo, method_name_id_by_str, type_id_to_cranelift,
     type_metadata_by_name_id, value_to_word, word_to_value_type_id,
 };
+use crate::types::{CodegenCtx, ExplicitParams};
+use crate::vtable_ctx::{VtableCtx, VtableCtxView};
 use vole_frontend::Symbol;
 use vole_identity::{MethodId, NameId, TypeDefId};
 use vole_sema::EntityRegistry;
@@ -24,9 +26,13 @@ enum InterfaceConcreteType {
     Function { is_closure: bool },
 }
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+/// Key for vtable lookup. Uses String for interface_name instead of Symbol
+/// because Symbol values are interner-specific, and different interners (main vs module)
+/// would produce different Symbols for the same interface name, causing duplicate
+/// vtable declarations.
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
 struct InterfaceVtableKey {
-    interface_name: Symbol,
+    interface_name: String,
     concrete: InterfaceConcreteType,
 }
 
@@ -89,10 +95,11 @@ impl InterfaceVtableRegistry {
     /// Phase 1: Get or declare a vtable.
     /// Does not compile wrappers yet - call ensure_compiled() later.
     #[tracing::instrument(skip(self, ctx, interface_type_arg_ids), fields(interface = %ctx.interner().resolve(interface_name)))]
-    pub(crate) fn get_or_declare(
+    pub(crate) fn get_or_declare<C: VtableCtx>(
         &mut self,
-        ctx: &mut CompileCtx,
+        ctx: &mut C,
         interface_name: Symbol,
+        interface_type_def_id: TypeDefId,
         interface_type_arg_ids: &[TypeId],
         concrete_type_id: TypeId,
     ) -> Result<DataId, String> {
@@ -114,8 +121,10 @@ impl InterfaceVtableRegistry {
                 InterfaceConcreteType::ImplTypeId(impl_type_id)
             }
         };
+        // Resolve interface name to string for key (Symbol is interner-specific)
+        let interface_name_str = ctx.interner().resolve(interface_name).to_string();
         let key = InterfaceVtableKey {
-            interface_name,
+            interface_name: interface_name_str.clone(),
             concrete: concrete_key,
         };
 
@@ -129,15 +138,12 @@ impl InterfaceVtableRegistry {
             return Ok(state.data_id);
         }
 
-        // Resolve interface metadata
-        let interface_name_str = ctx.interner().resolve(interface_name);
-        let interface_type_def_id = ctx
-            .resolve_type_str_or_interface(interface_name_str)
-            .ok_or_else(|| format!("unknown interface {:?}", interface_name_str))?;
-        let interface_name_id = ctx.query().get_type(interface_type_def_id).name_id;
+        // Get interface metadata from the passed TypeDefId (don't re-resolve by name
+        // since interface_by_short_name could return a different interface with the same name)
+        let interface_def = ctx.query().get_type(interface_type_def_id);
+        let interface_name_id = interface_def.name_id;
 
         // Build substitution map from type param names to concrete type args (already TypeIds)
-        let interface_def = ctx.query().get_type(interface_type_def_id);
         let substitutions: FxHashMap<NameId, TypeId> = interface_def
             .type_params
             .iter()
@@ -152,7 +158,7 @@ impl InterfaceVtableRegistry {
         // Build vtable name and declare data
         let type_name = match concrete_key {
             InterfaceConcreteType::ImplTypeId(type_id) => {
-                ctx.analyzed.name_table().display(type_id.name_id())
+                ctx.analyzed().name_table().display(type_id.name_id())
             }
             InterfaceConcreteType::Function { is_closure } => {
                 if is_closure {
@@ -197,9 +203,9 @@ impl InterfaceVtableRegistry {
     /// Phase 2+3: Ensure a vtable is fully compiled.
     /// Must be called after get_or_declare() for the same key.
     #[tracing::instrument(skip(self, ctx), fields(interface = %ctx.interner().resolve(interface_name)))]
-    pub(crate) fn ensure_compiled(
+    pub(crate) fn ensure_compiled<C: VtableCtx>(
         &mut self,
-        ctx: &mut CompileCtx,
+        ctx: &mut C,
         interface_name: Symbol,
         concrete_type_id: TypeId,
     ) -> Result<DataId, String> {
@@ -221,8 +227,10 @@ impl InterfaceVtableRegistry {
                 InterfaceConcreteType::ImplTypeId(impl_type_id)
             }
         };
+        // Resolve interface name to string for key (Symbol is interner-specific)
+        let interface_name_str = ctx.interner().resolve(interface_name).to_string();
         let key = InterfaceVtableKey {
-            interface_name,
+            interface_name: interface_name_str.clone(),
             concrete: concrete_key,
         };
 
@@ -238,7 +246,6 @@ impl InterfaceVtableRegistry {
             .ok_or_else(|| "vtable not declared - call get_or_declare first".to_string())?;
 
         let word_bytes = ctx.ptr_type().bytes() as usize;
-        let interface_name_str = ctx.interner().resolve(interface_name);
 
         // Phase 2: Compile wrappers
         let mut data = DataDescription::new();
@@ -247,7 +254,7 @@ impl InterfaceVtableRegistry {
 
         for (index, &method_id) in state.method_ids.iter().enumerate() {
             let method = ctx.query().get_method(method_id);
-            let method_name_str = ctx.analyzed.name_table().display(method.name_id);
+            let method_name_str = ctx.analyzed().name_table().display(method.name_id);
             let target = resolve_vtable_target(
                 ctx,
                 state.interface_name_id,
@@ -257,7 +264,7 @@ impl InterfaceVtableRegistry {
             )?;
             let wrapper_id = self.compile_wrapper(
                 ctx,
-                interface_name_str,
+                &interface_name_str,
                 &method_name_str,
                 state.concrete_type,
                 &target,
@@ -292,9 +299,9 @@ impl InterfaceVtableRegistry {
         Ok(state.data_id)
     }
 
-    fn compile_wrapper(
+    fn compile_wrapper<C: VtableCtx>(
         &mut self,
-        ctx: &mut CompileCtx,
+        ctx: &mut C,
         interface_name: &str,
         method_name: &str,
         concrete_type_id: TypeId,
@@ -411,9 +418,9 @@ impl InterfaceVtableRegistry {
 }
 
 /// Compile wrapper body for Function target (closure/function pointer calls)
-fn compile_function_wrapper(
+fn compile_function_wrapper<C: VtableCtx>(
     builder: &mut FunctionBuilder,
-    ctx: &mut CompileCtx,
+    ctx: &mut C,
     concrete_type_id: TypeId,
     data_word: Value,
     params: &[Value],
@@ -519,9 +526,9 @@ fn compile_function_wrapper(
 }
 
 /// Compile wrapper body for Direct/Implemented targets (direct method calls)
-fn compile_method_wrapper(
+fn compile_method_wrapper<C: VtableCtx>(
     builder: &mut FunctionBuilder,
-    ctx: &mut CompileCtx,
+    ctx: &mut C,
     concrete_type_id: TypeId,
     data_word: Value,
     params: &[Value],
@@ -559,9 +566,9 @@ fn compile_method_wrapper(
 
 /// Compile wrapper body for External target (native/external function calls)
 #[allow(clippy::too_many_arguments)]
-fn compile_external_wrapper(
+fn compile_external_wrapper<C: VtableCtx>(
     builder: &mut FunctionBuilder,
-    ctx: &mut CompileCtx,
+    ctx: &mut C,
     concrete_type_id: TypeId,
     data_word: Value,
     box_ptr: Value,
@@ -575,19 +582,21 @@ fn compile_external_wrapper(
     // so external functions like vole_iter_collect can iterate via vtable.
     let self_val = if interface_name == "Iterator" {
         // Call vole_interface_iter(box_ptr) to create UnifiedIterator adapter
-        let interface_iter_fn = ctx
-            .native_registry
+        // Extract just the pointer value to end the borrow before jit_module() call
+        let interface_iter_ptr = ctx
+            .native_registry()
             .lookup("std:intrinsics", "interface_iter")
             .ok_or_else(|| {
                 "native function std:intrinsics::interface_iter not found".to_string()
-            })?;
+            })?
+            .ptr;
         let mut iter_sig = ctx.jit_module().make_signature();
         iter_sig.params.push(AbiParam::new(ctx.ptr_type()));
         iter_sig.returns.push(AbiParam::new(ctx.ptr_type()));
         let iter_sig_ref = builder.import_signature(iter_sig);
         let iter_fn_ptr = builder
             .ins()
-            .iconst(ctx.ptr_type(), interface_iter_fn.ptr as i64);
+            .iconst(ctx.ptr_type(), interface_iter_ptr as i64);
         let iter_call = builder
             .ins()
             .call_indirect(iter_sig_ref, iter_fn_ptr, &[box_ptr]);
@@ -617,7 +626,7 @@ fn compile_external_wrapper(
     }
 
     // Get string names from NameId
-    let name_table = ctx.analyzed.name_table();
+    let name_table = ctx.analyzed().name_table();
     let module_path = name_table
         .last_segment_str(external_info.module_path)
         .ok_or_else(|| "module_path NameId has no segment".to_string())?;
@@ -626,10 +635,12 @@ fn compile_external_wrapper(
         .ok_or_else(|| "native_name NameId has no segment".to_string())?;
     drop(name_table);
 
-    let native_func = ctx
-        .native_registry
+    // Extract just the pointer value to end the borrow before jit_module() call
+    let native_func_ptr = ctx
+        .native_registry()
         .lookup(&module_path, &native_name)
-        .ok_or_else(|| format!("native function {}::{} not found", module_path, native_name))?;
+        .ok_or_else(|| format!("native function {}::{} not found", module_path, native_name))?
+        .ptr;
 
     let mut native_sig = ctx.jit_module().make_signature();
     // For Iterator, the self param is now *mut UnifiedIterator (pointer)
@@ -660,7 +671,7 @@ fn compile_external_wrapper(
     drop(arena);
 
     let sig_ref = builder.import_signature(native_sig);
-    let func_ptr_val = builder.ins().iconst(ctx.ptr_type(), native_func.ptr as i64);
+    let func_ptr_val = builder.ins().iconst(ctx.ptr_type(), native_func_ptr as i64);
     let call = builder
         .ins()
         .call_indirect(sig_ref, func_ptr_val, &call_args);
@@ -762,16 +773,20 @@ fn collect_interface_methods_inner_entity_registry(
 }
 
 /// Box a value as an interface type using TypeId.
-#[tracing::instrument(skip(builder, ctx, value), fields(interface_type_id = ?interface_type_id))]
-pub(crate) fn box_interface_value_id(
+///
+/// Takes split parameters to allow calling from Cg methods without borrow conflicts.
+/// Use box_interface_value_id_cg() for Cg callers or box_interface_value_id_vtable() for generic callers.
+#[tracing::instrument(skip(builder, codegen_ctx, explicit_params, value), fields(interface_type_id = ?interface_type_id))]
+pub(crate) fn box_interface_value_id<'a, 'ctx>(
     builder: &mut FunctionBuilder,
-    ctx: &mut CompileCtx,
+    codegen_ctx: &'a mut CodegenCtx<'ctx>,
+    explicit_params: &'a ExplicitParams<'ctx>,
     value: CompiledValue,
     interface_type_id: TypeId,
 ) -> Result<CompiledValue, String> {
     // Extract interface info using arena
     let (type_def_id, type_args_ids) = {
-        let arena = ctx.arena();
+        let arena = explicit_params.analyzed.type_arena();
         match arena.unwrap_interface(interface_type_id) {
             Some((type_def_id, type_args)) => (type_def_id, type_args.to_vec()),
             None => return Ok(value), // Not an interface type
@@ -779,63 +794,77 @@ pub(crate) fn box_interface_value_id(
     };
 
     // Look up the interface Symbol name via EntityRegistry
-    let interface_def = ctx.query().get_type(type_def_id);
-    let interface_name_str = ctx
+    let interface_def = explicit_params.analyzed.query().get_type(type_def_id);
+    let interface_name_str = explicit_params
         .analyzed
         .name_table()
         .last_segment_str(interface_def.name_id)
         .ok_or_else(|| format!("cannot get interface name string for {:?}", type_def_id))?;
-    let interface_name = ctx.interner().lookup(&interface_name_str).ok_or_else(|| {
-        format!(
-            "interface name '{}' not found in interner",
-            interface_name_str
-        )
-    })?;
+    let interface_name = explicit_params
+        .interner
+        .lookup(&interface_name_str)
+        .ok_or_else(|| {
+            format!(
+                "interface name '{}' not found in interner",
+                interface_name_str
+            )
+        })?;
 
     // Check if value is already an interface
-    if ctx.arena().is_interface(value.type_id) {
+    if explicit_params.analyzed.type_arena().is_interface(value.type_id) {
         tracing::debug!("already interface, skip boxing");
         return Ok(value);
     }
 
     // Check if this is an external-only interface
-    if ctx.registry().is_external_only(type_def_id) {
+    if explicit_params
+        .analyzed
+        .entity_registry()
+        .is_external_only(type_def_id)
+    {
         tracing::debug!("external-only interface, skip boxing");
         return Ok(CompiledValue {
             value: value.value,
-            ty: ctx.ptr_type(),
+            ty: codegen_ctx.ptr_type(),
             type_id: interface_type_id,
         });
     }
 
-    let heap_alloc_ref = runtime_heap_alloc_ref(ctx, builder)?;
+    // Create a VtableCtxView for operations that need VtableCtx
+    let mut ctx_view = VtableCtxView::new(codegen_ctx, explicit_params);
+    let heap_alloc_ref = runtime_heap_alloc_ref(&mut ctx_view, builder)?;
     let data_word = value_to_word(
         builder,
         &value,
-        ctx.ptr_type(),
+        ctx_view.ptr_type(),
         Some(heap_alloc_ref),
-        ctx.arena_rc(),
-        ctx.registry(),
+        ctx_view.arena_rc(),
+        ctx_view.registry(),
     )?;
 
     // Phase 1: Declare vtable
-    let vtable_id = ctx.interface_vtables.borrow_mut().get_or_declare(
-        ctx,
-        interface_name,
-        &type_args_ids,
-        value.type_id,
-    )?;
-    // Phase 2+3: Compile wrappers and define vtable data
-    ctx.interface_vtables
+    let vtable_id = explicit_params
+        .interface_vtables
         .borrow_mut()
-        .ensure_compiled(ctx, interface_name, value.type_id)?;
-    let vtable_gv = ctx
+        .get_or_declare(
+            &mut ctx_view,
+            interface_name,
+            type_def_id,
+            &type_args_ids,
+            value.type_id,
+        )?;
+    // Phase 2+3: Compile wrappers and define vtable data
+    explicit_params
+        .interface_vtables
+        .borrow_mut()
+        .ensure_compiled(&mut ctx_view, interface_name, value.type_id)?;
+    let vtable_gv = ctx_view
         .jit_module()
         .declare_data_in_func(vtable_id, builder.func);
-    let vtable_ptr = builder.ins().global_value(ctx.ptr_type(), vtable_gv);
+    let vtable_ptr = builder.ins().global_value(ctx_view.ptr_type(), vtable_gv);
 
-    let word_bytes = ctx.ptr_type().bytes() as i64;
-    let size_val = builder.ins().iconst(ctx.ptr_type(), word_bytes * 2);
+    let word_bytes = ctx_view.ptr_type().bytes() as i64;
+    let size_val = builder.ins().iconst(ctx_view.ptr_type(), word_bytes * 2);
     let alloc_call = builder.ins().call(heap_alloc_ref, &[size_val]);
     let iface_ptr = builder.inst_results(alloc_call)[0];
 
@@ -848,13 +877,13 @@ pub(crate) fn box_interface_value_id(
 
     Ok(CompiledValue {
         value: iface_ptr,
-        ty: ctx.ptr_type(),
+        ty: ctx_view.ptr_type(),
         type_id: interface_type_id,
     })
 }
 
-fn resolve_vtable_target(
-    ctx: &CompileCtx,
+fn resolve_vtable_target<C: VtableCtx>(
+    ctx: &C,
     interface_name_id: NameId,
     concrete_type_id: TypeId,
     interface_method_id: MethodId,
@@ -862,7 +891,7 @@ fn resolve_vtable_target(
 ) -> Result<VtableMethod, String> {
     // Get method info from EntityRegistry
     let interface_method = ctx.query().get_method(interface_method_id);
-    let method_name_str = ctx.analyzed.name_table().display(interface_method.name_id);
+    let method_name_str = ctx.analyzed().name_table().display(interface_method.name_id);
 
     // Apply substitutions to get concrete param/return types (using TypeId-based substitution)
     let (substituted_param_ids, substituted_return_id) = {
@@ -910,13 +939,11 @@ fn resolve_vtable_target(
         })?;
     // Use string-based lookup for cross-interner safety (method_def is from stdlib interner)
     // This may return None for default interface methods that aren't explicitly implemented
-    let method_name_id = method_name_id_by_str(ctx.analyzed, ctx.interner(), &method_name_str);
+    let method_name_id = method_name_id_by_str(ctx.analyzed(), ctx.interner(), &method_name_str);
 
     // Check implement registry for explicit implementations
     if let Some(method_name_id) = method_name_id
-        && let Some(impl_) = ctx
-            .analyzed
-            .implement_registry()
+        && let Some(impl_) = ctx.analyzed().implement_registry()
             .get_method(&impl_type_id, method_name_id)
     {
         // Use TypeId fields (required)
@@ -933,7 +960,7 @@ fn resolve_vtable_target(
             });
         }
         let method_info = ctx
-            .impl_method_infos
+            .impl_method_infos()
             .get(&(impl_type_id, method_name_id))
             .copied()
             .ok_or_else(|| "implement method info not found".to_string())?;
@@ -960,7 +987,7 @@ fn resolve_vtable_target(
 
         let type_name_id = ctx.query().get_type(type_def_id).name_id;
         let meta = type_metadata_by_name_id(
-            ctx.type_metadata,
+            ctx.type_metadata(),
             type_name_id,
             ctx.registry(),
             &ctx.arena(),
@@ -1035,8 +1062,8 @@ fn resolve_vtable_target(
     .into())
 }
 
-fn runtime_heap_alloc_ref(
-    ctx: &mut CompileCtx,
+fn runtime_heap_alloc_ref<C: VtableCtx>(
+    ctx: &mut C,
     builder: &mut FunctionBuilder,
 ) -> Result<FuncRef, String> {
     let key = ctx

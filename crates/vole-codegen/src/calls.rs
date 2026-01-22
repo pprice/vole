@@ -16,9 +16,7 @@ use vole_runtime::native_registry::{NativeFunction, NativeType};
 use vole_sema::type_arena::{TypeArena, TypeId};
 
 use super::context::Cg;
-use super::types::{
-    CompiledValue, box_interface_value_id, native_type_to_cranelift, type_id_to_cranelift,
-};
+use super::types::{CompiledValue, native_type_to_cranelift, type_id_to_cranelift};
 use super::{FunctionKey, FunctionRegistry, RuntimeFn};
 
 /// Compile a string literal by calling vole_string_new.
@@ -57,9 +55,9 @@ impl Cg<'_, '_, '_> {
         let value = compile_string_literal(
             self.builder,
             s,
-            self.ctx.ptr_type(),
-            self.ctx.module,
-            self.ctx.func_registry,
+            self.ptr_type(),
+            self.codegen_ctx.module,
+            self.codegen_ctx.func_registry,
         )?;
         Ok(self.string_value(value))
     }
@@ -86,9 +84,7 @@ impl Cg<'_, '_, '_> {
             return Ok(self.string_value(string_values[0]));
         }
 
-        let concat_key = self
-            .ctx
-            .funcs()
+        let concat_key = self.funcs()
             .runtime_key(RuntimeFn::StringConcat)
             .ok_or_else(|| "vole_string_concat not found".to_string())?;
         let concat_func_ref = self.func_ref(concat_key)?;
@@ -108,7 +104,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Handle arrays
-        if self.ctx.arena().is_array(val.type_id) {
+        if self.arena().is_array(val.type_id) {
             return self.call_runtime(RuntimeFn::ArrayI64ToString, &[val.value]);
         }
 
@@ -119,7 +115,7 @@ impl Cg<'_, '_, '_> {
 
         // Handle optionals (unions with nil variant)
         if let Some(nil_idx) = self.find_nil_variant(val.type_id) {
-            let arena = self.ctx.arena();
+            let arena = self.arena();
             if let Some(variants) = arena.unwrap_union(val.type_id) {
                 let variants_vec: Vec<TypeId> = variants.to_vec();
                 drop(arena);
@@ -162,7 +158,7 @@ impl Cg<'_, '_, '_> {
 
         // Add block param for the result string
         self.builder
-            .append_block_param(merge_block, self.ctx.ptr_type());
+            .append_block_param(merge_block, self.ptr_type());
 
         self.builder
             .ins()
@@ -176,13 +172,13 @@ impl Cg<'_, '_, '_> {
         // Some case: extract inner value and convert to string
         self.builder.switch_to_block(some_block);
         // Find the non-nil variant using arena
-        let arena = self.ctx.arena();
+        let arena = self.arena();
         let inner_type_id = variants
             .iter()
             .find(|&&v| !arena.is_nil(v))
             .copied()
             .unwrap_or(TypeId::NIL);
-        let inner_cr_type = type_id_to_cranelift(inner_type_id, &arena, self.ctx.ptr_type());
+        let inner_cr_type = type_id_to_cranelift(inner_type_id, &arena, self.ptr_type());
         drop(arena);
 
         let inner_val = self
@@ -216,7 +212,7 @@ impl Cg<'_, '_, '_> {
             _ => return self.indirect_call(call),
         };
 
-        let callee_name = self.ctx.interner().resolve(callee_sym);
+        let callee_name = self.interner().resolve(callee_sym);
 
         // Handle builtins
         match callee_name {
@@ -228,7 +224,7 @@ impl Cg<'_, '_, '_> {
 
         // Check if it's a closure variable
         if let Some((var, type_id)) = self.vars.get(&callee_sym)
-            && self.ctx.arena().is_function(*type_id)
+            && self.arena().is_function(*type_id)
         {
             return self.call_closure(*var, *type_id, call);
         }
@@ -236,7 +232,7 @@ impl Cg<'_, '_, '_> {
         // Check if it's a captured closure (e.g., recursive lambda or captured function)
         if self.has_captures()
             && let Some(binding) = self.get_capture(&callee_sym).copied()
-            && self.ctx.arena().is_function(binding.vole_type)
+            && self.arena().is_function(binding.vole_type)
         {
             let captured = self.load_capture(&binding)?;
             return self.call_closure_value(captured.value, binding.vole_type, call);
@@ -245,9 +241,9 @@ impl Cg<'_, '_, '_> {
         // Check if it's a functional interface variable
         if let Some((var, type_id)) = self.vars.get(&callee_sym)
             && let Some(iface_type_def_id) = self.interface_type_def_id(*type_id)
-            && let Some(method_id) = self.ctx.query().is_functional_interface(iface_type_def_id)
+            && let Some(method_id) = self.query().is_functional_interface(iface_type_def_id)
         {
-            let method = self.ctx.query().get_method(method_id);
+            let method = self.query().get_method(method_id);
             let func_type_id = method.signature_id;
             let method_name_id = method.name_id;
             let value = self.builder.use_var(*var);
@@ -266,7 +262,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Check if it's a global lambda or global functional interface
-        if let Some(init_expr) = self.ctx.global_init(callee_sym).cloned() {
+        if let Some(init_expr) = self.global_init(callee_sym).cloned() {
             // Compile the global's initializer to get its value
             let lambda_val = self.expr(&init_expr)?;
 
@@ -275,37 +271,30 @@ impl Cg<'_, '_, '_> {
             let global_type_id = {
                 let name_table = self.name_table();
                 let module_id = self
-                    .ctx
-                    .module_path()
-                    .and_then(|path| name_table.module_id_if_known(path))
+                    .current_module()
                     .unwrap_or_else(|| name_table.main_module());
                 name_table
-                    .name_id(module_id, &[callee_sym], self.ctx.interner())
-                    .and_then(|name_id| self.ctx.query().global(name_id))
+                    .name_id(module_id, &[callee_sym], self.interner())
+                    .and_then(|name_id| self.query().global(name_id))
                     .map(|global_def| global_def.type_id)
             };
 
             if let Some(declared_type_id) = global_type_id {
                 // If declared as functional interface, call via vtable dispatch
                 let iface_info = {
-                    let arena = self.ctx.arena();
+                    let arena = self.arena();
                     arena
                         .unwrap_interface(declared_type_id)
                         .map(|(type_def_id, _type_args)| type_def_id)
                 };
                 if let Some(type_def_id) = iface_info
-                    && let Some(method_id) = self.ctx.query().is_functional_interface(type_def_id)
+                    && let Some(method_id) = self.query().is_functional_interface(type_def_id)
                 {
-                    let method = self.ctx.query().get_method(method_id);
+                    let method = self.query().get_method(method_id);
                     let func_type_id = method.signature_id;
                     let method_name_id = method.name_id;
                     // Box the lambda value to create the interface representation
-                    let boxed = box_interface_value_id(
-                        self.builder,
-                        self.ctx,
-                        lambda_val,
-                        declared_type_id,
-                    )?;
+                    let boxed = self.box_interface_value(lambda_val, declared_type_id)?;
                     return self.interface_dispatch_call_args_by_type_def_id(
                         &boxed,
                         &call.args,
@@ -317,15 +306,15 @@ impl Cg<'_, '_, '_> {
             }
 
             // If it's a function type, call as closure
-            if self.ctx.arena().is_function(lambda_val.type_id) {
+            if self.arena().is_function(lambda_val.type_id) {
                 return self.call_closure_value(lambda_val.value, lambda_val.type_id, call);
             }
 
             // If it's an interface type (functional interface), call via vtable
             if let Some(type_def_id) = self.interface_type_def_id(lambda_val.type_id)
-                && let Some(method_id) = self.ctx.query().is_functional_interface(type_def_id)
+                && let Some(method_id) = self.query().is_functional_interface(type_def_id)
             {
-                let method = self.ctx.query().get_method(method_id);
+                let method = self.query().get_method(method_id);
                 let func_type_id = method.signature_id;
                 let method_name_id = method.name_id;
                 return self.interface_dispatch_call_args_by_type_def_id(
@@ -339,7 +328,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Check if this is a call to a generic function (via monomorphization)
-        let monomorph_key = self.ctx.query().monomorph_for(call_expr_id);
+        let monomorph_key = self.query().monomorph_for(call_expr_id);
         tracing::trace!(
             call_expr_id = ?call_expr_id,
             callee = callee_name,
@@ -348,7 +337,7 @@ impl Cg<'_, '_, '_> {
         );
         if let Some(monomorph_key) = monomorph_key {
             // Extract what we need from the monomorph cache before any mutable borrows
-            let instance_data = self.ctx.monomorph_cache().get(monomorph_key).map(|inst| {
+            let instance_data = self.monomorph_cache().get(monomorph_key).map(|inst| {
                 (
                     inst.original_name,
                     inst.mangled_name,
@@ -362,8 +351,8 @@ impl Cg<'_, '_, '_> {
                     mangled_name = ?mangled_name,
                     "found monomorph instance"
                 );
-                let func_key = self.ctx.funcs().intern_name_id(mangled_name);
-                if let Some(func_id) = self.ctx.funcs().func_id(func_key) {
+                let func_key = self.funcs().intern_name_id(mangled_name);
+                if let Some(func_id) = self.funcs().func_id(func_key) {
                     tracing::trace!("found func_id, using regular path");
                     return self.call_func_id(func_key, func_id, call);
                 }
@@ -371,9 +360,7 @@ impl Cg<'_, '_, '_> {
 
                 // For generic external functions, call them directly with type erasure
                 // They don't have compiled func_id, but we can look them up in native_registry
-                if let Some(ext_info) = self
-                    .ctx
-                    .analyzed
+                if let Some(ext_info) = self.analyzed()
                     .implement_registry()
                     .get_external_func(callee_name)
                 {
@@ -383,12 +370,12 @@ impl Cg<'_, '_, '_> {
                     drop(name_table);
                     if let (Some(module_path), Some(native_name)) = (module_path, native_name)
                         && let Some(native_func) =
-                            self.ctx.native_funcs().lookup(&module_path, &native_name)
+                            self.native_funcs().lookup(&module_path, &native_name)
                     {
                         // The func_type from the monomorph instance may have TypeParams that weren't
                         // inferred from arguments (like return type params). Apply class type
                         // substitutions to fully resolve the type.
-                        let return_type_id = self.ctx.substitute_type_id(return_type_id);
+                        let return_type_id = self.substitute_type(return_type_id);
                         return self.compile_native_call_with_types(
                             native_func,
                             call,
@@ -403,34 +390,28 @@ impl Cg<'_, '_, '_> {
         // 1. Try direct function lookup
         // 2. If in module context, try mangled name
         // 3. If in module context, try FFI call
-        let main_module = self.ctx.funcs_ref().main_module();
-        let interner = self.ctx.interner();
-        let func_key = self
-            .ctx
-            .funcs()
+        let main_module = self.funcs_ref().main_module();
+        let interner = self.interner();
+        let func_key = self.funcs()
             .intern_qualified(main_module, &[callee_sym], interner);
-        if let Some(func_id) = self.ctx.funcs_ref().func_id(func_key) {
+        if let Some(func_id) = self.funcs_ref().func_id(func_key) {
             return self.call_func_id(func_key, func_id, call);
         }
 
         // Check module context for mangled name or FFI
-        if let Some(module_path) = self.current_module() {
-            let name_table = self.name_table();
-            let module_id = name_table
-                .module_id_if_known(module_path)
-                .unwrap_or_else(|| name_table.main_module());
-            drop(name_table);
-            let name_id = crate::types::module_name_id(self.ctx.analyzed, module_id, callee_name);
+        if let Some(module_id) = self.current_module() {
+            let module_path = self.name_table().module_path(module_id).to_string();
+            let name_id = crate::types::module_name_id(self.analyzed(), module_id, callee_name);
             if let Some(name_id) = name_id {
-                let func_key = self.ctx.funcs().intern_name_id(name_id);
-                if let Some(func_id) = self.ctx.funcs().func_id(func_key) {
+                let func_key = self.funcs().intern_name_id(name_id);
+                if let Some(func_id) = self.funcs().func_id(func_key) {
                     // Found module function with qualified name
                     return self.call_func_id(func_key, func_id, call);
                 }
             }
 
             // Try FFI call for external module functions
-            if let Some(native_func) = self.ctx.native_funcs().lookup(module_path, callee_name) {
+            if let Some(native_func) = self.native_funcs().lookup(&module_path, callee_name) {
                 // Compile arguments first
                 let mut args = Vec::new();
                 for arg in &call.args {
@@ -439,27 +420,25 @@ impl Cg<'_, '_, '_> {
                 }
 
                 // Build the Cranelift signature from NativeSignature
-                let mut sig = self.ctx.jit_module().make_signature();
+                let mut sig = self.jit_module().make_signature();
                 for param_type in &native_func.signature.params {
                     sig.params.push(AbiParam::new(native_type_to_cranelift(
                         param_type,
-                        self.ctx.ptr_type(),
+                        self.ptr_type(),
                     )));
                 }
                 if native_func.signature.return_type != NativeType::Nil {
                     sig.returns.push(AbiParam::new(native_type_to_cranelift(
                         &native_func.signature.return_type,
-                        self.ctx.ptr_type(),
+                        self.ptr_type(),
                     )));
                 }
 
                 // Import the signature and emit an indirect call
                 let sig_ref = self.builder.import_signature(sig);
                 let func_ptr = native_func.ptr;
-                let func_ptr_val = self
-                    .builder
-                    .ins()
-                    .iconst(self.ctx.ptr_type(), func_ptr as i64);
+                let ptr_type = self.ptr_type();
+                let func_ptr_val = self.builder.ins().iconst(ptr_type, func_ptr as i64);
 
                 let call_inst = self
                     .builder
@@ -472,10 +451,10 @@ impl Cg<'_, '_, '_> {
                 } else {
                     // For generic external functions, use sema-inferred type first.
                     // Fall back to declared type for non-generic externals.
-                    let type_id = self.ctx.get_expr_type(&call_expr_id).unwrap_or_else(|| {
+                    let type_id = self.get_expr_type(&call_expr_id).unwrap_or_else(|| {
                         native_type_to_type_id(
                             &native_func.signature.return_type,
-                            &self.ctx.arena(),
+                            &self.arena(),
                             &self.update(),
                         )
                     });
@@ -486,7 +465,7 @@ impl Cg<'_, '_, '_> {
                         value: results[0],
                         ty: native_type_to_cranelift(
                             &native_func.signature.return_type,
-                            self.ctx.ptr_type(),
+                            self.ptr_type(),
                         ),
                         type_id,
                     });
@@ -498,16 +477,14 @@ impl Cg<'_, '_, '_> {
 
         // Try prelude external functions (works in module context too)
         // Look up the external info (module path and native name) from implement_registry
-        let ext_info = self
-            .ctx
-            .analyzed
+        let ext_info = self.analyzed()
             .implement_registry()
             .get_external_func(callee_name);
         let native_func = ext_info.and_then(|info| {
             let name_table = self.name_table();
             let module_path = name_table.last_segment_str(info.module_path)?;
             let native_name = name_table.last_segment_str(info.native_name)?;
-            self.ctx.native_funcs().lookup(&module_path, &native_name)
+            self.native_funcs().lookup(&module_path, &native_name)
         });
         if let Some(native_func) = native_func {
             // Compile arguments first
@@ -518,27 +495,25 @@ impl Cg<'_, '_, '_> {
             }
 
             // Build the Cranelift signature from NativeSignature
-            let mut sig = self.ctx.jit_module().make_signature();
+            let mut sig = self.jit_module().make_signature();
             for param_type in &native_func.signature.params {
                 sig.params.push(AbiParam::new(native_type_to_cranelift(
                     param_type,
-                    self.ctx.ptr_type(),
+                    self.ptr_type(),
                 )));
             }
             if native_func.signature.return_type != NativeType::Nil {
                 sig.returns.push(AbiParam::new(native_type_to_cranelift(
                     &native_func.signature.return_type,
-                    self.ctx.ptr_type(),
+                    self.ptr_type(),
                 )));
             }
 
             // Import the signature and emit an indirect call
             let sig_ref = self.builder.import_signature(sig);
             let func_ptr = native_func.ptr;
-            let func_ptr_val = self
-                .builder
-                .ins()
-                .iconst(self.ctx.ptr_type(), func_ptr as i64);
+            let ptr_type = self.ptr_type();
+            let func_ptr_val = self.builder.ins().iconst(ptr_type, func_ptr as i64);
 
             let call_inst = self
                 .builder
@@ -552,10 +527,10 @@ impl Cg<'_, '_, '_> {
                 // For generic external functions, the sema analyzer stores the inferred
                 // concrete return type in expr_types. Use that first.
                 // Fall back to declared type for non-generic externals.
-                let type_id = self.ctx.get_expr_type(&call_expr_id).unwrap_or_else(|| {
+                let type_id = self.get_expr_type(&call_expr_id).unwrap_or_else(|| {
                     native_type_to_type_id(
                         &native_func.signature.return_type,
-                        &self.ctx.arena(),
+                        &self.arena(),
                         &self.update(),
                     )
                 });
@@ -566,7 +541,7 @@ impl Cg<'_, '_, '_> {
                     value: results[0],
                     ty: native_type_to_cranelift(
                         &native_func.signature.return_type,
-                        self.ctx.ptr_type(),
+                        self.ptr_type(),
                     ),
                     type_id,
                 });
@@ -584,7 +559,7 @@ impl Cg<'_, '_, '_> {
         call: &CallExpr,
     ) -> Result<CompiledValue, String> {
         let func_ref = self
-            .ctx
+            .codegen_ctx
             .jit_module()
             .declare_func_in_func(func_id, self.builder.func);
 
@@ -623,11 +598,12 @@ impl Cg<'_, '_, '_> {
         let call_inst = self.builder.ins().call(func_ref, &args);
         let results = self.builder.inst_results(call_inst);
 
+        // Get return type - use codegen_ctx directly to avoid borrow conflict with results
         let return_type_id = self
-            .ctx
+            .codegen_ctx
             .funcs()
             .return_type(func_key)
-            .unwrap_or_else(|| self.ctx.arena().void());
+            .unwrap_or_else(|| self.explicit_params.analyzed.type_arena().void());
 
         if results.is_empty() {
             Ok(self.void_value())
@@ -640,7 +616,7 @@ impl Cg<'_, '_, '_> {
     fn indirect_call(&mut self, call: &CallExpr) -> Result<CompiledValue, String> {
         let callee = self.expr(&call.callee)?;
 
-        if self.ctx.arena().is_function(callee.type_id) {
+        if self.arena().is_function(callee.type_id) {
             return self.call_closure_value(callee.value, callee.type_id, call);
         }
 
@@ -751,15 +727,10 @@ impl Cg<'_, '_, '_> {
         self.builder.seal_block(fail_block);
 
         // vole_assert_fail(file_ptr, file_len, line)
-        let (file_ptr, file_len) = self.ctx.source_file();
-        let file_ptr_val = self
-            .builder
-            .ins()
-            .iconst(self.ctx.ptr_type(), file_ptr as i64);
-        let file_len_val = self
-            .builder
-            .ins()
-            .iconst(self.ctx.ptr_type(), file_len as i64);
+        let (file_ptr, file_len) = self.source_file();
+        let ptr_type = self.ptr_type();
+        let file_ptr_val = self.builder.ins().iconst(ptr_type, file_ptr as i64);
+        let file_len_val = self.builder.ins().iconst(ptr_type, file_len as i64);
         let line_val = self.builder.ins().iconst(types::I32, call_line as i64);
 
         self.call_runtime_void(
@@ -809,7 +780,7 @@ impl Cg<'_, '_, '_> {
 
         // Get function components from arena
         let (params, ret, _is_closure) = {
-            let arena = self.ctx.arena();
+            let arena = self.arena();
             let (params, ret, is_closure) = arena
                 .unwrap_function(func_type_id)
                 .ok_or_else(|| "call_actual_closure called with non-function type".to_string())?;
@@ -817,22 +788,22 @@ impl Cg<'_, '_, '_> {
         };
 
         // Build signature (closure ptr + params)
-        let mut sig = self.ctx.jit_module().make_signature();
-        sig.params.push(AbiParam::new(self.ctx.ptr_type())); // closure ptr
+        let mut sig = self.jit_module().make_signature();
+        sig.params.push(AbiParam::new(self.ptr_type())); // closure ptr
         for &param_type_id in params.iter() {
-            let arena = self.ctx.arena();
+            let arena = self.arena();
             sig.params.push(AbiParam::new(type_id_to_cranelift(
                 param_type_id,
                 &arena,
-                self.ctx.ptr_type(),
+                self.ptr_type(),
             )));
         }
-        let arena = self.ctx.arena();
+        let arena = self.arena();
         if ret != arena.void() {
             sig.returns.push(AbiParam::new(type_id_to_cranelift(
                 ret,
                 &arena,
-                self.ctx.ptr_type(),
+                self.ptr_type(),
             )));
         }
         drop(arena);
@@ -842,12 +813,12 @@ impl Cg<'_, '_, '_> {
         let mut args: ArgVec = smallvec![closure_ptr];
         for (arg, &param_type_id) in call.args.iter().zip(params.iter()) {
             let compiled = self.expr(arg)?;
-            let is_param_interface = self.ctx.arena().is_interface(param_type_id);
-            let is_param_union = self.ctx.arena().is_union(param_type_id);
+            let is_param_interface = self.arena().is_interface(param_type_id);
+            let is_param_union = self.arena().is_union(param_type_id);
 
             let compiled = if is_param_interface {
-                box_interface_value_id(self.builder, self.ctx, compiled, param_type_id)?
-            } else if is_param_union && !self.ctx.arena().is_union(compiled.type_id) {
+                self.box_interface_value(compiled, param_type_id)?
+            } else if is_param_union && !self.arena().is_union(compiled.type_id) {
                 // Box concrete type into union representation
                 self.construct_union_id(compiled, param_type_id)?
             } else {
@@ -883,26 +854,24 @@ impl Cg<'_, '_, '_> {
         }
 
         // Build the Cranelift signature from NativeSignature
-        let mut sig = self.ctx.jit_module().make_signature();
+        let mut sig = self.jit_module().make_signature();
         for param_type in &native_func.signature.params {
             sig.params.push(AbiParam::new(native_type_to_cranelift(
                 param_type,
-                self.ctx.ptr_type(),
+                self.ptr_type(),
             )));
         }
         if native_func.signature.return_type != NativeType::Nil {
             sig.returns.push(AbiParam::new(native_type_to_cranelift(
                 &native_func.signature.return_type,
-                self.ctx.ptr_type(),
+                self.ptr_type(),
             )));
         }
 
         // Import the signature and emit an indirect call
         let sig_ref = self.builder.import_signature(sig);
-        let func_ptr_val = self
-            .builder
-            .ins()
-            .iconst(self.ctx.ptr_type(), native_func.ptr as i64);
+        let ptr_type = self.ptr_type();
+        let func_ptr_val = self.builder.ins().iconst(ptr_type, native_func.ptr as i64);
 
         let call_inst = self
             .builder
@@ -920,7 +889,7 @@ impl Cg<'_, '_, '_> {
                 value: results[0],
                 ty: native_type_to_cranelift(
                     &native_func.signature.return_type,
-                    self.ctx.ptr_type(),
+                    self.ptr_type(),
                 ),
                 type_id,
             })

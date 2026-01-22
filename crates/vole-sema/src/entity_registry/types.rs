@@ -129,4 +129,23 @@ impl EntityRegistry {
         tracing::trace!("class not found by short name");
         None
     }
+
+    /// Look up any type by its short name (string-based, cross-module)
+    /// This searches through all registered types to find one matching the short name,
+    /// regardless of kind. Useful for resolving error types and other types by name.
+    pub fn type_by_short_name(
+        &self,
+        short_name: &str,
+        name_table: &vole_identity::NameTable,
+    ) -> Option<TypeDefId> {
+        for type_def in &self.type_defs {
+            if name_table
+                .last_segment_str(type_def.name_id)
+                .is_some_and(|last_segment| last_segment == short_name)
+            {
+                return Some(type_def.id);
+            }
+        }
+        None
+    }
 }

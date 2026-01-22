@@ -272,8 +272,7 @@ impl Compiler<'_> {
                 && let Some(method_name_id) =
                     method_name_id_with_interner(self.analyzed, interner, method.name)
             {
-                self.static_method_infos
-                    .insert((type_def_id, method_name_id), MethodInfo { func_key });
+                self.static_method_infos.insert((type_def_id, method_name_id), MethodInfo { func_key });
             }
         }
     }
@@ -345,8 +344,7 @@ impl Compiler<'_> {
                 && let Some(method_name_id) =
                     method_name_id_with_interner(self.analyzed, interner, method.name)
             {
-                self.static_method_infos
-                    .insert((type_def_id, method_name_id), MethodInfo { func_key });
+                self.static_method_infos.insert((type_def_id, method_name_id), MethodInfo { func_key });
             }
         }
     }
@@ -484,8 +482,7 @@ impl Compiler<'_> {
                     && let Some(method_name_id) =
                         method_name_id_with_interner(self.analyzed, interner, method.name)
                 {
-                    self.static_method_infos
-                        .insert((type_def_id, method_name_id), MethodInfo { func_key });
+                    self.static_method_infos.insert((type_def_id, method_name_id), MethodInfo { func_key });
                 }
             }
         }
@@ -711,8 +708,17 @@ impl Compiler<'_> {
                 // Compile method body
                 let mut cf_ctx = ControlFlowCtx::default();
 
-                // Create split contexts
-                let function_ctx = FunctionCtx::main(return_type_id);
+                // Create split contexts - use module context if compiling module code
+                let function_ctx = if let Some(path) = module_path {
+                    let name_table = self.analyzed.name_table();
+                    if let Some(mod_id) = name_table.module_id_if_known(path) {
+                        FunctionCtx::module(return_type_id, mod_id)
+                    } else {
+                        FunctionCtx::main(return_type_id)
+                    }
+                } else {
+                    FunctionCtx::main(return_type_id)
+                };
                 let explicit_params = ExplicitParams {
                     analyzed: self.analyzed,
                     interner: &self.analyzed.interner,
@@ -893,24 +899,12 @@ impl Compiler<'_> {
                 lambda_counter: &self.lambda_counter,
             };
 
-            let mut ctx = CompileCtx {
-                analyzed: self.analyzed,
-                interner: &self.analyzed.interner,
-                module: &mut self.jit.module,
-                func_registry: &mut self.func_registry,
-                source_file_ptr,
-                global_inits: &self.global_inits,
-                lambda_counter: &self.lambda_counter,
-                type_metadata: &self.type_metadata,
-                impl_method_infos: &self.impl_method_infos,
-                static_method_infos: &self.static_method_infos,
-                interface_vtables: &self.interface_vtables,
-                current_function_return_type: method_return_type_id,
-                native_registry: &self.native_registry,
-                current_module: None,
-                type_substitutions: None,
-                substitution_cache: RefCell::new(HashMap::new()),
-            };
+            let mut codegen_ctx = crate::types::CodegenCtx::new(
+                self.analyzed.query(),
+                self.pointer_type,
+                &mut self.jit.module,
+                &mut self.func_registry,
+            );
 
             let self_binding = (self_sym, self_type_id, self_cranelift_type);
             let config = FunctionCompileConfig::method(
@@ -921,7 +915,7 @@ impl Compiler<'_> {
             );
             compile_function_inner_with_params(
                 builder,
-                &mut ctx,
+                &mut codegen_ctx,
                 &function_ctx,
                 &explicit_params,
                 config,
@@ -1046,24 +1040,12 @@ impl Compiler<'_> {
                 lambda_counter: &self.lambda_counter,
             };
 
-            let mut ctx = CompileCtx {
-                analyzed: self.analyzed,
-                interner: &self.analyzed.interner,
-                module: &mut self.jit.module,
-                func_registry: &mut self.func_registry,
-                source_file_ptr,
-                global_inits: &self.global_inits,
-                lambda_counter: &self.lambda_counter,
-                type_metadata: &self.type_metadata,
-                impl_method_infos: &self.impl_method_infos,
-                static_method_infos: &self.static_method_infos,
-                interface_vtables: &self.interface_vtables,
-                current_function_return_type: method_return_type_id,
-                native_registry: &self.native_registry,
-                current_module: None,
-                type_substitutions: None,
-                substitution_cache: RefCell::new(HashMap::new()),
-            };
+            let mut codegen_ctx = crate::types::CodegenCtx::new(
+                self.analyzed.query(),
+                self.pointer_type,
+                &mut self.jit.module,
+                &mut self.func_registry,
+            );
             let self_binding = (self_sym, self_type_id, self.pointer_type);
             let config = FunctionCompileConfig::method(
                 &method.body,
@@ -1073,7 +1055,7 @@ impl Compiler<'_> {
             );
             compile_function_inner_with_params(
                 builder,
-                &mut ctx,
+                &mut codegen_ctx,
                 &function_ctx,
                 &explicit_params,
                 config,
@@ -1463,7 +1445,9 @@ impl Compiler<'_> {
         module_global_inits: &HashMap<Symbol, Expr>,
     ) -> Result<(), String> {
         let type_name_str = module_interner.resolve(class.name);
-        let module_id = self.query().main_module();
+        // Look up the actual module_id from the module_path (not main_module!)
+        let module_id = self.analyzed.name_table().module_id_if_known(module_path)
+            .unwrap_or_else(|| self.query().main_module());
         let func_module_id = self.func_registry.main_module();
 
         // Find the type metadata by looking for the type name string

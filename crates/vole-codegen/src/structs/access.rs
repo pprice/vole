@@ -6,7 +6,7 @@ use super::helpers::{
 use crate::RuntimeFn;
 use crate::context::Cg;
 use crate::errors::CodegenError;
-use crate::types::{CompiledValue, box_interface_value_id, module_name_id};
+use crate::types::{CompiledValue, module_name_id};
 use cranelift::prelude::*;
 use vole_frontend::{Expr, FieldAccessExpr, OptionalChainExpr, Symbol};
 use vole_sema::types::ConstantValue;
@@ -27,7 +27,7 @@ impl Cg<'_, '_, '_> {
             tracing::trace!(?module_id, "field access on module");
             let field_name = self.interner().resolve(fa.field);
             let module_path = self.name_table().module_path(module_id).to_string();
-            let name_id = module_name_id(self.ctx.analyzed, module_id, field_name);
+            let name_id = module_name_id(self.analyzed(), module_id, field_name);
 
             // Look up constant value in module metadata
             let const_val = {
@@ -106,8 +106,11 @@ impl Cg<'_, '_, '_> {
 
         let result_raw = self.get_field_cached(obj.value, slot as u32)?;
 
+        // Borrow arena from explicit_params directly to avoid borrow conflict
+        let arena = self.explicit_params.analyzed.type_arena();
         let (result_val, cranelift_ty) =
-            convert_field_value_id(self.builder, result_raw, field_type_id, &self.ctx.arena());
+            convert_field_value_id(self.builder, result_raw, field_type_id, &arena);
+        drop(arena);
 
         Ok(CompiledValue {
             value: result_val,
@@ -209,8 +212,11 @@ impl Cg<'_, '_, '_> {
         // Get field from the inner object
         let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
         let field_raw = self.call_runtime(RuntimeFn::InstanceGetField, &[inner_obj, slot_val])?;
+        // Borrow arena from explicit_params directly to avoid borrow conflict
+        let arena = self.explicit_params.analyzed.type_arena();
         let (field_val, field_cranelift_ty) =
-            convert_field_value_id(self.builder, field_raw, field_type_id, &self.ctx.arena());
+            convert_field_value_id(self.builder, field_raw, field_type_id, &arena);
+        drop(arena);
 
         // Wrap the field value in an optional (using construct_union_id)
         // But if field type is already optional, it's already a union - just use it directly
@@ -254,7 +260,7 @@ impl Cg<'_, '_, '_> {
         let field_name = self.interner().resolve(field);
         let (slot, field_type_id) = get_field_slot_and_type_id_cg(obj.type_id, field_name, self)?;
         let value = if self.arena().is_interface(field_type_id) {
-            box_interface_value_id(self.builder, self.ctx, value, field_type_id)?
+            self.box_interface_value(value, field_type_id)?
         } else {
             value
         };

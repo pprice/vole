@@ -334,4 +334,90 @@ impl<'a> CompileCtx<'a> {
     pub fn funcs_ref(&self) -> &FunctionRegistry {
         self.func_registry
     }
+
+    /// Create a CodegenCtx by reborrowing fields from CompileCtx.
+    ///
+    /// This is a transition helper for migrating from CompileCtx to CodegenCtx.
+    /// The returned CodegenCtx has a lifetime tied to the mutable borrow of self.
+    #[inline]
+    pub fn as_codegen_ctx(&mut self) -> super::CodegenCtx<'_> {
+        super::CodegenCtx::new(
+            self.analyzed.query(),
+            self.ptr_type(),
+            self.module,
+            self.func_registry,
+        )
+    }
+}
+
+impl<'a> crate::vtable_ctx::VtableCtx for CompileCtx<'a> {
+    fn analyzed(&self) -> &crate::AnalyzedProgram {
+        self.analyzed
+    }
+
+    fn arena(&self) -> std::cell::Ref<'_, TypeArena> {
+        self.analyzed.type_arena()
+    }
+
+    fn arena_rc(&self) -> &Rc<RefCell<TypeArena>> {
+        self.analyzed.type_arena_ref()
+    }
+
+    fn registry(&self) -> &EntityRegistry {
+        self.analyzed.entity_registry()
+    }
+
+    fn interner(&self) -> &Interner {
+        self.interner
+    }
+
+    fn query(&self) -> ProgramQuery<'_> {
+        self.analyzed.query()
+    }
+
+    fn update(&self) -> vole_sema::ProgramUpdate<'_> {
+        vole_sema::ProgramUpdate::new(self.analyzed.type_arena_ref())
+    }
+
+    fn ptr_type(&self) -> Type {
+        self.module.target_config().pointer_type()
+    }
+
+    fn jit_module(&mut self) -> &mut JITModule {
+        self.module
+    }
+
+    fn funcs(&mut self) -> &mut crate::FunctionRegistry {
+        self.func_registry
+    }
+
+    fn resolve_type_str_or_interface(&self, name: &str) -> Option<TypeDefId> {
+        let name_table = self.analyzed.name_table();
+        let module_id = self
+            .current_module
+            .and_then(|path| name_table.module_id_if_known(path))
+            .unwrap_or_else(|| name_table.main_module());
+        let resolver = Resolver::new(self.interner, &name_table, module_id, &[]);
+        resolver.resolve_type_str_or_interface(name, self.analyzed.entity_registry())
+    }
+
+    fn native_registry(&self) -> &vole_runtime::NativeRegistry {
+        self.native_registry
+    }
+
+    fn interface_vtables(
+        &self,
+    ) -> &RefCell<crate::interface_vtable::InterfaceVtableRegistry> {
+        self.interface_vtables
+    }
+
+    fn type_metadata(&self) -> &HashMap<Symbol, TypeMetadata> {
+        self.type_metadata
+    }
+
+    fn impl_method_infos(
+        &self,
+    ) -> &HashMap<(vole_sema::implement_registry::ImplTypeId, NameId), MethodInfo> {
+        self.impl_method_infos
+    }
 }

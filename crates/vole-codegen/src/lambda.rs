@@ -2,6 +2,7 @@
 //
 // Lambda/closure compilation support for code generation.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 use cranelift::prelude::*;
@@ -14,8 +15,8 @@ use super::RuntimeFn;
 use super::compiler::common::{FunctionCompileConfig, compile_function_inner_with_params};
 use super::context::Cg;
 use super::types::{
-    CompileCtx, CompiledValue, ExplicitParams, FunctionCtx, resolve_type_expr_id, type_id_size,
-    type_id_to_cranelift,
+    CompileCtx, CompiledValue, ExplicitParams, FunctionCtx,
+    resolve_type_expr_id, type_id_size, type_id_to_cranelift,
 };
 
 /// Information about a captured variable for lambda compilation
@@ -330,9 +331,10 @@ fn compile_pure_lambda(
             lambda_counter: ctx.lambda_counter,
         };
 
+        let mut codegen_ctx = ctx.as_codegen_ctx();
         compile_function_inner_with_params(
             lambda_builder,
-            ctx,
+            &mut codegen_ctx,
             &function_ctx,
             &explicit_params,
             config,
@@ -472,9 +474,10 @@ fn compile_lambda_with_captures(
             lambda_counter: ctx.lambda_counter,
         };
 
+        let mut codegen_ctx = ctx.as_codegen_ctx();
         compile_function_inner_with_params(
             lambda_builder,
-            ctx,
+            &mut codegen_ctx,
             &function_ctx,
             &explicit_params,
             config,
@@ -573,11 +576,40 @@ impl Cg<'_, '_, '_> {
         lambda: &LambdaExpr,
         node_id: NodeId,
     ) -> Result<CompiledValue, String> {
+        // Convert ModuleId to module path string for CompileCtx compatibility
+        let module_path = self.function_ctx.current_module.map(|mid| {
+            self.explicit_params
+                .analyzed
+                .name_table()
+                .module_path(mid)
+                .to_string()
+        });
+
+        // Construct a temporary CompileCtx from split contexts for legacy compile_lambda
+        let mut ctx = CompileCtx {
+            analyzed: self.explicit_params.analyzed,
+            interner: self.explicit_params.interner,
+            module: self.codegen_ctx.module,
+            func_registry: self.codegen_ctx.func_registry,
+            source_file_ptr: self.explicit_params.source_file_ptr,
+            global_inits: self.explicit_params.global_inits,
+            lambda_counter: self.explicit_params.lambda_counter,
+            type_metadata: self.explicit_params.type_metadata,
+            impl_method_infos: self.explicit_params.impl_method_infos,
+            static_method_infos: self.explicit_params.static_method_infos,
+            interface_vtables: self.explicit_params.interface_vtables,
+            current_function_return_type: self.function_ctx.return_type,
+            native_registry: self.explicit_params.native_registry,
+            current_module: module_path.as_deref(),
+            type_substitutions: self.function_ctx.substitutions,
+            substitution_cache: RefCell::new(HashMap::new()),
+        };
+
         compile_lambda(
             self.builder,
             lambda,
             self.vars,
-            self.ctx,
+            &mut ctx,
             node_id,
             self.self_capture,
         )

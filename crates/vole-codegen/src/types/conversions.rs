@@ -877,15 +877,34 @@ pub(crate) fn value_to_word(
                 .bitcast(types::I32, MemFlags::new(), value.value);
             builder.ins().uextend(word_type, i32_val)
         }
-        ArenaType::Primitive(PrimitiveType::Bool) => builder.ins().uextend(word_type, value.value),
+        ArenaType::Primitive(PrimitiveType::Bool) => {
+            // Only extend if the Cranelift value isn't already word-sized
+            if value.ty == word_type {
+                value.value
+            } else {
+                builder.ins().uextend(word_type, value.value)
+            }
+        }
         ArenaType::Primitive(PrimitiveType::I8) | ArenaType::Primitive(PrimitiveType::U8) => {
-            builder.ins().uextend(word_type, value.value)
+            if value.ty == word_type {
+                value.value
+            } else {
+                builder.ins().uextend(word_type, value.value)
+            }
         }
         ArenaType::Primitive(PrimitiveType::I16) | ArenaType::Primitive(PrimitiveType::U16) => {
-            builder.ins().uextend(word_type, value.value)
+            if value.ty == word_type {
+                value.value
+            } else {
+                builder.ins().uextend(word_type, value.value)
+            }
         }
         ArenaType::Primitive(PrimitiveType::I32) | ArenaType::Primitive(PrimitiveType::U32) => {
-            builder.ins().uextend(word_type, value.value)
+            if value.ty == word_type {
+                value.value
+            } else {
+                builder.ins().uextend(word_type, value.value)
+            }
         }
         ArenaType::Primitive(PrimitiveType::I64) | ArenaType::Primitive(PrimitiveType::U64) => {
             value.value

@@ -547,30 +547,17 @@ impl Compiler<'_> {
                 lambda_counter: &self.lambda_counter,
             };
 
-            // CompileCtx still needed for mutable JIT infrastructure
-            let mut ctx = CompileCtx {
-                analyzed: self.analyzed,
-                interner: module_interner,
-                module: &mut self.jit.module,
-                func_registry: &mut self.func_registry,
-                source_file_ptr,
-                global_inits: module_global_inits,
-                lambda_counter: &self.lambda_counter,
-                type_metadata: &self.type_metadata,
-                impl_method_infos: &self.impl_method_infos,
-                static_method_infos: &self.static_method_infos,
-                interface_vtables: &self.interface_vtables,
-                current_function_return_type: return_type_id,
-                native_registry: &self.native_registry,
-                current_module: Some(module_path),
-                type_substitutions: None,
-                substitution_cache: RefCell::new(HashMap::new()),
-            };
+            let mut codegen_ctx = crate::types::CodegenCtx::new(
+                self.analyzed.query(),
+                self.pointer_type,
+                &mut self.jit.module,
+                &mut self.func_registry,
+            );
 
             let config = FunctionCompileConfig::top_level(&func.body, params, return_type_id);
             compile_function_inner_with_params(
                 builder,
-                &mut ctx,
+                &mut codegen_ctx,
                 &function_ctx,
                 &explicit_params,
                 config,
@@ -646,30 +633,17 @@ impl Compiler<'_> {
                 lambda_counter: &self.lambda_counter,
             };
 
-            // CompileCtx still needed for mutable JIT infrastructure
-            let mut ctx = CompileCtx {
-                analyzed: self.analyzed,
-                interner: &self.analyzed.interner,
-                module: &mut self.jit.module,
-                func_registry: &mut self.func_registry,
-                source_file_ptr,
-                global_inits: &self.global_inits,
-                lambda_counter: &self.lambda_counter,
-                type_metadata: &self.type_metadata,
-                impl_method_infos: &self.impl_method_infos,
-                static_method_infos: &self.static_method_infos,
-                interface_vtables: &self.interface_vtables,
-                current_function_return_type: return_type_id,
-                native_registry: &self.native_registry,
-                current_module: None,
-                type_substitutions: None,
-                substitution_cache: RefCell::new(HashMap::new()),
-            };
+            let mut codegen_ctx = crate::types::CodegenCtx::new(
+                self.analyzed.query(),
+                self.pointer_type,
+                &mut self.jit.module,
+                &mut self.func_registry,
+            );
 
             let config = FunctionCompileConfig::top_level(&func.body, params, return_type_id);
             compile_function_inner_with_params(
                 builder,
-                &mut ctx,
+                &mut codegen_ctx,
                 &function_ctx,
                 &explicit_params,
                 config,
@@ -780,31 +754,18 @@ impl Compiler<'_> {
                 lambda_counter: &self.lambda_counter,
             };
 
-            // CompileCtx still needed for mutable JIT infrastructure
-            let mut ctx = CompileCtx {
-                analyzed: self.analyzed,
-                interner: &self.analyzed.interner,
-                module: &mut self.jit.module,
-                func_registry: &mut self.func_registry,
-                source_file_ptr,
-                global_inits: &self.global_inits,
-                lambda_counter: &self.lambda_counter,
-                type_metadata: &self.type_metadata,
-                impl_method_infos: &self.impl_method_infos,
-                static_method_infos: &self.static_method_infos,
-                interface_vtables: &self.interface_vtables,
-                current_function_return_type: Some(return_type_id),
-                native_registry: &self.native_registry,
-                current_module: None,
-                type_substitutions: None,
-                substitution_cache: RefCell::new(HashMap::new()),
-            };
+            let mut codegen_ctx = crate::types::CodegenCtx::new(
+                self.analyzed.query(),
+                self.pointer_type,
+                &mut self.jit.module,
+                &mut self.func_registry,
+            );
 
             // Use pure lambda config (skip_block_params=1 for closure ptr)
             let config = FunctionCompileConfig::pure_lambda(&func.body, params, return_type_id);
             compile_function_inner_with_params(
                 builder,
-                &mut ctx,
+                &mut codegen_ctx,
                 &function_ctx,
                 &explicit_params,
                 config,
@@ -963,11 +924,12 @@ impl Compiler<'_> {
                     };
                     // Compile the block using Cg with split contexts
                     let mut cf = ControlFlow::new();
-                    let mut cg = Cg::new_with_params(
+                    let mut codegen_ctx = ctx.as_codegen_ctx();
+                    let mut cg = Cg::new(
                         &mut builder,
                         &mut variables,
-                        &mut ctx,
                         &mut cf,
+                        &mut codegen_ctx,
                         &function_ctx,
                         &explicit_params,
                         None,

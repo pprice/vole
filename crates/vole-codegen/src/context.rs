@@ -19,7 +19,7 @@ use vole_sema::type_arena::{SemaType as ArenaType, TypeId};
 
 use super::lambda::CaptureBinding;
 use super::types::{
-    CodegenCtx, CompileCtx, CompiledValue, ExplicitParams, FunctionCtx, native_type_to_cranelift,
+    CodegenCtx, CompiledValue, ExplicitParams, FunctionCtx, native_type_to_cranelift,
     type_id_to_cranelift,
 };
 
@@ -73,34 +73,13 @@ pub(crate) struct Captures<'a> {
 /// Key for caching pure runtime function calls
 pub type CallCacheKey = (RuntimeFn, SmallVec<[Value; 4]>);
 
-/// Helper macro to prefer split codegen_ctx over fallback ctx (same method name)
-macro_rules! split_cg {
-    ($self:expr, $method:ident()) => {
-        if let Some(cg_ctx) = &$self.codegen_ctx {
-            cg_ctx.$method()
-        } else {
-            $self.ctx.$method()
-        }
-    };
-}
-
-/// Helper macro to prefer split explicit_params field over fallback ctx method
-macro_rules! split_ep {
-    ($self:expr, $field:ident, $ctx_method:ident()) => {
-        if let Some(ep) = &$self.explicit_params {
-            ep.$field
-        } else {
-            $self.ctx.$ctx_method()
-        }
-    };
-}
 
 /// Unified codegen context - all state needed for code generation.
 ///
 /// Lifetimes:
 /// - 'a: lifetime of local state (builder, vars, cf, captures)
 /// - 'b: lifetime of FunctionBuilder's internal data
-/// - 'ctx: lifetime of CompileCtx's inner references (can outlive 'a for lambdas)
+/// - 'ctx: lifetime of context references (can outlive 'a for lambdas)
 ///
 /// Methods are split across multiple files:
 /// - expr.rs: expr()
@@ -112,7 +91,6 @@ macro_rules! split_ep {
 pub(crate) struct Cg<'a, 'b, 'ctx> {
     pub builder: &'a mut FunctionBuilder<'b>,
     pub vars: &'a mut HashMap<Symbol, (Variable, TypeId)>,
-    pub ctx: &'a mut CompileCtx<'ctx>,
     pub cf: &'a mut ControlFlow,
     pub captures: Option<Captures<'a>>,
     /// For recursive lambdas: the binding name that captures itself
@@ -121,47 +99,34 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     pub call_cache: HashMap<CallCacheKey, Value>,
     /// Cache for field access: (instance_ptr, slot) -> field_value
     pub field_cache: HashMap<(Value, u32), Value>,
-    /// Return type of the current function (moved from CompileCtx for cleaner separation)
+    /// Return type of the current function
     pub return_type: Option<TypeId>,
 
-    // ========== Split context fields (for incremental migration) ==========
-    // These are Optional to support both legacy (CompileCtx) and new (split) modes.
-    // When set, accessor methods prefer these over ctx fields.
-    /// Split mutable JIT infrastructure (module, func_registry)
-    #[allow(dead_code)]
-    codegen_ctx: Option<&'a mut CodegenCtx<'ctx>>,
-    /// Split per-function state (return type, substitutions)
-    #[allow(dead_code)]
-    function_ctx: Option<&'a FunctionCtx<'ctx>>,
-    /// Split read-only lookup tables
-    #[allow(dead_code)]
-    explicit_params: Option<&'a ExplicitParams<'ctx>>,
+    // ========== Split context fields ==========
+    /// Mutable JIT infrastructure (module, func_registry) - REQUIRED
+    pub codegen_ctx: &'a mut CodegenCtx<'ctx>,
+    /// Per-function state (return type, substitutions) - REQUIRED
+    pub function_ctx: &'a FunctionCtx<'ctx>,
+    /// Read-only lookup tables - REQUIRED
+    pub explicit_params: &'a ExplicitParams<'ctx>,
 }
 
 impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
-    /// Create a new codegen context using split context types.
-    ///
-    /// This is the preferred constructor for new code. It takes the split contexts
-    /// (CodegenCtx, FunctionCtx, ExplicitParams) alongside the legacy CompileCtx.
-    /// During migration, both ctx and the split contexts are available - accessor
-    /// methods will prefer the split contexts when set.
+    /// Create a new codegen context with split contexts.
     ///
     /// # Arguments
     /// * `builder` - Cranelift FunctionBuilder for IR emission
     /// * `vars` - Variable bindings for the current function
-    /// * `ctx` - Legacy CompileCtx (still required during migration)
     /// * `cf` - Control flow context for loops
-    /// * `codegen_ctx` - Split mutable JIT infrastructure
-    /// * `function_ctx` - Split per-function state
-    /// * `explicit_params` - Split read-only lookup tables
+    /// * `codegen_ctx` - Mutable JIT infrastructure (module, func_registry)
+    /// * `function_ctx` - Per-function state (return type, substitutions)
+    /// * `explicit_params` - Read-only lookup tables
     /// * `captures` - Optional closure captures
     /// * `return_type` - Function return type
-    #[allow(dead_code)] // Part of incremental migration
     #[allow(clippy::too_many_arguments)]
-    pub fn new_split(
+    pub fn new(
         builder: &'a mut FunctionBuilder<'b>,
         vars: &'a mut HashMap<Symbol, (Variable, TypeId)>,
-        ctx: &'a mut CompileCtx<'ctx>,
         cf: &'a mut ControlFlow,
         codegen_ctx: &'a mut CodegenCtx<'ctx>,
         function_ctx: &'a FunctionCtx<'ctx>,
@@ -172,64 +137,15 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Self {
             builder,
             vars,
-            ctx,
             cf,
             captures,
             self_capture: None,
             call_cache: HashMap::new(),
             field_cache: HashMap::new(),
             return_type,
-            codegen_ctx: Some(codegen_ctx),
-            function_ctx: Some(function_ctx),
-            explicit_params: Some(explicit_params),
-        }
-    }
-
-    /// Create a codegen context with explicit params during CompileCtx migration.
-    ///
-    /// This constructor is for the transition period where we need CompileCtx for
-    /// mutable JIT infrastructure (module, func_registry) but want to use the new
-    /// split context types for read-only data.
-    ///
-    /// CodegenCtx is NOT taken because it would conflict with CompileCtx's mutable
-    /// references to the same data. The accessors will use explicit_params for
-    /// read-only data and fall back to ctx for mutable operations.
-    ///
-    /// # Arguments
-    /// * `builder` - Cranelift FunctionBuilder for IR emission
-    /// * `vars` - Variable bindings for the current function
-    /// * `ctx` - CompileCtx (provides mutable JIT infrastructure)
-    /// * `cf` - Control flow context for loops
-    /// * `function_ctx` - Split per-function state
-    /// * `explicit_params` - Split read-only lookup tables
-    /// * `captures` - Optional closure captures
-    /// * `return_type` - Function return type
-    #[allow(dead_code)] // Part of incremental migration
-    #[allow(clippy::too_many_arguments)]
-    pub fn new_with_params(
-        builder: &'a mut FunctionBuilder<'b>,
-        vars: &'a mut HashMap<Symbol, (Variable, TypeId)>,
-        ctx: &'a mut CompileCtx<'ctx>,
-        cf: &'a mut ControlFlow,
-        function_ctx: &'a FunctionCtx<'ctx>,
-        explicit_params: &'a ExplicitParams<'ctx>,
-        captures: Option<Captures<'a>>,
-        return_type: Option<TypeId>,
-    ) -> Self {
-        Self {
-            builder,
-            vars,
-            ctx,
-            cf,
-            captures,
-            self_capture: None,
-            call_cache: HashMap::new(),
-            field_cache: HashMap::new(),
-            return_type,
-            // CodegenCtx not used - would conflict with ctx's mutable refs
-            codegen_ctx: None,
-            function_ctx: Some(function_ctx),
-            explicit_params: Some(explicit_params),
+            codegen_ctx,
+            function_ctx,
+            explicit_params,
         }
     }
 
@@ -238,99 +154,122 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.captures.is_some()
     }
 
-    // ========== Context accessors for migration ==========
+    // ========== Context accessors ==========
 
-    /// Get a TypeCtx view for functions that need the new API.
-    /// This enables incremental migration from CompileCtx to TypeCtx + FunctionCtx.
+    /// Get a TypeCtx view
     #[inline]
     pub fn type_ctx(&self) -> super::types::TypeCtx<'_> {
-        super::types::TypeCtx::new(self.ctx.query(), self.ctx.ptr_type())
+        super::types::TypeCtx::new(
+            self.explicit_params.analyzed.query(),
+            self.codegen_ctx.ptr_type(),
+        )
     }
 
-    /// Get arena Rc for FunctionCtx operations (for future migration steps)
+    /// Get arena Rc
     #[inline]
-    #[allow(dead_code)]
     pub fn arena_rc(&self) -> &std::rc::Rc<std::cell::RefCell<vole_sema::type_arena::TypeArena>> {
-        self.ctx.arena_rc()
+        self.explicit_params.analyzed.type_arena_ref()
     }
 
-    /// Substitute type parameters (delegates to CompileCtx for now)
+    /// Substitute type parameters using function_ctx substitutions
     #[inline]
     pub fn substitute_type(&self, ty: TypeId) -> TypeId {
-        self.ctx.substitute_type_id(ty)
+        self.function_ctx
+            .substitute_type_id(ty, self.explicit_params.analyzed.type_arena_ref())
     }
 
-    /// Get current module path (will move to FunctionCtx as ModuleId)
+    /// Get current module (as ModuleId)
     #[inline]
-    pub fn current_module(&self) -> Option<&'ctx str> {
-        self.ctx.module_path()
+    pub fn current_module_id(&self) -> Option<vole_identity::ModuleId> {
+        self.function_ctx.current_module
     }
 
-    /// Get type substitutions (will move to FunctionCtx)
+    /// Get type substitutions
     #[inline]
-    #[allow(dead_code)]
     pub fn type_substitutions(&self) -> Option<&'ctx HashMap<vole_identity::NameId, TypeId>> {
-        self.ctx.substitutions()
+        self.function_ctx.substitutions
+    }
+
+    /// Alias for type_substitutions (backward compat)
+    #[inline]
+    pub fn substitutions(&self) -> Option<&'ctx HashMap<vole_identity::NameId, TypeId>> {
+        self.function_ctx.substitutions
     }
 
     /// Get entity registry reference
     #[inline]
     pub fn registry(&self) -> &'ctx vole_sema::entity_registry::EntityRegistry {
-        self.ctx.registry()
+        self.explicit_params.analyzed.entity_registry()
     }
 
-    /// Borrow the name table (shorter than query().name_table_rc().borrow())
+    /// Borrow the name table
     #[inline]
     pub fn name_table(&self) -> std::cell::Ref<'_, vole_identity::NameTable> {
-        self.ctx.query().name_table_rc().borrow()
+        self.explicit_params.analyzed.name_table()
     }
-
-    // ========== Convenience accessors for migration ==========
-    // These wrap ctx.* calls to enable later migration to split contexts.
-    // Allowed dead_code during incremental migration.
 
     /// Get the pointer type (Cranelift platform pointer)
     #[inline]
     pub fn ptr_type(&self) -> Type {
-        split_cg!(self, ptr_type())
+        self.codegen_ctx.ptr_type()
     }
 
     /// Get the query interface for the analyzed program
     #[inline]
     pub fn query(&self) -> vole_sema::ProgramQuery<'_> {
-        // Always use ctx.query() for now - CodegenCtx stores &ProgramQuery
-        // but we need to return an owned ProgramQuery
-        self.ctx.query()
+        self.explicit_params.analyzed.query()
     }
 
     /// Borrow the type arena
     #[inline]
     pub fn arena(&self) -> std::cell::Ref<'_, vole_sema::type_arena::TypeArena> {
-        split_cg!(self, arena())
+        self.explicit_params.analyzed.type_arena()
     }
 
-    /// Get expression type by NodeId
-    #[allow(dead_code)]
+    /// Get expression type by NodeId (checks module-specific types if in module context)
     #[inline]
     pub fn get_expr_type(&self, node_id: &vole_frontend::NodeId) -> Option<TypeId> {
-        self.ctx.get_expr_type(node_id)
+        // For module code, check module-specific expr_types first
+        if let Some(module_id) = self.function_ctx.current_module {
+            let name_table = self.name_table();
+            let module_path = name_table.module_path(module_id);
+            if let Some(module_types) = self
+                .explicit_params
+                .analyzed
+                .query()
+                .expr_data()
+                .module_types(module_path)
+            {
+                if let Some(ty) = module_types.get(node_id) {
+                    return Some(*ty);
+                }
+            }
+        }
+        // Fall back to main program expr_types
+        self.explicit_params
+            .analyzed
+            .query()
+            .expr_data()
+            .get_type(*node_id)
     }
 
     /// Get substituted return type for generic method calls
-    #[allow(dead_code)]
     #[inline]
     pub fn get_substituted_return_type(&self, node_id: &vole_frontend::NodeId) -> Option<TypeId> {
-        self.ctx.get_substituted_return_type(node_id)
+        self.explicit_params
+            .analyzed
+            .query()
+            .expr_data()
+            .get_substituted_return_type(*node_id)
     }
 
     /// Get type metadata map
     #[inline]
     pub fn type_metadata(&self) -> &'ctx HashMap<Symbol, super::types::TypeMetadata> {
-        split_ep!(self, type_metadata, type_meta())
+        self.explicit_params.type_metadata
     }
 
     /// Get impl method infos map
-    #[allow(dead_code)] // Part of incremental migration
     #[inline]
     pub fn impl_method_infos(
         &self,
@@ -341,76 +280,131 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         ),
         super::types::MethodInfo,
     > {
-        split_ep!(self, impl_method_infos, impl_methods())
+        self.explicit_params.impl_method_infos
     }
 
     /// Get global variable initializer by name
-    #[allow(dead_code)] // Part of incremental migration
     #[inline]
     pub fn global_init(&self, name: Symbol) -> Option<&vole_frontend::Expr> {
-        if let Some(ep) = &self.explicit_params {
-            ep.global_inits.get(&name)
-        } else {
-            self.ctx.global_init(name)
-        }
+        self.explicit_params.global_inits.get(&name)
     }
 
     /// Get source file pointer for error reporting
-    #[allow(dead_code)] // Part of incremental migration
     #[inline]
     pub fn source_file(&self) -> (*const u8, usize) {
-        if let Some(ep) = &self.explicit_params {
-            ep.source_file_ptr
-        } else {
-            self.ctx.source_file()
-        }
+        self.explicit_params.source_file_ptr
     }
 
     /// Increment lambda counter and return new value
-    #[allow(dead_code)] // Part of incremental migration
     #[inline]
     pub fn next_lambda_id(&self) -> usize {
-        if let Some(ep) = &self.explicit_params {
-            let id = ep.lambda_counter.get();
-            ep.lambda_counter.set(id + 1);
-            id
-        } else {
-            self.ctx.next_lambda_id()
-        }
+        let id = self.explicit_params.lambda_counter.get();
+        self.explicit_params.lambda_counter.set(id + 1);
+        id
     }
 
     /// Get native function registry
-    #[allow(dead_code)] // Part of incremental migration
     #[inline]
     pub fn native_registry(&self) -> &'ctx vole_runtime::NativeRegistry {
-        split_ep!(self, native_registry, native_funcs())
+        self.explicit_params.native_registry
     }
 
-    /// Get FunctionCtx for split context operations
-    #[allow(dead_code)]
+    /// Alias for native_registry (backward compat)
     #[inline]
-    pub fn function_ctx(&self) -> FunctionCtx<'ctx> {
-        self.ctx.function_ctx()
+    pub fn native_funcs(&self) -> &'ctx vole_runtime::NativeRegistry {
+        self.explicit_params.native_registry
     }
 
     /// Get the interner for symbol resolution
     #[inline]
     pub fn interner(&self) -> &'ctx vole_frontend::Interner {
-        split_ep!(self, interner, interner())
+        self.explicit_params.interner
+    }
+
+    /// Alias for type_metadata (backward compat)
+    #[inline]
+    pub fn type_meta(&self) -> &'ctx HashMap<Symbol, super::types::TypeMetadata> {
+        self.explicit_params.type_metadata
+    }
+
+    /// Alias for impl_method_infos (backward compat)
+    #[inline]
+    pub fn impl_methods(
+        &self,
+    ) -> &'ctx HashMap<
+        (
+            vole_sema::implement_registry::ImplTypeId,
+            vole_identity::NameId,
+        ),
+        super::types::MethodInfo,
+    > {
+        self.explicit_params.impl_method_infos
+    }
+
+    /// Get static method infos map
+    #[inline]
+    pub fn static_method_infos(
+        &self,
+    ) -> &'ctx HashMap<(vole_identity::TypeDefId, vole_identity::NameId), super::types::MethodInfo>
+    {
+        self.explicit_params.static_method_infos
+    }
+
+    /// Get interface vtable registry
+    #[inline]
+    pub fn interface_vtables(
+        &self,
+    ) -> &'ctx std::cell::RefCell<crate::interface_vtable::InterfaceVtableRegistry> {
+        self.explicit_params.interface_vtables
+    }
+
+    /// Get monomorph cache from entity registry
+    #[inline]
+    pub fn monomorph_cache(&self) -> &'ctx vole_sema::generic::MonomorphCache {
+        &self.explicit_params.analyzed.entity_registry().monomorph_cache
+    }
+
+    /// Get current module as Option<ModuleId> - use current_module_id() for new code
+    #[inline]
+    pub fn current_module(&self) -> Option<vole_identity::ModuleId> {
+        self.function_ctx.current_module
+    }
+
+    /// Get analyzed program reference
+    #[inline]
+    pub fn analyzed(&self) -> &'ctx crate::AnalyzedProgram {
+        self.explicit_params.analyzed
+    }
+
+    /// Get mutable reference to JIT module
+    #[inline]
+    pub fn jit_module(&mut self) -> &mut cranelift_jit::JITModule {
+        self.codegen_ctx.jit_module()
+    }
+
+    /// Get mutable reference to function registry
+    #[inline]
+    pub fn funcs(&mut self) -> &mut crate::FunctionRegistry {
+        self.codegen_ctx.funcs()
+    }
+
+    /// Get immutable reference to function registry
+    #[inline]
+    pub fn funcs_ref(&self) -> &crate::FunctionRegistry {
+        self.codegen_ctx.funcs_ref()
     }
 
     // ========== Arena helpers ==========
 
     /// Get an update interface for arena mutations.
-    /// Centralizes all borrow_mut() calls for cleaner code.
     #[inline]
     pub fn update(&self) -> vole_sema::ProgramUpdate<'_> {
-        self.ctx.update()
+        self.codegen_ctx.update()
     }
 
     /// Find the nil variant index in a union (for optional handling)
     pub fn find_nil_variant(&self, ty: TypeId) -> Option<usize> {
-        let arena = self.ctx.arena();
+        let arena = self.arena();
         if let Some(variants) = arena.unwrap_union(ty) {
             variants.iter().position(|&id| id.is_nil())
         } else {
@@ -420,14 +414,35 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Convert a TypeId to a Cranelift type
     pub fn cranelift_type(&self, ty: TypeId) -> Type {
-        // Use type_ctx() for split context migration (same underlying values as ctx)
-        let type_ctx = self.type_ctx();
-        type_id_to_cranelift(ty, &type_ctx.arena(), type_ctx.pointer_type)
+        type_id_to_cranelift(ty, &self.arena(), self.ptr_type())
     }
 
     /// Unwrap an interface type, returning the TypeDefId if it is one
     pub fn interface_type_def_id(&self, ty: TypeId) -> Option<vole_identity::TypeDefId> {
-        self.ctx.arena().unwrap_interface(ty).map(|(id, _)| id)
+        self.arena().unwrap_interface(ty).map(|(id, _)| id)
+    }
+
+    /// Resolve a type name Symbol to its TypeDefId (for error types, etc.)
+    ///
+    /// This looks up type names by short name, searching through all registered types.
+    /// Callers should check the TypeDefKind if they need a specific kind.
+    pub fn resolve_type(&self, sym: Symbol) -> Option<vole_identity::TypeDefId> {
+        let name = self.interner().resolve(sym);
+        let name_table = self.name_table();
+        self.registry().type_by_short_name(name, &name_table)
+    }
+
+    /// Resolve a type name string to its TypeDefId, with fallback to interface/class search.
+    ///
+    /// This tries direct resolution first, then falls back to searching by short name
+    /// through interfaces and classes.
+    pub fn resolve_type_str_or_interface(&self, name: &str) -> Option<vole_identity::TypeDefId> {
+        let name_table = self.name_table();
+        // Try interface first, then class, then any type by short name
+        self.registry()
+            .interface_by_short_name(name, &name_table)
+            .or_else(|| self.registry().class_by_short_name(name, &name_table))
+            .or_else(|| self.registry().type_by_short_name(name, &name_table))
     }
 
     /// Get capture binding for a symbol, if any
@@ -444,8 +459,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Get a function ID by key
     pub fn func_id(&self, key: FunctionKey) -> Result<FuncId, String> {
-        self.ctx
-            .funcs_ref()
+        self.funcs_ref()
             .func_id(key)
             .ok_or_else(|| "function id not found".to_string())
     }
@@ -456,15 +470,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         key: FunctionKey,
     ) -> Result<cranelift::codegen::ir::FuncRef, String> {
         let func_id = self.func_id(key)?;
-        Ok(self
-            .ctx
-            .jit_module()
-            .declare_func_in_func(func_id, self.builder.func))
+        // Use codegen_ctx directly to avoid borrowing self twice
+        let module = self.codegen_ctx.jit_module();
+        Ok(module.declare_func_in_func(func_id, self.builder.func))
     }
 
     /// Call a runtime function and return the first result (or error if no results)
     pub fn call_runtime(&mut self, runtime: RuntimeFn, args: &[Value]) -> Result<Value, String> {
-        let key = self.ctx.funcs().runtime_key(runtime).ok_or_else(|| {
+        let key = self.funcs().runtime_key(runtime).ok_or_else(|| {
             CodegenError::not_found("runtime function", runtime.name()).to_string()
         })?;
         let func_ref = self.func_ref(key)?;
@@ -511,7 +524,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Call a runtime function that returns void
     pub fn call_runtime_void(&mut self, runtime: RuntimeFn, args: &[Value]) -> Result<(), String> {
         let key = self
-            .ctx
             .funcs()
             .runtime_key(runtime)
             .ok_or_else(|| format!("{} not registered", runtime.name()))?;
@@ -565,7 +577,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Create a float constant with explicit type (for bidirectional inference)
     pub fn float_const(&mut self, n: f64, type_id: TypeId) -> CompiledValue {
-        let arena = self.ctx.arena();
+        let arena = self.arena();
         let (ty, value) = match arena.get(type_id) {
             ArenaType::Primitive(PrimitiveType::F32) => {
                 drop(arena);
@@ -606,17 +618,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     pub fn string_value(&self, value: Value) -> CompiledValue {
         CompiledValue {
             value,
-            ty: self.ctx.ptr_type(),
+            ty: self.ptr_type(),
             type_id: TypeId::STRING,
         }
     }
 
     /// Create a CompiledValue from a value and TypeId
     pub fn typed_value_interned(&self, value: Value, type_id: TypeId) -> CompiledValue {
-        let arena = self.ctx.arena();
+        let arena = self.arena();
         CompiledValue {
             value,
-            ty: type_id_to_cranelift(type_id, &arena, self.ctx.ptr_type()),
+            ty: type_id_to_cranelift(type_id, &arena, self.ptr_type()),
             type_id,
         }
     }
@@ -646,8 +658,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             let native_name = name_table
                 .last_segment_str(external_info.native_name)
                 .ok_or_else(|| "native_name NameId has no segment".to_string())?;
-            self.ctx
-                .native_funcs()
+            self.native_registry()
                 .lookup(&module_path, &native_name)
                 .ok_or_else(|| {
                     format!(
@@ -658,17 +669,16 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         };
 
         // Build the Cranelift signature from NativeSignature
-        let mut sig = self.ctx.jit_module().make_signature();
+        let ptr_type = self.ptr_type();
+        let mut sig = self.jit_module().make_signature();
         for param_type in &native_func.signature.params {
-            sig.params.push(AbiParam::new(native_type_to_cranelift(
-                param_type,
-                self.ctx.ptr_type(),
-            )));
+            sig.params
+                .push(AbiParam::new(native_type_to_cranelift(param_type, ptr_type)));
         }
         if native_func.signature.return_type != NativeType::Nil {
             sig.returns.push(AbiParam::new(native_type_to_cranelift(
                 &native_func.signature.return_type,
-                self.ctx.ptr_type(),
+                ptr_type,
             )));
         }
 
@@ -677,10 +687,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let func_ptr = native_func.ptr;
 
         // Load the function pointer as a constant
-        let func_ptr_val = self
-            .builder
-            .ins()
-            .iconst(self.ctx.ptr_type(), func_ptr as i64);
+        let func_ptr_val = self.builder.ins().iconst(ptr_type, func_ptr as i64);
 
         // Emit the indirect call
         let call_inst = self
@@ -692,8 +699,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         if results.is_empty() {
             Ok(self.void_value())
         } else {
-            let arena = self.ctx.arena();
-            let cranelift_ty = type_id_to_cranelift(return_type_id, &arena, self.ctx.ptr_type());
+            let arena = self.arena();
+            let cranelift_ty = type_id_to_cranelift(return_type_id, &arena, ptr_type);
             drop(arena);
             Ok(CompiledValue {
                 value: results[0],
@@ -701,5 +708,98 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 type_id: return_type_id,
             })
         }
+    }
+
+    /// Box a value as an interface type.
+    ///
+    /// This method avoids borrow issues by having exclusive access to self.
+    /// If the value is already an interface or the type is not an interface,
+    /// returns the value unchanged.
+    pub fn box_interface_value(
+        &mut self,
+        value: CompiledValue,
+        interface_type_id: TypeId,
+    ) -> Result<CompiledValue, String> {
+        crate::interface_vtable::box_interface_value_id(
+            self.builder,
+            self.codegen_ctx,
+            self.explicit_params,
+            value,
+            interface_type_id,
+        )
+    }
+}
+
+impl<'a, 'b, 'ctx> crate::vtable_ctx::VtableCtx for Cg<'a, 'b, 'ctx> {
+    fn analyzed(&self) -> &crate::AnalyzedProgram {
+        self.explicit_params.analyzed
+    }
+
+    fn arena(&self) -> std::cell::Ref<'_, vole_sema::type_arena::TypeArena> {
+        self.explicit_params.analyzed.type_arena()
+    }
+
+    fn arena_rc(&self) -> &std::rc::Rc<std::cell::RefCell<vole_sema::type_arena::TypeArena>> {
+        self.explicit_params.analyzed.type_arena_ref()
+    }
+
+    fn registry(&self) -> &vole_sema::EntityRegistry {
+        self.explicit_params.analyzed.entity_registry()
+    }
+
+    fn interner(&self) -> &vole_frontend::Interner {
+        self.explicit_params.interner
+    }
+
+    fn query(&self) -> vole_sema::ProgramQuery<'_> {
+        self.explicit_params.analyzed.query()
+    }
+
+    fn update(&self) -> vole_sema::ProgramUpdate<'_> {
+        vole_sema::ProgramUpdate::new(self.explicit_params.analyzed.type_arena_ref())
+    }
+
+    fn ptr_type(&self) -> Type {
+        self.codegen_ctx.ptr_type()
+    }
+
+    fn jit_module(&mut self) -> &mut cranelift_jit::JITModule {
+        self.codegen_ctx.jit_module()
+    }
+
+    fn funcs(&mut self) -> &mut crate::FunctionRegistry {
+        self.codegen_ctx.funcs()
+    }
+
+    fn resolve_type_str_or_interface(&self, name: &str) -> Option<vole_identity::TypeDefId> {
+        let name_table = self.name_table();
+        // Try interface first, then class, then any type by short name
+        self.registry()
+            .interface_by_short_name(name, &name_table)
+            .or_else(|| self.registry().class_by_short_name(name, &name_table))
+            .or_else(|| self.registry().type_by_short_name(name, &name_table))
+    }
+
+    fn native_registry(&self) -> &vole_runtime::NativeRegistry {
+        self.explicit_params.native_registry
+    }
+
+    fn interface_vtables(
+        &self,
+    ) -> &std::cell::RefCell<crate::interface_vtable::InterfaceVtableRegistry> {
+        self.explicit_params.interface_vtables
+    }
+
+    fn type_metadata(&self) -> &std::collections::HashMap<Symbol, super::types::TypeMetadata> {
+        self.explicit_params.type_metadata
+    }
+
+    fn impl_method_infos(
+        &self,
+    ) -> &std::collections::HashMap<
+        (vole_sema::implement_registry::ImplTypeId, vole_identity::NameId),
+        super::types::MethodInfo,
+    > {
+        self.explicit_params.impl_method_infos
     }
 }

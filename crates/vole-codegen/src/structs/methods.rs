@@ -13,8 +13,8 @@ use crate::context::Cg;
 use crate::errors::CodegenError;
 use crate::method_resolution::{MethodResolutionInputId, MethodTarget, resolve_method_target_id};
 use crate::types::{
-    CompiledValue, box_interface_value_id, module_name_id, type_id_size, type_id_to_cranelift,
-    value_to_word, word_to_value_type_id,
+    CompiledValue, module_name_id, type_id_size, type_id_to_cranelift, value_to_word,
+    word_to_value_type_id,
 };
 use vole_frontend::{Expr, ExprKind, MethodCallExpr, NodeId, Symbol};
 use vole_identity::NamerLookup;
@@ -42,16 +42,18 @@ impl Cg<'_, '_, '_> {
         expr_id: NodeId,
     ) -> Result<CompiledValue, String> {
         // Check for static method call FIRST - don't try to compile the receiver
+        // Convert ModuleId to module path string for method_at_in_module
+        let current_module_path = self.current_module().map(|mid| {
+            self.name_table().module_path(mid).to_string()
+        });
         if let Some(ResolvedMethod::Static {
             type_def_id,
             method_id,
             func_type_id,
             ..
-        }) = self
-            .ctx
-            .analyzed
+        }) = self.analyzed()
             .query()
-            .method_at_in_module(expr_id, self.current_module())
+            .method_at_in_module(expr_id, current_module_path.as_deref())
         {
             return self.static_method_call(*type_def_id, *method_id, *func_type_id, mc, expr_id);
         }
@@ -70,25 +72,19 @@ impl Cg<'_, '_, '_> {
         // Handle module method calls (e.g., math.sqrt(16.0), math.lerp(...))
         // These go to either external native functions or pure Vole module functions
         // Extract module_id before the if-let to avoid holding arena borrow
-        let module_id_opt = self
-            .ctx
-            .arena()
+        let module_id_opt = self.arena()
             .unwrap_module(obj.type_id)
             .map(|m| m.module_id);
         if let Some(module_id) = module_id_opt {
-            let module_path = self
-                .ctx
-                .analyzed
+            let module_path = self.analyzed()
                 .name_table()
                 .module_path(module_id)
                 .to_string();
-            let name_id = module_name_id(self.ctx.analyzed, module_id, method_name_str);
-            // Get the method resolution
-            let resolution = self
-                .ctx
-                .analyzed
+            let name_id = module_name_id(self.analyzed(), module_id, method_name_str);
+            // Get the method resolution (reuse current_module_path from above)
+            let resolution = self.analyzed()
                 .query()
-                .method_at_in_module(expr_id, self.current_module());
+                .method_at_in_module(expr_id, current_module_path.as_deref());
             if let Some(ResolvedMethod::Implemented {
                 external_info,
                 func_type_id,
@@ -122,16 +118,14 @@ impl Cg<'_, '_, '_> {
                             module_path, method_name_str
                         )
                     })?;
-                    let func_key = self.ctx.funcs().intern_name_id(name_id);
-                    let func_id = self.ctx.funcs().func_id(func_key).ok_or_else(|| {
+                    let func_key = self.funcs().intern_name_id(name_id);
+                    let func_id = self.funcs().func_id(func_key).ok_or_else(|| {
                         format!(
                             "Module function {}::{} not found",
                             module_path, method_name_str
                         )
                     })?;
-                    let func_ref = self
-                        .ctx
-                        .jit_module()
+                    let func_ref = self.codegen_ctx.jit_module()
                         .declare_func_in_func(func_id, self.builder.func);
                     let call_inst = self.builder.ins().call(func_ref, &args);
                     let results = self.builder.inst_results(call_inst);
@@ -169,13 +163,12 @@ impl Cg<'_, '_, '_> {
         // If no resolution exists (e.g., inside default method bodies), fall back to type-based lookup
         // In monomorphized context, skip sema resolution because it was computed for the type parameter,
         // not the concrete type. Let resolve_method_target do dynamic resolution based on object_type.
-        let resolution = if self.ctx.substitutions().is_some() {
+        let resolution = if self.substitutions().is_some() {
             None
         } else {
-            self.ctx
-                .analyzed
+            self.analyzed()
                 .query()
-                .method_at_in_module(expr_id, self.current_module())
+                .method_at_in_module(expr_id, current_module_path.as_deref())
         };
 
         tracing::debug!(
@@ -186,9 +179,9 @@ impl Cg<'_, '_, '_> {
         );
 
         let target = resolve_method_target_id(MethodResolutionInputId {
-            analyzed: self.ctx.analyzed,
-            type_metadata: self.ctx.type_metadata,
-            impl_method_infos: self.ctx.impl_method_infos,
+            analyzed: self.analyzed(),
+            type_metadata: self.type_metadata(),
+            impl_method_infos: self.impl_method_infos(),
             method_name_str,
             object_type_id: obj.type_id,
             method_id,
@@ -198,9 +191,7 @@ impl Cg<'_, '_, '_> {
         let (method_info, return_type_id) = match target {
             MethodTarget::FunctionalInterface { func_type_id } => {
                 // Use TypeDefId directly for EntityRegistry-based dispatch
-                let interface_type_def_id = self
-                    .ctx
-                    .arena()
+                let interface_type_def_id = self.arena()
                     .unwrap_interface(obj.type_id)
                     .map(|(id, _)| id);
                 if let Some(interface_type_def_id) = interface_type_def_id {
@@ -216,14 +207,11 @@ impl Cg<'_, '_, '_> {
                 // For functional interfaces, the object holds the function ptr or closure
                 // The actual is_closure status depends on the lambda's compilation.
                 // Get is_closure from the object's type if available, otherwise from func_type_id
-                let is_closure = self
-                    .ctx
-                    .arena()
+                let is_closure = self.arena()
                     .unwrap_function(obj.type_id)
                     .map(|(_, _, is_closure)| is_closure)
                     .or_else(|| {
-                        self.ctx
-                            .arena()
+                        self.arena()
                             .unwrap_function(func_type_id)
                             .map(|(_, _, is_closure)| is_closure)
                     })
@@ -236,8 +224,7 @@ impl Cg<'_, '_, '_> {
             } => {
                 // Use TypeId-based params for interface boxing check
                 let param_type_ids = resolution.and_then(|resolved| {
-                    self.ctx
-                        .arena()
+                    self.arena()
                         .unwrap_function(resolved.func_type_id())
                         .map(|(params, _, _)| params.clone())
                 });
@@ -248,7 +235,7 @@ impl Cg<'_, '_, '_> {
                         // Check if param is interface type using arena
                         let is_interface = self.arena().unwrap_interface(param_type_id).is_some();
                         let compiled = if is_interface {
-                            box_interface_value_id(self.builder, self.ctx, compiled, param_type_id)?
+                            self.box_interface_value(compiled, param_type_id)?
                         } else {
                             compiled
                         };
@@ -297,27 +284,21 @@ impl Cg<'_, '_, '_> {
         };
 
         // Use sema's cached substituted return type if available (avoids recomputation)
-        let return_type_id = self
-            .ctx
-            .get_substituted_return_type(&expr_id)
+        let return_type_id = self.get_substituted_return_type(&expr_id)
             .unwrap_or(return_type_id);
 
         // Check if this is a monomorphized class method call
         // If so, use the monomorphized method's func_key instead
-        let (method_func_ref, is_generic_class) = if let Some(monomorph_key) = self
-            .ctx
-            .analyzed
+        let (method_func_ref, is_generic_class) = if let Some(monomorph_key) = self.analyzed()
             .expression_data
             .get_class_method_generic(expr_id)
         {
             // Look up the monomorphized instance
-            if let Some(instance) = self
-                .ctx
-                .registry()
+            if let Some(instance) = self.registry()
                 .class_method_monomorph_cache
                 .get(monomorph_key)
             {
-                let func_key = self.ctx.funcs().intern_name_id(instance.mangled_name);
+                let func_key = self.funcs().intern_name_id(instance.mangled_name);
                 // Monomorphized methods have concrete types, no i64 conversion needed
                 (self.func_ref(func_key)?, false)
             } else {
@@ -326,9 +307,7 @@ impl Cg<'_, '_, '_> {
             }
         } else {
             // Not a monomorphized class method, use regular dispatch
-            let is_generic_class = self
-                .ctx
-                .arena()
+            let is_generic_class = self.arena()
                 .unwrap_class(obj.type_id)
                 .map(|(_, type_args)| !type_args.is_empty())
                 .unwrap_or(false);
@@ -337,8 +316,7 @@ impl Cg<'_, '_, '_> {
 
         // Use TypeId-based params for interface boxing check
         let param_type_ids = resolution.and_then(|resolved| {
-            self.ctx
-                .arena()
+            self.arena()
                 .unwrap_function(resolved.func_type_id())
                 .map(|(params, _, _)| params.clone())
         });
@@ -349,20 +327,23 @@ impl Cg<'_, '_, '_> {
                 // Check if param is interface type using arena
                 let is_interface = self.arena().unwrap_interface(param_type_id).is_some();
                 let compiled = if is_interface {
-                    box_interface_value_id(self.builder, self.ctx, compiled, param_type_id)?
+                    self.box_interface_value(compiled, param_type_id)?
                 } else {
                     compiled
                 };
 
                 // Generic class methods expect i64 for TypeParam, convert if needed
                 let arg_value = if is_generic_class && compiled.ty != types::I64 {
+                    let ptr_type = self.ptr_type();
+                    let arena_rc = self.arena_rc().clone();
+                    let registry = self.registry();
                     value_to_word(
                         self.builder,
                         &compiled,
-                        self.ptr_type(),
+                        ptr_type,
                         None, // No heap alloc needed for primitive conversions
-                        self.ctx.arena_rc(),
-                        self.registry(),
+                        &arena_rc,
+                        registry,
                     )?
                 } else {
                     compiled.value
@@ -374,13 +355,16 @@ impl Cg<'_, '_, '_> {
                 let compiled = self.expr(arg)?;
                 // Generic class methods expect i64 for TypeParam, convert if needed
                 let arg_value = if is_generic_class && compiled.ty != types::I64 {
+                    let ptr_type = self.ptr_type();
+                    let arena_rc = self.arena_rc().clone();
+                    let registry = self.registry();
                     value_to_word(
                         self.builder,
                         &compiled,
-                        self.ptr_type(),
+                        ptr_type,
                         None, // No heap alloc needed for primitive conversions
-                        self.ctx.arena_rc(),
-                        self.registry(),
+                        &arena_rc,
+                        registry,
                     )?
                 } else {
                     compiled.value
@@ -405,14 +389,17 @@ impl Cg<'_, '_, '_> {
                 // Method returned i64 (TypeParam) but we expect a different type
                 let ptr_type = self.ptr_type();
                 let registry = self.registry();
-                word_to_value_type_id(
+                let arena = self.explicit_params.analyzed.type_arena();
+                let converted = word_to_value_type_id(
                     self.builder,
                     actual_result,
                     return_type_id,
                     ptr_type,
                     registry,
-                    &self.ctx.arena(),
-                )
+                    &arena,
+                );
+                drop(arena);
+                converted
             } else {
                 actual_result
             };
@@ -578,9 +565,7 @@ impl Cg<'_, '_, '_> {
         elem_type_id: TypeId,
     ) -> Result<CompiledValue, String> {
         // Look up the Iterator interface via CompileCtx
-        let iter_type_id = self
-            .ctx
-            .resolve_type_str_or_interface("Iterator")
+        let iter_type_id = self.resolve_type_str_or_interface("Iterator")
             .ok_or_else(|| "Iterator interface not found in entity registry".to_string())?;
 
         let iter_def = self.query().get_type(iter_type_id);
@@ -591,8 +576,7 @@ impl Cg<'_, '_, '_> {
             .iter()
             .find(|&&mid| {
                 let m = self.query().get_method(mid);
-                self.ctx
-                    .analyzed
+                self.analyzed()
                     .name_table()
                     .last_segment_str(m.name_id)
                     .is_some_and(|n| n == method_name)
@@ -602,9 +586,7 @@ impl Cg<'_, '_, '_> {
         let method = self.query().get_method(*method_id);
 
         // Get the external binding for this method
-        let external_info = *self
-            .ctx
-            .registry()
+        let external_info = *self.registry()
             .get_external_binding(*method_id)
             .ok_or_else(|| format!("No external binding for Iterator.{}", method_name))?;
 
@@ -651,7 +633,7 @@ impl Cg<'_, '_, '_> {
     /// Takes and returns TypeId for O(1) equality; converts internally for matching
     pub(crate) fn maybe_convert_iterator_return_type(&self, ty: TypeId) -> TypeId {
         // Look up the Iterator interface via CompileCtx
-        let iterator_type_id = self.ctx.resolve_type_str_or_interface("Iterator");
+        let iterator_type_id = self.resolve_type_str_or_interface("Iterator");
         if let Some(iterator_type_id) = iterator_type_id {
             self.convert_iterator_return_type_by_type_def_id(ty, iterator_type_id)
         } else {
@@ -673,7 +655,7 @@ impl Cg<'_, '_, '_> {
             && let Some(&elem_type_id) = type_args.first()
         {
             drop(arena);
-            return self.ctx.update().runtime_iterator(elem_type_id);
+            return self.update().runtime_iterator(elem_type_id);
         }
         ty
     }
@@ -703,7 +685,7 @@ impl Cg<'_, '_, '_> {
 
             // Build the Cranelift signature for the closure call
             // First param is the closure pointer, then the user params
-            let mut sig = self.ctx.jit_module().make_signature();
+            let mut sig = self.jit_module().make_signature();
             sig.params.push(AbiParam::new(self.ptr_type())); // Closure pointer
             for param_id in param_ids.iter() {
                 sig.params.push(AbiParam::new(type_id_to_cranelift(
@@ -745,7 +727,7 @@ impl Cg<'_, '_, '_> {
             }
         } else {
             // It's a pure function - call directly
-            let mut sig = self.ctx.jit_module().make_signature();
+            let mut sig = self.jit_module().make_signature();
             for param_id in param_ids.iter() {
                 sig.params.push(AbiParam::new(type_id_to_cranelift(
                     *param_id,
@@ -843,7 +825,7 @@ impl Cg<'_, '_, '_> {
 
         tracing::trace!(slot = slot, "interface vtable dispatch");
 
-        let mut sig = self.ctx.jit_module().make_signature();
+        let mut sig = self.jit_module().make_signature();
         sig.params.push(AbiParam::new(word_type));
         for _ in 0..param_count {
             sig.params.push(AbiParam::new(word_type));
@@ -854,9 +836,7 @@ impl Cg<'_, '_, '_> {
         let sig_ref = self.builder.import_signature(sig);
 
         let heap_alloc_ref = {
-            let key = self
-                .ctx
-                .funcs()
+            let key = self.funcs()
                 .runtime_key(RuntimeFn::HeapAlloc)
                 .ok_or_else(|| "heap allocator not registered".to_string())?;
             self.func_ref(key)?
@@ -868,13 +848,15 @@ impl Cg<'_, '_, '_> {
         let mut call_args: ArgVec = smallvec![obj.value];
         for arg in args {
             let compiled = self.expr(arg)?;
+            let arena_rc = self.arena_rc().clone();
+            let registry = self.registry();
             let word = value_to_word(
                 self.builder,
                 &compiled,
                 word_type,
                 Some(heap_alloc_ref),
-                self.ctx.arena_rc(),
-                self.registry(),
+                &arena_rc,
+                registry,
             )?;
             call_args.push(word);
         }
@@ -894,14 +876,16 @@ impl Cg<'_, '_, '_> {
             .copied()
             .ok_or_else(|| "interface call missing return value".to_string())?;
         let registry = self.registry();
+        let arena = self.explicit_params.analyzed.type_arena();
         let value = word_to_value_type_id(
             self.builder,
             word,
             return_type_id,
             word_type,
             registry,
-            &self.ctx.arena(),
+            &arena,
         );
+        drop(arena);
 
         // Convert Iterator return types to RuntimeIterator for interface dispatch
         // since external iterator methods return raw iterator pointers, not boxed interfaces
@@ -935,9 +919,7 @@ impl Cg<'_, '_, '_> {
         // Check for monomorphized static method (for generic classes)
         if let Some(mono_key) = self.query().static_method_generic_at(expr_id) {
             // Look up the monomorphized instance
-            if let Some(instance) = self
-                .ctx
-                .registry()
+            if let Some(instance) = self.registry()
                 .static_method_monomorph_cache
                 .get(mono_key)
             {
@@ -949,7 +931,7 @@ impl Cg<'_, '_, '_> {
                     // Box interface values if needed - check using arena
                     let is_interface = self.arena().unwrap_interface(param_type_id).is_some();
                     let compiled = if is_interface {
-                        box_interface_value_id(self.builder, self.ctx, compiled, param_type_id)?
+                        self.box_interface_value(compiled, param_type_id)?
                     } else {
                         compiled
                     };
@@ -957,7 +939,7 @@ impl Cg<'_, '_, '_> {
                 }
 
                 // Get monomorphized function reference and call
-                let func_key = self.ctx.funcs().intern_name_id(instance.mangled_name);
+                let func_key = self.funcs().intern_name_id(instance.mangled_name);
                 let func_ref = self.func_ref(func_key)?;
                 let call = self.builder.ins().call(func_ref, &args);
                 let results = self.builder.inst_results(call);
@@ -977,18 +959,14 @@ impl Cg<'_, '_, '_> {
         }
 
         // Look up the static method info (for non-generic classes)
-        let method_info = *self
-            .ctx
-            .static_method_infos
+        let method_info = *self.static_method_infos()
             .get(&(type_def_id, method_name_id))
             .ok_or_else(|| {
                 let type_def = self.query().get_type(type_def_id);
                 let name_table = self.name_table();
                 let type_name = name_table.display(type_def.name_id);
                 let method_name = name_table.display(method_name_id);
-                let registered_keys: Vec<_> = self
-                    .ctx
-                    .static_method_infos
+                let registered_keys: Vec<_> = self.static_method_infos()
                     .keys()
                     .map(|(tid, mid)| {
                         let t = self.query().get_type(*tid);
@@ -1017,7 +995,7 @@ impl Cg<'_, '_, '_> {
         for (arg, param_id) in mc.args.iter().zip(param_ids.iter()) {
             let compiled = self.expr(arg)?;
             // Box interface values if needed (box_interface_value_id is a no-op for non-interfaces)
-            let compiled = box_interface_value_id(self.builder, self.ctx, compiled, *param_id)?;
+            let compiled = self.box_interface_value(compiled, *param_id)?;
             args.push(compiled.value);
         }
 

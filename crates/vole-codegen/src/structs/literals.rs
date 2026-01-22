@@ -6,7 +6,7 @@ use super::helpers::convert_to_i64_for_storage;
 use crate::RuntimeFn;
 use crate::context::Cg;
 use crate::errors::CodegenError;
-use crate::types::{CompiledValue, box_interface_value_id, type_id_size};
+use crate::types::{CompiledValue, type_id_size};
 use cranelift::prelude::*;
 use vole_frontend::{Expr, StructLiteralExpr};
 use vole_sema::type_arena::TypeId;
@@ -21,15 +21,11 @@ impl Cg<'_, '_, '_> {
         // This is needed because module classes register with main interner Symbols,
         // but struct literals in module code use module interner Symbols
         let type_name = self.interner().resolve(sl.name);
-        let lookup_symbol = self
-            .ctx
-            .analyzed
+        let lookup_symbol = self.analyzed()
             .interner
             .lookup(type_name)
             .unwrap_or(sl.name);
-        let metadata = self
-            .ctx
-            .type_metadata
+        let metadata = self.type_metadata()
             .get(&lookup_symbol)
             .ok_or_else(|| format!("Unknown type: {}", type_name))?;
 
@@ -37,7 +33,6 @@ impl Cg<'_, '_, '_> {
         let field_count = metadata.field_slots.len() as u32;
         // Prefer the type from semantic analysis (handles generic instantiation)
         let result_type_id = self
-            .ctx
             .query()
             .type_of(expr.id)
             .unwrap_or(metadata.vole_type);
@@ -53,7 +48,6 @@ impl Cg<'_, '_, '_> {
         )?;
 
         let set_key = self
-            .ctx
             .funcs()
             .runtime_key(RuntimeFn::InstanceSetField)
             .ok_or_else(|| "vole_instance_set_field not found".to_string())?;
@@ -116,7 +110,7 @@ impl Cg<'_, '_, '_> {
                 if field_is_union && !value_is_union {
                     self.construct_union_heap_id(value, field_type_id)?
                 } else if field_is_interface {
-                    box_interface_value_id(self.builder, self.ctx, value, field_type_id)?
+                    self.box_interface_value(value, field_type_id)?
                 } else {
                     value
                 }
@@ -170,7 +164,6 @@ impl Cg<'_, '_, '_> {
 
         // Get heap_alloc function ref
         let heap_alloc_key = self
-            .ctx
             .funcs()
             .runtime_key(RuntimeFn::HeapAlloc)
             .ok_or_else(|| "heap allocator not registered".to_string())?;

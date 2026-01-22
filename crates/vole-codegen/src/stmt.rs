@@ -18,14 +18,14 @@ use super::structs::{
 };
 use super::types::{
     CompileCtx, CompiledValue, ExplicitParams, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG,
-    FALLIBLE_TAG_OFFSET, FunctionCtx, box_interface_value_id, fallible_error_tag_by_id,
-    resolve_type_expr_id, tuple_layout_id, type_id_size, type_id_to_cranelift,
+    FALLIBLE_TAG_OFFSET, FunctionCtx, fallible_error_tag_by_id, resolve_type_expr_id,
+    tuple_layout_id, type_id_size, type_id_to_cranelift,
 };
 
 /// Compile a function body with split contexts.
 ///
 /// This is the transition API that takes FunctionCtx and ExplicitParams alongside
-/// CompileCtx. The split contexts are passed to Cg::new_with_params.
+/// CompileCtx. CodegenCtx is created from CompileCtx via as_codegen_ctx().
 #[allow(dead_code)] // Part of CompileCtx migration
 #[allow(clippy::too_many_arguments)]
 pub(super) fn compile_func_body_with_params<'ctx>(
@@ -45,11 +45,12 @@ pub(super) fn compile_func_body_with_params<'ctx>(
     match body {
         vole_frontend::FuncBody::Block(block) => {
             let mut cf = ControlFlow::new();
-            let mut cg = Cg::new_with_params(
+            let mut codegen_ctx = ctx.as_codegen_ctx();
+            let mut cg = Cg::new(
                 builder,
                 variables,
-                ctx,
                 &mut cf,
+                &mut codegen_ctx,
                 function_ctx,
                 explicit_params,
                 captures,
@@ -60,11 +61,12 @@ pub(super) fn compile_func_body_with_params<'ctx>(
         }
         vole_frontend::FuncBody::Expr(expr) => {
             let mut cf = ControlFlow::new();
-            let mut cg = Cg::new_with_params(
+            let mut codegen_ctx = ctx.as_codegen_ctx();
+            let mut cg = Cg::new(
                 builder,
                 variables,
-                ctx,
                 &mut cf,
+                &mut codegen_ctx,
                 function_ctx,
                 explicit_params,
                 captures,
@@ -141,7 +143,7 @@ impl Cg<'_, '_, '_> {
                 let mut declared_type_id_opt = None;
                 let (mut final_value, mut final_type_id) = if let Some(ty_expr) = &let_stmt.ty {
                     let type_ctx = self.type_ctx();
-                    let func_ctx = self.function_ctx();
+                    let func_ctx = self.function_ctx;
                     let declared_type_id =
                         resolve_type_expr_id(ty_expr, &type_ctx, &func_ctx, self.type_metadata());
                     declared_type_id_opt = Some(declared_type_id);
@@ -203,9 +205,7 @@ impl Cg<'_, '_, '_> {
                         let cranelift_ty =
                             type_id_to_cranelift(final_type_id, &arena, self.ptr_type());
                         drop(arena);
-                        let boxed = box_interface_value_id(
-                            self.builder,
-                            self.ctx,
+                        let boxed = self.box_interface_value(
                             CompiledValue {
                                 value: final_value,
                                 ty: cranelift_ty,
@@ -259,8 +259,7 @@ impl Cg<'_, '_, '_> {
                         && !self.arena().is_interface(compiled.type_id)
                         && !self.arena().is_runtime_iterator(compiled.type_id)
                     {
-                        let boxed =
-                            box_interface_value_id(self.builder, self.ctx, compiled, ret_type_id)?;
+                        let boxed = self.box_interface_value(compiled, ret_type_id)?;
                         self.builder.ins().return_(&[boxed.value]);
                         return Ok(true);
                     }
@@ -492,9 +491,7 @@ impl Cg<'_, '_, '_> {
         let arr = self.expr(&for_stmt.iterable)?;
 
         // Get element type using arena method
-        let elem_type_id = self
-            .ctx
-            .arena()
+        let elem_type_id = self.arena()
             .unwrap_array(arr.type_id)
             .unwrap_or_else(|| self.arena().i64());
 
@@ -881,12 +878,15 @@ impl Cg<'_, '_, '_> {
                     let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
                     let result_raw =
                         self.call_runtime(RuntimeFn::InstanceGetField, &[value, slot_val])?;
+                    // Borrow arena from explicit_params directly to avoid borrow conflict
+                    let arena = self.explicit_params.analyzed.type_arena();
                     let (result_val, cranelift_ty) = convert_field_value_id(
                         self.builder,
                         result_raw,
                         field_type_id,
-                        &self.ctx.arena(),
+                        &arena,
                     );
+                    drop(arena);
                     let var = self.builder.declare_var(cranelift_ty);
                     self.builder.def_var(var, result_val);
                     self.vars
