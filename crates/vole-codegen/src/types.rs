@@ -556,6 +556,30 @@ impl<'a> CompileCtx<'a> {
     pub fn type_meta(&self) -> &'a HashMap<Symbol, TypeMetadata> {
         self.type_metadata
     }
+
+    // ========== Core CodegenCtx field delegation methods ==========
+    // These provide access to the mutable JIT infrastructure.
+
+    /// Get Cranelift pointer type.
+    #[inline]
+    #[allow(dead_code)]
+    pub fn ptr_type(&self) -> Type {
+        self.pointer_type
+    }
+
+    /// Get mutable reference to JIT module.
+    #[inline]
+    #[allow(dead_code)]
+    pub fn jit_module(&mut self) -> &mut JITModule {
+        self.module
+    }
+
+    /// Get mutable reference to function registry.
+    #[inline]
+    #[allow(dead_code)]
+    pub fn funcs(&mut self) -> &mut FunctionRegistry {
+        self.func_registry
+    }
 }
 
 /// Resolve a type expression to a TypeId (uses CompileCtx for full context).
