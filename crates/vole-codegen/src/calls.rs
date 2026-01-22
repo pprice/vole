@@ -17,8 +17,7 @@ use vole_sema::type_arena::{TypeArena, TypeId};
 
 use super::context::Cg;
 use super::types::{
-    CompiledValue, box_interface_value_id, native_type_to_cranelift, resolve_type_expr_id,
-    type_id_to_cranelift,
+    CompiledValue, box_interface_value_id, native_type_to_cranelift, type_id_to_cranelift,
 };
 use super::{FunctionKey, FunctionRegistry, RuntimeFn};
 
@@ -275,10 +274,22 @@ impl Cg<'_, '_, '_> {
             };
             let lambda_val = self.expr(init_expr)?;
 
-            // Check if the global has a declared type (e.g., `let x: Predicate = ...`)
-            if let Some(ref ty_expr) = global.ty {
-                let declared_type_id = resolve_type_expr_id(ty_expr, self.ctx);
+            // Get declared type from GlobalDef (uses sema-resolved type, not TypeExpr)
+            // Scope the name_table borrow to avoid conflicts with later mutable borrows
+            let global_type_id = {
+                let name_table = self.name_table();
+                let module_id = self
+                    .ctx
+                    .module_path()
+                    .and_then(|path| name_table.module_id_if_known(path))
+                    .unwrap_or_else(|| name_table.main_module());
+                name_table
+                    .name_id(module_id, &[callee_sym], self.ctx.interner())
+                    .and_then(|name_id| self.ctx.query().global(name_id))
+                    .map(|global_def| global_def.type_id)
+            };
 
+            if let Some(declared_type_id) = global_type_id {
                 // If declared as functional interface, call via vtable dispatch
                 let iface_info = {
                     let arena = self.ctx.arena();

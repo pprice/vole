@@ -140,13 +140,27 @@ impl Cg<'_, '_, '_> {
             let mut value = self.expr(&global_init)?;
 
             // If the global has a declared interface type, box the value
-            if let Some(ref ty_expr) = global.ty {
-                let declared_type_id = resolve_type_expr_id(ty_expr, self.ctx);
-                if self.ctx.arena().is_interface(declared_type_id)
-                    && !self.ctx.arena().is_interface(value.type_id)
-                {
-                    value =
-                        box_interface_value_id(self.builder, self.ctx, value, declared_type_id)?;
+            // Use GlobalDef.type_id instead of re-resolving TypeExpr
+            let name_table = self.name_table();
+            let module_id = self
+                .ctx
+                .module_path()
+                .and_then(|path| name_table.module_id_if_known(path))
+                .unwrap_or_else(|| name_table.main_module());
+            if let Some(name_id) = name_table.name_id(module_id, &[sym], self.ctx.interner()) {
+                drop(name_table);
+                if let Some(global_def) = self.ctx.query().global(name_id) {
+                    let declared_type_id = global_def.type_id;
+                    if self.ctx.arena().is_interface(declared_type_id)
+                        && !self.ctx.arena().is_interface(value.type_id)
+                    {
+                        value = box_interface_value_id(
+                            self.builder,
+                            self.ctx,
+                            value,
+                            declared_type_id,
+                        )?;
+                    }
                 }
             }
             Ok(value)

@@ -111,16 +111,22 @@ pub(crate) fn infer_expr_type(
         ExprKind::Done => ctx.arena().done(),
 
         ExprKind::Identifier(sym) => {
+            // Check local parameters first
             for (name, ty_id) in param_types {
                 if name == sym {
                     return *ty_id;
                 }
             }
-            for global in ctx.global_vars() {
-                if global.name == *sym
-                    && let Some(type_expr) = &global.ty
-                {
-                    return resolve_type_expr_id(type_expr, ctx);
+            // Try to look up global via GlobalDef (uses NameId, not AST iteration)
+            let name_table = ctx.name_table();
+            let module_id = ctx
+                .module_path()
+                .and_then(|path| name_table.module_id_if_known(path))
+                .unwrap_or_else(|| name_table.main_module());
+            if let Some(name_id) = name_table.name_id(module_id, &[*sym], ctx.interner()) {
+                drop(name_table);
+                if let Some(global_def) = ctx.query().global(name_id) {
+                    return global_def.type_id;
                 }
             }
             primitives.i64
