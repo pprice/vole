@@ -851,10 +851,10 @@ impl Compiler<'_> {
 
                     // Create function type for the variable
                     let func_type_id = {
-                        let mut arena = ctx.arena.borrow_mut();
                         let param_ids: TypeIdVec =
                             scoped_func.param_type_ids.iter().copied().collect();
-                        arena.function(param_ids, scoped_func.return_type_id, true) // is_closure=true
+                        ctx.update()
+                            .function(param_ids, scoped_func.return_type_id, true) // is_closure=true
                     };
 
                     // Declare Cranelift variable and add to map
@@ -1769,11 +1769,11 @@ impl Compiler<'_> {
                         .collect();
 
                     // Determine if it's a class or record based on TypeDefKind
-                    let mut arena = self.analyzed.type_arena.borrow_mut();
+                    let update = vole_sema::ProgramUpdate::new(&self.analyzed.type_arena);
                     return match &type_def.kind {
-                        TypeDefKind::Record => arena.record(type_def_id, type_args_id),
-                        TypeDefKind::Class => arena.class(type_def_id, type_args_id),
-                        _ => arena.record(type_def_id, type_args_id), // Fallback
+                        TypeDefKind::Record => update.record(type_def_id, type_args_id),
+                        TypeDefKind::Class => update.class(type_def_id, type_args_id),
+                        _ => update.record(type_def_id, type_args_id), // Fallback
                     };
                 }
             }
@@ -1785,9 +1785,7 @@ impl Compiler<'_> {
             // Convert std HashMap to FxHashMap for type_arena
             let subs: FxHashMap<NameId, TypeId> =
                 substitutions.iter().map(|(&k, &v)| (k, v)).collect();
-            self.analyzed
-                .type_arena
-                .borrow_mut()
+            vole_sema::ProgramUpdate::new(&self.analyzed.type_arena)
                 .substitute(metadata.vole_type, &subs)
         } else {
             // Final fallback

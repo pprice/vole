@@ -886,13 +886,13 @@ fn resolve_vtable_target(
                 .expect("method signature must be a function type");
             (params.to_vec(), ret)
         };
-        // Now substitute with mutable borrow
-        let mut arena = ctx.arena.borrow_mut();
+        // Substitute using ProgramUpdate
+        let update = ctx.update();
         let param_ids: Vec<TypeId> = params_vec
             .iter()
-            .map(|&p| arena.substitute(p, substitutions))
+            .map(|&p| update.substitute(p, substitutions))
             .collect();
-        let ret_id = arena.substitute(ret, substitutions);
+        let ret_id = update.substitute(ret, substitutions);
         (param_ids, ret_id)
     };
 

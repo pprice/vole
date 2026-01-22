@@ -456,7 +456,8 @@ impl Cg<'_, '_, '_> {
                     let type_id = self.ctx.get_expr_type(&call_expr_id).unwrap_or_else(|| {
                         native_type_to_type_id(
                             &native_func.signature.return_type,
-                            &mut self.ctx.arena_mut(),
+                            &self.ctx.arena(),
+                            &self.update(),
                         )
                     });
                     // Convert Iterator<T> to RuntimeIterator(T) since external functions
@@ -535,7 +536,8 @@ impl Cg<'_, '_, '_> {
                 let type_id = self.ctx.get_expr_type(&call_expr_id).unwrap_or_else(|| {
                     native_type_to_type_id(
                         &native_func.signature.return_type,
-                        &mut self.ctx.arena_mut(),
+                        &self.ctx.arena(),
+                        &self.update(),
                     )
                 });
                 // Convert Iterator<T> to RuntimeIterator(T) since external functions
@@ -908,7 +910,11 @@ impl Cg<'_, '_, '_> {
 }
 
 /// Convert NativeType to TypeId.
-fn native_type_to_type_id(nt: &NativeType, arena: &mut TypeArena) -> TypeId {
+fn native_type_to_type_id(
+    nt: &NativeType,
+    arena: &TypeArena,
+    update: &vole_sema::ProgramUpdate,
+) -> TypeId {
     match nt {
         NativeType::I8 => arena.primitives.i8,
         NativeType::I16 => arena.primitives.i16,
@@ -925,12 +931,12 @@ fn native_type_to_type_id(nt: &NativeType, arena: &mut TypeArena) -> TypeId {
         NativeType::String => arena.primitives.string,
         NativeType::Nil => arena.primitives.nil,
         NativeType::Optional(inner) => {
-            let inner_id = native_type_to_type_id(inner, arena);
-            arena.optional(inner_id)
+            let inner_id = native_type_to_type_id(inner, arena, update);
+            update.optional(inner_id)
         }
         NativeType::Array(inner) => {
-            let inner_id = native_type_to_type_id(inner, arena);
-            arena.array(inner_id)
+            let inner_id = native_type_to_type_id(inner, arena, update);
+            update.array(inner_id)
         }
     }
 }

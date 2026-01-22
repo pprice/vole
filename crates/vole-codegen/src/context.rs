@@ -126,6 +126,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     // ========== Arena helpers ==========
 
+    /// Get an update interface for arena mutations.
+    /// Centralizes all borrow_mut() calls for cleaner code.
+    #[inline]
+    pub fn update(&self) -> vole_sema::ProgramUpdate<'_> {
+        self.ctx.update()
+    }
+
     /// Find the nil variant index in a union (for optional handling)
     pub fn find_nil_variant(&self, ty: TypeId) -> Option<usize> {
         let arena = self.ctx.arena();

@@ -52,16 +52,17 @@ impl<'a> TypeCtx<'a> {
         self.query.arena().borrow()
     }
 
-    /// Convenience: mutably borrow the type arena
-    #[inline]
-    pub fn arena_mut(&self) -> std::cell::RefMut<'_, TypeArena> {
-        self.query.arena().borrow_mut()
-    }
-
     /// Raw arena access (for functions that need &RefCell<TypeArena>)
     #[inline]
     pub fn arena_rc(&self) -> &'a Rc<RefCell<TypeArena>> {
         self.query.arena()
+    }
+
+    /// Get an update interface for arena mutations.
+    /// Centralizes all borrow_mut() calls for cleaner code.
+    #[inline]
+    pub fn update(&self) -> vole_sema::ProgramUpdate<'a> {
+        vole_sema::ProgramUpdate::new(self.query.arena())
     }
 
     /// Get the entity registry
@@ -130,9 +131,9 @@ impl<'a> CodegenCtx<'a> {
         self.types.arena()
     }
 
-    /// Convenience: mutably borrow arena
-    pub fn arena_mut(&self) -> std::cell::RefMut<'_, TypeArena> {
-        self.types.arena_mut()
+    /// Get an update interface for arena mutations.
+    pub fn update(&self) -> vole_sema::ProgramUpdate<'_> {
+        self.types.update()
     }
 }
 
@@ -206,7 +207,8 @@ impl<'a> FunctionCtx<'a> {
             // Convert std HashMap to FxHashMap for arena compatibility
             let subs: FxHashMap<NameId, TypeId> =
                 substitutions.iter().map(|(&k, &v)| (k, v)).collect();
-            let result = arena.borrow_mut().substitute(ty, &subs);
+            let update = vole_sema::ProgramUpdate::new(arena);
+            let result = update.substitute(ty, &subs);
             // Cache the result
             self.substitution_cache.borrow_mut().insert(ty, result);
             result
@@ -356,10 +358,11 @@ impl<'a> CompileCtx<'a> {
         self.arena.borrow()
     }
 
-    /// Mutably borrow the type arena (API-compatible with CodegenCtx)
+    /// Get an update interface for arena mutations.
+    /// Centralizes all borrow_mut() calls for cleaner code.
     #[inline]
-    pub fn arena_mut(&self) -> std::cell::RefMut<'_, TypeArena> {
-        self.arena.borrow_mut()
+    pub fn update(&self) -> vole_sema::ProgramUpdate<'_> {
+        vole_sema::ProgramUpdate::new(self.arena)
     }
 
     /// Get the interner (API-compatible with CodegenCtx)
@@ -379,7 +382,7 @@ impl<'a> CompileCtx<'a> {
             // Convert std HashMap to FxHashMap for arena compatibility
             let subs: FxHashMap<NameId, TypeId> =
                 substitutions.iter().map(|(&k, &v)| (k, v)).collect();
-            let result = self.arena.borrow_mut().substitute(ty, &subs);
+            let result = self.update().substitute(ty, &subs);
             // Cache the result
             self.substitution_cache.borrow_mut().insert(ty, result);
             result
@@ -461,7 +464,7 @@ pub(crate) fn resolve_type_expr_id(ty: &TypeExpr, ctx: &CompileCtx) -> TypeId {
     if let Some(substitutions) = ctx.type_substitutions {
         // Convert std::collections::HashMap to FxHashMap for arena.substitute
         let subs: FxHashMap<NameId, TypeId> = substitutions.iter().map(|(&k, &v)| (k, v)).collect();
-        ctx.arena.borrow_mut().substitute(type_id, &subs)
+        ctx.update().substitute(type_id, &subs)
     } else {
         type_id
     }
@@ -548,10 +551,11 @@ pub(crate) fn resolve_type_expr_to_id(
     interner: &Interner,
     name_table: &NameTable,
     module_id: ModuleId,
-    arena: &RefCell<TypeArena>,
+    arena: &Rc<RefCell<TypeArena>>,
 ) -> TypeId {
     use vole_sema::type_arena::SemaType;
     use vole_sema::types::primitive::PrimitiveType as SemaPrimitive;
+    let update = vole_sema::ProgramUpdate::new(arena);
 
     // Create resolver for name lookups
     let resolver = Resolver::new(interner, name_table, module_id, &[]);
@@ -602,9 +606,9 @@ pub(crate) fn resolve_type_expr_to_id(
                                 type_def_id, type_def.name_id, type_def.type_params
                             );
                         }
-                        arena.borrow_mut().interface(type_def_id, TypeIdVec::new())
+                        update.interface(type_def_id, TypeIdVec::new())
                     }
-                    TypeDefKind::ErrorType => arena.borrow_mut().error_type(type_def_id),
+                    TypeDefKind::ErrorType => update.error_type(type_def_id),
                     TypeDefKind::Record | TypeDefKind::Class => {
                         // For Record and Class types, first try direct lookup by Symbol
                         if let Some(metadata) = type_metadata.get(sym) {
@@ -627,9 +631,9 @@ pub(crate) fn resolve_type_expr_to_id(
                         }
                         // Build from entity registry
                         if type_def.kind == TypeDefKind::Record {
-                            arena.borrow_mut().record(type_def_id, TypeIdVec::new())
+                            update.record(type_def_id, TypeIdVec::new())
                         } else {
-                            arena.borrow_mut().class(type_def_id, TypeIdVec::new())
+                            update.class(type_def_id, TypeIdVec::new())
                         }
                     }
                     _ => {
@@ -652,11 +656,9 @@ pub(crate) fn resolve_type_expr_to_id(
                 // Type parameter - use placeholder
                 let name = interner.resolve(*sym);
                 tracing::trace!(name, "type parameter in codegen, using Placeholder");
-                arena
-                    .borrow_mut()
-                    .placeholder(vole_sema::types::PlaceholderKind::TypeParam(
-                        name.to_string(),
-                    ))
+                update.placeholder(vole_sema::types::PlaceholderKind::TypeParam(
+                    name.to_string(),
+                ))
             }
         }
         TypeExpr::Array(elem) => {
@@ -669,7 +671,7 @@ pub(crate) fn resolve_type_expr_to_id(
                 module_id,
                 arena,
             );
-            arena.borrow_mut().array(elem_id)
+            update.array(elem_id)
         }
         TypeExpr::Optional(inner) => {
             // T? desugars to T | nil
@@ -682,7 +684,7 @@ pub(crate) fn resolve_type_expr_to_id(
                 module_id,
                 arena,
             );
-            arena.borrow_mut().optional(inner_id)
+            update.optional(inner_id)
         }
         TypeExpr::Union(variants) => {
             let variant_ids: Vec<TypeId> = variants
@@ -699,7 +701,7 @@ pub(crate) fn resolve_type_expr_to_id(
                     )
                 })
                 .collect();
-            arena.borrow_mut().union(variant_ids)
+            update.union(variant_ids)
         }
         TypeExpr::Nil => arena.borrow().nil(),
         TypeExpr::Done => arena.borrow().done(),
@@ -730,13 +732,11 @@ pub(crate) fn resolve_type_expr_to_id(
                 module_id,
                 arena,
             );
-            arena.borrow_mut().function(param_ids, ret_id, false)
+            update.function(param_ids, ret_id, false)
         }
         TypeExpr::SelfType => {
             // Self type placeholder
-            arena
-                .borrow_mut()
-                .placeholder(vole_sema::types::PlaceholderKind::SelfType)
+            update.placeholder(vole_sema::types::PlaceholderKind::SelfType)
         }
         TypeExpr::Fallible {
             success_type,
@@ -760,7 +760,7 @@ pub(crate) fn resolve_type_expr_to_id(
                 module_id,
                 arena,
             );
-            arena.borrow_mut().fallible(success_id, error_id)
+            update.fallible(success_id, error_id)
         }
         TypeExpr::Generic { name, args } => {
             // Resolve all type arguments
@@ -786,8 +786,8 @@ pub(crate) fn resolve_type_expr_to_id(
             if let Some(type_def_id) = type_def_id {
                 let type_def = entity_registry.get_type(type_def_id);
                 match type_def.kind {
-                    TypeDefKind::Class => arena.borrow_mut().class(type_def_id, arg_ids),
-                    TypeDefKind::Record => arena.borrow_mut().record(type_def_id, arg_ids),
+                    TypeDefKind::Class => update.class(type_def_id, arg_ids),
+                    TypeDefKind::Record => update.record(type_def_id, arg_ids),
                     TypeDefKind::Interface => {
                         if !type_def.type_params.is_empty()
                             && type_def.type_params.len() != arg_ids.len()
@@ -802,7 +802,7 @@ pub(crate) fn resolve_type_expr_to_id(
                                 type_def.name_id
                             );
                         }
-                        arena.borrow_mut().interface(type_def_id, arg_ids)
+                        update.interface(type_def_id, arg_ids)
                     }
                     TypeDefKind::Alias | TypeDefKind::ErrorType | TypeDefKind::Primitive => {
                         panic!(
@@ -835,7 +835,7 @@ pub(crate) fn resolve_type_expr_to_id(
                     )
                 })
                 .collect();
-            arena.borrow_mut().tuple(element_ids)
+            update.tuple(element_ids)
         }
         TypeExpr::FixedArray { element, size } => {
             let elem_id = resolve_type_expr_to_id(
@@ -847,7 +847,7 @@ pub(crate) fn resolve_type_expr_to_id(
                 module_id,
                 arena,
             );
-            arena.borrow_mut().fixed_array(elem_id, *size)
+            update.fixed_array(elem_id, *size)
         }
         TypeExpr::Structural { .. } | TypeExpr::Combination(_) => {
             // Constraint-only types - use void

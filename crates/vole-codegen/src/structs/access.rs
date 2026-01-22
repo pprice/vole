@@ -171,12 +171,13 @@ impl Cg<'_, '_, '_> {
         // Result type is field_type | nil (optional)
         // But if field type is already optional, don't double-wrap
         let (result_type_id, is_field_optional) = {
-            let mut arena = self.ctx.arena_mut();
+            let arena = self.ctx.arena();
             let is_optional = arena.is_optional(field_type_id);
+            drop(arena);
             let result_id = if is_optional {
                 field_type_id
             } else {
-                arena.optional(field_type_id)
+                self.update().optional(field_type_id)
             };
             (result_id, is_optional)
         };

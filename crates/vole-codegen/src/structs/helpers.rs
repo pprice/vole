@@ -47,9 +47,7 @@ pub(crate) fn get_field_slot_and_type_id(
             // Apply type substitutions from type args
             let field_type_id = if !substitutions.is_empty() {
                 drop(arena);
-                let mut arena_mut = type_ctx.arena_mut();
-                let substituted = arena_mut.substitute(base_type_id, &substitutions);
-                drop(arena_mut);
+                let substituted = type_ctx.update().substitute(base_type_id, &substitutions);
                 // Apply monomorphization context substitutions
                 func_ctx.substitute_type_id(substituted, type_ctx.arena_rc())
             } else {
@@ -101,9 +99,7 @@ pub(crate) fn get_field_slot_and_type_id_legacy(
             // Apply type substitutions from type args
             let field_type_id = if !substitutions.is_empty() {
                 drop(arena);
-                let mut arena = ctx.arena.borrow_mut();
-                let substituted = arena.substitute(base_type_id, &substitutions);
-                drop(arena);
+                let substituted = ctx.update().substitute(base_type_id, &substitutions);
                 // Apply monomorphization context substitutions
                 ctx.substitute_type_id(substituted)
             } else {

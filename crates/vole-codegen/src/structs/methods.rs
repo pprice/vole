@@ -482,7 +482,7 @@ impl Cg<'_, '_, '_> {
 
         // Return as RuntimeIterator<i64> - concrete type for builtin iterators
         let i64_id = self.ctx.arena().primitives.i64;
-        let iter_type_id = self.ctx.arena_mut().runtime_iterator(i64_id);
+        let iter_type_id = self.update().runtime_iterator(i64_id);
         Ok(CompiledValue {
             value: result,
             ty: self.ctx.pointer_type,
@@ -508,7 +508,7 @@ impl Cg<'_, '_, '_> {
                 "iter" => {
                     let result = self.call_runtime(RuntimeFn::ArrayIter, &[obj.value])?;
                     // Return RuntimeIterator - a concrete type for builtin iterators
-                    let iter_type_id = self.ctx.arena_mut().runtime_iterator(elem_type_id);
+                    let iter_type_id = self.update().runtime_iterator(elem_type_id);
                     Ok(Some(CompiledValue {
                         value: result,
                         ty: self.ctx.pointer_type,
@@ -530,7 +530,7 @@ impl Cg<'_, '_, '_> {
                 "iter" => {
                     let result = self.call_runtime(RuntimeFn::StringCharsIter, &[obj.value])?;
                     let string_id = self.ctx.arena().string();
-                    let iter_type_id = self.ctx.arena_mut().runtime_iterator(string_id);
+                    let iter_type_id = self.update().runtime_iterator(string_id);
                     Ok(Some(CompiledValue {
                         value: result,
                         ty: self.ctx.pointer_type,
@@ -559,7 +559,7 @@ impl Cg<'_, '_, '_> {
                     .load(types::I64, MemFlags::new(), obj.value, 8);
                 let result = self.call_runtime(RuntimeFn::RangeIter, &[start, end])?;
                 let i64_id = self.ctx.arena().i64();
-                let iter_type_id = self.ctx.arena_mut().runtime_iterator(i64_id);
+                let iter_type_id = self.update().runtime_iterator(i64_id);
                 return Ok(Some(CompiledValue {
                     value: result,
                     ty: self.ctx.pointer_type,
@@ -627,10 +627,7 @@ impl Cg<'_, '_, '_> {
                 .expect("method signature must be a function type");
             ret
         };
-        let return_type_id = self
-            .ctx
-            .arena_mut()
-            .substitute(method_return_id, &substitutions);
+        let return_type_id = self.update().substitute(method_return_id, &substitutions);
 
         // Convert Iterator<T> return types to RuntimeIterator(T) since the runtime
         // functions return raw iterator pointers, not boxed interface values
@@ -682,7 +679,7 @@ impl Cg<'_, '_, '_> {
             && let Some(&elem_type_id) = type_args.first()
         {
             drop(arena);
-            return self.ctx.arena_mut().runtime_iterator(elem_type_id);
+            return self.ctx.update().runtime_iterator(elem_type_id);
         }
         ty
     }

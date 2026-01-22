@@ -319,10 +319,7 @@ impl Cg<'_, '_, '_> {
         let closure_ptr = self.builder.inst_results(alloc_call)[0];
 
         // Create closure type directly using arena (is_closure: true)
-        let closure_type_id = self
-            .ctx
-            .arena_mut()
-            .function(param_ids, return_type_id, true);
+        let closure_type_id = self.update().function(param_ids, return_type_id, true);
         Ok(CompiledValue {
             value: closure_ptr,
             ty: self.ctx.pointer_type,
@@ -439,8 +436,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Use type from ExpressionData if available, otherwise create it
-        let array_type_id =
-            inferred_type_id.unwrap_or_else(|| self.ctx.arena_mut().array(elem_type_id));
+        let array_type_id = inferred_type_id.unwrap_or_else(|| self.update().array(elem_type_id));
         Ok(CompiledValue {
             value: arr_ptr,
             ty: self.ctx.pointer_type,
@@ -538,7 +534,7 @@ impl Cg<'_, '_, '_> {
         let type_id = self
             .ctx
             .get_expr_type(&expr.id)
-            .unwrap_or_else(|| self.ctx.arena_mut().fixed_array(elem_type_id, count));
+            .unwrap_or_else(|| self.update().fixed_array(elem_type_id, count));
 
         Ok(CompiledValue {
             value: ptr,

@@ -36,7 +36,7 @@ impl CaptureBinding {
 pub(crate) fn build_capture_bindings(
     captures: &[vole_frontend::Capture],
     variables: &HashMap<Symbol, (Variable, TypeId)>,
-    arena: &mut TypeArena,
+    arena: &TypeArena,
 ) -> HashMap<Symbol, CaptureBinding> {
     let mut bindings = HashMap::new();
     let default_type_id = arena.primitives.i64;
@@ -192,7 +192,7 @@ pub(crate) fn infer_expr_type(
                 .map(|t| resolve_type_expr_id(t, ctx))
                 .unwrap_or(primitives.i64);
 
-            ctx.arena.borrow_mut().function(
+            ctx.update().function(
                 lambda_param_ids,
                 return_ty_id,
                 !lambda.captures.borrow().is_empty(),
@@ -329,9 +329,8 @@ fn compile_pure_lambda(
 
     // Create TypeId directly from components
     let func_type_id = {
-        let mut arena = ctx.arena.borrow_mut();
         let param_ids: TypeIdVec = param_type_ids.iter().copied().collect();
-        arena.function(param_ids, return_type_id, true) // is_closure=true
+        ctx.update().function(param_ids, return_type_id, true) // is_closure=true
     };
     Ok(CompiledValue {
         value: closure_ptr,
@@ -398,8 +397,7 @@ fn compile_lambda_with_captures(
     ctx.func_registry.set_func_id(func_key, func_id);
     ctx.func_registry.set_return_type(func_key, return_type_id);
 
-    let capture_bindings =
-        build_capture_bindings(&captures, variables, &mut ctx.arena.borrow_mut());
+    let capture_bindings = build_capture_bindings(&captures, variables, &ctx.arena.borrow());
 
     let mut lambda_ctx = ctx.module.make_context();
     lambda_ctx.func.signature = sig.clone();
@@ -504,9 +502,8 @@ fn compile_lambda_with_captures(
 
     // Create TypeId directly from components
     let func_type_id = {
-        let mut arena = ctx.arena.borrow_mut();
         let param_ids: TypeIdVec = param_type_ids.iter().copied().collect();
-        arena.function(param_ids, return_type_id, true) // is_closure=true
+        ctx.update().function(param_ids, return_type_id, true) // is_closure=true
     };
     Ok(CompiledValue {
         value: closure_ptr,
