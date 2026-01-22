@@ -25,7 +25,7 @@ use vole_sema::type_arena::TypeId;
 impl Cg<'_, '_, '_> {
     /// Look up a method NameId using the context's interner (which may be a module interner)
     fn method_name_id(&self, name: Symbol) -> NameId {
-        let name_table = self.ctx.analyzed.name_table.borrow();
+        let name_table = self.ctx.query().name_table_rc().borrow();
         let namer = NamerLookup::new(&name_table, self.ctx.interner());
         namer.method(name).unwrap_or_else(|| {
             panic!(
@@ -365,7 +365,7 @@ impl Cg<'_, '_, '_> {
                         self.ctx.pointer_type,
                         None, // No heap alloc needed for primitive conversions
                         self.ctx.arena,
-                        &self.ctx.analyzed.entity_registry,
+                        self.registry(),
                     )?
                 } else {
                     compiled.value
@@ -383,7 +383,7 @@ impl Cg<'_, '_, '_> {
                         self.ctx.pointer_type,
                         None, // No heap alloc needed for primitive conversions
                         self.ctx.arena,
-                        &self.ctx.analyzed.entity_registry,
+                        self.registry(),
                     )?
                 } else {
                     compiled.value
@@ -412,7 +412,7 @@ impl Cg<'_, '_, '_> {
                     actual_result,
                     return_type_id,
                     self.ctx.pointer_type,
-                    &self.ctx.analyzed.entity_registry,
+                    self.registry(),
                     &self.ctx.arena(),
                 )
             } else {
@@ -425,7 +425,7 @@ impl Cg<'_, '_, '_> {
                 let union_size = type_id_size(
                     return_type_id,
                     self.ctx.pointer_type,
-                    &self.ctx.analyzed.entity_registry,
+                    self.registry(),
                     &self.ctx.arena(),
                 );
                 let local_slot = self.builder.create_sized_stack_slot(StackSlotData::new(
@@ -814,7 +814,7 @@ impl Cg<'_, '_, '_> {
         let slot = crate::interface_vtable::interface_method_slot_by_type_def_id(
             interface_type_id,
             method_name_id,
-            &self.ctx.analyzed.entity_registry,
+            self.registry(),
         )?;
         self.interface_dispatch_call_args_inner(obj, args, slot, func_type_id)
     }
@@ -888,7 +888,7 @@ impl Cg<'_, '_, '_> {
                 word_type,
                 Some(heap_alloc_ref),
                 self.ctx.arena,
-                &self.ctx.analyzed.entity_registry,
+                self.registry(),
             )?;
             call_args.push(word);
         }
@@ -912,7 +912,7 @@ impl Cg<'_, '_, '_> {
             word,
             return_type_id,
             word_type,
-            &self.ctx.analyzed.entity_registry,
+            self.registry(),
             &self.ctx.arena(),
         );
 
@@ -946,7 +946,7 @@ impl Cg<'_, '_, '_> {
         let method_name_id = method_def.name_id;
 
         // Check for monomorphized static method (for generic classes)
-        if let Some(mono_key) = self.ctx.analyzed.query().static_method_generic_at(expr_id) {
+        if let Some(mono_key) = self.ctx.query().static_method_generic_at(expr_id) {
             // Look up the monomorphized instance
             if let Some(instance) = self
                 .ctx
@@ -980,7 +980,7 @@ impl Cg<'_, '_, '_> {
                 if results.is_empty() {
                     return Ok(self.void_value());
                 } else {
-                    let arena_ref = self.ctx.analyzed.type_arena.borrow();
+                    let arena_ref = self.ctx.arena();
                     return Ok(CompiledValue {
                         value: results[0],
                         ty: type_id_to_cranelift(return_type_id, &arena_ref, self.ctx.pointer_type),
@@ -997,7 +997,7 @@ impl Cg<'_, '_, '_> {
             .get(&(type_def_id, method_name_id))
             .ok_or_else(|| {
                 let type_def = self.ctx.query().get_type(type_def_id);
-                let name_table = self.ctx.analyzed.name_table.borrow();
+                let name_table = self.ctx.query().name_table_rc().borrow();
                 let type_name = name_table.display(type_def.name_id);
                 let method_name = name_table.display(method_name_id);
                 let registered_keys: Vec<_> = self

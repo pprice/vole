@@ -159,6 +159,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.ctx.type_substitutions
     }
 
+    /// Get entity registry reference
+    #[inline]
+    pub fn registry(&self) -> &'ctx vole_sema::entity_registry::EntityRegistry {
+        &self.ctx.analyzed.entity_registry
+    }
+
     // ========== Arena helpers ==========
 
     /// Get an update interface for arena mutations.
