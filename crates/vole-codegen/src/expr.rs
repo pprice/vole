@@ -173,15 +173,10 @@ impl Cg<'_, '_, '_> {
         let query = self.ctx.query();
         let name_id = query.function_name_id(query.main_module(), sym);
 
-        let orig_func_key = self.ctx.func_registry.intern_name_id(name_id);
-        let orig_func_id = self
-            .ctx
-            .func_registry
-            .func_id(orig_func_key)
-            .ok_or_else(|| {
-                CodegenError::not_found("function id for", self.ctx.interner().resolve(sym))
-                    .to_string()
-            })?;
+        let orig_func_key = self.ctx.funcs().intern_name_id(name_id);
+        let orig_func_id = self.ctx.funcs().func_id(orig_func_key).ok_or_else(|| {
+            CodegenError::not_found("function id for", self.ctx.interner().resolve(sym)).to_string()
+        })?;
 
         // Unwrap function type to get params and return type
         let (param_ids, return_type_id) = {
@@ -218,10 +213,10 @@ impl Cg<'_, '_, '_> {
 
         // Create wrapper function
         let (wrapper_name_id, wrapper_func_key) =
-            self.ctx.func_registry.intern_lambda_name(wrapper_index);
+            self.ctx.funcs().intern_lambda_name(wrapper_index);
         let wrapper_name = self
             .ctx
-            .func_registry
+            .funcs()
             .name_table_rc()
             .borrow()
             .display(wrapper_name_id);
@@ -236,10 +231,10 @@ impl Cg<'_, '_, '_> {
             .map_err(|e| e.to_string())?;
 
         self.ctx
-            .func_registry
+            .funcs()
             .set_func_id(wrapper_func_key, wrapper_func_id);
         self.ctx
-            .func_registry
+            .funcs()
             .set_return_type(wrapper_func_key, return_type_id);
 
         // Build the wrapper function body
@@ -297,9 +292,9 @@ impl Cg<'_, '_, '_> {
         // Wrap in a closure struct with zero captures
         let alloc_id = self
             .ctx
-            .func_registry
+            .funcs()
             .runtime_key(RuntimeFn::ClosureAlloc)
-            .and_then(|key| self.ctx.func_registry.func_id(key))
+            .and_then(|key| self.ctx.funcs().func_id(key))
             .ok_or_else(|| "vole_closure_alloc not found".to_string())?;
         let alloc_ref = self
             .ctx
@@ -401,7 +396,7 @@ impl Cg<'_, '_, '_> {
         let arr_ptr = self.call_runtime(RuntimeFn::ArrayNew, &[])?;
         let array_push_key = self
             .ctx
-            .func_registry
+            .funcs()
             .runtime_key(RuntimeFn::ArrayPush)
             .ok_or_else(|| "vole_array_push not found".to_string())?;
         let array_push_ref = self.func_ref(array_push_key)?;
@@ -744,7 +739,7 @@ impl Cg<'_, '_, '_> {
 
             let set_value_key = self
                 .ctx
-                .func_registry
+                .funcs()
                 .runtime_key(RuntimeFn::ArraySet)
                 .ok_or_else(|| "vole_array_set not found".to_string())?;
             let set_value_ref = self.func_ref(set_value_key)?;
@@ -849,7 +844,7 @@ impl Cg<'_, '_, '_> {
         let arena = self.ctx.arena();
         Ok(if arena.is_string(type_id) {
             drop(arena);
-            if self.ctx.func_registry.has_runtime(RuntimeFn::StringEq) {
+            if self.ctx.funcs().has_runtime(RuntimeFn::StringEq) {
                 self.call_runtime(RuntimeFn::StringEq, &[left, right])?
             } else {
                 self.builder.ins().icmp(IntCC::Equal, left, right)

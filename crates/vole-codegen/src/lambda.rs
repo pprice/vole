@@ -276,15 +276,15 @@ fn compile_pure_lambda(
     }
     sig.returns.push(AbiParam::new(return_type));
 
-    let (name_id, func_key) = ctx.func_registry.intern_lambda_name(lambda_id);
-    let lambda_name = ctx.func_registry.name_table_rc().borrow().display(name_id);
+    let (name_id, func_key) = ctx.funcs().intern_lambda_name(lambda_id);
+    let lambda_name = ctx.funcs().name_table_rc().borrow().display(name_id);
     let func_id = ctx
         .module
         .declare_function(&lambda_name, cranelift_module::Linkage::Local, &sig)
         .map_err(|e| e.to_string())?;
 
-    ctx.func_registry.set_func_id(func_key, func_id);
-    ctx.func_registry.set_return_type(func_key, return_type_id);
+    ctx.funcs().set_func_id(func_key, func_id);
+    ctx.funcs().set_return_type(func_key, return_type_id);
 
     let mut lambda_ctx = ctx.module.make_context();
     lambda_ctx.func.signature = sig.clone();
@@ -318,9 +318,9 @@ fn compile_pure_lambda(
     // This ensures iterator methods like .map() work correctly - they expect
     // all transform functions as Closure pointers, not raw function pointers.
     let alloc_id = ctx
-        .func_registry
+        .funcs()
         .runtime_key(RuntimeFn::ClosureAlloc)
-        .and_then(|key| ctx.func_registry.func_id(key))
+        .and_then(|key| ctx.funcs().func_id(key))
         .ok_or_else(|| "vole_closure_alloc not found".to_string())?;
     let alloc_ref = ctx.module.declare_func_in_func(alloc_id, builder.func);
     let zero_captures = builder.ins().iconst(types::I64, 0);
@@ -387,15 +387,15 @@ fn compile_lambda_with_captures(
     }
     sig.returns.push(AbiParam::new(return_type));
 
-    let (name_id, func_key) = ctx.func_registry.intern_lambda_name(lambda_id);
-    let lambda_name = ctx.func_registry.name_table_rc().borrow().display(name_id);
+    let (name_id, func_key) = ctx.funcs().intern_lambda_name(lambda_id);
+    let lambda_name = ctx.funcs().name_table_rc().borrow().display(name_id);
     let func_id = ctx
         .module
         .declare_function(&lambda_name, cranelift_module::Linkage::Local, &sig)
         .map_err(|e| e.to_string())?;
 
-    ctx.func_registry.set_func_id(func_key, func_id);
-    ctx.func_registry.set_return_type(func_key, return_type_id);
+    ctx.funcs().set_func_id(func_key, func_id);
+    ctx.funcs().set_return_type(func_key, return_type_id);
 
     let capture_bindings = build_capture_bindings(&captures, variables, &ctx.arena.borrow());
 
@@ -435,9 +435,9 @@ fn compile_lambda_with_captures(
 
     // Allocate closure
     let alloc_id = ctx
-        .func_registry
+        .funcs()
         .runtime_key(RuntimeFn::ClosureAlloc)
-        .and_then(|key| ctx.func_registry.func_id(key))
+        .and_then(|key| ctx.funcs().func_id(key))
         .ok_or_else(|| "vole_closure_alloc not found".to_string())?;
     let alloc_ref = ctx.module.declare_func_in_func(alloc_id, builder.func);
     let num_captures_val = builder.ins().iconst(types::I64, num_captures as i64);
@@ -448,18 +448,18 @@ fn compile_lambda_with_captures(
 
     // Set up each capture
     let set_capture_id = ctx
-        .func_registry
+        .funcs()
         .runtime_key(RuntimeFn::ClosureSetCapture)
-        .and_then(|key| ctx.func_registry.func_id(key))
+        .and_then(|key| ctx.funcs().func_id(key))
         .ok_or_else(|| "vole_closure_set_capture not found".to_string())?;
     let set_capture_ref = ctx
         .module
         .declare_func_in_func(set_capture_id, builder.func);
 
     let heap_alloc_id = ctx
-        .func_registry
+        .funcs()
         .runtime_key(RuntimeFn::HeapAlloc)
-        .and_then(|key| ctx.func_registry.func_id(key))
+        .and_then(|key| ctx.funcs().func_id(key))
         .ok_or_else(|| "vole_heap_alloc not found".to_string())?;
     let heap_alloc_ref = ctx.module.declare_func_in_func(heap_alloc_id, builder.func);
 

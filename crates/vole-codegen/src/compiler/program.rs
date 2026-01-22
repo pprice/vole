@@ -840,9 +840,9 @@ impl Compiler<'_> {
 
                     // Wrap in Closure struct via vole_closure_alloc
                     let alloc_id = ctx
-                        .func_registry
+                        .funcs()
                         .runtime_key(RuntimeFn::ClosureAlloc)
-                        .and_then(|key| ctx.func_registry.func_id(key))
+                        .and_then(|key| ctx.funcs().func_id(key))
                         .ok_or_else(|| "vole_closure_alloc not found".to_string())?;
                     let alloc_ref = ctx.module.declare_func_in_func(alloc_id, builder.func);
                     let zero_captures = builder.ins().iconst(types::I64, 0);

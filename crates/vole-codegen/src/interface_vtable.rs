@@ -460,11 +460,11 @@ fn compile_function_wrapper(
     let (func_ptr, call_args, sig) = if is_closure {
         drop(arena);
         let closure_get_key = ctx
-            .func_registry
+            .funcs()
             .runtime_key(RuntimeFn::ClosureGetFunc)
             .ok_or_else(|| "closure get func not registered".to_string())?;
         let closure_get_id = ctx
-            .func_registry
+            .funcs()
             .func_id(closure_get_key)
             .ok_or_else(|| "closure get func id missing".to_string())?;
         let closure_get_ref = ctx
@@ -556,7 +556,7 @@ fn compile_method_wrapper(
         ));
     }
     let func_id = ctx
-        .func_registry
+        .funcs()
         .func_id(method_info.func_key)
         .ok_or_else(|| "method function id not found".to_string())?;
     let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
@@ -1061,11 +1061,11 @@ fn runtime_heap_alloc_ref(
     builder: &mut FunctionBuilder,
 ) -> Result<FuncRef, String> {
     let key = ctx
-        .func_registry
+        .funcs()
         .runtime_key(RuntimeFn::HeapAlloc)
         .ok_or_else(|| "heap allocator not registered".to_string())?;
     let func_id = ctx
-        .func_registry
+        .funcs()
         .func_id(key)
         .ok_or_else(|| "heap allocator function id missing".to_string())?;
     Ok(ctx.module.declare_func_in_func(func_id, builder.func))

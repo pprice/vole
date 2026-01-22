@@ -123,8 +123,8 @@ impl Cg<'_, '_, '_> {
                             module_path, method_name_str
                         )
                     })?;
-                    let func_key = self.ctx.func_registry.intern_name_id(name_id);
-                    let func_id = self.ctx.func_registry.func_id(func_key).ok_or_else(|| {
+                    let func_key = self.ctx.funcs().intern_name_id(name_id);
+                    let func_id = self.ctx.funcs().func_id(func_key).ok_or_else(|| {
                         format!(
                             "Module function {}::{} not found",
                             module_path, method_name_str
@@ -320,7 +320,7 @@ impl Cg<'_, '_, '_> {
                 .class_method_monomorph_cache
                 .get(monomorph_key)
             {
-                let func_key = self.ctx.func_registry.intern_name_id(instance.mangled_name);
+                let func_key = self.ctx.funcs().intern_name_id(instance.mangled_name);
                 // Monomorphized methods have concrete types, no i64 conversion needed
                 (self.func_ref(func_key)?, false)
             } else {
@@ -870,7 +870,7 @@ impl Cg<'_, '_, '_> {
         let heap_alloc_ref = {
             let key = self
                 .ctx
-                .func_registry
+                .funcs()
                 .runtime_key(RuntimeFn::HeapAlloc)
                 .ok_or_else(|| "heap allocator not registered".to_string())?;
             self.func_ref(key)?
@@ -971,7 +971,7 @@ impl Cg<'_, '_, '_> {
                 }
 
                 // Get monomorphized function reference and call
-                let func_key = self.ctx.func_registry.intern_name_id(instance.mangled_name);
+                let func_key = self.ctx.funcs().intern_name_id(instance.mangled_name);
                 let func_ref = self.func_ref(func_key)?;
                 let call = self.builder.ins().call(func_ref, &args);
                 let results = self.builder.inst_results(call);

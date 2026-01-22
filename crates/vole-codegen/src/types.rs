@@ -580,6 +580,13 @@ impl<'a> CompileCtx<'a> {
     pub fn funcs(&mut self) -> &mut FunctionRegistry {
         self.func_registry
     }
+
+    /// Get immutable reference to function registry.
+    #[inline]
+    #[allow(dead_code)]
+    pub fn funcs_ref(&self) -> &FunctionRegistry {
+        self.func_registry
+    }
 }
 
 /// Resolve a type expression to a TypeId (uses CompileCtx for full context).

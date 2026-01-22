@@ -54,7 +54,7 @@ impl Cg<'_, '_, '_> {
 
         let set_key = self
             .ctx
-            .func_registry
+            .funcs()
             .runtime_key(RuntimeFn::InstanceSetField)
             .ok_or_else(|| "vole_instance_set_field not found".to_string())?;
         let set_func_ref = self.func_ref(set_key)?;
@@ -171,7 +171,7 @@ impl Cg<'_, '_, '_> {
         // Get heap_alloc function ref
         let heap_alloc_key = self
             .ctx
-            .func_registry
+            .funcs()
             .runtime_key(RuntimeFn::HeapAlloc)
             .ok_or_else(|| "heap allocator not registered".to_string())?;
         let heap_alloc_ref = self.func_ref(heap_alloc_key)?;

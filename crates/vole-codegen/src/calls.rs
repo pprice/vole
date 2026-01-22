@@ -89,7 +89,7 @@ impl Cg<'_, '_, '_> {
 
         let concat_key = self
             .ctx
-            .func_registry
+            .funcs()
             .runtime_key(RuntimeFn::StringConcat)
             .ok_or_else(|| "vole_string_concat not found".to_string())?;
         let concat_func_ref = self.func_ref(concat_key)?;
@@ -347,8 +347,8 @@ impl Cg<'_, '_, '_> {
                 mangled_name = ?instance.mangled_name,
                 "found monomorph instance"
             );
-            let func_key = self.ctx.func_registry.intern_name_id(instance.mangled_name);
-            if let Some(func_id) = self.ctx.func_registry.func_id(func_key) {
+            let func_key = self.ctx.funcs().intern_name_id(instance.mangled_name);
+            if let Some(func_id) = self.ctx.funcs().func_id(func_key) {
                 tracing::trace!("found func_id, using regular path");
                 return self.call_func_id(func_key, func_id, call);
             }
@@ -385,12 +385,13 @@ impl Cg<'_, '_, '_> {
         // 1. Try direct function lookup
         // 2. If in module context, try mangled name
         // 3. If in module context, try FFI call
-        let func_key = self.ctx.func_registry.intern_qualified(
-            self.ctx.func_registry.main_module(),
-            &[callee_sym],
-            self.ctx.interner(),
-        );
-        if let Some(func_id) = self.ctx.func_registry.func_id(func_key) {
+        let main_module = self.ctx.funcs_ref().main_module();
+        let interner = self.ctx.interner();
+        let func_key = self
+            .ctx
+            .funcs()
+            .intern_qualified(main_module, &[callee_sym], interner);
+        if let Some(func_id) = self.ctx.funcs_ref().func_id(func_key) {
             return self.call_func_id(func_key, func_id, call);
         }
 
@@ -403,8 +404,8 @@ impl Cg<'_, '_, '_> {
             drop(name_table);
             let name_id = crate::types::module_name_id(self.ctx.analyzed, module_id, callee_name);
             if let Some(name_id) = name_id {
-                let func_key = self.ctx.func_registry.intern_name_id(name_id);
-                if let Some(func_id) = self.ctx.func_registry.func_id(func_key) {
+                let func_key = self.ctx.funcs().intern_name_id(name_id);
+                if let Some(func_id) = self.ctx.funcs().func_id(func_key) {
                     // Found module function with qualified name
                     return self.call_func_id(func_key, func_id, call);
                 }
@@ -606,7 +607,7 @@ impl Cg<'_, '_, '_> {
 
         let return_type_id = self
             .ctx
-            .func_registry
+            .funcs()
             .return_type(func_key)
             .unwrap_or_else(|| self.ctx.arena().void());
 

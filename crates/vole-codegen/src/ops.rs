@@ -411,7 +411,7 @@ impl Cg<'_, '_, '_> {
 
     /// String equality comparison
     fn string_eq(&mut self, left: Value, right: Value) -> Result<Value, String> {
-        if self.ctx.func_registry.has_runtime(RuntimeFn::StringEq) {
+        if self.ctx.funcs().has_runtime(RuntimeFn::StringEq) {
             self.call_runtime(RuntimeFn::StringEq, &[left, right])
         } else {
             Ok(self.builder.ins().icmp(IntCC::Equal, left, right))
@@ -611,7 +611,7 @@ impl Cg<'_, '_, '_> {
         // Store back
         let array_set_key = self
             .ctx
-            .func_registry
+            .funcs()
             .runtime_key(RuntimeFn::ArraySet)
             .ok_or_else(|| "vole_array_set not found".to_string())?;
         let array_set_ref = self.func_ref(array_set_key)?;

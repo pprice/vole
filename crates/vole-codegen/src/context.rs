@@ -215,7 +215,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Get a function ID by key
     pub fn func_id(&self, key: FunctionKey) -> Result<FuncId, String> {
         self.ctx
-            .func_registry
+            .funcs_ref()
             .func_id(key)
             .ok_or_else(|| "function id not found".to_string())
     }
@@ -234,7 +234,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Call a runtime function and return the first result (or error if no results)
     pub fn call_runtime(&mut self, runtime: RuntimeFn, args: &[Value]) -> Result<Value, String> {
-        let key = self.ctx.func_registry.runtime_key(runtime).ok_or_else(|| {
+        let key = self.ctx.funcs().runtime_key(runtime).ok_or_else(|| {
             CodegenError::not_found("runtime function", runtime.name()).to_string()
         })?;
         let func_ref = self.func_ref(key)?;
@@ -282,7 +282,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     pub fn call_runtime_void(&mut self, runtime: RuntimeFn, args: &[Value]) -> Result<(), String> {
         let key = self
             .ctx
-            .func_registry
+            .funcs()
             .runtime_key(runtime)
             .ok_or_else(|| format!("{} not registered", runtime.name()))?;
         let func_ref = self.func_ref(key)?;
