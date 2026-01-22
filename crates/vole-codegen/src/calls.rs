@@ -395,7 +395,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Check module context for mangled name or FFI
-        if let Some(module_path) = self.ctx.current_module {
+        if let Some(module_path) = self.current_module() {
             let name_table = self.ctx.query().name_table_rc().borrow();
             let module_id = name_table
                 .module_id_if_known(module_path)
@@ -895,7 +895,7 @@ impl Cg<'_, '_, '_> {
             Ok(self.void_value())
         } else {
             // Apply class type substitutions if available (for calls inside monomorphized methods)
-            let type_id = self.ctx.substitute_type_id(return_type_id);
+            let type_id = self.substitute_type(return_type_id);
             let type_id = self.maybe_convert_iterator_return_type(type_id);
             Ok(CompiledValue {
                 value: results[0],

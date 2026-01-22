@@ -51,7 +51,7 @@ impl Cg<'_, '_, '_> {
             .ctx
             .analyzed
             .query()
-            .method_at_in_module(expr_id, self.ctx.current_module)
+            .method_at_in_module(expr_id, self.current_module())
         {
             return self.static_method_call(*type_def_id, *method_id, *func_type_id, mc, expr_id);
         }
@@ -89,7 +89,7 @@ impl Cg<'_, '_, '_> {
                 .ctx
                 .analyzed
                 .query()
-                .method_at_in_module(expr_id, self.ctx.current_module);
+                .method_at_in_module(expr_id, self.current_module());
             if let Some(ResolvedMethod::Implemented {
                 external_info,
                 func_type_id,
@@ -176,7 +176,7 @@ impl Cg<'_, '_, '_> {
             self.ctx
                 .analyzed
                 .query()
-                .method_at_in_module(expr_id, self.ctx.current_module)
+                .method_at_in_module(expr_id, self.current_module())
         };
 
         tracing::debug!(
