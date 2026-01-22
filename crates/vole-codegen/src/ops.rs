@@ -98,7 +98,7 @@ impl Cg<'_, '_, '_> {
         // Get the method key from impl_method_infos
         let method_info = self
             .ctx
-            .impl_method_infos
+            .impl_methods()
             .get(&(impl_type_id, method_id))
             .ok_or_else(|| "to_string method info not found in impl_method_infos".to_string())?;
 

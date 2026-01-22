@@ -1053,7 +1053,7 @@ impl Cg<'_, '_, '_> {
                 Pattern::Wildcard(_) => None,
                 Pattern::Identifier { name, .. } => {
                     // Check if this identifier is a type name (class/record)
-                    if let Some(type_meta) = self.ctx.type_metadata.get(name) {
+                    if let Some(type_meta) = self.ctx.type_meta().get(name) {
                         // Type pattern - compare against union variant tag
                         self.compile_type_pattern_check(&scrutinee, type_meta.vole_type)?
                     } else {
@@ -1171,7 +1171,7 @@ impl Cg<'_, '_, '_> {
                     // Record destructuring in match - TypeName { x, y } or { x, y }
                     let (pattern_check, pattern_type_id) = if let Some(name) = type_name {
                         // Typed record pattern - need to check type first
-                        if let Some(type_meta) = self.ctx.type_metadata.get(name) {
+                        if let Some(type_meta) = self.ctx.type_meta().get(name) {
                             (
                                 self.compile_type_pattern_check(&scrutinee, type_meta.vole_type)?,
                                 Some(type_meta.vole_type),

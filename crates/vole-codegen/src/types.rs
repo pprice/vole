@@ -513,6 +513,49 @@ impl<'a> CompileCtx<'a> {
         *self.lambda_counter += 1;
         *self.lambda_counter
     }
+
+    // ========== Registry field delegation methods ==========
+    // These provide read access to lookup tables used during codegen.
+    // Allow dead_code until all callers are migrated.
+
+    /// Get monomorphization cache for looking up generic instances.
+    #[inline]
+    #[allow(dead_code)]
+    pub fn monomorph(&self) -> &'a MonomorphCache {
+        self.monomorph_cache
+    }
+
+    /// Get native function registry for external calls.
+    #[inline]
+    pub fn native_funcs(&self) -> &'a NativeRegistry {
+        self.native_registry
+    }
+
+    /// Get impl method info map.
+    #[inline]
+    pub fn impl_methods(&self) -> &'a HashMap<(ImplTypeId, NameId), MethodInfo> {
+        self.impl_method_infos
+    }
+
+    /// Get static method info map.
+    #[inline]
+    #[allow(dead_code)]
+    pub fn static_methods(&self) -> &'a HashMap<(TypeDefId, NameId), MethodInfo> {
+        self.static_method_infos
+    }
+
+    /// Get interface vtable registry.
+    #[inline]
+    #[allow(dead_code)]
+    pub fn vtables(&self) -> &'a RefCell<crate::interface_vtable::InterfaceVtableRegistry> {
+        self.interface_vtables
+    }
+
+    /// Get type metadata map.
+    #[inline]
+    pub fn type_meta(&self) -> &'a HashMap<Symbol, TypeMetadata> {
+        self.type_metadata
+    }
 }
 
 /// Resolve a type expression to a TypeId (uses CompileCtx for full context).

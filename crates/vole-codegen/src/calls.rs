@@ -340,7 +340,7 @@ impl Cg<'_, '_, '_> {
             "checking for generic function call"
         );
         if let Some(monomorph_key) = monomorph_key
-            && let Some(instance) = self.ctx.monomorph_cache.get(monomorph_key)
+            && let Some(instance) = self.ctx.monomorph().get(monomorph_key)
         {
             tracing::trace!(
                 instance_name = ?instance.original_name,
@@ -368,7 +368,7 @@ impl Cg<'_, '_, '_> {
                 drop(name_table);
                 if let (Some(module_path), Some(native_name)) = (module_path, native_name)
                     && let Some(native_func) =
-                        self.ctx.native_registry.lookup(&module_path, &native_name)
+                        self.ctx.native_funcs().lookup(&module_path, &native_name)
                 {
                     // The func_type from the monomorph instance may have TypeParams that weren't
                     // inferred from arguments (like return type params). Apply class type
@@ -411,7 +411,7 @@ impl Cg<'_, '_, '_> {
             }
 
             // Try FFI call for external module functions
-            if let Some(native_func) = self.ctx.native_registry.lookup(module_path, callee_name) {
+            if let Some(native_func) = self.ctx.native_funcs().lookup(module_path, callee_name) {
                 // Compile arguments first
                 let mut args = Vec::new();
                 for arg in &call.args {
@@ -488,7 +488,7 @@ impl Cg<'_, '_, '_> {
             let name_table = self.name_table();
             let module_path = name_table.last_segment_str(info.module_path)?;
             let native_name = name_table.last_segment_str(info.native_name)?;
-            self.ctx.native_registry.lookup(&module_path, &native_name)
+            self.ctx.native_funcs().lookup(&module_path, &native_name)
         });
         if let Some(native_func) = native_func {
             // Compile arguments first
