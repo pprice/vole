@@ -7,7 +7,7 @@ use crate::FunctionType;
 use crate::generic::TypeParamInfo;
 use crate::implement_registry::ExternalMethodInfo;
 use crate::type_arena::TypeId;
-use vole_identity::{FieldId, FunctionId, MethodId, ModuleId, NameId, TypeDefId};
+use vole_identity::{FieldId, FunctionId, GlobalId, MethodId, ModuleId, NameId, TypeDefId};
 
 /// What kind of type definition this is
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -137,4 +137,14 @@ pub struct FunctionDef {
     pub signature: FunctionType,
     /// For generic functions - type parameter and signature info
     pub generic_info: Option<GenericFuncInfo>,
+}
+
+/// A global variable definition (module-level let/var)
+#[derive(Debug, Clone)]
+pub struct GlobalDef {
+    pub id: GlobalId,
+    pub name_id: NameId,
+    pub type_id: TypeId,  // Analyzed type, NOT TypeExpr
+    pub module_id: ModuleId,
+    pub is_mutable: bool,  // let (false) vs var (true)
 }

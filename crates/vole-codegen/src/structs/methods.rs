@@ -602,14 +602,14 @@ impl Cg<'_, '_, '_> {
             .resolve_type_str_or_interface("Iterator")
             .ok_or_else(|| "Iterator interface not found in entity registry".to_string())?;
 
-        let iter_def = self.ctx.analyzed.entity_registry.get_type(iter_type_id);
+        let iter_def = self.ctx.query().get_type(iter_type_id);
 
         // Find the method by name
         let method_id = iter_def
             .methods
             .iter()
             .find(|&&mid| {
-                let m = self.ctx.analyzed.entity_registry.get_method(mid);
+                let m = self.ctx.query().get_method(mid);
                 self.ctx
                     .analyzed
                     .name_table
@@ -619,7 +619,7 @@ impl Cg<'_, '_, '_> {
             })
             .ok_or_else(|| format!("Method {} not found on Iterator", method_name))?;
 
-        let method = self.ctx.analyzed.entity_registry.get_method(*method_id);
+        let method = self.ctx.query().get_method(*method_id);
 
         // Get the external binding for this method
         let external_info = *self
@@ -961,7 +961,7 @@ impl Cg<'_, '_, '_> {
         expr_id: NodeId,
     ) -> Result<CompiledValue, String> {
         // Get the method's name_id for lookup
-        let method_def = self.ctx.analyzed.entity_registry.get_method(method_id);
+        let method_def = self.ctx.query().get_method(method_id);
         let method_name_id = method_def.name_id;
 
         // Check for monomorphized static method (for generic classes)
@@ -1020,7 +1020,7 @@ impl Cg<'_, '_, '_> {
             .static_method_infos
             .get(&(type_def_id, method_name_id))
             .ok_or_else(|| {
-                let type_def = self.ctx.analyzed.entity_registry.get_type(type_def_id);
+                let type_def = self.ctx.query().get_type(type_def_id);
                 let name_table = self.ctx.analyzed.name_table.borrow();
                 let type_name = name_table.display(type_def.name_id);
                 let method_name = name_table.display(method_name_id);
@@ -1029,7 +1029,7 @@ impl Cg<'_, '_, '_> {
                     .static_method_infos
                     .keys()
                     .map(|(tid, mid)| {
-                        let t = self.ctx.analyzed.entity_registry.get_type(*tid);
+                        let t = self.ctx.query().get_type(*tid);
                         let tn = name_table.display(t.name_id);
                         let mn = name_table.display(*mid);
                         format!("({}, {})", tn, mn)

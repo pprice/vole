@@ -22,10 +22,162 @@ use vole_sema::entity_defs::TypeDefKind;
 use vole_sema::generic::MonomorphCache;
 use vole_sema::implement_registry::ImplTypeId;
 use vole_sema::type_arena::{TypeArena, TypeId, TypeIdVec};
-use vole_sema::{EntityRegistry, PrimitiveType, ResolverEntityExt};
+use vole_sema::{EntityRegistry, PrimitiveType, ProgramQuery, ResolverEntityExt};
 
 // Re-export box_interface_value_id for centralized access to boxing helper
 pub(crate) use super::interface_vtable::box_interface_value_id;
+
+/// Minimal context for type-system lookups in codegen.
+/// Stores ProgramQuery directly as a field for zero-overhead access.
+pub struct TypeCtx<'a> {
+    /// Query interface for type/entity/name lookups (stored, not created per-call)
+    pub query: ProgramQuery<'a>,
+    /// Cranelift pointer type (platform-specific)
+    pub pointer_type: Type,
+}
+
+impl<'a> TypeCtx<'a> {
+    pub fn new(query: ProgramQuery<'a>, pointer_type: Type) -> Self {
+        Self { query, pointer_type }
+    }
+
+    /// Convenience: borrow the type arena
+    #[inline]
+    pub fn arena(&self) -> std::cell::Ref<'_, TypeArena> {
+        self.query.arena().borrow()
+    }
+
+    /// Convenience: mutably borrow the type arena
+    #[inline]
+    pub fn arena_mut(&self) -> std::cell::RefMut<'_, TypeArena> {
+        self.query.arena().borrow_mut()
+    }
+
+    /// Raw arena access (for functions that need &RefCell<TypeArena>)
+    #[inline]
+    pub fn arena_rc(&self) -> &'a Rc<RefCell<TypeArena>> {
+        self.query.arena()
+    }
+
+    /// Get the entity registry
+    #[inline]
+    pub fn entities(&self) -> &'a EntityRegistry {
+        self.query.registry()
+    }
+
+    /// Get the interner
+    #[inline]
+    pub fn interner(&self) -> &'a Interner {
+        self.query.interner()
+    }
+
+    /// Get the name table Rc
+    #[inline]
+    pub fn name_table_rc(&self) -> &'a Rc<RefCell<NameTable>> {
+        self.query.name_table_rc()
+    }
+}
+
+/// Codegen context with mutable JIT infrastructure.
+/// Extends TypeCtx with module and function registry access.
+pub struct CodegenCtx<'a> {
+    /// Type system lookups
+    pub types: TypeCtx<'a>,
+    /// Cranelift JIT module for function declarations
+    pub module: &'a mut JITModule,
+    /// Function identity and ID management
+    pub func_registry: &'a mut FunctionRegistry,
+}
+
+impl<'a> CodegenCtx<'a> {
+    pub fn new(
+        query: ProgramQuery<'a>,
+        pointer_type: Type,
+        module: &'a mut JITModule,
+        func_registry: &'a mut FunctionRegistry,
+    ) -> Self {
+        Self {
+            types: TypeCtx::new(query, pointer_type),
+            module,
+            func_registry,
+        }
+    }
+
+    /// Convenience: get TypeCtx reference
+    pub fn type_ctx(&self) -> &TypeCtx<'a> {
+        &self.types
+    }
+
+    /// Convenience: pointer type
+    pub fn pointer_type(&self) -> Type {
+        self.types.pointer_type
+    }
+
+    /// Convenience: query interface
+    pub fn query(&self) -> &ProgramQuery<'a> {
+        &self.types.query
+    }
+
+    /// Convenience: borrow arena
+    pub fn arena(&self) -> std::cell::Ref<'_, TypeArena> {
+        self.types.arena()
+    }
+
+    /// Convenience: mutably borrow arena
+    pub fn arena_mut(&self) -> std::cell::RefMut<'_, TypeArena> {
+        self.types.arena_mut()
+    }
+}
+
+/// Per-function compilation context.
+/// Contains state that varies for each function being compiled.
+#[derive(Clone)]
+pub struct FunctionCtx<'a> {
+    /// Return type of the current function (for raise statements)
+    pub return_type: Option<TypeId>,
+    /// Module being compiled (None for main program)
+    pub current_module: Option<ModuleId>,
+    /// Type parameter substitutions for monomorphized generics
+    pub substitutions: Option<&'a HashMap<NameId, TypeId>>,
+}
+
+impl<'a> FunctionCtx<'a> {
+    /// Create context for main program function (no module, no substitutions)
+    pub fn main(return_type: Option<TypeId>) -> Self {
+        Self {
+            return_type,
+            current_module: None,
+            substitutions: None,
+        }
+    }
+
+    /// Create context for module function
+    pub fn module(return_type: Option<TypeId>, module_id: ModuleId) -> Self {
+        Self {
+            return_type,
+            current_module: Some(module_id),
+            substitutions: None,
+        }
+    }
+
+    /// Create context for monomorphized generic function
+    pub fn monomorphized(return_type: Option<TypeId>, substitutions: &'a HashMap<NameId, TypeId>) -> Self {
+        Self {
+            return_type,
+            current_module: None,
+            substitutions: Some(substitutions),
+        }
+    }
+
+    /// Create context for test function (no return type)
+    pub fn test() -> Self {
+        Self {
+            return_type: None,
+            current_module: None,
+            substitutions: None,
+        }
+    }
+}
 
 /// Compiled value with its type
 #[derive(Clone, Copy)]
@@ -155,6 +307,12 @@ pub(crate) struct CompileCtx<'a> {
 }
 
 impl<'a> CompileCtx<'a> {
+    /// Get a query interface for the analyzed program
+    #[inline]
+    pub fn query(&self) -> ProgramQuery<'_> {
+        self.analyzed.query()
+    }
+
     /// Substitute type parameters with concrete types using TypeId directly.
     /// Uses a cache to avoid repeated HashMap conversion and arena mutations.
     pub fn substitute_type_id(&self, ty: TypeId) -> TypeId {
@@ -302,6 +460,21 @@ pub(crate) fn function_name_id_with_interner(
     namer.function(module, name)
 }
 
+/// Resolve a type expression to TypeId using TypeCtx.
+/// Preferred API - use this when you have a TypeCtx available.
+pub(crate) fn resolve_type_expr_with_ctx(
+    ty: &TypeExpr,
+    type_ctx: &TypeCtx,
+    type_metadata: &HashMap<Symbol, TypeMetadata>,
+    module_id: ModuleId,
+) -> TypeId {
+    let entity_registry = type_ctx.entities();
+    let interner = type_ctx.interner();
+    let name_table = type_ctx.name_table_rc().borrow();
+    let arena = type_ctx.arena_rc();
+    resolve_type_expr_to_id(ty, entity_registry, type_metadata, interner, &*name_table, module_id, arena)
+}
+
 /// Resolve a type expression to TypeId.
 /// Use this function when you don't need to handle generic interface method substitution.
 #[allow(clippy::too_many_arguments)]
@@ -424,43 +597,19 @@ pub(crate) fn resolve_type_expr_to_id(
             }
         }
         TypeExpr::Array(elem) => {
-            let elem_id = resolve_type_expr_to_id(
-                elem,
-                entity_registry,
-                type_metadata,
-                interner,
-                name_table,
-                module_id,
-                arena,
-            );
+            let elem_id = resolve_type_expr_to_id(elem, entity_registry, type_metadata, interner, name_table, module_id, arena);
             arena.borrow_mut().array(elem_id)
         }
         TypeExpr::Optional(inner) => {
             // T? desugars to T | nil
-            let inner_id = resolve_type_expr_to_id(
-                inner,
-                entity_registry,
-                type_metadata,
-                interner,
-                name_table,
-                module_id,
-                arena,
-            );
+            let inner_id = resolve_type_expr_to_id(inner, entity_registry, type_metadata, interner, name_table, module_id, arena);
             arena.borrow_mut().optional(inner_id)
         }
         TypeExpr::Union(variants) => {
             let variant_ids: Vec<TypeId> = variants
                 .iter()
                 .map(|v| {
-                    resolve_type_expr_to_id(
-                        v,
-                        entity_registry,
-                        type_metadata,
-                        interner,
-                        name_table,
-                        module_id,
-                        arena,
-                    )
+                    resolve_type_expr_to_id(v, entity_registry, type_metadata, interner, name_table, module_id, arena)
                 })
                 .collect();
             arena.borrow_mut().union(variant_ids)
@@ -474,26 +623,10 @@ pub(crate) fn resolve_type_expr_to_id(
             let param_ids: TypeIdVec = params
                 .iter()
                 .map(|p| {
-                    resolve_type_expr_to_id(
-                        p,
-                        entity_registry,
-                        type_metadata,
-                        interner,
-                        name_table,
-                        module_id,
-                        arena,
-                    )
+                    resolve_type_expr_to_id(p, entity_registry, type_metadata, interner, name_table, module_id, arena)
                 })
                 .collect();
-            let ret_id = resolve_type_expr_to_id(
-                return_type,
-                entity_registry,
-                type_metadata,
-                interner,
-                name_table,
-                module_id,
-                arena,
-            );
+            let ret_id = resolve_type_expr_to_id(return_type, entity_registry, type_metadata, interner, name_table, module_id, arena);
             arena.borrow_mut().function(param_ids, ret_id, false)
         }
         TypeExpr::SelfType => {
@@ -506,24 +639,8 @@ pub(crate) fn resolve_type_expr_to_id(
             success_type,
             error_type,
         } => {
-            let success_id = resolve_type_expr_to_id(
-                success_type,
-                entity_registry,
-                type_metadata,
-                interner,
-                name_table,
-                module_id,
-                arena,
-            );
-            let error_id = resolve_type_expr_to_id(
-                error_type,
-                entity_registry,
-                type_metadata,
-                interner,
-                name_table,
-                module_id,
-                arena,
-            );
+            let success_id = resolve_type_expr_to_id(success_type, entity_registry, type_metadata, interner, name_table, module_id, arena);
+            let error_id = resolve_type_expr_to_id(error_type, entity_registry, type_metadata, interner, name_table, module_id, arena);
             arena.borrow_mut().fallible(success_id, error_id)
         }
         TypeExpr::Generic { name, args } => {
@@ -531,15 +648,7 @@ pub(crate) fn resolve_type_expr_to_id(
             let arg_ids: TypeIdVec = args
                 .iter()
                 .map(|a| {
-                    resolve_type_expr_to_id(
-                        a,
-                        entity_registry,
-                        type_metadata,
-                        interner,
-                        name_table,
-                        module_id,
-                        arena,
-                    )
+                    resolve_type_expr_to_id(a, entity_registry, type_metadata, interner, name_table, module_id, arena)
                 })
                 .collect();
 
@@ -588,29 +697,13 @@ pub(crate) fn resolve_type_expr_to_id(
             let element_ids: TypeIdVec = elements
                 .iter()
                 .map(|e| {
-                    resolve_type_expr_to_id(
-                        e,
-                        entity_registry,
-                        type_metadata,
-                        interner,
-                        name_table,
-                        module_id,
-                        arena,
-                    )
+                    resolve_type_expr_to_id(e, entity_registry, type_metadata, interner, name_table, module_id, arena)
                 })
                 .collect();
             arena.borrow_mut().tuple(element_ids)
         }
         TypeExpr::FixedArray { element, size } => {
-            let elem_id = resolve_type_expr_to_id(
-                element,
-                entity_registry,
-                type_metadata,
-                interner,
-                name_table,
-                module_id,
-                arena,
-            );
+            let elem_id = resolve_type_expr_to_id(element, entity_registry, type_metadata, interner, name_table, module_id, arena);
             arena.borrow_mut().fixed_array(elem_id, *size)
         }
         TypeExpr::Structural { .. } | TypeExpr::Combination(_) => {
@@ -798,6 +891,19 @@ pub(crate) fn load_fallible_payload(
 }
 
 /// Get the error tag for a specific error type within a fallible type.
+/// Get error tag using TypeCtx - preferred API.
+pub(crate) fn fallible_error_tag_with_ctx(
+    error_type_id: TypeId,
+    error_name: Symbol,
+    type_ctx: &TypeCtx,
+) -> Option<i64> {
+    let arena = type_ctx.arena();
+    let interner = type_ctx.interner();
+    let name_table = type_ctx.name_table_rc().borrow();
+    let entity_registry = type_ctx.entities();
+    fallible_error_tag_by_id(error_type_id, error_name, &*arena, interner, &*name_table, entity_registry)
+}
+
 /// Returns the 1-based index (tag 0 is reserved for success).
 ///
 /// Takes the error part of a fallible type as a TypeId and uses arena queries
@@ -883,6 +989,23 @@ pub(crate) fn convert_to_type(
     val.value
 }
 
+/// Convert a value to a uniform word representation using TypeCtx.
+pub(crate) fn value_to_word_with_ctx(
+    builder: &mut FunctionBuilder,
+    value: &CompiledValue,
+    type_ctx: &TypeCtx,
+    heap_alloc_ref: Option<FuncRef>,
+) -> Result<Value, String> {
+    value_to_word(
+        builder,
+        value,
+        type_ctx.pointer_type,
+        heap_alloc_ref,
+        type_ctx.query.arena(),
+        type_ctx.entities(),
+    )
+}
+
 /// Convert a value to a uniform word representation for interface dispatch.
 pub(crate) fn value_to_word(
     builder: &mut FunctionBuilder,
@@ -957,6 +1080,24 @@ pub(crate) fn value_to_word(
     };
 
     Ok(word)
+}
+
+/// Convert a word to typed value using TypeCtx.
+pub(crate) fn word_to_value_with_ctx(
+    builder: &mut FunctionBuilder,
+    word: Value,
+    type_id: TypeId,
+    type_ctx: &TypeCtx,
+) -> Value {
+    let arena = type_ctx.arena();
+    word_to_value_type_id(
+        builder,
+        word,
+        type_id,
+        type_ctx.pointer_type,
+        type_ctx.entities(),
+        &*arena,
+    )
 }
 
 /// Convert a uniform word representation back into a typed value using TypeId.

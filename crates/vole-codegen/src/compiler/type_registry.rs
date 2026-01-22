@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use super::{Compiler, SelfParam, TypeResolver};
 use crate::types::{
-    MethodInfo, TypeMetadata, method_name_id_with_interner, resolve_type_expr_to_id,
+    MethodInfo, TypeMetadata, method_name_id_with_interner, resolve_type_expr_with_ctx,
 };
 use vole_frontend::{
     ClassDecl, Decl, InterfaceDecl, Interner, Program, RecordDecl, StaticsBlock, Symbol, TypeExpr,
@@ -51,18 +51,9 @@ impl Compiler<'_> {
 
     /// Resolve a type expression to TypeId
     pub(super) fn resolve_type_to_id(&self, ty: &TypeExpr) -> TypeId {
-        let query = self.query();
-        let module_id = query.main_module();
-        let name_table = self.analyzed.name_table.borrow();
-        resolve_type_expr_to_id(
-            ty,
-            query.registry(),
-            &self.type_metadata,
-            query.interner(),
-            &*name_table,
-            module_id,
-            &self.analyzed.type_arena,
-        )
+        let type_ctx = self.type_ctx();
+        let module_id = type_ctx.query.main_module();
+        resolve_type_expr_with_ctx(ty, &type_ctx, &self.type_metadata, module_id)
     }
 
     /// Resolve a type expression to TypeId using a specific interner (for module types)
@@ -71,16 +62,9 @@ impl Compiler<'_> {
         ty: &TypeExpr,
         interner: &Interner,
     ) -> TypeId {
-        let name_table = self.analyzed.name_table.borrow();
-        resolve_type_expr_to_id(
-            ty,
-            &self.analyzed.entity_registry,
-            &self.type_metadata,
-            interner,
-            &*name_table,
-            self.func_registry.main_module(),
-            &self.analyzed.type_arena,
-        )
+        let type_ctx = self.type_ctx_with_interner(interner);
+        let module_id = self.func_registry.main_module();
+        resolve_type_expr_with_ctx(ty, &type_ctx, &self.type_metadata, module_id)
     }
 
     /// Pre-register a class type (just the name and type_id)
@@ -94,10 +78,7 @@ impl Compiler<'_> {
         let name_id = query.name_id(module_id, &[class.name]);
 
         // Look up the TypeDefId from EntityRegistry
-        let type_def_id = self
-            .analyzed
-            .entity_registry
-            .type_by_name(name_id)
+        let type_def_id = self.query().try_type_def_id(name_id)
             .expect("class should be registered in entity registry");
 
         // Create a placeholder vole_type_id (will be replaced in finalize_class)
@@ -168,7 +149,7 @@ impl Compiler<'_> {
                     .entity_registry
                     .find_method_on_type(type_def_id, method_name_id)
                 {
-                    let method_def = self.analyzed.entity_registry.get_method(method_id);
+                    let method_def = self.query().get_method(method_id);
                     let arena = self.analyzed.type_arena.borrow();
                     if let Some((_, ret_type_id, _)) =
                         arena.unwrap_function(method_def.signature_id)
@@ -296,10 +277,7 @@ impl Compiler<'_> {
         let name_id = query.name_id(module_id, &[record.name]);
 
         // Look up the TypeDefId from EntityRegistry
-        let type_def_id = self
-            .analyzed
-            .entity_registry
-            .type_by_name(name_id)
+        let type_def_id = self.query().try_type_def_id(name_id)
             .expect("record should be registered in entity registry");
 
         // Create a placeholder vole_type_id (will be replaced in finalize_record)
@@ -487,7 +465,7 @@ impl Compiler<'_> {
                     .entity_registry
                     .find_static_method_on_type(type_def_id, method_name_id)
                 {
-                    let method_def = self.analyzed.entity_registry.get_method(method_id);
+                    let method_def = self.query().get_method(method_id);
                     let arena = self.analyzed.type_arena.borrow();
                     if let Some((_, ret_type_id, _)) =
                         arena.unwrap_function(method_def.signature_id)
@@ -558,7 +536,7 @@ impl Compiler<'_> {
                 self.analyzed
                     .name_table
                     .borrow()
-                    .last_segment_str(self.analyzed.entity_registry.name_id(type_def_id))
+                    .last_segment_str(self.query().type_name_id(type_def_id))
                     .is_some_and(|name| name == type_name_str)
             } else {
                 false

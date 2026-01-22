@@ -9,7 +9,7 @@ use rustc_hash::FxHashMap;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::entity_defs::{Implementation, MethodDef, TypeDef};
+use crate::entity_defs::{FieldDef, GlobalDef, Implementation, MethodDef, TypeDef};
 use crate::entity_registry::EntityRegistry;
 use crate::expression_data::ExpressionData;
 use crate::generic::{MonomorphCache, MonomorphInstance, MonomorphKey, StaticMethodMonomorphKey};
@@ -17,7 +17,7 @@ use crate::implement_registry::{ExternalMethodInfo, ImplementRegistry};
 use crate::resolution::ResolvedMethod;
 use crate::type_arena::{TypeArena, TypeId};
 use vole_frontend::{Interner, NodeId, Program, Symbol};
-use vole_identity::{MethodId, ModuleId, NameId, NameTable, TypeDefId};
+use vole_identity::{FieldId, MethodId, ModuleId, NameId, NameTable, TypeDefId};
 
 /// Query interface for accessing analyzed program data.
 ///
@@ -227,6 +227,37 @@ impl<'a> ProgramQuery<'a> {
         self.registry.is_functional(type_id)
     }
 
+    /// Get the NameId for a type definition
+    pub fn type_name_id(&self, type_id: TypeDefId) -> NameId {
+        self.registry.get_type(type_id).name_id
+    }
+
+    /// Get the short name of a type (last segment only)
+    #[must_use]
+    pub fn type_short_name(&self, type_id: TypeDefId) -> Option<String> {
+        let name_id = self.registry.get_type(type_id).name_id;
+        self.name_table.borrow().last_segment_str(name_id)
+    }
+
+    // =========================================================================
+    // Field queries
+    // =========================================================================
+
+    /// Get a field definition by ID
+    pub fn get_field(&self, field_id: FieldId) -> &'a FieldDef {
+        self.registry.get_field(field_id)
+    }
+
+    /// Iterate over fields on a type
+    pub fn fields_on_type(&self, type_id: TypeDefId) -> impl Iterator<Item = FieldId> + 'a {
+        self.registry.fields_on_type(type_id)
+    }
+
+    /// Get the type of a field
+    pub fn field_type(&self, field_id: FieldId) -> TypeId {
+        self.registry.get_field(field_id).ty
+    }
+
     // =========================================================================
     // Method queries
     // =========================================================================
@@ -234,6 +265,12 @@ impl<'a> ProgramQuery<'a> {
     /// Get a method definition by ID
     pub fn get_method(&self, method_id: MethodId) -> &'a MethodDef {
         self.registry.get_method(method_id)
+    }
+
+    /// Get the display name of a method
+    pub fn method_display_name(&self, method_id: MethodId) -> String {
+        let method = self.registry.get_method(method_id);
+        self.name_table.borrow().display(method.name_id)
     }
 
     /// Find a method on a type by its short name
@@ -395,6 +432,23 @@ impl<'a> ProgramQuery<'a> {
     }
 
     // =========================================================================
+    // Global variable lookups
+    // =========================================================================
+
+    /// Get a global variable definition by its NameId
+    #[must_use]
+    pub fn global(&self, name_id: NameId) -> Option<&'a GlobalDef> {
+        let id = self.registry.global_by_name(name_id)?;
+        Some(self.registry.get_global(id))
+    }
+
+    /// Get the type of a global variable by its NameId
+    #[must_use]
+    pub fn global_type(&self, name_id: NameId) -> Option<TypeId> {
+        self.global(name_id).map(|g| g.type_id)
+    }
+
+    // =========================================================================
     // Escape hatches (for edge cases not covered by query methods)
     // =========================================================================
 
@@ -421,6 +475,11 @@ impl<'a> ProgramQuery<'a> {
     /// Get direct access to the implement registry for advanced queries
     pub fn implement_registry(&self) -> &'a ImplementRegistry {
         self.implement_registry
+    }
+
+    /// Get the type arena for direct type queries
+    pub fn arena(&self) -> &'a Rc<RefCell<TypeArena>> {
+        self.type_arena
     }
 
     // =========================================================================

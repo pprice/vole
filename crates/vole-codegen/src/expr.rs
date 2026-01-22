@@ -1621,7 +1621,7 @@ impl Cg<'_, '_, '_> {
             .ctx
             .resolve_type(name)
             .is_some_and(|type_id| {
-                self.ctx.analyzed.entity_registry.get_type(type_id).kind == TypeDefKind::ErrorType
+                self.ctx.query().get_type(type_id).kind == TypeDefKind::ErrorType
             });
 
         if is_error_type {
@@ -1701,7 +1701,7 @@ impl Cg<'_, '_, '_> {
             .ctx
             .resolve_type(name)
             .and_then(|type_id| {
-                let type_def = self.ctx.analyzed.entity_registry.get_type(type_id);
+                let type_def = self.ctx.query().get_type(type_id);
                 if type_def.kind == TypeDefKind::ErrorType && type_def.error_info.is_some() {
                     Some(type_id)
                 } else {
@@ -1744,10 +1744,9 @@ impl Cg<'_, '_, '_> {
         // Get fields from EntityRegistry
         let error_fields: Vec<_> = self
             .ctx
-            .analyzed
-            .entity_registry
+            .query()
             .fields_on_type(error_type_def_id)
-            .map(|field_id| self.ctx.analyzed.entity_registry.get_field(field_id))
+            .map(|field_id| self.ctx.query().get_field(field_id).clone())
             .collect();
 
         // Error fields are stored inline in the fallible structure

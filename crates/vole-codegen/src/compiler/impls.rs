@@ -235,11 +235,11 @@ impl Compiler<'_> {
             match &impl_block.target_type {
                 TypeExpr::Primitive(p) => {
                     let name_id = name_table.primitives.from_ast(*p);
-                    self.analyzed.entity_registry.type_by_name(name_id)
+                    self.query().try_type_def_id(name_id)
                 }
                 TypeExpr::Named(sym) => {
                     let name_id = name_table.name_id(self.query().main_module(), &[*sym], interner);
-                    name_id.and_then(|id| self.analyzed.entity_registry.type_by_name(id))
+                    name_id.and_then(|id| self.query().try_type_def_id(id))
                 }
                 _ => None,
             }
@@ -332,11 +332,11 @@ impl Compiler<'_> {
             match &impl_block.target_type {
                 TypeExpr::Primitive(p) => {
                     let name_id = name_table.primitives.from_ast(*p);
-                    self.analyzed.entity_registry.type_by_name(name_id)
+                    self.query().try_type_def_id(name_id)
                 }
                 TypeExpr::Named(sym) => {
                     let name_id = name_table.name_id(self.query().main_module(), &[*sym], interner);
-                    name_id.and_then(|id| self.analyzed.entity_registry.type_by_name(id))
+                    name_id.and_then(|id| self.query().try_type_def_id(id))
                 }
                 _ => None,
             }
@@ -518,12 +518,12 @@ impl Compiler<'_> {
                 match &impl_block.target_type {
                     TypeExpr::Primitive(p) => {
                         let name_id = name_table.primitives.from_ast(*p);
-                        self.analyzed.entity_registry.type_by_name(name_id)
+                        self.query().try_type_def_id(name_id)
                     }
                     TypeExpr::Named(sym) => {
                         let name_id =
                             name_table.name_id(self.query().main_module(), &[*sym], interner);
-                        name_id.and_then(|id| self.analyzed.entity_registry.type_by_name(id))
+                        name_id.and_then(|id| self.query().try_type_def_id(id))
                     }
                     _ => None,
                 }
@@ -1484,7 +1484,7 @@ impl Compiler<'_> {
             .find(|meta| {
                 let arena = self.analyzed.type_arena.borrow();
                 if let Some((type_def_id, _)) = arena.unwrap_class(meta.vole_type) {
-                    let name_id = self.analyzed.entity_registry.get_type(type_def_id).name_id;
+                    let name_id = self.query().get_type(type_def_id).name_id;
                     self.analyzed
                         .name_table
                         .borrow()

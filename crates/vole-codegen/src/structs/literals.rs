@@ -69,7 +69,7 @@ impl Cg<'_, '_, '_> {
                 .or_else(|| arena.unwrap_class(result_type_id).map(|(id, _)| id));
 
             if let Some(type_def_id) = type_def_id {
-                let type_def = self.ctx.analyzed.entity_registry.get_type(type_def_id);
+                let type_def = self.ctx.query().get_type(type_def_id);
                 if let Some(generic_info) = &type_def.generic_info {
                     generic_info
                         .field_names

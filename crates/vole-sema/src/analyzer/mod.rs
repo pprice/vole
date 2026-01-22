@@ -818,6 +818,17 @@ impl Analyzer {
                                 mutable: let_stmt.mutable,
                             },
                         );
+
+                        // Register in entity registry for proper global variable tracking
+                        let global_name_id = self
+                            .name_table_mut()
+                            .intern(self.current_module, &[let_stmt.name], interner);
+                        self.entity_registry_mut().register_global(
+                            global_name_id,
+                            var_type_id,
+                            self.current_module,
+                            let_stmt.mutable,
+                        );
                     }
                 }
             }

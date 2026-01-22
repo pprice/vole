@@ -11,16 +11,17 @@
 
 mod fields;
 mod functions;
+mod globals;
 mod methods;
 mod types;
 
 use std::collections::{HashMap, HashSet};
 
-use crate::entity_defs::{FieldDef, FunctionDef, MethodDef, TypeDef, TypeDefKind};
+use crate::entity_defs::{FieldDef, FunctionDef, GlobalDef, MethodDef, TypeDef, TypeDefKind};
 use crate::generic::{ClassMethodMonomorphCache, MonomorphCache, StaticMethodMonomorphCache};
 use crate::implement_registry::PrimitiveTypeId;
 use crate::type_arena::{TypeId as ArenaTypeId, TypeIdVec};
-use vole_identity::{FieldId, FunctionId, MethodId, NameId, TypeDefId};
+use vole_identity::{FieldId, FunctionId, GlobalId, MethodId, NameId, TypeDefId};
 
 /// Central registry for all language entities
 #[derive(Debug, Clone)]
@@ -30,12 +31,14 @@ pub struct EntityRegistry {
     pub(crate) method_defs: Vec<MethodDef>,
     pub(crate) field_defs: Vec<FieldDef>,
     pub(crate) function_defs: Vec<FunctionDef>,
+    pub(crate) global_defs: Vec<GlobalDef>,
 
     // Primary lookups by NameId
     pub(crate) type_by_name: HashMap<NameId, TypeDefId>,
     pub(crate) method_by_full_name: HashMap<NameId, MethodId>,
     pub(crate) field_by_full_name: HashMap<NameId, FieldId>,
     pub(crate) function_by_name: HashMap<NameId, FunctionId>,
+    pub(crate) global_by_name: HashMap<NameId, GlobalId>,
 
     // Scoped lookups: (type, method_name) -> MethodId
     pub(crate) methods_by_type: HashMap<TypeDefId, HashMap<NameId, MethodId>>,
@@ -68,10 +71,12 @@ impl EntityRegistry {
             method_defs: Vec::new(),
             field_defs: Vec::new(),
             function_defs: Vec::new(),
+            global_defs: Vec::new(),
             type_by_name: HashMap::new(),
             method_by_full_name: HashMap::new(),
             field_by_full_name: HashMap::new(),
             function_by_name: HashMap::new(),
+            global_by_name: HashMap::new(),
             methods_by_type: HashMap::new(),
             fields_by_type: HashMap::new(),
             static_methods_by_type: HashMap::new(),

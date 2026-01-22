@@ -136,14 +136,11 @@ impl InterfaceVtableRegistry {
         let interface_type_def_id = ctx
             .resolve_type_str_or_interface(interface_name_str)
             .ok_or_else(|| format!("unknown interface {:?}", interface_name_str))?;
-        let interface_name_id = ctx
-            .analyzed
-            .entity_registry
-            .get_type(interface_type_def_id)
+        let interface_name_id = ctx.query().get_type(interface_type_def_id)
             .name_id;
 
         // Build substitution map from type param names to concrete type args (already TypeIds)
-        let interface_def = ctx.analyzed.entity_registry.get_type(interface_type_def_id);
+        let interface_def = ctx.query().get_type(interface_type_def_id);
         let substitutions: FxHashMap<NameId, TypeId> = interface_def
             .type_params
             .iter()
@@ -256,7 +253,7 @@ impl InterfaceVtableRegistry {
         data.set_align(word_bytes as u64);
 
         for (index, &method_id) in state.method_ids.iter().enumerate() {
-            let method = ctx.analyzed.entity_registry.get_method(method_id);
+            let method = ctx.query().get_method(method_id);
             let method_name_str = ctx.analyzed.name_table.borrow().display(method.name_id);
             let target = resolve_vtable_target(
                 ctx,
@@ -792,7 +789,7 @@ pub(crate) fn box_interface_value_id(
     };
 
     // Look up the interface Symbol name via EntityRegistry
-    let interface_def = ctx.analyzed.entity_registry.get_type(type_def_id);
+    let interface_def = ctx.query().get_type(type_def_id);
     let interface_name_str = ctx
         .analyzed
         .name_table
@@ -873,7 +870,7 @@ fn resolve_vtable_target(
     substitutions: &FxHashMap<NameId, TypeId>,
 ) -> Result<VtableMethod, String> {
     // Get method info from EntityRegistry
-    let interface_method = ctx.analyzed.entity_registry.get_method(interface_method_id);
+    let interface_method = ctx.query().get_method(interface_method_id);
     let method_name_str = ctx.analyzed.name_table.borrow().display(interface_method.name_id);
 
     // Apply substitutions to get concrete param/return types (using TypeId-based substitution)
@@ -975,7 +972,7 @@ fn resolve_vtable_target(
             .or_else(|| arena.unwrap_record(concrete_type_id).map(|(id, _)| id))?;
         drop(arena);
 
-        let type_name_id = ctx.analyzed.entity_registry.get_type(type_def_id).name_id;
+        let type_name_id = ctx.query().get_type(type_def_id).name_id;
         let meta = type_metadata_by_name_id(
             ctx.type_metadata,
             type_name_id,
@@ -990,7 +987,7 @@ fn resolve_vtable_target(
             .entity_registry
             .find_method_on_type(type_def_id, method_name_id)
             .map(|m_id| {
-                let method = ctx.analyzed.entity_registry.get_method(m_id);
+                let method = ctx.query().get_method(m_id);
                 let arena = ctx.arena.borrow();
                 let (params, ret, _) = arena
                     .unwrap_function(method.signature_id)

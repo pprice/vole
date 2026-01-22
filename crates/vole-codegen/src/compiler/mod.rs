@@ -18,7 +18,7 @@ use crate::types::{MethodInfo, TypeMetadata};
 
 use crate::AnalyzedProgram;
 use crate::{FunctionRegistry, JitContext, RuntimeFn, interface_vtable::InterfaceVtableRegistry};
-use vole_frontend::{LetStmt, Symbol};
+use vole_frontend::{Interner, LetStmt, Symbol};
 use vole_identity::{NameId, TypeDefId};
 use vole_runtime::NativeRegistry;
 use vole_sema::{ImplTypeId, ProgramQuery};
@@ -92,6 +92,26 @@ impl<'a> Compiler<'a> {
     /// Get a query interface for the analyzed program
     fn query(&self) -> ProgramQuery<'_> {
         self.analyzed.query()
+    }
+
+    /// Get a TypeCtx for type resolution functions
+    fn type_ctx(&self) -> crate::types::TypeCtx<'_> {
+        crate::types::TypeCtx::new(self.query(), self.pointer_type)
+    }
+
+    /// Get a TypeCtx with a custom interner (for module programs)
+    fn type_ctx_with_interner<'b>(&'b self, interner: &'b Interner) -> crate::types::TypeCtx<'b> {
+        use vole_sema::ProgramQuery;
+        let query = ProgramQuery::new(
+            &self.analyzed.entity_registry,
+            &self.analyzed.expression_data,
+            &self.analyzed.name_table,
+            interner,
+            &self.analyzed.implement_registry,
+            &self.analyzed.module_programs,
+            &self.analyzed.type_arena,
+        );
+        crate::types::TypeCtx::new(query, self.pointer_type)
     }
 
     /// Intern a qualified function name (encapsulates borrow of interner + func_registry)

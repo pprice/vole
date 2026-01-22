@@ -1014,7 +1014,7 @@ impl Cg<'_, '_, '_> {
         let error_type_def_id = if let Some(type_def_id) = arena.unwrap_error(error_type_id) {
             // Single error type
             let name = name_table
-                .last_segment_str(self.ctx.analyzed.entity_registry.name_id(type_def_id));
+                .last_segment_str(self.ctx.query().type_name_id(type_def_id));
             if name.as_deref() == Some(raise_error_name) {
                 Some(type_def_id)
             } else {
@@ -1025,7 +1025,7 @@ impl Cg<'_, '_, '_> {
             variants.iter().find_map(|&v| {
                 if let Some(type_def_id) = arena.unwrap_error(v) {
                     let name = name_table.last_segment_str(
-                        self.ctx.analyzed.entity_registry.name_id(type_def_id),
+                        self.ctx.query().type_name_id(type_def_id),
                     );
                     if name.as_deref() == Some(raise_error_name) {
                         return Some(type_def_id);
@@ -1048,10 +1048,9 @@ impl Cg<'_, '_, '_> {
         // Get fields from EntityRegistry
         let error_fields: Vec<_> = self
             .ctx
-            .analyzed
-            .entity_registry
+            .query()
             .fields_on_type(error_type_def_id)
-            .map(|field_id| self.ctx.analyzed.entity_registry.get_field(field_id))
+            .map(|field_id| self.ctx.query().get_field(field_id).clone())
             .collect();
 
         // Store each field value at the appropriate offset in the payload

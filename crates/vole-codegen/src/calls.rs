@@ -246,13 +246,9 @@ impl Cg<'_, '_, '_> {
         // Check if it's a functional interface variable
         if let Some((var, type_id)) = self.vars.get(&callee_sym)
             && let Some(iface_type_def_id) = self.interface_type_def_id(*type_id)
-            && let Some(method_id) = self
-                .ctx
-                .analyzed
-                .entity_registry
-                .is_functional(iface_type_def_id)
+            && let Some(method_id) = self.ctx.query().is_functional_interface(iface_type_def_id)
         {
-            let method = self.ctx.analyzed.entity_registry.get_method(method_id);
+            let method = self.ctx.query().get_method(method_id);
             let func_type_id = method.signature_id;
             let method_name_id = method.name_id;
             let value = self.builder.use_var(*var);
@@ -292,9 +288,9 @@ impl Cg<'_, '_, '_> {
                 };
                 if let Some(type_def_id) = iface_info
                     && let Some(method_id) =
-                        self.ctx.analyzed.entity_registry.is_functional(type_def_id)
+                        self.ctx.query().is_functional_interface(type_def_id)
                 {
-                    let method = self.ctx.analyzed.entity_registry.get_method(method_id);
+                    let method = self.ctx.query().get_method(method_id);
                     let func_type_id = method.signature_id;
                     let method_name_id = method.name_id;
                     // Box the lambda value to create the interface representation
@@ -322,9 +318,9 @@ impl Cg<'_, '_, '_> {
             // If it's an interface type (functional interface), call via vtable
             if let Some(type_def_id) = self.interface_type_def_id(lambda_val.type_id)
                 && let Some(method_id) =
-                    self.ctx.analyzed.entity_registry.is_functional(type_def_id)
+                    self.ctx.query().is_functional_interface(type_def_id)
             {
-                let method = self.ctx.analyzed.entity_registry.get_method(method_id);
+                let method = self.ctx.query().get_method(method_id);
                 let func_type_id = method.signature_id;
                 let method_name_id = method.name_id;
                 return self.interface_dispatch_call_args_by_type_def_id(

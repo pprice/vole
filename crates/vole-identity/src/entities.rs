@@ -59,6 +59,20 @@ impl FunctionId {
     }
 }
 
+/// Identity for a global variable (module-level let/var)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct GlobalId(u32);
+
+impl GlobalId {
+    pub fn new(index: u32) -> Self {
+        Self(index)
+    }
+
+    pub fn index(self) -> u32 {
+        self.0
+    }
+}
+
 /// Identity for a type parameter (e.g., T in `func identity<T>(x: T) -> T`)
 /// Distinct from NameId to avoid confusion with inference variables.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
