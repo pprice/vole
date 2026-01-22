@@ -1,7 +1,7 @@
 // src/codegen/structs/access.rs
 
 use super::helpers::{
-    convert_field_value_id, convert_to_i64_for_storage, get_field_slot_and_type_id_legacy,
+    convert_field_value_id, convert_to_i64_for_storage, get_field_slot_and_type_id_cg,
 };
 use crate::RuntimeFn;
 use crate::context::Cg;
@@ -107,8 +107,7 @@ impl Cg<'_, '_, '_> {
 
         // Non-module field access - use TypeId-based helpers
         let field_name = self.ctx.interner().resolve(fa.field);
-        let (slot, field_type_id) =
-            get_field_slot_and_type_id_legacy(obj.type_id, field_name, self.ctx)?;
+        let (slot, field_type_id) = get_field_slot_and_type_id_cg(obj.type_id, field_name, self)?;
 
         let result_raw = self.get_field_cached(obj.value, slot as u32)?;
 
@@ -165,8 +164,7 @@ impl Cg<'_, '_, '_> {
 
         // Get the field type from the inner type using TypeId-based helper
         let field_name = self.ctx.interner().resolve(oc.field);
-        let (slot, field_type_id) =
-            get_field_slot_and_type_id_legacy(inner_type_id, field_name, self.ctx)?;
+        let (slot, field_type_id) = get_field_slot_and_type_id_cg(inner_type_id, field_name, self)?;
 
         // Result type is field_type | nil (optional)
         // But if field type is already optional, don't double-wrap
@@ -263,8 +261,7 @@ impl Cg<'_, '_, '_> {
         let value = self.expr(value_expr)?;
 
         let field_name = self.ctx.interner().resolve(field);
-        let (slot, field_type_id) =
-            get_field_slot_and_type_id_legacy(obj.type_id, field_name, self.ctx)?;
+        let (slot, field_type_id) = get_field_slot_and_type_id_cg(obj.type_id, field_name, self)?;
         let value = if self.ctx.arena().is_interface(field_type_id) {
             box_interface_value_id(self.builder, self.ctx, value, field_type_id)?
         } else {

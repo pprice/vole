@@ -4,7 +4,7 @@ use cranelift::prelude::*;
 use rustc_hash::FxHashMap;
 
 use crate::errors::CodegenError;
-use crate::types::{CompileCtx, CompiledValue, FunctionCtx, TypeCtx};
+use crate::types::{CompiledValue, FunctionCtx, TypeCtx};
 use vole_sema::PrimitiveType;
 use vole_sema::type_arena::{SemaType as ArenaType, TypeArena, TypeId};
 
@@ -61,14 +61,15 @@ pub(crate) fn get_field_slot_and_type_id(
     Err(CodegenError::not_found("field", format!("{} in type", field_name)).into())
 }
 
-/// Get field slot and type for a field access (legacy CompileCtx API - for incremental migration).
-#[allow(dead_code)]
-pub(crate) fn get_field_slot_and_type_id_legacy(
+/// Get field slot and type for a field access (Cg API - uses TypeCtx internally).
+/// This bridges Cg to the new TypeCtx-based API.
+pub(crate) fn get_field_slot_and_type_id_cg(
     type_id: TypeId,
     field_name: &str,
-    ctx: &CompileCtx,
+    cg: &crate::context::Cg,
 ) -> Result<(usize, TypeId), String> {
-    let arena = ctx.arena.borrow();
+    let type_ctx = cg.type_ctx();
+    let arena = type_ctx.arena();
 
     // Try class first, then record
     let (type_def_id, type_args) = arena
@@ -78,7 +79,7 @@ pub(crate) fn get_field_slot_and_type_id_legacy(
             CodegenError::type_mismatch("field access", "class or record", "other type").to_string()
         })?;
 
-    let type_def = ctx.query().get_type(type_def_id);
+    let type_def = type_ctx.query.get_type(type_def_id);
     let generic_info = type_def
         .generic_info
         .as_ref()
@@ -93,18 +94,18 @@ pub(crate) fn get_field_slot_and_type_id_legacy(
         .collect();
 
     for (slot, field_name_id) in generic_info.field_names.iter().enumerate() {
-        let name = ctx.query().last_segment(*field_name_id);
+        let name = type_ctx.query.last_segment(*field_name_id);
         if name.as_deref() == Some(field_name) {
             let base_type_id = generic_info.field_types[slot];
             // Apply type substitutions from type args
             let field_type_id = if !substitutions.is_empty() {
                 drop(arena);
-                let substituted = ctx.update().substitute(base_type_id, &substitutions);
-                // Apply monomorphization context substitutions
-                ctx.substitute_type_id(substituted)
+                let substituted = type_ctx.update().substitute(base_type_id, &substitutions);
+                // Apply monomorphization context substitutions (delegates to CompileCtx)
+                cg.substitute_type(substituted)
             } else {
                 drop(arena);
-                ctx.substitute_type_id(base_type_id)
+                cg.substitute_type(base_type_id)
             };
             return Ok((slot, field_type_id));
         }

@@ -124,6 +124,28 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.captures.is_some()
     }
 
+    // ========== Context accessors for migration ==========
+
+    /// Get a TypeCtx view for functions that need the new API.
+    /// This enables incremental migration from CompileCtx to TypeCtx + FunctionCtx.
+    #[inline]
+    pub fn type_ctx(&self) -> super::types::TypeCtx<'_> {
+        super::types::TypeCtx::new(self.ctx.query(), self.ctx.pointer_type)
+    }
+
+    /// Get arena Rc for FunctionCtx operations (for future migration steps)
+    #[inline]
+    #[allow(dead_code)]
+    pub fn arena_rc(&self) -> &std::rc::Rc<std::cell::RefCell<vole_sema::type_arena::TypeArena>> {
+        self.ctx.arena
+    }
+
+    /// Substitute type parameters (delegates to CompileCtx for now)
+    #[inline]
+    pub fn substitute_type(&self, ty: TypeId) -> TypeId {
+        self.ctx.substitute_type_id(ty)
+    }
+
     // ========== Arena helpers ==========
 
     /// Get an update interface for arena mutations.

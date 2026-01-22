@@ -12,7 +12,7 @@ use vole_sema::type_arena::TypeId;
 
 use super::context::Cg;
 use super::structs::{
-    convert_field_value_id, convert_to_i64_for_storage, get_field_slot_and_type_id_legacy,
+    convert_field_value_id, convert_to_i64_for_storage, get_field_slot_and_type_id_cg,
 };
 use super::types::{CompiledValue, array_element_tag_id, convert_to_type, type_id_to_cranelift};
 
@@ -638,8 +638,7 @@ impl Cg<'_, '_, '_> {
         let obj = self.expr(object)?;
 
         let field_name = self.ctx.interner().resolve(field);
-        let (slot, field_type_id) =
-            get_field_slot_and_type_id_legacy(obj.type_id, field_name, self.ctx)?;
+        let (slot, field_type_id) = get_field_slot_and_type_id_cg(obj.type_id, field_name, self)?;
 
         // Load current field
         let slot_val = self.builder.ins().iconst(types::I32, slot as i64);

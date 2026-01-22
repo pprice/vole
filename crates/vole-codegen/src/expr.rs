@@ -18,7 +18,7 @@ use vole_sema::entity_defs::TypeDefKind;
 
 use super::context::Cg;
 use super::structs::{
-    convert_field_value_id, convert_to_i64_for_storage, get_field_slot_and_type_id_legacy,
+    convert_field_value_id, convert_to_i64_for_storage, get_field_slot_and_type_id_cg,
 };
 use super::types::{
     CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, array_element_tag_id,
@@ -1225,10 +1225,10 @@ impl Cg<'_, '_, '_> {
                         // Extract and bind fields
                         for field_pattern in fields {
                             let field_name = self.ctx.interner().resolve(field_pattern.field_name);
-                            let (slot, field_type_id) = get_field_slot_and_type_id_legacy(
+                            let (slot, field_type_id) = get_field_slot_and_type_id_cg(
                                 field_source_type_id,
                                 field_name,
-                                self.ctx,
+                                self,
                             )?;
                             let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
                             let result_raw = self.call_runtime(
@@ -1275,10 +1275,10 @@ impl Cg<'_, '_, '_> {
                         // Extract and bind fields
                         for field_pattern in fields {
                             let field_name = self.ctx.interner().resolve(field_pattern.field_name);
-                            let (slot, field_type_id) = get_field_slot_and_type_id_legacy(
+                            let (slot, field_type_id) = get_field_slot_and_type_id_cg(
                                 field_source_type_id,
                                 field_name,
-                                self.ctx,
+                                self,
                             )?;
                             let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
                             let result_raw = self.call_runtime(

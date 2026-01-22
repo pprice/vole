@@ -14,7 +14,7 @@ use vole_sema::type_arena::TypeId;
 use super::compiler::ControlFlowCtx;
 use super::context::{Captures, Cg, ControlFlow};
 use super::structs::{
-    convert_field_value_id, convert_to_i64_for_storage, get_field_slot_and_type_id_legacy,
+    convert_field_value_id, convert_to_i64_for_storage, get_field_slot_and_type_id_cg,
 };
 use super::types::{
     CompileCtx, CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET,
@@ -909,7 +909,7 @@ impl Cg<'_, '_, '_> {
                 for field_pattern in fields {
                     let field_name = self.ctx.interner().resolve(field_pattern.field_name);
                     let (slot, field_type_id) =
-                        get_field_slot_and_type_id_legacy(ty_id, field_name, self.ctx)?;
+                        get_field_slot_and_type_id_cg(ty_id, field_name, self)?;
                     let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
                     let result_raw =
                         self.call_runtime(RuntimeFn::InstanceGetField, &[value, slot_val])?;
