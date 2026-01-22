@@ -228,7 +228,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let func_id = self.func_id(key)?;
         Ok(self
             .ctx
-            .module
+            .jit_module()
             .declare_func_in_func(func_id, self.builder.func))
     }
 
@@ -428,7 +428,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         };
 
         // Build the Cranelift signature from NativeSignature
-        let mut sig = self.ctx.module.make_signature();
+        let mut sig = self.ctx.jit_module().make_signature();
         for param_type in &native_func.signature.params {
             sig.params.push(AbiParam::new(native_type_to_cranelift(
                 param_type,

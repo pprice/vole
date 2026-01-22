@@ -132,7 +132,7 @@ impl Cg<'_, '_, '_> {
                     })?;
                     let func_ref = self
                         .ctx
-                        .module
+                        .jit_module()
                         .declare_func_in_func(func_id, self.builder.func);
                     let call_inst = self.builder.ins().call(func_ref, &args);
                     let results = self.builder.inst_results(call_inst);
@@ -709,7 +709,7 @@ impl Cg<'_, '_, '_> {
 
             // Build the Cranelift signature for the closure call
             // First param is the closure pointer, then the user params
-            let mut sig = self.ctx.module.make_signature();
+            let mut sig = self.ctx.jit_module().make_signature();
             sig.params.push(AbiParam::new(self.ctx.ptr_type())); // Closure pointer
             for param_id in param_ids.iter() {
                 sig.params.push(AbiParam::new(type_id_to_cranelift(
@@ -755,7 +755,7 @@ impl Cg<'_, '_, '_> {
             }
         } else {
             // It's a pure function - call directly
-            let mut sig = self.ctx.module.make_signature();
+            let mut sig = self.ctx.jit_module().make_signature();
             for param_id in param_ids.iter() {
                 sig.params.push(AbiParam::new(type_id_to_cranelift(
                     *param_id,
@@ -857,7 +857,7 @@ impl Cg<'_, '_, '_> {
 
         tracing::trace!(slot = slot, "interface vtable dispatch");
 
-        let mut sig = self.ctx.module.make_signature();
+        let mut sig = self.ctx.jit_module().make_signature();
         sig.params.push(AbiParam::new(word_type));
         for _ in 0..param_count {
             sig.params.push(AbiParam::new(word_type));

@@ -172,7 +172,7 @@ impl InterfaceVtableRegistry {
             type_name
         );
         let data_id = ctx
-            .module
+            .jit_module()
             .declare_data(&vtable_name, Linkage::Local, false, false)
             .map_err(|e| e.to_string())?;
 
@@ -268,7 +268,7 @@ impl InterfaceVtableRegistry {
                 state.concrete_type,
                 &target,
             )?;
-            let func_ref = ctx.module.declare_func_in_data(wrapper_id, &mut data);
+            let func_ref = ctx.jit_module().declare_func_in_data(wrapper_id, &mut data);
             data.write_function_addr((index * word_bytes) as u32, func_ref);
             let target_type = match &target.target {
                 VtableMethodTarget::Method(_) => "Method",
@@ -285,7 +285,7 @@ impl InterfaceVtableRegistry {
         }
 
         // Phase 3: Define data
-        ctx.module
+        ctx.jit_module()
             .define_data(state.data_id, &data)
             .map_err(|e| e.to_string())?;
 
@@ -308,7 +308,7 @@ impl InterfaceVtableRegistry {
     ) -> Result<cranelift_module::FuncId, String> {
         // Build wrapper signature using param_count and returns_void directly
         let word_type = ctx.ptr_type();
-        let mut sig = ctx.module.make_signature();
+        let mut sig = ctx.jit_module().make_signature();
         sig.params.push(AbiParam::new(word_type)); // self
         for _ in 0..method.param_count {
             sig.params.push(AbiParam::new(word_type));
@@ -324,11 +324,11 @@ impl InterfaceVtableRegistry {
         self.wrapper_counter += 1;
 
         let func_id = ctx
-            .module
+            .jit_module()
             .declare_function(&wrapper_name, Linkage::Local, &sig)
             .map_err(|e| e.to_string())?;
 
-        let mut func_ctx = ctx.module.make_context();
+        let mut func_ctx = ctx.jit_module().make_context();
         func_ctx.func.signature = sig;
         let mut builder_ctx = FunctionBuilderContext::new();
         {
@@ -407,10 +407,10 @@ impl InterfaceVtableRegistry {
             builder.finalize();
         }
 
-        ctx.module
+        ctx.jit_module()
             .define_function(func_id, &mut func_ctx)
             .map_err(|e| e.to_string())?;
-        ctx.module.clear_context(&mut func_ctx);
+        ctx.jit_module().clear_context(&mut func_ctx);
 
         Ok(func_id)
     }
@@ -468,12 +468,12 @@ fn compile_function_wrapper(
             .func_id(closure_get_key)
             .ok_or_else(|| "closure get func id missing".to_string())?;
         let closure_get_ref = ctx
-            .module
+            .jit_module()
             .declare_func_in_func(closure_get_id, builder.func);
         let closure_call = builder.ins().call(closure_get_ref, &[self_val]);
         let func_ptr = builder.inst_results(closure_call)[0];
 
-        let mut sig = ctx.module.make_signature();
+        let mut sig = ctx.jit_module().make_signature();
         let arena = ctx.arena.borrow();
         sig.params.push(AbiParam::new(type_id_to_cranelift(
             concrete_type_id,
@@ -501,7 +501,7 @@ fn compile_function_wrapper(
         call_args.extend(args);
         (func_ptr, call_args, sig)
     } else {
-        let mut sig = ctx.module.make_signature();
+        let mut sig = ctx.jit_module().make_signature();
         for &param_type_id in param_type_ids.iter() {
             sig.params.push(AbiParam::new(type_id_to_cranelift(
                 param_type_id,
@@ -559,7 +559,7 @@ fn compile_method_wrapper(
         .funcs()
         .func_id(method_info.func_key)
         .ok_or_else(|| "method function id not found".to_string())?;
-    let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
+    let func_ref = ctx.jit_module().declare_func_in_func(func_id, builder.func);
     let call = builder.ins().call(func_ref, &call_args);
     Ok(builder.inst_results(call).to_vec())
 }
@@ -588,7 +588,7 @@ fn compile_external_wrapper(
             .ok_or_else(|| {
                 "native function std:intrinsics::interface_iter not found".to_string()
             })?;
-        let mut iter_sig = ctx.module.make_signature();
+        let mut iter_sig = ctx.jit_module().make_signature();
         iter_sig.params.push(AbiParam::new(ctx.ptr_type()));
         iter_sig.returns.push(AbiParam::new(ctx.ptr_type()));
         let iter_sig_ref = builder.import_signature(iter_sig);
@@ -638,7 +638,7 @@ fn compile_external_wrapper(
         .lookup(&module_path, &native_name)
         .ok_or_else(|| format!("native function {}::{} not found", module_path, native_name))?;
 
-    let mut native_sig = ctx.module.make_signature();
+    let mut native_sig = ctx.jit_module().make_signature();
     // For Iterator, the self param is now *mut UnifiedIterator (pointer)
     let arena = ctx.arena.borrow();
     let self_param_type = if interface_name == "Iterator" {
@@ -837,7 +837,9 @@ pub(crate) fn box_interface_value_id(
     ctx.interface_vtables
         .borrow_mut()
         .ensure_compiled(ctx, interface_name, value.type_id)?;
-    let vtable_gv = ctx.module.declare_data_in_func(vtable_id, builder.func);
+    let vtable_gv = ctx
+        .jit_module()
+        .declare_data_in_func(vtable_id, builder.func);
     let vtable_ptr = builder.ins().global_value(ctx.ptr_type(), vtable_gv);
 
     let word_bytes = ctx.ptr_type().bytes() as i64;
@@ -1068,5 +1070,5 @@ fn runtime_heap_alloc_ref(
         .funcs()
         .func_id(key)
         .ok_or_else(|| "heap allocator function id missing".to_string())?;
-    Ok(ctx.module.declare_func_in_func(func_id, builder.func))
+    Ok(ctx.jit_module().declare_func_in_func(func_id, builder.func))
 }

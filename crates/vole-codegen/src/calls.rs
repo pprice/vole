@@ -421,7 +421,7 @@ impl Cg<'_, '_, '_> {
                 }
 
                 // Build the Cranelift signature from NativeSignature
-                let mut sig = self.ctx.module.make_signature();
+                let mut sig = self.ctx.jit_module().make_signature();
                 for param_type in &native_func.signature.params {
                     sig.params.push(AbiParam::new(native_type_to_cranelift(
                         param_type,
@@ -500,7 +500,7 @@ impl Cg<'_, '_, '_> {
             }
 
             // Build the Cranelift signature from NativeSignature
-            let mut sig = self.ctx.module.make_signature();
+            let mut sig = self.ctx.jit_module().make_signature();
             for param_type in &native_func.signature.params {
                 sig.params.push(AbiParam::new(native_type_to_cranelift(
                     param_type,
@@ -567,7 +567,7 @@ impl Cg<'_, '_, '_> {
     ) -> Result<CompiledValue, String> {
         let func_ref = self
             .ctx
-            .module
+            .jit_module()
             .declare_func_in_func(func_id, self.builder.func);
 
         // Get expected parameter types from the function's signature
@@ -799,7 +799,7 @@ impl Cg<'_, '_, '_> {
         };
 
         // Build signature (closure ptr + params)
-        let mut sig = self.ctx.module.make_signature();
+        let mut sig = self.ctx.jit_module().make_signature();
         sig.params.push(AbiParam::new(self.ctx.ptr_type())); // closure ptr
         for &param_type_id in params.iter() {
             let arena = self.ctx.arena();
@@ -865,7 +865,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Build the Cranelift signature from NativeSignature
-        let mut sig = self.ctx.module.make_signature();
+        let mut sig = self.ctx.jit_module().make_signature();
         for param_type in &native_func.signature.params {
             sig.params.push(AbiParam::new(native_type_to_cranelift(
                 param_type,

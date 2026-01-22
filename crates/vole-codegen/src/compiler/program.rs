@@ -834,7 +834,7 @@ impl Compiler<'_> {
                 for scoped_func in &scoped_funcs {
                     // Get func_ref for this function in the current test's context
                     let func_ref = ctx
-                        .module
+                        .jit_module()
                         .declare_func_in_func(scoped_func.func_id, builder.func);
                     let func_addr = builder.ins().func_addr(self.pointer_type, func_ref);
 
@@ -844,7 +844,9 @@ impl Compiler<'_> {
                         .runtime_key(RuntimeFn::ClosureAlloc)
                         .and_then(|key| ctx.funcs().func_id(key))
                         .ok_or_else(|| "vole_closure_alloc not found".to_string())?;
-                    let alloc_ref = ctx.module.declare_func_in_func(alloc_id, builder.func);
+                    let alloc_ref = ctx
+                        .jit_module()
+                        .declare_func_in_func(alloc_id, builder.func);
                     let zero_captures = builder.ins().iconst(types::I64, 0);
                     let alloc_call = builder.ins().call(alloc_ref, &[func_addr, zero_captures]);
                     let closure_ptr = builder.inst_results(alloc_call)[0];

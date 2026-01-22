@@ -202,7 +202,7 @@ impl Cg<'_, '_, '_> {
         let is_void_return = arena.is_void(return_type_id);
         drop(arena);
 
-        let mut wrapper_sig = self.ctx.module.make_signature();
+        let mut wrapper_sig = self.ctx.jit_module().make_signature();
         wrapper_sig.params.push(AbiParam::new(self.ctx.ptr_type())); // closure ptr (ignored)
         for &param_ty in &param_types {
             wrapper_sig.params.push(AbiParam::new(param_ty));
@@ -222,7 +222,7 @@ impl Cg<'_, '_, '_> {
             .display(wrapper_name_id);
         let wrapper_func_id = self
             .ctx
-            .module
+            .jit_module()
             .declare_function(
                 &wrapper_name,
                 cranelift_module::Linkage::Local,
@@ -238,7 +238,7 @@ impl Cg<'_, '_, '_> {
             .set_return_type(wrapper_func_key, return_type_id);
 
         // Build the wrapper function body
-        let mut wrapper_ctx = self.ctx.module.make_context();
+        let mut wrapper_ctx = self.ctx.jit_module().make_context();
         wrapper_ctx.func.signature = wrapper_sig.clone();
 
         {
@@ -256,7 +256,7 @@ impl Cg<'_, '_, '_> {
             // Get reference to original function
             let orig_func_ref = self
                 .ctx
-                .module
+                .jit_module()
                 .declare_func_in_func(orig_func_id, wrapper_builder.func);
 
             // Call original function with just the arguments (skip closure_ptr)
@@ -275,14 +275,14 @@ impl Cg<'_, '_, '_> {
         }
 
         self.ctx
-            .module
+            .jit_module()
             .define_function(wrapper_func_id, &mut wrapper_ctx)
             .map_err(|e| format!("Failed to define function wrapper: {:?}", e))?;
 
         // Get the wrapper function address
         let wrapper_func_ref = self
             .ctx
-            .module
+            .jit_module()
             .declare_func_in_func(wrapper_func_id, self.builder.func);
         let wrapper_func_addr = self
             .builder
@@ -298,7 +298,7 @@ impl Cg<'_, '_, '_> {
             .ok_or_else(|| "vole_closure_alloc not found".to_string())?;
         let alloc_ref = self
             .ctx
-            .module
+            .jit_module()
             .declare_func_in_func(alloc_id, self.builder.func);
         let zero_captures = self.builder.ins().iconst(types::I64, 0);
         let alloc_call = self

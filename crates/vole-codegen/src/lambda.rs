@@ -269,7 +269,7 @@ fn compile_pure_lambda(
 
     // Always use closure calling convention for consistency with how all lambdas
     // are now wrapped in Closure structs. First param is the closure pointer.
-    let mut sig = ctx.module.make_signature();
+    let mut sig = ctx.jit_module().make_signature();
     sig.params.push(AbiParam::new(ctx.ptr_type())); // closure ptr (ignored for pure lambdas)
     for &param_ty in &param_types {
         sig.params.push(AbiParam::new(param_ty));
@@ -279,14 +279,14 @@ fn compile_pure_lambda(
     let (name_id, func_key) = ctx.funcs().intern_lambda_name(lambda_id);
     let lambda_name = ctx.funcs().name_table_rc().borrow().display(name_id);
     let func_id = ctx
-        .module
+        .jit_module()
         .declare_function(&lambda_name, cranelift_module::Linkage::Local, &sig)
         .map_err(|e| e.to_string())?;
 
     ctx.funcs().set_func_id(func_key, func_id);
     ctx.funcs().set_return_type(func_key, return_type_id);
 
-    let mut lambda_ctx = ctx.module.make_context();
+    let mut lambda_ctx = ctx.jit_module().make_context();
     lambda_ctx.func.signature = sig.clone();
 
     // Build params: Vec<(Symbol, TypeId, Type)>
@@ -307,11 +307,11 @@ fn compile_pure_lambda(
         compile_function_inner(lambda_builder, ctx, config)?;
     }
 
-    ctx.module
+    ctx.jit_module()
         .define_function(func_id, &mut lambda_ctx)
         .map_err(|e| format!("Failed to define lambda: {:?}", e))?;
 
-    let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
+    let func_ref = ctx.jit_module().declare_func_in_func(func_id, builder.func);
     let func_addr = builder.ins().func_addr(ctx.ptr_type(), func_ref);
 
     // Always wrap lambdas in Closure structs for consistent calling convention.
@@ -322,7 +322,9 @@ fn compile_pure_lambda(
         .runtime_key(RuntimeFn::ClosureAlloc)
         .and_then(|key| ctx.funcs().func_id(key))
         .ok_or_else(|| "vole_closure_alloc not found".to_string())?;
-    let alloc_ref = ctx.module.declare_func_in_func(alloc_id, builder.func);
+    let alloc_ref = ctx
+        .jit_module()
+        .declare_func_in_func(alloc_id, builder.func);
     let zero_captures = builder.ins().iconst(types::I64, 0);
     let alloc_call = builder.ins().call(alloc_ref, &[func_addr, zero_captures]);
     let closure_ptr = builder.inst_results(alloc_call)[0];
@@ -380,7 +382,7 @@ fn compile_lambda_with_captures(
     let return_type = type_id_to_cranelift(return_type_id, &ctx.arena.borrow(), ctx.ptr_type());
 
     // First param is the closure pointer
-    let mut sig = ctx.module.make_signature();
+    let mut sig = ctx.jit_module().make_signature();
     sig.params.push(AbiParam::new(ctx.ptr_type()));
     for &param_ty in &param_types {
         sig.params.push(AbiParam::new(param_ty));
@@ -390,7 +392,7 @@ fn compile_lambda_with_captures(
     let (name_id, func_key) = ctx.funcs().intern_lambda_name(lambda_id);
     let lambda_name = ctx.funcs().name_table_rc().borrow().display(name_id);
     let func_id = ctx
-        .module
+        .jit_module()
         .declare_function(&lambda_name, cranelift_module::Linkage::Local, &sig)
         .map_err(|e| e.to_string())?;
 
@@ -399,7 +401,7 @@ fn compile_lambda_with_captures(
 
     let capture_bindings = build_capture_bindings(&captures, variables, &ctx.arena.borrow());
 
-    let mut lambda_ctx = ctx.module.make_context();
+    let mut lambda_ctx = ctx.jit_module().make_context();
     lambda_ctx.func.signature = sig.clone();
 
     // Build params: Vec<(Symbol, TypeId, Type)>
@@ -426,11 +428,11 @@ fn compile_lambda_with_captures(
         compile_function_inner(lambda_builder, ctx, config)?;
     }
 
-    ctx.module
+    ctx.jit_module()
         .define_function(func_id, &mut lambda_ctx)
         .map_err(|e| format!("Failed to define lambda: {:?}", e))?;
 
-    let func_ref = ctx.module.declare_func_in_func(func_id, builder.func);
+    let func_ref = ctx.jit_module().declare_func_in_func(func_id, builder.func);
     let func_addr = builder.ins().func_addr(ctx.ptr_type(), func_ref);
 
     // Allocate closure
@@ -439,7 +441,9 @@ fn compile_lambda_with_captures(
         .runtime_key(RuntimeFn::ClosureAlloc)
         .and_then(|key| ctx.funcs().func_id(key))
         .ok_or_else(|| "vole_closure_alloc not found".to_string())?;
-    let alloc_ref = ctx.module.declare_func_in_func(alloc_id, builder.func);
+    let alloc_ref = ctx
+        .jit_module()
+        .declare_func_in_func(alloc_id, builder.func);
     let num_captures_val = builder.ins().iconst(types::I64, num_captures as i64);
     let alloc_call = builder
         .ins()
@@ -453,7 +457,7 @@ fn compile_lambda_with_captures(
         .and_then(|key| ctx.funcs().func_id(key))
         .ok_or_else(|| "vole_closure_set_capture not found".to_string())?;
     let set_capture_ref = ctx
-        .module
+        .jit_module()
         .declare_func_in_func(set_capture_id, builder.func);
 
     let heap_alloc_id = ctx
@@ -461,7 +465,9 @@ fn compile_lambda_with_captures(
         .runtime_key(RuntimeFn::HeapAlloc)
         .and_then(|key| ctx.funcs().func_id(key))
         .ok_or_else(|| "vole_heap_alloc not found".to_string())?;
-    let heap_alloc_ref = ctx.module.declare_func_in_func(heap_alloc_id, builder.func);
+    let heap_alloc_ref = ctx
+        .jit_module()
+        .declare_func_in_func(heap_alloc_id, builder.func);
 
     for (i, capture) in captures.iter().enumerate() {
         // For self-captures (recursive lambdas), use the closure pointer itself
