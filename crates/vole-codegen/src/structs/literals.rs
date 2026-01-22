@@ -62,7 +62,7 @@ impl Cg<'_, '_, '_> {
 
         // Get field types for wrapping optional values using arena methods
         let field_types: HashMap<String, TypeId> = {
-            let arena = self.ctx.arena.borrow();
+            let arena = self.ctx.arena();
             let type_def_id = arena
                 .unwrap_record(result_type_id)
                 .map(|(id, _)| id)
@@ -111,7 +111,7 @@ impl Cg<'_, '_, '_> {
             // Use heap allocation for unions stored in class/record fields since stack slots
             // don't persist beyond the current function's stack frame
             let final_value = if let Some(&field_type_id) = field_types.get(init_name) {
-                let arena = self.ctx.arena.borrow();
+                let arena = self.ctx.arena();
                 let field_is_union = arena.is_union(field_type_id);
                 let field_is_interface = arena.is_interface(field_type_id);
                 let value_is_union = arena.is_union(value.type_id);
@@ -151,7 +151,7 @@ impl Cg<'_, '_, '_> {
         value: CompiledValue,
         union_type_id: TypeId,
     ) -> Result<CompiledValue, String> {
-        let arena = self.ctx.arena.borrow();
+        let arena = self.ctx.arena();
         let variants = arena.unwrap_union(union_type_id).ok_or_else(|| {
             CodegenError::type_mismatch("union construction", "union type", "non-union").to_string()
         })?;
@@ -185,7 +185,7 @@ impl Cg<'_, '_, '_> {
             union_type_id,
             self.ctx.pointer_type,
             &self.ctx.analyzed.entity_registry,
-            &self.ctx.arena.borrow(),
+            &self.ctx.arena(),
         );
         let size_val = self
             .builder

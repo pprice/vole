@@ -138,7 +138,6 @@ impl<'a> CodegenCtx<'a> {
 
 /// Per-function compilation context.
 /// Contains state that varies for each function being compiled.
-#[derive(Clone)]
 #[allow(dead_code)]
 pub struct FunctionCtx<'a> {
     /// Return type of the current function (for raise statements)
@@ -147,6 +146,8 @@ pub struct FunctionCtx<'a> {
     pub current_module: Option<ModuleId>,
     /// Type parameter substitutions for monomorphized generics
     pub substitutions: Option<&'a HashMap<NameId, TypeId>>,
+    /// Cache for substituted types (avoids repeated HashMap conversion and arena mutations)
+    substitution_cache: RefCell<HashMap<TypeId, TypeId>>,
 }
 
 #[allow(dead_code)]
@@ -157,6 +158,7 @@ impl<'a> FunctionCtx<'a> {
             return_type,
             current_module: None,
             substitutions: None,
+            substitution_cache: RefCell::new(HashMap::new()),
         }
     }
 
@@ -166,6 +168,7 @@ impl<'a> FunctionCtx<'a> {
             return_type,
             current_module: Some(module_id),
             substitutions: None,
+            substitution_cache: RefCell::new(HashMap::new()),
         }
     }
 
@@ -178,6 +181,7 @@ impl<'a> FunctionCtx<'a> {
             return_type,
             current_module: None,
             substitutions: Some(substitutions),
+            substitution_cache: RefCell::new(HashMap::new()),
         }
     }
 
@@ -187,6 +191,27 @@ impl<'a> FunctionCtx<'a> {
             return_type: None,
             current_module: None,
             substitutions: None,
+            substitution_cache: RefCell::new(HashMap::new()),
+        }
+    }
+
+    /// Substitute type parameters with concrete types using TypeId directly.
+    /// Uses a cache to avoid repeated HashMap conversion and arena mutations.
+    pub fn substitute_type_id(&self, ty: TypeId, arena: &Rc<RefCell<TypeArena>>) -> TypeId {
+        if let Some(substitutions) = self.substitutions {
+            // Check cache first
+            if let Some(&cached) = self.substitution_cache.borrow().get(&ty) {
+                return cached;
+            }
+            // Convert std HashMap to FxHashMap for arena compatibility
+            let subs: FxHashMap<NameId, TypeId> =
+                substitutions.iter().map(|(&k, &v)| (k, v)).collect();
+            let result = arena.borrow_mut().substitute(ty, &subs);
+            // Cache the result
+            self.substitution_cache.borrow_mut().insert(ty, result);
+            result
+        } else {
+            ty
         }
     }
 }
@@ -323,6 +348,18 @@ impl<'a> CompileCtx<'a> {
     #[inline]
     pub fn query(&self) -> ProgramQuery<'_> {
         self.analyzed.query()
+    }
+
+    /// Borrow the type arena (API-compatible with CodegenCtx)
+    #[inline]
+    pub fn arena(&self) -> std::cell::Ref<'_, TypeArena> {
+        self.arena.borrow()
+    }
+
+    /// Mutably borrow the type arena (API-compatible with CodegenCtx)
+    #[inline]
+    pub fn arena_mut(&self) -> std::cell::RefMut<'_, TypeArena> {
+        self.arena.borrow_mut()
     }
 
     /// Substitute type parameters with concrete types using TypeId directly.

@@ -109,7 +109,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Handle arrays
-        if self.ctx.arena.borrow().is_array(val.type_id) {
+        if self.ctx.arena().is_array(val.type_id) {
             return self.call_runtime(RuntimeFn::ArrayI64ToString, &[val.value]);
         }
 
@@ -120,7 +120,7 @@ impl Cg<'_, '_, '_> {
 
         // Handle optionals (unions with nil variant)
         if let Some(nil_idx) = self.find_nil_variant(val.type_id) {
-            let arena = self.ctx.arena.borrow();
+            let arena = self.ctx.arena();
             if let Some(variants) = arena.unwrap_union(val.type_id) {
                 let variants_vec: Vec<TypeId> = variants.to_vec();
                 drop(arena);
@@ -177,7 +177,7 @@ impl Cg<'_, '_, '_> {
         // Some case: extract inner value and convert to string
         self.builder.switch_to_block(some_block);
         // Find the non-nil variant using arena
-        let arena = self.ctx.arena.borrow();
+        let arena = self.ctx.arena();
         let inner_type_id = variants
             .iter()
             .find(|&&v| !arena.is_nil(v))
@@ -229,7 +229,7 @@ impl Cg<'_, '_, '_> {
 
         // Check if it's a closure variable
         if let Some((var, type_id)) = self.vars.get(&callee_sym)
-            && self.ctx.arena.borrow().is_function(*type_id)
+            && self.ctx.arena().is_function(*type_id)
         {
             return self.call_closure(*var, *type_id, call);
         }
@@ -237,7 +237,7 @@ impl Cg<'_, '_, '_> {
         // Check if it's a captured closure (e.g., recursive lambda or captured function)
         if self.has_captures()
             && let Some(binding) = self.get_capture(&callee_sym).copied()
-            && self.ctx.arena.borrow().is_function(binding.vole_type)
+            && self.ctx.arena().is_function(binding.vole_type)
         {
             let captured = self.load_capture(&binding)?;
             return self.call_closure_value(captured.value, binding.vole_type, call);
@@ -281,7 +281,7 @@ impl Cg<'_, '_, '_> {
 
                 // If declared as functional interface, call via vtable dispatch
                 let iface_info = {
-                    let arena = self.ctx.arena.borrow();
+                    let arena = self.ctx.arena();
                     arena
                         .unwrap_interface(declared_type_id)
                         .map(|(type_def_id, _type_args)| type_def_id)
@@ -310,7 +310,7 @@ impl Cg<'_, '_, '_> {
             }
 
             // If it's a function type, call as closure
-            if self.ctx.arena.borrow().is_function(lambda_val.type_id) {
+            if self.ctx.arena().is_function(lambda_val.type_id) {
                 return self.call_closure_value(lambda_val.value, lambda_val.type_id, call);
             }
 
@@ -456,7 +456,7 @@ impl Cg<'_, '_, '_> {
                     let type_id = self.ctx.get_expr_type(&call_expr_id).unwrap_or_else(|| {
                         native_type_to_type_id(
                             &native_func.signature.return_type,
-                            &mut self.ctx.arena.borrow_mut(),
+                            &mut self.ctx.arena_mut(),
                         )
                     });
                     // Convert Iterator<T> to RuntimeIterator(T) since external functions
@@ -535,7 +535,7 @@ impl Cg<'_, '_, '_> {
                 let type_id = self.ctx.get_expr_type(&call_expr_id).unwrap_or_else(|| {
                     native_type_to_type_id(
                         &native_func.signature.return_type,
-                        &mut self.ctx.arena.borrow_mut(),
+                        &mut self.ctx.arena_mut(),
                     )
                 });
                 // Convert Iterator<T> to RuntimeIterator(T) since external functions
@@ -606,7 +606,7 @@ impl Cg<'_, '_, '_> {
             .ctx
             .func_registry
             .return_type(func_key)
-            .unwrap_or_else(|| self.ctx.arena.borrow().void());
+            .unwrap_or_else(|| self.ctx.arena().void());
 
         if results.is_empty() {
             Ok(self.void_value())
@@ -619,7 +619,7 @@ impl Cg<'_, '_, '_> {
     fn indirect_call(&mut self, call: &CallExpr) -> Result<CompiledValue, String> {
         let callee = self.expr(&call.callee)?;
 
-        if self.ctx.arena.borrow().is_function(callee.type_id) {
+        if self.ctx.arena().is_function(callee.type_id) {
             return self.call_closure_value(callee.value, callee.type_id, call);
         }
 
@@ -788,7 +788,7 @@ impl Cg<'_, '_, '_> {
 
         // Get function components from arena
         let (params, ret, _is_closure) = {
-            let arena = self.ctx.arena.borrow();
+            let arena = self.ctx.arena();
             let (params, ret, is_closure) = arena
                 .unwrap_function(func_type_id)
                 .ok_or_else(|| "call_actual_closure called with non-function type".to_string())?;
@@ -799,14 +799,14 @@ impl Cg<'_, '_, '_> {
         let mut sig = self.ctx.module.make_signature();
         sig.params.push(AbiParam::new(self.ctx.pointer_type)); // closure ptr
         for &param_type_id in params.iter() {
-            let arena = self.ctx.arena.borrow();
+            let arena = self.ctx.arena();
             sig.params.push(AbiParam::new(type_id_to_cranelift(
                 param_type_id,
                 &arena,
                 self.ctx.pointer_type,
             )));
         }
-        let arena = self.ctx.arena.borrow();
+        let arena = self.ctx.arena();
         if ret != arena.void() {
             sig.returns.push(AbiParam::new(type_id_to_cranelift(
                 ret,
@@ -821,12 +821,12 @@ impl Cg<'_, '_, '_> {
         let mut args: ArgVec = smallvec![closure_ptr];
         for (arg, &param_type_id) in call.args.iter().zip(params.iter()) {
             let compiled = self.expr(arg)?;
-            let is_param_interface = self.ctx.arena.borrow().is_interface(param_type_id);
-            let is_param_union = self.ctx.arena.borrow().is_union(param_type_id);
+            let is_param_interface = self.ctx.arena().is_interface(param_type_id);
+            let is_param_union = self.ctx.arena().is_union(param_type_id);
 
             let compiled = if is_param_interface {
                 box_interface_value_id(self.builder, self.ctx, compiled, param_type_id)?
-            } else if is_param_union && !self.ctx.arena.borrow().is_union(compiled.type_id) {
+            } else if is_param_union && !self.ctx.arena().is_union(compiled.type_id) {
                 // Box concrete type into union representation
                 self.construct_union_id(compiled, param_type_id)?
             } else {

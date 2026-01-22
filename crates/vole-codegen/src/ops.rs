@@ -12,7 +12,7 @@ use vole_sema::type_arena::TypeId;
 
 use super::context::Cg;
 use super::structs::{
-    convert_field_value_id, convert_to_i64_for_storage, get_field_slot_and_type_id,
+    convert_field_value_id, convert_to_i64_for_storage, get_field_slot_and_type_id_legacy,
 };
 use super::types::{CompiledValue, array_element_tag_id, convert_to_type, type_id_to_cranelift};
 
@@ -65,7 +65,7 @@ impl Cg<'_, '_, '_> {
     /// Call to_string() on a value via the Stringable interface.
     /// Returns the resulting string value.
     fn call_to_string(&mut self, val: &CompiledValue) -> Result<Value, String> {
-        let arena = self.ctx.arena.borrow();
+        let arena = self.ctx.arena();
         let impl_type_id =
             ImplTypeId::from_type_id(val.type_id, &arena, &self.ctx.analyzed.entity_registry)
                 .ok_or_else(|| format!("Cannot find ImplTypeId for type_id {:?}", val.type_id))?;
@@ -89,7 +89,7 @@ impl Cg<'_, '_, '_> {
         // Check if it's an external (native) method
         if let Some(ref external_info) = method_impl.external_info {
             // Call the external function directly
-            let string_type_id = self.ctx.arena.borrow().primitives.string;
+            let string_type_id = self.ctx.arena().primitives.string;
             let result = self.call_external_id(external_info, &[val.value], string_type_id)?;
             return Ok(result.value);
         }
@@ -195,15 +195,15 @@ impl Cg<'_, '_, '_> {
         // When comparing optional == nil or optional != nil, we need to check the tag
         if matches!(op, BinaryOp::Eq | BinaryOp::Ne) {
             // Check if left is optional and right is nil
-            if self.ctx.arena.borrow().is_optional(left.type_id) && right.type_id.is_nil() {
+            if self.ctx.arena().is_optional(left.type_id) && right.type_id.is_nil() {
                 return self.optional_nil_compare(left, op);
             }
             // Check if right is optional and left is nil
-            if self.ctx.arena.borrow().is_optional(right.type_id) && left.type_id.is_nil() {
+            if self.ctx.arena().is_optional(right.type_id) && left.type_id.is_nil() {
                 return self.optional_nil_compare(right, op);
             }
             // Check if left is optional and right is a compatible value type (using TypeId)
-            let arena = self.ctx.arena.borrow();
+            let arena = self.ctx.arena();
             if let Some(inner_type_id) = arena.unwrap_optional(left.type_id)
                 && (inner_type_id == right.type_id
                     || (arena.is_integer(inner_type_id) && arena.is_integer(right.type_id)))
@@ -478,7 +478,7 @@ impl Cg<'_, '_, '_> {
 
         // Load the payload (at offset 8) with the correct type
         // The payload type matches the inner (non-nil) type of the optional (using TypeId)
-        let arena = self.ctx.arena.borrow();
+        let arena = self.ctx.arena();
         let inner_type_id = arena
             .unwrap_optional(optional.type_id)
             .unwrap_or_else(|| arena.i64());
@@ -584,13 +584,16 @@ impl Cg<'_, '_, '_> {
         let arr = self.expr(object)?;
         let idx = self.expr(index)?;
 
-        let arena = self.ctx.arena.borrow();
-        let elem_type_id = arena
-            .unwrap_array(arr.type_id)
-            .unwrap_or_else(|| arena.i64());
+        let elem_type_id = {
+            let arena = self.ctx.arena();
+            arena
+                .unwrap_array(arr.type_id)
+                .unwrap_or_else(|| arena.i64())
+        };
 
         // Load current element
         let raw_value = self.call_runtime(RuntimeFn::ArrayGetValue, &[arr.value, idx.value])?;
+        let arena = self.ctx.arena();
         let (current_val, current_ty) =
             convert_field_value_id(self.builder, raw_value, elem_type_id, &arena);
         drop(arena);
@@ -615,7 +618,7 @@ impl Cg<'_, '_, '_> {
         let store_value = convert_to_i64_for_storage(self.builder, &result);
         let tag_val = self.builder.ins().iconst(
             types::I64,
-            array_element_tag_id(elem_type_id, &self.ctx.arena.borrow()),
+            array_element_tag_id(elem_type_id, &self.ctx.arena()),
         );
 
         self.builder
@@ -635,13 +638,14 @@ impl Cg<'_, '_, '_> {
         let obj = self.expr(object)?;
 
         let field_name = self.ctx.interner.resolve(field);
-        let (slot, field_type_id) = get_field_slot_and_type_id(obj.type_id, field_name, self.ctx)?;
+        let (slot, field_type_id) =
+            get_field_slot_and_type_id_legacy(obj.type_id, field_name, self.ctx)?;
 
         // Load current field
         let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
         let current_raw = self.call_runtime(RuntimeFn::InstanceGetField, &[obj.value, slot_val])?;
 
-        let arena = self.ctx.arena.borrow();
+        let arena = self.ctx.arena();
         let (current_val, cranelift_ty) =
             convert_field_value_id(self.builder, current_raw, field_type_id, &arena);
         drop(arena);

@@ -128,7 +128,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Find the nil variant index in a union (for optional handling)
     pub fn find_nil_variant(&self, ty: TypeId) -> Option<usize> {
-        let arena = self.ctx.arena.borrow();
+        let arena = self.ctx.arena();
         if let Some(variants) = arena.unwrap_union(ty) {
             variants.iter().position(|&id| id.is_nil())
         } else {
@@ -138,16 +138,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Convert a TypeId to a Cranelift type
     pub fn cranelift_type(&self, ty: TypeId) -> Type {
-        type_id_to_cranelift(ty, &self.ctx.arena.borrow(), self.ctx.pointer_type)
+        type_id_to_cranelift(ty, &self.ctx.arena(), self.ctx.pointer_type)
     }
 
     /// Unwrap an interface type, returning the TypeDefId if it is one
     pub fn interface_type_def_id(&self, ty: TypeId) -> Option<vole_identity::TypeDefId> {
-        self.ctx
-            .arena
-            .borrow()
-            .unwrap_interface(ty)
-            .map(|(id, _)| id)
+        self.ctx.arena().unwrap_interface(ty).map(|(id, _)| id)
     }
 
     /// Get capture binding for a symbol, if any
@@ -285,7 +281,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Create a float constant with explicit type (for bidirectional inference)
     pub fn float_const(&mut self, n: f64, type_id: TypeId) -> CompiledValue {
-        let arena = self.ctx.arena.borrow();
+        let arena = self.ctx.arena();
         let (ty, value) = match arena.get(type_id) {
             ArenaType::Primitive(PrimitiveType::F32) => {
                 drop(arena);
@@ -333,7 +329,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Create a CompiledValue from a value and TypeId
     pub fn typed_value_interned(&self, value: Value, type_id: TypeId) -> CompiledValue {
-        let arena = self.ctx.arena.borrow();
+        let arena = self.ctx.arena();
         CompiledValue {
             value,
             ty: type_id_to_cranelift(type_id, &arena, self.ctx.pointer_type),
@@ -413,7 +409,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         if results.is_empty() {
             Ok(self.void_value())
         } else {
-            let arena = self.ctx.arena.borrow();
+            let arena = self.ctx.arena();
             let cranelift_ty = type_id_to_cranelift(return_type_id, &arena, self.ctx.pointer_type);
             drop(arena);
             Ok(CompiledValue {

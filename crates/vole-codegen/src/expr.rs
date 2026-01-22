@@ -18,7 +18,7 @@ use vole_sema::entity_defs::TypeDefKind;
 
 use super::context::Cg;
 use super::structs::{
-    convert_field_value_id, convert_to_i64_for_storage, get_field_slot_and_type_id,
+    convert_field_value_id, convert_to_i64_for_storage, get_field_slot_and_type_id_legacy,
 };
 use super::types::{
     CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, array_element_tag_id,
@@ -88,7 +88,7 @@ impl Cg<'_, '_, '_> {
                 let type_id = self
                     .ctx
                     .get_expr_type(&expr.id)
-                    .unwrap_or(self.ctx.arena.borrow().primitives.i64);
+                    .unwrap_or(self.ctx.arena().primitives.i64);
                 Ok(CompiledValue {
                     value: self.builder.ins().iconst(types::I64, 0),
                     ty: types::I64,
@@ -112,13 +112,13 @@ impl Cg<'_, '_, '_> {
 
             // Check for narrowed type from semantic analysis
             if let Some(narrowed_type_id) = self.ctx.get_expr_type(&expr.id)
-                && self.ctx.arena.borrow().is_union(*type_id)
-                && !self.ctx.arena.borrow().is_union(narrowed_type_id)
+                && self.ctx.arena().is_union(*type_id)
+                && !self.ctx.arena().is_union(narrowed_type_id)
             {
                 // Union layout: [tag:1][padding:7][payload]
                 let payload_ty = type_id_to_cranelift(
                     narrowed_type_id,
-                    &self.ctx.arena.borrow(),
+                    &self.ctx.arena(),
                     self.ctx.pointer_type,
                 );
                 let payload = self.builder.ins().load(payload_ty, MemFlags::new(), val, 8);
@@ -145,8 +145,8 @@ impl Cg<'_, '_, '_> {
             // If the global has a declared interface type, box the value
             if let Some(ref ty_expr) = global.ty {
                 let declared_type_id = resolve_type_expr_id(ty_expr, self.ctx);
-                if self.ctx.arena.borrow().is_interface(declared_type_id)
-                    && !self.ctx.arena.borrow().is_interface(value.type_id)
+                if self.ctx.arena().is_interface(declared_type_id)
+                    && !self.ctx.arena().is_interface(value.type_id)
                 {
                     value =
                         box_interface_value_id(self.builder, self.ctx, value, declared_type_id)?;
@@ -154,7 +154,7 @@ impl Cg<'_, '_, '_> {
             }
             Ok(value)
         } else if let Some(func_type_id) = self.ctx.get_expr_type(&expr.id)
-            && self.ctx.arena.borrow().is_function(func_type_id)
+            && self.ctx.arena().is_function(func_type_id)
         {
             // Identifier refers to a named function - create a closure wrapper
             self.function_reference(sym, func_type_id)
@@ -188,7 +188,7 @@ impl Cg<'_, '_, '_> {
 
         // Unwrap function type to get params and return type
         let (param_ids, return_type_id) = {
-            let arena = self.ctx.arena.borrow();
+            let arena = self.ctx.arena();
             let (params, ret, _is_closure) = arena
                 .unwrap_function(func_type_id)
                 .ok_or_else(|| "Expected function type".to_string())?;
@@ -201,7 +201,7 @@ impl Cg<'_, '_, '_> {
         let wrapper_index = *self.ctx.lambda_counter;
 
         // Build wrapper signature: (closure_ptr, params...) -> return_type
-        let arena = self.ctx.arena.borrow();
+        let arena = self.ctx.arena();
         let param_types: Vec<Type> = param_ids
             .iter()
             .map(|&t| type_id_to_cranelift(t, &arena, self.ctx.pointer_type))
@@ -321,8 +321,7 @@ impl Cg<'_, '_, '_> {
         // Create closure type directly using arena (is_closure: true)
         let closure_type_id = self
             .ctx
-            .arena
-            .borrow_mut()
+            .arena_mut()
             .function(param_ids, return_type_id, true);
         Ok(CompiledValue {
             value: closure_ptr,
@@ -368,14 +367,14 @@ impl Cg<'_, '_, '_> {
                 let var = *var;
                 let var_type_id = *var_type_id;
 
-                if self.ctx.arena.borrow().is_interface(var_type_id)
-                    && !self.ctx.arena.borrow().is_interface(value.type_id)
+                if self.ctx.arena().is_interface(var_type_id)
+                    && !self.ctx.arena().is_interface(value.type_id)
                 {
                     value = box_interface_value_id(self.builder, self.ctx, value, var_type_id)?;
                 }
 
-                let final_value = if self.ctx.arena.borrow().is_union(var_type_id)
-                    && !self.ctx.arena.borrow().is_union(value.type_id)
+                let final_value = if self.ctx.arena().is_union(var_type_id)
+                    && !self.ctx.arena().is_union(value.type_id)
                 {
                     let wrapped = self.construct_union_id(value, var_type_id)?;
                     wrapped.value
@@ -401,7 +400,7 @@ impl Cg<'_, '_, '_> {
 
         // If it's a tuple, use stack allocation
         if let Some(type_id) = inferred_type_id {
-            let elem_type_ids = self.ctx.arena.borrow().unwrap_tuple(type_id).cloned();
+            let elem_type_ids = self.ctx.arena().unwrap_tuple(type_id).cloned();
             if let Some(elem_type_ids) = elem_type_ids {
                 return self.tuple_literal(elements, &elem_type_ids, type_id);
             }
@@ -426,7 +425,7 @@ impl Cg<'_, '_, '_> {
                 elem_type_id = compiled.type_id;
             }
 
-            let arena = self.ctx.arena.borrow();
+            let arena = self.ctx.arena();
             let tag_val = self
                 .builder
                 .ins()
@@ -441,7 +440,7 @@ impl Cg<'_, '_, '_> {
 
         // Use type from ExpressionData if available, otherwise create it
         let array_type_id =
-            inferred_type_id.unwrap_or_else(|| self.ctx.arena.borrow_mut().array(elem_type_id));
+            inferred_type_id.unwrap_or_else(|| self.ctx.arena_mut().array(elem_type_id));
         Ok(CompiledValue {
             value: arr_ptr,
             ty: self.ctx.pointer_type,
@@ -461,7 +460,7 @@ impl Cg<'_, '_, '_> {
             elem_type_ids,
             self.ctx.pointer_type,
             &self.ctx.analyzed.entity_registry,
-            &self.ctx.arena.borrow(),
+            &self.ctx.arena(),
         );
 
         // Create stack slot for the tuple
@@ -505,7 +504,7 @@ impl Cg<'_, '_, '_> {
         let elem_type_id = self
             .ctx
             .get_expr_type(&element.id)
-            .unwrap_or(self.ctx.arena.borrow().primitives.i64);
+            .unwrap_or(self.ctx.arena().primitives.i64);
 
         // Compile the element once
         let elem_value = self.expr(element)?;
@@ -539,7 +538,7 @@ impl Cg<'_, '_, '_> {
         let type_id = self
             .ctx
             .get_expr_type(&expr.id)
-            .unwrap_or_else(|| self.ctx.arena.borrow_mut().fixed_array(elem_type_id, count));
+            .unwrap_or_else(|| self.ctx.arena_mut().fixed_array(elem_type_id, count));
 
         Ok(CompiledValue {
             value: ptr,
@@ -583,7 +582,7 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue {
             value: ptr,
             ty: self.ctx.pointer_type,
-            type_id: self.ctx.arena.borrow().range(),
+            type_id: self.ctx.arena().range(),
         })
     }
 
@@ -591,7 +590,7 @@ impl Cg<'_, '_, '_> {
     fn index(&mut self, object: &Expr, index: &Expr) -> Result<CompiledValue, String> {
         let obj = self.expr(object)?;
 
-        let arena = self.ctx.arena.borrow();
+        let arena = self.ctx.arena();
 
         // Try tuple first
         if let Some(elem_type_ids) = arena.unwrap_tuple(obj.type_id).cloned() {
@@ -603,15 +602,12 @@ impl Cg<'_, '_, '_> {
                     &elem_type_ids,
                     self.ctx.pointer_type,
                     &self.ctx.analyzed.entity_registry,
-                    &self.ctx.arena.borrow(),
+                    &self.ctx.arena(),
                 );
                 let offset = offsets[i];
                 let elem_type_id = elem_type_ids[i];
-                let elem_cr_type = type_id_to_cranelift(
-                    elem_type_id,
-                    &self.ctx.arena.borrow(),
-                    self.ctx.pointer_type,
-                );
+                let elem_cr_type =
+                    type_id_to_cranelift(elem_type_id, &self.ctx.arena(), self.ctx.pointer_type);
 
                 let value =
                     self.builder
@@ -634,7 +630,7 @@ impl Cg<'_, '_, '_> {
             // Fixed array indexing
             let elem_size = 8i32; // All elements aligned to 8 bytes
             let elem_cr_type =
-                type_id_to_cranelift(element_id, &self.ctx.arena.borrow(), self.ctx.pointer_type);
+                type_id_to_cranelift(element_id, &self.ctx.arena(), self.ctx.pointer_type);
 
             // Calculate offset: base + (index * elem_size)
             let offset = if let ExprKind::IntLiteral(i) = &index.kind {
@@ -689,7 +685,7 @@ impl Cg<'_, '_, '_> {
 
             let raw_value =
                 self.call_runtime_cached(RuntimeFn::ArrayGetValue, &[obj.value, idx.value])?;
-            let arena = self.ctx.arena.borrow();
+            let arena = self.ctx.arena();
             let (result_value, result_ty) =
                 convert_field_value_id(self.builder, raw_value, element_id, &arena);
             drop(arena);
@@ -702,7 +698,7 @@ impl Cg<'_, '_, '_> {
         }
 
         drop(arena);
-        let type_name = self.ctx.arena.borrow().display_basic(obj.type_id);
+        let type_name = self.ctx.arena().display_basic(obj.type_id);
         Err(format!("cannot index type {}", type_name))
     }
 
@@ -716,7 +712,7 @@ impl Cg<'_, '_, '_> {
         let arr = self.expr(object)?;
         let val = self.expr(value)?;
 
-        let arena = self.ctx.arena.borrow();
+        let arena = self.ctx.arena();
         let fixed_array_info = arena.unwrap_fixed_array(arr.type_id);
         let is_dynamic_array = arena.is_array(arr.type_id);
         drop(arena);
@@ -771,7 +767,7 @@ impl Cg<'_, '_, '_> {
                 .runtime_key(RuntimeFn::ArraySet)
                 .ok_or_else(|| "vole_array_set not found".to_string())?;
             let set_value_ref = self.func_ref(set_value_key)?;
-            let arena = self.ctx.arena.borrow();
+            let arena = self.ctx.arena();
             let tag_val = self
                 .builder
                 .ins()
@@ -786,7 +782,7 @@ impl Cg<'_, '_, '_> {
             Ok(val)
         } else {
             // Error: not an indexable type
-            let type_name = self.ctx.arena.borrow().display_basic(arr.type_id);
+            let type_name = self.ctx.arena().display_basic(arr.type_id);
             Err(format!("cannot assign to index of type {}", type_name))
         }
     }
@@ -796,7 +792,7 @@ impl Cg<'_, '_, '_> {
         let value = self.expr(&is_expr.value)?;
         let tested_type_id = resolve_type_expr_id(&is_expr.type_expr, self.ctx);
 
-        let arena = self.ctx.arena.borrow();
+        let arena = self.ctx.arena();
         if let Some(variants) = arena.unwrap_union(value.type_id) {
             let expected_tag = variants
                 .iter()
@@ -826,7 +822,7 @@ impl Cg<'_, '_, '_> {
         scrutinee: &CompiledValue,
         pattern_type_id: TypeId,
     ) -> Result<Option<Value>, String> {
-        let arena = self.ctx.arena.borrow();
+        let arena = self.ctx.arena();
         if let Some(variants) = arena.unwrap_union(scrutinee.type_id) {
             let expected_tag = variants
                 .iter()
@@ -869,7 +865,7 @@ impl Cg<'_, '_, '_> {
         left: Value,
         right: Value,
     ) -> Result<Value, String> {
-        let arena = self.ctx.arena.borrow();
+        let arena = self.ctx.arena();
         Ok(if arena.is_string(type_id) {
             drop(arena);
             if self.ctx.func_registry.has_runtime(RuntimeFn::StringEq) {
@@ -909,15 +905,11 @@ impl Cg<'_, '_, '_> {
 
         let inner_type_id = self
             .ctx
-            .arena
-            .borrow()
+            .arena()
             .unwrap_optional(value.type_id)
             .expect("unwrap expression requires optional type");
-        let cranelift_type = type_id_to_cranelift(
-            inner_type_id,
-            &self.ctx.arena.borrow(),
-            self.ctx.pointer_type,
-        );
+        let cranelift_type =
+            type_id_to_cranelift(inner_type_id, &self.ctx.arena(), self.ctx.pointer_type);
         self.builder.append_block_param(merge_block, cranelift_type);
 
         self.builder
@@ -1026,7 +1018,7 @@ impl Cg<'_, '_, '_> {
     pub fn match_expr(&mut self, match_expr: &MatchExpr) -> Result<CompiledValue, String> {
         let scrutinee = self.expr(&match_expr.scrutinee)?;
         let scrutinee_type_id = scrutinee.type_id;
-        let scrutinee_type_str = self.ctx.arena.borrow().display_basic(scrutinee_type_id);
+        let scrutinee_type_str = self.ctx.arena().display_basic(scrutinee_type_id);
         tracing::trace!(scrutinee_type = %scrutinee_type_str, "match scrutinee");
 
         let merge_block = self.builder.create_block();
@@ -1117,11 +1109,11 @@ impl Cg<'_, '_, '_> {
                     if let Some(inner_pat) = inner {
                         // Extract the success type from scrutinee's vole_type
                         if let Some((success_type_id, _error_type_id)) =
-                            self.ctx.arena.borrow().unwrap_fallible(scrutinee_type_id)
+                            self.ctx.arena().unwrap_fallible(scrutinee_type_id)
                         {
                             let payload_ty = type_id_to_cranelift(
                                 success_type_id,
-                                &self.ctx.arena.borrow(),
+                                &self.ctx.arena(),
                                 self.ctx.pointer_type,
                             );
                             let payload =
@@ -1145,18 +1137,14 @@ impl Cg<'_, '_, '_> {
                 Pattern::Tuple { elements, .. } => {
                     // Tuple destructuring in match - extract elements and bind
                     // Use arena methods for layout computation
-                    if let Some(elem_type_ids) = self
-                        .ctx
-                        .arena
-                        .borrow()
-                        .unwrap_tuple(scrutinee.type_id)
-                        .cloned()
+                    if let Some(elem_type_ids) =
+                        self.ctx.arena().unwrap_tuple(scrutinee.type_id).cloned()
                     {
                         let (_, offsets) = tuple_layout_id(
                             &elem_type_ids,
                             self.ctx.pointer_type,
                             &self.ctx.analyzed.entity_registry,
-                            &self.ctx.arena.borrow(),
+                            &self.ctx.arena(),
                         );
                         for (i, pattern) in elements.iter().enumerate() {
                             if let Pattern::Identifier { name, .. } = pattern {
@@ -1164,7 +1152,7 @@ impl Cg<'_, '_, '_> {
                                 let elem_type_id = elem_type_ids[i];
                                 let elem_cr_type = type_id_to_cranelift(
                                     elem_type_id,
-                                    &self.ctx.arena.borrow(),
+                                    &self.ctx.arena(),
                                     self.ctx.pointer_type,
                                 );
                                 let value = self.builder.ins().load(
@@ -1204,8 +1192,8 @@ impl Cg<'_, '_, '_> {
 
                     // For typed patterns on union types, we must defer field extraction
                     // until after the pattern check passes to avoid accessing invalid memory
-                    let is_conditional_extract = pattern_check.is_some()
-                        && self.ctx.arena.borrow().is_union(scrutinee_type_id);
+                    let is_conditional_extract =
+                        pattern_check.is_some() && self.ctx.arena().is_union(scrutinee_type_id);
 
                     if is_conditional_extract {
                         // Create an extraction block that only runs if pattern matches
@@ -1241,7 +1229,7 @@ impl Cg<'_, '_, '_> {
                         // Extract and bind fields
                         for field_pattern in fields {
                             let field_name = self.ctx.interner.resolve(field_pattern.field_name);
-                            let (slot, field_type_id) = get_field_slot_and_type_id(
+                            let (slot, field_type_id) = get_field_slot_and_type_id_legacy(
                                 field_source_type_id,
                                 field_name,
                                 self.ctx,
@@ -1251,7 +1239,7 @@ impl Cg<'_, '_, '_> {
                                 RuntimeFn::InstanceGetField,
                                 &[field_source, slot_val],
                             )?;
-                            let arena = self.ctx.arena.borrow();
+                            let arena = self.ctx.arena();
                             let (result_val, cranelift_ty) = convert_field_value_id(
                                 self.builder,
                                 result_raw,
@@ -1272,7 +1260,7 @@ impl Cg<'_, '_, '_> {
                         // Non-conditional case: extract fields directly
                         // Determine the value to extract fields from
                         let (field_source, field_source_type_id) =
-                            if self.ctx.arena.borrow().is_union(scrutinee_type_id) {
+                            if self.ctx.arena().is_union(scrutinee_type_id) {
                                 if let Some(pt_id) = pattern_type_id {
                                     let payload = self.builder.ins().load(
                                         types::I64,
@@ -1291,7 +1279,7 @@ impl Cg<'_, '_, '_> {
                         // Extract and bind fields
                         for field_pattern in fields {
                             let field_name = self.ctx.interner.resolve(field_pattern.field_name);
-                            let (slot, field_type_id) = get_field_slot_and_type_id(
+                            let (slot, field_type_id) = get_field_slot_and_type_id_legacy(
                                 field_source_type_id,
                                 field_name,
                                 self.ctx,
@@ -1301,7 +1289,7 @@ impl Cg<'_, '_, '_> {
                                 RuntimeFn::InstanceGetField,
                                 &[field_source, slot_val],
                             )?;
-                            let arena = self.ctx.arena.borrow();
+                            let arena = self.ctx.arena();
                             let (result_val, cranelift_ty) = convert_field_value_id(
                                 self.builder,
                                 result_raw,
@@ -1387,7 +1375,7 @@ impl Cg<'_, '_, '_> {
         let merged_value = self.builder.block_params(merge_block)[0];
 
         // Reduce back to the correct type based on result_type_id
-        let arena = self.ctx.arena.borrow();
+        let arena = self.ctx.arena();
         let target_cty = type_id_to_cranelift(result_type_id, &arena, self.ctx.pointer_type);
         drop(arena);
         let (result, result_ty) = if target_cty != types::I64 && target_cty.is_int() {
@@ -1415,7 +1403,7 @@ impl Cg<'_, '_, '_> {
         let fallible = self.expr(inner)?;
 
         let success_type_id = {
-            let arena = self.ctx.arena.borrow();
+            let arena = self.ctx.arena();
             match arena.unwrap_fallible(fallible.type_id) {
                 Some((success_id, _error_id)) => success_id,
                 None => {
@@ -1444,7 +1432,7 @@ impl Cg<'_, '_, '_> {
         let merge_block = self.builder.create_block();
 
         // Get payload type for success using TypeId
-        let arena = self.ctx.arena.borrow();
+        let arena = self.ctx.arena();
         let payload_ty = type_id_to_cranelift(success_type_id, &arena, self.ctx.pointer_type);
         drop(arena);
         self.builder.append_block_param(merge_block, payload_ty);
@@ -1501,14 +1489,11 @@ impl Cg<'_, '_, '_> {
         let result_type_id = self
             .ctx
             .get_expr_type(&if_expr.then_branch.id)
-            .unwrap_or(self.ctx.arena.borrow().primitives.void);
+            .unwrap_or(self.ctx.arena().primitives.void);
 
-        let is_void = self.ctx.arena.borrow().is_void(result_type_id);
-        let result_cranelift_type = type_id_to_cranelift(
-            result_type_id,
-            &self.ctx.arena.borrow(),
-            self.ctx.pointer_type,
-        );
+        let is_void = self.ctx.arena().is_void(result_type_id);
+        let result_cranelift_type =
+            type_id_to_cranelift(result_type_id, &self.ctx.arena(), self.ctx.pointer_type);
 
         // Create basic blocks
         let then_block = self.builder.create_block();
@@ -1637,13 +1622,9 @@ impl Cg<'_, '_, '_> {
             .icmp_imm(IntCC::NotEqual, tag, FALLIBLE_SUCCESS_TAG);
 
         // Extract error type and bind
-        if let Some((_, error_type_id)) = self.ctx.arena.borrow().unwrap_fallible(scrutinee.type_id)
-        {
-            let payload_ty = type_id_to_cranelift(
-                error_type_id,
-                &self.ctx.arena.borrow(),
-                self.ctx.pointer_type,
-            );
+        if let Some((_, error_type_id)) = self.ctx.arena().unwrap_fallible(scrutinee.type_id) {
+            let payload_ty =
+                type_id_to_cranelift(error_type_id, &self.ctx.arena(), self.ctx.pointer_type);
             let payload = load_fallible_payload(self.builder, scrutinee.value, payload_ty);
             let var = self.builder.declare_var(payload_ty);
             self.builder.def_var(var, payload);
@@ -1660,7 +1641,7 @@ impl Cg<'_, '_, '_> {
         scrutinee: &CompiledValue,
         tag: Value,
     ) -> Result<Option<Value>, String> {
-        let arena = self.ctx.arena.borrow();
+        let arena = self.ctx.arena();
         let Some((_success_type_id, error_type_id)) = arena.unwrap_fallible(scrutinee.type_id)
         else {
             // Not matching on a fallible type
@@ -1713,7 +1694,7 @@ impl Cg<'_, '_, '_> {
             return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
         };
 
-        let arena = self.ctx.arena.borrow();
+        let arena = self.ctx.arena();
         let Some((_success_type_id, fallible_error_type_id)) =
             arena.unwrap_fallible(scrutinee.type_id)
         else {
@@ -1777,7 +1758,7 @@ impl Cg<'_, '_, '_> {
 
             // Convert from i64 to the actual field type
             let field_ty_id = field_def.ty;
-            let arena = self.ctx.arena.borrow();
+            let arena = self.ctx.arena();
             let (result_val, cranelift_ty) =
                 convert_field_value_id(self.builder, raw_value, field_ty_id, &arena);
             drop(arena);

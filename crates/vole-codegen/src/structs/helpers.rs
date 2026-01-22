@@ -4,13 +4,68 @@ use cranelift::prelude::*;
 use rustc_hash::FxHashMap;
 
 use crate::errors::CodegenError;
-use crate::types::CompileCtx;
-use crate::types::CompiledValue;
+use crate::types::{CompileCtx, CompiledValue, FunctionCtx, TypeCtx};
 use vole_sema::PrimitiveType;
 use vole_sema::type_arena::{SemaType as ArenaType, TypeArena, TypeId};
 
-/// Get field slot and type for a field access.
+/// Get field slot and type for a field access (new context API).
+#[allow(dead_code)]
 pub(crate) fn get_field_slot_and_type_id(
+    type_id: TypeId,
+    field_name: &str,
+    type_ctx: &TypeCtx,
+    func_ctx: &FunctionCtx,
+) -> Result<(usize, TypeId), String> {
+    let arena = type_ctx.arena();
+
+    // Try class first, then record
+    let (type_def_id, type_args) = arena
+        .unwrap_class(type_id)
+        .or_else(|| arena.unwrap_record(type_id))
+        .ok_or_else(|| {
+            CodegenError::type_mismatch("field access", "class or record", "other type").to_string()
+        })?;
+
+    let type_def = type_ctx.query.get_type(type_def_id);
+    let generic_info = type_def
+        .generic_info
+        .as_ref()
+        .ok_or_else(|| CodegenError::not_found("generic_info", "type").to_string())?;
+
+    // Build substitution map from type params to type args
+    let substitutions: FxHashMap<vole_identity::NameId, TypeId> = type_def
+        .type_params
+        .iter()
+        .zip(type_args.iter())
+        .map(|(&param, &arg)| (param, arg))
+        .collect();
+
+    for (slot, field_name_id) in generic_info.field_names.iter().enumerate() {
+        let name = type_ctx.query.last_segment(*field_name_id);
+        if name.as_deref() == Some(field_name) {
+            let base_type_id = generic_info.field_types[slot];
+            // Apply type substitutions from type args
+            let field_type_id = if !substitutions.is_empty() {
+                drop(arena);
+                let mut arena_mut = type_ctx.arena_mut();
+                let substituted = arena_mut.substitute(base_type_id, &substitutions);
+                drop(arena_mut);
+                // Apply monomorphization context substitutions
+                func_ctx.substitute_type_id(substituted, type_ctx.arena_rc())
+            } else {
+                drop(arena);
+                func_ctx.substitute_type_id(base_type_id, type_ctx.arena_rc())
+            };
+            return Ok((slot, field_type_id));
+        }
+    }
+
+    Err(CodegenError::not_found("field", format!("{} in type", field_name)).into())
+}
+
+/// Get field slot and type for a field access (legacy CompileCtx API - for incremental migration).
+#[allow(dead_code)]
+pub(crate) fn get_field_slot_and_type_id_legacy(
     type_id: TypeId,
     field_name: &str,
     ctx: &CompileCtx,
