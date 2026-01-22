@@ -78,7 +78,7 @@ impl Compiler<'_> {
     }
 
     fn test_display_name(&self, name_id: NameId) -> String {
-        self.func_registry.name_table().display(name_id)
+        self.func_registry.name_table_rc().borrow().display(name_id)
     }
 
     /// Compile a complete program
@@ -475,24 +475,26 @@ impl Compiler<'_> {
 
         // Build params: Vec<(Symbol, TypeId, Type)>
         // First collect type IDs (which may access arena internally)
-        let query = self.query();
-        let type_metadata = &self.type_metadata;
-        let param_info: Vec<(Symbol, TypeId)> = func
-            .params
-            .iter()
-            .map(|p| {
-                let type_id = resolve_type_expr_to_id(
-                    &p.ty,
-                    query.registry(),
-                    type_metadata,
-                    query.interner(),
-                    query.name_table(),
-                    module_id,
-                    &self.analyzed.type_arena,
-                );
-                (p.name, type_id)
-            })
-            .collect();
+        let param_info: Vec<(Symbol, TypeId)> = {
+            let query = self.query();
+            let type_metadata = &self.type_metadata;
+            let name_table = self.analyzed.name_table.borrow();
+            func.params
+                .iter()
+                .map(|p| {
+                    let type_id = resolve_type_expr_to_id(
+                        &p.ty,
+                        query.registry(),
+                        type_metadata,
+                        query.interner(),
+                        &*name_table,
+                        module_id,
+                        &self.analyzed.type_arena,
+                    );
+                    (p.name, type_id)
+                })
+                .collect()
+        };
         let params: Vec<(Symbol, TypeId, types::Type)> = {
             let arena_ref = self.analyzed.type_arena.borrow();
             param_info
@@ -1246,6 +1248,7 @@ impl Compiler<'_> {
             let short_name = self
                 .analyzed
                 .name_table
+                .borrow()
                 .last_segment_str(instance.original_name)
                 .unwrap_or_else(|| func_name.clone());
             if self
@@ -1297,6 +1300,7 @@ impl Compiler<'_> {
             let short_name = self
                 .analyzed
                 .name_table
+                .borrow()
                 .last_segment_str(instance.original_name)
                 .unwrap_or_else(|| func_name.clone());
             if self

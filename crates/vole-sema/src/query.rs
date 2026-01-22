@@ -27,7 +27,7 @@ use vole_identity::{MethodId, ModuleId, NameId, NameTable, TypeDefId};
 pub struct ProgramQuery<'a> {
     registry: &'a EntityRegistry,
     expr_data: &'a ExpressionData,
-    name_table: &'a NameTable,
+    name_table: &'a Rc<RefCell<NameTable>>,
     interner: &'a Interner,
     implement_registry: &'a ImplementRegistry,
     module_programs: &'a FxHashMap<String, (Program, Interner)>,
@@ -39,7 +39,7 @@ impl<'a> ProgramQuery<'a> {
     pub fn new(
         registry: &'a EntityRegistry,
         expr_data: &'a ExpressionData,
-        name_table: &'a NameTable,
+        name_table: &'a Rc<RefCell<NameTable>>,
         interner: &'a Interner,
         implement_registry: &'a ImplementRegistry,
         module_programs: &'a FxHashMap<String, (Program, Interner)>,
@@ -100,12 +100,12 @@ impl<'a> ProgramQuery<'a> {
 
     /// Get the main module ID
     pub fn main_module(&self) -> ModuleId {
-        self.name_table.main_module()
+        self.name_table.borrow().main_module()
     }
 
     /// Display a NameId as a qualified string (e.g., "module::Type::method")
     pub fn display_name(&self, name_id: NameId) -> String {
-        self.name_table.display(name_id)
+        self.name_table.borrow().display(name_id)
     }
 
     /// Resolve a Symbol to its string representation
@@ -129,6 +129,7 @@ impl<'a> ProgramQuery<'a> {
     /// Convert Symbols to a NameId in the given module (panics if not found)
     pub fn name_id(&self, module: ModuleId, segments: &[Symbol]) -> NameId {
         self.name_table
+            .borrow()
             .name_id(module, segments, self.interner)
             .unwrap_or_else(|| {
                 let names: Vec<_> = segments.iter().map(|s| self.interner.resolve(*s)).collect();
@@ -139,7 +140,9 @@ impl<'a> ProgramQuery<'a> {
     /// Convert Symbols to a NameId in the given module, returning None if not found
     #[must_use]
     pub fn try_name_id(&self, module: ModuleId, segments: &[Symbol]) -> Option<NameId> {
-        self.name_table.name_id(module, segments, self.interner)
+        self.name_table
+            .borrow()
+            .name_id(module, segments, self.interner)
     }
 
     /// Convert a single Symbol to a NameId in the main module (panics if not found)
@@ -154,19 +157,20 @@ impl<'a> ProgramQuery<'a> {
     }
 
     /// Get the module path for a module ID
-    pub fn module_path(&self, module: ModuleId) -> &str {
-        self.name_table.module_path(module)
+    pub fn module_path(&self, module: ModuleId) -> String {
+        self.name_table.borrow().module_path(module).to_string()
     }
 
     /// Look up a module ID by path, returning None if not found
     #[must_use]
     pub fn module_id_if_known(&self, path: &str) -> Option<ModuleId> {
-        self.name_table.module_id_if_known(path)
+        self.name_table.borrow().module_id_if_known(path)
     }
 
     /// Look up a module ID by path, falling back to main module if not found
     pub fn module_id_or_main(&self, path: &str) -> ModuleId {
         self.name_table
+            .borrow()
             .module_id_if_known(path)
             .unwrap_or_else(|| self.main_module())
     }
@@ -174,7 +178,7 @@ impl<'a> ProgramQuery<'a> {
     /// Get the last segment of a NameId as a string
     #[must_use]
     pub fn last_segment(&self, name_id: NameId) -> Option<String> {
-        self.name_table.last_segment_str(name_id)
+        self.name_table.borrow().last_segment_str(name_id)
     }
 
     // =========================================================================
@@ -253,7 +257,8 @@ impl<'a> ProgramQuery<'a> {
     /// Look up a method NameId by Symbol (panics if not found)
     pub fn method_name_id(&self, name: Symbol) -> NameId {
         use vole_identity::NamerLookup;
-        let namer = NamerLookup::new(self.name_table, self.interner);
+        let name_table = self.name_table.borrow();
+        let namer = NamerLookup::new(&name_table, self.interner);
         namer.method(name).unwrap_or_else(|| {
             panic!(
                 "method name_id not found for '{}'",
@@ -266,26 +271,30 @@ impl<'a> ProgramQuery<'a> {
     #[must_use]
     pub fn try_method_name_id(&self, name: Symbol) -> Option<NameId> {
         use vole_identity::NamerLookup;
-        let namer = NamerLookup::new(self.name_table, self.interner);
+        let name_table = self.name_table.borrow();
+        let namer = NamerLookup::new(&name_table, self.interner);
         namer.method(name)
     }
 
     /// Look up a method NameId by string name (panics if not found)
     pub fn method_name_id_by_str(&self, name_str: &str) -> NameId {
-        vole_identity::method_name_id_by_str(self.name_table, self.interner, name_str)
+        let name_table = self.name_table.borrow();
+        vole_identity::method_name_id_by_str(&name_table, self.interner, name_str)
             .unwrap_or_else(|| panic!("method name_id not found for '{}'", name_str))
     }
 
     /// Look up a method NameId by string name, returning None if not found
     #[must_use]
     pub fn try_method_name_id_by_str(&self, name_str: &str) -> Option<NameId> {
-        vole_identity::method_name_id_by_str(self.name_table, self.interner, name_str)
+        let name_table = self.name_table.borrow();
+        vole_identity::method_name_id_by_str(&name_table, self.interner, name_str)
     }
 
     /// Look up a function NameId by Symbol (panics if not found)
     pub fn function_name_id(&self, module: ModuleId, name: Symbol) -> NameId {
         use vole_identity::NamerLookup;
-        let namer = NamerLookup::new(self.name_table, self.interner);
+        let name_table = self.name_table.borrow();
+        let namer = NamerLookup::new(&name_table, self.interner);
         namer.function(module, name).unwrap_or_else(|| {
             panic!(
                 "function name_id not found for '{}'",
@@ -298,7 +307,8 @@ impl<'a> ProgramQuery<'a> {
     #[must_use]
     pub fn try_function_name_id(&self, module: ModuleId, name: Symbol) -> Option<NameId> {
         use vole_identity::NamerLookup;
-        let namer = NamerLookup::new(self.name_table, self.interner);
+        let name_table = self.name_table.borrow();
+        let namer = NamerLookup::new(&name_table, self.interner);
         namer.function(module, name)
     }
 
@@ -315,7 +325,8 @@ impl<'a> ProgramQuery<'a> {
     #[must_use]
     pub fn method_return_type(&self, type_name: Symbol, method_name: Symbol) -> Option<TypeId> {
         use vole_identity::NamerLookup;
-        let namer = NamerLookup::new(self.name_table, self.interner);
+        let name_table = self.name_table.borrow();
+        let namer = NamerLookup::new(&name_table, self.interner);
         let type_name_id = namer.function(self.main_module(), type_name)?;
         let type_def_id = self.registry.type_by_name(type_name_id)?;
         let method_name_id = self.method_name_id(method_name);
@@ -336,17 +347,19 @@ impl<'a> ProgramQuery<'a> {
     /// Check if a NameId refers to the Iterator interface
     #[must_use]
     pub fn is_iterator(&self, name_id: NameId) -> bool {
+        let name_table = self.name_table.borrow();
         self.registry
             .type_by_name(name_id)
-            .is_some_and(|id| self.name_table.well_known.is_iterator_type_def(id))
+            .is_some_and(|id| name_table.well_known.is_iterator_type_def(id))
     }
 
     /// Check if a NameId refers to the Iterable interface
     #[must_use]
     pub fn is_iterable(&self, name_id: NameId) -> bool {
+        let name_table = self.name_table.borrow();
         self.registry
             .type_by_name(name_id)
-            .is_some_and(|id| self.name_table.well_known.is_iterable_type_def(id))
+            .is_some_and(|id| name_table.well_known.is_iterable_type_def(id))
     }
 
     // =========================================================================
@@ -395,8 +408,8 @@ impl<'a> ProgramQuery<'a> {
         self.expr_data
     }
 
-    /// Get direct access to the name table for advanced queries
-    pub fn name_table(&self) -> &'a NameTable {
+    /// Get direct access to the name table Rc for advanced queries
+    pub fn name_table_rc(&self) -> &'a Rc<RefCell<NameTable>> {
         self.name_table
     }
 

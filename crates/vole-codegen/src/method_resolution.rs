@@ -364,20 +364,21 @@ fn get_type_def_id_for_codegen_id(
         SemaType::Record { type_def_id, .. } => return Some(*type_def_id),
         SemaType::Interface { type_def_id, .. } => return Some(*type_def_id),
         SemaType::Primitive(prim) => {
+            let name_table = analyzed.name_table.borrow();
             let name_id = match prim {
-                PrimitiveType::I8 => analyzed.name_table.primitives.i8,
-                PrimitiveType::I16 => analyzed.name_table.primitives.i16,
-                PrimitiveType::I32 => analyzed.name_table.primitives.i32,
-                PrimitiveType::I64 => analyzed.name_table.primitives.i64,
-                PrimitiveType::I128 => analyzed.name_table.primitives.i128,
-                PrimitiveType::U8 => analyzed.name_table.primitives.u8,
-                PrimitiveType::U16 => analyzed.name_table.primitives.u16,
-                PrimitiveType::U32 => analyzed.name_table.primitives.u32,
-                PrimitiveType::U64 => analyzed.name_table.primitives.u64,
-                PrimitiveType::F32 => analyzed.name_table.primitives.f32,
-                PrimitiveType::F64 => analyzed.name_table.primitives.f64,
-                PrimitiveType::Bool => analyzed.name_table.primitives.bool,
-                PrimitiveType::String => analyzed.name_table.primitives.string,
+                PrimitiveType::I8 => name_table.primitives.i8,
+                PrimitiveType::I16 => name_table.primitives.i16,
+                PrimitiveType::I32 => name_table.primitives.i32,
+                PrimitiveType::I64 => name_table.primitives.i64,
+                PrimitiveType::I128 => name_table.primitives.i128,
+                PrimitiveType::U8 => name_table.primitives.u8,
+                PrimitiveType::U16 => name_table.primitives.u16,
+                PrimitiveType::U32 => name_table.primitives.u32,
+                PrimitiveType::U64 => name_table.primitives.u64,
+                PrimitiveType::F32 => name_table.primitives.f32,
+                PrimitiveType::F64 => name_table.primitives.f64,
+                PrimitiveType::Bool => name_table.primitives.bool,
+                PrimitiveType::String => name_table.primitives.string,
             };
             return analyzed.entity_registry.type_by_name(name_id);
         }

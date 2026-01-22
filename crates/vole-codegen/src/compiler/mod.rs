@@ -8,12 +8,13 @@ mod type_registry;
 
 pub use signatures::{SelfParam, TypeResolver};
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use cranelift::prelude::types as clif_types;
 
 use crate::types::{MethodInfo, TypeMetadata};
-use std::cell::RefCell;
 
 use crate::AnalyzedProgram;
 use crate::{FunctionRegistry, JitContext, RuntimeFn, interface_vtable::InterfaceVtableRegistry};
@@ -61,7 +62,7 @@ impl<'a> Compiler<'a> {
         let mut native_registry = NativeRegistry::new();
         vole_runtime::stdlib::register_stdlib(&mut native_registry);
 
-        let mut func_registry = FunctionRegistry::new(analyzed.name_table.clone());
+        let mut func_registry = FunctionRegistry::new(Rc::clone(&analyzed.name_table));
         for runtime in RuntimeFn::ALL {
             // Runtime functions are in imported_func_ids (Import linkage)
             if let Some(func_id) = jit.imported_func_ids.get(runtime.name()) {

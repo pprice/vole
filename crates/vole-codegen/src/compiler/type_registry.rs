@@ -53,12 +53,13 @@ impl Compiler<'_> {
     pub(super) fn resolve_type_to_id(&self, ty: &TypeExpr) -> TypeId {
         let query = self.query();
         let module_id = query.main_module();
+        let name_table = self.analyzed.name_table.borrow();
         resolve_type_expr_to_id(
             ty,
             query.registry(),
             &self.type_metadata,
             query.interner(),
-            query.name_table(),
+            &*name_table,
             module_id,
             &self.analyzed.type_arena,
         )
@@ -70,12 +71,13 @@ impl Compiler<'_> {
         ty: &TypeExpr,
         interner: &Interner,
     ) -> TypeId {
+        let name_table = self.analyzed.name_table.borrow();
         resolve_type_expr_to_id(
             ty,
             &self.analyzed.entity_registry,
             &self.type_metadata,
             interner,
-            &self.analyzed.name_table,
+            &*name_table,
             self.func_registry.main_module(),
             &self.analyzed.type_arena,
         )
@@ -542,7 +544,7 @@ impl Compiler<'_> {
         let Some(type_def_id) = self
             .analyzed
             .entity_registry
-            .class_by_short_name(type_name_str, &self.analyzed.name_table)
+            .class_by_short_name(type_name_str, &*self.analyzed.name_table.borrow())
         else {
             tracing::warn!(type_name = %type_name_str, "Could not find TypeDefId for module class");
             return;
@@ -555,6 +557,7 @@ impl Compiler<'_> {
             if let Some((type_def_id, _)) = arena.unwrap_class(meta.vole_type) {
                 self.analyzed
                     .name_table
+                    .borrow()
                     .last_segment_str(self.analyzed.entity_registry.name_id(type_def_id))
                     .is_some_and(|name| name == type_name_str)
             } else {

@@ -593,6 +593,7 @@ impl Cg<'_, '_, '_> {
             self.ctx
                 .analyzed
                 .name_table
+                .borrow()
                 .well_known
                 .is_iterator_type_def(type_def_id)
         } else {
@@ -975,7 +976,7 @@ impl Cg<'_, '_, '_> {
             raise_stmt.error_name,
             &self.ctx.arena.borrow(),
             self.ctx.interner,
-            &self.ctx.analyzed.name_table,
+            &*self.ctx.analyzed.name_table.borrow(),
             &self.ctx.analyzed.entity_registry,
         )
         .ok_or_else(|| {
@@ -1009,12 +1010,10 @@ impl Cg<'_, '_, '_> {
         // Get the error type_def_id to look up field order from EntityRegistry
         let raise_error_name = self.ctx.interner.resolve(raise_stmt.error_name);
         let arena = self.ctx.arena.borrow();
+        let name_table = self.ctx.analyzed.name_table.borrow();
         let error_type_def_id = if let Some(type_def_id) = arena.unwrap_error(error_type_id) {
             // Single error type
-            let name = self
-                .ctx
-                .analyzed
-                .name_table
+            let name = name_table
                 .last_segment_str(self.ctx.analyzed.entity_registry.name_id(type_def_id));
             if name.as_deref() == Some(raise_error_name) {
                 Some(type_def_id)
@@ -1025,10 +1024,9 @@ impl Cg<'_, '_, '_> {
             // Union of error types
             variants.iter().find_map(|&v| {
                 if let Some(type_def_id) = arena.unwrap_error(v) {
-                    let name =
-                        self.ctx.analyzed.name_table.last_segment_str(
-                            self.ctx.analyzed.entity_registry.name_id(type_def_id),
-                        );
+                    let name = name_table.last_segment_str(
+                        self.ctx.analyzed.entity_registry.name_id(type_def_id),
+                    );
                     if name.as_deref() == Some(raise_error_name) {
                         return Some(type_def_id);
                     }
@@ -1044,6 +1042,7 @@ impl Cg<'_, '_, '_> {
                 self.ctx.interner.resolve(raise_stmt.error_name)
             )
         })?;
+        drop(name_table);
         drop(arena);
 
         // Get fields from EntityRegistry
@@ -1063,6 +1062,7 @@ impl Cg<'_, '_, '_> {
                 .ctx
                 .analyzed
                 .name_table
+                .borrow()
                 .last_segment_str(field_def.name_id)
                 .unwrap_or_default();
             let field_init = raise_stmt

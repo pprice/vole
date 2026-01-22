@@ -358,16 +358,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         return_type_id: TypeId,
     ) -> Result<CompiledValue, String> {
         // Get string names from NameId
-        let module_path = self
-            .ctx
-            .analyzed
-            .name_table
+        let name_table = self.ctx.analyzed.name_table.borrow();
+        let module_path = name_table
             .last_segment_str(external_info.module_path)
             .ok_or_else(|| "module_path NameId has no segment".to_string())?;
-        let native_name = self
-            .ctx
-            .analyzed
-            .name_table
+        let native_name = name_table
             .last_segment_str(external_info.native_name)
             .ok_or_else(|| "native_name NameId has no segment".to_string())?;
 

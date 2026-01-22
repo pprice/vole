@@ -14,7 +14,6 @@ use crate::types::{
 use vole_frontend::Symbol;
 use vole_identity::{MethodId, NameId, TypeDefId};
 use vole_sema::EntityRegistry;
-use vole_sema::ResolverEntityExt;
 use vole_sema::entity_defs::TypeDefKind;
 use vole_sema::implement_registry::{ExternalMethodInfo, ImplTypeId};
 use vole_sema::type_arena::{SemaType, TypeId};
@@ -135,8 +134,7 @@ impl InterfaceVtableRegistry {
         // Resolve interface metadata
         let interface_name_str = ctx.interner.resolve(interface_name);
         let interface_type_def_id = ctx
-            .resolver()
-            .resolve_type_str_or_interface(interface_name_str, &ctx.analyzed.entity_registry)
+            .resolve_type_str_or_interface(interface_name_str)
             .ok_or_else(|| format!("unknown interface {:?}", interface_name_str))?;
         let interface_name_id = ctx
             .analyzed
@@ -162,7 +160,7 @@ impl InterfaceVtableRegistry {
         // Build vtable name and declare data
         let type_name = match concrete_key {
             InterfaceConcreteType::ImplTypeId(type_id) => {
-                ctx.analyzed.name_table.display(type_id.name_id())
+                ctx.analyzed.name_table.borrow().display(type_id.name_id())
             }
             InterfaceConcreteType::Function { is_closure } => {
                 if is_closure {
@@ -259,7 +257,7 @@ impl InterfaceVtableRegistry {
 
         for (index, &method_id) in state.method_ids.iter().enumerate() {
             let method = ctx.analyzed.entity_registry.get_method(method_id);
-            let method_name_str = ctx.analyzed.name_table.display(method.name_id);
+            let method_name_str = ctx.analyzed.name_table.borrow().display(method.name_id);
             let target = resolve_vtable_target(
                 ctx,
                 state.interface_name_id,
@@ -630,16 +628,14 @@ fn compile_external_wrapper(
     }
 
     // Get string names from NameId
-    let module_path = ctx
-        .analyzed
-        .name_table
+    let name_table = ctx.analyzed.name_table.borrow();
+    let module_path = name_table
         .last_segment_str(external_info.module_path)
         .ok_or_else(|| "module_path NameId has no segment".to_string())?;
-    let native_name = ctx
-        .analyzed
-        .name_table
+    let native_name = name_table
         .last_segment_str(external_info.native_name)
         .ok_or_else(|| "native_name NameId has no segment".to_string())?;
+    drop(name_table);
 
     let native_func = ctx
         .native_registry
@@ -800,6 +796,7 @@ pub(crate) fn box_interface_value_id(
     let interface_name_str = ctx
         .analyzed
         .name_table
+        .borrow()
         .last_segment_str(interface_def.name_id)
         .ok_or_else(|| format!("cannot get interface name string for {:?}", type_def_id))?;
     let interface_name = ctx.interner.lookup(&interface_name_str).ok_or_else(|| {
@@ -877,7 +874,7 @@ fn resolve_vtable_target(
 ) -> Result<VtableMethod, String> {
     // Get method info from EntityRegistry
     let interface_method = ctx.analyzed.entity_registry.get_method(interface_method_id);
-    let method_name_str = ctx.analyzed.name_table.display(interface_method.name_id);
+    let method_name_str = ctx.analyzed.name_table.borrow().display(interface_method.name_id);
 
     // Apply substitutions to get concrete param/return types (using TypeId-based substitution)
     let (substituted_param_ids, substituted_return_id) = {

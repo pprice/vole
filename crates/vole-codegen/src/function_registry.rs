@@ -2,7 +2,9 @@
 //
 // Opaque function identity registry for codegen.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use cranelift_module::FuncId;
 
@@ -111,14 +113,14 @@ struct FunctionEntry {
 }
 
 pub struct FunctionRegistry {
-    names: NameTable,
+    names: Rc<RefCell<NameTable>>,
     entries: Vec<FunctionEntry>,
     qualified_lookup: HashMap<NameId, FunctionKey>,
     runtime_lookup: HashMap<RuntimeFn, FunctionKey>,
 }
 
 impl FunctionRegistry {
-    pub fn new(names: NameTable) -> Self {
+    pub fn new(names: Rc<RefCell<NameTable>>) -> Self {
         Self {
             names,
             entries: Vec::new(),
@@ -128,17 +130,18 @@ impl FunctionRegistry {
     }
 
     pub fn main_module(&self) -> ModuleId {
-        self.names.main_module()
+        self.names.borrow().main_module()
     }
 
     pub fn builtin_module(&self) -> ModuleId {
-        self.names
+        let names = self.names.borrow();
+        names
             .builtin_module_id()
-            .unwrap_or_else(|| self.names.main_module())
+            .unwrap_or_else(|| names.main_module())
     }
 
     pub fn module_id(&mut self, path: &str) -> ModuleId {
-        self.names.module_id(path)
+        self.names.borrow_mut().module_id(path)
     }
 
     pub fn intern_qualified(
@@ -147,7 +150,7 @@ impl FunctionRegistry {
         segments: &[Symbol],
         interner: &Interner,
     ) -> FunctionKey {
-        let name_id = self.names.intern(module, segments, interner);
+        let name_id = self.names.borrow_mut().intern(module, segments, interner);
         self.intern_name_id(name_id)
     }
 
@@ -166,12 +169,15 @@ impl FunctionRegistry {
         segment: Symbol,
         interner: &Interner,
     ) -> FunctionKey {
-        let name_id = self.names.intern_with_symbol(prefix, segment, interner);
+        let name_id = self
+            .names
+            .borrow_mut()
+            .intern_with_symbol(prefix, segment, interner);
         self.intern_name_id(name_id)
     }
 
     pub fn intern_raw_qualified(&mut self, module: ModuleId, segments: &[&str]) -> FunctionKey {
-        let name_id = self.names.intern_raw(module, segments);
+        let name_id = self.names.borrow_mut().intern_raw(module, segments);
         self.intern_name_id(name_id)
     }
 
@@ -185,9 +191,11 @@ impl FunctionRegistry {
     }
 
     pub fn intern_test_name(&mut self, index: usize) -> (NameId, FunctionKey) {
+        let builtin = self.builtin_module();
         let name_id = self
             .names
-            .intern_indexed_raw(self.builtin_module(), "__test_", index);
+            .borrow_mut()
+            .intern_indexed_raw(builtin, "__test_", index);
         let key = self.intern_name_id(name_id);
         let name_id = self
             .name_for_qualified(key)
@@ -196,9 +204,11 @@ impl FunctionRegistry {
     }
 
     pub fn intern_lambda_name(&mut self, index: usize) -> (NameId, FunctionKey) {
+        let builtin = self.builtin_module();
         let name_id = self
             .names
-            .intern_indexed_raw(self.builtin_module(), "__lambda_", index);
+            .borrow_mut()
+            .intern_indexed_raw(builtin, "__lambda_", index);
         let key = self.intern_name_id(name_id);
         let name_id = self
             .name_for_qualified(key)
@@ -228,7 +238,7 @@ impl FunctionRegistry {
 
     pub fn display(&self, key: FunctionKey) -> String {
         match &self.entries[key.0 as usize].name {
-            FunctionName::Qualified(name_id) => self.names.display(*name_id),
+            FunctionName::Qualified(name_id) => self.names.borrow().display(*name_id),
             FunctionName::Runtime(runtime) => runtime.name().to_string(),
         }
     }
@@ -252,7 +262,7 @@ impl FunctionRegistry {
             .is_some()
     }
 
-    pub fn name_table(&self) -> &NameTable {
+    pub fn name_table_rc(&self) -> &Rc<RefCell<NameTable>> {
         &self.names
     }
 

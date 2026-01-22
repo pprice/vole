@@ -80,6 +80,7 @@ impl Cg<'_, '_, '_> {
                                 self.ctx
                                     .analyzed
                                     .name_table
+                                    .borrow()
                                     .last_segment_str(*name_id)
                                     .unwrap_or_default(),
                                 *ty_id,

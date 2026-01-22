@@ -367,26 +367,23 @@ impl Cg<'_, '_, '_> {
                 .analyzed
                 .implement_registry
                 .get_external_func(callee_name)
-                && let (Some(module_path), Some(native_name)) = (
-                    self.ctx
-                        .analyzed
-                        .name_table
-                        .last_segment_str(ext_info.module_path),
-                    self.ctx
-                        .analyzed
-                        .name_table
-                        .last_segment_str(ext_info.native_name),
-                )
-                && let Some(native_func) =
-                    self.ctx.native_registry.lookup(&module_path, &native_name)
             {
-                // The func_type from the monomorph instance may have TypeParams that weren't
-                // inferred from arguments (like return type params). Apply class type
-                // substitutions to fully resolve the type.
-                let return_type_id = self
-                    .ctx
-                    .substitute_type_id(instance.func_type.return_type_id);
-                return self.compile_native_call_with_types(native_func, call, return_type_id);
+                let name_table = self.ctx.analyzed.name_table.borrow();
+                let module_path = name_table.last_segment_str(ext_info.module_path);
+                let native_name = name_table.last_segment_str(ext_info.native_name);
+                drop(name_table);
+                if let (Some(module_path), Some(native_name)) = (module_path, native_name)
+                    && let Some(native_func) =
+                        self.ctx.native_registry.lookup(&module_path, &native_name)
+                {
+                    // The func_type from the monomorph instance may have TypeParams that weren't
+                    // inferred from arguments (like return type params). Apply class type
+                    // substitutions to fully resolve the type.
+                    let return_type_id = self
+                        .ctx
+                        .substitute_type_id(instance.func_type.return_type_id);
+                    return self.compile_native_call_with_types(native_func, call, return_type_id);
+                }
             }
         }
 
@@ -405,12 +402,11 @@ impl Cg<'_, '_, '_> {
 
         // Check module context for mangled name or FFI
         if let Some(module_path) = self.ctx.current_module {
-            let module_id = self
-                .ctx
-                .analyzed
-                .name_table
+            let name_table = self.ctx.analyzed.name_table.borrow();
+            let module_id = name_table
                 .module_id_if_known(module_path)
-                .unwrap_or_else(|| self.ctx.analyzed.name_table.main_module());
+                .unwrap_or_else(|| name_table.main_module());
+            drop(name_table);
             let name_id = crate::types::module_name_id(self.ctx.analyzed, module_id, callee_name);
             if let Some(name_id) = name_id {
                 let func_key = self.ctx.func_registry.intern_name_id(name_id);
@@ -494,16 +490,9 @@ impl Cg<'_, '_, '_> {
             .implement_registry
             .get_external_func(callee_name);
         let native_func = ext_info.and_then(|info| {
-            let module_path = self
-                .ctx
-                .analyzed
-                .name_table
-                .last_segment_str(info.module_path)?;
-            let native_name = self
-                .ctx
-                .analyzed
-                .name_table
-                .last_segment_str(info.native_name)?;
+            let name_table = self.ctx.analyzed.name_table.borrow();
+            let module_path = name_table.last_segment_str(info.module_path)?;
+            let native_name = name_table.last_segment_str(info.native_name)?;
             self.ctx.native_registry.lookup(&module_path, &native_name)
         });
         if let Some(native_func) = native_func {

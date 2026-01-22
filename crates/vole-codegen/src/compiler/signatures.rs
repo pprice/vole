@@ -45,72 +45,78 @@ impl Compiler<'_> {
         };
 
         // Resolve param TypeIds
-        let param_type_ids: SmallVec<[TypeId; 8]> = match &resolver {
-            TypeResolver::Query => {
-                let query = self.query();
-                let module_id = query.main_module();
-                params
-                    .iter()
-                    .map(|param| {
-                        resolve_type_expr_to_id(
-                            &param.ty,
-                            query.registry(),
-                            &self.type_metadata,
-                            query.interner(),
-                            query.name_table(),
-                            module_id,
-                            &self.analyzed.type_arena,
-                        )
-                    })
-                    .collect()
-            }
-            TypeResolver::Interner(interner) => {
-                let module_id = self.func_registry.main_module();
-                params
-                    .iter()
-                    .map(|param| {
-                        resolve_type_expr_to_id(
-                            &param.ty,
-                            &self.analyzed.entity_registry,
-                            &self.type_metadata,
-                            interner,
-                            &self.analyzed.name_table,
-                            module_id,
-                            &self.analyzed.type_arena,
-                        )
-                    })
-                    .collect()
+        let param_type_ids: SmallVec<[TypeId; 8]> = {
+            let name_table = self.analyzed.name_table.borrow();
+            match &resolver {
+                TypeResolver::Query => {
+                    let query = self.query();
+                    let module_id = query.main_module();
+                    params
+                        .iter()
+                        .map(|param| {
+                            resolve_type_expr_to_id(
+                                &param.ty,
+                                query.registry(),
+                                &self.type_metadata,
+                                query.interner(),
+                                &*name_table,
+                                module_id,
+                                &self.analyzed.type_arena,
+                            )
+                        })
+                        .collect()
+                }
+                TypeResolver::Interner(interner) => {
+                    let module_id = self.func_registry.main_module();
+                    params
+                        .iter()
+                        .map(|param| {
+                            resolve_type_expr_to_id(
+                                &param.ty,
+                                &self.analyzed.entity_registry,
+                                &self.type_metadata,
+                                interner,
+                                &*name_table,
+                                module_id,
+                                &self.analyzed.type_arena,
+                            )
+                        })
+                        .collect()
+                }
             }
         };
 
         // Resolve return TypeId
-        let return_type_id = return_type.map(|t| match &resolver {
-            TypeResolver::Query => {
-                let query = self.query();
-                let module_id = query.main_module();
-                resolve_type_expr_to_id(
-                    t,
-                    query.registry(),
-                    &self.type_metadata,
-                    query.interner(),
-                    query.name_table(),
-                    module_id,
-                    &self.analyzed.type_arena,
-                )
-            }
-            TypeResolver::Interner(interner) => {
-                let module_id = self.func_registry.main_module();
-                resolve_type_expr_to_id(
-                    t,
-                    &self.analyzed.entity_registry,
-                    &self.type_metadata,
-                    interner,
-                    &self.analyzed.name_table,
-                    module_id,
-                    &self.analyzed.type_arena,
-                )
-            }
-        });
+        let return_type_id = {
+            let name_table = self.analyzed.name_table.borrow();
+            return_type.map(|t| match &resolver {
+                TypeResolver::Query => {
+                    let query = self.query();
+                    let module_id = query.main_module();
+                    resolve_type_expr_to_id(
+                        t,
+                        query.registry(),
+                        &self.type_metadata,
+                        query.interner(),
+                        &*name_table,
+                        module_id,
+                        &self.analyzed.type_arena,
+                    )
+                }
+                TypeResolver::Interner(interner) => {
+                    let module_id = self.func_registry.main_module();
+                    resolve_type_expr_to_id(
+                        t,
+                        &self.analyzed.entity_registry,
+                        &self.type_metadata,
+                        interner,
+                        &*name_table,
+                        module_id,
+                        &self.analyzed.type_arena,
+                    )
+                }
+            })
+        };
 
         // Now convert TypeIds to Cranelift types (single arena borrow)
         let arena_ref = self.analyzed.type_arena.borrow();
@@ -154,41 +160,44 @@ impl Compiler<'_> {
         };
 
         // Resolve param TypeIds
-        let param_type_ids: SmallVec<[TypeId; 8]> = match &resolver {
-            TypeResolver::Query => {
-                let query = self.query();
-                let module_id = query.main_module();
-                params
-                    .iter()
-                    .map(|param| {
-                        resolve_type_expr_to_id(
-                            &param.ty,
-                            query.registry(),
-                            &self.type_metadata,
-                            query.interner(),
-                            query.name_table(),
-                            module_id,
-                            &self.analyzed.type_arena,
-                        )
-                    })
-                    .collect()
-            }
-            TypeResolver::Interner(interner) => {
-                let module_id = self.func_registry.main_module();
-                params
-                    .iter()
-                    .map(|param| {
-                        resolve_type_expr_to_id(
-                            &param.ty,
-                            &self.analyzed.entity_registry,
-                            &self.type_metadata,
-                            interner,
-                            &self.analyzed.name_table,
-                            module_id,
-                            &self.analyzed.type_arena,
-                        )
-                    })
-                    .collect()
+        let param_type_ids: SmallVec<[TypeId; 8]> = {
+            let name_table = self.analyzed.name_table.borrow();
+            match &resolver {
+                TypeResolver::Query => {
+                    let query = self.query();
+                    let module_id = query.main_module();
+                    params
+                        .iter()
+                        .map(|param| {
+                            resolve_type_expr_to_id(
+                                &param.ty,
+                                query.registry(),
+                                &self.type_metadata,
+                                query.interner(),
+                                &*name_table,
+                                module_id,
+                                &self.analyzed.type_arena,
+                            )
+                        })
+                        .collect()
+                }
+                TypeResolver::Interner(interner) => {
+                    let module_id = self.func_registry.main_module();
+                    params
+                        .iter()
+                        .map(|param| {
+                            resolve_type_expr_to_id(
+                                &param.ty,
+                                &self.analyzed.entity_registry,
+                                &self.type_metadata,
+                                interner,
+                                &*name_table,
+                                module_id,
+                                &self.analyzed.type_arena,
+                            )
+                        })
+                        .collect()
+                }
             }
         };
 

@@ -40,7 +40,7 @@ pub(crate) fn get_field_slot_and_type_id(
         .collect();
 
     for (slot, field_name_id) in generic_info.field_names.iter().enumerate() {
-        let name = ctx.analyzed.name_table.last_segment_str(*field_name_id);
+        let name = ctx.analyzed.name_table.borrow().last_segment_str(*field_name_id);
         if name.as_deref() == Some(field_name) {
             let base_type_id = generic_info.field_types[slot];
             // Apply type substitutions from type args

@@ -14,7 +14,6 @@ use vole_frontend::{
     AssignTarget, BlockExpr, Expr, ExprKind, IfExpr, LetInit, MatchExpr, Pattern, RangeExpr,
     RecordFieldPattern, Symbol, UnaryOp,
 };
-use vole_sema::ResolverEntityExt;
 use vole_sema::entity_defs::TypeDefKind;
 
 use super::context::Cg;
@@ -226,7 +225,7 @@ impl Cg<'_, '_, '_> {
         // Create wrapper function
         let (wrapper_name_id, wrapper_func_key) =
             self.ctx.func_registry.intern_lambda_name(wrapper_index);
-        let wrapper_name = self.ctx.func_registry.name_table().display(wrapper_name_id);
+        let wrapper_name = self.ctx.func_registry.name_table_rc().borrow().display(wrapper_name_id);
         let wrapper_func_id = self
             .ctx
             .module
@@ -1620,8 +1619,7 @@ impl Cg<'_, '_, '_> {
         // Check if this is an error type name via EntityRegistry
         let is_error_type = self
             .ctx
-            .resolver()
-            .resolve_type(name, &self.ctx.analyzed.entity_registry)
+            .resolve_type(name)
             .is_some_and(|type_id| {
                 self.ctx.analyzed.entity_registry.get_type(type_id).kind == TypeDefKind::ErrorType
             });
@@ -1668,18 +1666,21 @@ impl Cg<'_, '_, '_> {
             return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
         };
 
+        let name_table = self.ctx.analyzed.name_table.borrow();
         let Some(error_tag) = fallible_error_tag_by_id(
             error_type_id,
             name,
             &arena,
             self.ctx.interner,
-            &self.ctx.analyzed.name_table,
+            &*name_table,
             &self.ctx.analyzed.entity_registry,
         ) else {
             // Error type not found in fallible - will never match
+            drop(name_table);
             drop(arena);
             return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
         };
+        drop(name_table);
         drop(arena);
 
         let is_this_error = self.builder.ins().icmp_imm(IntCC::Equal, tag, error_tag);
@@ -1698,8 +1699,7 @@ impl Cg<'_, '_, '_> {
         // Look up error type_def_id via EntityRegistry
         let error_type_id = self
             .ctx
-            .resolver()
-            .resolve_type(name, &self.ctx.analyzed.entity_registry)
+            .resolve_type(name)
             .and_then(|type_id| {
                 let type_def = self.ctx.analyzed.entity_registry.get_type(type_id);
                 if type_def.kind == TypeDefKind::ErrorType && type_def.error_info.is_some() {
@@ -1722,18 +1722,21 @@ impl Cg<'_, '_, '_> {
             return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
         };
 
+        let name_table = self.ctx.analyzed.name_table.borrow();
         let Some(error_tag) = fallible_error_tag_by_id(
             fallible_error_type_id,
             name,
             &arena,
             self.ctx.interner,
-            &self.ctx.analyzed.name_table,
+            &*name_table,
             &self.ctx.analyzed.entity_registry,
         ) else {
             // Error type not found in fallible
+            drop(name_table);
             drop(arena);
             return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
         };
+        drop(name_table);
         drop(arena);
 
         let is_this_error = self.builder.ins().icmp_imm(IntCC::Equal, tag, error_tag);
@@ -1757,6 +1760,7 @@ impl Cg<'_, '_, '_> {
                 self.ctx
                     .analyzed
                     .name_table
+                    .borrow()
                     .last_segment_str(f.name_id)
                     .as_deref()
                     == Some(field_name)

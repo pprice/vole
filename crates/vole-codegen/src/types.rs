@@ -175,18 +175,28 @@ impl<'a> CompileCtx<'a> {
         }
     }
 
-    /// Get a Resolver for name lookups in codegen
-    pub fn resolver(&self) -> Resolver<'_> {
+    /// Resolve a type via the resolution chain (primitive → module → builtin).
+    /// This replaces calling resolver().resolve_type() which had lifetime issues.
+    pub fn resolve_type(&self, sym: Symbol) -> Option<TypeDefId> {
+        let name_table = self.analyzed.name_table.borrow();
         let module_id = self
             .current_module
-            .and_then(|path| self.analyzed.name_table.module_id_if_known(path))
-            .unwrap_or_else(|| self.analyzed.name_table.main_module());
-        Resolver::new(
-            self.interner,
-            &self.analyzed.name_table,
-            module_id,
-            &[], // No imports in codegen context
-        )
+            .and_then(|path| name_table.module_id_if_known(path))
+            .unwrap_or_else(|| name_table.main_module());
+        let resolver = Resolver::new(self.interner, &*name_table, module_id, &[]);
+        resolver.resolve_type(sym, &self.analyzed.entity_registry)
+    }
+
+    /// Resolve a type by string name, with fallback to interface/class short name search.
+    /// This replaces calling resolver().resolve_type_str_or_interface() which had lifetime issues.
+    pub fn resolve_type_str_or_interface(&self, name: &str) -> Option<TypeDefId> {
+        let name_table = self.analyzed.name_table.borrow();
+        let module_id = self
+            .current_module
+            .and_then(|path| name_table.module_id_if_known(path))
+            .unwrap_or_else(|| name_table.main_module());
+        let resolver = Resolver::new(self.interner, &*name_table, module_id, &[]);
+        resolver.resolve_type_str_or_interface(name, &self.analyzed.entity_registry)
     }
 
     /// Look up expression type, checking module-specific expr_types if compiling module code.
@@ -216,10 +226,11 @@ impl<'a> CompileCtx<'a> {
 
 /// Resolve a type expression to a TypeId (uses CompileCtx for full context).
 pub(crate) fn resolve_type_expr_id(ty: &TypeExpr, ctx: &CompileCtx) -> TypeId {
+    let name_table = ctx.analyzed.name_table.borrow();
     let module_id = ctx
         .current_module
-        .and_then(|path| ctx.analyzed.name_table.module_id_if_known(path))
-        .unwrap_or_else(|| ctx.analyzed.name_table.main_module());
+        .and_then(|path| name_table.module_id_if_known(path))
+        .unwrap_or_else(|| name_table.main_module());
 
     // Use the TypeId-native resolution function directly
     let type_id = resolve_type_expr_to_id(
@@ -227,10 +238,11 @@ pub(crate) fn resolve_type_expr_id(ty: &TypeExpr, ctx: &CompileCtx) -> TypeId {
         &ctx.analyzed.entity_registry,
         ctx.type_metadata,
         ctx.interner,
-        &ctx.analyzed.name_table,
+        &*name_table,
         module_id,
         ctx.arena,
     );
+    drop(name_table);
 
     // Apply type substitutions if compiling a monomorphized context
     if let Some(substitutions) = ctx.type_substitutions {
@@ -249,10 +261,11 @@ pub(crate) fn module_name_id(
 ) -> Option<NameId> {
     let query = analyzed.query();
     let module_path = query.module_path(module_id);
-    let (_, module_interner) = query.module_program(module_path)?;
+    let (_, module_interner) = query.module_program(&module_path)?;
     let sym = module_interner.lookup(name)?;
     analyzed
         .name_table
+        .borrow()
         .name_id(module_id, &[sym], module_interner)
 }
 
@@ -262,7 +275,8 @@ pub(crate) fn method_name_id_with_interner(
     interner: &Interner,
     name: Symbol,
 ) -> Option<NameId> {
-    let namer = NamerLookup::new(&analyzed.name_table, interner);
+    let name_table = analyzed.name_table.borrow();
+    let namer = NamerLookup::new(&*name_table, interner);
     namer.method(name)
 }
 
@@ -272,7 +286,8 @@ pub(crate) fn method_name_id_by_str(
     interner: &Interner,
     name_str: &str,
 ) -> Option<NameId> {
-    vole_identity::method_name_id_by_str(&analyzed.name_table, interner, name_str)
+    let name_table = analyzed.name_table.borrow();
+    vole_identity::method_name_id_by_str(&*name_table, interner, name_str)
 }
 
 /// Look up a function NameId by Symbol with explicit interner (for cross-interner usage)
@@ -282,7 +297,8 @@ pub(crate) fn function_name_id_with_interner(
     module: ModuleId,
     name: Symbol,
 ) -> Option<NameId> {
-    let namer = NamerLookup::new(&analyzed.name_table, interner);
+    let name_table = analyzed.name_table.borrow();
+    let namer = NamerLookup::new(&*name_table, interner);
     namer.function(module, name)
 }
 

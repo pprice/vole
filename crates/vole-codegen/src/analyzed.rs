@@ -22,8 +22,8 @@ pub struct AnalyzedProgram {
     pub implement_registry: ImplementRegistry,
     /// Parsed module programs for compiling pure Vole functions
     pub module_programs: FxHashMap<String, (Program, Interner)>,
-    /// Qualified name interner for printable identities
-    pub name_table: NameTable,
+    /// Shared name table for qualified name interning (used by codegen for lambda/test names)
+    pub name_table: Rc<RefCell<NameTable>>,
     /// Entity registry for type/method/field/function identity
     pub entity_registry: EntityRegistry,
     /// Shared type arena for interned types (same arena used by ExpressionData)
@@ -63,7 +63,7 @@ impl AnalyzedProgram {
             expression_data: output.expression_data,
             implement_registry: implements,
             module_programs: output.module_programs,
-            name_table: names,
+            name_table: Rc::new(RefCell::new(names)),
             entity_registry: entities,
             type_arena: Rc::new(RefCell::new(types)),
         }
@@ -80,5 +80,20 @@ impl AnalyzedProgram {
             &self.module_programs,
             &self.type_arena,
         )
+    }
+
+    /// Get read-only access to the name table
+    pub fn name_table(&self) -> std::cell::Ref<'_, NameTable> {
+        self.name_table.borrow()
+    }
+
+    /// Get mutable access to the name table (for interning new names in codegen)
+    pub fn name_table_mut(&self) -> std::cell::RefMut<'_, NameTable> {
+        self.name_table.borrow_mut()
+    }
+
+    /// Get a shared reference to the name table Rc (for FunctionRegistry)
+    pub fn name_table_rc(&self) -> Rc<RefCell<NameTable>> {
+        Rc::clone(&self.name_table)
     }
 }

@@ -19,14 +19,14 @@ use crate::types::{
 use vole_frontend::{Expr, ExprKind, MethodCallExpr, NodeId, Symbol};
 use vole_identity::NamerLookup;
 use vole_identity::{MethodId, NameId, TypeDefId};
-use vole_sema::ResolverEntityExt;
 use vole_sema::resolution::ResolvedMethod;
 use vole_sema::type_arena::TypeId;
 
 impl Cg<'_, '_, '_> {
     /// Look up a method NameId using the context's interner (which may be a module interner)
     fn method_name_id(&self, name: Symbol) -> NameId {
-        let namer = NamerLookup::new(&self.ctx.analyzed.name_table, self.ctx.interner);
+        let name_table = self.ctx.analyzed.name_table.borrow();
+        let namer = NamerLookup::new(&*name_table, self.ctx.interner);
         namer.method(name).unwrap_or_else(|| {
             panic!(
                 "method name_id not found for '{}'",
@@ -77,7 +77,13 @@ impl Cg<'_, '_, '_> {
             .unwrap_module(obj.type_id)
             .map(|m| m.module_id);
         if let Some(module_id) = module_id_opt {
-            let module_path = self.ctx.analyzed.name_table.module_path(module_id);
+            let module_path = self
+                .ctx
+                .analyzed
+                .name_table
+                .borrow()
+                .module_path(module_id)
+                .to_string();
             let name_id = module_name_id(self.ctx.analyzed, module_id, method_name_str);
             // Get the method resolution
             let resolution = self
@@ -590,11 +596,10 @@ impl Cg<'_, '_, '_> {
         method_name: &str,
         elem_type_id: TypeId,
     ) -> Result<CompiledValue, String> {
-        // Look up the Iterator interface via Resolver
+        // Look up the Iterator interface via CompileCtx
         let iter_type_id = self
             .ctx
-            .resolver()
-            .resolve_type_str_or_interface("Iterator", &self.ctx.analyzed.entity_registry)
+            .resolve_type_str_or_interface("Iterator")
             .ok_or_else(|| "Iterator interface not found in entity registry".to_string())?;
 
         let iter_def = self.ctx.analyzed.entity_registry.get_type(iter_type_id);
@@ -608,6 +613,7 @@ impl Cg<'_, '_, '_> {
                 self.ctx
                     .analyzed
                     .name_table
+                    .borrow()
                     .last_segment_str(m.name_id)
                     .is_some_and(|n| n == method_name)
             })
@@ -669,11 +675,8 @@ impl Cg<'_, '_, '_> {
     /// Convert Iterator<T> return types to RuntimeIterator(T), looking up Iterator interface by name
     /// Takes and returns TypeId for O(1) equality; converts internally for matching
     pub(crate) fn maybe_convert_iterator_return_type(&self, ty: TypeId) -> TypeId {
-        // Look up the Iterator interface via Resolver
-        let iterator_type_id = self
-            .ctx
-            .resolver()
-            .resolve_type_str_or_interface("Iterator", &self.ctx.analyzed.entity_registry);
+        // Look up the Iterator interface via CompileCtx
+        let iterator_type_id = self.ctx.resolve_type_str_or_interface("Iterator");
         if let Some(iterator_type_id) = iterator_type_id {
             self.convert_iterator_return_type_by_type_def_id(ty, iterator_type_id)
         } else {
@@ -1018,16 +1021,17 @@ impl Cg<'_, '_, '_> {
             .get(&(type_def_id, method_name_id))
             .ok_or_else(|| {
                 let type_def = self.ctx.analyzed.entity_registry.get_type(type_def_id);
-                let type_name = self.ctx.analyzed.name_table.display(type_def.name_id);
-                let method_name = self.ctx.analyzed.name_table.display(method_name_id);
+                let name_table = self.ctx.analyzed.name_table.borrow();
+                let type_name = name_table.display(type_def.name_id);
+                let method_name = name_table.display(method_name_id);
                 let registered_keys: Vec<_> = self
                     .ctx
                     .static_method_infos
                     .keys()
                     .map(|(tid, mid)| {
                         let t = self.ctx.analyzed.entity_registry.get_type(*tid);
-                        let tn = self.ctx.analyzed.name_table.display(t.name_id);
-                        let mn = self.ctx.analyzed.name_table.display(*mid);
+                        let tn = name_table.display(t.name_id);
+                        let mn = name_table.display(*mid);
                         format!("({}, {})", tn, mn)
                     })
                     .collect();
