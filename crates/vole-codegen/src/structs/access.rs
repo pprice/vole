@@ -12,12 +12,12 @@ use vole_frontend::{Expr, FieldAccessExpr, OptionalChainExpr, Symbol};
 use vole_sema::types::ConstantValue;
 
 impl Cg<'_, '_, '_> {
-    #[tracing::instrument(skip(self, fa), fields(field = %self.ctx.interner().resolve(fa.field)))]
+    #[tracing::instrument(skip(self, fa), fields(field = %self.interner().resolve(fa.field)))]
     pub fn field_access(&mut self, fa: &FieldAccessExpr) -> Result<CompiledValue, String> {
         let obj = self.expr(&fa.object)?;
 
         let module_info = {
-            let arena = self.ctx.arena();
+            let arena = self.arena();
             arena.unwrap_module(obj.type_id).map(|m| {
                 let exports = m.exports.clone();
                 (m.module_id, exports)
@@ -25,13 +25,13 @@ impl Cg<'_, '_, '_> {
         };
         if let Some((module_id, exports)) = module_info {
             tracing::trace!(?module_id, "field access on module");
-            let field_name = self.ctx.interner().resolve(fa.field);
+            let field_name = self.interner().resolve(fa.field);
             let module_path = self.name_table().module_path(module_id).to_string();
             let name_id = module_name_id(self.ctx.analyzed, module_id, field_name);
 
             // Look up constant value in module metadata
             let const_val = {
-                let arena = self.ctx.arena();
+                let arena = self.arena();
                 name_id.and_then(|nid| {
                     arena
                         .module_metadata(module_id)
@@ -39,14 +39,18 @@ impl Cg<'_, '_, '_> {
                 })
             };
             if let Some(const_val) = const_val {
-                let arena = self.ctx.arena();
+                let arena = self.arena();
+                let f64_id = arena.f64();
+                let i64_id = arena.i64();
+                let bool_id = arena.bool();
+                drop(arena);
                 return match const_val {
                     ConstantValue::F64(v) => {
                         let val = self.builder.ins().f64const(v);
                         Ok(CompiledValue {
                             value: val,
                             ty: types::F64,
-                            type_id: arena.f64(),
+                            type_id: f64_id,
                         })
                     }
                     ConstantValue::I64(v) => {
@@ -54,7 +58,7 @@ impl Cg<'_, '_, '_> {
                         Ok(CompiledValue {
                             value: val,
                             ty: types::I64,
-                            type_id: arena.i64(),
+                            type_id: i64_id,
                         })
                     }
                     ConstantValue::Bool(v) => {
@@ -62,13 +66,10 @@ impl Cg<'_, '_, '_> {
                         Ok(CompiledValue {
                             value: val,
                             ty: types::I8,
-                            type_id: arena.bool(),
+                            type_id: bool_id,
                         })
                     }
-                    ConstantValue::String(s) => {
-                        drop(arena);
-                        self.string_literal(&s)
-                    }
+                    ConstantValue::String(s) => self.string_literal(&s),
                 };
             }
 
@@ -76,7 +77,7 @@ impl Cg<'_, '_, '_> {
             let export_type_id = name_id
                 .and_then(|nid| exports.iter().find(|(n, _)| *n == nid).map(|(_, tid)| *tid));
             if let Some(export_type_id) = export_type_id {
-                let is_function = self.ctx.arena().is_function(export_type_id);
+                let is_function = self.arena().is_function(export_type_id);
                 if is_function {
                     return Err(CodegenError::unsupported_with_context(
                         "function as field value",
@@ -100,15 +101,13 @@ impl Cg<'_, '_, '_> {
         }
 
         // Non-module field access - use TypeId-based helpers
-        let field_name = self.ctx.interner().resolve(fa.field);
+        let field_name = self.interner().resolve(fa.field);
         let (slot, field_type_id) = get_field_slot_and_type_id_cg(obj.type_id, field_name, self)?;
 
         let result_raw = self.get_field_cached(obj.value, slot as u32)?;
 
-        let arena = self.ctx.arena();
         let (result_val, cranelift_ty) =
-            convert_field_value_id(self.builder, result_raw, field_type_id, &arena);
-        drop(arena);
+            convert_field_value_id(self.builder, result_raw, field_type_id, &self.ctx.arena());
 
         Ok(CompiledValue {
             value: result_val,
@@ -122,7 +121,7 @@ impl Cg<'_, '_, '_> {
 
         // The object should be an optional type (union with nil)
         let (_variants, nil_tag, inner_type_id) = {
-            let arena = self.ctx.arena();
+            let arena = self.arena();
             let variants = arena.unwrap_union(obj.type_id).ok_or_else(|| {
                 CodegenError::type_mismatch("optional chain", "optional type", "non-optional")
                     .to_string()
@@ -157,13 +156,13 @@ impl Cg<'_, '_, '_> {
         let merge_block = self.builder.create_block();
 
         // Get the field type from the inner type using TypeId-based helper
-        let field_name = self.ctx.interner().resolve(oc.field);
+        let field_name = self.interner().resolve(oc.field);
         let (slot, field_type_id) = get_field_slot_and_type_id_cg(inner_type_id, field_name, self)?;
 
         // Result type is field_type | nil (optional)
         // But if field type is already optional, don't double-wrap
         let (result_type_id, is_field_optional) = {
-            let arena = self.ctx.arena();
+            let arena = self.arena();
             let is_optional = arena.is_optional(field_type_id);
             drop(arena);
             let result_id = if is_optional {
@@ -175,8 +174,8 @@ impl Cg<'_, '_, '_> {
         };
 
         let cranelift_type = {
-            let arena = self.ctx.arena();
-            crate::types::type_id_to_cranelift(result_type_id, &arena, self.ctx.ptr_type())
+            let arena = self.arena();
+            crate::types::type_id_to_cranelift(result_type_id, &arena, self.ptr_type())
         };
         self.builder.append_block_param(merge_block, cranelift_type);
 
@@ -199,8 +198,8 @@ impl Cg<'_, '_, '_> {
 
         // Load the actual object from the union payload (offset 8)
         let inner_cranelift_type = {
-            let arena = self.ctx.arena();
-            crate::types::type_id_to_cranelift(inner_type_id, &arena, self.ctx.ptr_type())
+            let arena = self.arena();
+            crate::types::type_id_to_cranelift(inner_type_id, &arena, self.ptr_type())
         };
         let inner_obj =
             self.builder
@@ -210,10 +209,8 @@ impl Cg<'_, '_, '_> {
         // Get field from the inner object
         let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
         let field_raw = self.call_runtime(RuntimeFn::InstanceGetField, &[inner_obj, slot_val])?;
-        let (field_val, field_cranelift_ty) = {
-            let arena = self.ctx.arena();
-            convert_field_value_id(self.builder, field_raw, field_type_id, &arena)
-        };
+        let (field_val, field_cranelift_ty) =
+            convert_field_value_id(self.builder, field_raw, field_type_id, &self.ctx.arena());
 
         // Wrap the field value in an optional (using construct_union_id)
         // But if field type is already optional, it's already a union - just use it directly
@@ -254,9 +251,9 @@ impl Cg<'_, '_, '_> {
         let obj = self.expr(object)?;
         let value = self.expr(value_expr)?;
 
-        let field_name = self.ctx.interner().resolve(field);
+        let field_name = self.interner().resolve(field);
         let (slot, field_type_id) = get_field_slot_and_type_id_cg(obj.type_id, field_name, self)?;
-        let value = if self.ctx.arena().is_interface(field_type_id) {
+        let value = if self.arena().is_interface(field_type_id) {
             box_interface_value_id(self.builder, self.ctx, value, field_type_id)?
         } else {
             value

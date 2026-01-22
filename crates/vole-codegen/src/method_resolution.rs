@@ -62,7 +62,9 @@ pub(crate) fn resolve_method_target_id(
     use crate::structs::get_type_name_id_from_type_id;
 
     // Check if object is an interface
-    let is_interface = input.analyzed.type_arena()
+    let is_interface = input
+        .analyzed
+        .type_arena()
         .is_interface(input.object_type_id);
 
     // Filter out InterfaceMethod resolution when the concrete type is not an interface.
@@ -94,7 +96,9 @@ pub(crate) fn resolve_method_target_id(
 
     // Helper to get method return type from sema
     let get_return_type_from_sema = |type_def_id: TypeDefId, method_id: NameId| -> TypeId {
-        let Some(method_id) = input.analyzed.entity_registry()
+        let Some(method_id) = input
+            .analyzed
+            .entity_registry()
             .find_method_on_type(type_def_id, method_id)
         else {
             return TypeId::VOID;
@@ -118,7 +122,8 @@ pub(crate) fn resolve_method_target_id(
     // Helper to get impl method return type from sema's implement_registry
     let get_impl_return_type_from_sema = |type_id: &ImplTypeId| -> TypeId {
         input
-            .analyzed.implement_registry()
+            .analyzed
+            .implement_registry()
             .get_method(type_id, input.method_id)
             .map(|impl_| impl_.func_type.return_type_id)
             .unwrap_or(TypeId::VOID)
@@ -166,7 +171,9 @@ pub(crate) fn resolve_method_target_id(
                 };
 
                 // For interface types, we need vtable dispatch
-                if let Some((interface_type_id, _)) = input.analyzed.type_arena()
+                if let Some((interface_type_id, _)) = input
+                    .analyzed
+                    .type_arena()
                     .unwrap_interface(input.object_type_id)
                 {
                     let method_name_id = method_name_id_by_str(
@@ -244,7 +251,9 @@ pub(crate) fn resolve_method_target_id(
             }
             ResolvedMethod::InterfaceMethod { func_type_id, .. } => {
                 // This branch is only taken when object_type is an interface
-                let (interface_type_id, _) = input.analyzed.type_arena()
+                let (interface_type_id, _) = input
+                    .analyzed
+                    .type_arena()
                     .unwrap_interface(input.object_type_id)
                     .ok_or_else(|| "InterfaceMethod on non-interface type".to_string())?;
                 let method_name_id = method_name_id_by_str(
@@ -285,7 +294,9 @@ pub(crate) fn resolve_method_target_id(
             &input.analyzed.interner,
             input.method_name_str,
         )
-        && let Some(binding) = input.analyzed.entity_registry()
+        && let Some(binding) = input
+            .analyzed
+            .entity_registry()
             .find_method_binding(type_def_id, method_name_id)
     {
         drop(arena);

@@ -109,9 +109,9 @@ impl Cg<'_, '_, '_> {
         if !captures.iter().any(|c| c.name == name) {
             return None;
         }
-        let func_type_id = self.ctx.get_expr_type(&init_expr.id)?;
-        let arena = self.ctx.arena();
-        let cranelift_ty = type_id_to_cranelift(func_type_id, &arena, self.ctx.ptr_type());
+        let func_type_id = self.get_expr_type(&init_expr.id)?;
+        let arena = self.arena();
+        let cranelift_ty = type_id_to_cranelift(func_type_id, &arena, self.ptr_type());
         drop(arena);
         let var = self.builder.declare_var(cranelift_ty);
         self.vars.insert(name, (var, func_type_id));
@@ -155,10 +155,13 @@ impl Cg<'_, '_, '_> {
 
                 let mut declared_type_id_opt = None;
                 let (mut final_value, mut final_type_id) = if let Some(ty_expr) = &let_stmt.ty {
-                    let declared_type_id = resolve_type_expr_id(ty_expr, self.ctx);
+                    let type_ctx = self.type_ctx();
+                    let func_ctx = self.function_ctx();
+                    let declared_type_id =
+                        resolve_type_expr_id(ty_expr, &type_ctx, &func_ctx, self.type_metadata());
                     declared_type_id_opt = Some(declared_type_id);
 
-                    let arena = self.ctx.arena();
+                    let arena = self.arena();
                     let is_declared_union = arena.is_union(declared_type_id);
                     let is_declared_integer = arena.is_integer(declared_type_id);
                     let is_declared_f32 = declared_type_id == arena.f32();
@@ -166,13 +169,13 @@ impl Cg<'_, '_, '_> {
                     let is_declared_interface = arena.is_interface(declared_type_id);
                     drop(arena);
 
-                    if is_declared_union && !self.ctx.arena().is_union(init.type_id) {
+                    if is_declared_union && !self.arena().is_union(init.type_id) {
                         let wrapped = self.construct_union_id(init, declared_type_id)?;
                         (wrapped.value, wrapped.type_id)
                     } else if is_declared_integer && init.type_id.is_integer() {
-                        let arena = self.ctx.arena();
+                        let arena = self.arena();
                         let declared_cty =
-                            type_id_to_cranelift(declared_type_id, &arena, self.ctx.ptr_type());
+                            type_id_to_cranelift(declared_type_id, &arena, self.ptr_type());
                         drop(arena);
                         let init_cty = init.ty;
                         if declared_cty.bits() < init_cty.bits() {
@@ -205,15 +208,15 @@ impl Cg<'_, '_, '_> {
 
                 // Box value if assigning to interface type
                 if let Some(declared_type_id) = declared_type_id_opt {
-                    let arena = self.ctx.arena();
+                    let arena = self.arena();
                     let is_declared_interface = arena.is_interface(declared_type_id);
                     let is_final_interface = arena.is_interface(final_type_id);
                     drop(arena);
 
                     if is_declared_interface && !is_final_interface {
-                        let arena = self.ctx.arena();
+                        let arena = self.arena();
                         let cranelift_ty =
-                            type_id_to_cranelift(final_type_id, &arena, self.ctx.ptr_type());
+                            type_id_to_cranelift(final_type_id, &arena, self.ptr_type());
                         drop(arena);
                         let boxed = box_interface_value_id(
                             self.builder,
@@ -235,9 +238,8 @@ impl Cg<'_, '_, '_> {
                     self.builder.def_var(var, final_value);
                     // vars already has the entry from preregistration
                 } else {
-                    let arena = self.ctx.arena();
-                    let cranelift_ty =
-                        type_id_to_cranelift(final_type_id, &arena, self.ctx.ptr_type());
+                    let arena = self.arena();
+                    let cranelift_ty = type_id_to_cranelift(final_type_id, &arena, self.ptr_type());
                     drop(arena);
                     let var = self.builder.declare_var(cranelift_ty);
                     self.builder.def_var(var, final_value);
@@ -268,9 +270,9 @@ impl Cg<'_, '_, '_> {
                     // Box concrete types to interface representation if needed
                     // But skip boxing for RuntimeIterator - it's the raw representation of Iterator
                     if let Some(ret_type_id) = return_type_id
-                        && self.ctx.arena().is_interface(ret_type_id)
-                        && !self.ctx.arena().is_interface(compiled.type_id)
-                        && !self.ctx.arena().is_runtime_iterator(compiled.type_id)
+                        && self.arena().is_interface(ret_type_id)
+                        && !self.arena().is_interface(compiled.type_id)
+                        && !self.arena().is_runtime_iterator(compiled.type_id)
                     {
                         let boxed =
                             box_interface_value_id(self.builder, self.ctx, compiled, ret_type_id)?;
@@ -280,14 +282,14 @@ impl Cg<'_, '_, '_> {
 
                     // Check if the function has a fallible return type using arena methods
                     if let Some(ret_type_id) = return_type_id
-                        && self.ctx.arena().unwrap_fallible(ret_type_id).is_some()
+                        && self.arena().unwrap_fallible(ret_type_id).is_some()
                     {
                         // For fallible functions, wrap the success value in a fallible struct
                         let fallible_size = type_id_size(
                             ret_type_id,
-                            self.ctx.ptr_type(),
-                            self.ctx.query().registry(),
-                            &self.ctx.arena(),
+                            self.ptr_type(),
+                            self.query().registry(),
+                            &self.arena(),
                         );
 
                         // Allocate stack slot for the fallible result
@@ -311,12 +313,12 @@ impl Cg<'_, '_, '_> {
                             .stack_store(store_value, slot, FALLIBLE_PAYLOAD_OFFSET);
 
                         // Get the pointer to the fallible result
-                        let fallible_ptr =
-                            self.builder.ins().stack_addr(self.ctx.ptr_type(), slot, 0);
+                        let ptr_type = self.ptr_type();
+                        let fallible_ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
 
                         self.builder.ins().return_(&[fallible_ptr]);
                     } else if let Some(ret_type_id) = return_type_id
-                        && self.ctx.arena().is_union(ret_type_id)
+                        && self.arena().is_union(ret_type_id)
                     {
                         // For union return types, wrap the value in a union
                         let wrapped = self.construct_union_id(compiled, ret_type_id)?;
@@ -405,11 +407,10 @@ impl Cg<'_, '_, '_> {
                     self.for_range(for_stmt, range)
                 } else {
                     // Check if iterable is an Iterator type or string type using TypeId
-                    let iterable_type_id = self.ctx.query().type_of(for_stmt.iterable.id);
+                    let iterable_type_id = self.query().type_of(for_stmt.iterable.id);
                     let is_iterator =
                         iterable_type_id.is_some_and(|id| self.is_iterator_type_id(id));
-                    let is_string =
-                        iterable_type_id.is_some_and(|id| self.ctx.arena().is_string(id));
+                    let is_string = iterable_type_id.is_some_and(|id| self.arena().is_string(id));
                     if is_iterator {
                         self.for_iterator(for_stmt)
                     } else if is_string {
@@ -510,7 +511,7 @@ impl Cg<'_, '_, '_> {
             .ctx
             .arena()
             .unwrap_array(arr.type_id)
-            .unwrap_or_else(|| self.ctx.arena().i64());
+            .unwrap_or_else(|| self.arena().i64());
 
         let len_val = self.call_runtime(RuntimeFn::ArrayLen, &[arr.value])?;
 
@@ -572,7 +573,7 @@ impl Cg<'_, '_, '_> {
 
     /// Check if a type is an Iterator<T> type using TypeId
     fn is_iterator_type_id(&self, ty: TypeId) -> bool {
-        let arena = self.ctx.arena();
+        let arena = self.arena();
         if let Some((type_def_id, _)) = arena.unwrap_interface(ty) {
             self.name_table()
                 .well_known
@@ -588,7 +589,7 @@ impl Cg<'_, '_, '_> {
 
         // Get element type using arena methods
         let elem_type_id = {
-            let arena = self.ctx.arena();
+            let arena = self.arena();
             if let Some(elem_id) = arena.unwrap_runtime_iterator(iter.type_id) {
                 elem_id
             } else if let Some((_, type_args)) = arena.unwrap_interface(iter.type_id) {
@@ -604,10 +605,8 @@ impl Cg<'_, '_, '_> {
             8,
             0,
         ));
-        let slot_addr = self
-            .builder
-            .ins()
-            .stack_addr(self.ctx.ptr_type(), slot_data, 0);
+        let ptr_type = self.ptr_type();
+        let slot_addr = self.builder.ins().stack_addr(ptr_type, slot_data, 0);
 
         // Initialize element variable
         let elem_var = self.builder.declare_var(types::I64);
@@ -675,10 +674,8 @@ impl Cg<'_, '_, '_> {
             8,
             0,
         ));
-        let slot_addr = self
-            .builder
-            .ins()
-            .stack_addr(self.ctx.ptr_type(), slot_data, 0);
+        let ptr_type = self.ptr_type();
+        let slot_addr = self.builder.ins().stack_addr(ptr_type, slot_data, 0);
 
         // Initialize element variable (each character is returned as a string)
         let elem_var = self.builder.declare_var(types::I64);
@@ -738,7 +735,7 @@ impl Cg<'_, '_, '_> {
         value: CompiledValue,
         union_type_id: TypeId,
     ) -> Result<CompiledValue, String> {
-        let arena = self.ctx.arena();
+        let arena = self.arena();
         let variants = arena.unwrap_union(union_type_id).ok_or_else(|| {
             CodegenError::type_mismatch("union construction", "union type", "non-union").to_string()
         })?;
@@ -752,56 +749,56 @@ impl Cg<'_, '_, '_> {
         }
 
         // Find the position of value's type in variants
-        let (tag, actual_value, actual_type_id) =
-            if let Some(pos) = variants.iter().position(|&v| v == value.type_id) {
-                (pos, value.value, value.type_id)
+        let (tag, actual_value, actual_type_id) = if let Some(pos) =
+            variants.iter().position(|&v| v == value.type_id)
+        {
+            (pos, value.value, value.type_id)
+        } else {
+            // Try to find a compatible integer type for widening/narrowing
+            let arena = self.arena();
+            let value_is_integer = arena.is_integer(value.type_id);
+
+            let compatible = if value_is_integer {
+                variants
+                    .iter()
+                    .enumerate()
+                    .find(|(_, v)| arena.is_integer(**v))
+                    .map(|(pos, v)| (pos, *v))
             } else {
-                // Try to find a compatible integer type for widening/narrowing
-                let arena = self.ctx.arena();
-                let value_is_integer = arena.is_integer(value.type_id);
-
-                let compatible = if value_is_integer {
-                    variants
-                        .iter()
-                        .enumerate()
-                        .find(|(_, v)| arena.is_integer(**v))
-                        .map(|(pos, v)| (pos, *v))
-                } else {
-                    None
-                };
-                drop(arena);
-
-                match compatible {
-                    Some((pos, variant_type_id)) => {
-                        let arena = self.ctx.arena();
-                        let target_ty =
-                            type_id_to_cranelift(variant_type_id, &arena, self.ctx.ptr_type());
-                        drop(arena);
-                        let actual = if target_ty.bytes() < value.ty.bytes() {
-                            self.builder.ins().ireduce(target_ty, value.value)
-                        } else if target_ty.bytes() > value.ty.bytes() {
-                            self.builder.ins().sextend(target_ty, value.value)
-                        } else {
-                            value.value
-                        };
-                        (pos, actual, variant_type_id)
-                    }
-                    None => {
-                        return Err(CodegenError::type_mismatch(
-                            "union variant",
-                            "compatible type",
-                            "incompatible type",
-                        )
-                        .into());
-                    }
-                }
+                None
             };
+            drop(arena);
+
+            match compatible {
+                Some((pos, variant_type_id)) => {
+                    let arena = self.arena();
+                    let target_ty = type_id_to_cranelift(variant_type_id, &arena, self.ptr_type());
+                    drop(arena);
+                    let actual = if target_ty.bytes() < value.ty.bytes() {
+                        self.builder.ins().ireduce(target_ty, value.value)
+                    } else if target_ty.bytes() > value.ty.bytes() {
+                        self.builder.ins().sextend(target_ty, value.value)
+                    } else {
+                        value.value
+                    };
+                    (pos, actual, variant_type_id)
+                }
+                None => {
+                    return Err(CodegenError::type_mismatch(
+                        "union variant",
+                        "compatible type",
+                        "incompatible type",
+                    )
+                    .into());
+                }
+            }
+        };
 
         let union_size = type_id_size(
             union_type_id,
-            self.ctx.ptr_type(),
-            self.ctx.query().registry(),
-            &self.ctx.arena(),
+            self.ptr_type(),
+            self.query().registry(),
+            &self.arena(),
         );
         let slot = self.builder.create_sized_stack_slot(StackSlotData::new(
             StackSlotKind::ExplicitSlot,
@@ -816,10 +813,11 @@ impl Cg<'_, '_, '_> {
             self.builder.ins().stack_store(actual_value, slot, 8);
         }
 
-        let ptr = self.builder.ins().stack_addr(self.ctx.ptr_type(), slot, 0);
+        let ptr_type = self.ptr_type();
+        let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
         Ok(CompiledValue {
             value: ptr,
-            ty: self.ctx.ptr_type(),
+            ty: ptr_type,
             type_id: union_type_id,
         })
     }
@@ -833,7 +831,7 @@ impl Cg<'_, '_, '_> {
     ) -> Result<(), String> {
         match pattern {
             Pattern::Identifier { name, .. } => {
-                let cr_type = type_id_to_cranelift(ty_id, &self.ctx.arena(), self.ctx.ptr_type());
+                let cr_type = type_id_to_cranelift(ty_id, &self.arena(), self.ptr_type());
                 let var = self.builder.declare_var(cr_type);
                 self.builder.def_var(var, value);
                 self.vars.insert(*name, (var, ty_id));
@@ -842,25 +840,22 @@ impl Cg<'_, '_, '_> {
                 // Wildcard - nothing to bind
             }
             Pattern::Tuple { elements, .. } => {
-                let arena = self.ctx.arena();
+                let arena = self.arena();
 
                 // Try tuple first
                 if let Some(elem_type_ids) = arena.unwrap_tuple(ty_id).cloned() {
                     drop(arena);
                     let (_, offsets) = tuple_layout_id(
                         &elem_type_ids,
-                        self.ctx.ptr_type(),
-                        self.ctx.query().registry(),
-                        &self.ctx.arena(),
+                        self.ptr_type(),
+                        self.query().registry(),
+                        &self.arena(),
                     );
                     for (i, elem_pattern) in elements.iter().enumerate() {
                         let offset = offsets[i];
                         let elem_type_id = elem_type_ids[i];
-                        let elem_cr_type = type_id_to_cranelift(
-                            elem_type_id,
-                            &self.ctx.arena(),
-                            self.ctx.ptr_type(),
-                        );
+                        let elem_cr_type =
+                            type_id_to_cranelift(elem_type_id, &self.arena(), self.ptr_type());
                         let elem_value =
                             self.builder
                                 .ins()
@@ -871,12 +866,12 @@ impl Cg<'_, '_, '_> {
                 } else if let Some((element_id, _)) = arena.unwrap_fixed_array(ty_id) {
                     drop(arena);
                     let elem_cr_type =
-                        type_id_to_cranelift(element_id, &self.ctx.arena(), self.ctx.ptr_type());
+                        type_id_to_cranelift(element_id, &self.arena(), self.ptr_type());
                     let elem_size = type_id_size(
                         element_id,
-                        self.ctx.ptr_type(),
-                        self.ctx.query().registry(),
-                        &self.ctx.arena(),
+                        self.ptr_type(),
+                        self.query().registry(),
+                        &self.arena(),
                     )
                     .div_ceil(8)
                         * 8;
@@ -895,16 +890,18 @@ impl Cg<'_, '_, '_> {
             Pattern::Record { fields, .. } => {
                 // Record destructuring - extract fields via runtime
                 for field_pattern in fields {
-                    let field_name = self.ctx.interner().resolve(field_pattern.field_name);
+                    let field_name = self.interner().resolve(field_pattern.field_name);
                     let (slot, field_type_id) =
                         get_field_slot_and_type_id_cg(ty_id, field_name, self)?;
                     let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
                     let result_raw =
                         self.call_runtime(RuntimeFn::InstanceGetField, &[value, slot_val])?;
-                    let arena = self.ctx.arena();
-                    let (result_val, cranelift_ty) =
-                        convert_field_value_id(self.builder, result_raw, field_type_id, &arena);
-                    drop(arena);
+                    let (result_val, cranelift_ty) = convert_field_value_id(
+                        self.builder,
+                        result_raw,
+                        field_type_id,
+                        &self.ctx.arena(),
+                    );
                     let var = self.builder.declare_var(cranelift_ty);
                     self.builder.def_var(var, result_val);
                     self.vars
@@ -931,7 +928,6 @@ impl Cg<'_, '_, '_> {
 
         // Extract the error type from the fallible return type
         let (_success_type_id, error_type_id) = self
-            .ctx
             .arena()
             .unwrap_fallible(return_type_id)
             .ok_or_else(|| {
@@ -946,24 +942,24 @@ impl Cg<'_, '_, '_> {
         let error_tag = fallible_error_tag_by_id(
             error_type_id,
             raise_stmt.error_name,
-            &self.ctx.arena(),
-            self.ctx.interner(),
+            &self.arena(),
+            self.interner(),
             &self.name_table(),
-            self.ctx.query().registry(),
+            self.query().registry(),
         )
         .ok_or_else(|| {
             format!(
                 "Error type {} not found in fallible type",
-                self.ctx.interner().resolve(raise_stmt.error_name)
+                self.interner().resolve(raise_stmt.error_name)
             )
         })?;
 
         // Calculate the size of the fallible type
         let fallible_size = type_id_size(
             return_type_id,
-            self.ctx.ptr_type(),
-            self.ctx.query().registry(),
-            &self.ctx.arena(),
+            self.ptr_type(),
+            self.query().registry(),
+            &self.arena(),
         );
 
         // Allocate stack slot for the fallible result
@@ -980,12 +976,12 @@ impl Cg<'_, '_, '_> {
             .stack_store(tag_val, slot, FALLIBLE_TAG_OFFSET);
 
         // Get the error type_def_id to look up field order from EntityRegistry
-        let raise_error_name = self.ctx.interner().resolve(raise_stmt.error_name);
-        let arena = self.ctx.arena();
+        let raise_error_name = self.interner().resolve(raise_stmt.error_name);
+        let arena = self.arena();
         let name_table = self.name_table();
         let error_type_def_id = if let Some(type_def_id) = arena.unwrap_error(error_type_id) {
             // Single error type
-            let name = name_table.last_segment_str(self.ctx.query().type_name_id(type_def_id));
+            let name = name_table.last_segment_str(self.query().type_name_id(type_def_id));
             if name.as_deref() == Some(raise_error_name) {
                 Some(type_def_id)
             } else {
@@ -995,8 +991,7 @@ impl Cg<'_, '_, '_> {
             // Union of error types
             variants.iter().find_map(|&v| {
                 if let Some(type_def_id) = arena.unwrap_error(v) {
-                    let name =
-                        name_table.last_segment_str(self.ctx.query().type_name_id(type_def_id));
+                    let name = name_table.last_segment_str(self.query().type_name_id(type_def_id));
                     if name.as_deref() == Some(raise_error_name) {
                         return Some(type_def_id);
                     }
@@ -1009,7 +1004,7 @@ impl Cg<'_, '_, '_> {
         .ok_or_else(|| {
             format!(
                 "Could not find error type info for {}",
-                self.ctx.interner().resolve(raise_stmt.error_name)
+                self.interner().resolve(raise_stmt.error_name)
             )
         })?;
         drop(name_table);
@@ -1017,23 +1012,23 @@ impl Cg<'_, '_, '_> {
 
         // Get fields from EntityRegistry
         let error_fields: Vec<_> = self
-            .ctx
             .query()
             .fields_on_type(error_type_def_id)
-            .map(|field_id| self.ctx.query().get_field(field_id).clone())
+            .map(|field_id| self.query().get_field(field_id).clone())
             .collect();
 
         // Store each field value at the appropriate offset in the payload
         // Fields are stored sequentially at 8-byte intervals (i64 storage)
         for (field_idx, field_def) in error_fields.iter().enumerate() {
             // Find the matching field in the raise statement
-            let field_name = self.name_table()
+            let field_name = self
+                .name_table()
                 .last_segment_str(field_def.name_id)
                 .unwrap_or_default();
             let field_init = raise_stmt
                 .fields
                 .iter()
-                .find(|f| self.ctx.interner().resolve(f.name) == field_name)
+                .find(|f| self.interner().resolve(f.name) == field_name)
                 .ok_or_else(|| format!("Missing field {} in raise statement", &field_name))?;
 
             // Compile the field value expression
@@ -1052,7 +1047,8 @@ impl Cg<'_, '_, '_> {
         }
 
         // Get the pointer to the fallible result
-        let fallible_ptr = self.builder.ins().stack_addr(self.ctx.ptr_type(), slot, 0);
+        let ptr_type = self.ptr_type();
+        let fallible_ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
 
         // Return from the function with the fallible pointer
         self.builder.ins().return_(&[fallible_ptr]);

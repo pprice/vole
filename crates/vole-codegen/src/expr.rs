@@ -776,7 +776,14 @@ impl Cg<'_, '_, '_> {
     /// Compile an `is` type check expression
     fn is_expr(&mut self, is_expr: &vole_frontend::IsExpr) -> Result<CompiledValue, String> {
         let value = self.expr(&is_expr.value)?;
-        let tested_type_id = resolve_type_expr_id(&is_expr.type_expr, self.ctx);
+        let type_ctx = self.type_ctx();
+        let func_ctx = self.ctx.function_ctx();
+        let tested_type_id = resolve_type_expr_id(
+            &is_expr.type_expr,
+            &type_ctx,
+            &func_ctx,
+            self.ctx.type_metadata,
+        );
 
         let arena = self.ctx.arena();
         if let Some(variants) = arena.unwrap_union(value.type_id) {
@@ -1056,7 +1063,14 @@ impl Cg<'_, '_, '_> {
                     }
                 }
                 Pattern::Type { type_expr, .. } => {
-                    let pattern_type_id = resolve_type_expr_id(type_expr, self.ctx);
+                    let type_ctx = self.type_ctx();
+                    let func_ctx = self.ctx.function_ctx();
+                    let pattern_type_id = resolve_type_expr_id(
+                        type_expr,
+                        &type_ctx,
+                        &func_ctx,
+                        self.ctx.type_metadata,
+                    );
                     self.compile_type_pattern_check(&scrutinee, pattern_type_id)?
                 }
                 Pattern::Literal(lit_expr) => {

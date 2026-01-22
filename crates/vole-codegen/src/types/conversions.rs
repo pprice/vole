@@ -1,303 +1,27 @@
-// src/codegen/types.rs
+// types/conversions.rs
 //
-// Type-related utilities for code generation.
-// This module contains shared type utilities used throughout the codegen module.
+// Type conversion and resolution utilities for code generation.
 
 use cranelift::prelude::*;
 use cranelift_codegen::ir::FuncRef;
-use cranelift_jit::JITModule;
-use cranelift_module::Module;
 use rustc_hash::FxHashMap;
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::AnalyzedProgram;
-use crate::FunctionRegistry;
 use crate::errors::CodegenError;
-use vole_frontend::{Expr, Interner, NodeId, Symbol, TypeExpr};
-use vole_identity::{self, ModuleId, NameId, NameTable, NamerLookup, Resolver, TypeDefId};
-use vole_runtime::NativeRegistry;
+use vole_frontend::{Interner, Symbol, TypeExpr};
+use vole_identity::{ModuleId, NameId, NameTable, NamerLookup, Resolver, TypeDefId};
 use vole_runtime::native_registry::NativeType;
 use vole_sema::entity_defs::TypeDefKind;
-use vole_sema::generic::MonomorphCache;
-use vole_sema::implement_registry::ImplTypeId;
 use vole_sema::type_arena::{TypeArena, TypeId, TypeIdVec};
-use vole_sema::{EntityRegistry, PrimitiveType, ProgramQuery, ResolverEntityExt};
+use vole_sema::{EntityRegistry, PrimitiveType, ResolverEntityExt};
+
+use super::{CompileCtx, FunctionCtx, TypeCtx};
 
 // Re-export box_interface_value_id for centralized access to boxing helper
-pub(crate) use super::interface_vtable::box_interface_value_id;
-
-/// Minimal context for type-system lookups in codegen.
-/// Stores ProgramQuery directly as a field for zero-overhead access.
-#[allow(dead_code)]
-pub struct TypeCtx<'a> {
-    /// Query interface for type/entity/name lookups (stored, not created per-call)
-    pub query: ProgramQuery<'a>,
-    /// Cranelift pointer type (platform-specific)
-    pub pointer_type: Type,
-}
-
-#[allow(dead_code)]
-impl<'a> TypeCtx<'a> {
-    pub fn new(query: ProgramQuery<'a>, pointer_type: Type) -> Self {
-        Self {
-            query,
-            pointer_type,
-        }
-    }
-
-    /// Convenience: borrow the type arena
-    #[inline]
-    pub fn arena(&self) -> std::cell::Ref<'_, TypeArena> {
-        self.query.arena().borrow()
-    }
-
-    /// Raw arena access (for functions that need &RefCell<TypeArena>)
-    #[inline]
-    pub fn arena_rc(&self) -> &'a Rc<RefCell<TypeArena>> {
-        self.query.arena()
-    }
-
-    /// Get an update interface for arena mutations.
-    /// Centralizes all borrow_mut() calls for cleaner code.
-    #[inline]
-    pub fn update(&self) -> vole_sema::ProgramUpdate<'a> {
-        vole_sema::ProgramUpdate::new(self.query.arena())
-    }
-
-    /// Get the entity registry
-    #[inline]
-    pub fn entities(&self) -> &'a EntityRegistry {
-        self.query.registry()
-    }
-
-    /// Get the interner
-    #[inline]
-    pub fn interner(&self) -> &'a Interner {
-        self.query.interner()
-    }
-
-    /// Get the name table Rc
-    #[inline]
-    pub fn name_table_rc(&self) -> &'a Rc<RefCell<NameTable>> {
-        self.query.name_table_rc()
-    }
-}
-
-/// Codegen context with mutable JIT infrastructure.
-/// Extends TypeCtx with module and function registry access.
-#[allow(dead_code)]
-pub struct CodegenCtx<'a> {
-    /// Type system lookups
-    pub types: TypeCtx<'a>,
-    /// Cranelift JIT module for function declarations
-    pub module: &'a mut JITModule,
-    /// Function identity and ID management
-    pub func_registry: &'a mut FunctionRegistry,
-}
-
-#[allow(dead_code)]
-impl<'a> CodegenCtx<'a> {
-    pub fn new(
-        query: ProgramQuery<'a>,
-        pointer_type: Type,
-        module: &'a mut JITModule,
-        func_registry: &'a mut FunctionRegistry,
-    ) -> Self {
-        Self {
-            types: TypeCtx::new(query, pointer_type),
-            module,
-            func_registry,
-        }
-    }
-
-    /// Convenience: get TypeCtx reference
-    #[inline]
-    pub fn type_ctx(&self) -> &TypeCtx<'a> {
-        &self.types
-    }
-
-    /// Convenience: pointer type (alias for Cg migration)
-    #[inline]
-    pub fn ptr_type(&self) -> Type {
-        self.types.pointer_type
-    }
-
-    /// Convenience: query interface
-    #[inline]
-    pub fn query(&self) -> &ProgramQuery<'a> {
-        &self.types.query
-    }
-
-    /// Convenience: borrow arena
-    #[inline]
-    pub fn arena(&self) -> std::cell::Ref<'_, TypeArena> {
-        self.types.arena()
-    }
-
-    /// Get an update interface for arena mutations.
-    #[inline]
-    pub fn update(&self) -> vole_sema::ProgramUpdate<'_> {
-        self.types.update()
-    }
-
-    /// Get interner reference.
-    #[inline]
-    pub fn interner(&self) -> &'a Interner {
-        self.types.interner()
-    }
-
-    /// Get entity registry reference.
-    #[inline]
-    pub fn registry(&self) -> &'a EntityRegistry {
-        self.types.entities()
-    }
-
-    /// Get mutable reference to function registry.
-    #[inline]
-    pub fn funcs(&mut self) -> &mut FunctionRegistry {
-        self.func_registry
-    }
-
-    /// Get immutable reference to function registry.
-    #[inline]
-    pub fn funcs_ref(&self) -> &FunctionRegistry {
-        self.func_registry
-    }
-
-    /// Get mutable reference to JIT module.
-    #[inline]
-    pub fn jit_module(&mut self) -> &mut JITModule {
-        self.module
-    }
-}
-
-/// Per-function compilation context.
-/// Contains state that varies for each function being compiled.
-#[allow(dead_code)]
-pub struct FunctionCtx<'a> {
-    /// Return type of the current function (for raise statements)
-    pub return_type: Option<TypeId>,
-    /// Module being compiled (None for main program)
-    pub current_module: Option<ModuleId>,
-    /// Type parameter substitutions for monomorphized generics
-    pub substitutions: Option<&'a HashMap<NameId, TypeId>>,
-    /// Cache for substituted types (avoids repeated HashMap conversion and arena mutations)
-    substitution_cache: RefCell<HashMap<TypeId, TypeId>>,
-}
-
-#[allow(dead_code)]
-impl<'a> FunctionCtx<'a> {
-    /// Create context for main program function (no module, no substitutions)
-    pub fn main(return_type: Option<TypeId>) -> Self {
-        Self {
-            return_type,
-            current_module: None,
-            substitutions: None,
-            substitution_cache: RefCell::new(HashMap::new()),
-        }
-    }
-
-    /// Create context for module function
-    pub fn module(return_type: Option<TypeId>, module_id: ModuleId) -> Self {
-        Self {
-            return_type,
-            current_module: Some(module_id),
-            substitutions: None,
-            substitution_cache: RefCell::new(HashMap::new()),
-        }
-    }
-
-    /// Create context for monomorphized generic function
-    pub fn monomorphized(
-        return_type: Option<TypeId>,
-        substitutions: &'a HashMap<NameId, TypeId>,
-    ) -> Self {
-        Self {
-            return_type,
-            current_module: None,
-            substitutions: Some(substitutions),
-            substitution_cache: RefCell::new(HashMap::new()),
-        }
-    }
-
-    /// Create context for test function (no return type)
-    pub fn test() -> Self {
-        Self {
-            return_type: None,
-            current_module: None,
-            substitutions: None,
-            substitution_cache: RefCell::new(HashMap::new()),
-        }
-    }
-
-    /// Substitute type parameters with concrete types using TypeId directly.
-    /// Uses a cache to avoid repeated HashMap conversion and arena mutations.
-    pub fn substitute_type_id(&self, ty: TypeId, arena: &Rc<RefCell<TypeArena>>) -> TypeId {
-        if let Some(substitutions) = self.substitutions {
-            // Check cache first
-            if let Some(&cached) = self.substitution_cache.borrow().get(&ty) {
-                return cached;
-            }
-            // Convert std HashMap to FxHashMap for arena compatibility
-            let subs: FxHashMap<NameId, TypeId> =
-                substitutions.iter().map(|(&k, &v)| (k, v)).collect();
-            let update = vole_sema::ProgramUpdate::new(arena);
-            let result = update.substitute(ty, &subs);
-            // Cache the result
-            self.substitution_cache.borrow_mut().insert(ty, result);
-            result
-        } else {
-            ty
-        }
-    }
-}
-
-/// Explicit parameters - read-only lookup tables used during codegen.
-/// These are shared across all function compilations within a compile unit.
-#[allow(dead_code)]
-pub struct ExplicitParams<'a> {
-    /// Analyzed program containing expr_types, method_resolutions, etc.
-    pub analyzed: &'a AnalyzedProgram,
-    /// Interner for symbol resolution
-    pub interner: &'a Interner,
-    /// Class and record metadata for struct literals, field access, and method calls
-    pub type_metadata: &'a HashMap<Symbol, TypeMetadata>,
-    /// Implement block method info for primitive and named types
-    pub impl_method_infos: &'a HashMap<(ImplTypeId, NameId), MethodInfo>,
-    /// Static method info keyed by (TypeDefId, method_name)
-    pub static_method_infos: &'a HashMap<(TypeDefId, NameId), MethodInfo>,
-    /// Interface vtable registry (uses interior mutability)
-    pub interface_vtables: &'a RefCell<crate::interface_vtable::InterfaceVtableRegistry>,
-    /// Registry of native functions for external method calls
-    pub native_registry: &'a NativeRegistry,
-    /// Global variable initializer expressions keyed by name
-    pub global_inits: &'a HashMap<Symbol, Expr>,
-    /// Source file pointer for error reporting
-    pub source_file_ptr: (*const u8, usize),
-    /// Counter for generating unique lambda names (interior mutability)
-    pub lambda_counter: &'a Cell<usize>,
-}
-
-impl<'a> ExplicitParams<'a> {
-    /// Create ExplicitParams from a CompileCtx (for transitional use)
-    #[allow(dead_code)] // Part of CompileCtx migration
-    pub fn from_compile_ctx(ctx: &'a CompileCtx<'a>) -> Self {
-        Self {
-            analyzed: ctx.analyzed,
-            interner: ctx.interner,
-            type_metadata: ctx.type_metadata,
-            impl_method_infos: ctx.impl_method_infos,
-            static_method_infos: ctx.static_method_infos,
-            interface_vtables: ctx.interface_vtables,
-            native_registry: ctx.native_registry,
-            global_inits: ctx.global_inits,
-            source_file_ptr: ctx.source_file_ptr,
-            lambda_counter: ctx.lambda_counter,
-        }
-    }
-}
+pub(crate) use crate::interface_vtable::box_interface_value_id;
 
 /// Compiled value with its type
 #[derive(Clone, Copy)]
@@ -386,329 +110,35 @@ pub(crate) fn type_metadata_by_name_id<'a>(
     result
 }
 
-/// Context for compiling expressions and statements
-/// Bundles common parameters to reduce function argument count
+/// Resolve a type expression to a TypeId using split contexts.
 ///
-/// Note: `arena`, `pointer_type`, and `monomorph_cache` are derived from `analyzed`
-/// via accessor methods rather than stored as separate fields.
-pub(crate) struct CompileCtx<'a> {
-    /// Analyzed program containing expr_types, method_resolutions, etc.
-    pub analyzed: &'a AnalyzedProgram,
-    /// Interner for symbol resolution (may differ from analyzed.interner for module code)
-    pub interner: &'a Interner,
-    pub module: &'a mut JITModule,
-    pub func_registry: &'a mut FunctionRegistry,
-    pub source_file_ptr: (*const u8, usize),
-    /// Global variable initializer expressions keyed by name
-    pub global_inits: &'a HashMap<Symbol, Expr>,
-    /// Counter for generating unique lambda names (interior mutability)
-    pub lambda_counter: &'a Cell<usize>,
-    /// Class and record metadata for struct literals, field access, and method calls
-    pub type_metadata: &'a HashMap<Symbol, TypeMetadata>,
-    /// Implement block method info for primitive and named types
-    pub impl_method_infos: &'a HashMap<(ImplTypeId, NameId), MethodInfo>,
-    /// Static method info keyed by (TypeDefId, method_name)
-    pub static_method_infos: &'a HashMap<(TypeDefId, NameId), MethodInfo>,
-    /// Interface vtable registry (interface + concrete type -> data id)
-    pub interface_vtables: &'a RefCell<crate::interface_vtable::InterfaceVtableRegistry>,
-    /// Current function's return type (needed for raise statements in fallible functions)
-    pub current_function_return_type: Option<TypeId>,
-    /// Registry of native functions for external method calls
-    pub native_registry: &'a NativeRegistry,
-    /// Current module path when compiling module code (e.g., "std:math")
-    /// None when compiling main program code
-    pub current_module: Option<&'a str>,
-    /// Type substitutions for monomorphized class method compilation
-    /// Maps type param NameId -> concrete TypeId (interned for O(1) equality)
-    pub type_substitutions: Option<&'a HashMap<NameId, TypeId>>,
-    /// Cache for substituted types (avoids repeated HashMap conversion and arena mutations)
-    /// Only populated when type_substitutions is Some
-    pub substitution_cache: RefCell<HashMap<TypeId, TypeId>>,
-}
-
-impl<'a> CompileCtx<'a> {
-    /// Get a query interface for the analyzed program
-    #[inline]
-    pub fn query(&self) -> ProgramQuery<'_> {
-        self.analyzed.query()
-    }
-
-    /// Borrow the type arena (derived from analyzed)
-    #[inline]
-    pub fn arena(&self) -> std::cell::Ref<'_, TypeArena> {
-        self.analyzed.type_arena()
-    }
-
-    /// Get the arena Rc (for functions that need the raw Rc<RefCell<TypeArena>>)
-    #[inline]
-    pub fn arena_rc(&self) -> &Rc<RefCell<TypeArena>> {
-        self.analyzed.type_arena_ref()
-    }
-
-    /// Get an update interface for arena mutations.
-    /// Centralizes all borrow_mut() calls for cleaner code.
-    #[inline]
-    pub fn update(&self) -> vole_sema::ProgramUpdate<'_> {
-        vole_sema::ProgramUpdate::new(self.analyzed.type_arena_ref())
-    }
-
-    /// Get the pointer type (derived from module target config)
-    #[inline]
-    pub fn ptr_type(&self) -> Type {
-        self.module.target_config().pointer_type()
-    }
-
-    /// Get the monomorph cache (derived from analyzed)
-    #[inline]
-    pub fn monomorph_cache(&self) -> &MonomorphCache {
-        &self.analyzed.entity_registry().monomorph_cache
-    }
-
-    /// Get the interner (API-compatible with CodegenCtx)
-    #[inline]
-    pub fn interner(&self) -> &'a Interner {
-        self.interner
-    }
-
-    /// Get the entity registry.
-    #[inline]
-    pub fn registry(&self) -> &'a EntityRegistry {
-        self.analyzed.entity_registry()
-    }
-
-    /// Substitute type parameters with concrete types using TypeId directly.
-    /// Uses a cache to avoid repeated HashMap conversion and arena mutations.
-    pub fn substitute_type_id(&self, ty: TypeId) -> TypeId {
-        if let Some(substitutions) = self.type_substitutions {
-            // Check cache first
-            if let Some(&cached) = self.substitution_cache.borrow().get(&ty) {
-                return cached;
-            }
-            // Convert std HashMap to FxHashMap for arena compatibility
-            let subs: FxHashMap<NameId, TypeId> =
-                substitutions.iter().map(|(&k, &v)| (k, v)).collect();
-            let result = self.update().substitute(ty, &subs);
-            // Cache the result
-            self.substitution_cache.borrow_mut().insert(ty, result);
-            result
-        } else {
-            ty
-        }
-    }
-
-    /// Resolve a type via the resolution chain (primitive → module → builtin).
-    /// This replaces calling resolver().resolve_type() which had lifetime issues.
-    pub fn resolve_type(&self, sym: Symbol) -> Option<TypeDefId> {
-        let name_table = self.analyzed.name_table();
-        let module_id = self
-            .current_module
-            .and_then(|path| name_table.module_id_if_known(path))
-            .unwrap_or_else(|| name_table.main_module());
-        let resolver = Resolver::new(self.interner, &name_table, module_id, &[]);
-        resolver.resolve_type(sym, self.analyzed.entity_registry())
-    }
-
-    /// Resolve a type by string name, with fallback to interface/class short name search.
-    /// This replaces calling resolver().resolve_type_str_or_interface() which had lifetime issues.
-    pub fn resolve_type_str_or_interface(&self, name: &str) -> Option<TypeDefId> {
-        let name_table = self.analyzed.name_table();
-        let module_id = self
-            .current_module
-            .and_then(|path| name_table.module_id_if_known(path))
-            .unwrap_or_else(|| name_table.main_module());
-        let resolver = Resolver::new(self.interner, &name_table, module_id, &[]);
-        resolver.resolve_type_str_or_interface(name, self.analyzed.entity_registry())
-    }
-
-    /// Look up expression type, checking module-specific expr_types if compiling module code.
-    /// Returns the interned TypeId handle.
-    pub fn get_expr_type(&self, node_id: &NodeId) -> Option<TypeId> {
-        // When compiling module code, NodeIds are relative to that module's program
-        // Use module-specific expr_types if available
-        if let Some(module_path) = self.current_module
-            && let Some(module_types) = self.analyzed.query().expr_data().module_types(module_path)
-            && let Some(ty) = module_types.get(node_id)
-        {
-            return Some(*ty);
-        }
-        // Fall back to main program expr_types via query interface
-        self.analyzed.query().type_of(*node_id)
-    }
-
-    /// Get the substituted return type for a generic method call, if one was computed by sema.
-    /// This avoids codegen having to recompute type substitution for generic method calls.
-    pub fn get_substituted_return_type(&self, node_id: &NodeId) -> Option<TypeId> {
-        self.analyzed
-            .query()
-            .expr_data()
-            .get_substituted_return_type(*node_id)
-    }
-
-    // ========== Extraction methods for incremental migration ==========
-    // These methods will be used by subsequent migration tasks.
-    // Allow dead_code until callers are migrated.
-
-    /// Extract a FunctionCtx from this CompileCtx.
-    #[allow(dead_code)]
-    /// Used during incremental migration to the new context system.
-    pub fn function_ctx(&self) -> FunctionCtx<'a> {
-        let module_id = self
-            .current_module
-            .and_then(|path| self.analyzed.name_table().module_id_if_known(path));
-        FunctionCtx {
-            return_type: self.current_function_return_type,
-            current_module: module_id,
-            substitutions: self.type_substitutions,
-            substitution_cache: RefCell::new(HashMap::new()),
-        }
-    }
-
-    /// Extract a TypeCtx from this CompileCtx.
-    /// Used during incremental migration to the new context system.
-    #[allow(dead_code)]
-    pub fn type_ctx(&self) -> TypeCtx<'_> {
-        TypeCtx::new(self.query(), self.ptr_type())
-    }
-
-    // ========== Delegation methods for incremental migration ==========
-    // These methods will be used by subsequent migration tasks.
-
-    /// Get the current function's return type.
-    /// Delegation method for migrating to FunctionCtx.
-    #[inline]
-    #[allow(dead_code)]
-    pub fn return_type(&self) -> Option<TypeId> {
-        self.current_function_return_type
-    }
-
-    /// Get the type substitutions for monomorphized context.
-    /// Delegation method for migrating to FunctionCtx.
-    #[inline]
-    #[allow(dead_code)]
-    pub fn substitutions(&self) -> Option<&'a HashMap<NameId, TypeId>> {
-        self.type_substitutions
-    }
-
-    /// Get the current module path.
-    /// Delegation method for migrating to FunctionCtx.
-    #[inline]
-    #[allow(dead_code)]
-    pub fn module_path(&self) -> Option<&'a str> {
-        self.current_module
-    }
-
-    // ========== ExplicitParams delegation methods ==========
-    // These methods provide access to fields that will move to ExplicitParams.
-
-    /// Get source file pointer for error reporting.
-    #[inline]
-    pub fn source_file(&self) -> (*const u8, usize) {
-        self.source_file_ptr
-    }
-
-    /// Get global variable initializer by name.
-    #[inline]
-    pub fn global_init(&self, name: Symbol) -> Option<&Expr> {
-        self.global_inits.get(&name)
-    }
-
-    /// Increment lambda counter and return the new value.
-    #[inline]
-    pub fn next_lambda_id(&self) -> usize {
-        let next = self.lambda_counter.get() + 1;
-        self.lambda_counter.set(next);
-        next
-    }
-
-    // ========== Registry field delegation methods ==========
-    // These provide read access to lookup tables used during codegen.
-    // Allow dead_code until all callers are migrated.
-
-    /// Get native function registry for external calls.
-    #[inline]
-    pub fn native_funcs(&self) -> &'a NativeRegistry {
-        self.native_registry
-    }
-
-    /// Get impl method info map.
-    #[inline]
-    pub fn impl_methods(&self) -> &'a HashMap<(ImplTypeId, NameId), MethodInfo> {
-        self.impl_method_infos
-    }
-
-    /// Get static method info map.
-    #[inline]
-    #[allow(dead_code)]
-    pub fn static_methods(&self) -> &'a HashMap<(TypeDefId, NameId), MethodInfo> {
-        self.static_method_infos
-    }
-
-    /// Get interface vtable registry.
-    #[inline]
-    #[allow(dead_code)]
-    pub fn vtables(&self) -> &'a RefCell<crate::interface_vtable::InterfaceVtableRegistry> {
-        self.interface_vtables
-    }
-
-    /// Get type metadata map.
-    #[inline]
-    pub fn type_meta(&self) -> &'a HashMap<Symbol, TypeMetadata> {
-        self.type_metadata
-    }
-
-    // ========== Core CodegenCtx field delegation methods ==========
-    // These provide access to the mutable JIT infrastructure.
-
-    /// Get mutable reference to JIT module.
-    #[inline]
-    #[allow(dead_code)]
-    pub fn jit_module(&mut self) -> &mut JITModule {
-        self.module
-    }
-
-    /// Get mutable reference to function registry.
-    #[inline]
-    #[allow(dead_code)]
-    pub fn funcs(&mut self) -> &mut FunctionRegistry {
-        self.func_registry
-    }
-
-    /// Get immutable reference to function registry.
-    #[inline]
-    #[allow(dead_code)]
-    pub fn funcs_ref(&self) -> &FunctionRegistry {
-        self.func_registry
-    }
-}
-
-/// Resolve a type expression to a TypeId (uses CompileCtx for full context).
-pub(crate) fn resolve_type_expr_id(ty: &TypeExpr, ctx: &CompileCtx) -> TypeId {
-    let name_table = ctx.analyzed.name_table();
-    let module_id = ctx
+/// Takes TypeCtx for type-system lookups, FunctionCtx for per-function state
+/// (module, substitutions), and type_metadata for class/record lookups.
+pub(crate) fn resolve_type_expr_id(
+    ty: &TypeExpr,
+    type_ctx: &TypeCtx,
+    func_ctx: &FunctionCtx,
+    type_metadata: &HashMap<Symbol, TypeMetadata>,
+) -> TypeId {
+    let name_table = type_ctx.name_table_rc().borrow();
+    let module_id = func_ctx
         .current_module
-        .and_then(|path| name_table.module_id_if_known(path))
         .unwrap_or_else(|| name_table.main_module());
 
     // Use the TypeId-native resolution function directly
     let type_id = resolve_type_expr_to_id(
         ty,
-        ctx.registry(),
-        ctx.type_metadata,
-        ctx.interner(),
+        type_ctx.entities(),
+        type_metadata,
+        type_ctx.interner(),
         &name_table,
         module_id,
-        ctx.arena_rc(),
+        type_ctx.arena_rc(),
     );
     drop(name_table);
 
     // Apply type substitutions if compiling a monomorphized context
-    if let Some(substitutions) = ctx.substitutions() {
-        // Convert std::collections::HashMap to FxHashMap for arena.substitute
-        let subs: FxHashMap<NameId, TypeId> = substitutions.iter().map(|(&k, &v)| (k, v)).collect();
-        ctx.update().substitute(type_id, &subs)
-    } else {
-        type_id
-    }
+    func_ctx.substitute_type_id(type_id, type_ctx.arena_rc())
 }
 
 pub(crate) fn module_name_id(
@@ -720,7 +150,8 @@ pub(crate) fn module_name_id(
     let module_path = query.module_path(module_id);
     let (_, module_interner) = query.module_program(&module_path)?;
     let sym = module_interner.lookup(name)?;
-    analyzed.name_table()
+    analyzed
+        .name_table()
         .name_id(module_id, &[sym], module_interner)
 }
 

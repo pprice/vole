@@ -26,16 +26,16 @@ impl Cg<'_, '_, '_> {
     /// Look up a method NameId using the context's interner (which may be a module interner)
     fn method_name_id(&self, name: Symbol) -> NameId {
         let name_table = self.name_table();
-        let namer = NamerLookup::new(&name_table, self.ctx.interner());
+        let namer = NamerLookup::new(&name_table, self.interner());
         namer.method(name).unwrap_or_else(|| {
             panic!(
                 "method name_id not found for '{}'",
-                self.ctx.interner().resolve(name)
+                self.interner().resolve(name)
             )
         })
     }
 
-    #[tracing::instrument(skip(self, mc), fields(method = %self.ctx.interner().resolve(mc.method)))]
+    #[tracing::instrument(skip(self, mc), fields(method = %self.interner().resolve(mc.method)))]
     pub fn method_call(
         &mut self,
         mc: &MethodCallExpr,
@@ -58,14 +58,14 @@ impl Cg<'_, '_, '_> {
 
         // Handle range.iter() specially since range expressions can't be compiled to values directly
         if let ExprKind::Range(range) = &mc.object.kind {
-            let method_name = self.ctx.interner().resolve(mc.method);
+            let method_name = self.interner().resolve(mc.method);
             if method_name == "iter" {
                 return self.range_iter(range);
             }
         }
 
         let obj = self.expr(&mc.object)?;
-        let method_name_str = self.ctx.interner().resolve(mc.method);
+        let method_name_str = self.interner().resolve(mc.method);
 
         // Handle module method calls (e.g., math.sqrt(16.0), math.lerp(...))
         // These go to either external native functions or pure Vole module functions
@@ -78,7 +78,8 @@ impl Cg<'_, '_, '_> {
         if let Some(module_id) = module_id_opt {
             let module_path = self
                 .ctx
-                .analyzed.name_table()
+                .analyzed
+                .name_table()
                 .module_path(module_id)
                 .to_string();
             let name_id = module_name_id(self.ctx.analyzed, module_id, method_name_str);
@@ -96,7 +97,7 @@ impl Cg<'_, '_, '_> {
             {
                 // Get return type from arena
                 let return_type_id = {
-                    let arena = self.ctx.arena();
+                    let arena = self.arena();
                     let (_, ret, _) = arena
                         .unwrap_function(*func_type_id)
                         .expect("module method must have function type");
@@ -157,7 +158,7 @@ impl Cg<'_, '_, '_> {
 
         // Handle RuntimeIterator methods - these call external functions directly
         // without interface boxing or vtable dispatch
-        let runtime_iter_elem = self.ctx.arena().unwrap_runtime_iterator(obj.type_id);
+        let runtime_iter_elem = self.arena().unwrap_runtime_iterator(obj.type_id);
         if let Some(elem_type_id) = runtime_iter_elem {
             return self.runtime_iterator_method(&obj, mc, method_name_str, elem_type_id);
         }
@@ -245,8 +246,7 @@ impl Cg<'_, '_, '_> {
                     for (arg, &param_type_id) in mc.args.iter().zip(param_type_ids.iter()) {
                         let compiled = self.expr(arg)?;
                         // Check if param is interface type using arena
-                        let is_interface =
-                            self.ctx.arena().unwrap_interface(param_type_id).is_some();
+                        let is_interface = self.arena().unwrap_interface(param_type_id).is_some();
                         let compiled = if is_interface {
                             box_interface_value_id(self.builder, self.ctx, compiled, param_type_id)?
                         } else {
@@ -347,7 +347,7 @@ impl Cg<'_, '_, '_> {
             for (arg, &param_type_id) in mc.args.iter().zip(param_type_ids.iter()) {
                 let compiled = self.expr(arg)?;
                 // Check if param is interface type using arena
-                let is_interface = self.ctx.arena().unwrap_interface(param_type_id).is_some();
+                let is_interface = self.arena().unwrap_interface(param_type_id).is_some();
                 let compiled = if is_interface {
                     box_interface_value_id(self.builder, self.ctx, compiled, param_type_id)?
                 } else {
@@ -359,7 +359,7 @@ impl Cg<'_, '_, '_> {
                     value_to_word(
                         self.builder,
                         &compiled,
-                        self.ctx.ptr_type(),
+                        self.ptr_type(),
                         None, // No heap alloc needed for primitive conversions
                         self.ctx.arena_rc(),
                         self.registry(),
@@ -377,7 +377,7 @@ impl Cg<'_, '_, '_> {
                     value_to_word(
                         self.builder,
                         &compiled,
-                        self.ctx.ptr_type(),
+                        self.ptr_type(),
                         None, // No heap alloc needed for primitive conversions
                         self.ctx.arena_rc(),
                         self.registry(),
@@ -397,19 +397,20 @@ impl Cg<'_, '_, '_> {
         } else {
             // Generic methods are compiled with TypeParam -> i64, but we may need
             // a different type (f64, bool, etc). Convert using word_to_value.
-            let expected_ty =
-                type_id_to_cranelift(return_type_id, &self.ctx.arena(), self.ctx.ptr_type());
+            let expected_ty = type_id_to_cranelift(return_type_id, &self.arena(), self.ptr_type());
             let actual_result = results[0];
             let actual_ty = self.builder.func.dfg.value_type(actual_result);
 
             let result_value = if actual_ty != expected_ty && actual_ty == types::I64 {
                 // Method returned i64 (TypeParam) but we expect a different type
+                let ptr_type = self.ptr_type();
+                let registry = self.registry();
                 word_to_value_type_id(
                     self.builder,
                     actual_result,
                     return_type_id,
-                    self.ctx.ptr_type(),
-                    self.registry(),
+                    ptr_type,
+                    registry,
                     &self.ctx.arena(),
                 )
             } else {
@@ -418,12 +419,12 @@ impl Cg<'_, '_, '_> {
 
             // For Union return types, the callee returns a pointer to its stack memory
             // which becomes invalid after the call. Copy the union to our own stack.
-            let (final_value, final_type) = if self.ctx.arena().is_union(return_type_id) {
+            let (final_value, final_type) = if self.arena().is_union(return_type_id) {
                 let union_size = type_id_size(
                     return_type_id,
-                    self.ctx.ptr_type(),
+                    self.ptr_type(),
                     self.registry(),
-                    &self.ctx.arena(),
+                    &self.arena(),
                 );
                 let local_slot = self.builder.create_sized_stack_slot(StackSlotData::new(
                     StackSlotKind::ExplicitSlot,
@@ -444,10 +445,8 @@ impl Cg<'_, '_, '_> {
                     .load(types::I64, MemFlags::new(), result_value, 8);
                 self.builder.ins().stack_store(payload, local_slot, 8);
 
-                let local_ptr = self
-                    .builder
-                    .ins()
-                    .stack_addr(self.ctx.ptr_type(), local_slot, 0);
+                let ptr_type = self.ptr_type();
+                let local_ptr = self.builder.ins().stack_addr(ptr_type, local_slot, 0);
                 (local_ptr, expected_ty)
             } else {
                 (result_value, expected_ty)
@@ -478,11 +477,11 @@ impl Cg<'_, '_, '_> {
         let result = self.call_runtime(RuntimeFn::RangeIter, &[start.value, end_value])?;
 
         // Return as RuntimeIterator<i64> - concrete type for builtin iterators
-        let i64_id = self.ctx.arena().primitives.i64;
+        let i64_id = self.arena().primitives.i64;
         let iter_type_id = self.update().runtime_iterator(i64_id);
         Ok(CompiledValue {
             value: result,
-            ty: self.ctx.ptr_type(),
+            ty: self.ptr_type(),
             type_id: iter_type_id,
         })
     }
@@ -492,7 +491,7 @@ impl Cg<'_, '_, '_> {
         obj: &CompiledValue,
         method_name: &str,
     ) -> Result<Option<CompiledValue>, String> {
-        let arena = self.ctx.arena();
+        let arena = self.arena();
 
         // Array methods
         if let Some(elem_type_id) = arena.unwrap_array(obj.type_id) {
@@ -508,7 +507,7 @@ impl Cg<'_, '_, '_> {
                     let iter_type_id = self.update().runtime_iterator(elem_type_id);
                     Ok(Some(CompiledValue {
                         value: result,
-                        ty: self.ctx.ptr_type(),
+                        ty: self.ptr_type(),
                         type_id: iter_type_id,
                     }))
                 }
@@ -526,11 +525,11 @@ impl Cg<'_, '_, '_> {
                 }
                 "iter" => {
                     let result = self.call_runtime(RuntimeFn::StringCharsIter, &[obj.value])?;
-                    let string_id = self.ctx.arena().string();
+                    let string_id = self.arena().string();
                     let iter_type_id = self.update().runtime_iterator(string_id);
                     Ok(Some(CompiledValue {
                         value: result,
-                        ty: self.ctx.ptr_type(),
+                        ty: self.ptr_type(),
                         type_id: iter_type_id,
                     }))
                 }
@@ -555,11 +554,11 @@ impl Cg<'_, '_, '_> {
                     .ins()
                     .load(types::I64, MemFlags::new(), obj.value, 8);
                 let result = self.call_runtime(RuntimeFn::RangeIter, &[start, end])?;
-                let i64_id = self.ctx.arena().i64();
+                let i64_id = self.arena().i64();
                 let iter_type_id = self.update().runtime_iterator(i64_id);
                 return Ok(Some(CompiledValue {
                     value: result,
-                    ty: self.ctx.ptr_type(),
+                    ty: self.ptr_type(),
                     type_id: iter_type_id,
                 }));
             }
@@ -584,22 +583,23 @@ impl Cg<'_, '_, '_> {
             .resolve_type_str_or_interface("Iterator")
             .ok_or_else(|| "Iterator interface not found in entity registry".to_string())?;
 
-        let iter_def = self.ctx.query().get_type(iter_type_id);
+        let iter_def = self.query().get_type(iter_type_id);
 
         // Find the method by name
         let method_id = iter_def
             .methods
             .iter()
             .find(|&&mid| {
-                let m = self.ctx.query().get_method(mid);
+                let m = self.query().get_method(mid);
                 self.ctx
-                    .analyzed.name_table()
+                    .analyzed
+                    .name_table()
                     .last_segment_str(m.name_id)
                     .is_some_and(|n| n == method_name)
             })
             .ok_or_else(|| format!("Method {} not found on Iterator", method_name))?;
 
-        let method = self.ctx.query().get_method(*method_id);
+        let method = self.query().get_method(*method_id);
 
         // Get the external binding for this method
         let external_info = *self
@@ -615,7 +615,7 @@ impl Cg<'_, '_, '_> {
             .map(|param| (*param, elem_type_id))
             .collect();
         let method_return_id = {
-            let arena = self.ctx.arena();
+            let arena = self.arena();
             let (_, ret, _) = arena
                 .unwrap_function(method.signature_id)
                 .expect("method signature must be a function type");
@@ -666,7 +666,7 @@ impl Cg<'_, '_, '_> {
         ty: TypeId,
         iterator_type_id: TypeDefId,
     ) -> TypeId {
-        let arena = self.ctx.arena();
+        let arena = self.arena();
         // Check if this is an Interface type matching Iterator
         if let Some((type_def_id, type_args)) = arena.unwrap_interface(ty)
             && type_def_id == iterator_type_id
@@ -687,7 +687,7 @@ impl Cg<'_, '_, '_> {
     ) -> Result<CompiledValue, String> {
         // Extract function type components from the arena
         let (param_ids, return_type_id) = {
-            let arena = self.ctx.arena();
+            let arena = self.arena();
             let (params, ret, _) = arena.unwrap_function(func_type_id).ok_or_else(|| {
                 "Expected function type for functional interface call".to_string()
             })?;
@@ -704,20 +704,20 @@ impl Cg<'_, '_, '_> {
             // Build the Cranelift signature for the closure call
             // First param is the closure pointer, then the user params
             let mut sig = self.ctx.jit_module().make_signature();
-            sig.params.push(AbiParam::new(self.ctx.ptr_type())); // Closure pointer
+            sig.params.push(AbiParam::new(self.ptr_type())); // Closure pointer
             for param_id in param_ids.iter() {
                 sig.params.push(AbiParam::new(type_id_to_cranelift(
                     *param_id,
-                    &self.ctx.arena(),
-                    self.ctx.ptr_type(),
+                    &self.arena(),
+                    self.ptr_type(),
                 )));
             }
-            let is_void_return = self.ctx.arena().is_void(return_type_id);
+            let is_void_return = self.arena().is_void(return_type_id);
             if !is_void_return {
                 sig.returns.push(AbiParam::new(type_id_to_cranelift(
                     return_type_id,
-                    &self.ctx.arena(),
-                    self.ctx.ptr_type(),
+                    &self.arena(),
+                    self.ptr_type(),
                 )));
             }
 
@@ -739,11 +739,7 @@ impl Cg<'_, '_, '_> {
             } else {
                 Ok(CompiledValue {
                     value: results[0],
-                    ty: type_id_to_cranelift(
-                        return_type_id,
-                        &self.ctx.arena(),
-                        self.ctx.ptr_type(),
-                    ),
+                    ty: type_id_to_cranelift(return_type_id, &self.arena(), self.ptr_type()),
                     type_id: return_type_id,
                 })
             }
@@ -753,16 +749,16 @@ impl Cg<'_, '_, '_> {
             for param_id in param_ids.iter() {
                 sig.params.push(AbiParam::new(type_id_to_cranelift(
                     *param_id,
-                    &self.ctx.arena(),
-                    self.ctx.ptr_type(),
+                    &self.arena(),
+                    self.ptr_type(),
                 )));
             }
-            let is_void_return = self.ctx.arena().is_void(return_type_id);
+            let is_void_return = self.arena().is_void(return_type_id);
             if !is_void_return {
                 sig.returns.push(AbiParam::new(type_id_to_cranelift(
                     return_type_id,
-                    &self.ctx.arena(),
-                    self.ctx.ptr_type(),
+                    &self.arena(),
+                    self.ptr_type(),
                 )));
             }
 
@@ -785,11 +781,7 @@ impl Cg<'_, '_, '_> {
             } else {
                 Ok(CompiledValue {
                     value: results[0],
-                    ty: type_id_to_cranelift(
-                        return_type_id,
-                        &self.ctx.arena(),
-                        self.ctx.ptr_type(),
-                    ),
+                    ty: type_id_to_cranelift(return_type_id, &self.arena(), self.ptr_type()),
                     type_id: return_type_id,
                 })
             }
@@ -820,12 +812,12 @@ impl Cg<'_, '_, '_> {
         slot: usize,
         func_type_id: TypeId,
     ) -> Result<CompiledValue, String> {
-        let word_type = self.ctx.ptr_type();
+        let word_type = self.ptr_type();
         let word_bytes = word_type.bytes() as i32;
 
         // Unwrap function type to get params and return type
         let (param_count, return_type_id, is_void_return) = {
-            let arena = self.ctx.arena();
+            let arena = self.arena();
             let (params, ret_id, _is_closure) = arena
                 .unwrap_function(func_type_id)
                 .ok_or_else(|| "Expected function type for interface dispatch".to_string())?;
@@ -901,12 +893,13 @@ impl Cg<'_, '_, '_> {
             .first()
             .copied()
             .ok_or_else(|| "interface call missing return value".to_string())?;
+        let registry = self.registry();
         let value = word_to_value_type_id(
             self.builder,
             word,
             return_type_id,
             word_type,
-            self.registry(),
+            registry,
             &self.ctx.arena(),
         );
 
@@ -914,7 +907,7 @@ impl Cg<'_, '_, '_> {
         // since external iterator methods return raw iterator pointers, not boxed interfaces
         let return_type_id = self.maybe_convert_iterator_return_type(return_type_id);
 
-        let arena = self.ctx.arena();
+        let arena = self.arena();
         let cranelift_ty = type_id_to_cranelift(return_type_id, &arena, word_type);
         drop(arena);
 
@@ -936,11 +929,11 @@ impl Cg<'_, '_, '_> {
         expr_id: NodeId,
     ) -> Result<CompiledValue, String> {
         // Get the method's name_id for lookup
-        let method_def = self.ctx.query().get_method(method_id);
+        let method_def = self.query().get_method(method_id);
         let method_name_id = method_def.name_id;
 
         // Check for monomorphized static method (for generic classes)
-        if let Some(mono_key) = self.ctx.query().static_method_generic_at(expr_id) {
+        if let Some(mono_key) = self.query().static_method_generic_at(expr_id) {
             // Look up the monomorphized instance
             if let Some(instance) = self
                 .ctx
@@ -954,7 +947,7 @@ impl Cg<'_, '_, '_> {
                 for (arg, &param_type_id) in mc.args.iter().zip(param_type_ids.iter()) {
                     let compiled = self.expr(arg)?;
                     // Box interface values if needed - check using arena
-                    let is_interface = self.ctx.arena().unwrap_interface(param_type_id).is_some();
+                    let is_interface = self.arena().unwrap_interface(param_type_id).is_some();
                     let compiled = if is_interface {
                         box_interface_value_id(self.builder, self.ctx, compiled, param_type_id)?
                     } else {
@@ -973,10 +966,10 @@ impl Cg<'_, '_, '_> {
                 if results.is_empty() {
                     return Ok(self.void_value());
                 } else {
-                    let arena_ref = self.ctx.arena();
+                    let arena_ref = self.arena();
                     return Ok(CompiledValue {
                         value: results[0],
-                        ty: type_id_to_cranelift(return_type_id, &arena_ref, self.ctx.ptr_type()),
+                        ty: type_id_to_cranelift(return_type_id, &arena_ref, self.ptr_type()),
                         type_id: return_type_id,
                     });
                 }
@@ -989,7 +982,7 @@ impl Cg<'_, '_, '_> {
             .static_method_infos
             .get(&(type_def_id, method_name_id))
             .ok_or_else(|| {
-                let type_def = self.ctx.query().get_type(type_def_id);
+                let type_def = self.query().get_type(type_def_id);
                 let name_table = self.name_table();
                 let type_name = name_table.display(type_def.name_id);
                 let method_name = name_table.display(method_name_id);
@@ -998,7 +991,7 @@ impl Cg<'_, '_, '_> {
                     .static_method_infos
                     .keys()
                     .map(|(tid, mid)| {
-                        let t = self.ctx.query().get_type(*tid);
+                        let t = self.query().get_type(*tid);
                         let tn = name_table.display(t.name_id);
                         let mn = name_table.display(*mid);
                         format!("({}, {})", tn, mn)
@@ -1012,7 +1005,7 @@ impl Cg<'_, '_, '_> {
 
         // Get param types and return type from arena
         let (param_ids, return_type_id) = {
-            let arena = self.ctx.arena();
+            let arena = self.arena();
             let (params, ret, _) = arena
                 .unwrap_function(func_type_id)
                 .ok_or_else(|| "Expected function type for static method call".to_string())?;
@@ -1038,7 +1031,7 @@ impl Cg<'_, '_, '_> {
         } else {
             Ok(CompiledValue {
                 value: results[0],
-                ty: type_id_to_cranelift(return_type_id, &self.ctx.arena(), self.ctx.ptr_type()),
+                ty: type_id_to_cranelift(return_type_id, &self.arena(), self.ptr_type()),
                 type_id: return_type_id,
             })
         }

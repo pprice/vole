@@ -373,7 +373,8 @@ impl Cg<'_, '_, '_> {
                 // They don't have compiled func_id, but we can look them up in native_registry
                 if let Some(ext_info) = self
                     .ctx
-                    .analyzed.implement_registry()
+                    .analyzed
+                    .implement_registry()
                     .get_external_func(callee_name)
                 {
                     let name_table = self.name_table();
@@ -499,7 +500,8 @@ impl Cg<'_, '_, '_> {
         // Look up the external info (module path and native name) from implement_registry
         let ext_info = self
             .ctx
-            .analyzed.implement_registry()
+            .analyzed
+            .implement_registry()
             .get_external_func(callee_name);
         let native_func = ext_info.and_then(|info| {
             let name_table = self.name_table();

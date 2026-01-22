@@ -1,5 +1,6 @@
 // src/codegen/compiler/mod.rs
 pub(crate) mod common;
+pub(crate) mod context_factory;
 mod impls;
 mod program;
 mod signatures;

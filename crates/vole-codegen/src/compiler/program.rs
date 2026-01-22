@@ -1230,7 +1230,9 @@ impl Compiler<'_> {
     /// Declare all monomorphized function instances
     fn declare_monomorphized_instances(&mut self) -> Result<(), String> {
         // Collect instances to avoid borrow issues
-        let instances = self.analyzed.entity_registry()
+        let instances = self
+            .analyzed
+            .entity_registry()
             .monomorph_cache
             .collect_instances();
 
@@ -1238,10 +1240,14 @@ impl Compiler<'_> {
             // Skip external functions - they don't need JIT compilation
             // They're called directly via native_registry
             let func_name = self.query().display_name(instance.original_name);
-            let short_name = self.analyzed.name_table()
+            let short_name = self
+                .analyzed
+                .name_table()
                 .last_segment_str(instance.original_name)
                 .unwrap_or_else(|| func_name.clone());
-            if self.analyzed.implement_registry()
+            if self
+                .analyzed
+                .implement_registry()
                 .get_external_func(&short_name)
                 .is_some()
             {
@@ -1273,7 +1279,9 @@ impl Compiler<'_> {
             .collect();
 
         // Collect instances to avoid borrow issues
-        let instances = self.analyzed.entity_registry()
+        let instances = self
+            .analyzed
+            .entity_registry()
             .monomorph_cache
             .collect_instances();
 
@@ -1283,10 +1291,14 @@ impl Compiler<'_> {
             let func_name = self.query().display_name(instance.original_name);
             // External functions are registered by their short name (e.g. "_generic_map_get")
             // not the fully qualified name (e.g. "main::_generic_map_get")
-            let short_name = self.analyzed.name_table()
+            let short_name = self
+                .analyzed
+                .name_table()
                 .last_segment_str(instance.original_name)
                 .unwrap_or_else(|| func_name.clone());
-            if self.analyzed.implement_registry()
+            if self
+                .analyzed
+                .implement_registry()
                 .get_external_func(&short_name)
                 .is_some()
             {
@@ -1425,7 +1437,9 @@ impl Compiler<'_> {
     /// Declare all monomorphized class method instances
     fn declare_class_method_monomorphized_instances(&mut self) -> Result<(), String> {
         // Collect instances to avoid borrow issues
-        let instances = self.analyzed.entity_registry()
+        let instances = self
+            .analyzed
+            .entity_registry()
             .class_method_monomorph_cache
             .collect_instances();
 
@@ -1485,7 +1499,9 @@ impl Compiler<'_> {
             .collect();
 
         // Collect instances to avoid borrow issues
-        let instances = self.analyzed.entity_registry()
+        let instances = self
+            .analyzed
+            .entity_registry()
             .class_method_monomorph_cache
             .collect_instances();
 
@@ -1731,8 +1747,7 @@ impl Compiler<'_> {
                                 .get(&param.name_id)
                                 .copied()
                                 .unwrap_or_else(|| {
-                                    self.analyzed.type_arena_mut()
-                                        .type_param(param.name_id)
+                                    self.analyzed.type_arena_mut().type_param(param.name_id)
                                 })
                         })
                         .collect();
@@ -1765,7 +1780,9 @@ impl Compiler<'_> {
     /// Declare all monomorphized static method instances
     fn declare_static_method_monomorphized_instances(&mut self) -> Result<(), String> {
         // Collect instances to avoid borrow issues
-        let instances = self.analyzed.entity_registry()
+        let instances = self
+            .analyzed
+            .entity_registry()
             .static_method_monomorph_cache
             .collect_instances();
 
@@ -1820,7 +1837,9 @@ impl Compiler<'_> {
             .collect();
 
         // Collect instances to avoid borrow issues
-        let instances = self.analyzed.entity_registry()
+        let instances = self
+            .analyzed
+            .entity_registry()
             .static_method_monomorph_cache
             .collect_instances();
 

@@ -780,7 +780,9 @@ pub(crate) fn box_interface_value_id(
 
     // Look up the interface Symbol name via EntityRegistry
     let interface_def = ctx.query().get_type(type_def_id);
-    let interface_name_str = ctx.analyzed.name_table()
+    let interface_name_str = ctx
+        .analyzed
+        .name_table()
         .last_segment_str(interface_def.name_id)
         .ok_or_else(|| format!("cannot get interface name string for {:?}", type_def_id))?;
     let interface_name = ctx.interner().lookup(&interface_name_str).ok_or_else(|| {
@@ -913,7 +915,8 @@ fn resolve_vtable_target(
     // Check implement registry for explicit implementations
     if let Some(method_name_id) = method_name_id
         && let Some(impl_) = ctx
-            .analyzed.implement_registry()
+            .analyzed
+            .implement_registry()
             .get_method(&impl_type_id, method_name_id)
     {
         // Use TypeId fields (required)

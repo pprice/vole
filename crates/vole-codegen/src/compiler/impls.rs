@@ -794,11 +794,8 @@ impl Compiler<'_> {
         self.jit.ctx.func.signature = sig;
 
         // Get the Cranelift type for self (using TypeId)
-        let self_cranelift_type = type_id_to_cranelift(
-            self_type_id,
-            &self.analyzed.type_arena(),
-            self.pointer_type,
-        );
+        let self_cranelift_type =
+            type_id_to_cranelift(self_type_id, &self.analyzed.type_arena(), self.pointer_type);
 
         // Build params: Vec<(Symbol, TypeId, Type)>
         // First collect type IDs (which may access arena internally)
@@ -1379,7 +1376,8 @@ impl Compiler<'_> {
                 let arena = self.analyzed.type_arena();
                 if let Some((type_def_id, _)) = arena.unwrap_class(meta.vole_type) {
                     let name_id = self.query().get_type(type_def_id).name_id;
-                    self.analyzed.name_table()
+                    self.analyzed
+                        .name_table()
                         .last_segment_str(name_id)
                         .is_some_and(|name| name == type_name_str)
                 } else {

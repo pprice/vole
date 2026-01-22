@@ -18,7 +18,10 @@ use vole_sema::implement_registry::ExternalMethodInfo;
 use vole_sema::type_arena::{SemaType as ArenaType, TypeId};
 
 use super::lambda::CaptureBinding;
-use super::types::{CompileCtx, CompiledValue, native_type_to_cranelift, type_id_to_cranelift};
+use super::types::{
+    CodegenCtx, CompileCtx, CompiledValue, ExplicitParams, FunctionCtx, native_type_to_cranelift,
+    type_id_to_cranelift,
+};
 
 /// Control flow context for loops (break/continue targets)
 pub(crate) struct ControlFlow {
@@ -98,11 +101,27 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     pub field_cache: HashMap<(Value, u32), Value>,
     /// Return type of the current function (moved from CompileCtx for cleaner separation)
     pub return_type: Option<TypeId>,
+
+    // ========== Split context fields (for incremental migration) ==========
+    // These are Optional to support both legacy (CompileCtx) and new (split) modes.
+    // When set, accessor methods prefer these over ctx fields.
+    /// Split mutable JIT infrastructure (module, func_registry)
+    #[allow(dead_code)]
+    codegen_ctx: Option<&'a mut CodegenCtx<'ctx>>,
+    /// Split per-function state (return type, substitutions)
+    #[allow(dead_code)]
+    function_ctx: Option<&'a FunctionCtx<'ctx>>,
+    /// Split read-only lookup tables
+    #[allow(dead_code)]
+    explicit_params: Option<&'a ExplicitParams<'ctx>>,
 }
 
 impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Create a new codegen context with optional captures for closures.
     /// return_type is the function's return type (passed directly for cleaner separation).
+    ///
+    /// This is the legacy constructor using CompileCtx. For new code, prefer `new_split()`
+    /// which uses the split context types (CodegenCtx, FunctionCtx, ExplicitParams).
     pub fn new(
         builder: &'a mut FunctionBuilder<'b>,
         vars: &'a mut HashMap<Symbol, (Variable, TypeId)>,
@@ -121,6 +140,56 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             call_cache: HashMap::new(),
             field_cache: HashMap::new(),
             return_type,
+            // Split contexts not used in legacy mode
+            codegen_ctx: None,
+            function_ctx: None,
+            explicit_params: None,
+        }
+    }
+
+    /// Create a new codegen context using split context types.
+    ///
+    /// This is the preferred constructor for new code. It takes the split contexts
+    /// (CodegenCtx, FunctionCtx, ExplicitParams) alongside the legacy CompileCtx.
+    /// During migration, both ctx and the split contexts are available - accessor
+    /// methods will prefer the split contexts when set.
+    ///
+    /// # Arguments
+    /// * `builder` - Cranelift FunctionBuilder for IR emission
+    /// * `vars` - Variable bindings for the current function
+    /// * `ctx` - Legacy CompileCtx (still required during migration)
+    /// * `cf` - Control flow context for loops
+    /// * `codegen_ctx` - Split mutable JIT infrastructure
+    /// * `function_ctx` - Split per-function state
+    /// * `explicit_params` - Split read-only lookup tables
+    /// * `captures` - Optional closure captures
+    /// * `return_type` - Function return type
+    #[allow(dead_code)] // Part of incremental migration
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_split(
+        builder: &'a mut FunctionBuilder<'b>,
+        vars: &'a mut HashMap<Symbol, (Variable, TypeId)>,
+        ctx: &'a mut CompileCtx<'ctx>,
+        cf: &'a mut ControlFlow,
+        codegen_ctx: &'a mut CodegenCtx<'ctx>,
+        function_ctx: &'a FunctionCtx<'ctx>,
+        explicit_params: &'a ExplicitParams<'ctx>,
+        captures: Option<Captures<'a>>,
+        return_type: Option<TypeId>,
+    ) -> Self {
+        Self {
+            builder,
+            vars,
+            ctx,
+            cf,
+            captures,
+            self_capture: None,
+            call_cache: HashMap::new(),
+            field_cache: HashMap::new(),
+            return_type,
+            codegen_ctx: Some(codegen_ctx),
+            function_ctx: Some(function_ctx),
+            explicit_params: Some(explicit_params),
         }
     }
 
@@ -176,6 +245,109 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.ctx.query().name_table_rc().borrow()
     }
 
+    // ========== Convenience accessors for migration ==========
+    // These wrap ctx.* calls to enable later migration to split contexts.
+    // Allowed dead_code during incremental migration.
+
+    /// Get the pointer type (Cranelift platform pointer)
+    #[allow(dead_code)]
+    #[inline]
+    pub fn ptr_type(&self) -> Type {
+        self.ctx.ptr_type()
+    }
+
+    /// Get the query interface for the analyzed program
+    #[allow(dead_code)]
+    #[inline]
+    pub fn query(&self) -> vole_sema::ProgramQuery<'_> {
+        self.ctx.query()
+    }
+
+    /// Borrow the type arena
+    #[allow(dead_code)]
+    #[inline]
+    pub fn arena(&self) -> std::cell::Ref<'_, vole_sema::type_arena::TypeArena> {
+        self.ctx.arena()
+    }
+
+    /// Get expression type by NodeId
+    #[allow(dead_code)]
+    #[inline]
+    pub fn get_expr_type(&self, node_id: &vole_frontend::NodeId) -> Option<TypeId> {
+        self.ctx.get_expr_type(node_id)
+    }
+
+    /// Get substituted return type for generic method calls
+    #[allow(dead_code)]
+    #[inline]
+    pub fn get_substituted_return_type(&self, node_id: &vole_frontend::NodeId) -> Option<TypeId> {
+        self.ctx.get_substituted_return_type(node_id)
+    }
+
+    /// Get type metadata map
+    #[allow(dead_code)]
+    #[inline]
+    pub fn type_metadata(&self) -> &'ctx HashMap<Symbol, super::types::TypeMetadata> {
+        self.ctx.type_meta()
+    }
+
+    /// Get impl method infos map
+    #[allow(dead_code)]
+    #[inline]
+    pub fn impl_method_infos(
+        &self,
+    ) -> &'ctx HashMap<
+        (
+            vole_sema::implement_registry::ImplTypeId,
+            vole_identity::NameId,
+        ),
+        super::types::MethodInfo,
+    > {
+        self.ctx.impl_methods()
+    }
+
+    /// Get global variable initializer by name
+    #[allow(dead_code)]
+    #[inline]
+    pub fn global_init(&self, name: Symbol) -> Option<&vole_frontend::Expr> {
+        self.ctx.global_init(name)
+    }
+
+    /// Get source file pointer for error reporting
+    #[allow(dead_code)]
+    #[inline]
+    pub fn source_file(&self) -> (*const u8, usize) {
+        self.ctx.source_file()
+    }
+
+    /// Increment lambda counter and return new value
+    #[allow(dead_code)]
+    #[inline]
+    pub fn next_lambda_id(&self) -> usize {
+        self.ctx.next_lambda_id()
+    }
+
+    /// Get native function registry
+    #[allow(dead_code)]
+    #[inline]
+    pub fn native_registry(&self) -> &'ctx vole_runtime::NativeRegistry {
+        self.ctx.native_funcs()
+    }
+
+    /// Get FunctionCtx for split context operations
+    #[allow(dead_code)]
+    #[inline]
+    pub fn function_ctx(&self) -> FunctionCtx<'ctx> {
+        self.ctx.function_ctx()
+    }
+
+    /// Get the interner for symbol resolution
+    #[allow(dead_code)]
+    #[inline]
+    pub fn interner(&self) -> &'ctx vole_frontend::Interner {
+        self.ctx.interner()
+    }
+
     // ========== Arena helpers ==========
 
     /// Get an update interface for arena mutations.
@@ -197,7 +369,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Convert a TypeId to a Cranelift type
     pub fn cranelift_type(&self, ty: TypeId) -> Type {
-        type_id_to_cranelift(ty, &self.ctx.arena(), self.ctx.ptr_type())
+        // Use type_ctx() for split context migration (same underlying values as ctx)
+        let type_ctx = self.type_ctx();
+        type_id_to_cranelift(ty, &type_ctx.arena(), type_ctx.pointer_type)
     }
 
     /// Unwrap an interface type, returning the TypeDefId if it is one

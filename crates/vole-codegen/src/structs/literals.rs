@@ -20,7 +20,7 @@ impl Cg<'_, '_, '_> {
         // Resolve type name to main interner's Symbol for lookup
         // This is needed because module classes register with main interner Symbols,
         // but struct literals in module code use module interner Symbols
-        let type_name = self.ctx.interner().resolve(sl.name);
+        let type_name = self.interner().resolve(sl.name);
         let lookup_symbol = self
             .ctx
             .analyzed
@@ -61,14 +61,14 @@ impl Cg<'_, '_, '_> {
 
         // Get field types for wrapping optional values using arena methods
         let field_types: HashMap<String, TypeId> = {
-            let arena = self.ctx.arena();
+            let arena = self.arena();
             let type_def_id = arena
                 .unwrap_record(result_type_id)
                 .map(|(id, _)| id)
                 .or_else(|| arena.unwrap_class(result_type_id).map(|(id, _)| id));
 
             if let Some(type_def_id) = type_def_id {
-                let type_def = self.ctx.query().get_type(type_def_id);
+                let type_def = self.query().get_type(type_def_id);
                 if let Some(generic_info) = &type_def.generic_info {
                     generic_info
                         .field_names
@@ -92,12 +92,12 @@ impl Cg<'_, '_, '_> {
         };
 
         for init in &sl.fields {
-            let init_name = self.ctx.interner().resolve(init.name);
+            let init_name = self.interner().resolve(init.name);
             let slot = *field_slots.get(init_name).ok_or_else(|| {
                 format!(
                     "Unknown field: {} in type {}",
                     init_name,
-                    self.ctx.interner().resolve(sl.name)
+                    self.interner().resolve(sl.name)
                 )
             })?;
 
@@ -107,7 +107,7 @@ impl Cg<'_, '_, '_> {
             // Use heap allocation for unions stored in class/record fields since stack slots
             // don't persist beyond the current function's stack frame
             let final_value = if let Some(&field_type_id) = field_types.get(init_name) {
-                let arena = self.ctx.arena();
+                let arena = self.arena();
                 let field_is_union = arena.is_union(field_type_id);
                 let field_is_interface = arena.is_interface(field_type_id);
                 let value_is_union = arena.is_union(value.type_id);
@@ -134,7 +134,7 @@ impl Cg<'_, '_, '_> {
 
         Ok(CompiledValue {
             value: instance_ptr,
-            ty: self.ctx.ptr_type(),
+            ty: self.ptr_type(),
             type_id: result_type_id,
         })
     }
@@ -147,7 +147,7 @@ impl Cg<'_, '_, '_> {
         value: CompiledValue,
         union_type_id: TypeId,
     ) -> Result<CompiledValue, String> {
-        let arena = self.ctx.arena();
+        let arena = self.arena();
         let variants = arena.unwrap_union(union_type_id).ok_or_else(|| {
             CodegenError::type_mismatch("union construction", "union type", "non-union").to_string()
         })?;
@@ -177,16 +177,14 @@ impl Cg<'_, '_, '_> {
         let heap_alloc_ref = self.func_ref(heap_alloc_key)?;
 
         // Allocate union storage on the heap
+        let ptr_type = self.ptr_type();
         let union_size = type_id_size(
             union_type_id,
-            self.ctx.ptr_type(),
-            self.ctx.query().registry(),
-            &self.ctx.arena(),
+            ptr_type,
+            self.query().registry(),
+            &self.arena(),
         );
-        let size_val = self
-            .builder
-            .ins()
-            .iconst(self.ctx.ptr_type(), union_size as i64);
+        let size_val = self.builder.ins().iconst(ptr_type, union_size as i64);
         let alloc_call = self.builder.ins().call(heap_alloc_ref, &[size_val]);
         let heap_ptr = self.builder.inst_results(alloc_call)[0];
 
@@ -205,7 +203,7 @@ impl Cg<'_, '_, '_> {
 
         Ok(CompiledValue {
             value: heap_ptr,
-            ty: self.ctx.ptr_type(),
+            ty: self.ptr_type(),
             type_id: union_type_id,
         })
     }

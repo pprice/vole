@@ -84,7 +84,9 @@ impl Compiler<'_> {
             .expect("class should be registered in entity registry");
 
         // Create a placeholder vole_type_id (will be replaced in finalize_class)
-        let vole_type_id = self.analyzed.type_arena_mut()
+        let vole_type_id = self
+            .analyzed
+            .type_arena_mut()
             .class(type_def_id, TypeIdVec::new());
 
         self.type_metadata.insert(
@@ -144,7 +146,9 @@ impl Compiler<'_> {
                 self.resolve_type_to_id(return_type_expr)
             } else if let Some(type_def_id) = type_def_id {
                 // Look up the inferred return type from sema
-                if let Some(method_id) = self.analyzed.entity_registry()
+                if let Some(method_id) = self
+                    .analyzed
+                    .entity_registry()
                     .find_method_on_type(type_def_id, method_name_id)
                 {
                     let method_def = self.query().get_method(method_id);
@@ -266,7 +270,9 @@ impl Compiler<'_> {
             .expect("record should be registered in entity registry");
 
         // Create a placeholder vole_type_id (will be replaced in finalize_record)
-        let vole_type_id = self.analyzed.type_arena_mut()
+        let vole_type_id = self
+            .analyzed
+            .type_arena_mut()
             .record(type_def_id, TypeIdVec::new());
 
         self.type_metadata.insert(
@@ -428,7 +434,9 @@ impl Compiler<'_> {
                 self.resolve_type_to_id(return_type_expr)
             } else if let Some(type_def_id) = type_def_id {
                 // Look up the inferred return type from sema
-                if let Some(method_id) = self.analyzed.entity_registry()
+                if let Some(method_id) = self
+                    .analyzed
+                    .entity_registry()
                     .find_static_method_on_type(type_def_id, method_name_id)
                 {
                     let method_def = self.query().get_method(method_id);
@@ -480,7 +488,9 @@ impl Compiler<'_> {
 
         // Look up the TypeDefId using the class name
         tracing::debug!(type_name = %type_name_str, "Looking up TypeDefId for module class");
-        let Some(type_def_id) = self.analyzed.entity_registry()
+        let Some(type_def_id) = self
+            .analyzed
+            .entity_registry()
             .class_by_short_name(type_name_str, &self.analyzed.name_table())
         else {
             tracing::warn!(type_name = %type_name_str, "Could not find TypeDefId for module class");
@@ -492,7 +502,8 @@ impl Compiler<'_> {
         let already_registered = self.type_metadata.values().any(|meta| {
             let arena = self.analyzed.type_arena();
             if let Some((type_def_id, _)) = arena.unwrap_class(meta.vole_type) {
-                self.analyzed.name_table()
+                self.analyzed
+                    .name_table()
                     .last_segment_str(self.query().type_name_id(type_def_id))
                     .is_some_and(|name| name == type_name_str)
             } else {
@@ -568,7 +579,9 @@ impl Compiler<'_> {
             .lookup(type_name_str)
             .unwrap_or(class.name);
         tracing::debug!(type_name = %type_name_str, ?class.name, ?main_class_symbol, "Inserting type_metadata");
-        let vole_type_id = self.analyzed.type_arena_mut()
+        let vole_type_id = self
+            .analyzed
+            .type_arena_mut()
             .class(type_def_id, TypeIdVec::new());
         self.type_metadata.insert(
             main_class_symbol,

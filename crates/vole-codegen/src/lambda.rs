@@ -65,6 +65,8 @@ pub(crate) fn infer_lambda_return_type(
 /// Get lambda param and return types from explicit annotations or codegen inference (fallback when sema type unavailable)
 fn get_lambda_types_fallback(lambda: &LambdaExpr, ctx: &CompileCtx) -> (Vec<TypeId>, TypeId) {
     let primitives = ctx.arena().primitives;
+    let type_ctx = ctx.type_ctx();
+    let func_ctx = ctx.function_ctx();
 
     // Build param type ids from AST annotations, defaulting to i64
     let param_type_ids: Vec<TypeId> = lambda
@@ -72,14 +74,14 @@ fn get_lambda_types_fallback(lambda: &LambdaExpr, ctx: &CompileCtx) -> (Vec<Type
         .iter()
         .map(|p| {
             p.ty.as_ref()
-                .map(|t| resolve_type_expr_id(t, ctx))
+                .map(|t| resolve_type_expr_id(t, &type_ctx, &func_ctx, ctx.type_metadata))
                 .unwrap_or(primitives.i64)
         })
         .collect();
 
     // Get return type from annotation or infer from body
     let return_type_id = if let Some(t) = &lambda.return_type {
-        resolve_type_expr_id(t, ctx)
+        resolve_type_expr_id(t, &type_ctx, &func_ctx, ctx.type_metadata)
     } else {
         let param_context: Vec<(Symbol, TypeId)> = lambda
             .params
@@ -182,20 +184,22 @@ pub(crate) fn infer_expr_type(
 
         ExprKind::Lambda(lambda) => {
             let primitives = ctx.arena().primitives;
+            let type_ctx = ctx.type_ctx();
+            let func_ctx = ctx.function_ctx();
             // Resolve param types directly to TypeIds
             let lambda_param_ids: TypeIdVec = lambda
                 .params
                 .iter()
                 .map(|p| {
                     p.ty.as_ref()
-                        .map(|t| resolve_type_expr_id(t, ctx))
+                        .map(|t| resolve_type_expr_id(t, &type_ctx, &func_ctx, ctx.type_metadata))
                         .unwrap_or(primitives.i64)
                 })
                 .collect();
             let return_ty_id = lambda
                 .return_type
                 .as_ref()
-                .map(|t| resolve_type_expr_id(t, ctx))
+                .map(|t| resolve_type_expr_id(t, &type_ctx, &func_ctx, ctx.type_metadata))
                 .unwrap_or(primitives.i64);
 
             ctx.update().function(

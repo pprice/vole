@@ -6,16 +6,13 @@
 
 use std::collections::HashMap;
 
-use cranelift::prelude::{FunctionBuilder, InstBuilder, Type, types};
+use cranelift::prelude::{FunctionBuilder, InstBuilder, Type, Variable, types};
 use vole_frontend::{FuncBody, Symbol};
 use vole_sema::type_arena::TypeId;
 
-use crate::context::Captures;
+use crate::context::{Captures, Cg, ControlFlow};
 use crate::lambda::CaptureBinding;
-use crate::stmt::compile_func_body;
 use crate::types::CompileCtx;
-
-use super::ControlFlowCtx;
 
 /// What to return from a non-terminated block
 #[derive(Clone, Copy)]
@@ -127,28 +124,17 @@ impl<'a> FunctionCompileConfig<'a> {
     }
 }
 
-/// Compile the inner logic of a function: entry block, param binding, body, return handling.
+/// Set up function entry: create entry block, bind parameters and captures.
 ///
-/// This is the core compilation logic shared by all function compilation paths.
-/// The caller is responsible for:
-/// - Creating the FunctionBuilder with the correct context
-/// - Setting up the function signature
-/// - Calling define_function and clear after this returns
-///
-/// This function takes ownership of the builder because `finalize()` consumes it.
+/// Returns (variables, captures) ready for Cg creation.
 ///
 /// # Arguments
-/// * `builder` - The FunctionBuilder for this function (consumed by finalize)
-/// * `ctx` - The CompileCtx with all necessary context
-/// * `config` - Configuration specifying the function to compile
-///
-/// # Returns
-/// Ok(()) on success, Err with message on failure
-pub fn compile_function_inner(
-    mut builder: FunctionBuilder,
-    ctx: &mut CompileCtx,
-    config: FunctionCompileConfig,
-) -> Result<(), String> {
+/// * `builder` - The FunctionBuilder (mutably borrowed for setup)
+/// * `config` - Configuration specifying params, self binding, captures
+fn setup_function_entry<'a>(
+    builder: &mut FunctionBuilder,
+    config: &FunctionCompileConfig<'a>,
+) -> (HashMap<Symbol, (Variable, TypeId)>, Option<Captures<'a>>) {
     // Create entry block and switch to it
     let entry_block = builder.create_block();
     builder.append_block_params_for_function_params(entry_block);
@@ -159,10 +145,9 @@ pub fn compile_function_inner(
     let mut param_offset = config.skip_block_params;
 
     // Build variables map
-    let mut variables: HashMap<Symbol, (cranelift::prelude::Variable, TypeId)> = HashMap::new();
+    let mut variables: HashMap<Symbol, (Variable, TypeId)> = HashMap::new();
 
     // Set up closure variable if this is a capturing lambda
-    // The closure pointer is at block_params[0] when skip_block_params > 0 and we have captures
     let captures = if let (Some(bindings), Some(closure_ptr_type)) =
         (config.capture_bindings, config.closure_ptr_type)
     {
@@ -191,32 +176,99 @@ pub fn compile_function_inner(
         variables.insert(*name, (var, *type_id));
     }
 
+    (variables, captures)
+}
+
+/// Compile function body using Cg context.
+///
+/// This is the new Cg-based compilation path. The caller is responsible for:
+/// - Setting up the function entry (call `setup_function_entry`)
+/// - Creating the Cg context
+/// - Calling seal_all_blocks and finalize after this returns
+///
+/// # Arguments
+/// * `cg` - The Cg context with builder, variables, captures, etc.
+/// * `body` - The function body to compile
+/// * `default_return` - What to return if body doesn't terminate explicitly
+///
+/// # Returns
+/// Ok(()) on success, Err with message on failure
+#[allow(dead_code)] // Part of CompileCtx migration
+pub fn compile_function_body_with_cg(
+    cg: &mut Cg,
+    body: &FuncBody,
+    default_return: DefaultReturn,
+) -> Result<(), String> {
     // Compile function body
-    let mut cf_ctx = ControlFlowCtx::default();
-    let (terminated, expr_value) = compile_func_body(
-        &mut builder,
-        config.body,
-        &mut variables,
-        &mut cf_ctx,
-        ctx,
-        captures,
-        config.return_type_id,
-    )?;
+    let (terminated, expr_value) = match body {
+        FuncBody::Block(block) => {
+            let terminated = cg.block(block)?;
+            (terminated, None)
+        }
+        FuncBody::Expr(expr) => {
+            let value = cg.expr(expr)?;
+            (true, Some(value))
+        }
+    };
 
     // Add implicit return if no explicit return
     if let Some(value) = expr_value {
-        builder.ins().return_(&[value.value]);
+        cg.builder.ins().return_(&[value.value]);
     } else if !terminated {
-        match config.default_return {
+        match default_return {
             DefaultReturn::Empty => {
-                builder.ins().return_(&[]);
+                cg.builder.ins().return_(&[]);
             }
             DefaultReturn::ZeroI64 => {
-                let zero = builder.ins().iconst(types::I64, 0);
-                builder.ins().return_(&[zero]);
+                let zero = cg.builder.ins().iconst(types::I64, 0);
+                cg.builder.ins().return_(&[zero]);
             }
         }
     }
+
+    Ok(())
+}
+
+/// Compile the inner logic of a function: entry block, param binding, body, return handling.
+///
+/// This is the core compilation logic shared by all function compilation paths.
+/// The caller is responsible for:
+/// - Creating the FunctionBuilder with the correct context
+/// - Setting up the function signature
+/// - Calling define_function and clear after this returns
+///
+/// This function takes ownership of the builder because `finalize()` consumes it.
+///
+/// # Arguments
+/// * `builder` - The FunctionBuilder for this function (consumed by finalize)
+/// * `ctx` - The CompileCtx with all necessary context
+/// * `config` - Configuration specifying the function to compile
+///
+/// # Returns
+/// Ok(()) on success, Err with message on failure
+pub fn compile_function_inner(
+    mut builder: FunctionBuilder,
+    ctx: &mut CompileCtx,
+    config: FunctionCompileConfig,
+) -> Result<(), String> {
+    // Set up entry block and bind parameters
+    let (mut variables, captures) = setup_function_entry(&mut builder, &config);
+
+    // Create Cg and compile body using the new path
+    let mut cf = ControlFlow::new();
+    let mut cg = Cg::new(
+        &mut builder,
+        &mut variables,
+        ctx,
+        &mut cf,
+        captures,
+        config.return_type_id,
+    );
+
+    compile_function_body_with_cg(&mut cg, config.body, config.default_return)?;
+
+    // Cg borrow ends here, builder is accessible again
+    drop(cg);
 
     builder.seal_all_blocks();
     builder.finalize();
