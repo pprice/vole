@@ -112,28 +112,63 @@ impl<'a> CodegenCtx<'a> {
     }
 
     /// Convenience: get TypeCtx reference
+    #[inline]
     pub fn type_ctx(&self) -> &TypeCtx<'a> {
         &self.types
     }
 
-    /// Convenience: pointer type
-    pub fn pointer_type(&self) -> Type {
+    /// Convenience: pointer type (alias for Cg migration)
+    #[inline]
+    pub fn ptr_type(&self) -> Type {
         self.types.pointer_type
     }
 
     /// Convenience: query interface
+    #[inline]
     pub fn query(&self) -> &ProgramQuery<'a> {
         &self.types.query
     }
 
     /// Convenience: borrow arena
+    #[inline]
     pub fn arena(&self) -> std::cell::Ref<'_, TypeArena> {
         self.types.arena()
     }
 
     /// Get an update interface for arena mutations.
+    #[inline]
     pub fn update(&self) -> vole_sema::ProgramUpdate<'_> {
         self.types.update()
+    }
+
+    /// Get interner reference.
+    #[inline]
+    pub fn interner(&self) -> &'a Interner {
+        self.types.interner()
+    }
+
+    /// Get entity registry reference.
+    #[inline]
+    pub fn registry(&self) -> &'a EntityRegistry {
+        self.types.entities()
+    }
+
+    /// Get mutable reference to function registry.
+    #[inline]
+    pub fn funcs(&mut self) -> &mut FunctionRegistry {
+        self.func_registry
+    }
+
+    /// Get immutable reference to function registry.
+    #[inline]
+    pub fn funcs_ref(&self) -> &FunctionRegistry {
+        self.func_registry
+    }
+
+    /// Get mutable reference to JIT module.
+    #[inline]
+    pub fn jit_module(&mut self) -> &mut JITModule {
+        self.module
     }
 }
 
