@@ -6,9 +6,12 @@ Vole has built-in testing support with `test` blocks and assertions.
 
 | Syntax | Description |
 |--------|-------------|
-| `test "name" { }` | Define a test |
+| `test "name" { }` | Define a test with block body |
+| `test "name" => expr` | Define a test with expression body |
 | `tests { }` | Group multiple tests |
 | `tests "name" { }` | Named test group |
+| `func name() => ...` | Scoped helper function (inside tests block) |
+| `let name = ...` | Scoped constant (inside tests block) |
 | `assert(condition)` | Assert condition is true |
 
 **Running tests:**
@@ -34,6 +37,28 @@ test "string concatenation" {
 ```
 
 Tests are collected and run by the test runner.
+
+### Expression Tests
+
+For simple single-assertion tests, use expression syntax:
+
+```vole
+test "addition works" => assert(1 + 1 == 2)
+
+test "comparison" => assert(10 > 5)
+
+test "string length" => assert("hello".length == 5)
+```
+
+Use block syntax when you need multiple statements or local variables:
+
+```vole
+test "complex setup" {
+    let a = 10
+    let b = 20
+    assert(a + b == 30)
+}
+```
 
 ### Assertions
 
@@ -72,27 +97,54 @@ Named groups for organization:
 
 ```vole
 tests "Math operations" {
-    test "addition" {
-        assert(2 + 2 == 4)
-    }
-
-    test "subtraction" {
-        assert(5 - 3 == 2)
-    }
-
-    test "multiplication" {
-        assert(3 * 4 == 12)
-    }
+    test "addition" => assert(2 + 2 == 4)
+    test "subtraction" => assert(5 - 3 == 2)
+    test "multiplication" => assert(3 * 4 == 12)
 }
 
 tests "String operations" {
-    test "length" {
-        assert("hello".length == 5)
-    }
+    test "length" => assert("hello".length == 5)
+    test "concatenation" => assert("a" + "b" == "ab")
+}
+```
 
-    test "concatenation" {
-        assert("a" + "b" == "ab")
-    }
+### Scoped Declarations
+
+Define helper functions and constants scoped to a tests block:
+
+```vole
+tests "Math helpers" {
+    // Scoped function - only visible within this tests block
+    func double(x: i64) => x * 2
+
+    // Scoped constant
+    let FACTOR = 10
+
+    test "double works" => assert(double(21) == 42)
+
+    test "use constant" => assert(double(FACTOR) == 20)
+}
+
+// double and FACTOR are not visible here
+```
+
+Declarations must appear before test cases. Use scoped declarations to:
+- Keep helpers close to where they're used
+- Avoid polluting module-level namespace
+- Make tests self-documenting
+
+For helpers shared across multiple tests blocks, keep them at module level:
+
+```vole
+// Module-level helper - shared across all tests blocks
+func shared_helper(x: i64) => x + 1
+
+tests "first group" {
+    test "uses shared" => assert(shared_helper(1) == 2)
+}
+
+tests "second group" {
+    test "also uses shared" => assert(shared_helper(10) == 11)
 }
 ```
 
@@ -113,28 +165,30 @@ vole test test/unit/*.vole
 
 ### Test File Structure
 
-A typical test file:
+A typical test file with scoped helpers:
 
 ```vole
 // test/unit/calculator.vole
 
-// Define or use the functions being tested
-func add(a: i32, b: i32) -> i32 {
-    return a + b
-}
-
 tests "Calculator" {
-    test "add positive numbers" {
-        assert(add(2, 3) == 5)
-    }
+    // Scoped helper function
+    func add(a: i32, b: i32) -> i32 => a + b
 
-    test "add negative numbers" {
-        assert(add(-1, -1) == -2)
-    }
+    test "add positive numbers" => assert(add(2, 3) == 5)
+    test "add negative numbers" => assert(add(-1, -1) == -2)
+    test "add mixed" => assert(add(-5, 10) == 5)
+}
+```
 
-    test "add mixed" {
-        assert(add(-5, 10) == 5)
-    }
+Or with module-level functions when testing external code:
+
+```vole
+// test/unit/math.vole
+import math
+
+tests "math module" {
+    test "abs positive" => assert(math.abs(5) == 5)
+    test "abs negative" => assert(math.abs(-5) == 5)
 }
 ```
 
@@ -143,20 +197,18 @@ tests "Calculator" {
 **Test one thing per test:**
 
 ```vole
-// Good
-test "array length" {
-    assert([1, 2, 3].length == 3)
-}
+// Good - concise expression tests
+test "array length" => assert([1, 2, 3].length == 3)
 
 test "empty array length" {
     let empty: [i32] = []
     assert(empty.length == 0)
 }
 
-// Avoid
+// Avoid - multiple concerns in one test
 test "array stuff" {
     assert([1, 2, 3].length == 3)
-    assert([].length == 0)  // Multiple concerns
+    assert([].length == 0)
     assert([1] + [2] == [1, 2])
 }
 ```
@@ -196,25 +248,11 @@ test "user can be created with valid data" {
 
 ```vole
 tests "Division" {
-    test "positive numbers" {
-        assert(10 / 2 == 5)
-    }
-
-    test "result truncates" {
-        assert(7 / 2 == 3)
-    }
-
-    test "negative dividend" {
-        assert(-10 / 2 == -5)
-    }
-
-    test "negative divisor" {
-        assert(10 / -2 == -5)
-    }
-
-    test "both negative" {
-        assert(-10 / -2 == 5)
-    }
+    test "positive numbers" => assert(10 / 2 == 5)
+    test "result truncates" => assert(7 / 2 == 3)
+    test "negative dividend" => assert(-10 / 2 == -5)
+    test "negative divisor" => assert(10 / -2 == -5)
+    test "both negative" => assert(-10 / -2 == 5)
 }
 ```
 
@@ -253,7 +291,7 @@ tests "divide function" {
 
 ### Testing with Setup
 
-Share setup across tests:
+Share setup across tests using scoped helpers:
 
 ```vole
 record User {
@@ -262,15 +300,16 @@ record User {
     active: bool
 }
 
-func make_test_user() -> User {
-    return User {
-        name: "Test User",
-        age: 25,
-        active: true
-    }
-}
-
 tests "User operations" {
+    // Scoped factory function
+    func make_test_user() -> User {
+        return User {
+            name: "Test User",
+            age: 25,
+            active: true
+        }
+    }
+
     test "can get name" {
         let user = make_test_user()
         assert(user.name == "Test User")
@@ -282,6 +321,8 @@ tests "User operations" {
     }
 }
 ```
+
+Note: Record definitions must remain at module level (scoped types not yet supported).
 
 ### Testing Iterators
 
@@ -331,3 +372,5 @@ test/
 4. **Use descriptive names** - Test name should explain the scenario
 5. **Test edge cases** - Empty, zero, negative, boundary values
 6. **Don't test the language** - Test your code, not Vole itself
+7. **Use expression syntax for simple tests** - `test "name" => assert(...)`
+8. **Scope helpers to tests blocks** - Keep helpers close to where they're used
