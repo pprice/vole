@@ -500,6 +500,65 @@ impl Analyzer {
                     Ok(then_ty_id)
                 }
             }
+
+            ExprKind::When(when_expr) => {
+                // When expressions must have at least one arm
+                if when_expr.arms.is_empty() {
+                    self.add_error(
+                        SemanticError::WhenExprEmpty {
+                            span: when_expr.span.into(),
+                        },
+                        when_expr.span,
+                    );
+                    return Ok(ArenaTypeId::INVALID);
+                }
+
+                // Check that there's a wildcard arm
+                let has_wildcard = when_expr.arms.iter().any(|arm| arm.condition.is_none());
+                if !has_wildcard {
+                    self.add_error(
+                        SemanticError::WhenExprNotExhaustive {
+                            span: when_expr.span.into(),
+                        },
+                        when_expr.span,
+                    );
+                    return Ok(ArenaTypeId::INVALID);
+                }
+
+                // Check all conditions are bool and all bodies have the same type
+                let mut result_type = ArenaTypeId::INVALID;
+
+                for (i, arm) in when_expr.arms.iter().enumerate() {
+                    // Check condition (if not wildcard)
+                    if let Some(ref cond) = arm.condition {
+                        let cond_ty = self.check_expr(cond, interner)?;
+                        if cond_ty != self.ty_bool_id() && cond_ty != ArenaTypeId::INVALID {
+                            let found_str = self.type_display_id(cond_ty);
+                            self.add_error(
+                                SemanticError::WhenConditionNotBool {
+                                    found: found_str,
+                                    span: cond.span.into(),
+                                },
+                                cond.span,
+                            );
+                        }
+                    }
+
+                    // Check body
+                    let body_ty = self.check_expr(&arm.body, interner)?;
+
+                    if i == 0 {
+                        result_type = body_ty;
+                    } else if body_ty != ArenaTypeId::INVALID
+                        && result_type != ArenaTypeId::INVALID
+                        && !self.types_compatible_id(result_type, body_ty, interner)
+                    {
+                        self.add_type_mismatch_id(result_type, body_ty, arm.body.span);
+                    }
+                }
+
+                Ok(result_type)
+            }
         }
     }
 

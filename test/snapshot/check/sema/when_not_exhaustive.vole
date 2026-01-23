@@ -1,0 +1,8 @@
+// Error: when expression without wildcard is not exhaustive
+
+func check_exhaustive() -> i64 {
+    return when {
+        true => 1
+        false => 0
+    }
+}

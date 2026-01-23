@@ -1,0 +1,14 @@
+[stdout]
+
+[stderr]
+  x [E2091]: when expression is not exhaustive
+   ,-[<path>/when_not_exhaustive.vole:4:12]
+ 3 |     func check_exhaustive() -> i64 {
+ 4 | ,->     return when {
+ 5 | |           true => 1
+ 6 | |           false => 0
+ 7 | |->     }
+   : `---- when expression may not cover all cases
+ 8 |     }
+   `----
+  help: add a wildcard arm '_ => ...' to handle all remaining cases

@@ -252,6 +252,12 @@ impl<'a> GeneratorTransformer<'a> {
                         .as_ref()
                         .is_some_and(|e| self.expr_contains_yield(e))
             }
+            ExprKind::When(when_expr) => when_expr.arms.iter().any(|arm| {
+                arm.condition
+                    .as_ref()
+                    .is_some_and(|c| self.expr_contains_yield(c))
+                    || self.expr_contains_yield(&arm.body)
+            }),
             // Leaf expressions that can't contain yield
             ExprKind::IntLiteral(_)
             | ExprKind::FloatLiteral(_)
@@ -528,6 +534,14 @@ impl<'a> GeneratorTransformer<'a> {
                 self.collect_yields_from_expr(&if_expr.then_branch, yields);
                 if let Some(else_branch) = &if_expr.else_branch {
                     self.collect_yields_from_expr(else_branch, yields);
+                }
+            }
+            ExprKind::When(when_expr) => {
+                for arm in &when_expr.arms {
+                    if let Some(ref cond) = arm.condition {
+                        self.collect_yields_from_expr(cond, yields);
+                    }
+                    self.collect_yields_from_expr(&arm.body, yields);
                 }
             }
             // Leaf expressions

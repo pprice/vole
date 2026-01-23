@@ -1292,6 +1292,19 @@ fn find_lambda_in_expr(expr: &Expr, node_id: NodeId) -> Option<&LambdaExpr> {
             }
             None
         }
+        ExprKind::When(w) => {
+            for arm in &w.arms {
+                if let Some(ref cond) = arm.condition
+                    && let Some(lambda) = find_lambda_in_expr(cond, node_id)
+                {
+                    return Some(lambda);
+                }
+                if let Some(lambda) = find_lambda_in_expr(&arm.body, node_id) {
+                    return Some(lambda);
+                }
+            }
+            None
+        }
         // Leaf nodes with no sub-expressions
         ExprKind::IntLiteral(_)
         | ExprKind::FloatLiteral(_)

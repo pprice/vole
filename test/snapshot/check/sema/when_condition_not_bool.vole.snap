@@ -1,0 +1,11 @@
+[stdout]
+
+[stderr]
+  x [E2092]: when condition must be boolean, found i64
+   ,-[<path>/when_condition_not_bool.vole:5:9]
+ 4 |     return when {
+ 5 |         42 => 1
+   :         ^|
+   :          `-- expected bool
+ 6 |         _ => 0
+   `----

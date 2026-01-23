@@ -524,6 +524,10 @@ pub enum ExprKind {
 
     /// If expression: if cond { then } else { else }
     If(Box<IfExpr>),
+
+    /// When expression (subject-less conditional chains)
+    /// Syntax: `when { cond1 => result1, cond2 => result2, _ => default }`
+    When(Box<WhenExpr>),
 }
 
 /// Range expression (e.g., 0..10 or 0..=10)
@@ -665,6 +669,23 @@ pub struct MatchExpr {
 pub struct MatchArm {
     pub pattern: Pattern,
     pub guard: Option<Expr>,
+    pub body: Expr,
+    pub span: Span,
+}
+
+/// When expression (subject-less conditional chains)
+/// Syntax: `when { cond1 => result1, cond2 => result2, _ => default }`
+#[derive(Debug, Clone)]
+pub struct WhenExpr {
+    pub arms: Vec<WhenArm>,
+    pub span: Span,
+}
+
+/// A single arm in a when expression
+#[derive(Debug, Clone)]
+pub struct WhenArm {
+    /// The condition (None for wildcard `_` arm which always matches)
+    pub condition: Option<Expr>,
     pub body: Expr,
     pub span: Span,
 }

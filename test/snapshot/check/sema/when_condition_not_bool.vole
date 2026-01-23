@@ -1,0 +1,8 @@
+// Error: when condition must be boolean
+
+func bad_condition() -> i64 {
+    return when {
+        42 => 1
+        _ => 0
+    }
+}

@@ -5,6 +5,63 @@ use crate::Span;
 use crate::errors::ParserError;
 
 impl<'src> Parser<'src> {
+    /// Parse a when expression (subject-less conditional chains)
+    /// Syntax: `when { cond1 => result1, cond2 => result2, _ => default }`
+    pub(super) fn when_expr(&mut self) -> Result<Expr, ParseError> {
+        let start_span = self.current.span;
+        self.advance(); // consume 'when'
+
+        // Expect opening brace
+        self.consume(TokenType::LBrace, "expected '{' after when")?;
+        self.skip_newlines();
+
+        // Parse arms
+        let mut arms = Vec::new();
+        while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
+            arms.push(self.when_arm()?);
+            self.skip_newlines();
+        }
+
+        let end_span = self.current.span;
+        self.consume(TokenType::RBrace, "expected '}' after when arms")?;
+
+        Ok(Expr {
+            id: self.next_id(),
+            kind: ExprKind::When(Box::new(WhenExpr {
+                arms,
+                span: start_span.merge(end_span),
+            })),
+            span: start_span.merge(end_span),
+        })
+    }
+
+    /// Parse a single when arm
+    fn when_arm(&mut self) -> Result<WhenArm, ParseError> {
+        let start_span = self.current.span;
+
+        // Check for wildcard `_` (always matches)
+        let condition = if self.check(TokenType::Identifier) && self.current.lexeme == "_" {
+            self.advance(); // consume '_'
+            None
+        } else {
+            // Parse condition expression
+            Some(self.expression(0)?)
+        };
+
+        // Expect fat arrow
+        self.consume(TokenType::FatArrow, "expected '=>' after when condition")?;
+
+        // Parse body expression
+        let body = self.expression(0)?;
+
+        let end_span = body.span;
+        Ok(WhenArm {
+            condition,
+            body,
+            span: start_span.merge(end_span),
+        })
+    }
+
     /// Parse a match expression
     pub(super) fn match_expr(&mut self) -> Result<Expr, ParseError> {
         let start_span = self.current.span;

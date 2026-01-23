@@ -411,6 +411,24 @@ fn print_expr<'a>(
             }
             doc
         }
+        ExprKind::When(when_expr) => {
+            let mut doc = arena.text("when {").append(arena.hardline());
+            for arm in &when_expr.arms {
+                let arm_doc = if let Some(ref cond) = arm.condition {
+                    print_expr(arena, cond, interner)
+                } else {
+                    arena.text("_")
+                };
+                doc = doc.append(
+                    arm_doc
+                        .append(arena.text(" => "))
+                        .append(print_expr(arena, &arm.body, interner))
+                        .nest(INDENT),
+                );
+                doc = doc.append(arena.hardline());
+            }
+            doc.append(arena.text("}"))
+        }
     }
 }
 

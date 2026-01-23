@@ -12,7 +12,7 @@ use std::collections::HashMap;
 
 use vole_frontend::{
     AssignTarget, BlockExpr, Expr, ExprKind, IfExpr, MatchExpr, Pattern, RangeExpr,
-    RecordFieldPattern, Symbol, UnaryOp,
+    RecordFieldPattern, Symbol, UnaryOp, WhenExpr,
 };
 use vole_sema::entity_defs::TypeDefKind;
 
@@ -98,6 +98,7 @@ impl Cg<'_, '_, '_> {
             }
             ExprKind::Block(block_expr) => self.block_expr(block_expr),
             ExprKind::If(if_expr) => self.if_expr(if_expr),
+            ExprKind::When(when_expr) => self.when_expr(when_expr),
         }
     }
 
@@ -1418,6 +1419,131 @@ impl Cg<'_, '_, '_> {
                 .jump(merge_block, &[else_result.value.into()]);
         } else {
             self.builder.ins().jump(merge_block, &[]);
+        }
+
+        // Continue in merge block
+        self.switch_and_seal(merge_block);
+
+        if !is_void {
+            let result = self.builder.block_params(merge_block)[0];
+            Ok(CompiledValue {
+                value: result,
+                ty: result_cranelift_type,
+                type_id: result_type_id,
+            })
+        } else {
+            Ok(self.void_value())
+        }
+    }
+
+    /// Compile a when expression (subject-less conditional chain)
+    ///
+    /// Control flow for `when { cond1 => body1, cond2 => body2, _ => body3 }`:
+    /// ```text
+    /// entry:
+    ///     eval cond1
+    ///     brif -> body1, check2
+    /// check2:
+    ///     eval cond2
+    ///     brif -> body2, body3
+    /// body1: jump merge(result1)
+    /// body2: jump merge(result2)
+    /// body3: jump merge(result3)
+    /// merge: return block_param
+    /// ```
+    fn when_expr(&mut self, when_expr: &WhenExpr) -> Result<CompiledValue, String> {
+        // Get the result type from semantic analysis (from first arm body)
+        let result_type_id = if !when_expr.arms.is_empty() {
+            self.get_expr_type(&when_expr.arms[0].body.id)
+                .unwrap_or(self.arena().primitives.void)
+        } else {
+            self.arena().primitives.void
+        };
+
+        let is_void = self.arena().is_void(result_type_id);
+        let result_cranelift_type =
+            type_id_to_cranelift(result_type_id, &self.arena(), self.ptr_type());
+
+        // Create merge block
+        let merge_block = self.builder.create_block();
+        if !is_void {
+            self.builder
+                .append_block_param(merge_block, result_cranelift_type);
+        }
+
+        // Find the wildcard arm index (there must be one - sema ensures this)
+        let wildcard_idx = when_expr
+            .arms
+            .iter()
+            .position(|arm| arm.condition.is_none())
+            .unwrap_or(when_expr.arms.len() - 1);
+
+        // Create body blocks for each arm
+        let body_blocks: Vec<_> = when_expr
+            .arms
+            .iter()
+            .map(|_| self.builder.create_block())
+            .collect();
+
+        // Create condition evaluation blocks for arms 1..n-1 (not first, not wildcard)
+        // cond_blocks[i] is where we evaluate condition for arm i+1
+        let cond_blocks: Vec<_> = (0..when_expr.arms.len().saturating_sub(1))
+            .filter(|&i| i + 1 < when_expr.arms.len() && when_expr.arms[i + 1].condition.is_some())
+            .map(|_| self.builder.create_block())
+            .collect();
+
+        let mut cond_block_idx = 0;
+
+        // Process each conditional arm (skip wildcard - it's reached via brif "else" path)
+        for (i, arm) in when_expr.arms.iter().enumerate() {
+            if arm.condition.is_none() {
+                // Wildcard arm - don't emit jump, brif already routes here
+                // The wildcard body will be compiled in the body blocks loop
+                break;
+            }
+
+            // Evaluate condition in current block
+            let cond_result = self.expr(arm.condition.as_ref().unwrap())?;
+
+            // Determine "else" target (where to go if condition is false)
+            let else_target = if i + 1 < when_expr.arms.len() {
+                if when_expr.arms[i + 1].condition.is_none() {
+                    // Next is wildcard - go directly to its body
+                    body_blocks[i + 1]
+                } else {
+                    // Next has condition - go to condition evaluation block
+                    cond_blocks[cond_block_idx]
+                }
+            } else {
+                // Shouldn't happen (wildcard required), but go to wildcard
+                body_blocks[wildcard_idx]
+            };
+
+            // Branch to body or next condition
+            self.builder
+                .ins()
+                .brif(cond_result.value, body_blocks[i], &[], else_target, &[]);
+
+            // If next arm has a condition, switch to its evaluation block
+            if i + 1 < when_expr.arms.len() && when_expr.arms[i + 1].condition.is_some() {
+                self.switch_and_seal(else_target);
+                cond_block_idx += 1;
+            }
+        }
+
+        // Compile body blocks
+        for (i, arm) in when_expr.arms.iter().enumerate() {
+            self.switch_and_seal(body_blocks[i]);
+
+            let body_result = self.expr(&arm.body)?;
+
+            if !is_void {
+                self.builder
+                    .ins()
+                    .jump(merge_block, &[body_result.value.into()]);
+            } else {
+                self.builder.ins().jump(merge_block, &[]);
+            }
         }
 
         // Continue in merge block

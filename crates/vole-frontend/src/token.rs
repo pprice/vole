@@ -53,6 +53,7 @@ pub enum TokenType {
     KwDefault,    // default keyword (interface default methods)
     KwStatics,    // statics keyword (static method blocks)
     KwStatic,     // static keyword (static interface sugar)
+    KwWhen,       // when keyword (conditional expressions)
 
     // Type keywords
     KwI8,
@@ -175,6 +176,7 @@ impl TokenType {
             Self::KwDefault => "default",
             Self::KwStatics => "statics",
             Self::KwStatic => "static",
+            Self::KwWhen => "when",
             Self::KwI8 => "i8",
             Self::KwI16 => "i16",
             Self::KwI32 => "i32",

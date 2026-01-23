@@ -414,6 +414,7 @@ impl<'src> Parser<'src> {
                 })
             }
             TokenType::KwMatch => self.match_expr(),
+            TokenType::KwWhen => self.when_expr(),
             TokenType::KwIf => self.if_expr(),
             TokenType::KwTry => self.try_expr(),
             TokenType::KwYield => self.yield_expr(),

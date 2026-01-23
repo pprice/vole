@@ -776,6 +776,27 @@ impl<'a> AstPrinter<'a> {
                     inner.indented().write_expr(out, else_branch);
                 }
             }
+
+            ExprKind::When(when_expr) => {
+                self.write_indent(out);
+                out.push_str("When\n");
+                let inner = self.indented();
+                for (i, arm) in when_expr.arms.iter().enumerate() {
+                    inner.write_indent(out);
+                    writeln!(out, "arm[{}]:", i).unwrap();
+                    let arm_inner = inner.indented();
+                    arm_inner.write_indent(out);
+                    if let Some(ref cond) = arm.condition {
+                        out.push_str("condition:\n");
+                        arm_inner.indented().write_expr(out, cond);
+                    } else {
+                        out.push_str("condition: _ (wildcard)\n");
+                    }
+                    arm_inner.write_indent(out);
+                    out.push_str("body:\n");
+                    arm_inner.indented().write_expr(out, &arm.body);
+                }
+            }
         }
     }
 

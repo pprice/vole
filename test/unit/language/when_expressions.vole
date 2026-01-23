@@ -1,0 +1,138 @@
+// Test when expressions (subject-less conditional chains)
+
+// Simple when expression
+func classify_number(n: i64) -> string {
+    return when {
+        n < 0 => "negative"
+        n == 0 => "zero"
+        _ => "positive"
+    }
+}
+
+// When expression with complex conditions
+func grade(score: i64) -> string {
+    return when {
+        score >= 90 => "A"
+        score >= 80 => "B"
+        score >= 70 => "C"
+        score >= 60 => "D"
+        _ => "F"
+    }
+}
+
+// When expression returning integers
+func fibonacci_category(n: i64) -> i64 {
+    return when {
+        n <= 0 => 0
+        n == 1 => 1
+        n == 2 => 1
+        n <= 5 => 2
+        _ => 3
+    }
+}
+
+// When expression with boolean values
+func is_in_range(x: i64, low: i64, high: i64) -> bool {
+    return when {
+        x < low => false
+        x > high => false
+        _ => true
+    }
+}
+
+// When expression with logical operators
+func classify_age(age: i64) -> string {
+    return when {
+        age < 0 => "invalid"
+        age < 13 => "child"
+        age < 20 => "teenager"
+        age < 65 => "adult"
+        _ => "senior"
+    }
+}
+
+// Nested when expressions
+func day_type(day: i64) -> string {
+    return when {
+        day == 0 || day == 6 => "weekend"
+        _ => when {
+            day == 5 => "TGIF"
+            _ => "weekday"
+        }
+    }
+}
+
+// When expression for absolute value
+func abs(x: i64) -> i64 {
+    return when {
+        x < 0 => -x
+        _ => x
+    }
+}
+
+// When with multiple conditions per arm
+func sign(x: i64) -> i64 {
+    return when {
+        x > 0 => 1
+        x < 0 => -1
+        _ => 0
+    }
+}
+
+tests "when expressions" {
+    test "simple when classification" {
+        assert(classify_number(-5) == "negative")
+        assert(classify_number(0) == "zero")
+        assert(classify_number(5) == "positive")
+    }
+
+    test "grade calculation" {
+        assert(grade(95) == "A")
+        assert(grade(85) == "B")
+        assert(grade(75) == "C")
+        assert(grade(65) == "D")
+        assert(grade(50) == "F")
+    }
+
+    test "fibonacci category" {
+        assert(fibonacci_category(0) == 0)
+        assert(fibonacci_category(1) == 1)
+        assert(fibonacci_category(2) == 1)
+        assert(fibonacci_category(4) == 2)
+        assert(fibonacci_category(10) == 3)
+    }
+
+    test "range check" {
+        assert(is_in_range(5, 1, 10) == true)
+        assert(is_in_range(0, 1, 10) == false)
+        assert(is_in_range(11, 1, 10) == false)
+    }
+
+    test "age classification" {
+        assert(classify_age(-1) == "invalid")
+        assert(classify_age(5) == "child")
+        assert(classify_age(15) == "teenager")
+        assert(classify_age(30) == "adult")
+        assert(classify_age(70) == "senior")
+    }
+
+    test "nested when" {
+        assert(day_type(0) == "weekend")
+        assert(day_type(6) == "weekend")
+        assert(day_type(5) == "TGIF")
+        assert(day_type(1) == "weekday")
+        assert(day_type(3) == "weekday")
+    }
+
+    test "inline when" {
+        assert(abs(-5) == 5)
+        assert(abs(5) == 5)
+        assert(abs(0) == 0)
+    }
+
+    test "sign function" {
+        assert(sign(10) == 1)
+        assert(sign(-10) == -1)
+        assert(sign(0) == 0)
+    }
+}

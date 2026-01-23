@@ -560,6 +560,40 @@ pub enum SemanticError {
         #[label("non-constant expression")]
         span: SourceSpan,
     },
+
+    #[error("when expression must have at least one arm")]
+    #[diagnostic(code(E2090))]
+    WhenExprEmpty {
+        #[label("empty when expression")]
+        span: SourceSpan,
+    },
+
+    #[error("when expression is not exhaustive")]
+    #[diagnostic(
+        code(E2091),
+        help("add a wildcard arm '_ => ...' to handle all remaining cases")
+    )]
+    WhenExprNotExhaustive {
+        #[label("when expression may not cover all cases")]
+        span: SourceSpan,
+    },
+
+    #[error("when condition must be boolean, found {found}")]
+    #[diagnostic(code(E2092))]
+    WhenConditionNotBool {
+        found: String,
+        #[label("expected bool")]
+        span: SourceSpan,
+    },
+
+    #[error("when arms have incompatible types: expected {expected}, found {found}")]
+    #[diagnostic(code(E2093))]
+    WhenArmTypeMismatch {
+        expected: String,
+        found: String,
+        #[label("type mismatch")]
+        span: SourceSpan,
+    },
 }
 
 /// Semantic warnings (W3xxx) - these don't prevent compilation but indicate potential issues
