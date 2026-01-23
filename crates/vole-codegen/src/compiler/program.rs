@@ -6,7 +6,9 @@ use rustc_hash::FxHashMap;
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, InstBuilder, types};
 use cranelift_module::{FuncId, Module};
 
-use super::common::{FunctionCompileConfig, compile_function_inner_with_params};
+use super::common::{
+    FunctionCompileConfig, bind_params, compile_function_inner_with_params, create_entry_block,
+};
 use super::{Compiler, ControlFlowCtx, SelfParam, TestInfo, TypeResolver};
 
 use crate::FunctionKey;
@@ -554,8 +556,7 @@ impl Compiler<'_> {
         }
 
         // Define the function
-        self.jit.define_function(func_id)?;
-        self.jit.clear();
+        self.finalize_function(func_id)?;
 
         Ok(())
     }
@@ -624,8 +625,7 @@ impl Compiler<'_> {
         }
 
         // Define the function
-        self.jit.define_function(func_id)?;
-        self.jit.clear();
+        self.finalize_function(func_id)?;
 
         Ok(())
     }
@@ -898,8 +898,7 @@ impl Compiler<'_> {
             }
 
             // Define the function
-            self.jit.define_function(func_id)?;
-            self.jit.clear();
+            self.finalize_function(func_id)?;
 
             // Record test metadata
             let line = test.span.line;
@@ -1030,25 +1029,19 @@ impl Compiler<'_> {
         {
             let mut builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
 
-            let entry_block = builder.create_block();
-            builder.append_block_params_for_function_params(entry_block);
-            builder.switch_to_block(entry_block);
+            let entry_block = create_entry_block(&mut builder);
 
             // Build variables map
             let mut variables = HashMap::new();
-
-            // Bind parameters to variables
             let params = builder.block_params(entry_block).to_vec();
-            for (((name, ty), type_id), val) in param_names
-                .iter()
-                .zip(param_types.iter())
-                .zip(param_type_ids.iter())
-                .zip(params.iter())
-            {
-                let var = builder.declare_var(*ty);
-                builder.def_var(var, *val);
-                variables.insert(*name, (var, *type_id));
-            }
+            bind_params(
+                &mut builder,
+                &mut variables,
+                &param_names,
+                &param_types,
+                &param_type_ids,
+                &params,
+            );
 
             // Compile function body
             let mut cf_ctx = ControlFlowCtx::default();
@@ -1348,25 +1341,19 @@ impl Compiler<'_> {
         {
             let mut builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
 
-            let entry_block = builder.create_block();
-            builder.append_block_params_for_function_params(entry_block);
-            builder.switch_to_block(entry_block);
+            let entry_block = create_entry_block(&mut builder);
 
             // Build variables map
             let mut variables = HashMap::new();
-
-            // Bind parameters to variables
             let params = builder.block_params(entry_block).to_vec();
-            for (((name, ty), type_id), val) in param_names
-                .iter()
-                .zip(param_types.iter())
-                .zip(param_type_ids.iter())
-                .zip(params.iter())
-            {
-                let var = builder.declare_var(*ty);
-                builder.def_var(var, *val);
-                variables.insert(*name, (var, *type_id));
-            }
+            bind_params(
+                &mut builder,
+                &mut variables,
+                &param_names,
+                &param_types,
+                &param_type_ids,
+                &params,
+            );
 
             // Compile function body
             let mut cf_ctx = ControlFlowCtx::default();
@@ -1401,8 +1388,7 @@ impl Compiler<'_> {
         }
 
         // Define the function
-        self.jit.define_function(func_id)?;
-        self.jit.clear();
+        self.finalize_function(func_id)?;
 
         Ok(())
     }
@@ -1600,14 +1586,10 @@ impl Compiler<'_> {
         {
             let mut builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
 
-            let entry_block = builder.create_block();
-            builder.append_block_params_for_function_params(entry_block);
-            builder.switch_to_block(entry_block);
+            let entry_block = create_entry_block(&mut builder);
 
             // Build variables map
             let mut variables = HashMap::new();
-
-            // Get entry block params (self + user params)
             let block_params = builder.block_params(entry_block).to_vec();
 
             // Bind `self` as the first parameter
@@ -1616,16 +1598,14 @@ impl Compiler<'_> {
             variables.insert(self_sym, (self_var, self_type_id));
 
             // Bind remaining parameters with concrete types (TypeId-native)
-            for (((name, ty), type_id), val) in param_names
-                .iter()
-                .zip(param_types.iter())
-                .zip(param_type_ids.iter())
-                .zip(block_params[1..].iter())
-            {
-                let var = builder.declare_var(*ty);
-                builder.def_var(var, *val);
-                variables.insert(*name, (var, *type_id));
-            }
+            bind_params(
+                &mut builder,
+                &mut variables,
+                &param_names,
+                &param_types,
+                &param_type_ids,
+                &block_params[1..],
+            );
 
             // Compile method body
             let mut cf_ctx = ControlFlowCtx::default();
@@ -1662,8 +1642,7 @@ impl Compiler<'_> {
         }
 
         // Define the function
-        self.jit.define_function(func_id)?;
-        self.jit.clear();
+        self.finalize_function(func_id)?;
 
         Ok(())
     }
@@ -1913,27 +1892,21 @@ impl Compiler<'_> {
         {
             let mut builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
 
-            let entry_block = builder.create_block();
-            builder.append_block_params_for_function_params(entry_block);
-            builder.switch_to_block(entry_block);
+            let entry_block = create_entry_block(&mut builder);
 
             // Build variables map (no self for static methods)
             let mut variables = HashMap::new();
-
-            // Get entry block params (just user params, no self)
             let block_params = builder.block_params(entry_block).to_vec();
 
             // Bind parameters with concrete types (TypeId-native)
-            for (((name, ty), type_id), val) in param_names
-                .iter()
-                .zip(param_types.iter())
-                .zip(param_type_ids.iter())
-                .zip(block_params.iter())
-            {
-                let var = builder.declare_var(*ty);
-                builder.def_var(var, *val);
-                variables.insert(*name, (var, *type_id));
-            }
+            bind_params(
+                &mut builder,
+                &mut variables,
+                &param_names,
+                &param_types,
+                &param_type_ids,
+                &block_params,
+            );
 
             // Compile method body
             let body = method.body.as_ref().ok_or_else(|| {
@@ -1974,8 +1947,7 @@ impl Compiler<'_> {
         }
 
         // Define the function
-        self.jit.define_function(func_id)?;
-        self.jit.clear();
+        self.finalize_function(func_id)?;
 
         Ok(())
     }

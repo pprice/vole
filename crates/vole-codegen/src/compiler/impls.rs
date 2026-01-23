@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, InstBuilder, types};
 use cranelift_module::Module;
 
-use super::common::{FunctionCompileConfig, compile_function_inner_with_params};
+use super::common::{
+    FunctionCompileConfig, bind_params, compile_function_inner_with_params, create_entry_block,
+};
 use super::{Compiler, ControlFlowCtx, SelfParam, TypeResolver};
 use crate::stmt::compile_func_body_with_params;
 use crate::types::{
@@ -37,6 +39,18 @@ fn primitive_type_name(p: AstPrimitive) -> &'static str {
     }
 }
 
+/// Data needed to compile methods for a type (class or record)
+struct TypeMethodsData<'a> {
+    /// Type name symbol
+    name: Symbol,
+    /// Methods to compile
+    methods: &'a [FuncDecl],
+    /// Optional static methods block
+    statics: Option<&'a StaticsBlock>,
+    /// Type kind for error messages ("class" or "record")
+    type_kind: &'static str,
+}
+
 impl Compiler<'_> {
     /// Compile methods for a class
     pub(super) fn compile_class_methods(
@@ -48,65 +62,15 @@ impl Compiler<'_> {
         if !class.type_params.is_empty() {
             return Ok(());
         }
-
-        let metadata = self
-            .state
-            .type_metadata
-            .get(&class.name)
-            .cloned()
-            .ok_or_else(|| {
-                format!(
-                    "Internal error: class {} not registered",
-                    self.query().resolve_symbol(class.name)
-                )
-            })?;
-
-        for method in &class.methods {
-            self.compile_method(method, class.name, &metadata)?;
-        }
-
-        // Compile default methods from implemented interfaces
-        let direct_methods: std::collections::HashSet<_> =
-            class.methods.iter().map(|m| m.name).collect();
-
-        // Collect interface names using query (avoids borrow conflicts with compile_default_method)
-        let interface_names: Vec<Symbol> = {
-            let query = self.query();
-            query
-                .try_name_id(query.main_module(), &[class.name])
-                .and_then(|class_name_id| query.try_type_def_id(class_name_id))
-                .map(|type_def_id| {
-                    query
-                        .implemented_interfaces(type_def_id)
-                        .into_iter()
-                        .filter_map(|interface_id| {
-                            let interface_def = query.get_type(interface_id);
-                            query
-                                .last_segment(interface_def.name_id)
-                                .and_then(|name_str| query.try_symbol(&name_str))
-                        })
-                        .collect()
-                })
-                .unwrap_or_default()
-        };
-
-        // Compile default methods for each interface
-        for interface_name in interface_names {
-            if let Some(interface_decl) = self.find_interface_decl(program, interface_name) {
-                for method in &interface_decl.methods {
-                    if method.body.is_some() && !direct_methods.contains(&method.name) {
-                        self.compile_default_method(method, class.name, &metadata)?;
-                    }
-                }
-            }
-        }
-
-        // Compile static methods
-        if let Some(ref statics) = class.statics {
-            self.compile_static_methods(statics, class.name)?;
-        }
-
-        Ok(())
+        self.compile_type_methods(
+            TypeMethodsData {
+                name: class.name,
+                methods: &class.methods,
+                statics: class.statics.as_ref(),
+                type_kind: "class",
+            },
+            program,
+        )
     }
 
     /// Compile methods for a record
@@ -119,33 +83,50 @@ impl Compiler<'_> {
         if !record.type_params.is_empty() {
             return Ok(());
         }
+        self.compile_type_methods(
+            TypeMethodsData {
+                name: record.name,
+                methods: &record.methods,
+                statics: record.statics.as_ref(),
+                type_kind: "record",
+            },
+            program,
+        )
+    }
 
+    /// Core implementation for compiling methods of a class or record
+    fn compile_type_methods(
+        &mut self,
+        data: TypeMethodsData<'_>,
+        program: &vole_frontend::Program,
+    ) -> Result<(), String> {
         let metadata = self
             .state
             .type_metadata
-            .get(&record.name)
+            .get(&data.name)
             .cloned()
             .ok_or_else(|| {
                 format!(
-                    "Internal error: record {} not registered",
-                    self.query().resolve_symbol(record.name)
+                    "Internal error: {} {} not registered",
+                    data.type_kind,
+                    self.query().resolve_symbol(data.name)
                 )
             })?;
 
-        for method in &record.methods {
-            self.compile_method(method, record.name, &metadata)?;
+        for method in data.methods {
+            self.compile_method(method, data.name, &metadata)?;
         }
 
         // Compile default methods from implemented interfaces
         let direct_methods: std::collections::HashSet<_> =
-            record.methods.iter().map(|m| m.name).collect();
+            data.methods.iter().map(|m| m.name).collect();
 
         // Collect interface names using query (avoids borrow conflicts with compile_default_method)
         let interface_names: Vec<Symbol> = {
             let query = self.query();
             query
-                .try_name_id(query.main_module(), &[record.name])
-                .and_then(|record_name_id| query.try_type_def_id(record_name_id))
+                .try_name_id(query.main_module(), &[data.name])
+                .and_then(|type_name_id| query.try_type_def_id(type_name_id))
                 .map(|type_def_id| {
                     query
                         .implemented_interfaces(type_def_id)
@@ -166,15 +147,15 @@ impl Compiler<'_> {
             if let Some(interface_decl) = self.find_interface_decl(program, interface_name) {
                 for method in &interface_decl.methods {
                     if method.body.is_some() && !direct_methods.contains(&method.name) {
-                        self.compile_default_method(method, record.name, &metadata)?;
+                        self.compile_default_method(method, data.name, &metadata)?;
                     }
                 }
             }
         }
 
         // Compile static methods
-        if let Some(ref statics) = record.statics {
-            self.compile_static_methods(statics, record.name)?;
+        if let Some(statics) = data.statics {
+            self.compile_static_methods(statics, data.name)?;
         }
 
         Ok(())
@@ -660,31 +641,9 @@ impl Compiler<'_> {
             self.jit.ctx.func.signature = sig;
 
             // Collect param types as TypeId (resolve once, use for both Cranelift type and variables)
-            let param_type_ids: Vec<TypeId> = {
-                let name_table = self.analyzed.name_table();
-                method
-                    .params
-                    .iter()
-                    .map(|p| {
-                        resolve_type_expr_to_id(
-                            &p.ty,
-                            self.analyzed.entity_registry(),
-                            &self.state.type_metadata,
-                            interner,
-                            &name_table,
-                            module_id,
-                            self.analyzed.type_arena_ref(),
-                        )
-                    })
-                    .collect()
-            };
-            let param_cranelift_types: Vec<types::Type> = {
-                let arena = self.analyzed.type_arena();
-                param_type_ids
-                    .iter()
-                    .map(|&id| type_id_to_cranelift(id, &arena, self.pointer_type))
-                    .collect()
-            };
+            let param_type_ids =
+                self.resolve_param_type_ids_with_interner(&method.params, interner, module_id);
+            let param_cranelift_types = self.type_ids_to_cranelift(&param_type_ids);
             let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
 
             // Get source file pointer before borrowing ctx.func
@@ -695,27 +654,21 @@ impl Compiler<'_> {
             {
                 let mut builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
 
-                let entry_block = builder.create_block();
-                builder.append_block_params_for_function_params(entry_block);
-                builder.switch_to_block(entry_block);
+                let entry_block = create_entry_block(&mut builder);
 
                 // Build variables map (no self for static methods)
                 let mut variables = HashMap::new();
-
-                // Get entry block params (just user params, no self)
                 let params = builder.block_params(entry_block).to_vec();
 
                 // Bind parameters (using TypeId directly)
-                for (((name, ty), type_id), val) in param_names
-                    .iter()
-                    .zip(param_cranelift_types.iter())
-                    .zip(param_type_ids.iter())
-                    .zip(params.iter())
-                {
-                    let var = builder.declare_var(*ty);
-                    builder.def_var(var, *val);
-                    variables.insert(*name, (var, *type_id));
-                }
+                bind_params(
+                    &mut builder,
+                    &mut variables,
+                    &param_names,
+                    &param_cranelift_types,
+                    &param_type_ids,
+                    &params,
+                );
 
                 // Compile method body
                 let mut cf_ctx = ControlFlowCtx::default();
@@ -759,8 +712,7 @@ impl Compiler<'_> {
             }
 
             // Define the function
-            self.jit.define_function(func_id)?;
-            self.jit.clear();
+            self.finalize_function(func_id)?;
         }
 
         Ok(())
@@ -807,30 +759,8 @@ impl Compiler<'_> {
             type_id_to_cranelift(self_type_id, &self.analyzed.type_arena(), self.pointer_type);
 
         // Build params: Vec<(Symbol, TypeId, Type)>
-        // First collect type IDs (which may access arena internally)
-        let param_info: Vec<(Symbol, TypeId)> = {
-            let name_table = self.analyzed.name_table();
-            method
-                .params
-                .iter()
-                .map(|p| {
-                    let type_id = if matches!(&p.ty, TypeExpr::SelfType) {
-                        self_type_id
-                    } else {
-                        resolve_type_expr_to_id(
-                            &p.ty,
-                            self.analyzed.entity_registry(),
-                            &self.state.type_metadata,
-                            &self.analyzed.interner,
-                            &name_table,
-                            module_id,
-                            self.analyzed.type_arena_ref(),
-                        )
-                    };
-                    (p.name, type_id)
-                })
-                .collect()
-        };
+        let param_info =
+            self.resolve_param_type_ids_with_self_type(&method.params, self_type_id, module_id);
         let params: Vec<(Symbol, TypeId, types::Type)> = {
             let arena_ref = self.analyzed.type_arena();
             param_info
@@ -941,35 +871,8 @@ impl Compiler<'_> {
         let self_type_id = metadata.vole_type;
 
         // Build params: Vec<(Symbol, TypeId, Type)>
-        // First collect type IDs (which may access arena internally)
-        let param_info: Vec<(Symbol, TypeId)> = {
-            let query = self.query();
-            let registry = query.registry();
-            let interner = query.interner();
-            let name_table = self.analyzed.name_table();
-            let type_metadata = &self.state.type_metadata;
-            let arena = self.analyzed.type_arena_ref();
-            method
-                .params
-                .iter()
-                .map(|p| {
-                    let type_id = if matches!(&p.ty, TypeExpr::SelfType) {
-                        self_type_id
-                    } else {
-                        resolve_type_expr_to_id(
-                            &p.ty,
-                            registry,
-                            type_metadata,
-                            interner,
-                            &name_table,
-                            module_id,
-                            arena,
-                        )
-                    };
-                    (p.name, type_id)
-                })
-                .collect()
-        };
+        let param_info =
+            self.resolve_param_type_ids_with_self_type(&method.params, self_type_id, module_id);
         let params: Vec<(Symbol, TypeId, types::Type)> = {
             let arena_ref = self.analyzed.type_arena();
             param_info
@@ -1063,40 +966,13 @@ impl Compiler<'_> {
         let self_type_id = metadata.vole_type;
 
         // Collect param type IDs first, then convert to cranelift types
-        let param_type_ids: Vec<TypeId> = {
-            let query = self.query();
-            let registry = query.registry();
-            let interner = query.interner();
-            let name_table = self.analyzed.name_table();
-            let type_metadata = &self.state.type_metadata;
-            let arena = self.analyzed.type_arena_ref();
-            method
-                .params
-                .iter()
-                .map(|p| {
-                    if matches!(&p.ty, TypeExpr::SelfType) {
-                        self_type_id
-                    } else {
-                        resolve_type_expr_to_id(
-                            &p.ty,
-                            registry,
-                            type_metadata,
-                            interner,
-                            &name_table,
-                            module_id,
-                            arena,
-                        )
-                    }
-                })
-                .collect()
-        };
-        let param_types: Vec<types::Type> = {
-            let arena_ref = self.analyzed.type_arena();
-            param_type_ids
-                .iter()
-                .map(|&ty_id| type_id_to_cranelift(ty_id, &arena_ref, self.pointer_type))
-                .collect()
-        };
+        // Resolve param types with SelfType substitution
+        let param_type_ids = self.resolve_param_type_ids_with_self_type_only(
+            &method.params,
+            self_type_id,
+            module_id,
+        );
+        let param_types = self.type_ids_to_cranelift(&param_type_ids);
         let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
 
         // Use the return type from sema (handles inferred types)
@@ -1111,14 +987,10 @@ impl Compiler<'_> {
         {
             let mut builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
 
-            let entry_block = builder.create_block();
-            builder.append_block_params_for_function_params(entry_block);
-            builder.switch_to_block(entry_block);
+            let entry_block = create_entry_block(&mut builder);
 
             // Build variables map
             let mut variables = HashMap::new();
-
-            // Get entry block params (self + user params)
             let params = builder.block_params(entry_block).to_vec();
 
             // Bind `self` as the first parameter with the concrete type
@@ -1127,16 +999,14 @@ impl Compiler<'_> {
             variables.insert(self_sym, (self_var, metadata.vole_type));
 
             // Bind remaining parameters (TypeId-native)
-            for (((name, ty), type_id), val) in param_names
-                .iter()
-                .zip(param_types.iter())
-                .zip(param_type_ids.iter())
-                .zip(params[1..].iter())
-            {
-                let var = builder.declare_var(*ty);
-                builder.def_var(var, *val);
-                variables.insert(*name, (var, *type_id));
-            }
+            bind_params(
+                &mut builder,
+                &mut variables,
+                &param_names,
+                &param_types,
+                &param_type_ids,
+                &params[1..],
+            );
 
             // Compile method body (must exist for default methods)
             let body = method.body.as_ref().ok_or_else(|| {
@@ -1231,34 +1101,8 @@ impl Compiler<'_> {
             self.jit.ctx.func.signature = sig;
 
             // Collect param type IDs first, then convert to cranelift types (TypeId-native)
-            let param_type_ids: Vec<TypeId> = {
-                let query = self.query();
-                let type_metadata = &self.state.type_metadata;
-                let arena = self.analyzed.type_arena_ref();
-                let name_table = self.analyzed.name_table();
-                method
-                    .params
-                    .iter()
-                    .map(|p| {
-                        resolve_type_expr_to_id(
-                            &p.ty,
-                            query.registry(),
-                            type_metadata,
-                            query.interner(),
-                            &name_table,
-                            module_id,
-                            arena,
-                        )
-                    })
-                    .collect()
-            };
-            let param_types: Vec<types::Type> = {
-                let arena_ref = self.analyzed.type_arena();
-                param_type_ids
-                    .iter()
-                    .map(|&ty_id| type_id_to_cranelift(ty_id, &arena_ref, self.pointer_type))
-                    .collect()
-            };
+            let param_type_ids = self.resolve_param_type_ids(&method.params, &TypeResolver::Query);
+            let param_types = self.type_ids_to_cranelift(&param_type_ids);
             let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
 
             // Get source file pointer before borrowing ctx.func
@@ -1269,27 +1113,21 @@ impl Compiler<'_> {
             {
                 let mut builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
 
-                let entry_block = builder.create_block();
-                builder.append_block_params_for_function_params(entry_block);
-                builder.switch_to_block(entry_block);
+                let entry_block = create_entry_block(&mut builder);
 
                 // Build variables map (no self for static methods)
                 let mut variables = HashMap::new();
-
-                // Get entry block params (just user params, no self)
                 let params = builder.block_params(entry_block).to_vec();
 
                 // Bind parameters (TypeId-native)
-                for (((name, ty), type_id), val) in param_names
-                    .iter()
-                    .zip(param_types.iter())
-                    .zip(param_type_ids.iter())
-                    .zip(params.iter())
-                {
-                    let var = builder.declare_var(*ty);
-                    builder.def_var(var, *val);
-                    variables.insert(*name, (var, *type_id));
-                }
+                bind_params(
+                    &mut builder,
+                    &mut variables,
+                    &param_names,
+                    &param_types,
+                    &param_type_ids,
+                    &params,
+                );
 
                 // Create split contexts
                 let function_ctx = FunctionCtx::main(None);
@@ -1323,8 +1161,7 @@ impl Compiler<'_> {
             }
 
             // Define the function
-            self.jit.define_function(func_id)?;
-            self.jit.clear();
+            self.finalize_function(func_id)?;
         }
 
         Ok(())
@@ -1394,33 +1231,12 @@ impl Compiler<'_> {
             self.jit.ctx.func.signature = sig;
 
             // Resolve param type IDs (TypeId-native)
-            let param_type_ids: Vec<TypeId> = {
-                let type_metadata = &self.state.type_metadata;
-                let arena = self.analyzed.type_arena_ref();
-                let name_table = self.analyzed.name_table();
-                method
-                    .params
-                    .iter()
-                    .map(|p| {
-                        resolve_type_expr_to_id(
-                            &p.ty,
-                            self.analyzed.entity_registry(),
-                            type_metadata,
-                            module_interner,
-                            &name_table,
-                            module_id,
-                            arena,
-                        )
-                    })
-                    .collect()
-            };
-            let param_types: Vec<types::Type> = {
-                let arena_ref = self.analyzed.type_arena();
-                param_type_ids
-                    .iter()
-                    .map(|&ty_id| type_id_to_cranelift(ty_id, &arena_ref, self.pointer_type))
-                    .collect()
-            };
+            let param_type_ids = self.resolve_param_type_ids_with_interner(
+                &method.params,
+                module_interner,
+                module_id,
+            );
+            let param_types = self.type_ids_to_cranelift(&param_type_ids);
             let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
 
             // Get source file pointer and self symbol (use module interner for method body)
@@ -1453,14 +1269,10 @@ impl Compiler<'_> {
             {
                 let mut builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
 
-                let entry_block = builder.create_block();
-                builder.append_block_params_for_function_params(entry_block);
-                builder.switch_to_block(entry_block);
+                let entry_block = create_entry_block(&mut builder);
 
                 // Build variables map
                 let mut variables = HashMap::new();
-
-                // Get entry block params (self + user params)
                 let params = builder.block_params(entry_block).to_vec();
 
                 // Bind `self` as the first parameter
@@ -1469,16 +1281,14 @@ impl Compiler<'_> {
                 variables.insert(self_sym, (self_var, metadata.vole_type));
 
                 // Bind remaining parameters (TypeId-native)
-                for (((name, ty), type_id), val) in param_names
-                    .iter()
-                    .zip(param_types.iter())
-                    .zip(param_type_ids.iter())
-                    .zip(params[1..].iter())
-                {
-                    let var = builder.declare_var(*ty);
-                    builder.def_var(var, *val);
-                    variables.insert(*name, (var, *type_id));
-                }
+                bind_params(
+                    &mut builder,
+                    &mut variables,
+                    &param_names,
+                    &param_types,
+                    &param_type_ids,
+                    &params[1..],
+                );
 
                 // Create split contexts (use module interner)
                 let function_ctx = FunctionCtx::module(Some(return_type_id), module_id);
@@ -1517,8 +1327,7 @@ impl Compiler<'_> {
             }
 
             // Define the function
-            self.jit.define_function(func_id)?;
-            self.jit.clear();
+            self.finalize_function(func_id)?;
         }
 
         // Compile static methods
@@ -1570,33 +1379,12 @@ impl Compiler<'_> {
                 self.jit.ctx.func.signature = sig;
 
                 // Resolve param type IDs (TypeId-native)
-                let param_type_ids: Vec<TypeId> = {
-                    let type_metadata = &self.state.type_metadata;
-                    let arena = self.analyzed.type_arena_ref();
-                    let name_table = self.analyzed.name_table();
-                    method
-                        .params
-                        .iter()
-                        .map(|p| {
-                            resolve_type_expr_to_id(
-                                &p.ty,
-                                self.analyzed.entity_registry(),
-                                type_metadata,
-                                module_interner,
-                                &name_table,
-                                module_id,
-                                arena,
-                            )
-                        })
-                        .collect()
-                };
-                let param_types: Vec<types::Type> = {
-                    let arena_ref = self.analyzed.type_arena();
-                    param_type_ids
-                        .iter()
-                        .map(|&ty_id| type_id_to_cranelift(ty_id, &arena_ref, self.pointer_type))
-                        .collect()
-                };
+                let param_type_ids = self.resolve_param_type_ids_with_interner(
+                    &method.params,
+                    module_interner,
+                    module_id,
+                );
+                let param_types = self.type_ids_to_cranelift(&param_type_ids);
                 let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
 
                 // Get source file pointer
@@ -1608,27 +1396,21 @@ impl Compiler<'_> {
                     let mut builder =
                         FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
 
-                    let entry_block = builder.create_block();
-                    builder.append_block_params_for_function_params(entry_block);
-                    builder.switch_to_block(entry_block);
+                    let entry_block = create_entry_block(&mut builder);
 
                     // Build variables map (no self for static methods)
                     let mut variables = HashMap::new();
-
-                    // Get entry block params (just user params, no self)
                     let params = builder.block_params(entry_block).to_vec();
 
                     // Bind parameters (TypeId-native)
-                    for (((name, ty), type_id), val) in param_names
-                        .iter()
-                        .zip(param_types.iter())
-                        .zip(param_type_ids.iter())
-                        .zip(params.iter())
-                    {
-                        let var = builder.declare_var(*ty);
-                        builder.def_var(var, *val);
-                        variables.insert(*name, (var, *type_id));
-                    }
+                    bind_params(
+                        &mut builder,
+                        &mut variables,
+                        &param_names,
+                        &param_types,
+                        &param_type_ids,
+                        &params,
+                    );
 
                     // Create split contexts (use module interner)
                     let function_ctx = FunctionCtx::module(Some(return_type_id), module_id);

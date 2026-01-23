@@ -828,6 +828,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue { value, ty, type_id }
     }
 
+    /// Compile a list of expression arguments into Cranelift values.
+    /// This is the common pattern for function/method calls.
+    pub fn compile_call_args(&mut self, args: &[Expr]) -> Result<Vec<Value>, String> {
+        let mut values = Vec::with_capacity(args.len());
+        for arg in args {
+            let compiled = self.expr(arg)?;
+            values.push(compiled.value);
+        }
+        Ok(values)
+    }
+
     // ========== Control flow helpers ==========
 
     /// Switch to a block and seal it (common pattern for sequential control flow)

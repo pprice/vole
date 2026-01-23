@@ -413,38 +413,8 @@ impl Cg<'_, '_, '_> {
 
             // Try FFI call for external module functions
             if let Some(native_func) = self.native_funcs().lookup(&module_path, callee_name) {
-                // Compile arguments first
-                let mut args = Vec::new();
-                for arg in &call.args {
-                    let compiled = self.expr(arg)?;
-                    args.push(compiled.value);
-                }
-
-                // Build the Cranelift signature from NativeSignature
-                let mut sig = self.jit_module().make_signature();
-                for param_type in &native_func.signature.params {
-                    sig.params.push(AbiParam::new(native_type_to_cranelift(
-                        param_type,
-                        self.ptr_type(),
-                    )));
-                }
-                if native_func.signature.return_type != NativeType::Nil {
-                    sig.returns.push(AbiParam::new(native_type_to_cranelift(
-                        &native_func.signature.return_type,
-                        self.ptr_type(),
-                    )));
-                }
-
-                // Import the signature and emit an indirect call
-                let sig_ref = self.builder.import_signature(sig);
-                let func_ptr = native_func.ptr;
-                let ptr_type = self.ptr_type();
-                let func_ptr_val = self.builder.ins().iconst(ptr_type, func_ptr as i64);
-
-                let call_inst = self
-                    .builder
-                    .ins()
-                    .call_indirect(sig_ref, func_ptr_val, &args);
+                let args = self.compile_call_args(&call.args)?;
+                let call_inst = self.call_native_indirect(native_func, &args);
                 let results = self.builder.inst_results(call_inst);
 
                 if results.is_empty() {
@@ -489,38 +459,8 @@ impl Cg<'_, '_, '_> {
             self.native_funcs().lookup(&module_path, &native_name)
         });
         if let Some(native_func) = native_func {
-            // Compile arguments first
-            let mut args = Vec::new();
-            for arg in &call.args {
-                let compiled = self.expr(arg)?;
-                args.push(compiled.value);
-            }
-
-            // Build the Cranelift signature from NativeSignature
-            let mut sig = self.jit_module().make_signature();
-            for param_type in &native_func.signature.params {
-                sig.params.push(AbiParam::new(native_type_to_cranelift(
-                    param_type,
-                    self.ptr_type(),
-                )));
-            }
-            if native_func.signature.return_type != NativeType::Nil {
-                sig.returns.push(AbiParam::new(native_type_to_cranelift(
-                    &native_func.signature.return_type,
-                    self.ptr_type(),
-                )));
-            }
-
-            // Import the signature and emit an indirect call
-            let sig_ref = self.builder.import_signature(sig);
-            let func_ptr = native_func.ptr;
-            let ptr_type = self.ptr_type();
-            let func_ptr_val = self.builder.ins().iconst(ptr_type, func_ptr as i64);
-
-            let call_inst = self
-                .builder
-                .ins()
-                .call_indirect(sig_ref, func_ptr_val, &args);
+            let args = self.compile_call_args(&call.args)?;
+            let call_inst = self.call_native_indirect(native_func, &args);
             let results = self.builder.inst_results(call_inst);
 
             if results.is_empty() {
@@ -818,22 +758,16 @@ impl Cg<'_, '_, '_> {
         }
     }
 
-    /// Compile a native function call with known Vole types (for generic external functions)
-    /// This uses the concrete types from the monomorphized FunctionType rather than
-    /// inferring types from the native signature.
-    fn compile_native_call_with_types(
+    /// Emit an indirect call to a native function.
+    ///
+    /// This helper builds the Cranelift signature from NativeSignature,
+    /// imports it, and emits the indirect call. Returns the call instruction
+    /// so callers can handle results with their own type logic.
+    fn call_native_indirect(
         &mut self,
         native_func: &NativeFunction,
-        call: &CallExpr,
-        return_type_id: TypeId,
-    ) -> Result<CompiledValue, String> {
-        // Compile arguments
-        let mut args = Vec::new();
-        for arg in &call.args {
-            let compiled = self.expr(arg)?;
-            args.push(compiled.value);
-        }
-
+        args: &[Value],
+    ) -> cranelift_codegen::ir::Inst {
         // Build the Cranelift signature from NativeSignature
         let mut sig = self.jit_module().make_signature();
         for param_type in &native_func.signature.params {
@@ -853,11 +787,22 @@ impl Cg<'_, '_, '_> {
         let sig_ref = self.builder.import_signature(sig);
         let ptr_type = self.ptr_type();
         let func_ptr_val = self.builder.ins().iconst(ptr_type, native_func.ptr as i64);
-
-        let call_inst = self
-            .builder
+        self.builder
             .ins()
-            .call_indirect(sig_ref, func_ptr_val, &args);
+            .call_indirect(sig_ref, func_ptr_val, args)
+    }
+
+    /// Compile a native function call with known Vole types (for generic external functions)
+    /// This uses the concrete types from the monomorphized FunctionType rather than
+    /// inferring types from the native signature.
+    fn compile_native_call_with_types(
+        &mut self,
+        native_func: &NativeFunction,
+        call: &CallExpr,
+        return_type_id: TypeId,
+    ) -> Result<CompiledValue, String> {
+        let args = self.compile_call_args(&call.args)?;
+        let call_inst = self.call_native_indirect(native_func, &args);
         let results = self.builder.inst_results(call_inst);
 
         if results.is_empty() {

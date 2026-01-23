@@ -101,11 +101,7 @@ impl Cg<'_, '_, '_> {
                 };
 
                 // Compile arguments (no receiver for module functions)
-                let mut args = Vec::new();
-                for arg in &mc.args {
-                    let compiled = self.expr(arg)?;
-                    args.push(compiled.value);
-                }
+                let args = self.compile_call_args(&mc.args)?;
 
                 if let Some(ext_info) = external_info {
                     // External FFI function
@@ -722,13 +718,7 @@ impl Cg<'_, '_, '_> {
             }
 
             let sig_ref = self.builder.import_signature(sig);
-
-            let mut args = Vec::new();
-            for arg in &mc.args {
-                let compiled = self.expr(arg)?;
-                args.push(compiled.value);
-            }
-
+            let args = self.compile_call_args(&mc.args)?;
             let call_inst = self
                 .builder
                 .ins()

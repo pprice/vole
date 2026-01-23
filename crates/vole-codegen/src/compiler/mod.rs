@@ -197,4 +197,12 @@ impl<'a> Compiler<'a> {
     pub fn take_tests(&mut self) -> Vec<TestInfo> {
         std::mem::take(&mut self.tests)
     }
+
+    /// Define a function and clear the JIT context.
+    /// This is the common teardown after function compilation.
+    fn finalize_function(&mut self, func_id: cranelift_module::FuncId) -> Result<(), String> {
+        self.jit.define_function(func_id)?;
+        self.jit.clear();
+        Ok(())
+    }
 }
