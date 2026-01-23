@@ -269,16 +269,7 @@ impl Cg<'_, '_, '_> {
         let wrapper_func_addr = self.builder.ins().func_addr(ptr_type, wrapper_func_ref);
 
         // Wrap in a closure struct with zero captures
-        let alloc_id = self
-            .codegen_ctx
-            .funcs()
-            .runtime_key(RuntimeFn::ClosureAlloc)
-            .and_then(|key| self.codegen_ctx.funcs().func_id(key))
-            .ok_or_else(|| "vole_closure_alloc not found".to_string())?;
-        let alloc_ref = self
-            .codegen_ctx
-            .jit_module()
-            .declare_func_in_func(alloc_id, self.builder.func);
+        let alloc_ref = self.runtime_func_ref(RuntimeFn::ClosureAlloc)?;
         let zero_captures = self.builder.ins().iconst(types::I64, 0);
         let alloc_call = self
             .builder
@@ -360,11 +351,7 @@ impl Cg<'_, '_, '_> {
 
         // Otherwise, create a dynamic array
         let arr_ptr = self.call_runtime(RuntimeFn::ArrayNew, &[])?;
-        let array_push_key = self
-            .funcs()
-            .runtime_key(RuntimeFn::ArrayPush)
-            .ok_or_else(|| "vole_array_push not found".to_string())?;
-        let array_push_ref = self.func_ref(array_push_key)?;
+        let array_push_ref = self.runtime_func_ref(RuntimeFn::ArrayPush)?;
 
         // Use i64 as default - will be overwritten by first element if any
         let mut elem_type_id = TypeId::I64;
@@ -682,12 +669,7 @@ impl Cg<'_, '_, '_> {
             // Dynamic array assignment
             let idx = self.expr(index)?;
 
-            let set_value_key = self
-                .codegen_ctx
-                .funcs()
-                .runtime_key(RuntimeFn::ArraySet)
-                .ok_or_else(|| "vole_array_set not found".to_string())?;
-            let set_value_ref = self.func_ref(set_value_key)?;
+            let set_value_ref = self.runtime_func_ref(RuntimeFn::ArraySet)?;
             // Compute tag before using builder to avoid borrow conflict
             let tag = {
                 let arena = self.arena();

@@ -46,11 +46,7 @@ impl Cg<'_, '_, '_> {
             &[type_id_val, field_count_val, runtime_type],
         )?;
 
-        let set_key = self
-            .funcs()
-            .runtime_key(RuntimeFn::InstanceSetField)
-            .ok_or_else(|| "vole_instance_set_field not found".to_string())?;
-        let set_func_ref = self.func_ref(set_key)?;
+        let set_func_ref = self.runtime_func_ref(RuntimeFn::InstanceSetField)?;
 
         // Get field types for wrapping optional values using arena methods
         let field_types: HashMap<String, TypeId> = {
@@ -162,11 +158,7 @@ impl Cg<'_, '_, '_> {
             })?;
 
         // Get heap_alloc function ref
-        let heap_alloc_key = self
-            .funcs()
-            .runtime_key(RuntimeFn::HeapAlloc)
-            .ok_or_else(|| "heap allocator not registered".to_string())?;
-        let heap_alloc_ref = self.func_ref(heap_alloc_key)?;
+        let heap_alloc_ref = self.runtime_func_ref(RuntimeFn::HeapAlloc)?;
 
         // Allocate union storage on the heap
         let ptr_type = self.ptr_type();

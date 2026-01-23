@@ -792,13 +792,7 @@ impl Cg<'_, '_, '_> {
         }
         let sig_ref = self.builder.import_signature(sig);
 
-        let heap_alloc_ref = {
-            let key = self
-                .funcs()
-                .runtime_key(RuntimeFn::HeapAlloc)
-                .ok_or_else(|| "heap allocator not registered".to_string())?;
-            self.func_ref(key)?
-        };
+        let heap_alloc_ref = self.runtime_func_ref(RuntimeFn::HeapAlloc)?;
 
         // Pass the full boxed interface pointer (not just data_word) so wrappers can
         // access both data and vtable. This is needed for Iterator methods that create

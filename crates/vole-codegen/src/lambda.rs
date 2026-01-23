@@ -166,18 +166,7 @@ impl Cg<'_, '_, '_> {
         let func_addr = self.builder.ins().func_addr(ptr_type, func_ref);
 
         // Wrap in Closure struct for consistent calling convention
-        let alloc_key = self
-            .funcs()
-            .runtime_key(RuntimeFn::ClosureAlloc)
-            .ok_or_else(|| "vole_closure_alloc not found".to_string())?;
-        let alloc_id = self
-            .funcs()
-            .func_id(alloc_key)
-            .ok_or_else(|| "vole_closure_alloc not found".to_string())?;
-        let alloc_ref = self
-            .codegen_ctx
-            .module
-            .declare_func_in_func(alloc_id, self.builder.func);
+        let alloc_ref = self.runtime_func_ref(RuntimeFn::ClosureAlloc)?;
         let zero_captures = self.builder.ins().iconst(types::I64, 0);
         let alloc_call = self
             .builder
@@ -284,18 +273,7 @@ impl Cg<'_, '_, '_> {
         let func_addr = self.builder.ins().func_addr(ptr_type, func_ref);
 
         // Allocate closure
-        let alloc_key = self
-            .funcs()
-            .runtime_key(RuntimeFn::ClosureAlloc)
-            .ok_or_else(|| "vole_closure_alloc not found".to_string())?;
-        let alloc_id = self
-            .funcs()
-            .func_id(alloc_key)
-            .ok_or_else(|| "vole_closure_alloc not found".to_string())?;
-        let alloc_ref = self
-            .codegen_ctx
-            .module
-            .declare_func_in_func(alloc_id, self.builder.func);
+        let alloc_ref = self.runtime_func_ref(RuntimeFn::ClosureAlloc)?;
         let num_captures_val = self.builder.ins().iconst(types::I64, num_captures as i64);
         let alloc_call = self
             .builder
@@ -304,31 +282,8 @@ impl Cg<'_, '_, '_> {
         let closure_ptr = self.builder.inst_results(alloc_call)[0];
 
         // Set up each capture
-        let set_capture_key = self
-            .funcs()
-            .runtime_key(RuntimeFn::ClosureSetCapture)
-            .ok_or_else(|| "vole_closure_set_capture not found".to_string())?;
-        let set_capture_id = self
-            .funcs()
-            .func_id(set_capture_key)
-            .ok_or_else(|| "vole_closure_set_capture not found".to_string())?;
-        let set_capture_ref = self
-            .codegen_ctx
-            .module
-            .declare_func_in_func(set_capture_id, self.builder.func);
-
-        let heap_alloc_key = self
-            .funcs()
-            .runtime_key(RuntimeFn::HeapAlloc)
-            .ok_or_else(|| "vole_heap_alloc not found".to_string())?;
-        let heap_alloc_id = self
-            .funcs()
-            .func_id(heap_alloc_key)
-            .ok_or_else(|| "vole_heap_alloc not found".to_string())?;
-        let heap_alloc_ref = self
-            .codegen_ctx
-            .module
-            .declare_func_in_func(heap_alloc_id, self.builder.func);
+        let set_capture_ref = self.runtime_func_ref(RuntimeFn::ClosureSetCapture)?;
+        let heap_alloc_ref = self.runtime_func_ref(RuntimeFn::HeapAlloc)?;
 
         for (i, capture) in captures.iter().enumerate() {
             // For self-captures (recursive lambdas), use the closure pointer itself

@@ -84,11 +84,7 @@ impl Cg<'_, '_, '_> {
             return Ok(self.string_value(string_values[0]));
         }
 
-        let concat_key = self
-            .funcs()
-            .runtime_key(RuntimeFn::StringConcat)
-            .ok_or_else(|| "vole_string_concat not found".to_string())?;
-        let concat_func_ref = self.func_ref(concat_key)?;
+        let concat_func_ref = self.runtime_func_ref(RuntimeFn::StringConcat)?;
         let mut result = string_values[0];
         for &next in &string_values[1..] {
             let call = self.builder.ins().call(concat_func_ref, &[result, next]);

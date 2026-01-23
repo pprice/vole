@@ -547,12 +547,7 @@ impl Cg<'_, '_, '_> {
         let result = self.binary_op(current, rhs, binary_op)?;
 
         // Store back
-        let array_set_key = self
-            .codegen_ctx
-            .funcs()
-            .runtime_key(RuntimeFn::ArraySet)
-            .ok_or_else(|| "vole_array_set not found".to_string())?;
-        let array_set_ref = self.func_ref(array_set_key)?;
+        let array_set_ref = self.runtime_func_ref(RuntimeFn::ArraySet)?;
         let store_value = convert_to_i64_for_storage(self.builder, &result);
         // Compute tag before using builder to avoid borrow conflict
         let tag = {

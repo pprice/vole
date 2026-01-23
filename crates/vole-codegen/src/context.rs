@@ -682,12 +682,20 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Ok(module.declare_func_in_func(func_id, self.builder.func))
     }
 
-    /// Call a runtime function and return the first result (or error if no results)
-    pub fn call_runtime(&mut self, runtime: RuntimeFn, args: &[Value]) -> Result<Value, String> {
+    /// Get a FuncRef for a runtime function (RuntimeFn -> FuncRef in one call)
+    pub fn runtime_func_ref(
+        &mut self,
+        runtime: RuntimeFn,
+    ) -> Result<cranelift::codegen::ir::FuncRef, String> {
         let key = self.funcs().runtime_key(runtime).ok_or_else(|| {
             CodegenError::not_found("runtime function", runtime.name()).to_string()
         })?;
-        let func_ref = self.func_ref(key)?;
+        self.func_ref(key)
+    }
+
+    /// Call a runtime function and return the first result (or error if no results)
+    pub fn call_runtime(&mut self, runtime: RuntimeFn, args: &[Value]) -> Result<Value, String> {
+        let func_ref = self.runtime_func_ref(runtime)?;
         let call = self.builder.ins().call(func_ref, args);
         let results = self.builder.inst_results(call);
         if results.is_empty() {
@@ -730,11 +738,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Call a runtime function that returns void
     pub fn call_runtime_void(&mut self, runtime: RuntimeFn, args: &[Value]) -> Result<(), String> {
-        let key = self
-            .funcs()
-            .runtime_key(runtime)
-            .ok_or_else(|| format!("{} not registered", runtime.name()))?;
-        let func_ref = self.func_ref(key)?;
+        let func_ref = self.runtime_func_ref(runtime)?;
         self.builder.ins().call(func_ref, args);
         Ok(())
     }
