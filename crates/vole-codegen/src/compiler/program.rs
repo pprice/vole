@@ -7,7 +7,8 @@ use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, InstBuilder, t
 use cranelift_module::{FuncId, Module};
 
 use super::common::{
-    FunctionCompileConfig, bind_params, compile_function_inner_with_params, create_entry_block,
+    DefaultReturn, FunctionCompileConfig, bind_params, compile_function_inner_with_params,
+    create_entry_block, finalize_function_body,
 };
 use super::{Compiler, SelfParam, TestInfo, TypeResolver};
 
@@ -851,17 +852,10 @@ impl Compiler<'_> {
                 // only if there's an explicit return/break. So we check both.
                 let (block_terminated, expr_value) = cg.compile_body(&test.body)?;
 
-                // Add return if needed:
-                // - Expression bodies: always add return (expr_value is Some)
-                // - Block bodies: add return if block didn't explicitly terminate
-                let needs_return = expr_value.is_some() || !block_terminated;
-                if needs_return {
-                    let zero = builder.ins().iconst(types::I64, 0);
-                    builder.ins().return_(&[zero]);
-                }
-
-                builder.seal_all_blocks();
-                builder.finalize();
+                // Tests always return 0. Add return if block didn't explicitly terminate
+                // or if it's an expression body.
+                let terminated = block_terminated && expr_value.is_none();
+                finalize_function_body(builder, None, terminated, DefaultReturn::ZeroI64);
             }
 
             // Define the function
@@ -1021,15 +1015,7 @@ impl Compiler<'_> {
                 .with_return_type(return_type_id)
                 .compile_body(&func.body)?;
 
-            // Add implicit return if no explicit return
-            if let Some(value) = expr_value {
-                builder.ins().return_(&[value.value]);
-            } else if !terminated {
-                builder.ins().return_(&[]);
-            }
-
-            builder.seal_all_blocks();
-            builder.finalize();
+            finalize_function_body(builder, expr_value.as_ref(), terminated, DefaultReturn::Empty);
         }
 
         // NOTE: We intentionally do NOT call define_function here.
@@ -1070,14 +1056,7 @@ impl Compiler<'_> {
             let (terminated, _) =
                 Cg::new(&mut builder, &mut codegen_ctx, &env).compile_body(&test.body)?;
 
-            // If not already terminated, return 0 (test passed)
-            if !terminated {
-                let zero = builder.ins().iconst(types::I64, 0);
-                builder.ins().return_(&[zero]);
-            }
-
-            builder.seal_all_blocks();
-            builder.finalize();
+            finalize_function_body(builder, None, terminated, DefaultReturn::ZeroI64);
         }
 
         // NOTE: We intentionally do NOT call define_function here.
@@ -1243,15 +1222,7 @@ impl Compiler<'_> {
                 .with_return_type(Some(return_type_id))
                 .compile_body(&func.body)?;
 
-            // Add implicit return if no explicit return
-            if let Some(value) = expr_value {
-                builder.ins().return_(&[value.value]);
-            } else if !terminated {
-                builder.ins().return_(&[]);
-            }
-
-            builder.seal_all_blocks();
-            builder.finalize();
+            finalize_function_body(builder, expr_value.as_ref(), terminated, DefaultReturn::Empty);
         }
 
         // Define the function
@@ -1434,15 +1405,7 @@ impl Compiler<'_> {
                 .with_substitutions(Some(&instance.substitutions))
                 .compile_body(&method.body)?;
 
-            // Add implicit return if no explicit return
-            if let Some(value) = expr_value {
-                builder.ins().return_(&[value.value]);
-            } else if !terminated {
-                builder.ins().return_(&[]);
-            }
-
-            builder.seal_all_blocks();
-            builder.finalize();
+            finalize_function_body(builder, expr_value.as_ref(), terminated, DefaultReturn::Empty);
         }
 
         // Define the function
@@ -1681,15 +1644,7 @@ impl Compiler<'_> {
                 .with_substitutions(Some(&instance.substitutions))
                 .compile_body(body)?;
 
-            // Add implicit return if no explicit return
-            if let Some(value) = expr_value {
-                builder.ins().return_(&[value.value]);
-            } else if !terminated {
-                builder.ins().return_(&[]);
-            }
-
-            builder.seal_all_blocks();
-            builder.finalize();
+            finalize_function_body(builder, expr_value.as_ref(), terminated, DefaultReturn::Empty);
         }
 
         // Define the function

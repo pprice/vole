@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 
-use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, InstBuilder, types};
+use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
 use cranelift_module::Module;
 
 use super::common::{
-    FunctionCompileConfig, bind_params, compile_function_inner_with_params, create_entry_block,
+    DefaultReturn, FunctionCompileConfig, bind_params, compile_function_inner_with_params,
+    create_entry_block, finalize_function_body,
 };
 use super::{Compiler, SelfParam, TypeResolver};
 use crate::context::Cg;
@@ -684,15 +685,7 @@ impl Compiler<'_> {
                     .with_module(module_id)
                     .compile_body(body)?;
 
-                // Add implicit return if no explicit return
-                if let Some(value) = expr_value {
-                    builder.ins().return_(&[value.value]);
-                } else if !terminated {
-                    builder.ins().return_(&[]);
-                }
-
-                builder.seal_all_blocks();
-                builder.finalize();
+                finalize_function_body(builder, expr_value.as_ref(), terminated, DefaultReturn::Empty);
             }
 
             // Define the function
@@ -1008,15 +1001,7 @@ impl Compiler<'_> {
                 .with_return_type(method_return_type_id)
                 .compile_body(body)?;
 
-            // Add implicit return if no explicit return
-            if let Some(value) = expr_value {
-                builder.ins().return_(&[value.value]);
-            } else if !terminated {
-                builder.ins().return_(&[]);
-            }
-
-            builder.seal_all_blocks();
-            builder.finalize();
+            finalize_function_body(builder, expr_value.as_ref(), terminated, DefaultReturn::Empty);
         }
 
         // Define the function
@@ -1112,15 +1097,7 @@ impl Compiler<'_> {
                     .with_vars(variables)
                     .compile_body(body)?;
 
-                // Add implicit return if no explicit return
-                if let Some(value) = expr_value {
-                    builder.ins().return_(&[value.value]);
-                } else if !terminated {
-                    builder.ins().return_(&[]);
-                }
-
-                builder.seal_all_blocks();
-                builder.finalize();
+                finalize_function_body(builder, expr_value.as_ref(), terminated, DefaultReturn::Empty);
             }
 
             // Define the function
@@ -1269,14 +1246,7 @@ impl Compiler<'_> {
                     .with_module(Some(module_id))
                     .compile_body(&method.body)?;
 
-                if let Some(value) = expr_value {
-                    builder.ins().return_(&[value.value]);
-                } else if !terminated {
-                    builder.ins().return_(&[]);
-                }
-
-                builder.seal_all_blocks();
-                builder.finalize();
+                finalize_function_body(builder, expr_value.as_ref(), terminated, DefaultReturn::Empty);
             }
 
             // Define the function
@@ -1381,14 +1351,7 @@ impl Compiler<'_> {
                         .with_module(Some(module_id))
                         .compile_body(body)?;
 
-                    if let Some(value) = expr_value {
-                        builder.ins().return_(&[value.value]);
-                    } else if !terminated {
-                        builder.ins().return_(&[]);
-                    }
-
-                    builder.seal_all_blocks();
-                    builder.finalize();
+                    finalize_function_body(builder, expr_value.as_ref(), terminated, DefaultReturn::Empty);
                 }
 
                 // Define the function

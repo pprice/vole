@@ -327,26 +327,35 @@ pub fn compile_function_inner_with_params<'ctx>(
 ///
 /// NOTE: This helper takes ownership of the builder because `finalize()` consumes it.
 /// Call sites need to be restructured to pass ownership at the end of their scope.
-#[allow(dead_code)]
 ///
 /// This helper handles the common pattern at the end of function compilation:
 /// - Return the expression value if present
-/// - Add implicit empty return if not terminated
+/// - Add implicit return based on `default_return` if not terminated
 /// - Seal all blocks and finalize the builder
 ///
 /// # Arguments
 /// * `builder` - The FunctionBuilder to finalize (consumed)
 /// * `expr_value` - Optional compiled expression value to return
 /// * `terminated` - Whether the function body already terminated (return/break)
+/// * `default_return` - What to return when not terminated (Empty or ZeroI64)
 pub fn finalize_function_body(
     mut builder: FunctionBuilder,
     expr_value: Option<&crate::types::CompiledValue>,
     terminated: bool,
+    default_return: DefaultReturn,
 ) {
     if let Some(value) = expr_value {
         builder.ins().return_(&[value.value]);
     } else if !terminated {
-        builder.ins().return_(&[]);
+        match default_return {
+            DefaultReturn::Empty => {
+                builder.ins().return_(&[]);
+            }
+            DefaultReturn::ZeroI64 => {
+                let zero = builder.ins().iconst(types::I64, 0);
+                builder.ins().return_(&[zero]);
+            }
+        }
     }
     builder.seal_all_blocks();
     builder.finalize();
