@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::Write;
 
@@ -15,8 +14,8 @@ use crate::RuntimeFn;
 use crate::context::{Cg, ControlFlow};
 use crate::stmt::compile_func_body_with_params;
 use crate::types::{
-    CodegenCtx, CompileCtx, FunctionCtx, GlobalCtx, function_name_id_with_interner,
-    resolve_type_expr_to_id, type_id_to_cranelift,
+    CodegenCtx, FunctionCtx, GlobalCtx, function_name_id_with_interner, resolve_type_expr_to_id,
+    type_id_to_cranelift,
 };
 use vole_frontend::{
     Block, Decl, Expr, FuncDecl, InterfaceMethod, Interner, LetInit, LetStmt, Program, Span, Stmt,
@@ -840,43 +839,25 @@ impl Compiler<'_> {
                     lambda_counter: &self.lambda_counter,
                 };
 
-                // CompileCtx still needed for mutable JIT infrastructure
-                // (also used by compile_block and ctx.* method calls below)
-                let mut ctx = CompileCtx {
-                    analyzed: self.analyzed,
-                    interner: &self.analyzed.interner,
-                    module: &mut self.jit.module,
-                    func_registry: &mut self.func_registry,
-                    source_file_ptr,
-                    global_inits: &self.global_inits,
-                    lambda_counter: &self.lambda_counter,
-                    type_metadata: &self.type_metadata,
-                    impl_method_infos: &self.impl_method_infos,
-                    static_method_infos: &self.static_method_infos,
-                    interface_vtables: &self.interface_vtables,
-                    current_function_return_type: None, // Tests don't have a declared return type
-                    native_registry: &self.native_registry,
-                    current_module: None,
-                    type_substitutions: None,
-                    substitution_cache: RefCell::new(HashMap::new()),
-                };
+                let mut codegen_ctx =
+                    CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
                 // Add scoped functions to variables map
                 for scoped_func in &scoped_funcs {
                     // Get func_ref for this function in the current test's context
-                    let func_ref = ctx
-                        .jit_module()
+                    let func_ref = codegen_ctx
+                        .module
                         .declare_func_in_func(scoped_func.func_id, builder.func);
                     let func_addr = builder.ins().func_addr(self.pointer_type, func_ref);
 
                     // Wrap in Closure struct via vole_closure_alloc
-                    let alloc_id = ctx
-                        .funcs()
+                    let alloc_id = codegen_ctx
+                        .func_registry
                         .runtime_key(RuntimeFn::ClosureAlloc)
-                        .and_then(|key| ctx.funcs().func_id(key))
+                        .and_then(|key| codegen_ctx.func_registry.func_id(key))
                         .ok_or_else(|| "vole_closure_alloc not found".to_string())?;
-                    let alloc_ref = ctx
-                        .jit_module()
+                    let alloc_ref = codegen_ctx
+                        .module
                         .declare_func_in_func(alloc_id, builder.func);
                     let zero_captures = builder.ins().iconst(types::I64, 0);
                     let alloc_call = builder.ins().call(alloc_ref, &[func_addr, zero_captures]);
@@ -886,7 +867,8 @@ impl Compiler<'_> {
                     let func_type_id = {
                         let param_ids: TypeIdVec =
                             scoped_func.param_type_ids.iter().copied().collect();
-                        ctx.update()
+                        global
+                            .update()
                             .function(param_ids, scoped_func.return_type_id, true) // is_closure=true
                     };
 
@@ -909,7 +891,6 @@ impl Compiler<'_> {
                     };
                     // Compile the block using Cg with split contexts
                     let mut cf = ControlFlow::new();
-                    let mut codegen_ctx = ctx.as_codegen_ctx();
                     let mut cg = Cg::new(
                         &mut builder,
                         &mut variables,
@@ -927,7 +908,6 @@ impl Compiler<'_> {
                 // Note: For FuncBody::Expr, terminated=true but the block isn't actually
                 // terminated (no return instruction). For FuncBody::Block, terminated=true
                 // only if there's an explicit return/break. So we check both.
-                let mut codegen_ctx = ctx.as_codegen_ctx();
                 let (block_terminated, expr_value) = compile_func_body_with_params(
                     &mut builder,
                     &test.body,

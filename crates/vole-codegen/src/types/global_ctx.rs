@@ -49,6 +49,14 @@ pub struct GlobalCtx<'a> {
 }
 
 impl<'a> GlobalCtx<'a> {
+    /// Get a ProgramUpdate for modifying the type arena.
+    ///
+    /// This is used when creating new types (e.g., function types for closures).
+    #[inline]
+    pub fn update(&self) -> vole_sema::ProgramUpdate<'_> {
+        vole_sema::ProgramUpdate::new(self.analyzed.type_arena_ref())
+    }
+
     /// Create GlobalCtx from a CompileCtx (for transitional use)
     #[allow(dead_code)] // Part of CompileCtx migration
     pub fn from_compile_ctx(ctx: &'a CompileCtx<'a>) -> Self {
