@@ -92,6 +92,14 @@ match x {
     _ if x > 10 => "big"            // Guard
     _ => "default"                  // Wildcard (must be last)
 }
+
+// When - conditional expressions (no subject)
+let grade = when {
+    score >= 90 => "A"
+    score >= 80 => "B"
+    _ => "C"
+}
+let abs = when { x < 0 => -x, _ => x }  // Terse form
 ```
 
 ## Operators

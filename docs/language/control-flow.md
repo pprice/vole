@@ -13,6 +13,7 @@ Vole provides conditionals, loops, and pattern matching for controlling program 
 | `for i in 0..10 { }` | Range loop (exclusive end) |
 | `for i in 0..=10 { }` | Range loop (inclusive end) |
 | `match expr { pat => val }` | Pattern matching |
+| `when { cond => val, _ => default }` | Conditional expression |
 | `break` | Exit loop |
 | `continue` | Skip to next iteration |
 
@@ -259,6 +260,67 @@ let grade = match score {
     _ if score >= 70 => "C"
     _ => "F"
 }
+```
+
+### when Expressions
+
+`when` is a subject-less conditional expression for evaluating a chain of conditions:
+
+```vole
+let grade = when {
+    score >= 90 => "A"
+    score >= 80 => "B"
+    score >= 70 => "C"
+    _ => "F"
+}
+```
+
+Unlike `match` which compares a value against patterns, `when` evaluates boolean conditions in order.
+
+**Terse single-line form** (arms separated by commas):
+
+```vole
+let abs = when { x < 0 => -x, _ => x }
+let sign = when { x > 0 => 1, x < 0 => -1, _ => 0 }
+```
+
+**Multi-line form** (arms separated by newlines):
+
+```vole
+let category = when {
+    age < 13 => "child"
+    age < 20 => "teenager"
+    age < 65 => "adult"
+    _ => "senior"
+}
+```
+
+**Mixed form** (commas and newlines, trailing comma allowed):
+
+```vole
+let result = when {
+    x < 0 => "negative",
+    x == 0 => "zero",
+    _ => "positive",
+}
+```
+
+The `_` arm is required and must be last (exhaustiveness).
+
+### when vs match
+
+| Feature | `when` | `match` |
+|---------|--------|---------|
+| Has subject | No | Yes |
+| Conditions | Boolean expressions | Patterns |
+| Use case | Condition chains | Value matching |
+
+```vole
+// when: evaluate conditions
+let grade = when { score >= 90 => "A", _ => "other" }
+
+// match: match a value against patterns
+let name = match value { 1 => "one", _ => "other" }
 ```
 
 ### Nested Control Flow
