@@ -800,6 +800,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
     }
 
+    /// Convert a raw i64 field value to a CompiledValue with the proper type.
+    /// Handles type narrowing for primitives (f64 bitcast, bool/int reduction).
+    pub fn convert_field_value(&mut self, raw_value: Value, type_id: TypeId) -> CompiledValue {
+        // Use env.analyzed.type_arena() to avoid borrow conflict with builder
+        let arena = self.env.analyzed.type_arena();
+        let (value, ty) =
+            super::structs::convert_field_value_id(self.builder, raw_value, type_id, &arena);
+        drop(arena);
+        CompiledValue { value, ty, type_id }
+    }
+
     // ========== Control flow helpers ==========
 
     /// Switch to a block and seal it (common pattern for sequential control flow)

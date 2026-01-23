@@ -1,8 +1,6 @@
 // src/codegen/structs/access.rs
 
-use super::helpers::{
-    convert_field_value_id, convert_to_i64_for_storage, get_field_slot_and_type_id_cg,
-};
+use super::helpers::{convert_to_i64_for_storage, get_field_slot_and_type_id_cg};
 use crate::RuntimeFn;
 use crate::context::Cg;
 use crate::errors::CodegenError;
@@ -105,18 +103,7 @@ impl Cg<'_, '_, '_> {
         let (slot, field_type_id) = get_field_slot_and_type_id_cg(obj.type_id, field_name, self)?;
 
         let result_raw = self.get_field_cached(obj.value, slot as u32)?;
-
-        // Borrow arena from global directly to avoid borrow conflict
-        let arena = self.env.analyzed.type_arena();
-        let (result_val, cranelift_ty) =
-            convert_field_value_id(self.builder, result_raw, field_type_id, &arena);
-        drop(arena);
-
-        Ok(CompiledValue {
-            value: result_val,
-            ty: cranelift_ty,
-            type_id: field_type_id,
-        })
+        Ok(self.convert_field_value(result_raw, field_type_id))
     }
 
     pub fn optional_chain(&mut self, oc: &OptionalChainExpr) -> Result<CompiledValue, String> {
@@ -205,19 +192,10 @@ impl Cg<'_, '_, '_> {
         // Get field from the inner object
         let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
         let field_raw = self.call_runtime(RuntimeFn::InstanceGetField, &[inner_obj, slot_val])?;
-        // Borrow arena from global directly to avoid borrow conflict
-        let arena = self.env.analyzed.type_arena();
-        let (field_val, field_cranelift_ty) =
-            convert_field_value_id(self.builder, field_raw, field_type_id, &arena);
-        drop(arena);
+        let field_compiled = self.convert_field_value(field_raw, field_type_id);
 
         // Wrap the field value in an optional (using construct_union_id)
         // But if field type is already optional, it's already a union - just use it directly
-        let field_compiled = CompiledValue {
-            value: field_val,
-            ty: field_cranelift_ty,
-            type_id: field_type_id,
-        };
         let final_value = if is_field_optional {
             // Field is already optional, use as-is
             field_compiled

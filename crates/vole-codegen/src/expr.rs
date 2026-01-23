@@ -17,9 +17,7 @@ use vole_frontend::{
 use vole_sema::entity_defs::TypeDefKind;
 
 use super::context::Cg;
-use super::structs::{
-    convert_field_value_id, convert_to_i64_for_storage, get_field_slot_and_type_id_cg,
-};
+use super::structs::{convert_to_i64_for_storage, get_field_slot_and_type_id_cg};
 use super::types::{
     CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, array_element_tag_id,
     fallible_error_tag_by_id, load_fallible_payload, load_fallible_tag, resolve_type_expr_id,
@@ -641,17 +639,7 @@ impl Cg<'_, '_, '_> {
 
             let raw_value =
                 self.call_runtime_cached(RuntimeFn::ArrayGetValue, &[obj.value, idx.value])?;
-            // Borrow arena from global directly to avoid borrow conflict with builder
-            let arena = self.env.analyzed.type_arena();
-            let (result_value, result_ty) =
-                convert_field_value_id(self.builder, raw_value, element_id, &arena);
-            drop(arena);
-
-            return Ok(CompiledValue {
-                value: result_value,
-                ty: result_ty,
-                type_id: element_id,
-            });
+            return Ok(self.convert_field_value(raw_value, element_id));
         }
 
         drop(arena);
@@ -1193,17 +1181,9 @@ impl Cg<'_, '_, '_> {
                                 RuntimeFn::InstanceGetField,
                                 &[field_source, slot_val],
                             )?;
-                            // Borrow arena from global directly to avoid borrow conflict
-                            let arena = self.env.analyzed.type_arena();
-                            let (result_val, cranelift_ty) = convert_field_value_id(
-                                self.builder,
-                                result_raw,
-                                field_type_id,
-                                &arena,
-                            );
-                            drop(arena);
-                            let var = self.builder.declare_var(cranelift_ty);
-                            self.builder.def_var(var, result_val);
+                            let converted = self.convert_field_value(result_raw, field_type_id);
+                            let var = self.builder.declare_var(converted.ty);
+                            self.builder.def_var(var, converted.value);
                             arm_variables.insert(field_pattern.binding, (var, field_type_id));
                         }
 
@@ -1244,17 +1224,9 @@ impl Cg<'_, '_, '_> {
                                 RuntimeFn::InstanceGetField,
                                 &[field_source, slot_val],
                             )?;
-                            // Borrow arena from global directly to avoid borrow conflict
-                            let arena = self.env.analyzed.type_arena();
-                            let (result_val, cranelift_ty) = convert_field_value_id(
-                                self.builder,
-                                result_raw,
-                                field_type_id,
-                                &arena,
-                            );
-                            drop(arena);
-                            let var = self.builder.declare_var(cranelift_ty);
-                            self.builder.def_var(var, result_val);
+                            let converted = self.convert_field_value(result_raw, field_type_id);
+                            let var = self.builder.declare_var(converted.ty);
+                            self.builder.def_var(var, converted.value);
                             arm_variables.insert(field_pattern.binding, (var, field_type_id));
                         }
 
@@ -1699,13 +1671,9 @@ impl Cg<'_, '_, '_> {
 
             // Convert from i64 to the actual field type
             let field_ty_id = field_def.ty;
-            // Borrow arena from global directly to avoid borrow conflict
-            let arena = self.env.analyzed.type_arena();
-            let (result_val, cranelift_ty) =
-                convert_field_value_id(self.builder, raw_value, field_ty_id, &arena);
-            drop(arena);
-            let var = self.builder.declare_var(cranelift_ty);
-            self.builder.def_var(var, result_val);
+            let converted = self.convert_field_value(raw_value, field_ty_id);
+            let var = self.builder.declare_var(converted.ty);
+            self.builder.def_var(var, converted.value);
             arm_variables.insert(field_pattern.binding, (var, field_ty_id));
         }
 

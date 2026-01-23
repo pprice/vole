@@ -11,9 +11,7 @@ use vole_sema::implement_registry::ImplTypeId;
 use vole_sema::type_arena::TypeId;
 
 use super::context::Cg;
-use super::structs::{
-    convert_field_value_id, convert_to_i64_for_storage, get_field_slot_and_type_id_cg,
-};
+use super::structs::{convert_to_i64_for_storage, get_field_slot_and_type_id_cg};
 use super::types::{CompiledValue, array_element_tag_id, convert_to_type};
 
 impl Cg<'_, '_, '_> {
@@ -542,17 +540,7 @@ impl Cg<'_, '_, '_> {
 
         // Load current element
         let raw_value = self.call_runtime(RuntimeFn::ArrayGetValue, &[arr.value, idx.value])?;
-        // Borrow arena from global directly to avoid borrow conflict
-        let arena = self.env.analyzed.type_arena();
-        let (current_val, current_ty) =
-            convert_field_value_id(self.builder, raw_value, elem_type_id, &arena);
-        drop(arena);
-
-        let current = CompiledValue {
-            value: current_val,
-            ty: current_ty,
-            type_id: elem_type_id,
-        };
+        let current = self.convert_field_value(raw_value, elem_type_id);
 
         let rhs = self.expr(&compound.value)?;
         let binary_op = compound.op.to_binary_op();
@@ -595,18 +583,7 @@ impl Cg<'_, '_, '_> {
         // Load current field
         let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
         let current_raw = self.call_runtime(RuntimeFn::InstanceGetField, &[obj.value, slot_val])?;
-
-        // Borrow arena from global directly to avoid borrow conflict
-        let arena = self.env.analyzed.type_arena();
-        let (current_val, cranelift_ty) =
-            convert_field_value_id(self.builder, current_raw, field_type_id, &arena);
-        drop(arena);
-
-        let current = CompiledValue {
-            value: current_val,
-            ty: cranelift_ty,
-            type_id: field_type_id,
-        };
+        let current = self.convert_field_value(current_raw, field_type_id);
 
         let rhs = self.expr(&compound.value)?;
         let binary_op = compound.op.to_binary_op();

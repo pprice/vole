@@ -13,9 +13,7 @@ use vole_sema::type_arena::TypeId;
 
 use super::compiler::ControlFlowCtx;
 use super::context::{Captures, Cg, ControlFlow};
-use super::structs::{
-    convert_field_value_id, convert_to_i64_for_storage, get_field_slot_and_type_id_cg,
-};
+use super::structs::{convert_to_i64_for_storage, get_field_slot_and_type_id_cg};
 use super::types::{
     CodegenCtx, CompileEnv, CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG,
     FALLIBLE_TAG_OFFSET, FunctionCtx, fallible_error_tag_by_id, resolve_type_expr_id,
@@ -816,13 +814,9 @@ impl Cg<'_, '_, '_> {
                     let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
                     let result_raw =
                         self.call_runtime(RuntimeFn::InstanceGetField, &[value, slot_val])?;
-                    // Borrow arena from global directly to avoid borrow conflict
-                    let arena = self.env.analyzed.type_arena();
-                    let (result_val, cranelift_ty) =
-                        convert_field_value_id(self.builder, result_raw, field_type_id, &arena);
-                    drop(arena);
-                    let var = self.builder.declare_var(cranelift_ty);
-                    self.builder.def_var(var, result_val);
+                    let converted = self.convert_field_value(result_raw, field_type_id);
+                    let var = self.builder.declare_var(converted.ty);
+                    self.builder.def_var(var, converted.value);
                     self.vars
                         .insert(field_pattern.binding, (var, field_type_id));
                 }
