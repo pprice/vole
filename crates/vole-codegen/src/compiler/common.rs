@@ -10,9 +10,9 @@ use cranelift::prelude::{Block, FunctionBuilder, InstBuilder, Type, Variable, ty
 use vole_frontend::{FuncBody, Symbol};
 use vole_sema::type_arena::TypeId;
 
-use crate::context::{Captures, Cg, ControlFlow};
+use crate::context::{Captures, Cg};
 use crate::lambda::CaptureBinding;
-use crate::types::{CodegenCtx, CompileEnv, FunctionCtx};
+use crate::types::{CodegenCtx, CompileEnv};
 
 /// What to return from a non-terminated block
 #[derive(Clone, Copy)]
@@ -280,40 +280,37 @@ pub fn compile_function_body_with_cg(
 ///
 /// This uses the new split context architecture:
 /// - CodegenCtx for mutable JIT infrastructure (module, func_registry)
-/// - FunctionCtx for per-function state (return type, module id)
 /// - CompileEnv for session/unit level context (analyzed program, type metadata, etc.)
+/// - module_id and substitutions for per-function context
 ///
 /// # Arguments
 /// * `builder` - The FunctionBuilder for this function (consumed by finalize)
 /// * `codegen_ctx` - Mutable JIT infrastructure (module, func_registry)
-/// * `function_ctx` - Split per-function state (return type, module id)
 /// * `env` - Compilation environment (session/unit level)
 /// * `config` - Configuration specifying the function to compile
+/// * `module_id` - Current module (None for main program)
+/// * `substitutions` - Type parameter substitutions for monomorphized generics
 ///
 /// # Returns
 /// Ok(()) on success, Err with message on failure
-pub fn compile_function_inner_with_params<'ctx>(
+pub fn compile_function_inner_with_params<'a, 'ctx>(
     mut builder: FunctionBuilder,
     codegen_ctx: &mut CodegenCtx<'ctx>,
-    function_ctx: &FunctionCtx<'ctx>,
     env: &CompileEnv<'ctx>,
     config: FunctionCompileConfig,
+    module_id: Option<vole_identity::ModuleId>,
+    substitutions: Option<&'a std::collections::HashMap<vole_identity::NameId, TypeId>>,
 ) -> Result<(), String> {
     // Set up entry block and bind parameters
-    let (mut variables, captures) = setup_function_entry(&mut builder, &config);
+    let (variables, captures) = setup_function_entry(&mut builder, &config);
 
     // Create Cg with split contexts
-    let mut cf = ControlFlow::new();
-    let mut cg = Cg::new(
-        &mut builder,
-        &mut variables,
-        &mut cf,
-        codegen_ctx,
-        function_ctx,
-        env,
-    )
-    .with_return_type(config.return_type_id)
-    .with_captures(captures);
+    let mut cg = Cg::new(&mut builder, codegen_ctx, env)
+        .with_vars(variables)
+        .with_return_type(config.return_type_id)
+        .with_captures(captures)
+        .with_module(module_id)
+        .with_substitutions(substitutions);
 
     compile_function_body_with_cg(&mut cg, config.body, config.default_return)?;
 

@@ -6,10 +6,10 @@ use cranelift_module::Module;
 use super::common::{
     FunctionCompileConfig, bind_params, compile_function_inner_with_params, create_entry_block,
 };
-use super::{Compiler, ControlFlowCtx, SelfParam, TypeResolver};
-use crate::stmt::compile_func_body_with_params;
+use super::{Compiler, SelfParam, TypeResolver};
+use crate::context::Cg;
 use crate::types::{
-    CodegenCtx, FunctionCtx, MethodInfo, TypeMetadata, method_name_id_with_interner,
+    CodegenCtx, MethodInfo, TypeMetadata, method_name_id_with_interner,
     resolve_type_expr_to_id, type_id_to_cranelift,
 };
 use vole_frontend::ast::PrimitiveType as AstPrimitive;
@@ -671,34 +671,18 @@ impl Compiler<'_> {
                 );
 
                 // Compile method body
-                let mut cf_ctx = ControlFlowCtx::default();
-
-                // Create split contexts - use module context if compiling module code
-                let function_ctx = if let Some(path) = module_path {
+                let module_id = module_path.and_then(|path| {
                     let name_table = self.analyzed.name_table();
-                    if let Some(mod_id) = name_table.module_id_if_known(path) {
-                        FunctionCtx::module(return_type_id, mod_id)
-                    } else {
-                        FunctionCtx::main(return_type_id)
-                    }
-                } else {
-                    FunctionCtx::main(return_type_id)
-                };
+                    name_table.module_id_if_known(path)
+                });
                 let env = compile_env!(self, source_file_ptr);
                 let mut codegen_ctx =
                     CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
-
-                let (terminated, expr_value) = compile_func_body_with_params(
-                    &mut builder,
-                    body,
-                    &mut variables,
-                    &mut cf_ctx,
-                    &mut codegen_ctx,
-                    &function_ctx,
-                    &env,
-                    None,
-                    None,
-                )?;
+                let (terminated, expr_value) = Cg::new(&mut builder, &mut codegen_ctx, &env)
+                    .with_vars(variables)
+                    .with_return_type(return_type_id)
+                    .with_module(module_id)
+                    .compile_body(body)?;
 
                 // Add implicit return if no explicit return
                 if let Some(value) = expr_value {
@@ -799,7 +783,6 @@ impl Compiler<'_> {
             let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
 
             // Create split contexts
-            let function_ctx = FunctionCtx::main(method_return_type_id);
             let env = compile_env!(self, source_file_ptr);
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
@@ -813,9 +796,10 @@ impl Compiler<'_> {
             compile_function_inner_with_params(
                 builder,
                 &mut codegen_ctx,
-                &function_ctx,
                 &env,
                 config,
+                None,
+                None,
             )?;
         }
 
@@ -896,7 +880,6 @@ impl Compiler<'_> {
             let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
 
             // Create split contexts
-            let function_ctx = FunctionCtx::main(method_return_type_id);
             let env = compile_env!(self, source_file_ptr);
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
             let self_binding = (self_sym, self_type_id, self.pointer_type);
@@ -909,9 +892,10 @@ impl Compiler<'_> {
             compile_function_inner_with_params(
                 builder,
                 &mut codegen_ctx,
-                &function_ctx,
                 &env,
                 config,
+                None,
+                None,
             )?;
         }
 
@@ -1016,22 +1000,13 @@ impl Compiler<'_> {
                 )
             })?;
 
-            // Create split contexts
-            let function_ctx = FunctionCtx::main(method_return_type_id);
+            // Create split contexts and compile
             let env = compile_env!(self, source_file_ptr);
-            let mut cf_ctx = ControlFlowCtx::default();
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
-            let (terminated, expr_value) = compile_func_body_with_params(
-                &mut builder,
-                body,
-                &mut variables,
-                &mut cf_ctx,
-                &mut codegen_ctx,
-                &function_ctx,
-                &env,
-                None,
-                None,
-            )?;
+            let (terminated, expr_value) = Cg::new(&mut builder, &mut codegen_ctx, &env)
+                .with_vars(variables)
+                .with_return_type(method_return_type_id)
+                .compile_body(body)?;
 
             // Add implicit return if no explicit return
             if let Some(value) = expr_value {
@@ -1129,25 +1104,13 @@ impl Compiler<'_> {
                     &params,
                 );
 
-                // Create split contexts
-                let function_ctx = FunctionCtx::main(None);
-                let env = compile_env!(self, source_file_ptr);
-
                 // Compile method body
-                let mut cf_ctx = ControlFlowCtx::default();
+                let env = compile_env!(self, source_file_ptr);
                 let mut codegen_ctx =
                     CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
-                let (terminated, expr_value) = compile_func_body_with_params(
-                    &mut builder,
-                    body,
-                    &mut variables,
-                    &mut cf_ctx,
-                    &mut codegen_ctx,
-                    &function_ctx,
-                    &env,
-                    None,
-                    None,
-                )?;
+                let (terminated, expr_value) = Cg::new(&mut builder, &mut codegen_ctx, &env)
+                    .with_vars(variables)
+                    .compile_body(body)?;
 
                 // Add implicit return if no explicit return
                 if let Some(value) = expr_value {
@@ -1290,8 +1253,7 @@ impl Compiler<'_> {
                     &params[1..],
                 );
 
-                // Create split contexts (use module interner)
-                let function_ctx = FunctionCtx::module(Some(return_type_id), module_id);
+                // Compile method body (use module interner)
                 let env = compile_env!(
                     self,
                     module_interner,
@@ -1299,22 +1261,13 @@ impl Compiler<'_> {
                     source_file_ptr,
                     module_id
                 );
-
-                // Compile method body
-                let mut cf_ctx = ControlFlowCtx::default();
                 let mut codegen_ctx =
                     CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
-                let (terminated, expr_value) = compile_func_body_with_params(
-                    &mut builder,
-                    &method.body,
-                    &mut variables,
-                    &mut cf_ctx,
-                    &mut codegen_ctx,
-                    &function_ctx,
-                    &env,
-                    None,
-                    None,
-                )?;
+                let (terminated, expr_value) = Cg::new(&mut builder, &mut codegen_ctx, &env)
+                    .with_vars(variables)
+                    .with_return_type(Some(return_type_id))
+                    .with_module(Some(module_id))
+                    .compile_body(&method.body)?;
 
                 if let Some(value) = expr_value {
                     builder.ins().return_(&[value.value]);
@@ -1412,8 +1365,7 @@ impl Compiler<'_> {
                         &params,
                     );
 
-                    // Create split contexts (use module interner)
-                    let function_ctx = FunctionCtx::module(Some(return_type_id), module_id);
+                    // Compile method body (use module interner)
                     let env = compile_env!(
                         self,
                         module_interner,
@@ -1421,22 +1373,13 @@ impl Compiler<'_> {
                         source_file_ptr,
                         module_id
                     );
-
-                    // Compile method body
-                    let mut cf_ctx = ControlFlowCtx::default();
                     let mut codegen_ctx =
                         CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
-                    let (terminated, expr_value) = compile_func_body_with_params(
-                        &mut builder,
-                        body,
-                        &mut variables,
-                        &mut cf_ctx,
-                        &mut codegen_ctx,
-                        &function_ctx,
-                        &env,
-                        None,
-                        None,
-                    )?;
+                    let (terminated, expr_value) = Cg::new(&mut builder, &mut codegen_ctx, &env)
+                        .with_vars(variables)
+                        .with_return_type(Some(return_type_id))
+                        .with_module(Some(module_id))
+                        .compile_body(body)?;
 
                     if let Some(value) = expr_value {
                         builder.ins().return_(&[value.value]);

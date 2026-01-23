@@ -13,7 +13,7 @@ use vole_sema::type_arena::{TypeArena, TypeId, TypeIdVec};
 use super::RuntimeFn;
 use super::compiler::common::{FunctionCompileConfig, compile_function_inner_with_params};
 use super::context::Cg;
-use super::types::{CompiledValue, FunctionCtx, resolve_type_expr_id, type_id_to_cranelift};
+use super::types::{CompiledValue, type_id_to_cranelift};
 
 /// Information about a captured variable for lambda compilation
 #[derive(Clone, Copy)]
@@ -64,7 +64,6 @@ impl Cg<'_, '_, '_> {
 
         // Fallback: resolve from AST annotations or infer
         let primitives = self.arena().primitives;
-        let type_ctx = self.type_ctx();
 
         // Build param type ids from AST annotations, defaulting to i64
         let param_type_ids: Vec<TypeId> = lambda
@@ -72,26 +71,14 @@ impl Cg<'_, '_, '_> {
             .iter()
             .map(|p| {
                 p.ty.as_ref()
-                    .map(|t| {
-                        resolve_type_expr_id(
-                            t,
-                            &type_ctx,
-                            self.function_ctx,
-                            &self.env.state.type_metadata,
-                        )
-                    })
+                    .map(|t| self.resolve_type_expr(t))
                     .unwrap_or(primitives.i64)
             })
             .collect();
 
         // Get return type from annotation or infer from body
         let return_type_id = if let Some(t) = &lambda.return_type {
-            resolve_type_expr_id(
-                t,
-                &type_ctx,
-                self.function_ctx,
-                &self.env.state.type_metadata,
-            )
+            self.resolve_type_expr(t)
         } else {
             let param_context: Vec<(Symbol, TypeId)> = lambda
                 .params
@@ -164,15 +151,13 @@ impl Cg<'_, '_, '_> {
 
             let config = FunctionCompileConfig::pure_lambda(&lambda.body, params, return_type_id);
 
-            // Create contexts for lambda compilation
-            let function_ctx = FunctionCtx::main(Some(return_type_id));
-
             compile_function_inner_with_params(
                 lambda_builder,
                 self.codegen_ctx,
-                &function_ctx,
                 self.env,
                 config,
+                None,
+                None,
             )?;
         }
 
@@ -264,7 +249,7 @@ impl Cg<'_, '_, '_> {
         self.funcs().set_func_id(func_key, func_id);
         self.funcs().set_return_type(func_key, return_type_id);
 
-        let capture_bindings = build_capture_bindings(&captures, self.vars, &self.arena());
+        let capture_bindings = build_capture_bindings(&captures, &self.vars, &self.arena());
 
         let mut lambda_ctx = self.jit_module().make_context();
         lambda_ctx.func.signature = sig.clone();
@@ -291,15 +276,13 @@ impl Cg<'_, '_, '_> {
                 return_type_id,
             );
 
-            // Create contexts for lambda compilation
-            let function_ctx = FunctionCtx::main(Some(return_type_id));
-
             compile_function_inner_with_params(
                 lambda_builder,
                 self.codegen_ctx,
-                &function_ctx,
                 self.env,
                 config,
+                None,
+                None,
             )?;
         }
 

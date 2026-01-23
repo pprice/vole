@@ -2,8 +2,6 @@
 //
 // Statement and block compilation - impl Cg methods.
 
-use std::collections::HashMap;
-
 use cranelift::prelude::*;
 
 use crate::RuntimeFn;
@@ -11,49 +9,12 @@ use crate::errors::CodegenError;
 use vole_frontend::{self, ExprKind, LetInit, Pattern, RaiseStmt, Stmt, Symbol};
 use vole_sema::type_arena::TypeId;
 
-use super::compiler::ControlFlowCtx;
-use super::context::{Captures, Cg, ControlFlow};
+use super::context::Cg;
 use super::structs::{convert_to_i64_for_storage, get_field_slot_and_type_id_cg};
 use super::types::{
-    CodegenCtx, CompileEnv, CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG,
-    FALLIBLE_TAG_OFFSET, FunctionCtx, fallible_error_tag_by_id, resolve_type_expr_id,
-    tuple_layout_id, type_id_to_cranelift,
+    CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET,
+    fallible_error_tag_by_id, tuple_layout_id, type_id_to_cranelift,
 };
-
-/// Compile a function body with split contexts.
-///
-/// Takes CodegenCtx (JIT module + function registry) along with FunctionCtx and CompileEnv.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn compile_func_body_with_params<'ctx>(
-    builder: &mut FunctionBuilder,
-    body: &vole_frontend::FuncBody,
-    variables: &mut HashMap<Symbol, (Variable, TypeId)>,
-    _cf_ctx: &mut ControlFlowCtx,
-    codegen_ctx: &mut CodegenCtx<'ctx>,
-    function_ctx: &FunctionCtx<'ctx>,
-    env: &CompileEnv<'ctx>,
-    captures: Option<Captures>,
-    nested_return_type: Option<TypeId>,
-) -> Result<(bool, Option<CompiledValue>), String> {
-    // Determine effective return type: nested overrides function_ctx's return type
-    let return_type = nested_return_type.or(function_ctx.return_type);
-
-    let mut cf = ControlFlow::new();
-    let mut cg = Cg::new(builder, variables, &mut cf, codegen_ctx, function_ctx, env)
-        .with_return_type(return_type)
-        .with_captures(captures);
-
-    match body {
-        vole_frontend::FuncBody::Block(block) => {
-            let terminated = cg.block(block)?;
-            Ok((terminated, None))
-        }
-        vole_frontend::FuncBody::Expr(expr) => {
-            let value = cg.expr(expr)?;
-            Ok((true, Some(value)))
-        }
-    }
-}
 
 impl Cg<'_, '_, '_> {
     /// Pre-register a recursive lambda binding before compilation.
@@ -78,6 +39,27 @@ impl Cg<'_, '_, '_> {
         let var = self.builder.declare_var(cranelift_ty);
         self.vars.insert(name, (var, func_type_id));
         Some(var)
+    }
+
+    /// Compile a function body (block or expression).
+    ///
+    /// Returns (terminated, optional_value):
+    /// - For blocks: (true if explicitly terminated, None)
+    /// - For expressions: (true, Some(value))
+    pub fn compile_body(
+        &mut self,
+        body: &vole_frontend::FuncBody,
+    ) -> Result<(bool, Option<CompiledValue>), String> {
+        match body {
+            vole_frontend::FuncBody::Block(block) => {
+                let terminated = self.block(block)?;
+                Ok((terminated, None))
+            }
+            vole_frontend::FuncBody::Expr(expr) => {
+                let value = self.expr(expr)?;
+                Ok((true, Some(value)))
+            }
+        }
     }
 
     /// Compile a block of statements. Returns true if terminated (return/break).
@@ -117,10 +99,7 @@ impl Cg<'_, '_, '_> {
 
                 let mut declared_type_id_opt = None;
                 let (mut final_value, mut final_type_id) = if let Some(ty_expr) = &let_stmt.ty {
-                    let type_ctx = self.type_ctx();
-                    let func_ctx = self.function_ctx;
-                    let declared_type_id =
-                        resolve_type_expr_id(ty_expr, &type_ctx, func_ctx, self.type_metadata());
+                    let declared_type_id = self.resolve_type_expr(ty_expr);
                     declared_type_id_opt = Some(declared_type_id);
 
                     let arena = self.arena();

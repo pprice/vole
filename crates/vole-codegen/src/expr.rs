@@ -20,8 +20,8 @@ use super::context::Cg;
 use super::structs::{convert_to_i64_for_storage, get_field_slot_and_type_id_cg};
 use super::types::{
     CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, array_element_tag_id,
-    fallible_error_tag_by_id, load_fallible_payload, load_fallible_tag, resolve_type_expr_id,
-    tuple_layout_id, type_id_to_cranelift,
+    fallible_error_tag_by_id, load_fallible_payload, load_fallible_tag, tuple_layout_id,
+    type_id_to_cranelift,
 };
 use vole_sema::type_arena::TypeId;
 
@@ -717,14 +717,7 @@ impl Cg<'_, '_, '_> {
     /// Compile an `is` type check expression
     fn is_expr(&mut self, is_expr: &vole_frontend::IsExpr) -> Result<CompiledValue, String> {
         let value = self.expr(&is_expr.value)?;
-        let type_ctx = self.type_ctx();
-        let func_ctx = self.function_ctx;
-        let tested_type_id = resolve_type_expr_id(
-            &is_expr.type_expr,
-            &type_ctx,
-            func_ctx,
-            self.type_metadata(),
-        );
+        let tested_type_id = self.resolve_type_expr(&is_expr.type_expr);
 
         let arena = self.arena();
         if let Some(variants) = arena.unwrap_union(value.type_id) {
@@ -982,17 +975,14 @@ impl Cg<'_, '_, '_> {
                     }
                 }
                 Pattern::Type { type_expr, .. } => {
-                    let type_ctx = self.type_ctx();
-                    let func_ctx = self.function_ctx;
-                    let pattern_type_id =
-                        resolve_type_expr_id(type_expr, &type_ctx, func_ctx, self.type_metadata());
+                    let pattern_type_id = self.resolve_type_expr(type_expr);
                     self.compile_type_pattern_check(&scrutinee, pattern_type_id)?
                 }
                 Pattern::Literal(lit_expr) => {
                     // Save and restore vars for pattern matching
-                    let saved_vars = std::mem::replace(&mut *self.vars, arm_variables.clone());
+                    let saved_vars = std::mem::replace(&mut self.vars, arm_variables.clone());
                     let lit_val = self.expr(lit_expr)?;
-                    arm_variables = std::mem::replace(&mut *self.vars, saved_vars);
+                    arm_variables = std::mem::replace(&mut self.vars, saved_vars);
 
                     // Use Vole type (not Cranelift type) to determine comparison method
                     let cmp = self.compile_equality_check(
@@ -1219,9 +1209,9 @@ impl Cg<'_, '_, '_> {
 
             // Save and restore vars for guard evaluation
             let guard_result = if let Some(guard) = &arm.guard {
-                let saved_vars = std::mem::replace(&mut *self.vars, arm_variables.clone());
+                let saved_vars = std::mem::replace(&mut self.vars, arm_variables.clone());
                 let guard_val = self.expr(guard)?;
-                arm_variables = std::mem::replace(&mut *self.vars, saved_vars);
+                arm_variables = std::mem::replace(&mut self.vars, saved_vars);
                 Some(guard_val.value)
             } else {
                 None
@@ -1251,9 +1241,9 @@ impl Cg<'_, '_, '_> {
             self.builder.switch_to_block(body_block);
 
             // Compile body with the arm's variables
-            let saved_vars = std::mem::replace(&mut *self.vars, arm_variables);
+            let saved_vars = std::mem::replace(&mut self.vars, arm_variables);
             let body_val = self.expr(&arm.body)?;
-            let _ = std::mem::replace(&mut *self.vars, saved_vars);
+            let _ = std::mem::replace(&mut self.vars, saved_vars);
 
             if i == 0 {
                 result_type_id = body_val.type_id;

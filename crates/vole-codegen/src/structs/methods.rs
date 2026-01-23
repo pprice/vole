@@ -155,7 +155,7 @@ impl Cg<'_, '_, '_> {
         // If no resolution exists (e.g., inside default method bodies), fall back to type-based lookup
         // In monomorphized context, skip sema resolution because it was computed for the type parameter,
         // not the concrete type. Let resolve_method_target do dynamic resolution based on object_type.
-        let resolution = if self.substitutions().is_some() {
+        let resolution = if self.substitutions.is_some() {
             None
         } else {
             self.analyzed()
@@ -215,7 +215,7 @@ impl Cg<'_, '_, '_> {
                 return_type,
             } => {
                 // Use TypeId-based params for interface boxing check
-                let param_type_ids = resolution.and_then(|resolved| {
+                let param_type_ids = resolution.and_then(|resolved: &vole_sema::ResolvedMethod| {
                     self.arena()
                         .unwrap_function(resolved.func_type_id())
                         .map(|(params, _, _)| params.clone())
@@ -305,7 +305,7 @@ impl Cg<'_, '_, '_> {
         };
 
         // Use TypeId-based params for interface boxing check
-        let param_type_ids = resolution.and_then(|resolved| {
+        let param_type_ids = resolution.and_then(|resolved: &vole_sema::ResolvedMethod| {
             self.arena()
                 .unwrap_function(resolved.func_type_id())
                 .map(|(params, _, _)| params.clone())

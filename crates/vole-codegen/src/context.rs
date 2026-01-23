@@ -3,6 +3,7 @@
 // Unified codegen context - bundles all state needed during code generation.
 // Methods are implemented across multiple files using split impl blocks.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 use cranelift::prelude::{
@@ -11,11 +12,13 @@ use cranelift::prelude::{
 };
 use cranelift_codegen::ir::StackSlot;
 use cranelift_module::{FuncId, Module};
+use rustc_hash::FxHashMap;
 
 use crate::errors::CodegenError;
 use crate::{FunctionKey, RuntimeFn};
 use smallvec::SmallVec;
 use vole_frontend::{BinaryOp, Expr, ExprKind, Symbol};
+use vole_identity::{ModuleId, NameId};
 use vole_runtime::native_registry::NativeType;
 use vole_sema::PrimitiveType;
 use vole_sema::implement_registry::ExternalMethodInfo;
@@ -23,8 +26,8 @@ use vole_sema::type_arena::{SemaType as ArenaType, TypeId};
 
 use super::lambda::CaptureBinding;
 use super::types::{
-    CodegenCtx, CompileEnv, CompiledValue, FunctionCtx, native_type_to_cranelift,
-    resolve_type_expr_id, type_id_size, type_id_to_cranelift,
+    CodegenCtx, CompileEnv, CompiledValue, native_type_to_cranelift, type_id_size,
+    type_id_to_cranelift,
 };
 use vole_sema::type_arena::TypeIdVec;
 
@@ -81,7 +84,7 @@ pub type CallCacheKey = (RuntimeFn, SmallVec<[Value; 4]>);
 /// Unified codegen context - all state needed for code generation.
 ///
 /// Lifetimes:
-/// - 'a: lifetime of local state (builder, vars, cf, captures)
+/// - 'a: lifetime of borrowed state (builder, codegen_ctx, env)
 /// - 'b: lifetime of FunctionBuilder's internal data
 /// - 'ctx: lifetime of context references (can outlive 'a for lambdas)
 ///
@@ -94,8 +97,9 @@ pub type CallCacheKey = (RuntimeFn, SmallVec<[Value; 4]>);
 /// - structs.rs: struct_literal(), field_access(), method_call()
 pub(crate) struct Cg<'a, 'b, 'ctx> {
     pub builder: &'a mut FunctionBuilder<'b>,
-    pub vars: &'a mut HashMap<Symbol, (Variable, TypeId)>,
-    pub cf: &'a mut ControlFlow,
+    /// Variable bindings - owned, fresh per function
+    pub vars: HashMap<Symbol, (Variable, TypeId)>,
+    pub cf: ControlFlow,
     pub captures: Option<Captures<'a>>,
     /// For recursive lambdas: the binding name that captures itself
     pub self_capture: Option<Symbol>,
@@ -105,40 +109,46 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     pub field_cache: HashMap<(Value, u32), Value>,
     /// Return type of the current function
     pub return_type: Option<TypeId>,
+    /// Module being compiled (None for main program)
+    pub current_module: Option<ModuleId>,
+    /// Type parameter substitutions for monomorphized generics
+    pub substitutions: Option<&'a HashMap<NameId, TypeId>>,
+    /// Cache for substituted types
+    substitution_cache: RefCell<HashMap<TypeId, TypeId>>,
 
-    // ========== Split context fields ==========
-    /// Mutable JIT infrastructure (module, func_registry) - REQUIRED
+    // ========== Shared context fields ==========
+    /// Mutable JIT infrastructure (module, func_registry)
     pub codegen_ctx: &'a mut CodegenCtx<'ctx>,
-    /// Per-function state (return type, substitutions) - REQUIRED
-    pub function_ctx: &'a FunctionCtx<'ctx>,
-    /// Compilation environment (session/unit level) - REQUIRED
+    /// Compilation environment (session/unit level)
     pub env: &'a CompileEnv<'ctx>,
 }
 
 impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
-    /// Create a new codegen context with split contexts.
+    /// Create a new codegen context.
     ///
-    /// Defaults: captures = None, return_type = function_ctx.return_type.
-    /// Use `.with_captures()` or `.with_return_type()` to override.
+    /// Creates fresh `vars` and `cf` internally. Use `with_*` methods for configuration:
+    /// - `.with_return_type()` - set return type for the function
+    /// - `.with_module()` - set current module
+    /// - `.with_substitutions()` - set type parameter substitutions
+    /// - `.with_captures()` - set closure captures
     pub fn new(
         builder: &'a mut FunctionBuilder<'b>,
-        vars: &'a mut HashMap<Symbol, (Variable, TypeId)>,
-        cf: &'a mut ControlFlow,
         codegen_ctx: &'a mut CodegenCtx<'ctx>,
-        function_ctx: &'a FunctionCtx<'ctx>,
         env: &'a CompileEnv<'ctx>,
     ) -> Self {
         Self {
             builder,
-            vars,
-            cf,
+            vars: HashMap::new(),
+            cf: ControlFlow::new(),
             captures: None,
             self_capture: None,
             call_cache: HashMap::new(),
             field_cache: HashMap::new(),
-            return_type: function_ctx.return_type,
+            return_type: None,
+            current_module: None,
+            substitutions: None,
+            substitution_cache: RefCell::new(HashMap::new()),
             codegen_ctx,
-            function_ctx,
             env,
         }
     }
@@ -149,10 +159,33 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self
     }
 
-    /// Override the return type (defaults to function_ctx.return_type).
+    /// Set the return type.
     pub fn with_return_type(mut self, return_type: Option<TypeId>) -> Self {
         self.return_type = return_type;
         self
+    }
+
+    /// Set the current module.
+    pub fn with_module(mut self, module_id: Option<ModuleId>) -> Self {
+        self.current_module = module_id;
+        self
+    }
+
+    /// Set type parameter substitutions for monomorphized generics.
+    pub fn with_substitutions(mut self, subs: Option<&'a HashMap<NameId, TypeId>>) -> Self {
+        self.substitutions = subs;
+        self
+    }
+
+    /// Set pre-populated variables (for cases where params are bound before Cg creation).
+    pub fn with_vars(mut self, vars: HashMap<Symbol, (Variable, TypeId)>) -> Self {
+        self.vars = vars;
+        self
+    }
+
+    /// Get mutable reference to variables map (for binding params after creation).
+    pub fn vars_mut(&mut self) -> &mut HashMap<Symbol, (Variable, TypeId)> {
+        &mut self.vars
     }
 
     /// Check if we're in a closure context with captures
@@ -174,31 +207,45 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.env.analyzed.type_arena_ref()
     }
 
-    /// Substitute type parameters using function_ctx substitutions
+    /// Substitute type parameters using current substitutions
     #[inline]
     pub fn substitute_type(&self, ty: TypeId) -> TypeId {
-        self.function_ctx
-            .substitute_type_id(ty, self.env.analyzed.type_arena_ref())
+        if let Some(substitutions) = self.substitutions {
+            // Check cache first
+            if let Some(&cached) = self.substitution_cache.borrow().get(&ty) {
+                return cached;
+            }
+            // Convert std HashMap to FxHashMap for arena compatibility
+            let subs: FxHashMap<NameId, TypeId> =
+                substitutions.iter().map(|(&k, &v)| (k, v)).collect();
+            let update = vole_sema::ProgramUpdate::new(self.env.analyzed.type_arena_ref());
+            let result = update.substitute(ty, &subs);
+            // Cache the result
+            self.substitution_cache.borrow_mut().insert(ty, result);
+            result
+        } else {
+            ty
+        }
     }
 
     /// Get current module (as ModuleId)
     #[inline]
     #[allow(dead_code)]
-    pub fn current_module_id(&self) -> Option<vole_identity::ModuleId> {
-        self.function_ctx.current_module
+    pub fn current_module_id(&self) -> Option<ModuleId> {
+        self.current_module
     }
 
     /// Get type substitutions
     #[inline]
     #[allow(dead_code)]
-    pub fn type_substitutions(&self) -> Option<&'ctx HashMap<vole_identity::NameId, TypeId>> {
-        self.function_ctx.substitutions
+    pub fn type_substitutions(&self) -> Option<&HashMap<NameId, TypeId>> {
+        self.substitutions
     }
 
     /// Alias for type_substitutions (backward compat)
     #[inline]
-    pub fn substitutions(&self) -> Option<&'ctx HashMap<vole_identity::NameId, TypeId>> {
-        self.function_ctx.substitutions
+    pub fn get_substitutions(&self) -> Option<&HashMap<NameId, TypeId>> {
+        self.substitutions
     }
 
     /// Get entity registry reference
@@ -235,7 +282,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn get_expr_type(&self, node_id: &vole_frontend::NodeId) -> Option<TypeId> {
         // For module code, check module-specific expr_types first
-        if let Some(module_id) = self.function_ctx.current_module {
+        if let Some(module_id) = self.current_module {
             let name_table = self.name_table();
             let module_path = name_table.module_path(module_id);
             if let Some(module_types) = self
@@ -368,7 +415,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Get current module as Option<ModuleId> - use current_module_id() for new code
     #[inline]
     pub fn current_module(&self) -> Option<vole_identity::ModuleId> {
-        self.function_ctx.current_module
+        self.current_module
     }
 
     /// Get analyzed program reference
@@ -401,6 +448,30 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn update(&self) -> vole_sema::ProgramUpdate<'_> {
         vole_sema::ProgramUpdate::new(self.env.analyzed.type_arena_ref())
+    }
+
+    /// Resolve a type expression to a TypeId using this context's module and substitutions.
+    pub fn resolve_type_expr(&self, ty: &vole_frontend::TypeExpr) -> TypeId {
+        let type_ctx = self.type_ctx();
+        let name_table = type_ctx.name_table_rc().borrow();
+        let module_id = self
+            .current_module
+            .unwrap_or_else(|| name_table.main_module());
+
+        // Use the TypeId-native resolution function directly
+        let type_id = super::types::resolve_type_expr_to_id(
+            ty,
+            type_ctx.entities(),
+            &self.env.state.type_metadata,
+            type_ctx.interner(),
+            &name_table,
+            module_id,
+            type_ctx.arena_rc(),
+        );
+        drop(name_table);
+
+        // Apply type substitutions if compiling a monomorphized context
+        self.substitute_type(type_id)
     }
 
     /// Find the nil variant index in a union (for optional handling)
@@ -449,7 +520,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 // Try to look up global via GlobalDef
                 let name_table = self.name_table();
                 let module_id = self
-                    .function_ctx
                     .current_module
                     .unwrap_or_else(|| name_table.main_module());
                 if let Some(name_id) = name_table.name_id(module_id, &[*sym], self.interner()) {
@@ -515,35 +585,20 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
             ExprKind::Lambda(lambda) => {
                 let primitives = self.arena().primitives;
-                let type_ctx = self.type_ctx();
                 // Resolve param types directly to TypeIds
                 let lambda_param_ids: TypeIdVec = lambda
                     .params
                     .iter()
                     .map(|p| {
                         p.ty.as_ref()
-                            .map(|t| {
-                                resolve_type_expr_id(
-                                    t,
-                                    &type_ctx,
-                                    self.function_ctx,
-                                    &self.env.state.type_metadata,
-                                )
-                            })
+                            .map(|t| self.resolve_type_expr(t))
                             .unwrap_or(primitives.i64)
                     })
                     .collect();
                 let return_ty_id = lambda
                     .return_type
                     .as_ref()
-                    .map(|t| {
-                        resolve_type_expr_id(
-                            t,
-                            &type_ctx,
-                            self.function_ctx,
-                            &self.env.state.type_metadata,
-                        )
-                    })
+                    .map(|t| self.resolve_type_expr(t))
                     .unwrap_or(primitives.i64);
 
                 self.update().function(
