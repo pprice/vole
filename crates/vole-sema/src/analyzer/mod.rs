@@ -881,6 +881,23 @@ impl Analyzer {
                         self.type_param_stack.push_scope(scope);
                     }
 
+                    // Type-check field default expressions
+                    {
+                        let class_name_id =
+                            self.name_table()
+                                .name_id(self.current_module, &[class.name], interner);
+                        let field_types = class_name_id.and_then(|class_name_id| {
+                            let registry = self.entity_registry();
+                            registry
+                                .type_by_name(class_name_id)
+                                .and_then(|type_def_id| registry.get_generic_info(type_def_id))
+                                .map(|gi| gi.field_types.clone())
+                        });
+                        if let Some(field_types) = field_types {
+                            self.check_field_defaults(&class.fields, &field_types, interner)?;
+                        }
+                    }
+
                     for method in &class.methods {
                         self.check_method(method, class.name, interner)?;
                     }
@@ -955,6 +972,25 @@ impl Analyzer {
                             scope.add(tp.clone());
                         }
                         self.type_param_stack.push_scope(scope);
+                    }
+
+                    // Type-check field default expressions
+                    {
+                        let record_name_id = self.name_table().name_id(
+                            self.current_module,
+                            &[record.name],
+                            interner,
+                        );
+                        let field_types = record_name_id.and_then(|record_name_id| {
+                            let registry = self.entity_registry();
+                            registry
+                                .type_by_name(record_name_id)
+                                .and_then(|type_def_id| registry.get_generic_info(type_def_id))
+                                .map(|gi| gi.field_types.clone())
+                        });
+                        if let Some(field_types) = field_types {
+                            self.check_field_defaults(&record.fields, &field_types, interner)?;
+                        }
                     }
 
                     for method in &record.methods {
@@ -1536,6 +1572,9 @@ impl Analyzer {
             );
         }
 
+        // Type-check parameter default expressions
+        self.check_param_defaults(&func.params, &func_type.params_id, interner)?;
+
         // Check body
         self.check_func_body(&func.body, interner)?;
 
@@ -1583,6 +1622,70 @@ impl Analyzer {
         }
         self.exit_function_context(saved_ctx);
 
+        Ok(())
+    }
+
+    /// Type-check parameter default expressions against their declared types.
+    /// Called during function body analysis when parameters are in scope.
+    fn check_param_defaults(
+        &mut self,
+        params: &[Param],
+        param_types: &crate::type_arena::TypeIdVec,
+        interner: &Interner,
+    ) -> Result<(), Vec<TypeError>> {
+        for (param, &expected_type_id) in params.iter().zip(param_types.iter()) {
+            if let Some(ref default_expr) = param.default_value {
+                // Type-check the default expression
+                let found_type_id = self.check_expr(default_expr, interner)?;
+
+                // Check type compatibility
+                if !self.types_compatible_id(expected_type_id, found_type_id, interner) {
+                    let expected = self.type_display_id(expected_type_id);
+                    let found = self.type_display_id(found_type_id);
+                    self.add_error(
+                        SemanticError::DefaultExprTypeMismatch {
+                            expected,
+                            found,
+                            span: default_expr.span.into(),
+                        },
+                        default_expr.span,
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Type-check field default expressions against their declared types.
+    /// Called during class/record analysis.
+    fn check_field_defaults(
+        &mut self,
+        fields: &[FieldDef],
+        field_type_ids: &[ArenaTypeId],
+        interner: &Interner,
+    ) -> Result<(), Vec<TypeError>> {
+        for (field, &expected_type_id) in fields.iter().zip(field_type_ids.iter()) {
+            if let Some(ref default_expr) = field.default_value {
+                // Type-check the default expression
+                let found_type_id = self.check_expr(default_expr, interner)?;
+
+                // Check type compatibility
+                if !self.types_compatible_id(expected_type_id, found_type_id, interner) {
+                    let expected = self.type_display_id(expected_type_id);
+                    let found = self.type_display_id(found_type_id);
+                    let field_name = interner.resolve(field.name).to_string();
+                    self.add_error(
+                        SemanticError::FieldDefaultTypeMismatch {
+                            expected,
+                            found,
+                            field: field_name,
+                            span: default_expr.span.into(),
+                        },
+                        default_expr.span,
+                    );
+                }
+            }
+        }
         Ok(())
     }
 
@@ -1679,6 +1782,9 @@ impl Analyzer {
                 },
             );
         }
+
+        // Type-check parameter default expressions
+        self.check_param_defaults(&method.params, &params_id, interner)?;
 
         // Check body
         self.check_func_body(&method.body, interner)?;
@@ -1992,6 +2098,10 @@ impl Analyzer {
                 },
             );
         }
+
+        // Type-check parameter default expressions
+        let param_type_vec: crate::type_arena::TypeIdVec = param_types.iter().copied().collect();
+        self.check_param_defaults(&func.params, &param_type_vec, interner)?;
 
         // Check body
         self.check_func_body(&func.body, interner)?;

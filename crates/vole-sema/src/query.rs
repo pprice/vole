@@ -16,7 +16,7 @@ use crate::generic::{MonomorphCache, MonomorphInstance, MonomorphKey, StaticMeth
 use crate::implement_registry::{ExternalMethodInfo, ImplementRegistry};
 use crate::resolution::ResolvedMethod;
 use crate::type_arena::{TypeArena, TypeId};
-use vole_frontend::{Interner, NodeId, Program, Symbol};
+use vole_frontend::{Expr, Interner, NodeId, Program, Symbol};
 use vole_identity::{FieldId, MethodId, ModuleId, NameId, NameTable, Resolver, TypeDefId};
 
 use crate::resolve::ResolverEntityExt;
@@ -380,6 +380,34 @@ impl<'a> ProgramQuery<'a> {
         let func_id = self.registry.function_by_name(name_id)?;
         let func_def = self.registry.get_function(func_id);
         Some(func_def.signature.return_type_id)
+    }
+
+    /// Get a function's default parameter expressions and required param count.
+    /// Returns (required_params, param_defaults) where param_defaults[i] is Some
+    /// if parameter i has a default value.
+    #[must_use]
+    pub fn function_param_defaults(
+        &self,
+        module: ModuleId,
+        name: Symbol,
+    ) -> Option<(usize, &[Option<Box<Expr>>])> {
+        let name_id = self.try_function_name_id(module, name)?;
+        let func_id = self.registry.function_by_name(name_id)?;
+        let func_def = self.registry.get_function(func_id);
+        Some((func_def.required_params, &func_def.param_defaults))
+    }
+
+    /// Get a function's default parameter expressions by NameId.
+    /// Returns (required_params, param_defaults) where param_defaults[i] is Some
+    /// if parameter i has a default value.
+    #[must_use]
+    pub fn function_param_defaults_by_name_id(
+        &self,
+        name_id: NameId,
+    ) -> Option<(usize, &[Option<Box<Expr>>])> {
+        let func_id = self.registry.function_by_name(name_id)?;
+        let func_def = self.registry.get_function(func_id);
+        Some((func_def.required_params, &func_def.param_defaults))
     }
 
     /// Get a method's return type from entity_registry

@@ -98,91 +98,104 @@ impl Analyzer {
                 .collect()
         };
 
-        let (type_name, fields, result_type_id) = if let Some(type_id) = type_id_opt {
-            // Extract type info before doing mutable operations
-            let (kind, generic_info, is_class_valid, is_record_valid) = {
-                let registry = self.entity_registry();
-                let type_def = registry.get_type(type_id);
-                (
-                    type_def.kind,
-                    type_def.generic_info.clone(),
-                    registry.build_class_type(type_id).is_some(),
-                    registry.build_record_type(type_id).is_some(),
-                )
+        let (type_name, fields, field_has_default, result_type_id) =
+            if let Some(type_id) = type_id_opt {
+                // Extract type info before doing mutable operations
+                let (kind, generic_info, is_class_valid, is_record_valid) = {
+                    let registry = self.entity_registry();
+                    let type_def = registry.get_type(type_id);
+                    (
+                        type_def.kind,
+                        type_def.generic_info.clone(),
+                        registry.build_class_type(type_id).is_some(),
+                        registry.build_record_type(type_id).is_some(),
+                    )
+                };
+                let fields = generic_info
+                    .as_ref()
+                    .map(get_fields_from_generic_info)
+                    .unwrap_or_default();
+                let field_defaults = generic_info
+                    .as_ref()
+                    .map(|gi| gi.field_has_default.clone())
+                    .unwrap_or_default();
+                match kind {
+                    TypeDefKind::Class => {
+                        if is_class_valid {
+                            let result_id = self.type_arena_mut().class(type_id, vec![]);
+                            (
+                                interner.resolve(struct_lit.name).to_string(),
+                                fields,
+                                field_defaults,
+                                result_id,
+                            )
+                        } else {
+                            self.add_error(
+                                SemanticError::UnknownType {
+                                    name: interner.resolve(struct_lit.name).to_string(),
+                                    span: expr.span.into(),
+                                },
+                                expr.span,
+                            );
+                            return Ok(self.ty_invalid_id());
+                        }
+                    }
+                    TypeDefKind::Record => {
+                        if is_record_valid {
+                            let result_id = self.type_arena_mut().record(type_id, vec![]);
+                            (
+                                interner.resolve(struct_lit.name).to_string(),
+                                fields,
+                                field_defaults,
+                                result_id,
+                            )
+                        } else {
+                            self.add_error(
+                                SemanticError::UnknownType {
+                                    name: interner.resolve(struct_lit.name).to_string(),
+                                    span: expr.span.into(),
+                                },
+                                expr.span,
+                            );
+                            return Ok(self.ty_invalid_id());
+                        }
+                    }
+                    _ => {
+                        self.add_error(
+                            SemanticError::UnknownType {
+                                name: interner.resolve(struct_lit.name).to_string(),
+                                span: expr.span.into(),
+                            },
+                            expr.span,
+                        );
+                        return Ok(self.ty_invalid_id());
+                    }
+                }
+            } else {
+                self.add_error(
+                    SemanticError::UnknownType {
+                        name: interner.resolve(struct_lit.name).to_string(),
+                        span: expr.span.into(),
+                    },
+                    expr.span,
+                );
+                return Ok(self.ty_invalid_id());
             };
-            let fields = generic_info
-                .as_ref()
-                .map(get_fields_from_generic_info)
-                .unwrap_or_default();
-            match kind {
-                TypeDefKind::Class => {
-                    if is_class_valid {
-                        let result_id = self.type_arena_mut().class(type_id, vec![]);
-                        (
-                            interner.resolve(struct_lit.name).to_string(),
-                            fields,
-                            result_id,
-                        )
-                    } else {
-                        self.add_error(
-                            SemanticError::UnknownType {
-                                name: interner.resolve(struct_lit.name).to_string(),
-                                span: expr.span.into(),
-                            },
-                            expr.span,
-                        );
-                        return Ok(self.ty_invalid_id());
-                    }
-                }
-                TypeDefKind::Record => {
-                    if is_record_valid {
-                        let result_id = self.type_arena_mut().record(type_id, vec![]);
-                        (
-                            interner.resolve(struct_lit.name).to_string(),
-                            fields,
-                            result_id,
-                        )
-                    } else {
-                        self.add_error(
-                            SemanticError::UnknownType {
-                                name: interner.resolve(struct_lit.name).to_string(),
-                                span: expr.span.into(),
-                            },
-                            expr.span,
-                        );
-                        return Ok(self.ty_invalid_id());
-                    }
-                }
-                _ => {
-                    self.add_error(
-                        SemanticError::UnknownType {
-                            name: interner.resolve(struct_lit.name).to_string(),
-                            span: expr.span.into(),
-                        },
-                        expr.span,
-                    );
-                    return Ok(self.ty_invalid_id());
-                }
-            }
-        } else {
-            self.add_error(
-                SemanticError::UnknownType {
-                    name: interner.resolve(struct_lit.name).to_string(),
-                    span: expr.span.into(),
-                },
-                expr.span,
-            );
-            return Ok(self.ty_invalid_id());
-        };
 
-        // Check that all required fields are present
+        // Check that all required fields are present (fields without defaults)
         let provided_fields: HashSet<String> = struct_lit
             .fields
             .iter()
             .map(|f| interner.resolve(f.name).to_string())
             .collect();
 
-        for field in &fields {
+        for (i, field) in fields.iter().enumerate() {
+            // Skip fields that have defaults - they are optional
+            let has_default = field_has_default.get(i).copied().unwrap_or(false);
+            if has_default {
+                continue;
+            }
+
             let field_name = {
                 let table = self.name_table();
                 table.last_segment_str(field.name_id)
@@ -304,13 +317,24 @@ impl Analyzer {
         };
 
         // Check that all required fields are present - compare by string value
+        // Fields with defaults are optional
         let provided_fields: HashSet<String> = struct_lit
             .fields
             .iter()
             .map(|f| interner.resolve(f.name).to_string())
             .collect();
 
-        for field_name_id in &generic_info.field_names {
+        for (i, field_name_id) in generic_info.field_names.iter().enumerate() {
+            // Skip fields that have defaults - they are optional
+            let has_default = generic_info
+                .field_has_default
+                .get(i)
+                .copied()
+                .unwrap_or(false);
+            if has_default {
+                continue;
+            }
+
             let field_name_str = self
                 .name_table()
                 .last_segment_str(*field_name_id)
@@ -435,13 +459,24 @@ impl Analyzer {
         };
 
         // Check that all required fields are present - compare by string value
+        // Fields with defaults are optional
         let provided_fields: HashSet<String> = struct_lit
             .fields
             .iter()
             .map(|f| interner.resolve(f.name).to_string())
             .collect();
 
-        for field_name_id in &generic_info.field_names {
+        for (i, field_name_id) in generic_info.field_names.iter().enumerate() {
+            // Skip fields that have defaults - they are optional
+            let has_default = generic_info
+                .field_has_default
+                .get(i)
+                .copied()
+                .unwrap_or(false);
+            if has_default {
+                continue;
+            }
+
             let field_name_str = self
                 .name_table()
                 .last_segment_str(*field_name_id)

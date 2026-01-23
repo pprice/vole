@@ -1,0 +1,6 @@
+// check: E2084
+// Test that non-default params after default params is an error
+
+func bad_order(x: i64 = 10, y: i64) -> i64 {
+    return x + y
+}

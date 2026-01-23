@@ -1,0 +1,11 @@
+// check: E2088
+// Test that calling a function with fewer than required args is an error
+
+func greet(name: string, greeting: string = "Hello") -> string {
+    return greeting + ", " + name
+}
+
+func main() {
+    // Missing required 'name' argument
+    let msg = greet()
+}

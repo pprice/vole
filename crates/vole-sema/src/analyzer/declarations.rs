@@ -4,7 +4,7 @@
 use super::*;
 use crate::entity_defs::{GenericFuncInfo, GenericTypeInfo, TypeDefKind};
 use crate::type_arena::{TypeId as ArenaTypeId, TypeIdVec};
-use vole_frontend::ast::{ExprKind, LetInit, TypeExpr};
+use vole_frontend::ast::{ExprKind, FieldDef as AstFieldDef, LetInit, TypeExpr};
 
 /// Extract the base interface name from a TypeExpr.
 /// For `Iterator` returns `Iterator`, for `Iterator<i64>` returns `Iterator`.
@@ -116,6 +116,17 @@ impl Analyzer {
         let name_id = self
             .name_table_mut()
             .intern(self.current_module, &[func.name], interner);
+
+        // Validate parameter default ordering: non-defaulted params must come before defaulted
+        let required_params = self.validate_param_defaults(&func.params, interner);
+
+        // Clone the default expressions for storage
+        let param_defaults: Vec<Option<Box<Expr>>> = func
+            .params
+            .iter()
+            .map(|p| p.default_value.clone())
+            .collect();
+
         if func.type_params.is_empty() {
             // Non-generic function: resolve types directly to TypeId
             let params_id: Vec<_> = func
@@ -133,12 +144,14 @@ impl Analyzer {
 
             self.functions.insert(func.name, signature.clone());
 
-            // Register in EntityRegistry
-            self.entity_registry_mut().register_function(
+            // Register in EntityRegistry with default expressions
+            self.entity_registry_mut().register_function_full(
                 name_id,
                 name_id, // For top-level functions, name_id == full_name_id
                 self.current_module,
                 signature,
+                required_params,
+                param_defaults,
             );
         } else {
             // Generic function: resolve with type params in scope
@@ -207,12 +220,14 @@ impl Analyzer {
             // Create a FunctionType from TypeIds
             let signature = FunctionType::from_ids(&param_type_ids, return_type_id, false);
 
-            // Register in EntityRegistry
-            let func_id = self.entity_registry_mut().register_function(
+            // Register in EntityRegistry with default expressions
+            let func_id = self.entity_registry_mut().register_function_full(
                 name_id,
                 name_id, // For top-level functions, name_id == full_name_id
                 self.current_module,
                 signature,
+                required_params,
+                param_defaults,
             );
             self.entity_registry_mut().set_function_generic_info(
                 func_id,
@@ -223,6 +238,67 @@ impl Analyzer {
                 },
             );
         }
+    }
+
+    /// Validate parameter default ordering and count required params.
+    /// Returns the number of required (non-defaulted) parameters.
+    /// Emits errors if non-defaulted params come after defaulted params.
+    fn validate_param_defaults(&mut self, params: &[Param], interner: &Interner) -> usize {
+        let mut seen_default = false;
+        let mut required_params = 0;
+
+        for param in params {
+            if param.default_value.is_some() {
+                seen_default = true;
+            } else if seen_default {
+                // Non-default param after a default param - emit error
+                let name = interner.resolve(param.name).to_string();
+                self.add_error(
+                    SemanticError::DefaultParamNotLast {
+                        name,
+                        span: param.span.into(),
+                    },
+                    param.span,
+                );
+            } else {
+                required_params += 1;
+            }
+        }
+
+        required_params
+    }
+
+    /// Validate field default ordering and collect which fields have defaults.
+    /// Returns a Vec<bool> indicating whether each field has a default.
+    /// Emits errors if non-defaulted fields come after defaulted fields.
+    fn validate_field_defaults(
+        &mut self,
+        fields: &[AstFieldDef],
+        interner: &Interner,
+    ) -> Vec<bool> {
+        let mut seen_default = false;
+        let mut field_has_default = Vec::with_capacity(fields.len());
+
+        for field in fields {
+            let has_default = field.default_value.is_some();
+            field_has_default.push(has_default);
+
+            if has_default {
+                seen_default = true;
+            } else if seen_default {
+                // Required field after a field with default - emit error
+                let name = interner.resolve(field.name).to_string();
+                self.add_error(
+                    SemanticError::RequiredFieldAfterDefaulted {
+                        field: name,
+                        span: field.span.into(),
+                    },
+                    field.span,
+                );
+            }
+        }
+
+        field_has_default
     }
 
     fn collect_class_signature(&mut self, class: &ClassDecl, interner: &Interner) {
@@ -237,6 +313,9 @@ impl Analyzer {
                 .entity_registry_mut()
                 .type_by_name(name_id)
                 .expect("class shell registered in register_all_type_shells");
+
+            // Validate field default ordering and collect which fields have defaults
+            let field_has_default = self.validate_field_defaults(&class.fields, interner);
 
             // Collect field info for generic_info (needed for struct literal checking)
             // Convert Symbol field names to NameId at registration time
@@ -263,6 +342,7 @@ impl Analyzer {
                     type_params: vec![],
                     field_names: field_names.clone(),
                     field_types: field_type_ids.clone(),
+                    field_has_default,
                 },
             );
 
@@ -411,6 +491,9 @@ impl Analyzer {
             // Generic class: store with type params as placeholders
             let builtin_mod = self.name_table_mut().builtin_module();
 
+            // Validate field default ordering and collect which fields have defaults
+            let field_has_default = self.validate_field_defaults(&class.fields, interner);
+
             // First pass: create name_scope for constraint resolution (same pattern as functions)
             let mut name_scope = TypeParamScope::new();
             for tp in &class.type_params {
@@ -500,6 +583,7 @@ impl Analyzer {
                     type_params,
                     field_names: field_names.clone(),
                     field_types: field_type_ids.clone(),
+                    field_has_default,
                 },
             );
 
@@ -760,6 +844,9 @@ impl Analyzer {
                 .type_by_name(name_id)
                 .expect("record shell registered in register_all_type_shells");
 
+            // Validate field default ordering and collect which fields have defaults
+            let field_has_default = self.validate_field_defaults(&record.fields, interner);
+
             // Collect field info for generic_info (needed for struct literal checking)
             // Convert Symbol field names to NameId at registration time
             let builtin_mod = self.name_table_mut().builtin_module();
@@ -785,6 +872,7 @@ impl Analyzer {
                     type_params: vec![],
                     field_names: field_names.clone(),
                     field_types: field_type_ids.clone(),
+                    field_has_default,
                 },
             );
 
@@ -886,6 +974,9 @@ impl Analyzer {
         } else {
             // Generic record: store with type params as placeholders
             let builtin_mod = self.name_table_mut().builtin_module();
+
+            // Validate field default ordering and collect which fields have defaults
+            let field_has_default = self.validate_field_defaults(&record.fields, interner);
 
             // First pass: create name_scope for constraint resolution (same pattern as functions)
             let mut name_scope = TypeParamScope::new();
@@ -1003,6 +1094,7 @@ impl Analyzer {
                     type_params,
                     field_names,
                     field_types: field_type_ids,
+                    field_has_default,
                 },
             );
 

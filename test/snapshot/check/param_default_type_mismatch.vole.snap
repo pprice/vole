@@ -1,0 +1,11 @@
+[stdout]
+
+[stderr]
+  x [E2085]: default value type mismatch: expected i64, found string
+   ,-[<path>/param_default_type_mismatch.vole:4:19]
+ 3 | 
+ 4 | func foo(x: i64 = "not a number") -> i64 {
+   :                   ^^^^^^^|^^^^^^
+   :                          `-- default value has wrong type
+ 5 |     return x
+   `----

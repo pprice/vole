@@ -1,0 +1,11 @@
+// check: E2088
+// Test that calling a function with more than total params is an error
+
+func greet(name: string, greeting: string = "Hello") -> string {
+    return greeting + ", " + name
+}
+
+func main() {
+    // Too many arguments
+    let msg = greet("World", "Hi", "extra")
+}

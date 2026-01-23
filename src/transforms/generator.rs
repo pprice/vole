@@ -309,6 +309,7 @@ impl<'a> GeneratorTransformer<'a> {
         fields.push(FieldDef {
             name: state_sym,
             ty: TypeExpr::Primitive(PrimitiveType::I64),
+            default_value: None,
             span: dummy_span,
         });
 
@@ -317,6 +318,7 @@ impl<'a> GeneratorTransformer<'a> {
             fields.push(FieldDef {
                 name: param.name,
                 ty: param.ty.clone(),
+                default_value: None,
                 span: dummy_span,
             });
         }
@@ -326,6 +328,7 @@ impl<'a> GeneratorTransformer<'a> {
             fields.push(FieldDef {
                 name: *name,
                 ty: ty.clone(),
+                default_value: None,
                 span: dummy_span,
             });
         }

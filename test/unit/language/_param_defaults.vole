@@ -1,0 +1,90 @@
+// Tests for parameter default values in function calls
+
+// Function with one defaulted parameter
+func greet(name: string, greeting: string = "Hello") -> string {
+    return greeting + ", " + name + "!"
+}
+
+// Function with multiple defaults
+func format_number(n: i64, prefix: string = "", suffix: string = "") -> string {
+    return prefix + n.to_string() + suffix
+}
+
+// Function with all defaults
+func get_default_message(msg: string = "Default message") -> string {
+    return msg
+}
+
+// Function with numeric default
+func add_with_default(a: i64, b: i64 = 10) -> i64 {
+    return a + b
+}
+
+// Function with boolean default
+func is_valid(value: i64, strict: bool = false) -> bool {
+    if strict {
+        return value > 0
+    }
+    return value >= 0
+}
+
+tests "parameter defaults - omitting optional args" {
+    test "call with all args provided" {
+        let result = greet("World", "Hi")
+        assert(result == "Hi, World!")
+    }
+
+    test "call omitting one defaulted arg" {
+        let result = greet("World")
+        assert(result == "Hello, World!")
+    }
+
+    test "call with multiple defaults - all provided" {
+        let result = format_number(42, "$", " dollars")
+        assert(result == "$42 dollars")
+    }
+
+    test "call with multiple defaults - omit last" {
+        let result = format_number(42, "$")
+        assert(result == "$42")
+    }
+
+    test "call with multiple defaults - omit all defaults" {
+        let result = format_number(42)
+        assert(result == "42")
+    }
+
+    test "call with all defaults - provide arg" {
+        let result = get_default_message("Custom message")
+        assert(result == "Custom message")
+    }
+
+    test "call with all defaults - use default" {
+        let result = get_default_message()
+        assert(result == "Default message")
+    }
+
+    test "numeric default - use default" {
+        let result = add_with_default(5)
+        assert(result == 15)
+    }
+
+    test "numeric default - override" {
+        let result = add_with_default(5, 20)
+        assert(result == 25)
+    }
+
+    test "boolean default - use default" {
+        // Default is false (non-strict), so 0 is valid
+        assert(is_valid(0) == true)
+        // With strict=false, -1 is still invalid
+        assert(is_valid(-1) == false)
+    }
+
+    test "boolean default - override" {
+        // With strict=true, 0 is not valid
+        assert(is_valid(0, true) == false)
+        // With strict=true, positive values are valid
+        assert(is_valid(1, true) == true)
+    }
+}

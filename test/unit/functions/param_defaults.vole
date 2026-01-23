@@ -1,0 +1,50 @@
+// Test default parameter values for functions
+
+// Simple string default
+func greet(name: string, greeting: string = "Hello") -> string => "{greeting}, {name}!"
+
+// Multiple integer defaults
+func add(a: i64, b: i64 = 10, c: i64 = 100) -> i64 => a + b + c
+
+// Float default
+func multiply(x: f64, factor: f64 = 2.0) -> f64 => x * factor
+
+// Bool default
+func with_flag(value: i64, flag: bool = false) -> i64 => if flag { -value } else { value }
+
+// Default using expressions
+func compute(x: i64, offset: i64 = 1 + 2 + 3) -> i64 => x + offset
+
+tests {
+    test "string default parameter" {
+        // With all args
+        assert(greet("World", "Hi") == "Hi, World!")
+        // With default
+        assert(greet("World") == "Hello, World!")
+    }
+
+    test "multiple integer defaults" {
+        // All defaults used
+        assert(add(1) == 111)        // 1 + 10 + 100
+        // One default used
+        assert(add(1, 2) == 103)     // 1 + 2 + 100
+        // No defaults used
+        assert(add(1, 2, 3) == 6)    // 1 + 2 + 3
+    }
+
+    test "float default parameter" {
+        assert(multiply(5.0) == 10.0)      // 5.0 * 2.0
+        assert(multiply(5.0, 3.0) == 15.0) // 5.0 * 3.0
+    }
+
+    test "bool default parameter" {
+        assert(with_flag(42) == 42)
+        assert(with_flag(42, false) == 42)
+        assert(with_flag(42, true) == -42)
+    }
+
+    test "expression default parameter" {
+        assert(compute(100) == 106)     // 100 + (1+2+3)
+        assert(compute(100, 0) == 100)  // 100 + 0
+    }
+}

@@ -7,7 +7,7 @@ use crate::FunctionType;
 use crate::generic::TypeParamInfo;
 use crate::implement_registry::ExternalMethodInfo;
 use crate::type_arena::TypeId;
-use vole_frontend::NodeId;
+use vole_frontend::{Expr, NodeId};
 use vole_identity::{FieldId, FunctionId, GlobalId, MethodId, ModuleId, NameId, TypeDefId};
 
 /// What kind of type definition this is
@@ -33,6 +33,8 @@ pub struct GenericTypeInfo {
     pub field_names: Vec<NameId>,
     /// Field types with TypeParam placeholders (e.g., [TypeParam(T), i64])
     pub field_types: Vec<TypeId>,
+    /// Whether each field has a default value (parallel to field_names)
+    pub field_has_default: Vec<bool>,
 }
 
 /// A method binding within an implementation block.
@@ -138,6 +140,13 @@ pub struct FunctionDef {
     pub signature: FunctionType,
     /// For generic functions - type parameter and signature info
     pub generic_info: Option<GenericFuncInfo>,
+    /// Number of required parameters (without defaults).
+    /// Parameters 0..required_params are required, rest have defaults.
+    pub required_params: usize,
+    /// Default expressions for parameters (cloned from AST).
+    /// Index corresponds to parameter index.
+    /// Required params have None, defaulted params have Some.
+    pub param_defaults: Vec<Option<Box<Expr>>>,
 }
 
 /// A global variable definition (module-level let/var)

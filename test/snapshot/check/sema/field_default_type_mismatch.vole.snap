@@ -1,0 +1,11 @@
+[stdout]
+
+[stderr]
+  x [E2087]: field default type mismatch: expected i32, found string
+   ,-[<path>/field_default_type_mismatch.vole:4:18]
+ 3 | record Config {
+ 4 |     count: i32 = "hello",  // Error: expected i32, found string
+   :                  ^^^|^^^
+   :                     `-- default value has wrong type
+ 5 | }
+   `----

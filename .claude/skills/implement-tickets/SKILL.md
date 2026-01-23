@@ -10,7 +10,8 @@ Verify `tk` is installed first or **STOP**.
 1. Use `tk dep tree <id>` to get all tickets associated with the specified task/epic.
 2. Pick the first task that we can implement that is not blocked
 3. Follow the Sub-task workflow below, ensure to launch these as sub-agents so they
-   have isolated context.
+   have isolated context. ***Do not launch parallel sub-agents*** if they will modify 
+   files, as they will conflict. 
 4. If the the task is successful move on to the next ticket, if not report back to 
    user with helpful suggestions on how to proceed. 
 5. If we have exhausted all tickets **STOP**

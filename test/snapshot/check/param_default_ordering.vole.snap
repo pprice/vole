@@ -1,0 +1,12 @@
+[stdout]
+
+[stderr]
+  x [E2084]: parameter with default value must come after parameters without defaults
+   ,-[<path>/param_default_ordering.vole:4:29]
+ 3 | 
+ 4 | func bad_order(x: i64 = 10, y: i64) -> i64 {
+   :                             |
+   :                             `-- non-default parameter after default parameter
+ 5 |     return x + y
+   `----
+  help: move parameter 'y' after all non-default parameters

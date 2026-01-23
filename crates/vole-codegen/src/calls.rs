@@ -11,7 +11,7 @@ use crate::errors::CodegenError;
 
 /// SmallVec for call arguments - most calls have <= 8 args
 type ArgVec = SmallVec<[Value; 8]>;
-use vole_frontend::{CallExpr, ExprKind, NodeId, StringPart};
+use vole_frontend::{CallExpr, Expr, ExprKind, NodeId, StringPart, Symbol};
 use vole_runtime::native_registry::{NativeFunction, NativeType};
 use vole_sema::type_arena::{TypeArena, TypeId};
 
@@ -349,7 +349,7 @@ impl Cg<'_, '_, '_> {
                 let func_key = self.funcs().intern_name_id(mangled_name);
                 if let Some(func_id) = self.funcs().func_id(func_key) {
                     tracing::trace!("found func_id, using regular path");
-                    return self.call_func_id(func_key, func_id, call);
+                    return self.call_func_id(func_key, func_id, call, callee_sym);
                 }
                 tracing::trace!("no func_id, checking for external function");
 
@@ -392,7 +392,7 @@ impl Cg<'_, '_, '_> {
             .funcs()
             .intern_qualified(main_module, &[callee_sym], interner);
         if let Some(func_id) = self.funcs_ref().func_id(func_key) {
-            return self.call_func_id(func_key, func_id, call);
+            return self.call_func_id(func_key, func_id, call, callee_sym);
         }
 
         // Check module context for mangled name or FFI
@@ -403,7 +403,7 @@ impl Cg<'_, '_, '_> {
                 let func_key = self.funcs().intern_name_id(name_id);
                 if let Some(func_id) = self.funcs().func_id(func_key) {
                     // Found module function with qualified name
-                    return self.call_func_id(func_key, func_id, call);
+                    return self.call_func_id(func_key, func_id, call, callee_sym);
                 }
             }
 
@@ -495,6 +495,7 @@ impl Cg<'_, '_, '_> {
         func_key: FunctionKey,
         func_id: FuncId,
         call: &CallExpr,
+        callee_sym: Symbol,
     ) -> Result<CompiledValue, String> {
         let func_ref = self
             .codegen_ctx
@@ -533,6 +534,17 @@ impl Cg<'_, '_, '_> {
             args.push(arg_value);
         }
 
+        // If there are fewer provided args than expected, compile default expressions
+        if args.len() < expected_types.len() {
+            let provided_args = args.len();
+            let remaining_expected_types = expected_types[provided_args..].to_vec();
+
+            // Compile defaults for omitted parameters
+            let default_args =
+                self.compile_default_args(callee_sym, provided_args, &remaining_expected_types)?;
+            args.extend(default_args);
+        }
+
         let call_inst = self.builder.ins().call(func_ref, &args);
 
         // Get return type
@@ -543,6 +555,76 @@ impl Cg<'_, '_, '_> {
             .unwrap_or_else(|| self.env.analyzed.type_arena().void());
 
         Ok(self.call_result(call_inst, return_type_id))
+    }
+
+    /// Compile default expressions for omitted function parameters.
+    /// Returns compiled values for parameters starting at `start_index`.
+    ///
+    /// # Safety
+    /// This function uses raw pointers to access default expressions stored in EntityRegistry.
+    /// This is safe because EntityRegistry is owned by AnalyzedProgram which outlives all
+    /// compilation, and the expression data is not moved or modified during compilation.
+    fn compile_default_args(
+        &mut self,
+        callee_sym: Symbol,
+        start_index: usize,
+        expected_types: &[Type],
+    ) -> Result<Vec<Value>, String> {
+        let module_id = self
+            .current_module()
+            .unwrap_or_else(|| self.query().main_module());
+
+        // Get the function ID
+        let func_id = {
+            let name_id = self.query().try_function_name_id(module_id, callee_sym);
+            name_id.and_then(|id| self.query().registry().function_by_name(id))
+        };
+
+        let Some(func_id) = func_id else {
+            return Ok(Vec::new());
+        };
+
+        // Get raw pointers to default expressions.
+        // These point to data in EntityRegistry which lives for the duration of AnalyzedProgram.
+        // We use raw pointers to work around the borrow checker since self.expr() needs &mut self.
+        let default_ptrs: Vec<Option<*const Expr>> = {
+            let func_def = self.query().registry().get_function(func_id);
+            func_def
+                .param_defaults
+                .iter()
+                .map(|opt| opt.as_ref().map(|e| e.as_ref() as *const Expr))
+                .collect()
+        };
+
+        let mut args = Vec::new();
+        for (i, &expected_ty) in expected_types.iter().enumerate() {
+            let param_idx = start_index + i;
+            if let Some(Some(default_ptr)) = default_ptrs.get(param_idx) {
+                // SAFETY: The pointer points to data in EntityRegistry which is owned by
+                // AnalyzedProgram. AnalyzedProgram outlives this entire compilation session.
+                // The data is not moved or modified, so the pointer remains valid.
+                let default_expr: &Expr = unsafe { &**default_ptr };
+                let compiled = self.expr(default_expr)?;
+
+                // Narrow/extend integer types if needed
+                let arg_value = if compiled.ty.is_int()
+                    && expected_ty.is_int()
+                    && expected_ty.bits() < compiled.ty.bits()
+                {
+                    self.builder.ins().ireduce(expected_ty, compiled.value)
+                } else if compiled.ty.is_int()
+                    && expected_ty.is_int()
+                    && expected_ty.bits() > compiled.ty.bits()
+                {
+                    self.builder.ins().sextend(expected_ty, compiled.value)
+                } else {
+                    compiled.value
+                };
+                args.push(arg_value);
+            }
+        }
+
+        Ok(args)
     }
 
     /// Compile an indirect call (closure or function value)

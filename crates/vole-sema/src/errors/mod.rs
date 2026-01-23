@@ -62,6 +62,16 @@ pub enum SemanticError {
         span: SourceSpan,
     },
 
+    #[error("expected {min} to {max} arguments, found {found}")]
+    #[diagnostic(code(E2088))]
+    WrongArgumentCountRange {
+        min: usize,
+        max: usize,
+        found: usize,
+        #[label("wrong number of arguments")]
+        span: SourceSpan,
+    },
+
     #[error("expected {expected} type arguments, found {found}")]
     #[diagnostic(code(E2013))]
     WrongTypeArgCount {
@@ -494,6 +504,47 @@ pub enum SemanticError {
         name: String,
         expected: String,
         #[label("function expects to return {expected}")]
+        span: SourceSpan,
+    },
+
+    #[error("parameter with default value must come after parameters without defaults")]
+    #[diagnostic(
+        code(E2084),
+        help("move parameter '{name}' after all non-default parameters")
+    )]
+    DefaultParamNotLast {
+        name: String,
+        #[label("non-default parameter after default parameter")]
+        span: SourceSpan,
+    },
+
+    #[error("default value type mismatch: expected {expected}, found {found}")]
+    #[diagnostic(code(E2085))]
+    DefaultExprTypeMismatch {
+        expected: String,
+        found: String,
+        #[label("default value has wrong type")]
+        span: SourceSpan,
+    },
+
+    #[error("required field '{field}' cannot follow field with default value")]
+    #[diagnostic(
+        code(E2086),
+        help("move all fields with default values to the end of the field list")
+    )]
+    RequiredFieldAfterDefaulted {
+        field: String,
+        #[label("required field after defaulted field")]
+        span: SourceSpan,
+    },
+
+    #[error("field default type mismatch: expected {expected}, found {found}")]
+    #[diagnostic(code(E2087))]
+    FieldDefaultTypeMismatch {
+        expected: String,
+        found: String,
+        field: String,
+        #[label("default value has wrong type")]
         span: SourceSpan,
     },
 }

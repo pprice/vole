@@ -1,0 +1,6 @@
+// check: E2085
+// Test that type mismatch in parameter default value is caught
+
+func foo(x: i64 = "not a number") -> i64 {
+    return x
+}

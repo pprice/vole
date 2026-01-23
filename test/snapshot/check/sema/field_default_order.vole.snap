@@ -1,0 +1,12 @@
+[stdout]
+
+[stderr]
+  x [E2086]: required field 'name' cannot follow field with default value
+   ,-[<path>/field_default_order.vole:5:5]
+ 4 |     debug: bool = false,
+ 5 |     name: string,  // Error: required field after defaulted field
+   :     ^^^^^^|^^^^^^
+   :           `-- required field after defaulted field
+ 6 | }
+   `----
+  help: move all fields with default values to the end of the field list

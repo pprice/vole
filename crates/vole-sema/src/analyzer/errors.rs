@@ -113,4 +113,28 @@ impl Analyzer {
             span,
         );
     }
+
+    /// Helper to add a wrong argument count error with a range (min to max)
+    pub(crate) fn add_wrong_arg_count_range(
+        &mut self,
+        min: usize,
+        max: usize,
+        found: usize,
+        span: Span,
+    ) {
+        if min == max {
+            // If they're equal, use the simpler error
+            self.add_wrong_arg_count(min, found, span);
+        } else {
+            self.add_error(
+                SemanticError::WrongArgumentCountRange {
+                    min,
+                    max,
+                    found,
+                    span: span.into(),
+                },
+                span,
+            );
+        }
+    }
 }

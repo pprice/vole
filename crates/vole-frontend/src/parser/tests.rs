@@ -1311,3 +1311,84 @@ fn test_parse_array_vs_repeat_disambiguation() {
         ));
     }
 }
+
+#[test]
+fn test_parse_param_default_value() {
+    // Parameter with default value: y: i64 = 10
+    let source = "func foo(x: i64, y: i64 = 10) { }";
+    let mut parser = Parser::new(source);
+    let program = parser
+        .parse_program()
+        .expect("should parse parameter with default value");
+
+    if let Decl::Function(f) = &program.declarations[0] {
+        assert_eq!(f.params.len(), 2);
+        // First param should have no default
+        assert!(f.params[0].default_value.is_none());
+        // Second param should have default value of 10
+        if let Some(default) = &f.params[1].default_value {
+            assert!(matches!(default.kind, ExprKind::IntLiteral(10)));
+        } else {
+            panic!("expected default value for second parameter");
+        }
+    } else {
+        panic!("expected function declaration");
+    }
+}
+
+#[test]
+fn test_parse_param_default_value_expression() {
+    // Parameter with expression as default value
+    let source = "func foo(x: i64 = 1 + 2) { }";
+    let mut parser = Parser::new(source);
+    let program = parser
+        .parse_program()
+        .expect("should parse parameter with expression default");
+
+    if let Decl::Function(f) = &program.declarations[0] {
+        assert_eq!(f.params.len(), 1);
+        if let Some(default) = &f.params[0].default_value {
+            assert!(matches!(default.kind, ExprKind::Binary(_)));
+        } else {
+            panic!("expected default value expression");
+        }
+    } else {
+        panic!("expected function declaration");
+    }
+}
+
+#[test]
+fn test_parse_param_no_default_value() {
+    // Parameter without default value (sanity check)
+    let source = "func foo(x: i64) { }";
+    let mut parser = Parser::new(source);
+    let program = parser
+        .parse_program()
+        .expect("should parse parameter without default");
+
+    if let Decl::Function(f) = &program.declarations[0] {
+        assert_eq!(f.params.len(), 1);
+        assert!(f.params[0].default_value.is_none());
+    } else {
+        panic!("expected function declaration");
+    }
+}
+
+#[test]
+fn test_parse_multiple_params_with_defaults() {
+    // Multiple parameters with default values
+    let source = "func foo(a: i64, b: i64 = 1, c: i64 = 2) { }";
+    let mut parser = Parser::new(source);
+    let program = parser
+        .parse_program()
+        .expect("should parse multiple params with defaults");
+
+    if let Decl::Function(f) = &program.declarations[0] {
+        assert_eq!(f.params.len(), 3);
+        assert!(f.params[0].default_value.is_none());
+        assert!(f.params[1].default_value.is_some());
+        assert!(f.params[2].default_value.is_some());
+    } else {
+        panic!("expected function declaration");
+    }
+}

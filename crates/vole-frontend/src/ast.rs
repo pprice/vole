@@ -107,6 +107,7 @@ pub struct TestCase {
 pub struct Param {
     pub name: Symbol,
     pub ty: TypeExpr,
+    pub default_value: Option<Box<Expr>>,
     pub span: Span,
 }
 
@@ -115,6 +116,7 @@ pub struct Param {
 pub struct FieldDef {
     pub name: Symbol,
     pub ty: TypeExpr,
+    pub default_value: Option<Box<Expr>>,
     pub span: Span,
 }
 

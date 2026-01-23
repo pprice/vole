@@ -2,6 +2,7 @@
 
 use crate::FunctionType;
 use crate::entity_defs::FunctionDef;
+use vole_frontend::Expr;
 use vole_identity::{FunctionId, ModuleId, NameId};
 
 use super::EntityRegistry;
@@ -15,6 +16,47 @@ impl EntityRegistry {
         module: ModuleId,
         signature: FunctionType,
     ) -> FunctionId {
+        let total_params = signature.params_id.len();
+        self.register_function_full(
+            name_id,
+            full_name_id,
+            module,
+            signature,
+            total_params, // All params required
+            vec![None; total_params],
+        )
+    }
+
+    /// Register a new free function with specified number of required params
+    pub fn register_function_with_defaults(
+        &mut self,
+        name_id: NameId,
+        full_name_id: NameId,
+        module: ModuleId,
+        signature: FunctionType,
+        required_params: usize,
+    ) -> FunctionId {
+        let total_params = signature.params_id.len();
+        self.register_function_full(
+            name_id,
+            full_name_id,
+            module,
+            signature,
+            required_params,
+            vec![None; total_params],
+        )
+    }
+
+    /// Register a new free function with default expressions
+    pub fn register_function_full(
+        &mut self,
+        name_id: NameId,
+        full_name_id: NameId,
+        module: ModuleId,
+        signature: FunctionType,
+        required_params: usize,
+        param_defaults: Vec<Option<Box<Expr>>>,
+    ) -> FunctionId {
         let id = FunctionId::new(self.function_defs.len() as u32);
         self.function_defs.push(FunctionDef {
             id,
@@ -22,7 +64,9 @@ impl EntityRegistry {
             full_name_id,
             module,
             signature,
+            required_params,
             generic_info: None,
+            param_defaults,
         });
         self.function_by_name.insert(full_name_id, id);
         id
@@ -56,5 +100,10 @@ impl EntityRegistry {
         self.function_defs[func_id.index() as usize]
             .signature
             .return_type_id = return_type;
+    }
+
+    /// Update the number of required parameters for a function
+    pub fn set_function_required_params(&mut self, func_id: FunctionId, required_params: usize) {
+        self.function_defs[func_id.index() as usize].required_params = required_params;
     }
 }

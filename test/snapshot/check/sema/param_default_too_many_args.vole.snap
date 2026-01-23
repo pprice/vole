@@ -1,0 +1,11 @@
+[stdout]
+
+[stderr]
+  x [E2088]: expected 1 to 2 arguments, found 3
+    ,-[<path>/param_default_too_many_args.vole:10:15]
+  9 |     // Too many arguments
+ 10 |     let msg = greet("World", "Hi", "extra")
+    :               ^^^^^^^^^^^^^^|^^^^^^^^^^^^^^
+    :                             `-- wrong number of arguments
+ 11 | }
+    `----

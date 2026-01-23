@@ -58,9 +58,22 @@ impl Analyzer {
                 if self.in_lambda() {
                     self.mark_lambda_has_side_effects();
                 }
-                return self.check_call_args_id(
+
+                // Look up required_params from entity registry if available
+                let required_params = {
+                    let name_id =
+                        self.name_table_mut()
+                            .intern(self.current_module, &[*sym], interner);
+                    self.entity_registry()
+                        .function_by_name(name_id)
+                        .map(|fid| self.entity_registry().get_function(fid).required_params)
+                        .unwrap_or(func_type.params_id.len())
+                };
+
+                return self.check_call_args_with_defaults_id(
                     &call.args,
                     &func_type.params_id,
+                    required_params,
                     func_type.return_type_id,
                     expr.span,
                     interner,
@@ -69,19 +82,21 @@ impl Analyzer {
 
             // Check if it's a generic function via EntityRegistry
             // Split into separate borrows to avoid borrow conflicts
-            let generic_info = {
+            let (generic_info, generic_required_params) = {
                 let name_id = self
                     .name_table_mut()
                     .intern(self.current_module, &[*sym], interner);
-                let func_id = self.entity_registry_mut().function_by_name(name_id);
-                func_id.and_then(|fid| {
-                    self.entity_registry_mut()
-                        .get_function(fid)
-                        .generic_info
-                        .clone()
-                })
+                let registry = self.entity_registry();
+                let func_id = registry.function_by_name(name_id);
+                func_id
+                    .map(|fid| {
+                        let func_def = registry.get_function(fid);
+                        (func_def.generic_info.clone(), func_def.required_params)
+                    })
+                    .unwrap_or((None, 0))
             };
             if let Some(generic_def) = generic_info {
+                let required_params = generic_required_params;
                 // Calling a generic function - infer type params and monomorphize
                 if self.in_lambda() {
                     self.mark_lambda_has_side_effects();
@@ -123,9 +138,15 @@ impl Analyzer {
                     (param_ids, return_id)
                 };
 
-                // Check arg count
-                if call.args.len() != concrete_param_ids.len() {
-                    self.add_wrong_arg_count(concrete_param_ids.len(), call.args.len(), expr.span);
+                // Check arg count: must be at least required_params and at most total_params
+                let total_params = concrete_param_ids.len();
+                if call.args.len() < required_params || call.args.len() > total_params {
+                    self.add_wrong_arg_count_range(
+                        required_params,
+                        total_params,
+                        call.args.len(),
+                        expr.span,
+                    );
                     return Ok(ArenaTypeId::INVALID);
                 }
 

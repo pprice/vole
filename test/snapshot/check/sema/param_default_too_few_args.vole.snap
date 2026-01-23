@@ -1,0 +1,11 @@
+[stdout]
+
+[stderr]
+  x [E2088]: expected 1 to 2 arguments, found 0
+    ,-[<path>/param_default_too_few_args.vole:10:15]
+  9 |     // Missing required 'name' argument
+ 10 |     let msg = greet()
+    :               ^^^|^^^
+    :                  `-- wrong number of arguments
+ 11 | }
+    `----

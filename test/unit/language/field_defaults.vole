@@ -1,0 +1,86 @@
+// Tests for struct/class/record field default values
+
+// Record with default field values
+record Config {
+    debug: bool = false,
+    timeout: i64 = 30,
+    name: string = "default",
+}
+
+// Class with default field values
+class Counter {
+    value: i64 = 0,
+    step: i64 = 1,
+
+    func increment() -> i64 {
+        self.value = self.value + self.step
+        return self.value
+    }
+
+    func get() -> i64 {
+        return self.value
+    }
+}
+
+// Class with mixed required and default fields
+class Point {
+    x: i64,
+    y: i64,
+    z: i64 = 0,
+}
+
+tests "field default values" {
+    test "record all defaults" {
+        let cfg = Config {}
+        assert(cfg.debug == false)
+        assert(cfg.timeout == 30)
+        assert(cfg.name == "default")
+    }
+
+    test "record some defaults" {
+        let cfg = Config { debug: true }
+        assert(cfg.debug == true)
+        assert(cfg.timeout == 30)
+        assert(cfg.name == "default")
+    }
+
+    test "record override all defaults" {
+        let cfg = Config { debug: true, timeout: 60, name: "custom" }
+        assert(cfg.debug == true)
+        assert(cfg.timeout == 60)
+        assert(cfg.name == "custom")
+    }
+
+    test "class all defaults" {
+        let c = Counter {}
+        assert(c.get() == 0)
+        assert(c.increment() == 1)
+        assert(c.increment() == 2)
+    }
+
+    test "class some defaults" {
+        let c = Counter { value: 10 }
+        assert(c.get() == 10)
+        assert(c.increment() == 11)
+    }
+
+    test "class override all defaults" {
+        let c = Counter { value: 100, step: 5 }
+        assert(c.get() == 100)
+        assert(c.increment() == 105)
+    }
+
+    test "mixed required and default" {
+        let p = Point { x: 1, y: 2 }
+        assert(p.x == 1)
+        assert(p.y == 2)
+        assert(p.z == 0)
+    }
+
+    test "mixed with default override" {
+        let p = Point { x: 1, y: 2, z: 3 }
+        assert(p.x == 1)
+        assert(p.y == 2)
+        assert(p.z == 3)
+    }
+}

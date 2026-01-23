@@ -1,6 +1,6 @@
 // src/codegen/structs/literals.rs
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::helpers::convert_to_i64_for_storage;
 use crate::RuntimeFn;
@@ -8,8 +8,20 @@ use crate::context::Cg;
 use crate::errors::CodegenError;
 use crate::types::CompiledValue;
 use cranelift::prelude::*;
-use vole_frontend::{Expr, StructLiteralExpr};
+use vole_frontend::{Decl, Expr, FieldDef, Program, StructLiteralExpr, Symbol};
 use vole_sema::type_arena::TypeId;
+
+/// Find the field definitions for a type by looking up the class/record declaration in the program
+fn find_type_fields(program: &Program, type_name: Symbol) -> Option<&[FieldDef]> {
+    for decl in &program.declarations {
+        match decl {
+            Decl::Class(class) if class.name == type_name => return Some(&class.fields),
+            Decl::Record(record) if record.name == type_name => return Some(&record.fields),
+            _ => {}
+        }
+    }
+    None
+}
 
 impl Cg<'_, '_, '_> {
     pub fn struct_literal(
@@ -84,6 +96,14 @@ impl Cg<'_, '_, '_> {
             }
         };
 
+        // Collect names of fields that were explicitly provided in the struct literal
+        let provided_fields: HashSet<String> = sl
+            .fields
+            .iter()
+            .map(|init| self.interner().resolve(init.name).to_string())
+            .collect();
+
+        // Compile explicitly provided fields
         for init in &sl.fields {
             let init_name = self.interner().resolve(init.name);
             let slot = *field_slots.get(init_name).ok_or_else(|| {
@@ -125,11 +145,125 @@ impl Cg<'_, '_, '_> {
                 .call(set_func_ref, &[instance_ptr, slot_val, store_value]);
         }
 
+        // Handle omitted fields with default values
+        // Look up the original type declaration to get default expressions
+        // We use raw pointers to the original AST to avoid cloning, which would
+        // invalidate string literal pointers during JIT execution.
+        let field_default_ptrs =
+            self.collect_field_default_ptrs(sl.name, &provided_fields, type_def_id);
+
+        for (field_name, default_expr_ptr) in field_default_ptrs {
+            let slot = *field_slots.get(&field_name).ok_or_else(|| {
+                format!(
+                    "Unknown field: {} in type {} (default)",
+                    field_name,
+                    self.interner().resolve(sl.name)
+                )
+            })?;
+
+            // SAFETY: The pointer points to an Expr in the original AST (either main Program
+            // or a module Program), both owned by AnalyzedProgram. Since AnalyzedProgram
+            // outlives this entire compilation, the pointer remains valid.
+            let default_expr: &Expr = unsafe { &*default_expr_ptr };
+
+            // Compile the default expression
+            let value = self.expr(default_expr)?;
+
+            // If field type is optional (union) and value type is not a union, wrap it
+            let final_value = if let Some(&field_type_id) = field_types.get(&field_name) {
+                let arena = self.arena();
+                let field_is_union = arena.is_union(field_type_id);
+                let field_is_interface = arena.is_interface(field_type_id);
+                let value_is_union = arena.is_union(value.type_id);
+                drop(arena);
+
+                if field_is_union && !value_is_union {
+                    self.construct_union_heap_id(value, field_type_id)?
+                } else if field_is_interface {
+                    self.box_interface_value(value, field_type_id)?
+                } else {
+                    value
+                }
+            } else {
+                value
+            };
+
+            let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
+            let store_value = convert_to_i64_for_storage(self.builder, &final_value);
+
+            self.builder
+                .ins()
+                .call(set_func_ref, &[instance_ptr, slot_val, store_value]);
+        }
+
         Ok(CompiledValue {
             value: instance_ptr,
             ty: self.ptr_type(),
             type_id: result_type_id,
         })
+    }
+
+    /// Collect raw pointers to default expressions for omitted fields in a struct literal.
+    /// Returns Vec of (field_name, raw_pointer_to_expression) pairs for fields that have
+    /// defaults but were not provided in the struct literal.
+    ///
+    /// # Safety
+    /// The returned raw pointers are valid for the lifetime of AnalyzedProgram, which
+    /// owns both the main Program and all module Programs. Since AnalyzedProgram outlives
+    /// all compilation, these pointers remain valid during struct literal compilation.
+    fn collect_field_default_ptrs(
+        &self,
+        type_name: Symbol,
+        provided_fields: &HashSet<String>,
+        type_def_id: vole_identity::TypeDefId,
+    ) -> Vec<(String, *const Expr)> {
+        let mut defaults = Vec::new();
+
+        // Get the type definition to find out which module it's in
+        let type_def = self.query().get_type(type_def_id);
+        let type_module = type_def.module;
+
+        // Get the main module to check if this type is in the main program
+        let main_module = self.query().main_module();
+
+        if type_module == main_module {
+            // Type is in the main program - search there
+            if let Some(fields) = find_type_fields(&self.analyzed().program, type_name) {
+                for field in fields {
+                    let field_name = self.interner().resolve(field.name).to_string();
+                    if !provided_fields.contains(&field_name)
+                        && let Some(default_value) = &field.default_value
+                    {
+                        // Store raw pointer to the original expression
+                        defaults.push((field_name, default_value.as_ref() as *const Expr));
+                    }
+                }
+            }
+        } else {
+            // Type is in a module - find the module path and search there
+            let module_path = self.name_table().module_path(type_module).to_string();
+            if let Some((program, module_interner)) =
+                self.analyzed().module_programs.get(&module_path)
+            {
+                // Get the type name in the module's interner
+                let type_name_str = self.interner().resolve(type_name);
+                if let Some(module_type_sym) = module_interner.lookup(type_name_str)
+                    && let Some(fields) = find_type_fields(program, module_type_sym)
+                {
+                    for field in fields {
+                        let field_name = module_interner.resolve(field.name).to_string();
+                        if !provided_fields.contains(&field_name)
+                            && let Some(default_value) = &field.default_value
+                        {
+                            // Store raw pointer to the original expression
+                            defaults.push((field_name, default_value.as_ref() as *const Expr));
+                        }
+                    }
+                }
+            }
+        }
+
+        defaults
     }
 
     /// Construct a union value on the heap (for storing in class/record fields).

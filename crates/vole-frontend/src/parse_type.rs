@@ -28,9 +28,17 @@ impl<'src> Parser<'src> {
         self.advance(); // consume ':'
         let ty = self.parse_type()?;
 
+        // Parse optional default value: param: Type = expr
+        let default_value = if self.match_token(TokenType::Eq) {
+            Some(Box::new(self.expression(0)?))
+        } else {
+            None
+        };
+
         Ok(Param {
             name,
             ty,
+            default_value,
             span: name_token.span,
         })
     }
