@@ -1,60 +1,75 @@
-# AGENTS.md
+# CLAUDE.md
+Vole is a Type-space JIT Programming language
+This project uses a CLI ticket system for task management. Run `tk help` when you need to use it.
 
-This file summarizes local agent instructions for this repo.
+## Rules
 
-## Required Reads
+<IMPORTANT>
+- Use tools to investigate (run tests, use debuggers)
+- Use tools to modify where needed (e.g. ast-grep)
+- When planning work, do not write markdown files, use tickets with `tk`
+- NEVER "simplfy" tests in `vole/test`; you are hiding  bugs doing so
+- NEVER assume "pre-existing failures", you likely broke it.
+- NEVER opt out of work, simplify, for think tasks are too complex, _especially_ from tickets
+- If you take shortcuts, track them in tickets with `tk`
+</IMPORTANT>
 
-- Always read `CLAUDE.md` for repo guidance.
-- Always check `CLAUDE.local.md` for private instructions.
-- If in a git worktree, read `CLAUDE.local.md` from the main worktree (first entry in `git worktree list`).
 
-## Project Context
+### Workspace Structure
 
-- Vole is a compiled programming language with JIT compilation via Cranelift.
-- Original source of truth is the Zig project at `~/code/personal/void`; refer to it (including docs/tests) when adding features.
+```
+crates/
+├── vole-identity/   # NameId, NameTable, entity IDs
+├── vole-frontend/   # lexer, parser, AST, interner
+├── vole-sema/       # type checking, module loading
+├── vole-runtime/    # builtins, values, instance
+├── vole-codegen/    # Cranelift JIT (isolated - heavy deps)
+src/                 # CLI, commands, binaries
+```
 
-## Working Style
+## Tools
 
-- Bias toward action; use tools to investigate.
-- Be concise; check before asking.
-- Use haiku agents for simple tasks (single-file edits, docs, mechanical changes, simple commits).
+Just
+```bash
+just pre-commit     # Pre-commit checks, like  CI,  but will format and attempt to fix clippy
+just check          # Fast type check (run after ANY change)
+just ci             # All checks (format, clippy, test, snap)
+just unit           # Run vole unit tests
+just snap           # Run snapshot tests
+```
 
-## Build and Test
+Cargo
+```bash
+cargo run -- run file.vole    # Execute
+cargo run -- test dir/        # Run test blocks
+```
 
-Prefer `just` commands:
+Recommended
+```
+ast-grep    # Use for large scale renames and finds with -l rust
+tk          # Use for tracking work
+lldb        # Debugger
+gdb         # Debugger
+```
 
-- `just build` for debug build
-- `just ci` for full checks
-- `just unit` for unit tests
-- `just snap` for snapshot tests
+## Testing
 
-## Files and Modules
+| Type | Location | Use For |
+|------|----------|---------|
+| Unit tests | `test/unit/` | Preferred. Code that runs. |
+| Snapshot/check | `test/snapshot/check/` | Error messages |
+| Snapshot/run | `test/snapshot/run/` | Smoke tests |
 
-- Keep files ~1000 lines; prefer new files over growing large ones.
-- When splitting, use logical submodules and split `impl` blocks.
+Format: `tests { test "name" { assert(...) } }`
+Bless: `cargo run --bin vole-snap -- bless path/`
 
-## Landing the Plane (Session Completion)
+NEVER "simplify" tests, even if you just created them.
 
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+## Debugging
 
-**MANDATORY WORKFLOW:**
-
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
-   ```bash
-   git pull --rebase
-   bd sync
-   git push
-   git status  # MUST show "up to date with origin"
-   ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
-
-**CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
+```bash
+vole inspect ast file.vole       # Show AST
+vole inspect ir file.vole        # Show Cranelift IR
+just dev-backtrace-test file.vole  # Debug segfaults
+just trace file.vole             # Tracing with VOLE_LOG
+```
