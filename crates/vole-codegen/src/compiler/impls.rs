@@ -3,12 +3,8 @@ use std::collections::HashMap;
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
 use cranelift_module::Module;
 
-use super::common::{
-    DefaultReturn, FunctionCompileConfig, bind_params, compile_function_inner_with_params,
-    create_entry_block, finalize_function_body,
-};
+use super::common::{FunctionCompileConfig, compile_function_inner_with_params};
 use super::{Compiler, SelfParam, TypeResolver};
-use crate::context::Cg;
 use crate::types::{
     CodegenCtx, MethodInfo, TypeMetadata, method_name_id_with_interner, resolve_type_expr_to_id,
     type_id_to_cranelift,
@@ -641,51 +637,42 @@ impl Compiler<'_> {
             );
             self.jit.ctx.func.signature = sig;
 
-            // Collect param types as TypeId (resolve once, use for both Cranelift type and variables)
+            // Collect param types and build config
             let param_type_ids =
                 self.resolve_param_type_ids_with_interner(&method.params, interner, module_id);
             let param_cranelift_types = self.type_ids_to_cranelift(&param_type_ids);
-            let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
+            let params: Vec<_> = method
+                .params
+                .iter()
+                .zip(param_type_ids.iter())
+                .zip(param_cranelift_types.iter())
+                .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
+                .collect();
 
-            // Get source file pointer before borrowing ctx.func
+            // Get source file pointer and module_id
             let source_file_ptr = self.source_file_ptr();
+            let resolved_module_id = module_path.and_then(|path| {
+                let name_table = self.analyzed.name_table();
+                name_table.module_id_if_known(path)
+            });
 
-            // Create function builder
+            // Create function builder and compile
             let mut builder_ctx = FunctionBuilderContext::new();
             {
-                let mut builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-
-                let entry_block = create_entry_block(&mut builder);
-
-                // Build variables map (no self for static methods)
-                let mut variables = HashMap::new();
-                let params = builder.block_params(entry_block).to_vec();
-
-                // Bind parameters (using TypeId directly)
-                bind_params(
-                    &mut builder,
-                    &mut variables,
-                    &param_names,
-                    &param_cranelift_types,
-                    &param_type_ids,
-                    &params,
-                );
-
-                // Compile method body
-                let module_id = module_path.and_then(|path| {
-                    let name_table = self.analyzed.name_table();
-                    name_table.module_id_if_known(path)
-                });
+                let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
                 let env = compile_env!(self, source_file_ptr);
                 let mut codegen_ctx =
                     CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
-                let (terminated, expr_value) = Cg::new(&mut builder, &mut codegen_ctx, &env)
-                    .with_vars(variables)
-                    .with_return_type(return_type_id)
-                    .with_module(module_id)
-                    .compile_body(body)?;
 
-                finalize_function_body(builder, expr_value.as_ref(), terminated, DefaultReturn::Empty);
+                let config = FunctionCompileConfig::top_level(body, params, return_type_id);
+                compile_function_inner_with_params(
+                    builder,
+                    &mut codegen_ctx,
+                    &env,
+                    config,
+                    resolved_module_id,
+                    None,
+                )?;
             }
 
             // Define the function
@@ -942,7 +929,6 @@ impl Compiler<'_> {
         // Use TypeId directly for self binding
         let self_type_id = metadata.vole_type;
 
-        // Collect param type IDs first, then convert to cranelift types
         // Resolve param types with SelfType substitution
         let param_type_ids = self.resolve_param_type_ids_with_self_type_only(
             &method.params,
@@ -950,58 +936,36 @@ impl Compiler<'_> {
             module_id,
         );
         let param_types = self.type_ids_to_cranelift(&param_type_ids);
-        let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
+        let params: Vec<_> = method
+            .params
+            .iter()
+            .zip(param_type_ids.iter())
+            .zip(param_types.iter())
+            .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
+            .collect();
 
-        // Use the return type from sema (handles inferred types)
-        let method_return_type_id = Some(return_type_id_from_sema);
+        // Compile method body (must exist for default methods)
+        let body = method.body.as_ref().ok_or_else(|| {
+            format!(
+                "Internal error: default method {} has no body",
+                method_name_str
+            )
+        })?;
 
-        // Get source file pointer and self symbol before borrowing ctx.func
+        // Get source file pointer and self binding
         let source_file_ptr = self.source_file_ptr();
         let self_sym = self.self_symbol();
+        let self_binding = (self_sym, metadata.vole_type, self.pointer_type);
 
-        // Create function builder
+        // Create function builder and compile
         let mut builder_ctx = FunctionBuilderContext::new();
         {
-            let mut builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-
-            let entry_block = create_entry_block(&mut builder);
-
-            // Build variables map
-            let mut variables = HashMap::new();
-            let params = builder.block_params(entry_block).to_vec();
-
-            // Bind `self` as the first parameter with the concrete type
-            let self_var = builder.declare_var(self.pointer_type);
-            builder.def_var(self_var, params[0]);
-            variables.insert(self_sym, (self_var, metadata.vole_type));
-
-            // Bind remaining parameters (TypeId-native)
-            bind_params(
-                &mut builder,
-                &mut variables,
-                &param_names,
-                &param_types,
-                &param_type_ids,
-                &params[1..],
-            );
-
-            // Compile method body (must exist for default methods)
-            let body = method.body.as_ref().ok_or_else(|| {
-                format!(
-                    "Internal error: default method {} has no body",
-                    method_name_str
-                )
-            })?;
-
-            // Create split contexts and compile
+            let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
             let env = compile_env!(self, source_file_ptr);
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
-            let (terminated, expr_value) = Cg::new(&mut builder, &mut codegen_ctx, &env)
-                .with_vars(variables)
-                .with_return_type(method_return_type_id)
-                .compile_body(body)?;
 
-            finalize_function_body(builder, expr_value.as_ref(), terminated, DefaultReturn::Empty);
+            let config = FunctionCompileConfig::method(body, params, self_binding, Some(return_type_id_from_sema));
+            compile_function_inner_with_params(builder, &mut codegen_ctx, &env, config, None, None)?;
         }
 
         // Define the function
@@ -1060,44 +1024,28 @@ impl Compiler<'_> {
             );
             self.jit.ctx.func.signature = sig;
 
-            // Collect param type IDs first, then convert to cranelift types (TypeId-native)
+            // Collect param types and build config
             let param_type_ids = self.resolve_param_type_ids(&method.params, &TypeResolver::Query);
             let param_types = self.type_ids_to_cranelift(&param_type_ids);
-            let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
+            let params: Vec<_> = method
+                .params
+                .iter()
+                .zip(param_type_ids.iter())
+                .zip(param_types.iter())
+                .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
+                .collect();
 
-            // Get source file pointer before borrowing ctx.func
+            // Create function builder and compile
             let source_file_ptr = self.source_file_ptr();
-
-            // Create function builder
             let mut builder_ctx = FunctionBuilderContext::new();
             {
-                let mut builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-
-                let entry_block = create_entry_block(&mut builder);
-
-                // Build variables map (no self for static methods)
-                let mut variables = HashMap::new();
-                let params = builder.block_params(entry_block).to_vec();
-
-                // Bind parameters (TypeId-native)
-                bind_params(
-                    &mut builder,
-                    &mut variables,
-                    &param_names,
-                    &param_types,
-                    &param_type_ids,
-                    &params,
-                );
-
-                // Compile method body
+                let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
                 let env = compile_env!(self, source_file_ptr);
                 let mut codegen_ctx =
                     CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
-                let (terminated, expr_value) = Cg::new(&mut builder, &mut codegen_ctx, &env)
-                    .with_vars(variables)
-                    .compile_body(body)?;
 
-                finalize_function_body(builder, expr_value.as_ref(), terminated, DefaultReturn::Empty);
+                let config = FunctionCompileConfig::top_level(body, params, Some(return_type_id));
+                compile_function_inner_with_params(builder, &mut codegen_ctx, &env, config, None, None)?;
             }
 
             // Define the function
@@ -1170,67 +1118,46 @@ impl Compiler<'_> {
             );
             self.jit.ctx.func.signature = sig;
 
-            // Resolve param type IDs (TypeId-native)
+            // Resolve param types and build config params
             let param_type_ids = self.resolve_param_type_ids_with_interner(
                 &method.params,
                 module_interner,
                 module_id,
             );
             let param_types = self.type_ids_to_cranelift(&param_type_ids);
-            let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
+            let params: Vec<_> = method
+                .params
+                .iter()
+                .zip(param_type_ids.iter())
+                .zip(param_types.iter())
+                .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
+                .collect();
 
-            // Get source file pointer and self symbol (use module interner for method body)
-            let source_file_ptr = self.source_file_ptr();
+            // Resolve return type and self binding
+            let return_type_id = {
+                let name_table = self.analyzed.name_table();
+                method.return_type.as_ref().map(|t| {
+                    resolve_type_expr_to_id(
+                        t,
+                        self.analyzed.entity_registry(),
+                        &self.state.type_metadata,
+                        module_interner,
+                        &name_table,
+                        module_id,
+                        self.analyzed.type_arena_ref(),
+                    )
+                })
+            };
             let self_sym = module_interner
                 .lookup("self")
                 .expect("'self' should be interned in module");
-            // Resolve return type (TypeId-native)
-            let return_type_id = {
-                let name_table = self.analyzed.name_table();
-                method
-                    .return_type
-                    .as_ref()
-                    .map(|t| {
-                        resolve_type_expr_to_id(
-                            t,
-                            self.analyzed.entity_registry(),
-                            &self.state.type_metadata,
-                            module_interner,
-                            &name_table,
-                            module_id,
-                            self.analyzed.type_arena_ref(),
-                        )
-                    })
-                    .unwrap_or(TypeId::VOID)
-            };
+            let self_binding = (self_sym, metadata.vole_type, self.pointer_type);
 
-            // Create function builder
+            // Create function builder and compile
+            let source_file_ptr = self.source_file_ptr();
             let mut builder_ctx = FunctionBuilderContext::new();
             {
-                let mut builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-
-                let entry_block = create_entry_block(&mut builder);
-
-                // Build variables map
-                let mut variables = HashMap::new();
-                let params = builder.block_params(entry_block).to_vec();
-
-                // Bind `self` as the first parameter
-                let self_var = builder.declare_var(self.pointer_type);
-                builder.def_var(self_var, params[0]);
-                variables.insert(self_sym, (self_var, metadata.vole_type));
-
-                // Bind remaining parameters (TypeId-native)
-                bind_params(
-                    &mut builder,
-                    &mut variables,
-                    &param_names,
-                    &param_types,
-                    &param_type_ids,
-                    &params[1..],
-                );
-
-                // Compile method body (use module interner)
+                let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
                 let env = compile_env!(
                     self,
                     module_interner,
@@ -1240,13 +1167,16 @@ impl Compiler<'_> {
                 );
                 let mut codegen_ctx =
                     CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
-                let (terminated, expr_value) = Cg::new(&mut builder, &mut codegen_ctx, &env)
-                    .with_vars(variables)
-                    .with_return_type(Some(return_type_id))
-                    .with_module(Some(module_id))
-                    .compile_body(&method.body)?;
 
-                finalize_function_body(builder, expr_value.as_ref(), terminated, DefaultReturn::Empty);
+                let config = FunctionCompileConfig::method(&method.body, params, self_binding, return_type_id);
+                compile_function_inner_with_params(
+                    builder,
+                    &mut codegen_ctx,
+                    &env,
+                    config,
+                    Some(module_id),
+                    None,
+                )?;
             }
 
             // Define the function
@@ -1272,26 +1202,6 @@ impl Compiler<'_> {
                     )
                 })?;
 
-                // Resolve return type (TypeId-native)
-                let return_type_id = {
-                    let name_table = self.analyzed.name_table();
-                    method
-                        .return_type
-                        .as_ref()
-                        .map(|t| {
-                            resolve_type_expr_to_id(
-                                t,
-                                self.analyzed.entity_registry(),
-                                &self.state.type_metadata,
-                                module_interner,
-                                &name_table,
-                                module_id,
-                                self.analyzed.type_arena_ref(),
-                            )
-                        })
-                        .unwrap_or(TypeId::VOID)
-                };
-
                 // Create signature (no self parameter) - use module interner
                 let sig = self.build_signature(
                     &method.params,
@@ -1301,41 +1211,42 @@ impl Compiler<'_> {
                 );
                 self.jit.ctx.func.signature = sig;
 
-                // Resolve param type IDs (TypeId-native)
+                // Resolve param types and build config params
                 let param_type_ids = self.resolve_param_type_ids_with_interner(
                     &method.params,
                     module_interner,
                     module_id,
                 );
                 let param_types = self.type_ids_to_cranelift(&param_type_ids);
-                let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
+                let params: Vec<_> = method
+                    .params
+                    .iter()
+                    .zip(param_type_ids.iter())
+                    .zip(param_types.iter())
+                    .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
+                    .collect();
 
-                // Get source file pointer
+                // Resolve return type
+                let return_type_id = {
+                    let name_table = self.analyzed.name_table();
+                    method.return_type.as_ref().map(|t| {
+                        resolve_type_expr_to_id(
+                            t,
+                            self.analyzed.entity_registry(),
+                            &self.state.type_metadata,
+                            module_interner,
+                            &name_table,
+                            module_id,
+                            self.analyzed.type_arena_ref(),
+                        )
+                    })
+                };
+
+                // Create function builder and compile
                 let source_file_ptr = self.source_file_ptr();
-
-                // Create function builder
                 let mut builder_ctx = FunctionBuilderContext::new();
                 {
-                    let mut builder =
-                        FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-
-                    let entry_block = create_entry_block(&mut builder);
-
-                    // Build variables map (no self for static methods)
-                    let mut variables = HashMap::new();
-                    let params = builder.block_params(entry_block).to_vec();
-
-                    // Bind parameters (TypeId-native)
-                    bind_params(
-                        &mut builder,
-                        &mut variables,
-                        &param_names,
-                        &param_types,
-                        &param_type_ids,
-                        &params,
-                    );
-
-                    // Compile method body (use module interner)
+                    let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
                     let env = compile_env!(
                         self,
                         module_interner,
@@ -1345,13 +1256,16 @@ impl Compiler<'_> {
                     );
                     let mut codegen_ctx =
                         CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
-                    let (terminated, expr_value) = Cg::new(&mut builder, &mut codegen_ctx, &env)
-                        .with_vars(variables)
-                        .with_return_type(Some(return_type_id))
-                        .with_module(Some(module_id))
-                        .compile_body(body)?;
 
-                    finalize_function_body(builder, expr_value.as_ref(), terminated, DefaultReturn::Empty);
+                    let config = FunctionCompileConfig::top_level(body, params, return_type_id);
+                    compile_function_inner_with_params(
+                        builder,
+                        &mut codegen_ctx,
+                        &env,
+                        config,
+                        Some(module_id),
+                        None,
+                    )?;
                 }
 
                 // Define the function
