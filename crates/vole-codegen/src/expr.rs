@@ -861,8 +861,7 @@ impl Cg<'_, '_, '_> {
             .ins()
             .brif(is_nil, nil_block, &[], not_nil_block, &[]);
 
-        self.builder.switch_to_block(nil_block);
-        self.builder.seal_block(nil_block);
+        self.switch_and_seal(nil_block);
         let default_val = self.expr(&nc.default)?;
         let default_coerced = if default_val.ty != cranelift_type {
             if default_val.ty.is_int() && cranelift_type.is_int() {
@@ -884,8 +883,7 @@ impl Cg<'_, '_, '_> {
         let default_arg = BlockArg::from(default_coerced);
         self.builder.ins().jump(merge_block, &[default_arg]);
 
-        self.builder.switch_to_block(not_nil_block);
-        self.builder.seal_block(not_nil_block);
+        self.switch_and_seal(not_nil_block);
         let payload = self
             .builder
             .ins()
@@ -893,8 +891,7 @@ impl Cg<'_, '_, '_> {
         let payload_arg = BlockArg::from(payload);
         self.builder.ins().jump(merge_block, &[payload_arg]);
 
-        self.builder.switch_to_block(merge_block);
-        self.builder.seal_block(merge_block);
+        self.switch_and_seal(merge_block);
 
         let result = self.builder.block_params(merge_block)[0];
         Ok(CompiledValue {
@@ -1324,12 +1321,10 @@ impl Cg<'_, '_, '_> {
         }
 
         // Fill in trap block (should be unreachable if match is exhaustive)
-        self.builder.switch_to_block(trap_block);
-        self.builder.seal_block(trap_block);
+        self.switch_and_seal(trap_block);
         self.builder.ins().trap(TrapCode::unwrap_user(1));
 
-        self.builder.switch_to_block(merge_block);
-        self.builder.seal_block(merge_block);
+        self.switch_and_seal(merge_block);
 
         let merged_value = self.builder.block_params(merge_block)[0];
 
@@ -1398,20 +1393,17 @@ impl Cg<'_, '_, '_> {
             .brif(is_success, success_block, &[], error_block, &[]);
 
         // Error block: propagate by returning the fallible value
-        self.builder.switch_to_block(error_block);
-        self.builder.seal_block(error_block);
+        self.switch_and_seal(error_block);
         self.builder.ins().return_(&[fallible.value]);
 
         // Success block: extract payload and jump to merge
-        self.builder.switch_to_block(success_block);
-        self.builder.seal_block(success_block);
+        self.switch_and_seal(success_block);
         let payload = load_fallible_payload(self.builder, fallible.value, payload_ty);
         let payload_arg = BlockArg::from(payload);
         self.builder.ins().jump(merge_block, &[payload_arg]);
 
         // Merge block: continue with extracted value
-        self.builder.switch_to_block(merge_block);
-        self.builder.seal_block(merge_block);
+        self.switch_and_seal(merge_block);
         let result = self.builder.block_params(merge_block)[0];
 
         Ok(CompiledValue {
@@ -1466,8 +1458,7 @@ impl Cg<'_, '_, '_> {
             .brif(condition.value, then_block, &[], else_block, &[]);
 
         // Compile then branch
-        self.builder.switch_to_block(then_block);
-        self.builder.seal_block(then_block);
+        self.switch_and_seal(then_block);
         let then_result = self.expr(&if_expr.then_branch)?;
         if !is_void {
             self.builder
@@ -1478,8 +1469,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Compile else branch
-        self.builder.switch_to_block(else_block);
-        self.builder.seal_block(else_block);
+        self.switch_and_seal(else_block);
         let else_result = if let Some(ref else_branch) = if_expr.else_branch {
             self.expr(else_branch)?
         } else {
@@ -1495,8 +1485,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Continue in merge block
-        self.builder.switch_to_block(merge_block);
-        self.builder.seal_block(merge_block);
+        self.switch_and_seal(merge_block);
 
         if !is_void {
             let result = self.builder.block_params(merge_block)[0];

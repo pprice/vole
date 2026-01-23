@@ -126,22 +126,19 @@ impl Cg<'_, '_, '_> {
             .brif(left.value, then_block, &[], else_block, &[]);
 
         // Then block: left was true, evaluate right
-        self.builder.switch_to_block(then_block);
-        self.builder.seal_block(then_block);
+        self.switch_and_seal(then_block);
         let right = self.expr(&bin.right)?;
         let right_arg = BlockArg::from(right.value);
         self.builder.ins().jump(merge_block, &[right_arg]);
 
         // Else block: left was false, short-circuit with false
-        self.builder.switch_to_block(else_block);
-        self.builder.seal_block(else_block);
+        self.switch_and_seal(else_block);
         let false_val = self.builder.ins().iconst(types::I8, 0);
         let false_arg = BlockArg::from(false_val);
         self.builder.ins().jump(merge_block, &[false_arg]);
 
         // Merge block
-        self.builder.switch_to_block(merge_block);
-        self.builder.seal_block(merge_block);
+        self.switch_and_seal(merge_block);
         let result = self.builder.block_params(merge_block)[0];
 
         Ok(self.bool_value(result))
@@ -161,22 +158,19 @@ impl Cg<'_, '_, '_> {
             .brif(left.value, then_block, &[], else_block, &[]);
 
         // Then block: left was true, short-circuit with true
-        self.builder.switch_to_block(then_block);
-        self.builder.seal_block(then_block);
+        self.switch_and_seal(then_block);
         let true_val = self.builder.ins().iconst(types::I8, 1);
         let true_arg = BlockArg::from(true_val);
         self.builder.ins().jump(merge_block, &[true_arg]);
 
         // Else block: left was false, evaluate right
-        self.builder.switch_to_block(else_block);
-        self.builder.seal_block(else_block);
+        self.switch_and_seal(else_block);
         let right = self.expr(&bin.right)?;
         let right_arg = BlockArg::from(right.value);
         self.builder.ins().jump(merge_block, &[right_arg]);
 
         // Merge block
-        self.builder.switch_to_block(merge_block);
-        self.builder.seal_block(merge_block);
+        self.switch_and_seal(merge_block);
         let result = self.builder.block_params(merge_block)[0];
 
         Ok(self.bool_value(result))

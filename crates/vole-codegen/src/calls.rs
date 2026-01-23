@@ -725,8 +725,7 @@ impl Cg<'_, '_, '_> {
             .ins()
             .brif(cond_i32, pass_block, &[], fail_block, &[]);
 
-        self.builder.switch_to_block(fail_block);
-        self.builder.seal_block(fail_block);
+        self.switch_and_seal(fail_block);
 
         // vole_assert_fail(file_ptr, file_len, line)
         let (file_ptr, file_len) = self.source_file();
@@ -741,8 +740,7 @@ impl Cg<'_, '_, '_> {
         )?;
         self.builder.ins().jump(pass_block, &[]);
 
-        self.builder.switch_to_block(pass_block);
-        self.builder.seal_block(pass_block);
+        self.switch_and_seal(pass_block);
 
         Ok(self.void_value())
     }

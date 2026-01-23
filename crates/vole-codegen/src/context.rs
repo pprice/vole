@@ -802,6 +802,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     // ========== Control flow helpers ==========
 
+    /// Switch to a block and seal it (common pattern for sequential control flow)
+    pub fn switch_and_seal(&mut self, block: cranelift::prelude::Block) {
+        self.builder.switch_to_block(block);
+        self.builder.seal_block(block);
+    }
+
     /// Extend a boolean condition to I32 for use with brif
     pub fn cond_to_i32(&mut self, cond: Value) -> Value {
         self.builder.ins().uextend(types::I32, cond)

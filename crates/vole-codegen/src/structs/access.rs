@@ -182,8 +182,7 @@ impl Cg<'_, '_, '_> {
             .brif(is_nil, nil_block, &[], not_nil_block, &[]);
 
         // Nil block: return nil wrapped in the optional type
-        self.builder.switch_to_block(nil_block);
-        self.builder.seal_block(nil_block);
+        self.switch_and_seal(nil_block);
         let nil_val = self.nil_value();
         let nil_union = self.construct_union_id(nil_val, result_type_id)?;
         self.builder
@@ -191,8 +190,7 @@ impl Cg<'_, '_, '_> {
             .jump(merge_block, &[nil_union.value.into()]);
 
         // Not-nil block: do field access and wrap result in optional
-        self.builder.switch_to_block(not_nil_block);
-        self.builder.seal_block(not_nil_block);
+        self.switch_and_seal(not_nil_block);
 
         // Load the actual object from the union payload (offset 8)
         let inner_cranelift_type = {
@@ -232,8 +230,7 @@ impl Cg<'_, '_, '_> {
             .jump(merge_block, &[final_value.value.into()]);
 
         // Merge block
-        self.builder.switch_to_block(merge_block);
-        self.builder.seal_block(merge_block);
+        self.switch_and_seal(merge_block);
 
         let result = self.builder.block_params(merge_block)[0];
         Ok(CompiledValue {
