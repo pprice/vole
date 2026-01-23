@@ -5,7 +5,11 @@
 
 use std::collections::HashMap;
 
-use cranelift::prelude::{AbiParam, FunctionBuilder, InstBuilder, Type, Value, Variable, types};
+use cranelift::prelude::{
+    AbiParam, FunctionBuilder, InstBuilder, IntCC, MemFlags, StackSlotData, StackSlotKind, Type,
+    Value, Variable, types,
+};
+use cranelift_codegen::ir::StackSlot;
 use cranelift_module::{FuncId, Module};
 
 use crate::errors::CodegenError;
@@ -19,8 +23,8 @@ use vole_sema::type_arena::{SemaType as ArenaType, TypeId};
 
 use super::lambda::CaptureBinding;
 use super::types::{
-    CodegenCtx, CompiledValue, FunctionCtx, GlobalCtx, native_type_to_cranelift,
-    resolve_type_expr_id, type_id_to_cranelift,
+    CodegenCtx, CompileEnv, CompiledValue, FunctionCtx, native_type_to_cranelift,
+    resolve_type_expr_id, type_id_size, type_id_to_cranelift,
 };
 use vole_sema::type_arena::TypeIdVec;
 
@@ -107,46 +111,48 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     pub codegen_ctx: &'a mut CodegenCtx<'ctx>,
     /// Per-function state (return type, substitutions) - REQUIRED
     pub function_ctx: &'a FunctionCtx<'ctx>,
-    /// Read-only lookup tables - REQUIRED
-    pub global: &'a GlobalCtx<'ctx>,
+    /// Compilation environment (session/unit level) - REQUIRED
+    pub env: &'a CompileEnv<'ctx>,
 }
 
 impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Create a new codegen context with split contexts.
     ///
-    /// # Arguments
-    /// * `builder` - Cranelift FunctionBuilder for IR emission
-    /// * `vars` - Variable bindings for the current function
-    /// * `cf` - Control flow context for loops
-    /// * `codegen_ctx` - Mutable JIT infrastructure (module, func_registry)
-    /// * `function_ctx` - Per-function state (return type, substitutions)
-    /// * `global` - Read-only lookup tables
-    /// * `captures` - Optional closure captures
-    /// * `return_type` - Function return type
-    #[allow(clippy::too_many_arguments)]
+    /// Defaults: captures = None, return_type = function_ctx.return_type.
+    /// Use `.with_captures()` or `.with_return_type()` to override.
     pub fn new(
         builder: &'a mut FunctionBuilder<'b>,
         vars: &'a mut HashMap<Symbol, (Variable, TypeId)>,
         cf: &'a mut ControlFlow,
         codegen_ctx: &'a mut CodegenCtx<'ctx>,
         function_ctx: &'a FunctionCtx<'ctx>,
-        global: &'a GlobalCtx<'ctx>,
-        captures: Option<Captures<'a>>,
-        return_type: Option<TypeId>,
+        env: &'a CompileEnv<'ctx>,
     ) -> Self {
         Self {
             builder,
             vars,
             cf,
-            captures,
+            captures: None,
             self_capture: None,
             call_cache: HashMap::new(),
             field_cache: HashMap::new(),
-            return_type,
+            return_type: function_ctx.return_type,
             codegen_ctx,
             function_ctx,
-            global,
+            env,
         }
+    }
+
+    /// Set closure captures (None = no captures).
+    pub fn with_captures(mut self, captures: Option<Captures<'a>>) -> Self {
+        self.captures = captures;
+        self
+    }
+
+    /// Override the return type (defaults to function_ctx.return_type).
+    pub fn with_return_type(mut self, return_type: Option<TypeId>) -> Self {
+        self.return_type = return_type;
+        self
     }
 
     /// Check if we're in a closure context with captures
@@ -159,20 +165,20 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Get a TypeCtx view
     #[inline]
     pub fn type_ctx(&self) -> super::types::TypeCtx<'_> {
-        super::types::TypeCtx::new(self.global.analyzed.query(), self.codegen_ctx.ptr_type())
+        super::types::TypeCtx::new(self.env.analyzed.query(), self.codegen_ctx.ptr_type())
     }
 
     /// Get arena Rc
     #[inline]
     pub fn arena_rc(&self) -> &std::rc::Rc<std::cell::RefCell<vole_sema::type_arena::TypeArena>> {
-        self.global.analyzed.type_arena_ref()
+        self.env.analyzed.type_arena_ref()
     }
 
     /// Substitute type parameters using function_ctx substitutions
     #[inline]
     pub fn substitute_type(&self, ty: TypeId) -> TypeId {
         self.function_ctx
-            .substitute_type_id(ty, self.global.analyzed.type_arena_ref())
+            .substitute_type_id(ty, self.env.analyzed.type_arena_ref())
     }
 
     /// Get current module (as ModuleId)
@@ -198,13 +204,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Get entity registry reference
     #[inline]
     pub fn registry(&self) -> &'ctx vole_sema::entity_registry::EntityRegistry {
-        self.global.analyzed.entity_registry()
+        self.env.analyzed.entity_registry()
     }
 
     /// Borrow the name table
     #[inline]
     pub fn name_table(&self) -> std::cell::Ref<'_, vole_identity::NameTable> {
-        self.global.analyzed.name_table()
+        self.env.analyzed.name_table()
     }
 
     /// Get the pointer type (Cranelift platform pointer)
@@ -216,13 +222,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Get the query interface for the analyzed program
     #[inline]
     pub fn query(&self) -> vole_sema::ProgramQuery<'_> {
-        self.global.analyzed.query()
+        self.env.analyzed.query()
     }
 
     /// Borrow the type arena
     #[inline]
     pub fn arena(&self) -> std::cell::Ref<'_, vole_sema::type_arena::TypeArena> {
-        self.global.analyzed.type_arena()
+        self.env.analyzed.type_arena()
     }
 
     /// Get expression type by NodeId (checks module-specific types if in module context)
@@ -233,7 +239,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             let name_table = self.name_table();
             let module_path = name_table.module_path(module_id);
             if let Some(module_types) = self
-                .global
+                .env
                 .analyzed
                 .query()
                 .expr_data()
@@ -244,13 +250,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             }
         }
         // Fall back to main program expr_types
-        self.global.analyzed.query().expr_data().get_type(*node_id)
+        self.env.analyzed.query().expr_data().get_type(*node_id)
     }
 
     /// Get substituted return type for generic method calls
     #[inline]
     pub fn get_substituted_return_type(&self, node_id: &vole_frontend::NodeId) -> Option<TypeId> {
-        self.global
+        self.env
             .analyzed
             .query()
             .expr_data()
@@ -260,7 +266,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Get type metadata map
     #[inline]
     pub fn type_metadata(&self) -> &'ctx HashMap<Symbol, super::types::TypeMetadata> {
-        self.global.type_metadata
+        &self.env.state.type_metadata
     }
 
     /// Get impl method infos map
@@ -274,51 +280,51 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         ),
         super::types::MethodInfo,
     > {
-        self.global.impl_method_infos
+        &self.env.state.impl_method_infos
     }
 
     /// Get global variable initializer by name
     #[inline]
     pub fn global_init(&self, name: Symbol) -> Option<&Expr> {
-        self.global.global_inits.get(&name)
+        self.env.global_inits.get(&name)
     }
 
     /// Get source file pointer for error reporting
     #[inline]
     pub fn source_file(&self) -> (*const u8, usize) {
-        self.global.source_file_ptr
+        self.env.source_file_ptr
     }
 
     /// Increment lambda counter and return new value
     #[inline]
     pub fn next_lambda_id(&self) -> usize {
-        let id = self.global.lambda_counter.get();
-        self.global.lambda_counter.set(id + 1);
+        let id = self.env.state.lambda_counter.get();
+        self.env.state.lambda_counter.set(id + 1);
         id
     }
 
     /// Get native function registry
     #[inline]
     pub fn native_registry(&self) -> &'ctx vole_runtime::NativeRegistry {
-        self.global.native_registry
+        &self.env.state.native_registry
     }
 
     /// Alias for native_registry (backward compat)
     #[inline]
     pub fn native_funcs(&self) -> &'ctx vole_runtime::NativeRegistry {
-        self.global.native_registry
+        &self.env.state.native_registry
     }
 
     /// Get the interner for symbol resolution
     #[inline]
     pub fn interner(&self) -> &'ctx vole_frontend::Interner {
-        self.global.interner
+        self.env.interner
     }
 
     /// Alias for type_metadata (backward compat)
     #[inline]
     pub fn type_meta(&self) -> &'ctx HashMap<Symbol, super::types::TypeMetadata> {
-        self.global.type_metadata
+        &self.env.state.type_metadata
     }
 
     /// Alias for impl_method_infos (backward compat)
@@ -332,7 +338,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         ),
         super::types::MethodInfo,
     > {
-        self.global.impl_method_infos
+        &self.env.state.impl_method_infos
     }
 
     /// Get static method infos map
@@ -341,7 +347,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &self,
     ) -> &'ctx HashMap<(vole_identity::TypeDefId, vole_identity::NameId), super::types::MethodInfo>
     {
-        self.global.static_method_infos
+        &self.env.state.static_method_infos
     }
 
     /// Get interface vtable registry
@@ -350,13 +356,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     pub fn interface_vtables(
         &self,
     ) -> &'ctx std::cell::RefCell<crate::interface_vtable::InterfaceVtableRegistry> {
-        self.global.interface_vtables
+        &self.env.state.interface_vtables
     }
 
     /// Get monomorph cache from entity registry
     #[inline]
     pub fn monomorph_cache(&self) -> &'ctx vole_sema::generic::MonomorphCache {
-        &self.global.analyzed.entity_registry().monomorph_cache
+        &self.env.analyzed.entity_registry().monomorph_cache
     }
 
     /// Get current module as Option<ModuleId> - use current_module_id() for new code
@@ -368,7 +374,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Get analyzed program reference
     #[inline]
     pub fn analyzed(&self) -> &'ctx crate::AnalyzedProgram {
-        self.global.analyzed
+        self.env.analyzed
     }
 
     /// Get mutable reference to JIT module
@@ -394,7 +400,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Get an update interface for arena mutations.
     #[inline]
     pub fn update(&self) -> vole_sema::ProgramUpdate<'_> {
-        vole_sema::ProgramUpdate::new(self.global.analyzed.type_arena_ref())
+        vole_sema::ProgramUpdate::new(self.env.analyzed.type_arena_ref())
     }
 
     /// Find the nil variant index in a union (for optional handling)
@@ -410,6 +416,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Convert a TypeId to a Cranelift type
     pub fn cranelift_type(&self, ty: TypeId) -> Type {
         type_id_to_cranelift(ty, &self.arena(), self.ptr_type())
+    }
+
+    /// Get the size (in bits) of a TypeId
+    pub fn type_size(&self, ty: TypeId) -> u32 {
+        type_id_size(ty, self.ptr_type(), self.query().registry(), &self.arena())
     }
 
     /// Infer the type of an expression given parameter types as context.
@@ -516,7 +527,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                                     t,
                                     &type_ctx,
                                     self.function_ctx,
-                                    self.global.type_metadata,
+                                    &self.env.state.type_metadata,
                                 )
                             })
                             .unwrap_or(primitives.i64)
@@ -530,7 +541,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                             t,
                             &type_ctx,
                             self.function_ctx,
-                            self.global.type_metadata,
+                            &self.env.state.type_metadata,
                         )
                     })
                     .unwrap_or(primitives.i64);
@@ -745,6 +756,22 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
     }
 
+    /// Load a tag byte from a union/optional pointer and compare to expected value.
+    /// Returns an i8 value (1 if equal, 0 if not).
+    pub fn tag_eq(&mut self, ptr: Value, expected_tag: i64) -> Value {
+        let tag = self.builder.ins().load(types::I8, MemFlags::new(), ptr, 0);
+        let expected = self.builder.ins().iconst(types::I8, expected_tag);
+        self.builder.ins().icmp(IntCC::Equal, tag, expected)
+    }
+
+    /// Load a tag byte from a union/optional pointer and compare for inequality.
+    /// Returns an i8 value (1 if not equal, 0 if equal).
+    pub fn tag_ne(&mut self, ptr: Value, expected_tag: i64) -> Value {
+        let tag = self.builder.ins().load(types::I8, MemFlags::new(), ptr, 0);
+        let expected = self.builder.ins().iconst(types::I8, expected_tag);
+        self.builder.ins().icmp(IntCC::NotEqual, tag, expected)
+    }
+
     /// Create a Done value (iterator termination sentinel)
     pub fn done_value(&mut self) -> CompiledValue {
         let value = self.builder.ins().iconst(types::I8, 0);
@@ -764,12 +791,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
     }
 
-    /// Create a CompiledValue from a value and TypeId
-    pub fn typed_value_interned(&self, value: Value, type_id: TypeId) -> CompiledValue {
-        let arena = self.arena();
+    /// Create a CompiledValue from a value and TypeId, automatically computing the cranelift type
+    pub fn compiled(&self, value: Value, type_id: TypeId) -> CompiledValue {
         CompiledValue {
             value,
-            ty: type_id_to_cranelift(type_id, &arena, self.ptr_type()),
+            ty: self.cranelift_type(type_id),
             type_id,
         }
     }
@@ -779,6 +805,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Extend a boolean condition to I32 for use with brif
     pub fn cond_to_i32(&mut self, cond: Value) -> Value {
         self.builder.ins().uextend(types::I32, cond)
+    }
+
+    // ========== Stack allocation ==========
+
+    /// Allocate a stack slot of the given size in bytes
+    pub fn alloc_stack(&mut self, size: u32) -> StackSlot {
+        self.builder.create_sized_stack_slot(StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            size,
+            0,
+        ))
     }
 
     // ========== External native function calls ==========
@@ -865,7 +902,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         crate::interface_vtable::box_interface_value_id(
             self.builder,
             self.codegen_ctx,
-            self.global,
+            self.env,
             value,
             interface_type_id,
         )
@@ -874,31 +911,31 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
 impl<'a, 'b, 'ctx> crate::vtable_ctx::VtableCtx for Cg<'a, 'b, 'ctx> {
     fn analyzed(&self) -> &crate::AnalyzedProgram {
-        self.global.analyzed
+        self.env.analyzed
     }
 
     fn arena(&self) -> std::cell::Ref<'_, vole_sema::type_arena::TypeArena> {
-        self.global.analyzed.type_arena()
+        self.env.analyzed.type_arena()
     }
 
     fn arena_rc(&self) -> &std::rc::Rc<std::cell::RefCell<vole_sema::type_arena::TypeArena>> {
-        self.global.analyzed.type_arena_ref()
+        self.env.analyzed.type_arena_ref()
     }
 
     fn registry(&self) -> &vole_sema::EntityRegistry {
-        self.global.analyzed.entity_registry()
+        self.env.analyzed.entity_registry()
     }
 
     fn interner(&self) -> &vole_frontend::Interner {
-        self.global.interner
+        self.env.interner
     }
 
     fn query(&self) -> vole_sema::ProgramQuery<'_> {
-        self.global.analyzed.query()
+        self.env.analyzed.query()
     }
 
     fn update(&self) -> vole_sema::ProgramUpdate<'_> {
-        vole_sema::ProgramUpdate::new(self.global.analyzed.type_arena_ref())
+        vole_sema::ProgramUpdate::new(self.env.analyzed.type_arena_ref())
     }
 
     fn ptr_type(&self) -> Type {
@@ -923,17 +960,17 @@ impl<'a, 'b, 'ctx> crate::vtable_ctx::VtableCtx for Cg<'a, 'b, 'ctx> {
     }
 
     fn native_registry(&self) -> &vole_runtime::NativeRegistry {
-        self.global.native_registry
+        &self.env.state.native_registry
     }
 
     fn interface_vtables(
         &self,
     ) -> &std::cell::RefCell<crate::interface_vtable::InterfaceVtableRegistry> {
-        self.global.interface_vtables
+        &self.env.state.interface_vtables
     }
 
     fn type_metadata(&self) -> &HashMap<Symbol, super::types::TypeMetadata> {
-        self.global.type_metadata
+        &self.env.state.type_metadata
     }
 
     fn impl_method_infos(
@@ -945,6 +982,6 @@ impl<'a, 'b, 'ctx> crate::vtable_ctx::VtableCtx for Cg<'a, 'b, 'ctx> {
         ),
         super::types::MethodInfo,
     > {
-        self.global.impl_method_infos
+        &self.env.state.impl_method_infos
     }
 }

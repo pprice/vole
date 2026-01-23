@@ -13,9 +13,7 @@ use vole_sema::type_arena::{TypeArena, TypeId, TypeIdVec};
 use super::RuntimeFn;
 use super::compiler::common::{FunctionCompileConfig, compile_function_inner_with_params};
 use super::context::Cg;
-use super::types::{
-    CompiledValue, FunctionCtx, resolve_type_expr_id, type_id_size, type_id_to_cranelift,
-};
+use super::types::{CompiledValue, FunctionCtx, resolve_type_expr_id, type_id_to_cranelift};
 
 /// Information about a captured variable for lambda compilation
 #[derive(Clone, Copy)]
@@ -79,7 +77,7 @@ impl Cg<'_, '_, '_> {
                             t,
                             &type_ctx,
                             self.function_ctx,
-                            self.global.type_metadata,
+                            &self.env.state.type_metadata,
                         )
                     })
                     .unwrap_or(primitives.i64)
@@ -88,7 +86,12 @@ impl Cg<'_, '_, '_> {
 
         // Get return type from annotation or infer from body
         let return_type_id = if let Some(t) = &lambda.return_type {
-            resolve_type_expr_id(t, &type_ctx, self.function_ctx, self.global.type_metadata)
+            resolve_type_expr_id(
+                t,
+                &type_ctx,
+                self.function_ctx,
+                &self.env.state.type_metadata,
+            )
         } else {
             let param_context: Vec<(Symbol, TypeId)> = lambda
                 .params
@@ -168,7 +171,7 @@ impl Cg<'_, '_, '_> {
                 lambda_builder,
                 self.codegen_ctx,
                 &function_ctx,
-                self.global,
+                self.env,
                 config,
             )?;
         }
@@ -295,7 +298,7 @@ impl Cg<'_, '_, '_> {
                 lambda_builder,
                 self.codegen_ctx,
                 &function_ctx,
-                self.global,
+                self.env,
                 config,
             )?;
         }
@@ -375,7 +378,7 @@ impl Cg<'_, '_, '_> {
                 (self.builder.use_var(*var), *ty)
             };
 
-            let size = type_id_size(vole_type_id, ptr_type, self.registry(), &self.arena());
+            let size = self.type_size(vole_type_id);
             let size_val = self.builder.ins().iconst(types::I64, size as i64);
 
             let alloc_call = self.builder.ins().call(heap_alloc_ref, &[size_val]);

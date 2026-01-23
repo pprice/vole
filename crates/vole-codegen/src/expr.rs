@@ -440,11 +440,7 @@ impl Cg<'_, '_, '_> {
         );
 
         // Create stack slot for the tuple
-        let slot = self.builder.create_sized_stack_slot(StackSlotData::new(
-            StackSlotKind::ExplicitSlot,
-            total_size,
-            0,
-        ));
+        let slot = self.alloc_stack(total_size);
 
         // Compile and store each element
         for (i, elem) in elements.iter().enumerate() {
@@ -487,11 +483,7 @@ impl Cg<'_, '_, '_> {
         let total_size = elem_size * (count as u32);
 
         // Create stack slot for the fixed array
-        let slot = self.builder.create_sized_stack_slot(StackSlotData::new(
-            StackSlotKind::ExplicitSlot,
-            total_size,
-            0,
-        ));
+        let slot = self.alloc_stack(total_size);
 
         // Store the element value at each position
         for i in 0..count {
@@ -532,11 +524,7 @@ impl Cg<'_, '_, '_> {
         };
 
         // Create a stack slot to hold (start, end) - 16 bytes
-        let slot = self.builder.create_sized_stack_slot(StackSlotData::new(
-            StackSlotKind::ExplicitSlot,
-            16,
-            0,
-        ));
+        let slot = self.alloc_stack(16);
 
         // Store start at offset 0
         self.builder.ins().stack_store(start.value, slot, 0);
@@ -654,7 +642,7 @@ impl Cg<'_, '_, '_> {
             let raw_value =
                 self.call_runtime_cached(RuntimeFn::ArrayGetValue, &[obj.value, idx.value])?;
             // Borrow arena from global directly to avoid borrow conflict with builder
-            let arena = self.global.analyzed.type_arena();
+            let arena = self.env.analyzed.type_arena();
             let (result_value, result_ty) =
                 convert_field_value_id(self.builder, raw_value, element_id, &arena);
             drop(arena);
@@ -776,13 +764,7 @@ impl Cg<'_, '_, '_> {
                 .unwrap_or(usize::MAX);
             drop(arena);
 
-            let tag = self
-                .builder
-                .ins()
-                .load(types::I8, MemFlags::new(), value.value, 0);
-            let expected = self.builder.ins().iconst(types::I8, expected_tag as i64);
-            let result = self.builder.ins().icmp(IntCC::Equal, tag, expected);
-
+            let result = self.tag_eq(value.value, expected_tag as i64);
             Ok(self.bool_value(result))
         } else {
             drop(arena);
@@ -812,13 +794,7 @@ impl Cg<'_, '_, '_> {
                 return Ok(Some(never_match));
             }
 
-            let tag = self
-                .builder
-                .ins()
-                .load(types::I8, MemFlags::new(), scrutinee.value, 0);
-            let expected = self.builder.ins().iconst(types::I8, expected_tag as i64);
-            let result = self.builder.ins().icmp(IntCC::Equal, tag, expected);
-
+            let result = self.tag_eq(scrutinee.value, expected_tag as i64);
             Ok(Some(result))
         } else {
             drop(arena);
@@ -868,12 +844,7 @@ impl Cg<'_, '_, '_> {
             CodegenError::type_mismatch("null coalesce operator", "optional type", "non-optional")
         })?;
 
-        let tag = self
-            .builder
-            .ins()
-            .load(types::I8, MemFlags::new(), value.value, 0);
-        let nil_tag_val = self.builder.ins().iconst(types::I8, nil_tag as i64);
-        let is_nil = self.builder.ins().icmp(IntCC::Equal, tag, nil_tag_val);
+        let is_nil = self.tag_eq(value.value, nil_tag as i64);
 
         let nil_block = self.builder.create_block();
         let not_nil_block = self.builder.create_block();
@@ -1226,7 +1197,7 @@ impl Cg<'_, '_, '_> {
                                 &[field_source, slot_val],
                             )?;
                             // Borrow arena from global directly to avoid borrow conflict
-                            let arena = self.global.analyzed.type_arena();
+                            let arena = self.env.analyzed.type_arena();
                             let (result_val, cranelift_ty) = convert_field_value_id(
                                 self.builder,
                                 result_raw,
@@ -1277,7 +1248,7 @@ impl Cg<'_, '_, '_> {
                                 &[field_source, slot_val],
                             )?;
                             // Borrow arena from global directly to avoid borrow conflict
-                            let arena = self.global.analyzed.type_arena();
+                            let arena = self.env.analyzed.type_arena();
                             let (result_val, cranelift_ty) = convert_field_value_id(
                                 self.builder,
                                 result_raw,
@@ -1363,9 +1334,7 @@ impl Cg<'_, '_, '_> {
         let merged_value = self.builder.block_params(merge_block)[0];
 
         // Reduce back to the correct type based on result_type_id
-        let arena = self.arena();
-        let target_cty = type_id_to_cranelift(result_type_id, &arena, self.ptr_type());
-        drop(arena);
+        let target_cty = self.cranelift_type(result_type_id);
         let (result, result_ty) = if target_cty != types::I64 && target_cty.is_int() {
             (
                 self.builder.ins().ireduce(target_cty, merged_value),
@@ -1420,9 +1389,7 @@ impl Cg<'_, '_, '_> {
         let merge_block = self.builder.create_block();
 
         // Get payload type for success using TypeId
-        let arena = self.arena();
-        let payload_ty = type_id_to_cranelift(success_type_id, &arena, self.ptr_type());
-        drop(arena);
+        let payload_ty = self.cranelift_type(success_type_id);
         self.builder.append_block_param(merge_block, payload_ty);
 
         // Branch based on tag
@@ -1744,7 +1711,7 @@ impl Cg<'_, '_, '_> {
             // Convert from i64 to the actual field type
             let field_ty_id = field_def.ty;
             // Borrow arena from global directly to avoid borrow conflict
-            let arena = self.global.analyzed.type_arena();
+            let arena = self.env.analyzed.type_arena();
             let (result_val, cranelift_ty) =
                 convert_field_value_id(self.builder, raw_value, field_ty_id, &arena);
             drop(arena);

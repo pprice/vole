@@ -1,37 +1,29 @@
 // src/codegen/compiler/mod.rs
 
-/// Macro to construct GlobalCtx from Compiler fields.
+/// Macro to construct CompileEnv from Compiler fields.
 /// This is a macro (not a method) to allow field-level borrowing,
-/// which lets the borrow checker see that GlobalCtx uses different
+/// which lets the borrow checker see that CompileEnv uses different
 /// fields than CodegenCtx.
-macro_rules! global_ctx {
+macro_rules! compile_env {
     ($self:expr, $source_file_ptr:expr) => {
-        crate::types::GlobalCtx {
+        crate::types::CompileEnv {
             analyzed: $self.analyzed,
+            state: &$self.state,
             interner: &$self.analyzed.interner,
-            type_metadata: &$self.state.type_metadata,
-            impl_method_infos: &$self.state.impl_method_infos,
-            static_method_infos: &$self.state.static_method_infos,
-            interface_vtables: &$self.state.interface_vtables,
-            native_registry: &$self.state.native_registry,
             global_inits: &$self.global_inits,
             source_file_ptr: $source_file_ptr,
-            lambda_counter: &$self.state.lambda_counter,
+            current_module: None,
         }
     };
-    // Module variant with custom interner and global_inits
-    ($self:expr, $interner:expr, $global_inits:expr, $source_file_ptr:expr) => {
-        crate::types::GlobalCtx {
+    // Module variant with custom interner, global_inits, and module_id
+    ($self:expr, $interner:expr, $global_inits:expr, $source_file_ptr:expr, $module_id:expr) => {
+        crate::types::CompileEnv {
             analyzed: $self.analyzed,
+            state: &$self.state,
             interner: $interner,
-            type_metadata: &$self.state.type_metadata,
-            impl_method_infos: &$self.state.impl_method_infos,
-            static_method_infos: &$self.state.static_method_infos,
-            interface_vtables: &$self.state.interface_vtables,
-            native_registry: &$self.state.native_registry,
             global_inits: $global_inits,
             source_file_ptr: $source_file_ptr,
-            lambda_counter: &$self.state.lambda_counter,
+            current_module: Some($module_id),
         }
     };
 }

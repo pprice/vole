@@ -17,7 +17,7 @@ use super::CodegenState;
 /// Contains references to shared state that doesn't change during
 /// function compilation.
 ///
-/// This replaces `GlobalCtx` with a cleaner separation:
+/// Provides cleaner separation:
 /// - `CompileEnv` = session/unit level (interner, global_inits, module)
 /// - `Cg` = per-function working context (return_type, substitutions)
 pub struct CompileEnv<'a> {
@@ -32,5 +32,6 @@ pub struct CompileEnv<'a> {
     /// Source file pointer for error reporting
     pub source_file_ptr: (*const u8, usize),
     /// Module being compiled (None for main program)
+    #[allow(dead_code)] // Reserved for future module-aware codegen
     pub current_module: Option<ModuleId>,
 }

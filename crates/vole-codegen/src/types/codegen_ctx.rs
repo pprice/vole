@@ -16,7 +16,7 @@ use crate::FunctionRegistry;
 /// - JIT module for declaring/defining functions
 /// - Function registry for tracking function IDs
 ///
-/// Read-only data (analyzed program, type metadata, etc.) lives in GlobalCtx/GlobalCtx.
+/// Read-only data (analyzed program, type metadata, etc.) lives in CompileEnv.
 /// Per-function state (return type, substitutions) lives in FunctionCtx.
 pub struct JitCtx<'a> {
     /// Cranelift JIT module for function declarations

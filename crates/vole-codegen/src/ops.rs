@@ -14,7 +14,7 @@ use super::context::Cg;
 use super::structs::{
     convert_field_value_id, convert_to_i64_for_storage, get_field_slot_and_type_id_cg,
 };
-use super::types::{CompiledValue, array_element_tag_id, convert_to_type, type_id_to_cranelift};
+use super::types::{CompiledValue, array_element_tag_id, convert_to_type};
 
 impl Cg<'_, '_, '_> {
     /// Compile a binary expression
@@ -305,66 +305,42 @@ impl Cg<'_, '_, '_> {
                         .icmp(IntCC::NotEqual, left_val, right_val)
                 }
             }
-            BinaryOp::Lt => {
-                if result_ty == types::F64 || result_ty == types::F32 {
-                    self.builder
-                        .ins()
-                        .fcmp(FloatCC::LessThan, left_val, right_val)
-                } else if left_type_id.is_unsigned_int() {
-                    self.builder
-                        .ins()
-                        .icmp(IntCC::UnsignedLessThan, left_val, right_val)
-                } else {
-                    self.builder
-                        .ins()
-                        .icmp(IntCC::SignedLessThan, left_val, right_val)
-                }
-            }
-            BinaryOp::Gt => {
-                if result_ty == types::F64 || result_ty == types::F32 {
-                    self.builder
-                        .ins()
-                        .fcmp(FloatCC::GreaterThan, left_val, right_val)
-                } else if left_type_id.is_unsigned_int() {
-                    self.builder
-                        .ins()
-                        .icmp(IntCC::UnsignedGreaterThan, left_val, right_val)
-                } else {
-                    self.builder
-                        .ins()
-                        .icmp(IntCC::SignedGreaterThan, left_val, right_val)
-                }
-            }
-            BinaryOp::Le => {
-                if result_ty == types::F64 || result_ty == types::F32 {
-                    self.builder
-                        .ins()
-                        .fcmp(FloatCC::LessThanOrEqual, left_val, right_val)
-                } else if left_type_id.is_unsigned_int() {
-                    self.builder
-                        .ins()
-                        .icmp(IntCC::UnsignedLessThanOrEqual, left_val, right_val)
-                } else {
-                    self.builder
-                        .ins()
-                        .icmp(IntCC::SignedLessThanOrEqual, left_val, right_val)
-                }
-            }
-            BinaryOp::Ge => {
-                if result_ty == types::F64 || result_ty == types::F32 {
-                    self.builder
-                        .ins()
-                        .fcmp(FloatCC::GreaterThanOrEqual, left_val, right_val)
-                } else if left_type_id.is_unsigned_int() {
-                    self.builder
-                        .ins()
-                        .icmp(IntCC::UnsignedGreaterThanOrEqual, left_val, right_val)
-                } else {
-                    self.builder
-                        .ins()
-                        .icmp(IntCC::SignedGreaterThanOrEqual, left_val, right_val)
-                }
-            }
+            BinaryOp::Lt => self.emit_cmp(
+                result_ty,
+                left_type_id,
+                left_val,
+                right_val,
+                FloatCC::LessThan,
+                IntCC::UnsignedLessThan,
+                IntCC::SignedLessThan,
+            ),
+            BinaryOp::Gt => self.emit_cmp(
+                result_ty,
+                left_type_id,
+                left_val,
+                right_val,
+                FloatCC::GreaterThan,
+                IntCC::UnsignedGreaterThan,
+                IntCC::SignedGreaterThan,
+            ),
+            BinaryOp::Le => self.emit_cmp(
+                result_ty,
+                left_type_id,
+                left_val,
+                right_val,
+                FloatCC::LessThanOrEqual,
+                IntCC::UnsignedLessThanOrEqual,
+                IntCC::SignedLessThanOrEqual,
+            ),
+            BinaryOp::Ge => self.emit_cmp(
+                result_ty,
+                left_type_id,
+                left_val,
+                right_val,
+                FloatCC::GreaterThanOrEqual,
+                IntCC::UnsignedGreaterThanOrEqual,
+                IntCC::SignedGreaterThanOrEqual,
+            ),
             BinaryOp::And | BinaryOp::Or => unreachable!("handled above"),
             BinaryOp::BitAnd => self.builder.ins().band(left_val, right_val),
             BinaryOp::BitOr => self.builder.ins().bor(left_val, right_val),
@@ -429,23 +405,10 @@ impl Cg<'_, '_, '_> {
             .find_nil_variant(optional.type_id)
             .ok_or("optional_nil_compare called on non-optional type")?;
 
-        // Load the tag from the optional (first byte)
-        let tag = self
-            .builder
-            .ins()
-            .load(types::I8, MemFlags::new(), optional.value, 0);
-
         // Compare tag with nil_tag
-        let nil_tag_val = self.builder.ins().iconst(types::I8, nil_tag as i64);
-        let is_nil = self.builder.ins().icmp(IntCC::Equal, tag, nil_tag_val);
-
-        // For != nil, we need to invert the result
         let result = match op {
-            BinaryOp::Eq => is_nil,
-            BinaryOp::Ne => {
-                let one = self.builder.ins().iconst(types::I8, 1);
-                self.builder.ins().isub(one, is_nil)
-            }
+            BinaryOp::Eq => self.tag_eq(optional.value, nil_tag as i64),
+            BinaryOp::Ne => self.tag_ne(optional.value, nil_tag as i64),
             _ => unreachable!("optional_nil_compare only handles Eq and Ne"),
         };
 
@@ -465,24 +428,18 @@ impl Cg<'_, '_, '_> {
             .find_nil_variant(optional.type_id)
             .ok_or("optional_value_compare called on non-optional type")?;
 
-        // Load the tag from the optional (first byte)
-        let tag = self
-            .builder
-            .ins()
-            .load(types::I8, MemFlags::new(), optional.value, 0);
-
         // Check if not nil (tag != nil_tag)
-        let nil_tag_val = self.builder.ins().iconst(types::I8, nil_tag as i64);
-        let is_not_nil = self.builder.ins().icmp(IntCC::NotEqual, tag, nil_tag_val);
+        let is_not_nil = self.tag_ne(optional.value, nil_tag as i64);
 
         // Load the payload (at offset 8) with the correct type
         // The payload type matches the inner (non-nil) type of the optional (using TypeId)
-        let arena = self.arena();
-        let inner_type_id = arena
-            .unwrap_optional(optional.type_id)
-            .unwrap_or_else(|| arena.i64());
-        let payload_cranelift_type = type_id_to_cranelift(inner_type_id, &arena, self.ptr_type());
-        drop(arena);
+        let inner_type_id = {
+            let arena = self.arena();
+            arena
+                .unwrap_optional(optional.type_id)
+                .unwrap_or_else(|| arena.i64())
+        };
+        let payload_cranelift_type = self.cranelift_type(inner_type_id);
         let payload =
             self.builder
                 .ins()
@@ -562,7 +519,7 @@ impl Cg<'_, '_, '_> {
         let var_type_id = *var_type_id;
         let current_val = self.builder.use_var(var);
 
-        let current = self.typed_value_interned(current_val, var_type_id);
+        let current = self.compiled(current_val, var_type_id);
 
         let rhs = self.expr(&compound.value)?;
         let binary_op = compound.op.to_binary_op();
@@ -592,7 +549,7 @@ impl Cg<'_, '_, '_> {
         // Load current element
         let raw_value = self.call_runtime(RuntimeFn::ArrayGetValue, &[arr.value, idx.value])?;
         // Borrow arena from global directly to avoid borrow conflict
-        let arena = self.global.analyzed.type_arena();
+        let arena = self.env.analyzed.type_arena();
         let (current_val, current_ty) =
             convert_field_value_id(self.builder, raw_value, elem_type_id, &arena);
         drop(arena);
@@ -646,7 +603,7 @@ impl Cg<'_, '_, '_> {
         let current_raw = self.call_runtime(RuntimeFn::InstanceGetField, &[obj.value, slot_val])?;
 
         // Borrow arena from global directly to avoid borrow conflict
-        let arena = self.global.analyzed.type_arena();
+        let arena = self.env.analyzed.type_arena();
         let (current_val, cranelift_ty) =
             convert_field_value_id(self.builder, current_raw, field_type_id, &arena);
         drop(arena);
@@ -671,5 +628,26 @@ impl Cg<'_, '_, '_> {
         self.field_cache.clear(); // Invalidate cached field reads
 
         Ok(result)
+    }
+
+    /// Emit a comparison instruction, dispatching based on type (float vs int, signed vs unsigned).
+    #[allow(clippy::too_many_arguments)]
+    fn emit_cmp(
+        &mut self,
+        result_ty: Type,
+        left_type_id: TypeId,
+        left_val: Value,
+        right_val: Value,
+        float_cc: FloatCC,
+        unsigned_cc: IntCC,
+        signed_cc: IntCC,
+    ) -> Value {
+        if result_ty == types::F64 || result_ty == types::F32 {
+            self.builder.ins().fcmp(float_cc, left_val, right_val)
+        } else if left_type_id.is_unsigned_int() {
+            self.builder.ins().icmp(unsigned_cc, left_val, right_val)
+        } else {
+            self.builder.ins().icmp(signed_cc, left_val, right_val)
+        }
     }
 }

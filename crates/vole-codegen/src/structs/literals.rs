@@ -6,7 +6,7 @@ use super::helpers::convert_to_i64_for_storage;
 use crate::RuntimeFn;
 use crate::context::Cg;
 use crate::errors::CodegenError;
-use crate::types::{CompiledValue, type_id_size};
+use crate::types::CompiledValue;
 use cranelift::prelude::*;
 use vole_frontend::{Expr, StructLiteralExpr};
 use vole_sema::type_arena::TypeId;
@@ -26,7 +26,8 @@ impl Cg<'_, '_, '_> {
             .interner
             .lookup(type_name)
             .unwrap_or(sl.name);
-        let metadata = self.type_metadata()
+        let metadata = self
+            .type_metadata()
             .get(&lookup_symbol)
             .ok_or_else(|| format!("Unknown type: {}", type_name))?;
 
@@ -169,12 +170,7 @@ impl Cg<'_, '_, '_> {
 
         // Allocate union storage on the heap
         let ptr_type = self.ptr_type();
-        let union_size = type_id_size(
-            union_type_id,
-            ptr_type,
-            self.query().registry(),
-            &self.arena(),
-        );
+        let union_size = self.type_size(union_type_id);
         let size_val = self.builder.ins().iconst(ptr_type, union_size as i64);
         let alloc_call = self.builder.ins().call(heap_alloc_ref, &[size_val]);
         let heap_ptr = self.builder.inst_results(alloc_call)[0];

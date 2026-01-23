@@ -147,10 +147,8 @@ impl Cg<'_, '_, '_> {
         variants: &[TypeId],
         nil_idx: usize,
     ) -> Result<Value, String> {
-        // Load the tag from offset 0
-        let tag = self.builder.ins().load(types::I8, MemFlags::new(), ptr, 0);
-        let nil_tag = self.builder.ins().iconst(types::I8, nil_idx as i64);
-        let is_nil = self.builder.ins().icmp(IntCC::Equal, tag, nil_tag);
+        // Check if the tag equals nil
+        let is_nil = self.tag_eq(ptr, nil_idx as i64);
 
         // Create blocks for branching
         let nil_block = self.builder.create_block();
@@ -607,12 +605,12 @@ impl Cg<'_, '_, '_> {
             .codegen_ctx
             .funcs()
             .return_type(func_key)
-            .unwrap_or_else(|| self.global.analyzed.type_arena().void());
+            .unwrap_or_else(|| self.env.analyzed.type_arena().void());
 
         if results.is_empty() {
             Ok(self.void_value())
         } else {
-            Ok(self.typed_value_interned(results[0], return_type_id))
+            Ok(self.compiled(results[0], return_type_id))
         }
     }
 
@@ -795,12 +793,8 @@ impl Cg<'_, '_, '_> {
         let mut sig = self.jit_module().make_signature();
         sig.params.push(AbiParam::new(self.ptr_type())); // closure ptr
         for &param_type_id in params.iter() {
-            let arena = self.arena();
-            sig.params.push(AbiParam::new(type_id_to_cranelift(
-                param_type_id,
-                &arena,
-                self.ptr_type(),
-            )));
+            sig.params
+                .push(AbiParam::new(self.cranelift_type(param_type_id)));
         }
         let arena = self.arena();
         if ret != arena.void() {
@@ -837,7 +831,7 @@ impl Cg<'_, '_, '_> {
         if results.is_empty() {
             Ok(self.void_value())
         } else {
-            Ok(self.typed_value_interned(results[0], ret))
+            Ok(self.compiled(results[0], ret))
         }
     }
 

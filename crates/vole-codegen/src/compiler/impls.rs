@@ -50,7 +50,8 @@ impl Compiler<'_> {
         }
 
         let metadata = self
-                    .state.type_metadata
+            .state
+            .type_metadata
             .get(&class.name)
             .cloned()
             .ok_or_else(|| {
@@ -120,7 +121,8 @@ impl Compiler<'_> {
         }
 
         let metadata = self
-                    .state.type_metadata
+            .state
+            .type_metadata
             .get(&record.name)
             .cloned()
             .ok_or_else(|| {
@@ -271,7 +273,8 @@ impl Compiler<'_> {
                 && let Some(method_name_id) =
                     method_name_id_with_interner(self.analyzed, interner, method.name)
             {
-                self.state.static_method_infos
+                self.state
+                    .static_method_infos
                     .insert((type_def_id, method_name_id), MethodInfo { func_key });
             }
         }
@@ -344,7 +347,8 @@ impl Compiler<'_> {
                 && let Some(method_name_id) =
                     method_name_id_with_interner(self.analyzed, interner, method.name)
             {
-                self.state.static_method_infos
+                self.state
+                    .static_method_infos
                     .insert((type_def_id, method_name_id), MethodInfo { func_key });
             }
         }
@@ -431,7 +435,8 @@ impl Compiler<'_> {
             if let Some(impl_id) = impl_type_id {
                 let method_id = method_name_id_with_interner(self.analyzed, interner, method.name)
                     .expect("implement method name_id should be registered");
-                self.state.impl_method_infos
+                self.state
+                    .impl_method_infos
                     .insert((impl_id, method_id), MethodInfo { func_key });
             }
         }
@@ -483,7 +488,8 @@ impl Compiler<'_> {
                     && let Some(method_name_id) =
                         method_name_id_with_interner(self.analyzed, interner, method.name)
                 {
-                    self.state.static_method_infos
+                    self.state
+                        .static_method_infos
                         .insert((type_def_id, method_name_id), MethodInfo { func_key });
                 }
             }
@@ -509,7 +515,8 @@ impl Compiler<'_> {
                 self.analyzed.type_arena().primitive(prim_type)
             }
             TypeExpr::Named(sym) => self
-                        .state.type_metadata
+                .state
+                .type_metadata
                 .get(sym)
                 .map(|m| m.vole_type)
                 .unwrap_or_else(|| {
@@ -545,7 +552,10 @@ impl Compiler<'_> {
         for method in &impl_block.methods {
             let method_key = impl_type_id.and_then(|type_id| {
                 let method_id = self.method_name_id(method.name);
-                self.state.impl_method_infos.get(&(type_id, method_id)).copied()
+                self.state
+                    .impl_method_infos
+                    .get(&(type_id, method_id))
+                    .copied()
             });
             self.compile_implement_method(
                 method,
@@ -721,7 +731,7 @@ impl Compiler<'_> {
                 } else {
                     FunctionCtx::main(return_type_id)
                 };
-                let global = global_ctx!(self, source_file_ptr);
+                let env = compile_env!(self, source_file_ptr);
                 let mut codegen_ctx =
                     CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
@@ -732,7 +742,7 @@ impl Compiler<'_> {
                     &mut cf_ctx,
                     &mut codegen_ctx,
                     &function_ctx,
-                    &global,
+                    &env,
                     None,
                     None,
                 )?;
@@ -860,7 +870,7 @@ impl Compiler<'_> {
 
             // Create split contexts
             let function_ctx = FunctionCtx::main(method_return_type_id);
-            let global = global_ctx!(self, source_file_ptr);
+            let env = compile_env!(self, source_file_ptr);
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
             let self_binding = (self_sym, self_type_id, self_cranelift_type);
@@ -874,7 +884,7 @@ impl Compiler<'_> {
                 builder,
                 &mut codegen_ctx,
                 &function_ctx,
-                &global,
+                &env,
                 config,
             )?;
         }
@@ -984,7 +994,7 @@ impl Compiler<'_> {
 
             // Create split contexts
             let function_ctx = FunctionCtx::main(method_return_type_id);
-            let global = global_ctx!(self, source_file_ptr);
+            let env = compile_env!(self, source_file_ptr);
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
             let self_binding = (self_sym, self_type_id, self.pointer_type);
             let config = FunctionCompileConfig::method(
@@ -997,7 +1007,7 @@ impl Compiler<'_> {
                 builder,
                 &mut codegen_ctx,
                 &function_ctx,
-                &global,
+                &env,
                 config,
             )?;
         }
@@ -1138,7 +1148,7 @@ impl Compiler<'_> {
 
             // Create split contexts
             let function_ctx = FunctionCtx::main(method_return_type_id);
-            let global = global_ctx!(self, source_file_ptr);
+            let env = compile_env!(self, source_file_ptr);
             let mut cf_ctx = ControlFlowCtx::default();
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
             let (terminated, expr_value) = compile_func_body_with_params(
@@ -1148,7 +1158,7 @@ impl Compiler<'_> {
                 &mut cf_ctx,
                 &mut codegen_ctx,
                 &function_ctx,
-                &global,
+                &env,
                 None,
                 None,
             )?;
@@ -1283,7 +1293,7 @@ impl Compiler<'_> {
 
                 // Create split contexts
                 let function_ctx = FunctionCtx::main(None);
-                let global = global_ctx!(self, source_file_ptr);
+                let env = compile_env!(self, source_file_ptr);
 
                 // Compile method body
                 let mut cf_ctx = ControlFlowCtx::default();
@@ -1296,7 +1306,7 @@ impl Compiler<'_> {
                     &mut cf_ctx,
                     &mut codegen_ctx,
                     &function_ctx,
-                    &global,
+                    &env,
                     None,
                     None,
                 )?;
@@ -1339,7 +1349,8 @@ impl Compiler<'_> {
 
         // Find the type metadata by looking for the type name string
         let metadata = self
-                    .state.type_metadata
+            .state
+            .type_metadata
             .values()
             .find(|meta| {
                 let arena = self.analyzed.type_arena();
@@ -1471,7 +1482,13 @@ impl Compiler<'_> {
 
                 // Create split contexts (use module interner)
                 let function_ctx = FunctionCtx::module(Some(return_type_id), module_id);
-                let global = global_ctx!(self, module_interner, module_global_inits, source_file_ptr);
+                let env = compile_env!(
+                    self,
+                    module_interner,
+                    module_global_inits,
+                    source_file_ptr,
+                    module_id
+                );
 
                 // Compile method body
                 let mut cf_ctx = ControlFlowCtx::default();
@@ -1484,7 +1501,7 @@ impl Compiler<'_> {
                     &mut cf_ctx,
                     &mut codegen_ctx,
                     &function_ctx,
-                    &global,
+                    &env,
                     None,
                     None,
                 )?;
@@ -1615,7 +1632,13 @@ impl Compiler<'_> {
 
                     // Create split contexts (use module interner)
                     let function_ctx = FunctionCtx::module(Some(return_type_id), module_id);
-                    let global = global_ctx!(self, module_interner, module_global_inits, source_file_ptr);
+                    let env = compile_env!(
+                        self,
+                        module_interner,
+                        module_global_inits,
+                        source_file_ptr,
+                        module_id
+                    );
 
                     // Compile method body
                     let mut cf_ctx = ControlFlowCtx::default();
@@ -1628,7 +1651,7 @@ impl Compiler<'_> {
                         &mut cf_ctx,
                         &mut codegen_ctx,
                         &function_ctx,
-                        &global,
+                        &env,
                         None,
                         None,
                     )?;

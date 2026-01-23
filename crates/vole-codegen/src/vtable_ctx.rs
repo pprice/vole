@@ -18,13 +18,13 @@ use vole_sema::implement_registry::ImplTypeId;
 use vole_sema::type_arena::TypeArena;
 use vole_sema::{EntityRegistry, ProgramQuery, ProgramUpdate};
 
-use crate::types::{CodegenCtx, GlobalCtx, MethodInfo, TypeMetadata};
+use crate::types::{CodegenCtx, CompileEnv, MethodInfo, TypeMetadata};
 use crate::{AnalyzedProgram, FunctionRegistry};
 
 /// Trait providing the interface needed for vtable compilation.
 ///
 /// This trait allows vtable operations to work with VtableCtxView,
-/// which combines CodegenCtx and GlobalCtx.
+/// which combines CodegenCtx and CompileEnv.
 #[allow(dead_code)]
 pub trait VtableCtx {
     /// Get the analyzed program reference
@@ -73,51 +73,48 @@ pub trait VtableCtx {
     fn impl_method_infos(&self) -> &HashMap<(ImplTypeId, NameId), MethodInfo>;
 }
 
-/// A view that combines CodegenCtx and GlobalCtx to implement VtableCtx.
+/// A view that combines CodegenCtx and CompileEnv to implement VtableCtx.
 ///
 /// This allows functions that need VtableCtx to work with split borrows from Cg,
 /// avoiding borrow checker issues when both builder and context are needed.
 pub struct VtableCtxView<'a, 'ctx> {
     pub codegen_ctx: &'a mut CodegenCtx<'ctx>,
-    pub global: &'a GlobalCtx<'ctx>,
+    pub env: &'a CompileEnv<'ctx>,
 }
 
 impl<'a, 'ctx> VtableCtxView<'a, 'ctx> {
-    pub fn new(codegen_ctx: &'a mut CodegenCtx<'ctx>, global: &'a GlobalCtx<'ctx>) -> Self {
-        Self {
-            codegen_ctx,
-            global,
-        }
+    pub fn new(codegen_ctx: &'a mut CodegenCtx<'ctx>, env: &'a CompileEnv<'ctx>) -> Self {
+        Self { codegen_ctx, env }
     }
 }
 
 impl<'a, 'ctx> VtableCtx for VtableCtxView<'a, 'ctx> {
     fn analyzed(&self) -> &AnalyzedProgram {
-        self.global.analyzed
+        self.env.analyzed
     }
 
     fn arena(&self) -> Ref<'_, TypeArena> {
-        self.global.analyzed.type_arena()
+        self.env.analyzed.type_arena()
     }
 
     fn arena_rc(&self) -> &Rc<RefCell<TypeArena>> {
-        self.global.analyzed.type_arena_ref()
+        self.env.analyzed.type_arena_ref()
     }
 
     fn registry(&self) -> &EntityRegistry {
-        self.global.analyzed.entity_registry()
+        self.env.analyzed.entity_registry()
     }
 
     fn interner(&self) -> &Interner {
-        self.global.interner
+        self.env.interner
     }
 
     fn query(&self) -> ProgramQuery<'_> {
-        self.global.analyzed.query()
+        self.env.analyzed.query()
     }
 
     fn update(&self) -> ProgramUpdate<'_> {
-        ProgramUpdate::new(self.global.analyzed.type_arena_ref())
+        ProgramUpdate::new(self.env.analyzed.type_arena_ref())
     }
 
     fn ptr_type(&self) -> Type {
@@ -133,8 +130,8 @@ impl<'a, 'ctx> VtableCtx for VtableCtxView<'a, 'ctx> {
     }
 
     fn resolve_type_str_or_interface(&self, name: &str) -> Option<TypeDefId> {
-        let name_table = self.global.analyzed.name_table();
-        let registry = self.global.analyzed.entity_registry();
+        let name_table = self.env.analyzed.name_table();
+        let registry = self.env.analyzed.entity_registry();
         // Try interface first, then class, then any type by short name
         registry
             .interface_by_short_name(name, &name_table)
@@ -143,18 +140,18 @@ impl<'a, 'ctx> VtableCtx for VtableCtxView<'a, 'ctx> {
     }
 
     fn native_registry(&self) -> &NativeRegistry {
-        self.global.native_registry
+        &self.env.state.native_registry
     }
 
     fn interface_vtables(&self) -> &RefCell<crate::interface_vtable::InterfaceVtableRegistry> {
-        self.global.interface_vtables
+        &self.env.state.interface_vtables
     }
 
     fn type_metadata(&self) -> &HashMap<Symbol, TypeMetadata> {
-        self.global.type_metadata
+        &self.env.state.type_metadata
     }
 
     fn impl_method_infos(&self) -> &HashMap<(ImplTypeId, NameId), MethodInfo> {
-        self.global.impl_method_infos
+        &self.env.state.impl_method_infos
     }
 }

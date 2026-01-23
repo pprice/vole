@@ -107,7 +107,7 @@ impl Cg<'_, '_, '_> {
         let result_raw = self.get_field_cached(obj.value, slot as u32)?;
 
         // Borrow arena from global directly to avoid borrow conflict
-        let arena = self.global.analyzed.type_arena();
+        let arena = self.env.analyzed.type_arena();
         let (result_val, cranelift_ty) =
             convert_field_value_id(self.builder, result_raw, field_type_id, &arena);
         drop(arena);
@@ -146,12 +146,7 @@ impl Cg<'_, '_, '_> {
         };
 
         // Check if object is nil by reading the tag
-        let tag = self
-            .builder
-            .ins()
-            .load(types::I8, MemFlags::new(), obj.value, 0);
-        let nil_tag_val = self.builder.ins().iconst(types::I8, nil_tag as i64);
-        let is_nil = self.builder.ins().icmp(IntCC::Equal, tag, nil_tag_val);
+        let is_nil = self.tag_eq(obj.value, nil_tag as i64);
 
         // Create blocks for branching
         let nil_block = self.builder.create_block();
@@ -213,7 +208,7 @@ impl Cg<'_, '_, '_> {
         let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
         let field_raw = self.call_runtime(RuntimeFn::InstanceGetField, &[inner_obj, slot_val])?;
         // Borrow arena from global directly to avoid borrow conflict
-        let arena = self.global.analyzed.type_arena();
+        let arena = self.env.analyzed.type_arena();
         let (field_val, field_cranelift_ty) =
             convert_field_value_id(self.builder, field_raw, field_type_id, &arena);
         drop(arena);

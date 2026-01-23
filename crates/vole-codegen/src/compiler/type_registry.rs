@@ -105,7 +105,8 @@ impl Compiler<'_> {
     pub(super) fn finalize_class(&mut self, class: &ClassDecl, program: &Program) {
         // Get the pre-registered type_id
         let type_id = self
-                    .state.type_metadata
+            .state
+            .type_metadata
             .get(&class.name)
             .expect("class should be pre-registered")
             .type_id;
@@ -236,7 +237,8 @@ impl Compiler<'_> {
 
         // Reuse the vole_type_id and type_def_id from pre_register
         let pre_registered = self
-                    .state.type_metadata
+            .state
+            .type_metadata
             .get(&class.name)
             .expect("class should be pre-registered");
         let vole_type_id = pre_registered.vole_type;
@@ -291,7 +293,8 @@ impl Compiler<'_> {
     pub(super) fn finalize_record(&mut self, record: &RecordDecl, program: &Program) {
         // Get the pre-registered type_id
         let type_id = self
-                    .state.type_metadata
+            .state
+            .type_metadata
             .get(&record.name)
             .expect("record should be pre-registered")
             .type_id;
@@ -394,7 +397,8 @@ impl Compiler<'_> {
 
         // Reuse the vole_type_id and type_def_id from pre_register
         let pre_registered = self
-                    .state.type_metadata
+            .state
+            .type_metadata
             .get(&record.name)
             .expect("record should be pre-registered");
         let vole_type_id = pre_registered.vole_type;
@@ -471,7 +475,8 @@ impl Compiler<'_> {
 
             // Register in static_method_infos for codegen lookup
             if let Some(type_def_id) = type_def_id {
-                self.state.static_method_infos
+                self.state
+                    .static_method_infos
                     .insert((type_def_id, method_name_id), MethodInfo { func_key });
             }
         }
@@ -623,7 +628,8 @@ impl Compiler<'_> {
                         method_name = %method_name_str,
                         "Registering static method"
                     );
-                    self.state.static_method_infos
+                    self.state
+                        .static_method_infos
                         .insert((type_def_id, method_name_id), MethodInfo { func_key });
                 }
             }

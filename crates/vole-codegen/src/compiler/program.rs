@@ -14,7 +14,7 @@ use crate::RuntimeFn;
 use crate::context::{Cg, ControlFlow};
 use crate::stmt::compile_func_body_with_params;
 use crate::types::{
-    CodegenCtx, FunctionCtx, GlobalCtx, function_name_id_with_interner, resolve_type_expr_to_id,
+    CodegenCtx, CompileEnv, FunctionCtx, function_name_id_with_interner, resolve_type_expr_to_id,
     type_id_to_cranelift,
 };
 use vole_frontend::{
@@ -533,7 +533,13 @@ impl Compiler<'_> {
 
             // Create split contexts for the new compilation path
             let function_ctx = FunctionCtx::module(return_type_id, module_id);
-            let global = global_ctx!(self, module_interner, module_global_inits, source_file_ptr);
+            let env = compile_env!(
+                self,
+                module_interner,
+                module_global_inits,
+                source_file_ptr,
+                module_id
+            );
 
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
@@ -542,7 +548,7 @@ impl Compiler<'_> {
                 builder,
                 &mut codegen_ctx,
                 &function_ctx,
-                &global,
+                &env,
                 config,
             )?;
         }
@@ -603,7 +609,7 @@ impl Compiler<'_> {
 
             // Create split contexts for the new compilation path
             let function_ctx = FunctionCtx::main(return_type_id);
-            let global = global_ctx!(self, source_file_ptr);
+            let env = compile_env!(self, source_file_ptr);
 
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
@@ -612,7 +618,7 @@ impl Compiler<'_> {
                 builder,
                 &mut codegen_ctx,
                 &function_ctx,
-                &global,
+                &env,
                 config,
             )?;
         }
@@ -627,7 +633,9 @@ impl Compiler<'_> {
     /// Compile a scoped function declaration (like a pure lambda).
     /// Returns the FuncId and type information needed to make it callable in tests.
     fn compile_scoped_function(&mut self, func: &FuncDecl) -> Result<ScopedFuncInfo, String> {
-        self.state.lambda_counter.set(self.state.lambda_counter.get() + 1);
+        self.state
+            .lambda_counter
+            .set(self.state.lambda_counter.get() + 1);
 
         // Get param types using the compiler's type resolution
         let param_type_ids: Vec<TypeId> = func
@@ -708,7 +716,7 @@ impl Compiler<'_> {
 
             // Create split contexts for the new compilation path
             let function_ctx = FunctionCtx::main(Some(return_type_id));
-            let global = global_ctx!(self, source_file_ptr);
+            let env = compile_env!(self, source_file_ptr);
 
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
@@ -718,7 +726,7 @@ impl Compiler<'_> {
                 builder,
                 &mut codegen_ctx,
                 &function_ctx,
-                &global,
+                &env,
                 config,
             )?;
         }
@@ -793,7 +801,7 @@ impl Compiler<'_> {
 
                 // Create split contexts for the new compilation path
                 let function_ctx = FunctionCtx::test();
-                let global = global_ctx!(self, source_file_ptr);
+                let env = compile_env!(self, source_file_ptr);
 
                 let mut codegen_ctx =
                     CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
@@ -823,9 +831,11 @@ impl Compiler<'_> {
                     let func_type_id = {
                         let param_ids: TypeIdVec =
                             scoped_func.param_type_ids.iter().copied().collect();
-                        global
-                            .update()
-                            .function(param_ids, scoped_func.return_type_id, true) // is_closure=true
+                        vole_sema::ProgramUpdate::new(env.analyzed.type_arena_ref()).function(
+                            param_ids,
+                            scoped_func.return_type_id,
+                            true,
+                        ) // is_closure=true
                     };
 
                     // Declare Cranelift variable and add to map
@@ -853,9 +863,7 @@ impl Compiler<'_> {
                         &mut cf,
                         &mut codegen_ctx,
                         &function_ctx,
-                        &global,
-                        None,
-                        None,
+                        &env,
                     );
                     cg.block(&let_block)?;
                 }
@@ -871,7 +879,7 @@ impl Compiler<'_> {
                     &mut cf_ctx,
                     &mut codegen_ctx,
                     &function_ctx,
-                    &global,
+                    &env,
                     None, // no captures
                     None, // no nested return type
                 )?;
@@ -1044,22 +1052,17 @@ impl Compiler<'_> {
 
             // Compile function body
             let mut cf_ctx = ControlFlowCtx::default();
-            let empty_type_metadata = HashMap::new();
             let empty_global_inits = HashMap::new();
 
             // Create split contexts for the new compilation path
             let function_ctx = FunctionCtx::main(return_type_id);
-            let global = GlobalCtx {
+            let env = CompileEnv {
                 analyzed: self.analyzed,
+                state: &self.state,
                 interner: &self.analyzed.interner,
-                type_metadata: &empty_type_metadata,
-                impl_method_infos: &self.state.impl_method_infos,
-                static_method_infos: &self.state.static_method_infos,
-                interface_vtables: &self.state.interface_vtables,
-                native_registry: &self.state.native_registry,
                 global_inits: &empty_global_inits,
                 source_file_ptr,
-                lambda_counter: &self.state.lambda_counter,
+                current_module: None,
             };
 
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
@@ -1071,7 +1074,7 @@ impl Compiler<'_> {
                 &mut cf_ctx,
                 &mut codegen_ctx,
                 &function_ctx,
-                &global,
+                &env,
                 None,
                 None,
             )?;
@@ -1116,22 +1119,17 @@ impl Compiler<'_> {
 
             // Compile test body
             let mut cf_ctx = ControlFlowCtx::default();
-            let empty_type_metadata = HashMap::new();
             let empty_global_inits = HashMap::new();
 
             // Create split contexts for the new compilation path
             let function_ctx = FunctionCtx::test();
-            let global = GlobalCtx {
+            let env = CompileEnv {
                 analyzed: self.analyzed,
+                state: &self.state,
                 interner: &self.analyzed.interner,
-                type_metadata: &empty_type_metadata,
-                impl_method_infos: &self.state.impl_method_infos,
-                static_method_infos: &self.state.static_method_infos,
-                interface_vtables: &self.state.interface_vtables,
-                native_registry: &self.state.native_registry,
                 global_inits: &empty_global_inits,
                 source_file_ptr,
-                lambda_counter: &self.state.lambda_counter,
+                current_module: None,
             };
 
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
@@ -1143,7 +1141,7 @@ impl Compiler<'_> {
                 &mut cf_ctx,
                 &mut codegen_ctx,
                 &function_ctx,
-                &global,
+                &env,
                 None, // no captures
                 None, // no nested return type
             )?;
@@ -1375,7 +1373,7 @@ impl Compiler<'_> {
 
             // Create split contexts for the new compilation path
             let function_ctx = FunctionCtx::main(Some(return_type_id));
-            let global = global_ctx!(self, source_file_ptr);
+            let env = compile_env!(self, source_file_ptr);
 
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
@@ -1386,7 +1384,7 @@ impl Compiler<'_> {
                 &mut cf_ctx,
                 &mut codegen_ctx,
                 &function_ctx,
-                &global,
+                &env,
                 None,
                 None,
             )?;
@@ -1636,7 +1634,7 @@ impl Compiler<'_> {
             // Note: Uses monomorphized FunctionCtx for type substitutions
             let function_ctx =
                 FunctionCtx::monomorphized(Some(return_type_id), &instance.substitutions);
-            let global = global_ctx!(self, source_file_ptr);
+            let env = compile_env!(self, source_file_ptr);
 
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
@@ -1647,7 +1645,7 @@ impl Compiler<'_> {
                 &mut cf_ctx,
                 &mut codegen_ctx,
                 &function_ctx,
-                &global,
+                &env,
                 None,
                 None,
             )?;
@@ -1948,7 +1946,7 @@ impl Compiler<'_> {
             // Note: Uses monomorphized FunctionCtx for type substitutions
             let function_ctx =
                 FunctionCtx::monomorphized(Some(return_type_id), &instance.substitutions);
-            let global = global_ctx!(self, source_file_ptr);
+            let env = compile_env!(self, source_file_ptr);
 
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
@@ -1959,7 +1957,7 @@ impl Compiler<'_> {
                 &mut cf_ctx,
                 &mut codegen_ctx,
                 &function_ctx,
-                &global,
+                &env,
                 None,
                 None,
             )?;

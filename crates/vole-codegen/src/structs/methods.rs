@@ -13,8 +13,7 @@ use crate::context::Cg;
 use crate::errors::CodegenError;
 use crate::method_resolution::{MethodResolutionInputId, MethodTarget, resolve_method_target_id};
 use crate::types::{
-    CompiledValue, module_name_id, type_id_size, type_id_to_cranelift, value_to_word,
-    word_to_value_type_id,
+    CompiledValue, module_name_id, type_id_to_cranelift, value_to_word, word_to_value_type_id,
 };
 use vole_frontend::{Expr, ExprKind, MethodCallExpr, NodeId, Symbol};
 use vole_identity::NamerLookup;
@@ -136,7 +135,7 @@ impl Cg<'_, '_, '_> {
                     if results.is_empty() {
                         return Ok(self.void_value());
                     } else {
-                        return Ok(self.typed_value_interned(results[0], return_type_id));
+                        return Ok(self.compiled(results[0], return_type_id));
                     }
                 }
             } else {
@@ -388,7 +387,7 @@ impl Cg<'_, '_, '_> {
         } else {
             // Generic methods are compiled with TypeParam -> i64, but we may need
             // a different type (f64, bool, etc). Convert using word_to_value.
-            let expected_ty = type_id_to_cranelift(return_type_id, &self.arena(), self.ptr_type());
+            let expected_ty = self.cranelift_type(return_type_id);
             let actual_result = results[0];
             let actual_ty = self.builder.func.dfg.value_type(actual_result);
 
@@ -396,7 +395,7 @@ impl Cg<'_, '_, '_> {
                 // Method returned i64 (TypeParam) but we expect a different type
                 let ptr_type = self.ptr_type();
                 let registry = self.registry();
-                let arena = self.global.analyzed.type_arena();
+                let arena = self.env.analyzed.type_arena();
                 let converted = word_to_value_type_id(
                     self.builder,
                     actual_result,
@@ -414,17 +413,8 @@ impl Cg<'_, '_, '_> {
             // For Union return types, the callee returns a pointer to its stack memory
             // which becomes invalid after the call. Copy the union to our own stack.
             let (final_value, final_type) = if self.arena().is_union(return_type_id) {
-                let union_size = type_id_size(
-                    return_type_id,
-                    self.ptr_type(),
-                    self.registry(),
-                    &self.arena(),
-                );
-                let local_slot = self.builder.create_sized_stack_slot(StackSlotData::new(
-                    StackSlotKind::ExplicitSlot,
-                    union_size,
-                    0,
-                ));
+                let union_size = self.type_size(return_type_id);
+                let local_slot = self.alloc_stack(union_size);
 
                 // Copy tag (8 bytes at offset 0) and value (8 bytes at offset 8)
                 let tag = self
@@ -728,11 +718,7 @@ impl Cg<'_, '_, '_> {
             if results.is_empty() {
                 Ok(self.void_value())
             } else {
-                Ok(CompiledValue {
-                    value: results[0],
-                    ty: type_id_to_cranelift(return_type_id, &self.arena(), self.ptr_type()),
-                    type_id: return_type_id,
-                })
+                Ok(self.compiled(results[0], return_type_id))
             }
         } else {
             // It's a pure function - call directly
@@ -770,11 +756,7 @@ impl Cg<'_, '_, '_> {
             if results.is_empty() {
                 Ok(self.void_value())
             } else {
-                Ok(CompiledValue {
-                    value: results[0],
-                    ty: type_id_to_cranelift(return_type_id, &self.arena(), self.ptr_type()),
-                    type_id: return_type_id,
-                })
+                Ok(self.compiled(results[0], return_type_id))
             }
         }
     }
@@ -886,7 +868,7 @@ impl Cg<'_, '_, '_> {
             .copied()
             .ok_or_else(|| "interface call missing return value".to_string())?;
         let registry = self.registry();
-        let arena = self.global.analyzed.type_arena();
+        let arena = self.env.analyzed.type_arena();
         let value = word_to_value_type_id(
             self.builder,
             word,
@@ -901,15 +883,7 @@ impl Cg<'_, '_, '_> {
         // since external iterator methods return raw iterator pointers, not boxed interfaces
         let return_type_id = self.maybe_convert_iterator_return_type(return_type_id);
 
-        let arena = self.arena();
-        let cranelift_ty = type_id_to_cranelift(return_type_id, &arena, word_type);
-        drop(arena);
-
-        Ok(CompiledValue {
-            value,
-            ty: cranelift_ty,
-            type_id: return_type_id,
-        })
+        Ok(self.compiled(value, return_type_id))
     }
 
     /// Handle static method call: TypeName.method(args)
@@ -955,12 +929,7 @@ impl Cg<'_, '_, '_> {
                 if results.is_empty() {
                     return Ok(self.void_value());
                 } else {
-                    let arena_ref = self.arena();
-                    return Ok(CompiledValue {
-                        value: results[0],
-                        ty: type_id_to_cranelift(return_type_id, &arena_ref, self.ptr_type()),
-                        type_id: return_type_id,
-                    });
+                    return Ok(self.compiled(results[0], return_type_id));
                 }
             }
         }
@@ -1014,11 +983,7 @@ impl Cg<'_, '_, '_> {
         if results.is_empty() {
             Ok(self.void_value())
         } else {
-            Ok(CompiledValue {
-                value: results[0],
-                ty: type_id_to_cranelift(return_type_id, &self.arena(), self.ptr_type()),
-                type_id: return_type_id,
-            })
+            Ok(self.compiled(results[0], return_type_id))
         }
     }
 }

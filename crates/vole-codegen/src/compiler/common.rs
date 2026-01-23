@@ -12,7 +12,7 @@ use vole_sema::type_arena::TypeId;
 
 use crate::context::{Captures, Cg, ControlFlow};
 use crate::lambda::CaptureBinding;
-use crate::types::{CodegenCtx, FunctionCtx, GlobalCtx};
+use crate::types::{CodegenCtx, CompileEnv, FunctionCtx};
 
 /// What to return from a non-terminated block
 #[derive(Clone, Copy)]
@@ -234,13 +234,13 @@ pub fn compile_function_body_with_cg(
 /// This uses the new split context architecture:
 /// - CodegenCtx for mutable JIT infrastructure (module, func_registry)
 /// - FunctionCtx for per-function state (return type, module id)
-/// - GlobalCtx for read-only lookup tables
+/// - CompileEnv for session/unit level context (analyzed program, type metadata, etc.)
 ///
 /// # Arguments
 /// * `builder` - The FunctionBuilder for this function (consumed by finalize)
 /// * `codegen_ctx` - Mutable JIT infrastructure (module, func_registry)
 /// * `function_ctx` - Split per-function state (return type, module id)
-/// * `global` - Split read-only lookup tables
+/// * `env` - Compilation environment (session/unit level)
 /// * `config` - Configuration specifying the function to compile
 ///
 /// # Returns
@@ -249,7 +249,7 @@ pub fn compile_function_inner_with_params<'ctx>(
     mut builder: FunctionBuilder,
     codegen_ctx: &mut CodegenCtx<'ctx>,
     function_ctx: &FunctionCtx<'ctx>,
-    global: &GlobalCtx<'ctx>,
+    env: &CompileEnv<'ctx>,
     config: FunctionCompileConfig,
 ) -> Result<(), String> {
     // Set up entry block and bind parameters
@@ -263,10 +263,10 @@ pub fn compile_function_inner_with_params<'ctx>(
         &mut cf,
         codegen_ctx,
         function_ctx,
-        global,
-        captures,
-        config.return_type_id,
-    );
+        env,
+    )
+    .with_return_type(config.return_type_id)
+    .with_captures(captures);
 
     compile_function_body_with_cg(&mut cg, config.body, config.default_return)?;
 

@@ -17,14 +17,14 @@ use super::structs::{
     convert_field_value_id, convert_to_i64_for_storage, get_field_slot_and_type_id_cg,
 };
 use super::types::{
-    CodegenCtx, CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET,
-    FunctionCtx, GlobalCtx, fallible_error_tag_by_id, resolve_type_expr_id, tuple_layout_id,
-    type_id_size, type_id_to_cranelift,
+    CodegenCtx, CompileEnv, CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG,
+    FALLIBLE_TAG_OFFSET, FunctionCtx, fallible_error_tag_by_id, resolve_type_expr_id,
+    tuple_layout_id, type_id_to_cranelift,
 };
 
 /// Compile a function body with split contexts.
 ///
-/// Takes CodegenCtx (JIT module + function registry) along with FunctionCtx and GlobalCtx.
+/// Takes CodegenCtx (JIT module + function registry) along with FunctionCtx and CompileEnv.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn compile_func_body_with_params<'ctx>(
     builder: &mut FunctionBuilder,
@@ -33,41 +33,24 @@ pub(super) fn compile_func_body_with_params<'ctx>(
     _cf_ctx: &mut ControlFlowCtx,
     codegen_ctx: &mut CodegenCtx<'ctx>,
     function_ctx: &FunctionCtx<'ctx>,
-    global: &GlobalCtx<'ctx>,
+    env: &CompileEnv<'ctx>,
     captures: Option<Captures>,
     nested_return_type: Option<TypeId>,
 ) -> Result<(bool, Option<CompiledValue>), String> {
     // Determine effective return type: nested overrides function_ctx's return type
     let return_type = nested_return_type.or(function_ctx.return_type);
 
+    let mut cf = ControlFlow::new();
+    let mut cg = Cg::new(builder, variables, &mut cf, codegen_ctx, function_ctx, env)
+        .with_return_type(return_type)
+        .with_captures(captures);
+
     match body {
         vole_frontend::FuncBody::Block(block) => {
-            let mut cf = ControlFlow::new();
-            let mut cg = Cg::new(
-                builder,
-                variables,
-                &mut cf,
-                codegen_ctx,
-                function_ctx,
-                global,
-                captures,
-                return_type,
-            );
             let terminated = cg.block(block)?;
             Ok((terminated, None))
         }
         vole_frontend::FuncBody::Expr(expr) => {
-            let mut cf = ControlFlow::new();
-            let mut cg = Cg::new(
-                builder,
-                variables,
-                &mut cf,
-                codegen_ctx,
-                function_ctx,
-                global,
-                captures,
-                return_type,
-            );
             let value = cg.expr(expr)?;
             Ok((true, Some(value)))
         }
@@ -93,9 +76,7 @@ impl Cg<'_, '_, '_> {
             return None;
         }
         let func_type_id = self.get_expr_type(&init_expr.id)?;
-        let arena = self.arena();
-        let cranelift_ty = type_id_to_cranelift(func_type_id, &arena, self.ptr_type());
-        drop(arena);
+        let cranelift_ty = self.cranelift_type(func_type_id);
         let var = self.builder.declare_var(cranelift_ty);
         self.vars.insert(name, (var, func_type_id));
         Some(var)
@@ -219,9 +200,7 @@ impl Cg<'_, '_, '_> {
                     self.builder.def_var(var, final_value);
                     // vars already has the entry from preregistration
                 } else {
-                    let arena = self.arena();
-                    let cranelift_ty = type_id_to_cranelift(final_type_id, &arena, self.ptr_type());
-                    drop(arena);
+                    let cranelift_ty = self.cranelift_type(final_type_id);
                     let var = self.builder.declare_var(cranelift_ty);
                     self.builder.def_var(var, final_value);
                     self.vars.insert(let_stmt.name, (var, final_type_id));
@@ -265,19 +244,10 @@ impl Cg<'_, '_, '_> {
                         && self.arena().unwrap_fallible(ret_type_id).is_some()
                     {
                         // For fallible functions, wrap the success value in a fallible struct
-                        let fallible_size = type_id_size(
-                            ret_type_id,
-                            self.ptr_type(),
-                            self.query().registry(),
-                            &self.arena(),
-                        );
+                        let fallible_size = self.type_size(ret_type_id);
 
                         // Allocate stack slot for the fallible result
-                        let slot = self.builder.create_sized_stack_slot(StackSlotData::new(
-                            StackSlotKind::ExplicitSlot,
-                            fallible_size,
-                            0,
-                        ));
+                        let slot = self.alloc_stack(fallible_size);
 
                         // Store the success tag at offset 0
                         let tag_val = self.builder.ins().iconst(types::I64, FALLIBLE_SUCCESS_TAG);
@@ -579,11 +549,7 @@ impl Cg<'_, '_, '_> {
         };
 
         // Create a stack slot for the out_value parameter
-        let slot_data = self.builder.create_sized_stack_slot(StackSlotData::new(
-            StackSlotKind::ExplicitSlot,
-            8,
-            0,
-        ));
+        let slot_data = self.alloc_stack(8);
         let ptr_type = self.ptr_type();
         let slot_addr = self.builder.ins().stack_addr(ptr_type, slot_data, 0);
 
@@ -648,11 +614,7 @@ impl Cg<'_, '_, '_> {
         let iter_val = self.call_runtime(RuntimeFn::StringCharsIter, &[string_val.value])?;
 
         // Create a stack slot for the out_value parameter
-        let slot_data = self.builder.create_sized_stack_slot(StackSlotData::new(
-            StackSlotKind::ExplicitSlot,
-            8,
-            0,
-        ));
+        let slot_data = self.alloc_stack(8);
         let ptr_type = self.ptr_type();
         let slot_addr = self.builder.ins().stack_addr(ptr_type, slot_data, 0);
 
@@ -728,62 +690,50 @@ impl Cg<'_, '_, '_> {
         }
 
         // Find the position of value's type in variants
-        let (tag, actual_value, actual_type_id) = if let Some(pos) =
-            variants.iter().position(|&v| v == value.type_id)
-        {
-            (pos, value.value, value.type_id)
-        } else {
-            // Try to find a compatible integer type for widening/narrowing
-            let arena = self.arena();
-            let value_is_integer = arena.is_integer(value.type_id);
-
-            let compatible = if value_is_integer {
-                variants
-                    .iter()
-                    .enumerate()
-                    .find(|(_, v)| arena.is_integer(**v))
-                    .map(|(pos, v)| (pos, *v))
+        let (tag, actual_value, actual_type_id) =
+            if let Some(pos) = variants.iter().position(|&v| v == value.type_id) {
+                (pos, value.value, value.type_id)
             } else {
-                None
+                // Try to find a compatible integer type for widening/narrowing
+                let arena = self.arena();
+                let value_is_integer = arena.is_integer(value.type_id);
+
+                let compatible = if value_is_integer {
+                    variants
+                        .iter()
+                        .enumerate()
+                        .find(|(_, v)| arena.is_integer(**v))
+                        .map(|(pos, v)| (pos, *v))
+                } else {
+                    None
+                };
+                drop(arena);
+
+                match compatible {
+                    Some((pos, variant_type_id)) => {
+                        let target_ty = self.cranelift_type(variant_type_id);
+                        let actual = if target_ty.bytes() < value.ty.bytes() {
+                            self.builder.ins().ireduce(target_ty, value.value)
+                        } else if target_ty.bytes() > value.ty.bytes() {
+                            self.builder.ins().sextend(target_ty, value.value)
+                        } else {
+                            value.value
+                        };
+                        (pos, actual, variant_type_id)
+                    }
+                    None => {
+                        return Err(CodegenError::type_mismatch(
+                            "union variant",
+                            "compatible type",
+                            "incompatible type",
+                        )
+                        .into());
+                    }
+                }
             };
-            drop(arena);
 
-            match compatible {
-                Some((pos, variant_type_id)) => {
-                    let arena = self.arena();
-                    let target_ty = type_id_to_cranelift(variant_type_id, &arena, self.ptr_type());
-                    drop(arena);
-                    let actual = if target_ty.bytes() < value.ty.bytes() {
-                        self.builder.ins().ireduce(target_ty, value.value)
-                    } else if target_ty.bytes() > value.ty.bytes() {
-                        self.builder.ins().sextend(target_ty, value.value)
-                    } else {
-                        value.value
-                    };
-                    (pos, actual, variant_type_id)
-                }
-                None => {
-                    return Err(CodegenError::type_mismatch(
-                        "union variant",
-                        "compatible type",
-                        "incompatible type",
-                    )
-                    .into());
-                }
-            }
-        };
-
-        let union_size = type_id_size(
-            union_type_id,
-            self.ptr_type(),
-            self.query().registry(),
-            &self.arena(),
-        );
-        let slot = self.builder.create_sized_stack_slot(StackSlotData::new(
-            StackSlotKind::ExplicitSlot,
-            union_size,
-            0,
-        ));
+        let union_size = self.type_size(union_type_id);
+        let slot = self.alloc_stack(union_size);
 
         let tag_val = self.builder.ins().iconst(types::I8, tag as i64);
         self.builder.ins().stack_store(tag_val, slot, 0);
@@ -810,7 +760,7 @@ impl Cg<'_, '_, '_> {
     ) -> Result<(), String> {
         match pattern {
             Pattern::Identifier { name, .. } => {
-                let cr_type = type_id_to_cranelift(ty_id, &self.arena(), self.ptr_type());
+                let cr_type = self.cranelift_type(ty_id);
                 let var = self.builder.declare_var(cr_type);
                 self.builder.def_var(var, value);
                 self.vars.insert(*name, (var, ty_id));
@@ -833,8 +783,7 @@ impl Cg<'_, '_, '_> {
                     for (i, elem_pattern) in elements.iter().enumerate() {
                         let offset = offsets[i];
                         let elem_type_id = elem_type_ids[i];
-                        let elem_cr_type =
-                            type_id_to_cranelift(elem_type_id, &self.arena(), self.ptr_type());
+                        let elem_cr_type = self.cranelift_type(elem_type_id);
                         let elem_value =
                             self.builder
                                 .ins()
@@ -844,16 +793,8 @@ impl Cg<'_, '_, '_> {
                 // Try fixed array
                 } else if let Some((element_id, _)) = arena.unwrap_fixed_array(ty_id) {
                     drop(arena);
-                    let elem_cr_type =
-                        type_id_to_cranelift(element_id, &self.arena(), self.ptr_type());
-                    let elem_size = type_id_size(
-                        element_id,
-                        self.ptr_type(),
-                        self.query().registry(),
-                        &self.arena(),
-                    )
-                    .div_ceil(8)
-                        * 8;
+                    let elem_cr_type = self.cranelift_type(element_id);
+                    let elem_size = self.type_size(element_id).div_ceil(8) * 8;
                     for (i, elem_pattern) in elements.iter().enumerate() {
                         let offset = (i as i32) * (elem_size as i32);
                         let elem_value =
@@ -876,7 +817,7 @@ impl Cg<'_, '_, '_> {
                     let result_raw =
                         self.call_runtime(RuntimeFn::InstanceGetField, &[value, slot_val])?;
                     // Borrow arena from global directly to avoid borrow conflict
-                    let arena = self.global.analyzed.type_arena();
+                    let arena = self.env.analyzed.type_arena();
                     let (result_val, cranelift_ty) =
                         convert_field_value_id(self.builder, result_raw, field_type_id, &arena);
                     drop(arena);
@@ -933,19 +874,10 @@ impl Cg<'_, '_, '_> {
         })?;
 
         // Calculate the size of the fallible type
-        let fallible_size = type_id_size(
-            return_type_id,
-            self.ptr_type(),
-            self.query().registry(),
-            &self.arena(),
-        );
+        let fallible_size = self.type_size(return_type_id);
 
         // Allocate stack slot for the fallible result
-        let slot = self.builder.create_sized_stack_slot(StackSlotData::new(
-            StackSlotKind::ExplicitSlot,
-            fallible_size,
-            0,
-        ));
+        let slot = self.alloc_stack(fallible_size);
 
         // Store the error tag at offset 0
         let tag_val = self.builder.ins().iconst(types::I64, error_tag);
