@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use cranelift::prelude::{Block, FunctionBuilder, InstBuilder, Type, Variable, types};
+use cranelift::prelude::{FunctionBuilder, InstBuilder, Type, Variable, types};
 use vole_frontend::{FuncBody, Symbol};
 use vole_sema::type_arena::TypeId;
 
@@ -21,21 +21,6 @@ pub enum DefaultReturn {
     Empty,
     /// Return a zero i64 (for lambdas): `return_(&[iconst(i64, 0)])`
     ZeroI64,
-}
-
-/// Create entry block, add function params, and switch to it.
-///
-/// This helper extracts the common 3-line entry block setup pattern:
-/// - Create a new block
-/// - Add block params matching the function signature
-/// - Switch builder to the new block
-///
-/// Returns the entry block for parameter access via `builder.block_params()`.
-pub fn create_entry_block(builder: &mut FunctionBuilder) -> Block {
-    let entry_block = builder.create_block();
-    builder.append_block_params_for_function_params(entry_block);
-    builder.switch_to_block(entry_block);
-    entry_block
 }
 
 /// Configuration for compiling a function body.
@@ -192,38 +177,6 @@ pub(crate) fn setup_function_entry<'a>(
     }
 
     (variables, captures)
-}
-
-/// Bind function parameters to variables.
-///
-/// This helper extracts the common pattern of zipping param names, Cranelift types,
-/// Vole TypeIds, and block param Values together to create variable bindings.
-///
-/// # Arguments
-/// * `builder` - The FunctionBuilder to declare variables in
-/// * `variables` - The variables map to populate
-/// * `param_names` - Slice of parameter name Symbols
-/// * `param_cranelift_types` - Slice of Cranelift Types for each parameter
-/// * `param_type_ids` - Slice of Vole TypeIds for each parameter
-/// * `block_params` - Slice of Cranelift Values from the entry block
-pub fn bind_params(
-    builder: &mut FunctionBuilder,
-    variables: &mut HashMap<Symbol, (Variable, TypeId)>,
-    param_names: &[Symbol],
-    param_cranelift_types: &[Type],
-    param_type_ids: &[TypeId],
-    block_params: &[cranelift::prelude::Value],
-) {
-    for (((name, ty), type_id), val) in param_names
-        .iter()
-        .zip(param_cranelift_types.iter())
-        .zip(param_type_ids.iter())
-        .zip(block_params.iter())
-    {
-        let var = builder.declare_var(*ty);
-        builder.def_var(var, *val);
-        variables.insert(*name, (var, *type_id));
-    }
 }
 
 /// Compile function body using Cg context.

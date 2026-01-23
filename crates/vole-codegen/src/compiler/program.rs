@@ -7,8 +7,8 @@ use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, InstBuilder, t
 use cranelift_module::{FuncId, Module};
 
 use super::common::{
-    DefaultReturn, FunctionCompileConfig, bind_params, compile_function_inner_with_params,
-    create_entry_block, finalize_function_body,
+    DefaultReturn, FunctionCompileConfig, compile_function_inner_with_params,
+    finalize_function_body,
 };
 use super::{Compiler, SelfParam, TestInfo, TypeResolver};
 
@@ -962,44 +962,32 @@ impl Compiler<'_> {
         );
         self.jit.ctx.func.signature = sig;
 
-        // Collect param type ids (TypeId-native)
+        // Collect param types and build config
         let param_type_ids: Vec<TypeId> = func
             .params
             .iter()
             .map(|p| self.resolve_type_to_id(&p.ty))
             .collect();
         let param_types = self.type_ids_to_cranelift(&param_type_ids);
-        let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
+        let params: Vec<_> = func
+            .params
+            .iter()
+            .zip(param_type_ids.iter())
+            .zip(param_types.iter())
+            .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
+            .collect();
 
-        // Get function return type id (TypeId-native)
+        // Get function return type id
         let return_type_id = func
             .return_type
             .as_ref()
             .map(|t| self.resolve_type_to_id(t));
 
-        // Get source file pointer before borrowing ctx.func
+        // Create function builder and compile
         let source_file_ptr = self.source_file_ptr();
-
-        // Create function builder
         let mut builder_ctx = FunctionBuilderContext::new();
         {
-            let mut builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-
-            let entry_block = create_entry_block(&mut builder);
-
-            // Build variables map
-            let mut variables = HashMap::new();
-            let params = builder.block_params(entry_block).to_vec();
-            bind_params(
-                &mut builder,
-                &mut variables,
-                &param_names,
-                &param_types,
-                &param_type_ids,
-                &params,
-            );
-
-            // Compile function body
+            let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
             let empty_global_inits = HashMap::new();
             let env = CompileEnv {
                 analyzed: self.analyzed,
@@ -1010,12 +998,9 @@ impl Compiler<'_> {
                 current_module: None,
             };
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
-            let (terminated, expr_value) = Cg::new(&mut builder, &mut codegen_ctx, &env)
-                .with_vars(variables)
-                .with_return_type(return_type_id)
-                .compile_body(&func.body)?;
 
-            finalize_function_body(builder, expr_value.as_ref(), terminated, DefaultReturn::Empty);
+            let config = FunctionCompileConfig::top_level(&func.body, params, return_type_id);
+            compile_function_inner_with_params(builder, &mut codegen_ctx, &env, config, None, None)?;
         }
 
         // NOTE: We intentionally do NOT call define_function here.
@@ -1180,49 +1165,33 @@ impl Compiler<'_> {
             .func_id(func_key)
             .ok_or_else(|| format!("Monomorphized function {} not declared", mangled_name))?;
 
-        // Get parameter names and concrete type ids (using FunctionType's TypeId fields)
-        let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
+        // Get parameter types and build config
         let param_type_ids: Vec<TypeId> = instance.func_type.params_id.to_vec();
         let return_type_id = instance.func_type.return_type_id;
+        let param_cranelift_types = self.type_ids_to_cranelift(&param_type_ids);
+        let params: Vec<_> = func
+            .params
+            .iter()
+            .zip(param_type_ids.iter())
+            .zip(param_cranelift_types.iter())
+            .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
+            .collect();
 
-        // Create function signature from concrete types (TypeId-native)
-        let params = self.type_ids_to_cranelift(&param_type_ids);
+        // Create function signature from concrete types
         let ret = self.return_type_to_cranelift(return_type_id);
-        let param_types = params.clone();
-        let sig = self.jit.create_signature(&params, ret);
+        let sig = self.jit.create_signature(&param_cranelift_types, ret);
         self.jit.ctx.func.signature = sig;
 
-        // Get source file pointer
+        // Create function builder and compile
         let source_file_ptr = self.source_file_ptr();
-
-        // Create function builder
         let mut builder_ctx = FunctionBuilderContext::new();
         {
-            let mut builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-
-            let entry_block = create_entry_block(&mut builder);
-
-            // Build variables map
-            let mut variables = HashMap::new();
-            let params = builder.block_params(entry_block).to_vec();
-            bind_params(
-                &mut builder,
-                &mut variables,
-                &param_names,
-                &param_types,
-                &param_type_ids,
-                &params,
-            );
-
-            // Compile function body
+            let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
             let env = compile_env!(self, source_file_ptr);
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
-            let (terminated, expr_value) = Cg::new(&mut builder, &mut codegen_ctx, &env)
-                .with_vars(variables)
-                .with_return_type(Some(return_type_id))
-                .compile_body(&func.body)?;
 
-            finalize_function_body(builder, expr_value.as_ref(), terminated, DefaultReturn::Empty);
+            let config = FunctionCompileConfig::top_level(&func.body, params, Some(return_type_id));
+            compile_function_inner_with_params(builder, &mut codegen_ctx, &env, config, None, None)?;
         }
 
         // Define the function
@@ -1348,64 +1317,47 @@ impl Compiler<'_> {
             .func_id(func_key)
             .ok_or_else(|| format!("Monomorphized class method {} not declared", mangled_name))?;
 
-        // Get param and return type ids (TypeId-native)
+        // Get param and return types, build config
         let param_type_ids: Vec<TypeId> = instance.func_type.params_id.to_vec();
         let return_type_id = instance.func_type.return_type_id;
+        let param_cranelift_types = self.type_ids_to_cranelift(&param_type_ids);
+        let params: Vec<_> = method
+            .params
+            .iter()
+            .zip(param_type_ids.iter())
+            .zip(param_cranelift_types.iter())
+            .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
+            .collect();
 
-        // Create method signature (self + params) with concrete types (TypeId-native)
-        let param_types = self.type_ids_to_cranelift(&param_type_ids);
-        let mut params = vec![self.pointer_type]; // self
-        params.extend_from_slice(&param_types);
+        // Create method signature (self + params) with concrete types
+        let mut sig_params = vec![self.pointer_type]; // self
+        sig_params.extend_from_slice(&param_cranelift_types);
         let ret = self.return_type_to_cranelift(return_type_id);
-        let sig = self.jit.create_signature(&params, ret);
+        let sig = self.jit.create_signature(&sig_params, ret);
         self.jit.ctx.func.signature = sig;
 
-        // Get parameter names
-        let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
-
-        // Build self type with concrete type args (TypeId-native)
+        // Build self binding with concrete type args
         let self_type_id = self.build_concrete_self_type_id(type_name, &instance.substitutions);
-
-        // Get source file pointer and self symbol
-        let source_file_ptr = self.source_file_ptr();
         let self_sym = self.self_symbol();
+        let self_binding = (self_sym, self_type_id, self.pointer_type);
 
-        // Create function builder
+        // Create function builder and compile
+        let source_file_ptr = self.source_file_ptr();
         let mut builder_ctx = FunctionBuilderContext::new();
         {
-            let mut builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-
-            let entry_block = create_entry_block(&mut builder);
-
-            // Build variables map
-            let mut variables = HashMap::new();
-            let block_params = builder.block_params(entry_block).to_vec();
-
-            // Bind `self` as the first parameter
-            let self_var = builder.declare_var(self.pointer_type);
-            builder.def_var(self_var, block_params[0]);
-            variables.insert(self_sym, (self_var, self_type_id));
-
-            // Bind remaining parameters with concrete types (TypeId-native)
-            bind_params(
-                &mut builder,
-                &mut variables,
-                &param_names,
-                &param_types,
-                &param_type_ids,
-                &block_params[1..],
-            );
-
-            // Compile method body (with monomorphized substitutions)
+            let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
             let env = compile_env!(self, source_file_ptr);
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
-            let (terminated, expr_value) = Cg::new(&mut builder, &mut codegen_ctx, &env)
-                .with_vars(variables)
-                .with_return_type(Some(return_type_id))
-                .with_substitutions(Some(&instance.substitutions))
-                .compile_body(&method.body)?;
 
-            finalize_function_body(builder, expr_value.as_ref(), terminated, DefaultReturn::Empty);
+            let config = FunctionCompileConfig::method(&method.body, params, self_binding, Some(return_type_id));
+            compile_function_inner_with_params(
+                builder,
+                &mut codegen_ctx,
+                &env,
+                config,
+                None,
+                Some(&instance.substitutions),
+            )?;
         }
 
         // Define the function
@@ -1594,57 +1546,45 @@ impl Compiler<'_> {
             .func_id(func_key)
             .ok_or_else(|| format!("Monomorphized static method {} not declared", mangled_name))?;
 
-        // Get param and return type ids (TypeId-native)
+        // Get param and return types, build config
         let param_type_ids: Vec<TypeId> = instance.func_type.params_id.to_vec();
         let return_type_id = instance.func_type.return_type_id;
+        let param_cranelift_types = self.type_ids_to_cranelift(&param_type_ids);
+        let params: Vec<_> = method
+            .params
+            .iter()
+            .zip(param_type_ids.iter())
+            .zip(param_cranelift_types.iter())
+            .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
+            .collect();
 
-        // Create signature (no self parameter) with concrete types (TypeId-native)
-        let params = self.type_ids_to_cranelift(&param_type_ids);
+        // Create signature (no self parameter) with concrete types
         let ret = self.return_type_to_cranelift(return_type_id);
-        let param_types = params.clone();
-        let sig = self.jit.create_signature(&params, ret);
+        let sig = self.jit.create_signature(&param_cranelift_types, ret);
         self.jit.ctx.func.signature = sig;
 
-        // Get parameter names
-        let param_names: Vec<Symbol> = method.params.iter().map(|p| p.name).collect();
+        // Get method body
+        let body = method.body.as_ref().ok_or_else(|| {
+            format!("Internal error: static method {} has no body", mangled_name)
+        })?;
 
-        // Get source file pointer
+        // Create function builder and compile
         let source_file_ptr = self.source_file_ptr();
-
-        // Create function builder
         let mut builder_ctx = FunctionBuilderContext::new();
         {
-            let mut builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-
-            let entry_block = create_entry_block(&mut builder);
-
-            // Build variables map (no self for static methods)
-            let mut variables = HashMap::new();
-            let block_params = builder.block_params(entry_block).to_vec();
-
-            // Bind parameters with concrete types (TypeId-native)
-            bind_params(
-                &mut builder,
-                &mut variables,
-                &param_names,
-                &param_types,
-                &param_type_ids,
-                &block_params,
-            );
-
-            // Compile method body
-            let body = method.body.as_ref().ok_or_else(|| {
-                format!("Internal error: static method {} has no body", mangled_name)
-            })?;
+            let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
             let env = compile_env!(self, source_file_ptr);
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
-            let (terminated, expr_value) = Cg::new(&mut builder, &mut codegen_ctx, &env)
-                .with_vars(variables)
-                .with_return_type(Some(return_type_id))
-                .with_substitutions(Some(&instance.substitutions))
-                .compile_body(body)?;
 
-            finalize_function_body(builder, expr_value.as_ref(), terminated, DefaultReturn::Empty);
+            let config = FunctionCompileConfig::top_level(body, params, Some(return_type_id));
+            compile_function_inner_with_params(
+                builder,
+                &mut codegen_ctx,
+                &env,
+                config,
+                None,
+                Some(&instance.substitutions),
+            )?;
         }
 
         // Define the function
