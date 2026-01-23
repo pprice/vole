@@ -1086,6 +1086,97 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             interface_type_id,
         )
     }
+
+    /// Compile default expressions for omitted parameters.
+    ///
+    /// This is a unified helper used by function calls, method calls, and static method calls.
+    /// It takes pre-extracted raw pointers to default expressions to avoid borrow checker issues.
+    ///
+    /// # Arguments
+    /// - `default_ptrs`: Raw pointers to default expressions (indexed by parameter position)
+    /// - `start_index`: Index of the first omitted parameter
+    /// - `expected_type_ids`: Expected TypeIds for the omitted parameters (slice starting at start_index)
+    /// - `is_generic_class`: Whether this is a generic class call (needs value_to_word conversion)
+    ///
+    /// # Safety
+    /// The raw pointers must point to data in EntityRegistry which outlives compilation.
+    /// Compile default expressions for omitted parameters.
+    ///
+    /// This is a unified helper used by function calls, method calls, and static method calls.
+    /// It takes pre-extracted raw pointers to default expressions to avoid borrow checker issues.
+    ///
+    /// # Arguments
+    /// - `default_ptrs`: Raw pointers to default expressions (indexed by parameter position)
+    /// - `start_index`: Index of the first omitted parameter
+    /// - `expected_type_ids`: Expected TypeIds for the omitted parameters (slice starting at start_index)
+    /// - `is_generic_class`: Whether this is a generic class call (needs value_to_word conversion)
+    ///
+    /// # Safety
+    /// The raw pointers must point to data in EntityRegistry which outlives compilation.
+    pub fn compile_defaults_from_ptrs(
+        &mut self,
+        default_ptrs: &[Option<*const Expr>],
+        start_index: usize,
+        expected_type_ids: &[TypeId],
+        is_generic_class: bool,
+    ) -> Result<Vec<Value>, String> {
+        use crate::types::value_to_word;
+
+        let mut args = Vec::new();
+        for (i, &param_type_id) in expected_type_ids.iter().enumerate() {
+            let param_idx = start_index + i;
+            if let Some(Some(default_ptr)) = default_ptrs.get(param_idx) {
+                // SAFETY: The pointer points to data in EntityRegistry which is owned by
+                // AnalyzedProgram. AnalyzedProgram outlives this entire compilation session.
+                // The data is not moved or modified, so the pointer remains valid.
+                let default_expr: &Expr = unsafe { &**default_ptr };
+                let compiled = self.expr(default_expr)?;
+
+                // Coerce to the expected param type (handles interface boxing, union construction)
+                let compiled = self.coerce_to_type(compiled, param_type_id)?;
+
+                // Handle integer narrowing/widening if needed
+                let expected_ty = self.cranelift_type(param_type_id);
+                let compiled = if compiled.ty.is_int()
+                    && expected_ty.is_int()
+                    && expected_ty.bits() != compiled.ty.bits()
+                {
+                    let new_value = if expected_ty.bits() < compiled.ty.bits() {
+                        self.builder.ins().ireduce(expected_ty, compiled.value)
+                    } else {
+                        self.builder.ins().sextend(expected_ty, compiled.value)
+                    };
+                    CompiledValue {
+                        value: new_value,
+                        ty: expected_ty,
+                        type_id: param_type_id,
+                    }
+                } else {
+                    compiled
+                };
+
+                // Generic class methods expect i64 for TypeParam, convert if needed
+                let arg_value = if is_generic_class && compiled.ty != types::I64 {
+                    let ptr_type = self.ptr_type();
+                    let arena_rc = self.arena_rc().clone();
+                    let registry = self.registry();
+                    value_to_word(
+                        self.builder,
+                        &compiled,
+                        ptr_type,
+                        None, // No heap alloc needed for primitive conversions
+                        &arena_rc,
+                        registry,
+                    )?
+                } else {
+                    compiled.value
+                };
+                args.push(arg_value);
+            }
+        }
+
+        Ok(args)
+    }
 }
 
 impl<'a, 'b, 'ctx> crate::vtable_ctx::VtableCtx for Cg<'a, 'b, 'ctx> {

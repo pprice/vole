@@ -584,15 +584,12 @@ impl Cg<'_, '_, '_> {
     /// Compile default expressions for omitted function parameters.
     /// Returns compiled values for parameters starting at `start_index`.
     ///
-    /// # Safety
-    /// This function uses raw pointers to access default expressions stored in EntityRegistry.
-    /// This is safe because EntityRegistry is owned by AnalyzedProgram which outlives all
-    /// compilation, and the expression data is not moved or modified during compilation.
+    /// Uses the unified `compile_defaults_from_ptrs` helper.
     fn compile_default_args(
         &mut self,
         callee_sym: Symbol,
         start_index: usize,
-        expected_types: &[Type],
+        _expected_types: &[Type], // Kept for API compatibility, but we use TypeIds from FunctionDef
     ) -> Result<Vec<Value>, String> {
         let module_id = self
             .current_module()
@@ -608,47 +605,25 @@ impl Cg<'_, '_, '_> {
             return Ok(Vec::new());
         };
 
-        // Get raw pointers to default expressions.
-        // These point to data in EntityRegistry which lives for the duration of AnalyzedProgram.
-        // We use raw pointers to work around the borrow checker since self.expr() needs &mut self.
-        let default_ptrs: Vec<Option<*const Expr>> = {
+        // Get raw pointers to default expressions and param TypeIds from FunctionDef.
+        let (default_ptrs, param_type_ids): (Vec<Option<*const Expr>>, Vec<TypeId>) = {
             let func_def = self.query().registry().get_function(func_id);
-            func_def
+            let ptrs = func_def
                 .param_defaults
                 .iter()
                 .map(|opt| opt.as_ref().map(|e| e.as_ref() as *const Expr))
-                .collect()
+                .collect();
+            let type_ids = func_def.signature.params_id.iter().copied().collect();
+            (ptrs, type_ids)
         };
 
-        let mut args = Vec::new();
-        for (i, &expected_ty) in expected_types.iter().enumerate() {
-            let param_idx = start_index + i;
-            if let Some(Some(default_ptr)) = default_ptrs.get(param_idx) {
-                // SAFETY: The pointer points to data in EntityRegistry which is owned by
-                // AnalyzedProgram. AnalyzedProgram outlives this entire compilation session.
-                // The data is not moved or modified, so the pointer remains valid.
-                let default_expr: &Expr = unsafe { &**default_ptr };
-                let compiled = self.expr(default_expr)?;
-
-                // Narrow/extend integer types if needed
-                let arg_value = if compiled.ty.is_int()
-                    && expected_ty.is_int()
-                    && expected_ty.bits() < compiled.ty.bits()
-                {
-                    self.builder.ins().ireduce(expected_ty, compiled.value)
-                } else if compiled.ty.is_int()
-                    && expected_ty.is_int()
-                    && expected_ty.bits() > compiled.ty.bits()
-                {
-                    self.builder.ins().sextend(expected_ty, compiled.value)
-                } else {
-                    compiled.value
-                };
-                args.push(arg_value);
-            }
-        }
-
-        Ok(args)
+        // Use the unified helper
+        self.compile_defaults_from_ptrs(
+            &default_ptrs,
+            start_index,
+            &param_type_ids[start_index..],
+            false, // Not a generic class call
+        )
     }
 
     /// Compile call arguments for an external function, including defaults for omitted parameters.
