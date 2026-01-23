@@ -480,6 +480,15 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         type_id_to_cranelift(ty, &self.arena(), self.ptr_type())
     }
 
+    /// Convert a slice of TypeIds to Cranelift types
+    pub fn cranelift_types(&self, type_ids: &[TypeId]) -> Vec<Type> {
+        let arena = self.arena();
+        type_ids
+            .iter()
+            .map(|&ty| type_id_to_cranelift(ty, &arena, self.ptr_type()))
+            .collect()
+    }
+
     /// Get the size (in bits) of a TypeId
     pub fn type_size(&self, ty: TypeId) -> u32 {
         type_id_size(ty, self.ptr_type(), self.query().registry(), &self.arena())

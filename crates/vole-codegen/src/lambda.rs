@@ -13,7 +13,7 @@ use vole_sema::type_arena::{TypeArena, TypeId, TypeIdVec};
 use super::RuntimeFn;
 use super::compiler::common::{FunctionCompileConfig, compile_function_inner_with_params};
 use super::context::Cg;
-use super::types::{CompiledValue, type_id_to_cranelift};
+use super::types::CompiledValue;
 
 /// Information about a captured variable for lambda compilation
 #[derive(Clone, Copy)]
@@ -104,15 +104,8 @@ impl Cg<'_, '_, '_> {
         let (param_type_ids, return_type_id) = self.get_lambda_types(lambda, node_id);
 
         // Convert to Cranelift types
-        let param_types: Vec<Type> = {
-            let arena = self.arena();
-            param_type_ids
-                .iter()
-                .map(|&ty| type_id_to_cranelift(ty, &arena, self.ptr_type()))
-                .collect()
-        };
-
-        let return_type = type_id_to_cranelift(return_type_id, &self.arena(), self.ptr_type());
+        let param_types = self.cranelift_types(&param_type_ids);
+        let return_type = self.cranelift_type(return_type_id);
 
         // Always use closure calling convention for consistency
         let mut sig = self.jit_module().make_signature();
@@ -220,15 +213,8 @@ impl Cg<'_, '_, '_> {
         let (param_type_ids, return_type_id) = self.get_lambda_types(lambda, node_id);
 
         // Convert to Cranelift types
-        let param_types: Vec<Type> = {
-            let arena = self.arena();
-            param_type_ids
-                .iter()
-                .map(|&ty| type_id_to_cranelift(ty, &arena, self.ptr_type()))
-                .collect()
-        };
-
-        let return_type = type_id_to_cranelift(return_type_id, &self.arena(), self.ptr_type());
+        let param_types = self.cranelift_types(&param_type_ids);
+        let return_type = self.cranelift_type(return_type_id);
 
         // First param is the closure pointer
         let mut sig = self.jit_module().make_signature();

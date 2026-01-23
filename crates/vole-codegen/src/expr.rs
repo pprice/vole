@@ -187,15 +187,9 @@ impl Cg<'_, '_, '_> {
         let wrapper_index = self.next_lambda_id();
 
         // Build wrapper signature: (closure_ptr, params...) -> return_type
-        let arena = self.arena();
-        let param_types: Vec<Type> = param_ids
-            .iter()
-            .map(|&t| type_id_to_cranelift(t, &arena, self.ptr_type()))
-            .collect();
-
-        let return_cr_type = type_id_to_cranelift(return_type_id, &arena, self.ptr_type());
-        let is_void_return = arena.is_void(return_type_id);
-        drop(arena);
+        let param_types = self.cranelift_types(&param_ids);
+        let return_cr_type = self.cranelift_type(return_type_id);
+        let is_void_return = self.arena().is_void(return_type_id);
 
         let mut wrapper_sig = self.jit_module().make_signature();
         wrapper_sig.params.push(AbiParam::new(self.ptr_type())); // closure ptr (ignored)
@@ -1057,13 +1051,7 @@ impl Cg<'_, '_, '_> {
                             offsets
                         };
                         // Precompute cranelift types for each element
-                        let elem_cr_types: Vec<_> = {
-                            let arena = self.arena();
-                            elem_type_ids
-                                .iter()
-                                .map(|&tid| type_id_to_cranelift(tid, &arena, ptr_type))
-                                .collect()
-                        };
+                        let elem_cr_types = self.cranelift_types(&elem_type_ids);
                         for (i, pattern) in elements.iter().enumerate() {
                             if let Pattern::Identifier { name, .. } = pattern {
                                 let offset = offsets[i];

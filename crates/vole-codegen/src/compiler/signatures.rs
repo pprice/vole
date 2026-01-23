@@ -318,6 +318,11 @@ impl Compiler<'_> {
             .collect()
     }
 
+    /// Convert a single TypeId to a Cranelift type.
+    pub fn type_id_to_cranelift(&self, type_id: TypeId) -> CraneliftType {
+        type_id_to_cranelift(type_id, &self.analyzed.type_arena(), self.pointer_type)
+    }
+
     /// Resolve parameter TypeExprs to TypeIds with SelfType substitution.
     ///
     /// This helper handles implement block methods where `Self` type needs to be

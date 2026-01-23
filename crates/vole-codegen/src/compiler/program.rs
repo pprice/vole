@@ -658,13 +658,7 @@ impl Compiler<'_> {
         };
 
         // Convert to Cranelift types
-        let param_types: Vec<cranelift::prelude::Type> = {
-            let arena = self.analyzed.type_arena();
-            param_type_ids
-                .iter()
-                .map(|&ty| type_id_to_cranelift(ty, &arena, self.pointer_type))
-                .collect()
-        };
+        let param_types = self.type_ids_to_cranelift(&param_type_ids);
 
         let return_type = type_id_to_cranelift(
             return_type_id,
@@ -980,12 +974,7 @@ impl Compiler<'_> {
             .iter()
             .map(|p| self.resolve_type_to_id(&p.ty))
             .collect();
-        let arena_ref = self.analyzed.type_arena();
-        let param_types: Vec<types::Type> = param_type_ids
-            .iter()
-            .map(|&ty| type_id_to_cranelift(ty, &arena_ref, self.pointer_type))
-            .collect();
-        drop(arena_ref);
+        let param_types = self.type_ids_to_cranelift(&param_type_ids);
         let param_names: Vec<Symbol> = func.params.iter().map(|p| p.name).collect();
 
         // Get function return type id (TypeId-native)
@@ -1256,22 +1245,13 @@ impl Compiler<'_> {
         let return_type_id = instance.func_type.return_type_id;
 
         // Create function signature from concrete types (TypeId-native)
-        let arena_ref = self.analyzed.type_arena();
-        let params: Vec<types::Type> = param_type_ids
-            .iter()
-            .map(|&ty| type_id_to_cranelift(ty, &arena_ref, self.pointer_type))
-            .collect();
+        let params = self.type_ids_to_cranelift(&param_type_ids);
         let ret = if return_type_id.is_void() {
             None
         } else {
-            Some(type_id_to_cranelift(
-                return_type_id,
-                &arena_ref,
-                self.pointer_type,
-            ))
+            Some(self.type_id_to_cranelift(return_type_id))
         };
         let param_types = params.clone();
-        drop(arena_ref);
         let sig = self.jit.create_signature(&params, ret);
         self.jit.ctx.func.signature = sig;
 
@@ -1474,29 +1454,14 @@ impl Compiler<'_> {
         let return_type_id = instance.func_type.return_type_id;
 
         // Create method signature (self + params) with concrete types (TypeId-native)
-        let arena_ref = self.analyzed.type_arena();
+        let param_types = self.type_ids_to_cranelift(&param_type_ids);
         let mut params = vec![self.pointer_type]; // self
-        for &param_type_id in &param_type_ids {
-            params.push(type_id_to_cranelift(
-                param_type_id,
-                &arena_ref,
-                self.pointer_type,
-            ));
-        }
+        params.extend_from_slice(&param_types);
         let ret = if return_type_id.is_void() {
             None
         } else {
-            Some(type_id_to_cranelift(
-                return_type_id,
-                &arena_ref,
-                self.pointer_type,
-            ))
+            Some(self.type_id_to_cranelift(return_type_id))
         };
-        let param_types: Vec<types::Type> = param_type_ids
-            .iter()
-            .map(|&ty| type_id_to_cranelift(ty, &arena_ref, self.pointer_type))
-            .collect();
-        drop(arena_ref);
         let sig = self.jit.create_signature(&params, ret);
         self.jit.ctx.func.signature = sig;
 
@@ -1777,22 +1742,13 @@ impl Compiler<'_> {
         let return_type_id = instance.func_type.return_type_id;
 
         // Create signature (no self parameter) with concrete types (TypeId-native)
-        let arena_ref = self.analyzed.type_arena();
-        let params: Vec<types::Type> = param_type_ids
-            .iter()
-            .map(|&ty| type_id_to_cranelift(ty, &arena_ref, self.pointer_type))
-            .collect();
+        let params = self.type_ids_to_cranelift(&param_type_ids);
         let ret = if return_type_id.is_void() {
             None
         } else {
-            Some(type_id_to_cranelift(
-                return_type_id,
-                &arena_ref,
-                self.pointer_type,
-            ))
+            Some(self.type_id_to_cranelift(return_type_id))
         };
         let param_types = params.clone();
-        drop(arena_ref);
         let sig = self.jit.create_signature(&params, ret);
         self.jit.ctx.func.signature = sig;
 
