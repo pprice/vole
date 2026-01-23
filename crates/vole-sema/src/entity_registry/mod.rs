@@ -23,6 +23,8 @@ use crate::implement_registry::PrimitiveTypeId;
 use crate::type_arena::{TypeId as ArenaTypeId, TypeIdVec};
 use vole_identity::{FieldId, FunctionId, GlobalId, MethodId, NameId, TypeDefId};
 
+pub use fields::{FieldSubstitutionCache, FieldSubstitutionKey};
+
 /// Central registry for all language entities
 #[derive(Debug, Clone)]
 pub struct EntityRegistry {
@@ -62,6 +64,9 @@ pub struct EntityRegistry {
 
     /// Cache of monomorphized generic static method instances
     pub static_method_monomorph_cache: StaticMethodMonomorphCache,
+
+    /// Cache of substituted field types for generic type instantiations
+    pub field_substitution_cache: FieldSubstitutionCache,
 }
 
 impl EntityRegistry {
@@ -86,6 +91,7 @@ impl EntityRegistry {
             monomorph_cache: MonomorphCache::new(),
             class_method_monomorph_cache: ClassMethodMonomorphCache::new(),
             static_method_monomorph_cache: StaticMethodMonomorphCache::new(),
+            field_substitution_cache: FieldSubstitutionCache::new(),
         }
     }
 
@@ -542,6 +548,7 @@ impl EntityRegistry {
         self.monomorph_cache = MonomorphCache::new();
         self.class_method_monomorph_cache = ClassMethodMonomorphCache::new();
         self.static_method_monomorph_cache = StaticMethodMonomorphCache::new();
+        self.field_substitution_cache.clear();
     }
 }
 
