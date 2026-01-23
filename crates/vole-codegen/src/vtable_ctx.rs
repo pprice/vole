@@ -11,14 +11,14 @@ use std::collections::HashMap;
 use cranelift::prelude::Type;
 use cranelift_jit::JITModule;
 
-use vole_frontend::{Interner, Symbol};
+use vole_frontend::Interner;
 use vole_identity::{NameId, TypeDefId};
 use vole_runtime::NativeRegistry;
 use vole_sema::implement_registry::ImplTypeId;
 use vole_sema::type_arena::TypeArena;
 use vole_sema::{EntityRegistry, ProgramQuery, ProgramUpdate};
 
-use crate::types::{CodegenCtx, CompileEnv, MethodInfo, TypeMetadata};
+use crate::types::{CodegenCtx, CompileEnv, MethodInfo, TypeMetadataMap};
 use crate::{AnalyzedProgram, FunctionRegistry};
 
 /// Trait providing the interface needed for vtable compilation.
@@ -67,7 +67,7 @@ pub trait VtableCtx {
     fn interface_vtables(&self) -> &RefCell<crate::interface_vtable::InterfaceVtableRegistry>;
 
     /// Get type metadata map
-    fn type_metadata(&self) -> &HashMap<Symbol, TypeMetadata>;
+    fn type_metadata(&self) -> &TypeMetadataMap;
 
     /// Get impl method infos map
     fn impl_method_infos(&self) -> &HashMap<(ImplTypeId, NameId), MethodInfo>;
@@ -130,13 +130,9 @@ impl<'a, 'ctx> VtableCtx for VtableCtxView<'a, 'ctx> {
     }
 
     fn resolve_type_str_or_interface(&self, name: &str) -> Option<TypeDefId> {
-        let name_table = self.env.analyzed.name_table();
-        let registry = self.env.analyzed.entity_registry();
-        // Try interface first, then class, then any type by short name
-        registry
-            .interface_by_short_name(name, &name_table)
-            .or_else(|| registry.class_by_short_name(name, &name_table))
-            .or_else(|| registry.type_by_short_name(name, &name_table))
+        let query = self.query();
+        let module_id = query.main_module();
+        query.resolve_type_def_by_str(module_id, name)
     }
 
     fn native_registry(&self) -> &NativeRegistry {
@@ -147,7 +143,7 @@ impl<'a, 'ctx> VtableCtx for VtableCtxView<'a, 'ctx> {
         &self.env.state.interface_vtables
     }
 
-    fn type_metadata(&self) -> &HashMap<Symbol, TypeMetadata> {
+    fn type_metadata(&self) -> &TypeMetadataMap {
         &self.env.state.type_metadata
     }
 

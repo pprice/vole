@@ -17,7 +17,9 @@ use crate::implement_registry::{ExternalMethodInfo, ImplementRegistry};
 use crate::resolution::ResolvedMethod;
 use crate::type_arena::{TypeArena, TypeId};
 use vole_frontend::{Interner, NodeId, Program, Symbol};
-use vole_identity::{FieldId, MethodId, ModuleId, NameId, NameTable, TypeDefId};
+use vole_identity::{FieldId, MethodId, ModuleId, NameId, NameTable, Resolver, TypeDefId};
+
+use crate::resolve::ResolverEntityExt;
 
 /// Query interface for accessing analyzed program data.
 ///
@@ -201,6 +203,28 @@ impl<'a> ProgramQuery<'a> {
     #[must_use]
     pub fn try_type_def_id(&self, name_id: NameId) -> Option<TypeDefId> {
         self.registry.type_by_name(name_id)
+    }
+
+    /// Resolve a Symbol to a TypeDefId using the full resolution chain.
+    /// This follows the same resolution path as sema:
+    /// 1. Primitives
+    /// 2. Current module definitions
+    /// 3. Explicit imports
+    /// 4. Builtin module (stdlib types)
+    /// 5. Interface/class fallback (for prelude types like Set, Map)
+    #[must_use]
+    pub fn resolve_type_def(&self, module: ModuleId, sym: Symbol) -> Option<TypeDefId> {
+        let name_table = self.name_table.borrow();
+        let resolver = Resolver::new(self.interner, &name_table, module, &[]);
+        resolver.resolve_type_or_interface(sym, self.registry)
+    }
+
+    /// Resolve a type name string to a TypeDefId using the full resolution chain.
+    #[must_use]
+    pub fn resolve_type_def_by_str(&self, module: ModuleId, name: &str) -> Option<TypeDefId> {
+        let name_table = self.name_table.borrow();
+        let resolver = Resolver::new(self.interner, &name_table, module, &[]);
+        resolver.resolve_type_str_or_interface(name, self.registry)
     }
 
     /// Resolve a type alias to its underlying type.

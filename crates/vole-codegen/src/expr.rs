@@ -939,7 +939,17 @@ impl Cg<'_, '_, '_> {
                 Pattern::Wildcard(_) => None,
                 Pattern::Identifier { name, .. } => {
                     // Check if this identifier is a type name (class/record)
-                    if let Some(type_meta) = self.type_meta().get(name) {
+                    // Need to look up TypeDefId from Symbol first
+                    let query = self.query();
+                    let module_id = self
+                        .current_module_id()
+                        .unwrap_or_else(|| query.main_module());
+
+                    let type_def_id = query
+                        .try_name_id(module_id, &[*name])
+                        .and_then(|name_id| query.try_type_def_id(name_id));
+
+                    if let Some(type_meta) = type_def_id.and_then(|id| self.type_meta().get(&id)) {
                         // Type pattern - compare against union variant tag
                         self.compile_type_pattern_check(&scrutinee, type_meta.vole_type)?
                     } else {
@@ -1060,7 +1070,19 @@ impl Cg<'_, '_, '_> {
                     // Record destructuring in match - TypeName { x, y } or { x, y }
                     let (pattern_check, pattern_type_id) = if let Some(name) = type_name {
                         // Typed record pattern - need to check type first
-                        if let Some(type_meta) = self.type_meta().get(name) {
+                        // Look up TypeDefId from Symbol
+                        let query = self.query();
+                        let module_id = self
+                            .current_module_id()
+                            .unwrap_or_else(|| query.main_module());
+
+                        let type_def_id = query
+                            .try_name_id(module_id, &[*name])
+                            .and_then(|name_id| query.try_type_def_id(name_id));
+
+                        if let Some(type_meta) =
+                            type_def_id.and_then(|id| self.type_meta().get(&id))
+                        {
                             (
                                 self.compile_type_pattern_check(&scrutinee, type_meta.vole_type)?,
                                 Some(type_meta.vole_type),

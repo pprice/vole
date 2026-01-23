@@ -17,19 +17,23 @@ impl Cg<'_, '_, '_> {
         sl: &StructLiteralExpr,
         expr: &Expr,
     ) -> Result<CompiledValue, String> {
-        // Resolve type name to main interner's Symbol for lookup
-        // This is needed because module classes register with main interner Symbols,
-        // but struct literals in module code use module interner Symbols
+        // Look up TypeDefId from type name using the full resolution chain.
+        // This handles prelude types like Set, Map that are registered in separate modules.
+        // Note: We use the string name rather than Symbol because the current interner
+        // may be module-specific while the query uses the main program's interner.
         let type_name = self.interner().resolve(sl.name);
-        let lookup_symbol = self
-            .analyzed()
-            .interner
-            .lookup(type_name)
-            .unwrap_or(sl.name);
+        let query = self.query();
+        let module_id = self
+            .current_module_id()
+            .unwrap_or_else(|| query.main_module());
+
+        let type_def_id = query
+            .resolve_type_def_by_str(module_id, type_name)
+            .ok_or_else(|| format!("Unknown type: {} (not in entity registry)", type_name))?;
         let metadata = self
             .type_metadata()
-            .get(&lookup_symbol)
-            .ok_or_else(|| format!("Unknown type: {}", type_name))?;
+            .get(&type_def_id)
+            .ok_or_else(|| format!("Unknown type: {} (not in type_metadata)", type_name))?;
 
         let type_id = metadata.type_id;
         let field_count = metadata.field_slots.len() as u32;

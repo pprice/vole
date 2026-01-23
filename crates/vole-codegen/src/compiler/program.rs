@@ -1000,7 +1000,14 @@ impl Compiler<'_> {
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
             let config = FunctionCompileConfig::top_level(&func.body, params, return_type_id);
-            compile_function_inner_with_params(builder, &mut codegen_ctx, &env, config, None, None)?;
+            compile_function_inner_with_params(
+                builder,
+                &mut codegen_ctx,
+                &env,
+                config,
+                None,
+                None,
+            )?;
         }
 
         // NOTE: We intentionally do NOT call define_function here.
@@ -1191,7 +1198,14 @@ impl Compiler<'_> {
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
             let config = FunctionCompileConfig::top_level(&func.body, params, Some(return_type_id));
-            compile_function_inner_with_params(builder, &mut codegen_ctx, &env, config, None, None)?;
+            compile_function_inner_with_params(
+                builder,
+                &mut codegen_ctx,
+                &env,
+                config,
+                None,
+                None,
+            )?;
         }
 
         // Define the function
@@ -1349,7 +1363,12 @@ impl Compiler<'_> {
             let env = compile_env!(self, source_file_ptr);
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
-            let config = FunctionCompileConfig::method(&method.body, params, self_binding, Some(return_type_id));
+            let config = FunctionCompileConfig::method(
+                &method.body,
+                params,
+                self_binding,
+                Some(return_type_id),
+            );
             compile_function_inner_with_params(
                 builder,
                 &mut codegen_ctx,
@@ -1383,62 +1402,64 @@ impl Compiler<'_> {
             "build_concrete_self_type_id"
         );
 
-        // Try to get NameId for this type
-        if let Some(name_id) = query.try_name_id(module_id, &[type_name]) {
-            tracing::debug!(name_id = ?name_id, "found name_id");
-            // Look up the TypeDef
-            if let Some(type_def_id) = query.try_type_def_id(name_id) {
-                let type_def = query.get_type(type_def_id);
+        // Try to get NameId and TypeDefId for this type
+        let type_def_id = query
+            .try_name_id(module_id, &[type_name])
+            .and_then(|name_id| {
+                tracing::debug!(name_id = ?name_id, "found name_id");
+                query.try_type_def_id(name_id)
+            });
+
+        if let Some(type_def_id) = type_def_id {
+            let type_def = query.get_type(type_def_id);
+            tracing::debug!(
+                type_def_id = ?type_def_id,
+                has_generic_info = type_def.generic_info.is_some(),
+                "found type_def"
+            );
+
+            // If it has generic_info, use it to build the type with proper TypeParam substitution
+            if let Some(generic_info) = &type_def.generic_info {
                 tracing::debug!(
-                    type_def_id = ?type_def_id,
-                    has_generic_info = type_def.generic_info.is_some(),
-                    "found type_def"
+                    field_types = ?generic_info.field_types,
+                    "using generic_info"
                 );
 
-                // If it has generic_info, use it to build the type with proper TypeParam substitution
-                if let Some(generic_info) = &type_def.generic_info {
-                    tracing::debug!(
-                        field_types = ?generic_info.field_types,
-                        "using generic_info"
-                    );
+                // Build type_args from substituted type params (TypeId-native)
+                let type_args_id: TypeIdVec = generic_info
+                    .type_params
+                    .iter()
+                    .map(|param| {
+                        substitutions
+                            .get(&param.name_id)
+                            .copied()
+                            .unwrap_or_else(|| {
+                                self.analyzed.type_arena_mut().type_param(param.name_id)
+                            })
+                    })
+                    .collect();
 
-                    // Build type_args from substituted type params (TypeId-native)
-                    let type_args_id: TypeIdVec = generic_info
-                        .type_params
-                        .iter()
-                        .map(|param| {
-                            substitutions
-                                .get(&param.name_id)
-                                .copied()
-                                .unwrap_or_else(|| {
-                                    self.analyzed.type_arena_mut().type_param(param.name_id)
-                                })
-                        })
-                        .collect();
+                // Determine if it's a class or record based on TypeDefKind
+                let update = vole_sema::ProgramUpdate::new(self.analyzed.type_arena_ref());
+                return match &type_def.kind {
+                    TypeDefKind::Record => update.record(type_def_id, type_args_id),
+                    TypeDefKind::Class => update.class(type_def_id, type_args_id),
+                    _ => update.record(type_def_id, type_args_id), // Fallback
+                };
+            }
 
-                    // Determine if it's a class or record based on TypeDefKind
-                    let update = vole_sema::ProgramUpdate::new(self.analyzed.type_arena_ref());
-                    return match &type_def.kind {
-                        TypeDefKind::Record => update.record(type_def_id, type_args_id),
-                        TypeDefKind::Class => update.class(type_def_id, type_args_id),
-                        _ => update.record(type_def_id, type_args_id), // Fallback
-                    };
-                }
+            // Non-generic type: use type_metadata
+            if let Some(metadata) = self.state.type_metadata.get(&type_def_id) {
+                // Apply substitutions to the stored vole_type
+                let subs: FxHashMap<NameId, TypeId> =
+                    substitutions.iter().map(|(&k, &v)| (k, v)).collect();
+                return vole_sema::ProgramUpdate::new(self.analyzed.type_arena_ref())
+                    .substitute(metadata.vole_type, &subs);
             }
         }
 
-        // Fallback: use type_metadata (for non-generic types)
-        if let Some(metadata) = self.state.type_metadata.get(&type_name) {
-            // Apply substitutions to the stored vole_type
-            // Convert std HashMap to FxHashMap for type_arena
-            let subs: FxHashMap<NameId, TypeId> =
-                substitutions.iter().map(|(&k, &v)| (k, v)).collect();
-            vole_sema::ProgramUpdate::new(self.analyzed.type_arena_ref())
-                .substitute(metadata.vole_type, &subs)
-        } else {
-            // Final fallback
-            self.analyzed.type_arena().primitives.i64
-        }
+        // Final fallback (type not in entity registry or type_metadata)
+        self.analyzed.type_arena().primitives.i64
     }
 
     /// Declare all monomorphized static method instances
@@ -1564,9 +1585,10 @@ impl Compiler<'_> {
         self.jit.ctx.func.signature = sig;
 
         // Get method body
-        let body = method.body.as_ref().ok_or_else(|| {
-            format!("Internal error: static method {} has no body", mangled_name)
-        })?;
+        let body = method
+            .body
+            .as_ref()
+            .ok_or_else(|| format!("Internal error: static method {} has no body", mangled_name))?;
 
         // Create function builder and compile
         let source_file_ptr = self.source_file_ptr();

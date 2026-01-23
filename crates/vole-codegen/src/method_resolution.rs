@@ -2,8 +2,7 @@ use std::collections::HashMap;
 
 use crate::AnalyzedProgram;
 use crate::errors::CodegenError;
-use crate::types::{MethodInfo, method_name_id_by_str, type_metadata_by_name_id};
-use vole_frontend::Symbol;
+use crate::types::{MethodInfo, TypeMetadataMap, method_name_id_by_str, type_metadata_by_name_id};
 use vole_identity::{MethodId, NameId, TypeDefId};
 use vole_sema::PrimitiveType;
 use vole_sema::implement_registry::{ExternalMethodInfo, ImplTypeId};
@@ -47,7 +46,7 @@ pub(crate) enum MethodTarget {
 /// Method resolution input.
 pub(crate) struct MethodResolutionInputId<'a> {
     pub analyzed: &'a AnalyzedProgram,
-    pub type_metadata: &'a HashMap<Symbol, crate::types::TypeMetadata>,
+    pub type_metadata: &'a TypeMetadataMap,
     pub impl_method_infos: &'a HashMap<(ImplTypeId, NameId), MethodInfo>,
     pub method_name_str: &'a str,
     pub object_type_id: TypeId,

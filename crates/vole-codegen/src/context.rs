@@ -26,7 +26,7 @@ use vole_sema::type_arena::{SemaType as ArenaType, TypeId};
 
 use super::lambda::CaptureBinding;
 use super::types::{
-    CodegenCtx, CompileEnv, CompiledValue, native_type_to_cranelift, type_id_size,
+    CodegenCtx, CompileEnv, CompiledValue, TypeMetadataMap, native_type_to_cranelift, type_id_size,
     type_id_to_cranelift,
 };
 use vole_sema::type_arena::TypeIdVec;
@@ -314,7 +314,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Get type metadata map
     #[inline]
-    pub fn type_metadata(&self) -> &'ctx HashMap<Symbol, super::types::TypeMetadata> {
+    pub fn type_metadata(&self) -> &'ctx TypeMetadataMap {
         &self.env.state.type_metadata
     }
 
@@ -367,7 +367,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Alias for type_metadata (backward compat)
     #[inline]
-    pub fn type_meta(&self) -> &'ctx HashMap<Symbol, super::types::TypeMetadata> {
+    pub fn type_meta(&self) -> &'ctx TypeMetadataMap {
         &self.env.state.type_metadata
     }
 
@@ -629,27 +629,31 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.arena().unwrap_interface(ty).map(|(id, _)| id)
     }
 
-    /// Resolve a type name Symbol to its TypeDefId (for error types, etc.)
+    /// Resolve a type name Symbol to its TypeDefId using the full resolution chain.
     ///
-    /// This looks up type names by short name, searching through all registered types.
-    /// Callers should check the TypeDefKind if they need a specific kind.
+    /// This uses the same resolution path as sema: primitives, current module,
+    /// imports, builtin module, and interface/class fallback.
+    /// Note: We convert the Symbol to string first because the current interner
+    /// may be module-specific while the query uses the main program's interner.
     pub fn resolve_type(&self, sym: Symbol) -> Option<vole_identity::TypeDefId> {
         let name = self.interner().resolve(sym);
-        let name_table = self.name_table();
-        self.registry().type_by_short_name(name, &name_table)
+        let query = self.query();
+        let module_id = self
+            .current_module_id()
+            .unwrap_or_else(|| query.main_module());
+        query.resolve_type_def_by_str(module_id, name)
     }
 
-    /// Resolve a type name string to its TypeDefId, with fallback to interface/class search.
+    /// Resolve a type name string to its TypeDefId using the full resolution chain.
     ///
-    /// This tries direct resolution first, then falls back to searching by short name
-    /// through interfaces and classes.
+    /// This uses the same resolution path as sema: primitives, current module,
+    /// imports, builtin module, and interface/class fallback.
     pub fn resolve_type_str_or_interface(&self, name: &str) -> Option<vole_identity::TypeDefId> {
-        let name_table = self.name_table();
-        // Try interface first, then class, then any type by short name
-        self.registry()
-            .interface_by_short_name(name, &name_table)
-            .or_else(|| self.registry().class_by_short_name(name, &name_table))
-            .or_else(|| self.registry().type_by_short_name(name, &name_table))
+        let query = self.query();
+        let module_id = self
+            .current_module_id()
+            .unwrap_or_else(|| query.main_module());
+        query.resolve_type_def_by_str(module_id, name)
     }
 
     /// Get capture binding for a symbol, if any
@@ -1126,12 +1130,11 @@ impl<'a, 'b, 'ctx> crate::vtable_ctx::VtableCtx for Cg<'a, 'b, 'ctx> {
     }
 
     fn resolve_type_str_or_interface(&self, name: &str) -> Option<vole_identity::TypeDefId> {
-        let name_table = self.name_table();
-        // Try interface first, then class, then any type by short name
-        self.registry()
-            .interface_by_short_name(name, &name_table)
-            .or_else(|| self.registry().class_by_short_name(name, &name_table))
-            .or_else(|| self.registry().type_by_short_name(name, &name_table))
+        let query = self.query();
+        let module_id = self
+            .current_module_id()
+            .unwrap_or_else(|| query.main_module());
+        query.resolve_type_def_by_str(module_id, name)
     }
 
     fn native_registry(&self) -> &vole_runtime::NativeRegistry {
@@ -1142,7 +1145,7 @@ impl<'a, 'b, 'ctx> crate::vtable_ctx::VtableCtx for Cg<'a, 'b, 'ctx> {
         &self.env.state.interface_vtables
     }
 
-    fn type_metadata(&self) -> &HashMap<Symbol, super::types::TypeMetadata> {
+    fn type_metadata(&self) -> &TypeMetadataMap {
         &self.env.state.type_metadata
     }
 

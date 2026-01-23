@@ -5,7 +5,6 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 
-use vole_frontend::Symbol;
 use vole_identity::{NameId, TypeDefId};
 use vole_runtime::NativeRegistry;
 use vole_sema::implement_registry::ImplTypeId;
@@ -13,6 +12,10 @@ use vole_sema::implement_registry::ImplTypeId;
 use crate::interface_vtable::InterfaceVtableRegistry;
 
 use super::{MethodInfo, TypeMetadata};
+
+/// Type metadata lookup map.
+/// Keyed by TypeDefId for stable cross-interner identity.
+pub type TypeMetadataMap = HashMap<TypeDefId, TypeMetadata>;
 
 /// Grouped codegen lookup tables.
 ///
@@ -22,8 +25,8 @@ use super::{MethodInfo, TypeMetadata};
 /// Fields using interior mutability (RefCell, Cell) can be mutated through
 /// shared references during compilation.
 pub struct CodegenState {
-    /// Class and record metadata for struct literals, field access, and method calls
-    pub type_metadata: HashMap<Symbol, TypeMetadata>,
+    /// Class and record metadata for struct literals, field access, and method calls.
+    pub type_metadata: TypeMetadataMap,
     /// Implement block method info for primitive and named types
     pub impl_method_infos: HashMap<(ImplTypeId, NameId), MethodInfo>,
     /// Static method info keyed by (TypeDefId, method_name)

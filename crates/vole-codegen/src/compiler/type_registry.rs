@@ -90,7 +90,7 @@ impl Compiler<'_> {
             .class(type_def_id, TypeIdVec::new());
 
         self.state.type_metadata.insert(
-            class.name,
+            type_def_id,
             TypeMetadata {
                 type_id,
                 field_slots: HashMap::new(),
@@ -103,16 +103,23 @@ impl Compiler<'_> {
 
     /// Finalize a class type: fill in field types and declare methods
     pub(super) fn finalize_class(&mut self, class: &ClassDecl, program: &Program) {
+        let query = self.query();
+        let module_id = query.main_module();
+
+        // Look up TypeDefId first (needed as key for type_metadata)
+        let type_def_id = self
+            .query()
+            .try_name_id(module_id, &[class.name])
+            .and_then(|name_id| self.query().try_type_def_id(name_id))
+            .expect("class should be registered in entity registry");
+
         // Get the pre-registered type_id
         let type_id = self
             .state
             .type_metadata
-            .get(&class.name)
+            .get(&type_def_id)
             .expect("class should be pre-registered")
             .type_id;
-
-        let query = self.query();
-        let module_id = query.main_module();
 
         // Build field slots map (TypeId-native)
         let mut field_slots = HashMap::new();
@@ -131,12 +138,7 @@ impl Compiler<'_> {
         register_instance_type(type_id, field_type_tags);
 
         // Collect method return types (TypeId-native)
-        // Get the TypeDefId for looking up method signatures from sema
-        let type_def_id = self
-            .query()
-            .try_name_id(module_id, &[class.name])
-            .and_then(|name_id| self.query().try_type_def_id(name_id));
-
+        // type_def_id already looked up above
         let func_module_id = self.func_registry.main_module();
         let mut method_infos = HashMap::new();
         for method in &class.methods {
@@ -145,22 +147,16 @@ impl Compiler<'_> {
             // Get return type from EntityRegistry (handles inferred types) if no explicit return type
             let return_type = if let Some(ref return_type_expr) = method.return_type {
                 self.resolve_type_to_id(return_type_expr)
-            } else if let Some(type_def_id) = type_def_id {
+            } else if let Some(method_id) = self
+                .analyzed
+                .entity_registry()
+                .find_method_on_type(type_def_id, method_name_id)
+            {
                 // Look up the inferred return type from sema
-                if let Some(method_id) = self
-                    .analyzed
-                    .entity_registry()
-                    .find_method_on_type(type_def_id, method_name_id)
-                {
-                    let method_def = self.query().get_method(method_id);
-                    let arena = self.analyzed.type_arena();
-                    if let Some((_, ret_type_id, _)) =
-                        arena.unwrap_function(method_def.signature_id)
-                    {
-                        ret_type_id
-                    } else {
-                        TypeId::VOID
-                    }
+                let method_def = self.query().get_method(method_id);
+                let arena = self.analyzed.type_arena();
+                if let Some((_, ret_type_id, _)) = arena.unwrap_function(method_def.signature_id) {
+                    ret_type_id
                 } else {
                     TypeId::VOID
                 }
@@ -235,16 +231,15 @@ impl Compiler<'_> {
             self.register_static_methods(statics, class.name);
         }
 
-        // Reuse the vole_type_id and type_def_id from pre_register
-        let pre_registered = self
+        // Reuse the vole_type_id from pre_register (type_def_id already available)
+        let vole_type_id = self
             .state
             .type_metadata
-            .get(&class.name)
-            .expect("class should be pre-registered");
-        let vole_type_id = pre_registered.vole_type;
-        let type_def_id = pre_registered.type_def_id;
+            .get(&type_def_id)
+            .expect("class should be pre-registered")
+            .vole_type;
         self.state.type_metadata.insert(
-            class.name,
+            type_def_id,
             TypeMetadata {
                 type_id,
                 field_slots,
@@ -278,7 +273,7 @@ impl Compiler<'_> {
             .record(type_def_id, TypeIdVec::new());
 
         self.state.type_metadata.insert(
-            record.name,
+            type_def_id,
             TypeMetadata {
                 type_id,
                 field_slots: HashMap::new(),
@@ -291,16 +286,23 @@ impl Compiler<'_> {
 
     /// Finalize a record type: fill in field types and declare methods
     pub(super) fn finalize_record(&mut self, record: &RecordDecl, program: &Program) {
+        let query = self.query();
+        let module_id = query.main_module();
+
+        // Look up TypeDefId first (needed as key for type_metadata)
+        let type_def_id = self
+            .query()
+            .try_name_id(module_id, &[record.name])
+            .and_then(|name_id| self.query().try_type_def_id(name_id))
+            .expect("record should be registered in entity registry");
+
         // Get the pre-registered type_id
         let type_id = self
             .state
             .type_metadata
-            .get(&record.name)
+            .get(&type_def_id)
             .expect("record should be pre-registered")
             .type_id;
-
-        let query = self.query();
-        let module_id = query.main_module();
 
         // Build field slots map (TypeId-native)
         let mut field_slots = HashMap::new();
@@ -395,16 +397,15 @@ impl Compiler<'_> {
             self.register_static_methods(statics, record.name);
         }
 
-        // Reuse the vole_type_id and type_def_id from pre_register
-        let pre_registered = self
+        // Reuse the vole_type_id from pre_register (type_def_id already available)
+        let vole_type_id = self
             .state
             .type_metadata
-            .get(&record.name)
-            .expect("record should be pre-registered");
-        let vole_type_id = pre_registered.vole_type;
-        let type_def_id = pre_registered.type_def_id;
+            .get(&type_def_id)
+            .expect("record should be pre-registered")
+            .vole_type;
         self.state.type_metadata.insert(
-            record.name,
+            type_def_id,
             TypeMetadata {
                 type_id,
                 field_slots,
@@ -491,31 +492,18 @@ impl Compiler<'_> {
         let type_name_str = module_interner.resolve(class.name);
         tracing::debug!(type_name = %type_name_str, "finalize_module_class called");
 
-        // Look up the TypeDefId using the class name
+        // Look up the TypeDefId using the class name via full resolution chain
         tracing::debug!(type_name = %type_name_str, "Looking up TypeDefId for module class");
-        let Some(type_def_id) = self
-            .analyzed
-            .entity_registry()
-            .class_by_short_name(type_name_str, &self.analyzed.name_table())
-        else {
+        let query = self.query();
+        let module_id = query.main_module();
+        let Some(type_def_id) = query.resolve_type_def_by_str(module_id, type_name_str) else {
             tracing::warn!(type_name = %type_name_str, "Could not find TypeDefId for module class");
             return;
         };
         tracing::debug!(type_name = %type_name_str, ?type_def_id, "Found TypeDefId for module class");
 
-        // Skip if already registered - check by type name string to avoid Symbol collisions across interners
-        let already_registered = self.state.type_metadata.values().any(|meta| {
-            let arena = self.analyzed.type_arena();
-            if let Some((type_def_id, _)) = arena.unwrap_class(meta.vole_type) {
-                self.analyzed
-                    .name_table()
-                    .last_segment_str(self.query().type_name_id(type_def_id))
-                    .is_some_and(|name| name == type_name_str)
-            } else {
-                false
-            }
-        });
-        if already_registered {
+        // Skip if already registered (TypeDefId key ensures no cross-interner collisions)
+        if self.state.type_metadata.contains_key(&type_def_id) {
             tracing::debug!(type_name = %type_name_str, "Skipping - already registered in type_metadata");
             return;
         }
@@ -574,22 +562,14 @@ impl Compiler<'_> {
         }
         tracing::debug!(type_name = %type_name_str, registered_count = method_infos.len(), "Finished registering instance methods");
 
-        // Register type metadata
-        // IMPORTANT: Use the main interner's Symbol for the class name, not the module's Symbol.
-        // Module classes have Symbols from their own interners which may collide (e.g., both
-        // Set and Map might have their class name as Symbol(0) in their respective interners).
-        let main_class_symbol = self
-            .analyzed
-            .interner
-            .lookup(type_name_str)
-            .unwrap_or(class.name);
-        tracing::debug!(type_name = %type_name_str, ?class.name, ?main_class_symbol, "Inserting type_metadata");
+        // Register type metadata (keyed by TypeDefId - no cross-interner Symbol collision issues)
+        tracing::debug!(type_name = %type_name_str, ?type_def_id, "Inserting type_metadata");
         let vole_type_id = self
             .analyzed
             .type_arena_mut()
             .class(type_def_id, TypeIdVec::new());
         self.state.type_metadata.insert(
-            main_class_symbol,
+            type_def_id,
             TypeMetadata {
                 type_id,
                 field_slots,

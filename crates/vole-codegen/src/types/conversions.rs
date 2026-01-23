@@ -17,6 +17,7 @@ use vole_sema::entity_defs::TypeDefKind;
 use vole_sema::type_arena::{TypeArena, TypeId, TypeIdVec};
 use vole_sema::{EntityRegistry, PrimitiveType, ResolverEntityExt};
 
+use super::codegen_state::TypeMetadataMap;
 use super::{FunctionCtx, TypeCtx};
 
 /// Compiled value with its type
@@ -64,7 +65,7 @@ pub(crate) struct MethodInfo {
 /// Look up TypeMetadata by NameId (cross-interner safe)
 /// Returns the TypeMetadata for a class/record with the given name_id
 pub(crate) fn type_metadata_by_name_id<'a>(
-    type_metadata: &'a HashMap<Symbol, TypeMetadata>,
+    type_metadata: &'a TypeMetadataMap,
     name_id: NameId,
     entity_registry: &EntityRegistry,
     arena: &TypeArena,
@@ -115,7 +116,7 @@ pub(crate) fn resolve_type_expr_id(
     ty: &TypeExpr,
     type_ctx: &TypeCtx,
     func_ctx: &FunctionCtx,
-    type_metadata: &HashMap<Symbol, TypeMetadata>,
+    type_metadata: &TypeMetadataMap,
 ) -> TypeId {
     let name_table = type_ctx.name_table_rc().borrow();
     let module_id = func_ctx
@@ -190,7 +191,7 @@ pub(crate) fn function_name_id_with_interner(
 pub(crate) fn resolve_type_expr_with_ctx(
     ty: &TypeExpr,
     type_ctx: &TypeCtx,
-    type_metadata: &HashMap<Symbol, TypeMetadata>,
+    type_metadata: &TypeMetadataMap,
     module_id: ModuleId,
 ) -> TypeId {
     let entity_registry = type_ctx.entities();
@@ -214,13 +215,12 @@ pub(crate) fn resolve_type_expr_with_ctx(
 pub(crate) fn resolve_type_expr_to_id(
     ty: &TypeExpr,
     entity_registry: &EntityRegistry,
-    type_metadata: &HashMap<Symbol, TypeMetadata>,
+    type_metadata: &TypeMetadataMap,
     interner: &Interner,
     name_table: &NameTable,
     module_id: ModuleId,
     arena: &Rc<RefCell<TypeArena>>,
 ) -> TypeId {
-    use vole_sema::type_arena::SemaType;
     use vole_sema::types::primitive::PrimitiveType as SemaPrimitive;
     let update = vole_sema::ProgramUpdate::new(arena);
 
@@ -277,24 +277,9 @@ pub(crate) fn resolve_type_expr_to_id(
                     }
                     TypeDefKind::ErrorType => update.error_type(type_def_id),
                     TypeDefKind::Record | TypeDefKind::Class => {
-                        // For Record and Class types, first try direct lookup by Symbol
-                        if let Some(metadata) = type_metadata.get(sym) {
-                            // Verify this is the right type by comparing type_def_ids
-                            let matches = {
-                                let arena_ref = arena.borrow();
-                                match arena_ref.get(metadata.vole_type) {
-                                    SemaType::Record {
-                                        type_def_id: id, ..
-                                    } => *id == type_def_id,
-                                    SemaType::Class {
-                                        type_def_id: id, ..
-                                    } => *id == type_def_id,
-                                    _ => false,
-                                }
-                            };
-                            if matches {
-                                return metadata.vole_type;
-                            }
+                        // For Record and Class types, look up by TypeDefId (no verification needed)
+                        if let Some(metadata) = type_metadata.get(&type_def_id) {
+                            return metadata.vole_type;
                         }
                         // Build from entity registry
                         if type_def.kind == TypeDefKind::Record {
@@ -304,9 +289,9 @@ pub(crate) fn resolve_type_expr_to_id(
                         }
                     }
                     _ => {
-                        // Primitive or unknown - check type metadata
+                        // Primitive or unknown - check type metadata by TypeDefId
                         type_metadata
-                            .get(sym)
+                            .get(&type_def_id)
                             .map(|m| m.vole_type)
                             .unwrap_or_else(|| {
                                 panic!(
@@ -317,9 +302,8 @@ pub(crate) fn resolve_type_expr_to_id(
                             })
                     }
                 }
-            } else if let Some(metadata) = type_metadata.get(sym) {
-                metadata.vole_type
             } else {
+                // No type_def_id found - must be a type parameter
                 // Type parameter - use placeholder
                 let name = interner.resolve(*sym);
                 tracing::trace!(name, "type parameter in codegen, using Placeholder");

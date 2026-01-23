@@ -97,14 +97,28 @@ impl Compiler<'_> {
         data: TypeMethodsData<'_>,
         program: &vole_frontend::Program,
     ) -> Result<(), String> {
+        // Look up TypeDefId from name (needed as key for type_metadata)
+        let query = self.query();
+        let module_id = query.main_module();
+        let type_def_id = query
+            .try_name_id(module_id, &[data.name])
+            .and_then(|name_id| query.try_type_def_id(name_id))
+            .ok_or_else(|| {
+                format!(
+                    "Internal error: {} {} not found in entity registry",
+                    data.type_kind,
+                    self.query().resolve_symbol(data.name)
+                )
+            })?;
+
         let metadata = self
             .state
             .type_metadata
-            .get(&data.name)
+            .get(&type_def_id)
             .cloned()
             .ok_or_else(|| {
                 format!(
-                    "Internal error: {} {} not registered",
+                    "Internal error: {} {} not registered in type_metadata",
                     data.type_kind,
                     self.query().resolve_symbol(data.name)
                 )
@@ -352,41 +366,56 @@ impl Compiler<'_> {
 
         // For named types (records/classes), look up in type_metadata since they're not in type_aliases
         // Get type_id directly from metadata to avoid to_type() conversion
-        let (self_type_id, impl_type_id) = match &impl_block.target_type {
-            TypeExpr::Primitive(p) => {
-                let prim_type = vole_sema::PrimitiveType::from_ast(*p);
-                let type_id = self.analyzed.type_arena().primitive(prim_type);
-                let impl_id = self.impl_type_id_from_type_id(type_id);
-                (type_id, impl_id)
-            }
-            TypeExpr::Named(sym) => {
-                let metadata = self.state.type_metadata.get(sym).unwrap_or_else(|| {
-                    panic!(
-                        "INTERNAL ERROR: implement block target type not in type_metadata\n\
-                         sym: {:?}",
-                        sym
-                    )
-                });
-                // Use TypeId directly
-                let impl_id = self.impl_type_id_from_type_id(metadata.vole_type);
-                (metadata.vole_type, impl_id)
-            }
-            _ => {
-                let name_table = self.analyzed.name_table();
-                let type_id = resolve_type_expr_to_id(
-                    &impl_block.target_type,
-                    self.analyzed.entity_registry(),
-                    &self.state.type_metadata,
-                    interner,
-                    &name_table,
-                    module_id,
-                    self.analyzed.type_arena_ref(),
-                );
-                drop(name_table);
-                let impl_id = self.impl_type_id_from_type_id(type_id);
-                (type_id, impl_id)
-            }
-        };
+        let (self_type_id, impl_type_id) =
+            match &impl_block.target_type {
+                TypeExpr::Primitive(p) => {
+                    let prim_type = vole_sema::PrimitiveType::from_ast(*p);
+                    let type_id = self.analyzed.type_arena().primitive(prim_type);
+                    let impl_id = self.impl_type_id_from_type_id(type_id);
+                    (type_id, impl_id)
+                }
+                TypeExpr::Named(sym) => {
+                    // Look up TypeDefId from Symbol
+                    let type_def_id = self
+                    .query()
+                    .try_name_id(module_id, &[*sym])
+                    .and_then(|name_id| self.query().try_type_def_id(name_id))
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "INTERNAL ERROR: implement block target type not in entity registry\n\
+                             sym: {:?}",
+                            sym
+                        )
+                    });
+                    let metadata = self.state.type_metadata.get(&type_def_id).unwrap_or_else(
+                        || {
+                            panic!(
+                                "INTERNAL ERROR: implement block target type not in type_metadata\n\
+                         type_def_id: {:?}",
+                                type_def_id
+                            )
+                        },
+                    );
+                    // Use TypeId directly
+                    let impl_id = self.impl_type_id_from_type_id(metadata.vole_type);
+                    (metadata.vole_type, impl_id)
+                }
+                _ => {
+                    let name_table = self.analyzed.name_table();
+                    let type_id = resolve_type_expr_to_id(
+                        &impl_block.target_type,
+                        self.analyzed.entity_registry(),
+                        &self.state.type_metadata,
+                        interner,
+                        &name_table,
+                        module_id,
+                        self.analyzed.type_arena_ref(),
+                    );
+                    drop(name_table);
+                    let impl_id = self.impl_type_id_from_type_id(type_id);
+                    (type_id, impl_id)
+                }
+            };
 
         // Declare methods as functions: TypeName::methodName (implement block convention)
         for method in &impl_block.methods {
@@ -492,18 +521,31 @@ impl Compiler<'_> {
                 let prim_type = vole_sema::PrimitiveType::from_ast(*p);
                 self.analyzed.type_arena().primitive(prim_type)
             }
-            TypeExpr::Named(sym) => self
-                .state
-                .type_metadata
-                .get(sym)
-                .map(|m| m.vole_type)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "INTERNAL ERROR: implement block self type not in type_metadata\n\
-                         sym: {:?}",
-                        sym
-                    )
-                }),
+            TypeExpr::Named(sym) => {
+                let module_id = self.query().main_module();
+                let type_def_id = self
+                    .query()
+                    .try_name_id(module_id, &[*sym])
+                    .and_then(|name_id| self.query().try_type_def_id(name_id))
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "INTERNAL ERROR: implement block self type not in entity registry\n\
+                             sym: {:?}",
+                            sym
+                        )
+                    });
+                self.state
+                    .type_metadata
+                    .get(&type_def_id)
+                    .map(|m| m.vole_type)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "INTERNAL ERROR: implement block self type not in type_metadata\n\
+                             type_def_id: {:?}",
+                            type_def_id
+                        )
+                    })
+            }
             _ => {
                 let name_table = self.analyzed.name_table();
                 resolve_type_expr_to_id(
@@ -964,8 +1006,20 @@ impl Compiler<'_> {
             let env = compile_env!(self, source_file_ptr);
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
-            let config = FunctionCompileConfig::method(body, params, self_binding, Some(return_type_id_from_sema));
-            compile_function_inner_with_params(builder, &mut codegen_ctx, &env, config, None, None)?;
+            let config = FunctionCompileConfig::method(
+                body,
+                params,
+                self_binding,
+                Some(return_type_id_from_sema),
+            );
+            compile_function_inner_with_params(
+                builder,
+                &mut codegen_ctx,
+                &env,
+                config,
+                None,
+                None,
+            )?;
         }
 
         // Define the function
@@ -1045,7 +1099,14 @@ impl Compiler<'_> {
                     CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
                 let config = FunctionCompileConfig::top_level(body, params, Some(return_type_id));
-                compile_function_inner_with_params(builder, &mut codegen_ctx, &env, config, None, None)?;
+                compile_function_inner_with_params(
+                    builder,
+                    &mut codegen_ctx,
+                    &env,
+                    config,
+                    None,
+                    None,
+                )?;
             }
 
             // Define the function
@@ -1168,7 +1229,12 @@ impl Compiler<'_> {
                 let mut codegen_ctx =
                     CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
-                let config = FunctionCompileConfig::method(&method.body, params, self_binding, return_type_id);
+                let config = FunctionCompileConfig::method(
+                    &method.body,
+                    params,
+                    self_binding,
+                    return_type_id,
+                );
                 compile_function_inner_with_params(
                     builder,
                     &mut codegen_ctx,
