@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use cranelift::prelude::Type;
 use cranelift_jit::JITModule;
 
-use crate::types::{CodegenCtx, ExplicitParams, FunctionCtx, MethodInfo, TypeCtx, TypeMetadata};
+use crate::types::{CodegenCtx, FunctionCtx, GlobalCtx, MethodInfo, TypeCtx, TypeMetadata};
 use crate::{AnalyzedProgram, FunctionRegistry};
 use vole_frontend::{Expr, Interner, Symbol};
 use vole_identity::{ModuleId, NameId, TypeDefId};
@@ -20,7 +20,7 @@ use vole_sema::type_arena::TypeId;
 
 /// Factory for creating compilation contexts.
 ///
-/// Centralizes the construction of TypeCtx, CodegenCtx, FunctionCtx, ExplicitParams,
+/// Centralizes the construction of TypeCtx, CodegenCtx, FunctionCtx, GlobalCtx,
 /// and the legacy CompileCtx. This avoids divergent call-site wiring and ensures
 /// consistent context creation across the codebase.
 ///
@@ -37,7 +37,7 @@ use vole_sema::type_arena::TypeId;
 /// // Build contexts as needed
 /// let type_ctx = factory.type_ctx();
 /// let function_ctx = FunctionCtx::main(return_type);
-/// let explicit_params = factory.explicit_params();
+/// let global = factory.global();
 ///
 /// // Or build a legacy CompileCtx for compatibility
 /// let mut compile_ctx = factory.compile_ctx(return_type, None, None);
@@ -129,10 +129,10 @@ impl<'a> CtxFactory<'a> {
         TypeCtx::new(self.query(), self.pointer_type)
     }
 
-    /// Build ExplicitParams - shared read-only lookup tables.
+    /// Build GlobalCtx - shared read-only lookup tables.
     #[must_use]
-    pub fn explicit_params(&self) -> ExplicitParams<'_> {
-        ExplicitParams {
+    pub fn global(&self) -> GlobalCtx<'_> {
+        GlobalCtx {
             analyzed: self.analyzed,
             interner: self.interner,
             type_metadata: self.type_metadata,
@@ -185,7 +185,7 @@ impl<'a> CtxFactory<'a> {
     //
     // For legacy compatibility, callers should:
     // 1. Use the factory's fields directly to construct CompileCtx, OR
-    // 2. Use the split contexts (TypeCtx, FunctionCtx, ExplicitParams) with Cg::new_split
+    // 2. Use the split contexts (TypeCtx, FunctionCtx, GlobalCtx) with Cg::new_split
     //
     // Example legacy construction:
     // ```
@@ -199,20 +199,18 @@ impl<'a> CtxFactory<'a> {
     // ```
 }
 
-/// Builder for creating a CodegenCtx.
+/// Builder for creating a JitCtx.
 ///
-/// This is separate from CtxFactory because CodegenCtx takes mutable references
+/// This is separate from CtxFactory because JitCtx takes mutable references
 /// to module and func_registry, which creates borrowing challenges.
-/// Use this when you need direct access to CodegenCtx without going through
+/// Use this when you need direct access to JitCtx without going through
 /// the full CtxFactory.
 #[allow(dead_code)] // Used during migration
-pub(crate) fn build_codegen_ctx<'a>(
-    query: ProgramQuery<'a>,
-    pointer_type: Type,
+pub(crate) fn build_jit_ctx<'a>(
     module: &'a mut JITModule,
     func_registry: &'a mut FunctionRegistry,
 ) -> CodegenCtx<'a> {
-    CodegenCtx::new(query, pointer_type, module, func_registry)
+    CodegenCtx::new(module, func_registry)
 }
 
 #[cfg(test)]

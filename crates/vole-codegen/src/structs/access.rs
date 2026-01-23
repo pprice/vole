@@ -106,8 +106,8 @@ impl Cg<'_, '_, '_> {
 
         let result_raw = self.get_field_cached(obj.value, slot as u32)?;
 
-        // Borrow arena from explicit_params directly to avoid borrow conflict
-        let arena = self.explicit_params.analyzed.type_arena();
+        // Borrow arena from global directly to avoid borrow conflict
+        let arena = self.global.analyzed.type_arena();
         let (result_val, cranelift_ty) =
             convert_field_value_id(self.builder, result_raw, field_type_id, &arena);
         drop(arena);
@@ -212,8 +212,8 @@ impl Cg<'_, '_, '_> {
         // Get field from the inner object
         let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
         let field_raw = self.call_runtime(RuntimeFn::InstanceGetField, &[inner_obj, slot_val])?;
-        // Borrow arena from explicit_params directly to avoid borrow conflict
-        let arena = self.explicit_params.analyzed.type_arena();
+        // Borrow arena from global directly to avoid borrow conflict
+        let arena = self.global.analyzed.type_arena();
         let (field_val, field_cranelift_ty) =
             convert_field_value_id(self.builder, field_raw, field_type_id, &arena);
         drop(arena);

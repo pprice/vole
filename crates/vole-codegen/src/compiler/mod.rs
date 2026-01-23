@@ -115,11 +115,11 @@ impl<'a> Compiler<'a> {
         crate::types::TypeCtx::new(query, self.pointer_type)
     }
 
-    /// Get ExplicitParams - shared lookup tables for codegen.
+    /// Get GlobalCtx - shared lookup tables for codegen.
     /// This bundles the read-only data that's shared across all function compilations.
     #[allow(dead_code)] // Part of CompileCtx migration
-    fn explicit_params(&self) -> crate::types::ExplicitParams<'_> {
-        crate::types::ExplicitParams {
+    fn global(&self) -> crate::types::GlobalCtx<'_> {
+        crate::types::GlobalCtx {
             analyzed: self.analyzed,
             interner: &self.analyzed.interner,
             type_metadata: &self.type_metadata,

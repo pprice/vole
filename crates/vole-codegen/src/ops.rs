@@ -591,8 +591,8 @@ impl Cg<'_, '_, '_> {
 
         // Load current element
         let raw_value = self.call_runtime(RuntimeFn::ArrayGetValue, &[arr.value, idx.value])?;
-        // Borrow arena from explicit_params directly to avoid borrow conflict
-        let arena = self.explicit_params.analyzed.type_arena();
+        // Borrow arena from global directly to avoid borrow conflict
+        let arena = self.global.analyzed.type_arena();
         let (current_val, current_ty) =
             convert_field_value_id(self.builder, raw_value, elem_type_id, &arena);
         drop(arena);
@@ -645,8 +645,8 @@ impl Cg<'_, '_, '_> {
         let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
         let current_raw = self.call_runtime(RuntimeFn::InstanceGetField, &[obj.value, slot_val])?;
 
-        // Borrow arena from explicit_params directly to avoid borrow conflict
-        let arena = self.explicit_params.analyzed.type_arena();
+        // Borrow arena from global directly to avoid borrow conflict
+        let arena = self.global.analyzed.type_arena();
         let (current_val, cranelift_ty) =
             convert_field_value_id(self.builder, current_raw, field_type_id, &arena);
         drop(arena);

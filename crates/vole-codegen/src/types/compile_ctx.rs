@@ -33,7 +33,7 @@ use super::{FunctionCtx, MethodInfo, TypeCtx, TypeMetadata};
 /// - [`TypeCtx`] for read-only program queries (arena, interner, name table)
 /// - [`CodegenCtx`] for mutable JIT infrastructure (module, func registry)
 /// - [`FunctionCtx`] for per-function state (return type, substitutions)
-/// - [`ExplicitParams`] for shared read-only registries
+/// - [`GlobalCtx`] for shared read-only registries
 /// - [`Cg`](crate::context::Cg) wraps all the above for function body compilation
 ///
 /// ## Migration Guide
@@ -233,8 +233,8 @@ impl<'a> CompileCtx<'a> {
         self.current_module
     }
 
-    // ========== ExplicitParams delegation methods ==========
-    // These methods provide access to fields that will move to ExplicitParams.
+    // ========== GlobalCtx delegation methods ==========
+    // These methods provide access to fields that will move to GlobalCtx.
 
     /// Get source file pointer for error reporting.
     #[inline]
@@ -248,12 +248,12 @@ impl<'a> CompileCtx<'a> {
         self.global_inits.get(&name)
     }
 
-    /// Increment lambda counter and return the new value.
+    /// Get current lambda counter and increment it (returns value before increment).
     #[inline]
     pub fn next_lambda_id(&self) -> usize {
-        let next = self.lambda_counter.get() + 1;
-        self.lambda_counter.set(next);
-        next
+        let id = self.lambda_counter.get();
+        self.lambda_counter.set(id + 1);
+        id
     }
 
     // ========== Registry field delegation methods ==========
@@ -293,18 +293,13 @@ impl<'a> CompileCtx<'a> {
         self.func_registry
     }
 
-    /// Create a CodegenCtx by reborrowing fields from CompileCtx.
+    /// Create a JitCtx by reborrowing fields from CompileCtx.
     ///
-    /// This is a transition helper for migrating from CompileCtx to CodegenCtx.
-    /// The returned CodegenCtx has a lifetime tied to the mutable borrow of self.
+    /// This is a transition helper for migrating from CompileCtx to JitCtx.
+    /// The returned JitCtx has a lifetime tied to the mutable borrow of self.
     #[inline]
     pub fn as_codegen_ctx(&mut self) -> super::CodegenCtx<'_> {
-        super::CodegenCtx::new(
-            self.analyzed.query(),
-            self.ptr_type(),
-            self.module,
-            self.func_registry,
-        )
+        super::CodegenCtx::new(self.module, self.func_registry)
     }
 }
 

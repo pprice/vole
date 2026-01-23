@@ -396,7 +396,7 @@ impl Cg<'_, '_, '_> {
                 // Method returned i64 (TypeParam) but we expect a different type
                 let ptr_type = self.ptr_type();
                 let registry = self.registry();
-                let arena = self.explicit_params.analyzed.type_arena();
+                let arena = self.global.analyzed.type_arena();
                 let converted = word_to_value_type_id(
                     self.builder,
                     actual_result,
@@ -886,7 +886,7 @@ impl Cg<'_, '_, '_> {
             .copied()
             .ok_or_else(|| "interface call missing return value".to_string())?;
         let registry = self.registry();
-        let arena = self.explicit_params.analyzed.type_arena();
+        let arena = self.global.analyzed.type_arena();
         let value = word_to_value_type_id(
             self.builder,
             word,

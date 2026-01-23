@@ -15,7 +15,7 @@ use crate::RuntimeFn;
 use crate::context::{Cg, ControlFlow};
 use crate::stmt::compile_func_body_with_params;
 use crate::types::{
-    CompileCtx, ExplicitParams, FunctionCtx, function_name_id_with_interner,
+    CodegenCtx, CompileCtx, FunctionCtx, GlobalCtx, function_name_id_with_interner,
     resolve_type_expr_to_id, type_id_to_cranelift,
 };
 use vole_frontend::{
@@ -534,7 +534,7 @@ impl Compiler<'_> {
 
             // Create split contexts for the new compilation path
             let function_ctx = FunctionCtx::module(return_type_id, module_id);
-            let explicit_params = ExplicitParams {
+            let global = GlobalCtx {
                 analyzed: self.analyzed,
                 interner: module_interner, // Module-specific interner
                 type_metadata: &self.type_metadata,
@@ -547,19 +547,14 @@ impl Compiler<'_> {
                 lambda_counter: &self.lambda_counter,
             };
 
-            let mut codegen_ctx = crate::types::CodegenCtx::new(
-                self.analyzed.query(),
-                self.pointer_type,
-                &mut self.jit.module,
-                &mut self.func_registry,
-            );
+            let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
             let config = FunctionCompileConfig::top_level(&func.body, params, return_type_id);
             compile_function_inner_with_params(
                 builder,
                 &mut codegen_ctx,
                 &function_ctx,
-                &explicit_params,
+                &global,
                 config,
             )?;
         }
@@ -620,7 +615,7 @@ impl Compiler<'_> {
 
             // Create split contexts for the new compilation path
             let function_ctx = FunctionCtx::main(return_type_id);
-            let explicit_params = ExplicitParams {
+            let global = GlobalCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
                 type_metadata: &self.type_metadata,
@@ -633,19 +628,14 @@ impl Compiler<'_> {
                 lambda_counter: &self.lambda_counter,
             };
 
-            let mut codegen_ctx = crate::types::CodegenCtx::new(
-                self.analyzed.query(),
-                self.pointer_type,
-                &mut self.jit.module,
-                &mut self.func_registry,
-            );
+            let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
             let config = FunctionCompileConfig::top_level(&func.body, params, return_type_id);
             compile_function_inner_with_params(
                 builder,
                 &mut codegen_ctx,
                 &function_ctx,
-                &explicit_params,
+                &global,
                 config,
             )?;
         }
@@ -741,7 +731,7 @@ impl Compiler<'_> {
 
             // Create split contexts for the new compilation path
             let function_ctx = FunctionCtx::main(Some(return_type_id));
-            let explicit_params = ExplicitParams {
+            let global = GlobalCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
                 type_metadata: &self.type_metadata,
@@ -754,12 +744,7 @@ impl Compiler<'_> {
                 lambda_counter: &self.lambda_counter,
             };
 
-            let mut codegen_ctx = crate::types::CodegenCtx::new(
-                self.analyzed.query(),
-                self.pointer_type,
-                &mut self.jit.module,
-                &mut self.func_registry,
-            );
+            let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
             // Use pure lambda config (skip_block_params=1 for closure ptr)
             let config = FunctionCompileConfig::pure_lambda(&func.body, params, return_type_id);
@@ -767,7 +752,7 @@ impl Compiler<'_> {
                 builder,
                 &mut codegen_ctx,
                 &function_ctx,
-                &explicit_params,
+                &global,
                 config,
             )?;
         }
@@ -842,7 +827,7 @@ impl Compiler<'_> {
 
                 // Create split contexts for the new compilation path
                 let function_ctx = FunctionCtx::test();
-                let explicit_params = ExplicitParams {
+                let global = GlobalCtx {
                     analyzed: self.analyzed,
                     interner: &self.analyzed.interner,
                     type_metadata: &self.type_metadata,
@@ -931,7 +916,7 @@ impl Compiler<'_> {
                         &mut cf,
                         &mut codegen_ctx,
                         &function_ctx,
-                        &explicit_params,
+                        &global,
                         None,
                         None,
                     );
@@ -942,14 +927,15 @@ impl Compiler<'_> {
                 // Note: For FuncBody::Expr, terminated=true but the block isn't actually
                 // terminated (no return instruction). For FuncBody::Block, terminated=true
                 // only if there's an explicit return/break. So we check both.
+                let mut codegen_ctx = ctx.as_codegen_ctx();
                 let (block_terminated, expr_value) = compile_func_body_with_params(
                     &mut builder,
                     &test.body,
                     &mut variables,
                     &mut cf_ctx,
-                    &mut ctx,
+                    &mut codegen_ctx,
                     &function_ctx,
-                    &explicit_params,
+                    &global,
                     None, // no captures
                     None, // no nested return type
                 )?;
@@ -1127,7 +1113,7 @@ impl Compiler<'_> {
 
             // Create split contexts for the new compilation path
             let function_ctx = FunctionCtx::main(return_type_id);
-            let explicit_params = ExplicitParams {
+            let global = GlobalCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
                 type_metadata: &empty_type_metadata,
@@ -1140,34 +1126,16 @@ impl Compiler<'_> {
                 lambda_counter: &self.lambda_counter,
             };
 
-            // CompileCtx still needed for mutable JIT infrastructure
-            let mut ctx = CompileCtx {
-                analyzed: self.analyzed,
-                interner: &self.analyzed.interner,
-                module: &mut self.jit.module,
-                func_registry: &mut self.func_registry,
-                source_file_ptr,
-                global_inits: &empty_global_inits,
-                lambda_counter: &self.lambda_counter,
-                type_metadata: &empty_type_metadata,
-                impl_method_infos: &self.impl_method_infos,
-                static_method_infos: &self.static_method_infos,
-                interface_vtables: &self.interface_vtables,
-                current_function_return_type: return_type_id,
-                native_registry: &self.native_registry,
-                current_module: None,
-                type_substitutions: None,
-                substitution_cache: RefCell::new(HashMap::new()),
-            };
+            let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
             let (terminated, expr_value) = compile_func_body_with_params(
                 &mut builder,
                 &func.body,
                 &mut variables,
                 &mut cf_ctx,
-                &mut ctx,
+                &mut codegen_ctx,
                 &function_ctx,
-                &explicit_params,
+                &global,
                 None,
                 None,
             )?;
@@ -1217,7 +1185,7 @@ impl Compiler<'_> {
 
             // Create split contexts for the new compilation path
             let function_ctx = FunctionCtx::test();
-            let explicit_params = ExplicitParams {
+            let global = GlobalCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
                 type_metadata: &empty_type_metadata,
@@ -1230,34 +1198,16 @@ impl Compiler<'_> {
                 lambda_counter: &self.lambda_counter,
             };
 
-            // CompileCtx still needed for mutable JIT infrastructure
-            let mut ctx = CompileCtx {
-                analyzed: self.analyzed,
-                interner: &self.analyzed.interner,
-                module: &mut self.jit.module,
-                func_registry: &mut self.func_registry,
-                source_file_ptr,
-                global_inits: &empty_global_inits,
-                lambda_counter: &self.lambda_counter,
-                type_metadata: &empty_type_metadata,
-                impl_method_infos: &self.impl_method_infos,
-                static_method_infos: &self.static_method_infos,
-                interface_vtables: &self.interface_vtables,
-                current_function_return_type: None, // Tests don't have a declared return type
-                native_registry: &self.native_registry,
-                current_module: None,
-                type_substitutions: None,
-                substitution_cache: RefCell::new(HashMap::new()),
-            };
+            let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
             let (terminated, _) = compile_func_body_with_params(
                 &mut builder,
                 &test.body,
                 &mut variables,
                 &mut cf_ctx,
-                &mut ctx,
+                &mut codegen_ctx,
                 &function_ctx,
-                &explicit_params,
+                &global,
                 None, // no captures
                 None, // no nested return type
             )?;
@@ -1489,7 +1439,7 @@ impl Compiler<'_> {
 
             // Create split contexts for the new compilation path
             let function_ctx = FunctionCtx::main(Some(return_type_id));
-            let explicit_params = ExplicitParams {
+            let global = GlobalCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
                 type_metadata: &self.type_metadata,
@@ -1503,33 +1453,16 @@ impl Compiler<'_> {
             };
 
             // CompileCtx still needed for mutable JIT infrastructure
-            let mut ctx = CompileCtx {
-                analyzed: self.analyzed,
-                interner: &self.analyzed.interner,
-                module: &mut self.jit.module,
-                func_registry: &mut self.func_registry,
-                source_file_ptr,
-                global_inits: &self.global_inits,
-                lambda_counter: &self.lambda_counter,
-                type_metadata: &self.type_metadata,
-                impl_method_infos: &self.impl_method_infos,
-                static_method_infos: &self.static_method_infos,
-                interface_vtables: &self.interface_vtables,
-                current_function_return_type: Some(return_type_id),
-                native_registry: &self.native_registry,
-                current_module: None,
-                type_substitutions: None,
-                substitution_cache: RefCell::new(HashMap::new()),
-            };
+            let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
             let (terminated, expr_value) = compile_func_body_with_params(
                 &mut builder,
                 &func.body,
                 &mut variables,
                 &mut cf_ctx,
-                &mut ctx,
+                &mut codegen_ctx,
                 &function_ctx,
-                &explicit_params,
+                &global,
                 None,
                 None,
             )?;
@@ -1779,7 +1712,7 @@ impl Compiler<'_> {
             // Note: Uses monomorphized FunctionCtx for type substitutions
             let function_ctx =
                 FunctionCtx::monomorphized(Some(return_type_id), &instance.substitutions);
-            let explicit_params = ExplicitParams {
+            let global = GlobalCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
                 type_metadata: &self.type_metadata,
@@ -1792,34 +1725,16 @@ impl Compiler<'_> {
                 lambda_counter: &self.lambda_counter,
             };
 
-            // CompileCtx still needed for mutable JIT infrastructure
-            let mut ctx = CompileCtx {
-                analyzed: self.analyzed,
-                interner: &self.analyzed.interner,
-                module: &mut self.jit.module,
-                func_registry: &mut self.func_registry,
-                source_file_ptr,
-                global_inits: &self.global_inits,
-                lambda_counter: &self.lambda_counter,
-                type_metadata: &self.type_metadata,
-                impl_method_infos: &self.impl_method_infos,
-                static_method_infos: &self.static_method_infos,
-                interface_vtables: &self.interface_vtables,
-                current_function_return_type: Some(return_type_id),
-                native_registry: &self.native_registry,
-                current_module: None,
-                type_substitutions: Some(&instance.substitutions),
-                substitution_cache: RefCell::new(HashMap::new()),
-            };
+            let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
             let (terminated, expr_value) = compile_func_body_with_params(
                 &mut builder,
                 &method.body,
                 &mut variables,
                 &mut cf_ctx,
-                &mut ctx,
+                &mut codegen_ctx,
                 &function_ctx,
-                &explicit_params,
+                &global,
                 None,
                 None,
             )?;
@@ -2120,7 +2035,7 @@ impl Compiler<'_> {
             // Note: Uses monomorphized FunctionCtx for type substitutions
             let function_ctx =
                 FunctionCtx::monomorphized(Some(return_type_id), &instance.substitutions);
-            let explicit_params = ExplicitParams {
+            let global = GlobalCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
                 type_metadata: &self.type_metadata,
@@ -2133,34 +2048,16 @@ impl Compiler<'_> {
                 lambda_counter: &self.lambda_counter,
             };
 
-            // CompileCtx still needed for mutable JIT infrastructure
-            let mut ctx = CompileCtx {
-                analyzed: self.analyzed,
-                interner: &self.analyzed.interner,
-                module: &mut self.jit.module,
-                func_registry: &mut self.func_registry,
-                source_file_ptr,
-                global_inits: &self.global_inits,
-                lambda_counter: &self.lambda_counter,
-                type_metadata: &self.type_metadata,
-                impl_method_infos: &self.impl_method_infos,
-                static_method_infos: &self.static_method_infos,
-                interface_vtables: &self.interface_vtables,
-                current_function_return_type: Some(return_type_id),
-                native_registry: &self.native_registry,
-                current_module: None,
-                type_substitutions: Some(&instance.substitutions),
-                substitution_cache: RefCell::new(HashMap::new()),
-            };
+            let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
             let (terminated, expr_value) = compile_func_body_with_params(
                 &mut builder,
                 body,
                 &mut variables,
                 &mut cf_ctx,
-                &mut ctx,
+                &mut codegen_ctx,
                 &function_ctx,
-                &explicit_params,
+                &global,
                 None,
                 None,
             )?;

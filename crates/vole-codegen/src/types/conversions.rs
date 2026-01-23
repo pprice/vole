@@ -18,7 +18,7 @@ use vole_sema::entity_defs::TypeDefKind;
 use vole_sema::type_arena::{TypeArena, TypeId, TypeIdVec};
 use vole_sema::{EntityRegistry, PrimitiveType, ResolverEntityExt};
 
-use super::{CompileCtx, FunctionCtx, TypeCtx};
+use super::{FunctionCtx, TypeCtx};
 
 // Re-export box_interface_value_id for centralized access to boxing helper
 pub(crate) use crate::interface_vtable::box_interface_value_id;

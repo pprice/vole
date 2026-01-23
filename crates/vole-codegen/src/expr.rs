@@ -653,8 +653,8 @@ impl Cg<'_, '_, '_> {
 
             let raw_value =
                 self.call_runtime_cached(RuntimeFn::ArrayGetValue, &[obj.value, idx.value])?;
-            // Borrow arena from explicit_params directly to avoid borrow conflict with builder
-            let arena = self.explicit_params.analyzed.type_arena();
+            // Borrow arena from global directly to avoid borrow conflict with builder
+            let arena = self.global.analyzed.type_arena();
             let (result_value, result_ty) =
                 convert_field_value_id(self.builder, raw_value, element_id, &arena);
             drop(arena);
@@ -1225,8 +1225,8 @@ impl Cg<'_, '_, '_> {
                                 RuntimeFn::InstanceGetField,
                                 &[field_source, slot_val],
                             )?;
-                            // Borrow arena from explicit_params directly to avoid borrow conflict
-                            let arena = self.explicit_params.analyzed.type_arena();
+                            // Borrow arena from global directly to avoid borrow conflict
+                            let arena = self.global.analyzed.type_arena();
                             let (result_val, cranelift_ty) = convert_field_value_id(
                                 self.builder,
                                 result_raw,
@@ -1276,8 +1276,8 @@ impl Cg<'_, '_, '_> {
                                 RuntimeFn::InstanceGetField,
                                 &[field_source, slot_val],
                             )?;
-                            // Borrow arena from explicit_params directly to avoid borrow conflict
-                            let arena = self.explicit_params.analyzed.type_arena();
+                            // Borrow arena from global directly to avoid borrow conflict
+                            let arena = self.global.analyzed.type_arena();
                             let (result_val, cranelift_ty) = convert_field_value_id(
                                 self.builder,
                                 result_raw,
@@ -1743,8 +1743,8 @@ impl Cg<'_, '_, '_> {
 
             // Convert from i64 to the actual field type
             let field_ty_id = field_def.ty;
-            // Borrow arena from explicit_params directly to avoid borrow conflict
-            let arena = self.explicit_params.analyzed.type_arena();
+            // Borrow arena from global directly to avoid borrow conflict
+            let arena = self.global.analyzed.type_arena();
             let (result_val, cranelift_ty) =
                 convert_field_value_id(self.builder, raw_value, field_ty_id, &arena);
             drop(arena);

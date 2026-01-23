@@ -607,7 +607,7 @@ impl Cg<'_, '_, '_> {
             .codegen_ctx
             .funcs()
             .return_type(func_key)
-            .unwrap_or_else(|| self.explicit_params.analyzed.type_arena().void());
+            .unwrap_or_else(|| self.global.analyzed.type_arena().void());
 
         if results.is_empty() {
             Ok(self.void_value())

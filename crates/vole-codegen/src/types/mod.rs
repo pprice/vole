@@ -9,15 +9,17 @@
 mod codegen_ctx;
 mod compile_ctx;
 mod conversions;
-mod explicit_params;
 mod function_ctx;
+mod global_ctx;
 mod type_ctx;
 
 // Re-export all public types and functions for backward compatibility
-pub use codegen_ctx::CodegenCtx;
+pub use codegen_ctx::{CodegenCtx, JitCtx};
 pub(crate) use compile_ctx::CompileCtx;
-pub use explicit_params::ExplicitParams;
+pub use global_ctx::GlobalCtx;
+// Backward compatibility alias
 pub use function_ctx::FunctionCtx;
+pub use global_ctx::ExplicitParams;
 pub use type_ctx::TypeCtx;
 
 // Re-export conversion types and functions

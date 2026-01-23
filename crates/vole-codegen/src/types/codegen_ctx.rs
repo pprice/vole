@@ -1,85 +1,42 @@
 // types/codegen_ctx.rs
 //
-// Codegen context with mutable JIT infrastructure.
+// JIT context with mutable infrastructure for code generation.
 
-// Allow dead code during migration - CodegenCtx will be used as CompileCtx is phased out
 #![allow(dead_code)]
 
 use cranelift::prelude::Type;
 use cranelift_jit::JITModule;
+use cranelift_module::Module;
 
 use crate::FunctionRegistry;
-use vole_frontend::Interner;
-use vole_sema::type_arena::TypeArena;
-use vole_sema::{EntityRegistry, ProgramQuery};
 
-use super::TypeCtx;
-
-/// Codegen context with mutable JIT infrastructure.
-/// Extends TypeCtx with module and function registry access.
-pub struct CodegenCtx<'a> {
-    /// Type system lookups
-    pub types: TypeCtx<'a>,
+/// JIT context - mutable infrastructure for code generation.
+///
+/// This holds only the mutable parts needed during compilation:
+/// - JIT module for declaring/defining functions
+/// - Function registry for tracking function IDs
+///
+/// Read-only data (analyzed program, type metadata, etc.) lives in GlobalCtx/GlobalCtx.
+/// Per-function state (return type, substitutions) lives in FunctionCtx.
+pub struct JitCtx<'a> {
     /// Cranelift JIT module for function declarations
     pub module: &'a mut JITModule,
     /// Function identity and ID management
     pub func_registry: &'a mut FunctionRegistry,
 }
 
-impl<'a> CodegenCtx<'a> {
-    pub fn new(
-        query: ProgramQuery<'a>,
-        pointer_type: Type,
-        module: &'a mut JITModule,
-        func_registry: &'a mut FunctionRegistry,
-    ) -> Self {
+impl<'a> JitCtx<'a> {
+    pub fn new(module: &'a mut JITModule, func_registry: &'a mut FunctionRegistry) -> Self {
         Self {
-            types: TypeCtx::new(query, pointer_type),
             module,
             func_registry,
         }
     }
 
-    /// Convenience: get TypeCtx reference
-    #[inline]
-    pub fn type_ctx(&self) -> &TypeCtx<'a> {
-        &self.types
-    }
-
-    /// Convenience: pointer type (alias for Cg migration)
+    /// Get the pointer type from the JIT module's target config.
     #[inline]
     pub fn ptr_type(&self) -> Type {
-        self.types.pointer_type
-    }
-
-    /// Convenience: query interface
-    #[inline]
-    pub fn query(&self) -> &ProgramQuery<'a> {
-        &self.types.query
-    }
-
-    /// Convenience: borrow arena
-    #[inline]
-    pub fn arena(&self) -> std::cell::Ref<'_, TypeArena> {
-        self.types.arena()
-    }
-
-    /// Get an update interface for arena mutations.
-    #[inline]
-    pub fn update(&self) -> vole_sema::ProgramUpdate<'_> {
-        self.types.update()
-    }
-
-    /// Get interner reference.
-    #[inline]
-    pub fn interner(&self) -> &'a Interner {
-        self.types.interner()
-    }
-
-    /// Get entity registry reference.
-    #[inline]
-    pub fn registry(&self) -> &'a EntityRegistry {
-        self.types.entities()
+        self.module.target_config().pointer_type()
     }
 
     /// Get mutable reference to function registry.
@@ -100,3 +57,6 @@ impl<'a> CodegenCtx<'a> {
         self.module
     }
 }
+
+// Keep CodegenCtx as a type alias during migration
+pub type CodegenCtx<'a> = JitCtx<'a>;

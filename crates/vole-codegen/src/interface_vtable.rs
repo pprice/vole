@@ -7,7 +7,7 @@ use cranelift_module::{DataDescription, DataId, Linkage, Module};
 
 use crate::RuntimeFn;
 use crate::errors::CodegenError;
-use crate::types::{CodegenCtx, ExplicitParams};
+use crate::types::{CodegenCtx, GlobalCtx};
 use crate::types::{
     CompiledValue, MethodInfo, method_name_id_by_str, type_id_to_cranelift,
     type_metadata_by_name_id, value_to_word, word_to_value_type_id,
@@ -774,17 +774,17 @@ fn collect_interface_methods_inner_entity_registry(
 ///
 /// Takes split parameters to allow calling from Cg methods without borrow conflicts.
 /// Use box_interface_value_id_cg() for Cg callers or box_interface_value_id_vtable() for generic callers.
-#[tracing::instrument(skip(builder, codegen_ctx, explicit_params, value), fields(interface_type_id = ?interface_type_id))]
+#[tracing::instrument(skip(builder, codegen_ctx, global, value), fields(interface_type_id = ?interface_type_id))]
 pub(crate) fn box_interface_value_id<'a, 'ctx>(
     builder: &mut FunctionBuilder,
     codegen_ctx: &'a mut CodegenCtx<'ctx>,
-    explicit_params: &'a ExplicitParams<'ctx>,
+    global: &'a GlobalCtx<'ctx>,
     value: CompiledValue,
     interface_type_id: TypeId,
 ) -> Result<CompiledValue, String> {
     // Extract interface info using arena
     let (type_def_id, type_args_ids) = {
-        let arena = explicit_params.analyzed.type_arena();
+        let arena = global.analyzed.type_arena();
         match arena.unwrap_interface(interface_type_id) {
             Some((type_def_id, type_args)) => (type_def_id, type_args.to_vec()),
             None => return Ok(value), // Not an interface type
@@ -792,34 +792,27 @@ pub(crate) fn box_interface_value_id<'a, 'ctx>(
     };
 
     // Look up the interface Symbol name via EntityRegistry
-    let interface_def = explicit_params.analyzed.query().get_type(type_def_id);
-    let interface_name_str = explicit_params
+    let interface_def = global.analyzed.query().get_type(type_def_id);
+    let interface_name_str = global
         .analyzed
         .name_table()
         .last_segment_str(interface_def.name_id)
         .ok_or_else(|| format!("cannot get interface name string for {:?}", type_def_id))?;
-    let interface_name = explicit_params
-        .interner
-        .lookup(&interface_name_str)
-        .ok_or_else(|| {
-            format!(
-                "interface name '{}' not found in interner",
-                interface_name_str
-            )
-        })?;
+    let interface_name = global.interner.lookup(&interface_name_str).ok_or_else(|| {
+        format!(
+            "interface name '{}' not found in interner",
+            interface_name_str
+        )
+    })?;
 
     // Check if value is already an interface
-    if explicit_params
-        .analyzed
-        .type_arena()
-        .is_interface(value.type_id)
-    {
+    if global.analyzed.type_arena().is_interface(value.type_id) {
         tracing::debug!("already interface, skip boxing");
         return Ok(value);
     }
 
     // Check if this is an external-only interface
-    if explicit_params
+    if global
         .analyzed
         .entity_registry()
         .is_external_only(type_def_id)
@@ -833,7 +826,7 @@ pub(crate) fn box_interface_value_id<'a, 'ctx>(
     }
 
     // Create a VtableCtxView for operations that need VtableCtx
-    let mut ctx_view = VtableCtxView::new(codegen_ctx, explicit_params);
+    let mut ctx_view = VtableCtxView::new(codegen_ctx, global);
     let heap_alloc_ref = runtime_heap_alloc_ref(&mut ctx_view, builder)?;
     let data_word = value_to_word(
         builder,
@@ -845,21 +838,19 @@ pub(crate) fn box_interface_value_id<'a, 'ctx>(
     )?;
 
     // Phase 1: Declare vtable
-    let vtable_id = explicit_params
-        .interface_vtables
-        .borrow_mut()
-        .get_or_declare(
-            &mut ctx_view,
-            interface_name,
-            type_def_id,
-            &type_args_ids,
-            value.type_id,
-        )?;
+    let vtable_id = global.interface_vtables.borrow_mut().get_or_declare(
+        &mut ctx_view,
+        interface_name,
+        type_def_id,
+        &type_args_ids,
+        value.type_id,
+    )?;
     // Phase 2+3: Compile wrappers and define vtable data
-    explicit_params
-        .interface_vtables
-        .borrow_mut()
-        .ensure_compiled(&mut ctx_view, interface_name, value.type_id)?;
+    global.interface_vtables.borrow_mut().ensure_compiled(
+        &mut ctx_view,
+        interface_name,
+        value.type_id,
+    )?;
     let vtable_gv = ctx_view
         .jit_module()
         .declare_data_in_func(vtable_id, builder.func);

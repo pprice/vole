@@ -1,8 +1,7 @@
-// types/explicit_params.rs
+// types/global_ctx.rs
 //
-// Explicit parameters - read-only lookup tables used during codegen.
+// Global context - immutable/interior-mutable data shared across all compilations.
 
-// Allow dead code during migration - ExplicitParams will be used as CompileCtx is phased out
 #![allow(dead_code)]
 
 use std::cell::{Cell, RefCell};
@@ -18,9 +17,15 @@ use crate::interface_vtable::InterfaceVtableRegistry;
 
 use super::{CompileCtx, MethodInfo, TypeMetadata};
 
-/// Explicit parameters - read-only lookup tables used during codegen.
-/// These are shared across all function compilations within a compile unit.
-pub struct ExplicitParams<'a> {
+/// Global context - immutable and interior-mutable data shared during codegen.
+///
+/// This holds program-wide data that doesn't change during function compilation:
+/// - Analyzed program (type info, method resolutions)
+/// - Metadata maps (type metadata, method info)
+/// - Interior-mutable registries (vtables, lambda counter)
+///
+/// Paired with `JitCtx` (mutable JIT infrastructure) and `FunctionCtx` (per-function state).
+pub struct GlobalCtx<'a> {
     /// Analyzed program containing expr_types, method_resolutions, etc.
     pub analyzed: &'a AnalyzedProgram,
     /// Interner for symbol resolution
@@ -43,8 +48,8 @@ pub struct ExplicitParams<'a> {
     pub lambda_counter: &'a Cell<usize>,
 }
 
-impl<'a> ExplicitParams<'a> {
-    /// Create ExplicitParams from a CompileCtx (for transitional use)
+impl<'a> GlobalCtx<'a> {
+    /// Create GlobalCtx from a CompileCtx (for transitional use)
     #[allow(dead_code)] // Part of CompileCtx migration
     pub fn from_compile_ctx(ctx: &'a CompileCtx<'a>) -> Self {
         Self {
@@ -61,3 +66,6 @@ impl<'a> ExplicitParams<'a> {
         }
     }
 }
+
+// Keep ExplicitParams as a type alias for backward compatibility
+pub type ExplicitParams<'a> = GlobalCtx<'a>;

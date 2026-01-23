@@ -17,42 +17,39 @@ use super::structs::{
     convert_field_value_id, convert_to_i64_for_storage, get_field_slot_and_type_id_cg,
 };
 use super::types::{
-    CompileCtx, CompiledValue, ExplicitParams, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG,
-    FALLIBLE_TAG_OFFSET, FunctionCtx, fallible_error_tag_by_id, resolve_type_expr_id,
-    tuple_layout_id, type_id_size, type_id_to_cranelift,
+    CodegenCtx, CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET,
+    FunctionCtx, GlobalCtx, fallible_error_tag_by_id, resolve_type_expr_id, tuple_layout_id,
+    type_id_size, type_id_to_cranelift,
 };
 
 /// Compile a function body with split contexts.
 ///
-/// This is the transition API that takes FunctionCtx and ExplicitParams alongside
-/// CompileCtx. CodegenCtx is created from CompileCtx via as_codegen_ctx().
-#[allow(dead_code)] // Part of CompileCtx migration
+/// Takes CodegenCtx (JIT module + function registry) along with FunctionCtx and GlobalCtx.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn compile_func_body_with_params<'ctx>(
     builder: &mut FunctionBuilder,
     body: &vole_frontend::FuncBody,
     variables: &mut HashMap<Symbol, (Variable, TypeId)>,
     _cf_ctx: &mut ControlFlowCtx,
-    ctx: &mut CompileCtx<'ctx>,
+    codegen_ctx: &mut CodegenCtx<'ctx>,
     function_ctx: &FunctionCtx<'ctx>,
-    explicit_params: &ExplicitParams<'ctx>,
+    global: &GlobalCtx<'ctx>,
     captures: Option<Captures>,
     nested_return_type: Option<TypeId>,
 ) -> Result<(bool, Option<CompiledValue>), String> {
-    // Determine effective return type: nested overrides ctx's return type
-    let return_type = nested_return_type.or(ctx.current_function_return_type);
+    // Determine effective return type: nested overrides function_ctx's return type
+    let return_type = nested_return_type.or(function_ctx.return_type);
 
     match body {
         vole_frontend::FuncBody::Block(block) => {
             let mut cf = ControlFlow::new();
-            let mut codegen_ctx = ctx.as_codegen_ctx();
             let mut cg = Cg::new(
                 builder,
                 variables,
                 &mut cf,
-                &mut codegen_ctx,
+                codegen_ctx,
                 function_ctx,
-                explicit_params,
+                global,
                 captures,
                 return_type,
             );
@@ -61,14 +58,13 @@ pub(super) fn compile_func_body_with_params<'ctx>(
         }
         vole_frontend::FuncBody::Expr(expr) => {
             let mut cf = ControlFlow::new();
-            let mut codegen_ctx = ctx.as_codegen_ctx();
             let mut cg = Cg::new(
                 builder,
                 variables,
                 &mut cf,
-                &mut codegen_ctx,
+                codegen_ctx,
                 function_ctx,
-                explicit_params,
+                global,
                 captures,
                 return_type,
             );
@@ -879,8 +875,8 @@ impl Cg<'_, '_, '_> {
                     let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
                     let result_raw =
                         self.call_runtime(RuntimeFn::InstanceGetField, &[value, slot_val])?;
-                    // Borrow arena from explicit_params directly to avoid borrow conflict
-                    let arena = self.explicit_params.analyzed.type_arena();
+                    // Borrow arena from global directly to avoid borrow conflict
+                    let arena = self.global.analyzed.type_arena();
                     let (result_val, cranelift_ty) =
                         convert_field_value_id(self.builder, result_raw, field_type_id, &arena);
                     drop(arena);

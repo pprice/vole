@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::collections::HashMap;
 
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, InstBuilder, types};
@@ -8,8 +7,8 @@ use super::common::{FunctionCompileConfig, compile_function_inner_with_params};
 use super::{Compiler, ControlFlowCtx, SelfParam, TypeResolver};
 use crate::stmt::compile_func_body_with_params;
 use crate::types::{
-    CompileCtx, ExplicitParams, FunctionCtx, MethodInfo, TypeMetadata,
-    method_name_id_with_interner, resolve_type_expr_to_id, type_id_to_cranelift,
+    CodegenCtx, FunctionCtx, GlobalCtx, MethodInfo, TypeMetadata, method_name_id_with_interner,
+    resolve_type_expr_to_id, type_id_to_cranelift,
 };
 use vole_frontend::ast::PrimitiveType as AstPrimitive;
 use vole_frontend::{
@@ -722,7 +721,7 @@ impl Compiler<'_> {
                 } else {
                     FunctionCtx::main(return_type_id)
                 };
-                let explicit_params = ExplicitParams {
+                let global = GlobalCtx {
                     analyzed: self.analyzed,
                     interner: &self.analyzed.interner,
                     type_metadata: &self.type_metadata,
@@ -735,33 +734,17 @@ impl Compiler<'_> {
                     lambda_counter: &self.lambda_counter,
                 };
 
-                let mut ctx = CompileCtx {
-                    analyzed: self.analyzed,
-                    interner: &self.analyzed.interner,
-                    module: &mut self.jit.module,
-                    func_registry: &mut self.func_registry,
-                    source_file_ptr,
-                    global_inits: &self.global_inits,
-                    lambda_counter: &self.lambda_counter,
-                    type_metadata: &self.type_metadata,
-                    impl_method_infos: &self.impl_method_infos,
-                    static_method_infos: &self.static_method_infos,
-                    interface_vtables: &self.interface_vtables,
-                    current_function_return_type: return_type_id,
-                    native_registry: &self.native_registry,
-                    current_module: module_path,
-                    type_substitutions: None,
-                    substitution_cache: RefCell::new(HashMap::new()),
-                };
+                let mut codegen_ctx =
+                    CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
                 let (terminated, expr_value) = compile_func_body_with_params(
                     &mut builder,
                     body,
                     &mut variables,
                     &mut cf_ctx,
-                    &mut ctx,
+                    &mut codegen_ctx,
                     &function_ctx,
-                    &explicit_params,
+                    &global,
                     None,
                     None,
                 )?;
@@ -889,7 +872,7 @@ impl Compiler<'_> {
 
             // Create split contexts
             let function_ctx = FunctionCtx::main(method_return_type_id);
-            let explicit_params = ExplicitParams {
+            let global = GlobalCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
                 type_metadata: &self.type_metadata,
@@ -902,12 +885,7 @@ impl Compiler<'_> {
                 lambda_counter: &self.lambda_counter,
             };
 
-            let mut codegen_ctx = crate::types::CodegenCtx::new(
-                self.analyzed.query(),
-                self.pointer_type,
-                &mut self.jit.module,
-                &mut self.func_registry,
-            );
+            let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
             let self_binding = (self_sym, self_type_id, self_cranelift_type);
             let config = FunctionCompileConfig::method(
@@ -920,7 +898,7 @@ impl Compiler<'_> {
                 builder,
                 &mut codegen_ctx,
                 &function_ctx,
-                &explicit_params,
+                &global,
                 config,
             )?;
         }
@@ -1030,7 +1008,7 @@ impl Compiler<'_> {
 
             // Create split contexts
             let function_ctx = FunctionCtx::main(method_return_type_id);
-            let explicit_params = ExplicitParams {
+            let global = GlobalCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
                 type_metadata: &self.type_metadata,
@@ -1043,12 +1021,7 @@ impl Compiler<'_> {
                 lambda_counter: &self.lambda_counter,
             };
 
-            let mut codegen_ctx = crate::types::CodegenCtx::new(
-                self.analyzed.query(),
-                self.pointer_type,
-                &mut self.jit.module,
-                &mut self.func_registry,
-            );
+            let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
             let self_binding = (self_sym, self_type_id, self.pointer_type);
             let config = FunctionCompileConfig::method(
                 &method.body,
@@ -1060,7 +1033,7 @@ impl Compiler<'_> {
                 builder,
                 &mut codegen_ctx,
                 &function_ctx,
-                &explicit_params,
+                &global,
                 config,
             )?;
         }
@@ -1201,7 +1174,7 @@ impl Compiler<'_> {
 
             // Create split contexts
             let function_ctx = FunctionCtx::main(method_return_type_id);
-            let explicit_params = ExplicitParams {
+            let global = GlobalCtx {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
                 type_metadata: &self.type_metadata,
@@ -1215,32 +1188,15 @@ impl Compiler<'_> {
             };
 
             let mut cf_ctx = ControlFlowCtx::default();
-            let mut ctx = CompileCtx {
-                analyzed: self.analyzed,
-                interner: &self.analyzed.interner,
-                module: &mut self.jit.module,
-                func_registry: &mut self.func_registry,
-                source_file_ptr,
-                global_inits: &self.global_inits,
-                lambda_counter: &self.lambda_counter,
-                type_metadata: &self.type_metadata,
-                impl_method_infos: &self.impl_method_infos,
-                static_method_infos: &self.static_method_infos,
-                interface_vtables: &self.interface_vtables,
-                current_function_return_type: method_return_type_id,
-                native_registry: &self.native_registry,
-                current_module: None,
-                type_substitutions: None,
-                substitution_cache: RefCell::new(HashMap::new()),
-            };
+            let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
             let (terminated, expr_value) = compile_func_body_with_params(
                 &mut builder,
                 body,
                 &mut variables,
                 &mut cf_ctx,
-                &mut ctx,
+                &mut codegen_ctx,
                 &function_ctx,
-                &explicit_params,
+                &global,
                 None,
                 None,
             )?;
@@ -1375,7 +1331,7 @@ impl Compiler<'_> {
 
                 // Create split contexts
                 let function_ctx = FunctionCtx::main(None);
-                let explicit_params = ExplicitParams {
+                let global = GlobalCtx {
                     analyzed: self.analyzed,
                     interner: &self.analyzed.interner,
                     type_metadata: &self.type_metadata,
@@ -1390,32 +1346,16 @@ impl Compiler<'_> {
 
                 // Compile method body
                 let mut cf_ctx = ControlFlowCtx::default();
-                let mut ctx = CompileCtx {
-                    analyzed: self.analyzed,
-                    interner: &self.analyzed.interner,
-                    module: &mut self.jit.module,
-                    func_registry: &mut self.func_registry,
-                    source_file_ptr,
-                    global_inits: &self.global_inits,
-                    lambda_counter: &self.lambda_counter,
-                    type_metadata: &self.type_metadata,
-                    impl_method_infos: &self.impl_method_infos,
-                    static_method_infos: &self.static_method_infos,
-                    interface_vtables: &self.interface_vtables,
-                    current_function_return_type: None,
-                    native_registry: &self.native_registry,
-                    current_module: None,
-                    type_substitutions: None,
-                    substitution_cache: RefCell::new(HashMap::new()),
-                };
+                let mut codegen_ctx =
+                    CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
                 let (terminated, expr_value) = compile_func_body_with_params(
                     &mut builder,
                     body,
                     &mut variables,
                     &mut cf_ctx,
-                    &mut ctx,
+                    &mut codegen_ctx,
                     &function_ctx,
-                    &explicit_params,
+                    &global,
                     None,
                     None,
                 )?;
@@ -1590,7 +1530,7 @@ impl Compiler<'_> {
 
                 // Create split contexts (use module interner)
                 let function_ctx = FunctionCtx::module(Some(return_type_id), module_id);
-                let explicit_params = ExplicitParams {
+                let global = GlobalCtx {
                     analyzed: self.analyzed,
                     interner: module_interner,
                     type_metadata: &self.type_metadata,
@@ -1605,32 +1545,16 @@ impl Compiler<'_> {
 
                 // Compile method body
                 let mut cf_ctx = ControlFlowCtx::default();
-                let mut ctx = CompileCtx {
-                    analyzed: self.analyzed,
-                    interner: module_interner,
-                    module: &mut self.jit.module,
-                    func_registry: &mut self.func_registry,
-                    source_file_ptr,
-                    global_inits: module_global_inits,
-                    lambda_counter: &self.lambda_counter,
-                    type_metadata: &self.type_metadata,
-                    impl_method_infos: &self.impl_method_infos,
-                    static_method_infos: &self.static_method_infos,
-                    interface_vtables: &self.interface_vtables,
-                    current_function_return_type: Some(return_type_id),
-                    native_registry: &self.native_registry,
-                    current_module: Some(module_path),
-                    type_substitutions: None,
-                    substitution_cache: RefCell::new(HashMap::new()),
-                };
+                let mut codegen_ctx =
+                    CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
                 let (terminated, expr_value) = compile_func_body_with_params(
                     &mut builder,
                     &method.body,
                     &mut variables,
                     &mut cf_ctx,
-                    &mut ctx,
+                    &mut codegen_ctx,
                     &function_ctx,
-                    &explicit_params,
+                    &global,
                     None,
                     None,
                 )?;
@@ -1761,7 +1685,7 @@ impl Compiler<'_> {
 
                     // Create split contexts (use module interner)
                     let function_ctx = FunctionCtx::module(Some(return_type_id), module_id);
-                    let explicit_params = ExplicitParams {
+                    let global = GlobalCtx {
                         analyzed: self.analyzed,
                         interner: module_interner,
                         type_metadata: &self.type_metadata,
@@ -1776,32 +1700,16 @@ impl Compiler<'_> {
 
                     // Compile method body
                     let mut cf_ctx = ControlFlowCtx::default();
-                    let mut ctx = CompileCtx {
-                        analyzed: self.analyzed,
-                        interner: module_interner,
-                        module: &mut self.jit.module,
-                        func_registry: &mut self.func_registry,
-                        source_file_ptr,
-                        global_inits: module_global_inits,
-                        lambda_counter: &self.lambda_counter,
-                        type_metadata: &self.type_metadata,
-                        impl_method_infos: &self.impl_method_infos,
-                        static_method_infos: &self.static_method_infos,
-                        interface_vtables: &self.interface_vtables,
-                        current_function_return_type: Some(return_type_id),
-                        native_registry: &self.native_registry,
-                        current_module: Some(module_path),
-                        type_substitutions: None,
-                        substitution_cache: RefCell::new(HashMap::new()),
-                    };
+                    let mut codegen_ctx =
+                        CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
                     let (terminated, expr_value) = compile_func_body_with_params(
                         &mut builder,
                         body,
                         &mut variables,
                         &mut cf_ctx,
-                        &mut ctx,
+                        &mut codegen_ctx,
                         &function_ctx,
-                        &explicit_params,
+                        &global,
                         None,
                         None,
                     )?;
