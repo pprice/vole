@@ -694,6 +694,23 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
     }
 
+    /// Get the result of a call instruction as a CompiledValue.
+    ///
+    /// If the call has no results, returns void_value().
+    /// Otherwise, wraps the first result with the given return_type_id.
+    pub fn call_result(
+        &mut self,
+        call: cranelift_codegen::ir::Inst,
+        return_type_id: TypeId,
+    ) -> CompiledValue {
+        let results = self.builder.inst_results(call);
+        if results.is_empty() {
+            self.void_value()
+        } else {
+            self.compiled(results[0], return_type_id)
+        }
+    }
+
     // ========== CompiledValue constructors ==========
 
     /// Wrap a Cranelift value as a Bool CompiledValue

@@ -598,20 +598,15 @@ impl Cg<'_, '_, '_> {
         }
 
         let call_inst = self.builder.ins().call(func_ref, &args);
-        let results = self.builder.inst_results(call_inst);
 
-        // Get return type - use codegen_ctx directly to avoid borrow conflict with results
+        // Get return type
         let return_type_id = self
             .codegen_ctx
             .funcs()
             .return_type(func_key)
             .unwrap_or_else(|| self.env.analyzed.type_arena().void());
 
-        if results.is_empty() {
-            Ok(self.void_value())
-        } else {
-            Ok(self.compiled(results[0], return_type_id))
-        }
+        Ok(self.call_result(call_inst, return_type_id))
     }
 
     /// Compile an indirect call (closure or function value)

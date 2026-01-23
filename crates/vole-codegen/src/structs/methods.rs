@@ -130,13 +130,7 @@ impl Cg<'_, '_, '_> {
                         .jit_module()
                         .declare_func_in_func(func_id, self.builder.func);
                     let call_inst = self.builder.ins().call(func_ref, &args);
-                    let results = self.builder.inst_results(call_inst);
-
-                    if results.is_empty() {
-                        return Ok(self.void_value());
-                    } else {
-                        return Ok(self.compiled(results[0], return_type_id));
-                    }
+                    return Ok(self.call_result(call_inst, return_type_id));
                 }
             } else {
                 return Err(CodegenError::not_found(
@@ -707,13 +701,7 @@ impl Cg<'_, '_, '_> {
 
             // Perform the indirect call
             let call_inst = self.builder.ins().call_indirect(sig_ref, func_ptr, &args);
-            let results = self.builder.inst_results(call_inst);
-
-            if results.is_empty() {
-                Ok(self.void_value())
-            } else {
-                Ok(self.compiled(results[0], return_type_id))
-            }
+            Ok(self.call_result(call_inst, return_type_id))
         } else {
             // It's a pure function - call directly
             let mut sig = self.jit_module().make_signature();
@@ -745,13 +733,7 @@ impl Cg<'_, '_, '_> {
                 .builder
                 .ins()
                 .call_indirect(sig_ref, func_ptr_or_closure, &args);
-            let results = self.builder.inst_results(call_inst);
-
-            if results.is_empty() {
-                Ok(self.void_value())
-            } else {
-                Ok(self.compiled(results[0], return_type_id))
-            }
+            Ok(self.call_result(call_inst, return_type_id))
         }
     }
 
@@ -911,14 +893,8 @@ impl Cg<'_, '_, '_> {
                 let func_key = self.funcs().intern_name_id(instance.mangled_name);
                 let func_ref = self.func_ref(func_key)?;
                 let call = self.builder.ins().call(func_ref, &args);
-                let results = self.builder.inst_results(call);
-
                 let return_type_id = instance.func_type.return_type_id;
-                if results.is_empty() {
-                    return Ok(self.void_value());
-                } else {
-                    return Ok(self.compiled(results[0], return_type_id));
-                }
+                return Ok(self.call_result(call, return_type_id));
             }
         }
 
@@ -965,12 +941,6 @@ impl Cg<'_, '_, '_> {
         // Get function reference and call
         let func_ref = self.func_ref(method_info.func_key)?;
         let call = self.builder.ins().call(func_ref, &args);
-        let results = self.builder.inst_results(call);
-
-        if results.is_empty() {
-            Ok(self.void_value())
-        } else {
-            Ok(self.compiled(results[0], return_type_id))
-        }
+        Ok(self.call_result(call, return_type_id))
     }
 }
