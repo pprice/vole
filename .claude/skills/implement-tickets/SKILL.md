@@ -3,29 +3,31 @@ name: implement-tickets
 description: Use when you are asked to implement tickets (tasks/epics) created in `tk`
 ---
 
-# Reading Tickets
+# Verification.
 Verify `tk` is installed first or **STOP**.
 
 # Workflow
 1. Use `tk dep tree <id>` to get all tickets associated with the specified task/epic.
 2. Pick the first task that we can implement that is not blocked
 3. Follow the Sub-task workflow below, ensure to launch these as sub-agents so they
-   have isolated context. ***Do not launch parallel sub-agents*** if they will modify 
-   files, as they will conflict. 
+   have isolated context. Do not launch parallel sub-agents if they will modify 
+   files, as they will conflict. Use seqential unless the task is nullipotent
+   (e.g. explore, run tests, etc).
 4. If the the task is successful move on to the next ticket, if not report back to 
-   user with helpful suggestions on how to proceed. 
+   user with suggestions on how to proceed. Suggestions cannot be "skip the work". 
 5. If we have exhausted all tickets **STOP**
 
 # Sub-task workflow
 Used for implementing a single task.
 
-1. Start a sub agent with the sub-agent rules below 
+1. Start a sub agent with the sub-agent rules below, do not start parallel 
+   agents unless nullipontent.
 2. Use `tk show <id>` to read a tickets contents 
 3. Implement the ticket within the sub agent
 4. If succesful `tk close` the ticket
-5. If shortcuts are taken create new tickets associated with the parent
-   ticket documenting shortcuts, and potential remediations.
-6. If unsuccessful make sure the ticket remains open and report the user
+5. If shortcuts are taken create **new tickets** associated with the parent
+   ticket documenting shortcuts, rationale and potential remediations.
+6. If unsuccessful make sure the ticket remains open and report the user.
 
 
 # Sub-agent rules
