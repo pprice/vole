@@ -1,0 +1,105 @@
+// Test float intrinsics: nan(), infinity(), neg_infinity(), epsilon()
+// These are compiled directly to constants, not function calls.
+
+tests "f64 intrinsics" {
+    test "f64.nan() returns NaN" {
+        let n = f64.nan()
+        // NaN is the only value that is not equal to itself
+        assert(n != n)
+    }
+
+    test "f64.infinity() returns positive infinity" {
+        let inf = f64.infinity()
+        assert(inf > 0.0)
+        // Infinity plus any finite number is still infinity
+        assert(inf + 1.0 == inf)
+        assert(inf > 1000000000000.0)
+    }
+
+    test "f64.neg_infinity() returns negative infinity" {
+        let neg_inf = f64.neg_infinity()
+        assert(neg_inf < 0.0)
+        // Negative infinity minus any finite number is still negative infinity
+        assert(neg_inf - 1.0 == neg_inf)
+        assert(neg_inf < -1000000000000.0)
+    }
+
+    test "f64.epsilon() returns machine epsilon" {
+        let eps = f64.epsilon()
+        assert(eps > 0.0)
+        assert(eps < 0.0000000001)
+        // Machine epsilon: smallest value such that 1.0 + eps != 1.0
+        assert(1.0 + eps != 1.0)
+    }
+
+    test "f64 infinity and neg_infinity are negatives" {
+        let inf = f64.infinity()
+        let neg_inf = f64.neg_infinity()
+        assert(inf + neg_inf != inf + neg_inf)  // NaN
+    }
+}
+
+tests "f32 intrinsics" {
+    test "f32.nan() returns NaN" {
+        let n: f32 = f32.nan()
+        // NaN is the only value that is not equal to itself
+        assert(n != n)
+    }
+
+    test "f32.infinity() returns positive infinity" {
+        let inf: f32 = f32.infinity()
+        assert(inf > 0.0)
+        // Infinity plus any finite number is still infinity
+        assert(inf + 1.0 == inf)
+    }
+
+    test "f32.neg_infinity() returns negative infinity" {
+        let neg_inf: f32 = f32.neg_infinity()
+        assert(neg_inf < 0.0)
+        // Negative infinity minus any finite number is still negative infinity
+        assert(neg_inf - 1.0 == neg_inf)
+    }
+
+    test "f32.epsilon() returns machine epsilon" {
+        let eps: f32 = f32.epsilon()
+        assert(eps > 0.0)
+        assert(eps < 0.0001)
+        // Machine epsilon: smallest value such that 1.0 + eps != 1.0
+        assert(1.0 + eps != 1.0)
+    }
+
+    test "f32 infinity and neg_infinity are negatives" {
+        let inf: f32 = f32.infinity()
+        let neg_inf: f32 = f32.neg_infinity()
+        assert(inf + neg_inf != inf + neg_inf)  // NaN
+    }
+}
+
+tests "float intrinsic arithmetic" {
+    test "NaN propagation" {
+        let n = f64.nan()
+        let x = n + 1.0
+        let y = n * 2.0
+        let z = n / 3.0
+        // All operations with NaN produce NaN
+        assert(x != x)
+        assert(y != y)
+        assert(z != z)
+    }
+
+    test "infinity arithmetic" {
+        let inf = f64.infinity()
+        assert(inf * 2.0 == inf)
+        assert(inf / 2.0 == inf)
+        assert(1.0 / inf == 0.0)
+    }
+
+    test "infinity comparisons" {
+        let inf = f64.infinity()
+        let neg_inf = f64.neg_infinity()
+        assert(inf > neg_inf)
+        assert(neg_inf < inf)
+        assert(inf == inf)
+        assert(neg_inf == neg_inf)
+    }
+}

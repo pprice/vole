@@ -856,6 +856,14 @@ impl Cg<'_, '_, '_> {
         mc: &MethodCallExpr,
         expr_id: NodeId,
     ) -> Result<CompiledValue, String> {
+        // Check for float intrinsics (nan, infinity, neg_infinity, epsilon)
+        // These are compiled directly to constants, no function call needed.
+        if mc.args.is_empty()
+            && let Some(result) = self.try_float_intrinsic(type_def_id, mc.method)?
+        {
+            return Ok(result);
+        }
+
         // Get the method's name_id for lookup
         let method_def = self.query().get_method(method_id);
         let method_name_id = method_def.name_id;
@@ -926,5 +934,102 @@ impl Cg<'_, '_, '_> {
         let func_ref = self.func_ref(method_info.func_key)?;
         let call = self.builder.ins().call(func_ref, &args);
         Ok(self.call_result(call, return_type_id))
+    }
+
+    /// Try to compile a float intrinsic (nan, infinity, neg_infinity, epsilon).
+    /// Returns Some(value) if this is a known intrinsic, None otherwise.
+    fn try_float_intrinsic(
+        &mut self,
+        type_def_id: TypeDefId,
+        method_sym: Symbol,
+    ) -> Result<Option<CompiledValue>, String> {
+        // Get type name_id and check if it's f32 or f64
+        let type_name_id = self.query().get_type(type_def_id).name_id;
+        let name_table = self.name_table();
+        let is_f32 = type_name_id == name_table.primitives.f32;
+        let is_f64 = type_name_id == name_table.primitives.f64;
+        drop(name_table);
+
+        if !is_f32 && !is_f64 {
+            return Ok(None);
+        }
+
+        // Get method name string
+        let method_name = self.interner().resolve(method_sym);
+
+        // Match intrinsic methods
+        let value = match method_name {
+            "nan" => {
+                if is_f32 {
+                    let v = self.builder.ins().f32const(f32::NAN);
+                    CompiledValue {
+                        value: v,
+                        ty: types::F32,
+                        type_id: TypeId::F32,
+                    }
+                } else {
+                    let v = self.builder.ins().f64const(f64::NAN);
+                    CompiledValue {
+                        value: v,
+                        ty: types::F64,
+                        type_id: TypeId::F64,
+                    }
+                }
+            }
+            "infinity" => {
+                if is_f32 {
+                    let v = self.builder.ins().f32const(f32::INFINITY);
+                    CompiledValue {
+                        value: v,
+                        ty: types::F32,
+                        type_id: TypeId::F32,
+                    }
+                } else {
+                    let v = self.builder.ins().f64const(f64::INFINITY);
+                    CompiledValue {
+                        value: v,
+                        ty: types::F64,
+                        type_id: TypeId::F64,
+                    }
+                }
+            }
+            "neg_infinity" => {
+                if is_f32 {
+                    let v = self.builder.ins().f32const(f32::NEG_INFINITY);
+                    CompiledValue {
+                        value: v,
+                        ty: types::F32,
+                        type_id: TypeId::F32,
+                    }
+                } else {
+                    let v = self.builder.ins().f64const(f64::NEG_INFINITY);
+                    CompiledValue {
+                        value: v,
+                        ty: types::F64,
+                        type_id: TypeId::F64,
+                    }
+                }
+            }
+            "epsilon" => {
+                if is_f32 {
+                    let v = self.builder.ins().f32const(f32::EPSILON);
+                    CompiledValue {
+                        value: v,
+                        ty: types::F32,
+                        type_id: TypeId::F32,
+                    }
+                } else {
+                    let v = self.builder.ins().f64const(f64::EPSILON);
+                    CompiledValue {
+                        value: v,
+                        ty: types::F64,
+                        type_id: TypeId::F64,
+                    }
+                }
+            }
+            _ => return Ok(None),
+        };
+
+        Ok(Some(value))
     }
 }

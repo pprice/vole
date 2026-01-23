@@ -28,6 +28,17 @@ interface One {
     }
 }
 
+// Float constant interface - provides special float values
+// These are compiled directly to constants by the codegen (no function call)
+interface FloatConstants {
+    statics {
+        func nan() -> Self
+        func infinity() -> Self
+        func neg_infinity() -> Self
+        func epsilon() -> Self
+    }
+}
+
 // Instance interfaces
 
 interface Equatable {

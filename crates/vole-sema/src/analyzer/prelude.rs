@@ -36,6 +36,7 @@ impl Analyzer {
             "std:prelude/i64",
             "std:prelude/i32",
             "std:prelude/f64",
+            "std:prelude/f32",
             "std:prelude/bool",
             "std:prelude/iterators",
             "std:prelude/map",
