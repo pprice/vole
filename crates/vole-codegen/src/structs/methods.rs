@@ -234,13 +234,7 @@ impl Cg<'_, '_, '_> {
                 if let Some(param_type_ids) = &param_type_ids {
                     for (arg, &param_type_id) in mc.args.iter().zip(param_type_ids.iter()) {
                         let compiled = self.expr(arg)?;
-                        // Check if param is interface type using arena
-                        let is_interface = self.arena().unwrap_interface(param_type_id).is_some();
-                        let compiled = if is_interface {
-                            self.box_interface_value(compiled, param_type_id)?
-                        } else {
-                            compiled
-                        };
+                        let compiled = self.coerce_to_type(compiled, param_type_id)?;
                         args.push(compiled.value);
                     }
                 } else {
@@ -909,13 +903,7 @@ impl Cg<'_, '_, '_> {
                 let mut args = Vec::new();
                 for (arg, &param_type_id) in mc.args.iter().zip(param_type_ids.iter()) {
                     let compiled = self.expr(arg)?;
-                    // Box interface values if needed - check using arena
-                    let is_interface = self.arena().unwrap_interface(param_type_id).is_some();
-                    let compiled = if is_interface {
-                        self.box_interface_value(compiled, param_type_id)?
-                    } else {
-                        compiled
-                    };
+                    let compiled = self.coerce_to_type(compiled, param_type_id)?;
                     args.push(compiled.value);
                 }
 
@@ -970,8 +958,7 @@ impl Cg<'_, '_, '_> {
         let mut args = Vec::new();
         for (arg, param_id) in mc.args.iter().zip(param_ids.iter()) {
             let compiled = self.expr(arg)?;
-            // Box interface values if needed (box_interface_value_id is a no-op for non-interfaces)
-            let compiled = self.box_interface_value(compiled, *param_id)?;
+            let compiled = self.coerce_to_type(compiled, *param_id)?;
             args.push(compiled.value);
         }
 

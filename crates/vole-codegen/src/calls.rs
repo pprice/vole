@@ -809,17 +809,7 @@ impl Cg<'_, '_, '_> {
         let mut args: ArgVec = smallvec![closure_ptr];
         for (arg, &param_type_id) in call.args.iter().zip(params.iter()) {
             let compiled = self.expr(arg)?;
-            let is_param_interface = self.arena().is_interface(param_type_id);
-            let is_param_union = self.arena().is_union(param_type_id);
-
-            let compiled = if is_param_interface {
-                self.box_interface_value(compiled, param_type_id)?
-            } else if is_param_union && !self.arena().is_union(compiled.type_id) {
-                // Box concrete type into union representation
-                self.construct_union_id(compiled, param_type_id)?
-            } else {
-                compiled
-            };
+            let compiled = self.coerce_to_type(compiled, param_type_id)?;
             args.push(compiled.value);
         }
 

@@ -907,6 +907,37 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Box a value as an interface type.
+    /// Coerce a value to match a target type if needed.
+    ///
+    /// Handles two cases:
+    /// - If target is an interface and value is not, boxes the value
+    /// - If target is a union and value is not, wraps the value in a union
+    ///
+    /// Returns the value unchanged if no coercion is needed.
+    pub fn coerce_to_type(
+        &mut self,
+        value: CompiledValue,
+        target_type_id: TypeId,
+    ) -> Result<CompiledValue, String> {
+        let (is_target_interface, is_value_interface, is_target_union, is_value_union) = {
+            let arena = self.arena();
+            (
+                arena.is_interface(target_type_id),
+                arena.is_interface(value.type_id),
+                arena.is_union(target_type_id),
+                arena.is_union(value.type_id),
+            )
+        };
+        if is_target_interface && !is_value_interface {
+            self.box_interface_value(value, target_type_id)
+        } else if is_target_union && !is_value_union {
+            self.construct_union_id(value, target_type_id)
+        } else {
+            Ok(value)
+        }
+    }
+
+    /// Box a value as an interface type.
     ///
     /// This method avoids borrow issues by having exclusive access to self.
     /// If the value is already an interface or the type is not an interface,

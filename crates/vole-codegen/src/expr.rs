@@ -141,12 +141,7 @@ impl Cg<'_, '_, '_> {
             if let Some(name_id) = name_table.name_id(module_id, &[sym], self.interner()) {
                 drop(name_table);
                 if let Some(global_def) = self.query().global(name_id) {
-                    let declared_type_id = global_def.type_id;
-                    if self.arena().is_interface(declared_type_id)
-                        && !self.arena().is_interface(value.type_id)
-                    {
-                        value = self.box_interface_value(value, declared_type_id)?;
-                    }
+                    value = self.coerce_to_type(value, global_def.type_id)?;
                 }
             }
             Ok(value)
@@ -343,21 +338,8 @@ impl Cg<'_, '_, '_> {
                 let var = *var;
                 let var_type_id = *var_type_id;
 
-                if self.arena().is_interface(var_type_id)
-                    && !self.arena().is_interface(value.type_id)
-                {
-                    value = self.box_interface_value(value, var_type_id)?;
-                }
-
-                let final_value = if self.arena().is_union(var_type_id)
-                    && !self.arena().is_union(value.type_id)
-                {
-                    let wrapped = self.construct_union_id(value, var_type_id)?;
-                    wrapped.value
-                } else {
-                    value.value
-                };
-                self.builder.def_var(var, final_value);
+                value = self.coerce_to_type(value, var_type_id)?;
+                self.builder.def_var(var, value.value);
                 Ok(value)
             }
             AssignTarget::Field { object, field, .. } => {
