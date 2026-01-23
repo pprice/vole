@@ -824,6 +824,28 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.builder.ins().uextend(types::I32, cond)
     }
 
+    /// Compile a loop body with proper loop context setup.
+    ///
+    /// - Registers the loop with exit_block and continue_block
+    /// - Compiles the body block
+    /// - If not terminated, jumps to continue_block
+    ///
+    /// Returns true if the body terminated (return/break).
+    pub fn compile_loop_body(
+        &mut self,
+        body: &vole_frontend::Block,
+        exit_block: cranelift::prelude::Block,
+        continue_block: cranelift::prelude::Block,
+    ) -> Result<bool, String> {
+        self.cf.push_loop(exit_block, continue_block);
+        let terminated = self.block(body)?;
+        self.cf.pop_loop();
+        if !terminated {
+            self.builder.ins().jump(continue_block, &[]);
+        }
+        Ok(terminated)
+    }
+
     // ========== Stack allocation ==========
 
     /// Allocate a stack slot of the given size in bytes

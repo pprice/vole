@@ -296,13 +296,7 @@ impl Cg<'_, '_, '_> {
                     .brif(cond_i32, body_block, &[], exit_block, &[]);
 
                 self.builder.switch_to_block(body_block);
-                self.cf.push_loop(exit_block, header_block);
-                let body_terminated = self.block(&while_stmt.body)?;
-                self.cf.pop_loop();
-
-                if !body_terminated {
-                    self.builder.ins().jump(header_block, &[]);
-                }
+                self.compile_loop_body(&while_stmt.body, exit_block, header_block)?;
 
                 self.builder.switch_to_block(exit_block);
 
@@ -426,13 +420,7 @@ impl Cg<'_, '_, '_> {
             .brif(cmp, body_block, &[], exit_block, &[]);
 
         self.builder.switch_to_block(body_block);
-        self.cf.push_loop(exit_block, continue_block);
-        let body_terminated = self.block(&for_stmt.body)?;
-        self.cf.pop_loop();
-
-        if !body_terminated {
-            self.builder.ins().jump(continue_block, &[]);
-        }
+        self.compile_loop_body(&for_stmt.body, exit_block, continue_block)?;
 
         self.builder.switch_to_block(continue_block);
         let current = self.builder.use_var(var);
@@ -494,13 +482,7 @@ impl Cg<'_, '_, '_> {
         let elem_val = self.call_runtime(RuntimeFn::ArrayGetValue, &[arr.value, current_idx])?;
         self.builder.def_var(elem_var, elem_val);
 
-        self.cf.push_loop(exit_block, continue_block);
-        let body_terminated = self.block(&for_stmt.body)?;
-        self.cf.pop_loop();
-
-        if !body_terminated {
-            self.builder.ins().jump(continue_block, &[]);
-        }
+        self.compile_loop_body(&for_stmt.body, exit_block, continue_block)?;
 
         self.builder.switch_to_block(continue_block);
         let current_idx = self.builder.use_var(idx_var);
@@ -581,13 +563,7 @@ impl Cg<'_, '_, '_> {
             .load(types::I64, MemFlags::new(), slot_addr, 0);
         self.builder.def_var(elem_var, elem_val);
 
-        self.cf.push_loop(exit_block, continue_block);
-        let body_terminated = self.block(&for_stmt.body)?;
-        self.cf.pop_loop();
-
-        if !body_terminated {
-            self.builder.ins().jump(continue_block, &[]);
-        }
+        self.compile_loop_body(&for_stmt.body, exit_block, continue_block)?;
 
         // Continue: jump back to header
         self.builder.switch_to_block(continue_block);
@@ -646,13 +622,7 @@ impl Cg<'_, '_, '_> {
             .load(types::I64, MemFlags::new(), slot_addr, 0);
         self.builder.def_var(elem_var, elem_val);
 
-        self.cf.push_loop(exit_block, continue_block);
-        let body_terminated = self.block(&for_stmt.body)?;
-        self.cf.pop_loop();
-
-        if !body_terminated {
-            self.builder.ins().jump(continue_block, &[]);
-        }
+        self.compile_loop_body(&for_stmt.body, exit_block, continue_block)?;
 
         // Continue: jump back to header
         self.builder.switch_to_block(continue_block);
