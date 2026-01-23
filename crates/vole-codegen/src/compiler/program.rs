@@ -1432,7 +1432,6 @@ impl Compiler<'_> {
                 lambda_counter: &self.lambda_counter,
             };
 
-            // CompileCtx still needed for mutable JIT infrastructure
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
             let (terminated, expr_value) = compile_func_body_with_params(

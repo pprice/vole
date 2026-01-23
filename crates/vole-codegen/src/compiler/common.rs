@@ -193,7 +193,7 @@ pub(crate) fn setup_function_entry<'a>(
 ///
 /// # Returns
 /// Ok(()) on success, Err with message on failure
-#[allow(dead_code)] // Part of CompileCtx migration
+#[allow(dead_code)]
 pub fn compile_function_body_with_cg(
     cg: &mut Cg,
     body: &FuncBody,

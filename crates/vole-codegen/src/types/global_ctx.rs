@@ -15,7 +15,7 @@ use vole_sema::implement_registry::ImplTypeId;
 use crate::AnalyzedProgram;
 use crate::interface_vtable::InterfaceVtableRegistry;
 
-use super::{CompileCtx, MethodInfo, TypeMetadata};
+use super::{MethodInfo, TypeMetadata};
 
 /// Global context - immutable and interior-mutable data shared during codegen.
 ///
@@ -55,23 +55,6 @@ impl<'a> GlobalCtx<'a> {
     #[inline]
     pub fn update(&self) -> vole_sema::ProgramUpdate<'_> {
         vole_sema::ProgramUpdate::new(self.analyzed.type_arena_ref())
-    }
-
-    /// Create GlobalCtx from a CompileCtx (for transitional use)
-    #[allow(dead_code)] // Part of CompileCtx migration
-    pub fn from_compile_ctx(ctx: &'a CompileCtx<'a>) -> Self {
-        Self {
-            analyzed: ctx.analyzed,
-            interner: ctx.interner,
-            type_metadata: ctx.type_metadata,
-            impl_method_infos: ctx.impl_method_infos,
-            static_method_infos: ctx.static_method_infos,
-            interface_vtables: ctx.interface_vtables,
-            native_registry: ctx.native_registry,
-            global_inits: ctx.global_inits,
-            source_file_ptr: ctx.source_file_ptr,
-            lambda_counter: ctx.lambda_counter,
-        }
     }
 }
 

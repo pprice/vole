@@ -1,7 +1,6 @@
 // compiler/context_factory.rs
 //
-// Factory for creating split context objects, centralizing context construction
-// to avoid divergent call-site wiring during the CompileCtx migration.
+// Factory for creating split context objects, centralizing context construction.
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -20,9 +19,8 @@ use vole_sema::type_arena::TypeId;
 
 /// Factory for creating compilation contexts.
 ///
-/// Centralizes the construction of TypeCtx, CodegenCtx, FunctionCtx, GlobalCtx,
-/// and the legacy CompileCtx. This avoids divergent call-site wiring and ensures
-/// consistent context creation across the codebase.
+/// Centralizes the construction of TypeCtx, CodegenCtx, FunctionCtx, and GlobalCtx.
+/// This ensures consistent context creation across the codebase.
 ///
 /// # Usage
 ///
@@ -38,9 +36,6 @@ use vole_sema::type_arena::TypeId;
 /// let type_ctx = factory.type_ctx();
 /// let function_ctx = FunctionCtx::main(return_type);
 /// let global = factory.global();
-///
-/// // Or build a legacy CompileCtx for compatibility
-/// let mut compile_ctx = factory.compile_ctx(return_type, None, None);
 /// ```
 #[allow(dead_code)] // Used during migration
 pub(crate) struct CtxFactory<'a> {
@@ -177,26 +172,6 @@ impl<'a> CtxFactory<'a> {
     pub fn function_ctx_test(&self) -> FunctionCtx<'static> {
         FunctionCtx::test()
     }
-
-    // Note: A `compile_ctx()` method that returns CompileCtx<'a> is not possible
-    // because CtxFactory holds mutable references to module and func_registry,
-    // and Rust's borrowing rules prevent giving those same mutable references
-    // to the returned CompileCtx while &mut self is held.
-    //
-    // For legacy compatibility, callers should:
-    // 1. Use the factory's fields directly to construct CompileCtx, OR
-    // 2. Use the split contexts (TypeCtx, FunctionCtx, GlobalCtx) with Cg::new_split
-    //
-    // Example legacy construction:
-    // ```
-    // let ctx = CompileCtx {
-    //     analyzed: factory.analyzed,
-    //     interner: factory.interner,
-    //     module: factory.module,  // Note: factory must be consumed or mutable ref managed
-    //     func_registry: factory.func_registry,
-    //     ...
-    // };
-    // ```
 }
 
 /// Builder for creating a JitCtx.

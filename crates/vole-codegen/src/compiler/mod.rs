@@ -117,7 +117,7 @@ impl<'a> Compiler<'a> {
 
     /// Get GlobalCtx - shared lookup tables for codegen.
     /// This bundles the read-only data that's shared across all function compilations.
-    #[allow(dead_code)] // Part of CompileCtx migration
+    #[allow(dead_code)]
     fn global(&self) -> crate::types::GlobalCtx<'_> {
         crate::types::GlobalCtx {
             analyzed: self.analyzed,

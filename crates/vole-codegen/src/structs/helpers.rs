@@ -101,7 +101,7 @@ pub(crate) fn get_field_slot_and_type_id_cg(
             let field_type_id = if !substitutions.is_empty() {
                 drop(arena);
                 let substituted = type_ctx.update().substitute(base_type_id, &substitutions);
-                // Apply monomorphization context substitutions (delegates to CompileCtx)
+                // Apply monomorphization context substitutions
                 cg.substitute_type(substituted)
             } else {
                 drop(arena);

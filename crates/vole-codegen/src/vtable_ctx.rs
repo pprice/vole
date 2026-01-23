@@ -1,7 +1,7 @@
 // vtable_ctx.rs
 //
 // Trait for vtable compilation context.
-// Abstracts over CompileCtx and Cg for interface vtable operations.
+// Provides unified interface for vtable operations.
 
 use std::cell::{Ref, RefCell};
 use std::rc::Rc;
@@ -23,8 +23,8 @@ use crate::{AnalyzedProgram, FunctionRegistry};
 
 /// Trait providing the interface needed for vtable compilation.
 ///
-/// This trait allows vtable operations to work with both CompileCtx (legacy)
-/// and Cg (new split context model).
+/// This trait allows vtable operations to work with VtableCtxView,
+/// which combines CodegenCtx and GlobalCtx.
 #[allow(dead_code)]
 pub trait VtableCtx {
     /// Get the analyzed program reference

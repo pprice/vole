@@ -4,7 +4,6 @@
 
 use cranelift::prelude::*;
 use cranelift_codegen::ir::FuncRef;
-use rustc_hash::FxHashMap;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -19,9 +18,6 @@ use vole_sema::type_arena::{TypeArena, TypeId, TypeIdVec};
 use vole_sema::{EntityRegistry, PrimitiveType, ResolverEntityExt};
 
 use super::{FunctionCtx, TypeCtx};
-
-// Re-export box_interface_value_id for centralized access to boxing helper
-pub(crate) use crate::interface_vtable::box_interface_value_id;
 
 /// Compiled value with its type
 #[derive(Clone, Copy)]

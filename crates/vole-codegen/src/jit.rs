@@ -945,7 +945,7 @@ impl JitContext {
         self.ctx.clear();
     }
 
-    /// Split into parts for compilation - allows FunctionBuilder and CompileCtx to coexist.
+    /// Split into parts for compilation - allows FunctionBuilder and CodegenCtx to coexist.
     /// Returns disjoint mutable references: (func, module, func_ids)
     pub fn split_for_compile(
         &mut self,

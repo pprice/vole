@@ -2,7 +2,6 @@
 //
 // Per-function compilation context.
 
-// Allow dead code during migration - FunctionCtx will be used as CompileCtx is phased out
 #![allow(dead_code)]
 
 use rustc_hash::FxHashMap;

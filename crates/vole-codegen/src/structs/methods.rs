@@ -571,7 +571,7 @@ impl Cg<'_, '_, '_> {
         method_name: &str,
         elem_type_id: TypeId,
     ) -> Result<CompiledValue, String> {
-        // Look up the Iterator interface via CompileCtx
+        // Look up the Iterator interface
         let iter_type_id = self
             .resolve_type_str_or_interface("Iterator")
             .ok_or_else(|| "Iterator interface not found in entity registry".to_string())?;
@@ -641,7 +641,7 @@ impl Cg<'_, '_, '_> {
     /// Convert Iterator<T> return types to RuntimeIterator(T), looking up Iterator interface by name
     /// Takes and returns TypeId for O(1) equality; converts internally for matching
     pub(crate) fn maybe_convert_iterator_return_type(&self, ty: TypeId) -> TypeId {
-        // Look up the Iterator interface via CompileCtx
+        // Look up the Iterator interface
         let iterator_type_id = self.resolve_type_str_or_interface("Iterator");
         if let Some(iterator_type_id) = iterator_type_id {
             self.convert_iterator_return_type_by_type_def_id(ty, iterator_type_id)
