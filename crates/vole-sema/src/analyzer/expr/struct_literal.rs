@@ -4,8 +4,43 @@ use crate::type_arena::TypeId as ArenaTypeId;
 use crate::type_arena::TypeIdVec;
 use crate::types::StructFieldId;
 use rustc_hash::FxHashMap;
+use vole_frontend::ast::ExprKind;
 
 impl Analyzer {
+    /// Check if a shorthand field value refers to an undefined variable.
+    /// If so, emit a specialized error and return true.
+    /// This provides better error messages for shorthand syntax like `Point { x }`.
+    fn check_shorthand_undefined(
+        &mut self,
+        field_init: &StructFieldInit,
+        interner: &Interner,
+    ) -> bool {
+        // Only check shorthand fields
+        if !field_init.shorthand {
+            return false;
+        }
+
+        // Shorthand fields have an identifier value that matches the field name
+        if let ExprKind::Identifier(sym) = &field_init.value.kind {
+            // Check if the variable is defined
+            let has_variable = self.get_variable_type_id(*sym).is_some();
+            let has_function = self.get_function_type(*sym, interner).is_some();
+
+            if !has_variable && !has_function {
+                let name = interner.resolve(*sym).to_string();
+                self.add_error(
+                    SemanticError::UndefinedShorthandVariable {
+                        name,
+                        span: field_init.value.span.into(),
+                    },
+                    field_init.value.span,
+                );
+                return true;
+            }
+        }
+        false
+    }
+
     pub(super) fn check_struct_literal_expr(
         &mut self,
         expr: &Expr,
@@ -168,6 +203,12 @@ impl Analyzer {
 
         // Check each provided field
         for field_init in &struct_lit.fields {
+            // Check for shorthand syntax with undefined variable first
+            if self.check_shorthand_undefined(field_init, interner) {
+                // Error already reported, skip normal type checking for this field
+                continue;
+            }
+
             let field_init_name = interner.resolve(field_init.name);
             if let Some(expected_field) = fields.iter().find(|f| {
                 self.name_table()
@@ -209,6 +250,15 @@ impl Analyzer {
         // Use string keys since Symbols may be from different interners
         let mut field_value_type_ids: HashMap<String, ArenaTypeId> = HashMap::new();
         for field_init in &struct_lit.fields {
+            // Check for shorthand syntax with undefined variable first
+            if self.check_shorthand_undefined(field_init, interner) {
+                // Error already reported, use invalid type for this field
+                field_value_type_ids.insert(
+                    interner.resolve(field_init.name).to_string(),
+                    ArenaTypeId::INVALID,
+                );
+                continue;
+            }
             let field_ty_id = self.check_expr(&field_init.value, interner)?;
             field_value_type_ids.insert(interner.resolve(field_init.name).to_string(), field_ty_id);
         }
@@ -331,6 +381,15 @@ impl Analyzer {
         // Use string keys since Symbols may be from different interners
         let mut field_value_type_ids: HashMap<String, ArenaTypeId> = HashMap::new();
         for field_init in &struct_lit.fields {
+            // Check for shorthand syntax with undefined variable first
+            if self.check_shorthand_undefined(field_init, interner) {
+                // Error already reported, use invalid type for this field
+                field_value_type_ids.insert(
+                    interner.resolve(field_init.name).to_string(),
+                    ArenaTypeId::INVALID,
+                );
+                continue;
+            }
             let field_ty_id = self.check_expr(&field_init.value, interner)?;
             field_value_type_ids.insert(interner.resolve(field_init.name).to_string(), field_ty_id);
         }

@@ -25,6 +25,14 @@ pub enum SemanticError {
         span: SourceSpan,
     },
 
+    #[error("undefined variable in field shorthand")]
+    #[diagnostic(code(E2003))]
+    UndefinedShorthandVariable {
+        name: String,
+        #[label("shorthand `{name}` expands to `{name}: {name}`, but `{name}` is not defined")]
+        span: SourceSpan,
+    },
+
     #[error("cannot assign to immutable variable '{name}'")]
     #[diagnostic(
         code(E2006),
