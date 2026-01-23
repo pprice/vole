@@ -184,6 +184,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Get mutable reference to variables map (for binding params after creation).
+    #[allow(dead_code)]
     pub fn vars_mut(&mut self) -> &mut HashMap<Symbol, (Variable, TypeId)> {
         &mut self.vars
     }
@@ -203,7 +204,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Get arena Rc
     #[inline]
-    pub fn arena_rc(&self) -> &std::rc::Rc<std::cell::RefCell<vole_sema::type_arena::TypeArena>> {
+    pub fn arena_rc(&self) -> &std::rc::Rc<RefCell<vole_sema::type_arena::TypeArena>> {
         self.env.analyzed.type_arena_ref()
     }
 
@@ -244,6 +245,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Alias for type_substitutions (backward compat)
     #[inline]
+    #[allow(dead_code)]
     pub fn get_substitutions(&self) -> Option<&HashMap<NameId, TypeId>> {
         self.substitutions
     }
@@ -320,13 +322,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn impl_method_infos(
         &self,
-    ) -> &'ctx HashMap<
-        (
-            vole_sema::implement_registry::ImplTypeId,
-            vole_identity::NameId,
-        ),
-        super::types::MethodInfo,
-    > {
+    ) -> &'ctx HashMap<(vole_sema::implement_registry::ImplTypeId, NameId), super::types::MethodInfo>
+    {
         &self.env.state.impl_method_infos
     }
 
@@ -378,13 +375,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn impl_methods(
         &self,
-    ) -> &'ctx HashMap<
-        (
-            vole_sema::implement_registry::ImplTypeId,
-            vole_identity::NameId,
-        ),
-        super::types::MethodInfo,
-    > {
+    ) -> &'ctx HashMap<(vole_sema::implement_registry::ImplTypeId, NameId), super::types::MethodInfo>
+    {
         &self.env.state.impl_method_infos
     }
 
@@ -392,8 +384,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn static_method_infos(
         &self,
-    ) -> &'ctx HashMap<(vole_identity::TypeDefId, vole_identity::NameId), super::types::MethodInfo>
-    {
+    ) -> &'ctx HashMap<(vole_identity::TypeDefId, NameId), super::types::MethodInfo> {
         &self.env.state.static_method_infos
     }
 
@@ -402,7 +393,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[allow(dead_code)]
     pub fn interface_vtables(
         &self,
-    ) -> &'ctx std::cell::RefCell<crate::interface_vtable::InterfaceVtableRegistry> {
+    ) -> &'ctx RefCell<crate::interface_vtable::InterfaceVtableRegistry> {
         &self.env.state.interface_vtables
     }
 
@@ -414,7 +405,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Get current module as Option<ModuleId> - use current_module_id() for new code
     #[inline]
-    pub fn current_module(&self) -> Option<vole_identity::ModuleId> {
+    pub fn current_module(&self) -> Option<ModuleId> {
         self.current_module
     }
 
@@ -1089,7 +1080,7 @@ impl<'a, 'b, 'ctx> crate::vtable_ctx::VtableCtx for Cg<'a, 'b, 'ctx> {
         self.env.analyzed.type_arena()
     }
 
-    fn arena_rc(&self) -> &std::rc::Rc<std::cell::RefCell<vole_sema::type_arena::TypeArena>> {
+    fn arena_rc(&self) -> &std::rc::Rc<RefCell<vole_sema::type_arena::TypeArena>> {
         self.env.analyzed.type_arena_ref()
     }
 
@@ -1134,9 +1125,7 @@ impl<'a, 'b, 'ctx> crate::vtable_ctx::VtableCtx for Cg<'a, 'b, 'ctx> {
         &self.env.state.native_registry
     }
 
-    fn interface_vtables(
-        &self,
-    ) -> &std::cell::RefCell<crate::interface_vtable::InterfaceVtableRegistry> {
+    fn interface_vtables(&self) -> &RefCell<crate::interface_vtable::InterfaceVtableRegistry> {
         &self.env.state.interface_vtables
     }
 
@@ -1146,13 +1135,8 @@ impl<'a, 'b, 'ctx> crate::vtable_ctx::VtableCtx for Cg<'a, 'b, 'ctx> {
 
     fn impl_method_infos(
         &self,
-    ) -> &HashMap<
-        (
-            vole_sema::implement_registry::ImplTypeId,
-            vole_identity::NameId,
-        ),
-        super::types::MethodInfo,
-    > {
+    ) -> &HashMap<(vole_sema::implement_registry::ImplTypeId, NameId), super::types::MethodInfo>
+    {
         &self.env.state.impl_method_infos
     }
 }

@@ -837,8 +837,7 @@ impl Compiler<'_> {
                 }
 
                 // Compile scoped let declarations and test body
-                let mut cg = Cg::new(&mut builder, &mut codegen_ctx, &env)
-                    .with_vars(variables);
+                let mut cg = Cg::new(&mut builder, &mut codegen_ctx, &env).with_vars(variables);
 
                 if !scoped_lets.is_empty() {
                     // Create a synthetic block with the let statements
@@ -1079,8 +1078,8 @@ impl Compiler<'_> {
                 current_module: None,
             };
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
-            let (terminated, _) = Cg::new(&mut builder, &mut codegen_ctx, &env)
-                .compile_body(&test.body)?;
+            let (terminated, _) =
+                Cg::new(&mut builder, &mut codegen_ctx, &env).compile_body(&test.body)?;
 
             // If not already terminated, return 0 (test passed)
             if !terminated {

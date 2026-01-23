@@ -110,6 +110,7 @@ pub(crate) fn type_metadata_by_name_id<'a>(
 ///
 /// Takes TypeCtx for type-system lookups, FunctionCtx for per-function state
 /// (module, substitutions), and type_metadata for class/record lookups.
+#[allow(dead_code)]
 pub(crate) fn resolve_type_expr_id(
     ty: &TypeExpr,
     type_ctx: &TypeCtx,

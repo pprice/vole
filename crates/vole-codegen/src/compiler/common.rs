@@ -293,13 +293,13 @@ pub fn compile_function_body_with_cg(
 ///
 /// # Returns
 /// Ok(()) on success, Err with message on failure
-pub fn compile_function_inner_with_params<'a, 'ctx>(
+pub fn compile_function_inner_with_params<'ctx>(
     mut builder: FunctionBuilder,
     codegen_ctx: &mut CodegenCtx<'ctx>,
     env: &CompileEnv<'ctx>,
     config: FunctionCompileConfig,
     module_id: Option<vole_identity::ModuleId>,
-    substitutions: Option<&'a std::collections::HashMap<vole_identity::NameId, TypeId>>,
+    substitutions: Option<&HashMap<vole_identity::NameId, TypeId>>,
 ) -> Result<(), String> {
     // Set up entry block and bind parameters
     let (variables, captures) = setup_function_entry(&mut builder, &config);

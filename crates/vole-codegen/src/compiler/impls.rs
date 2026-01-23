@@ -9,8 +9,8 @@ use super::common::{
 use super::{Compiler, SelfParam, TypeResolver};
 use crate::context::Cg;
 use crate::types::{
-    CodegenCtx, MethodInfo, TypeMetadata, method_name_id_with_interner,
-    resolve_type_expr_to_id, type_id_to_cranelift,
+    CodegenCtx, MethodInfo, TypeMetadata, method_name_id_with_interner, resolve_type_expr_to_id,
+    type_id_to_cranelift,
 };
 use vole_frontend::ast::PrimitiveType as AstPrimitive;
 use vole_frontend::{

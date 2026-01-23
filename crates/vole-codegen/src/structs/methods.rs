@@ -215,7 +215,7 @@ impl Cg<'_, '_, '_> {
                 return_type,
             } => {
                 // Use TypeId-based params for interface boxing check
-                let param_type_ids = resolution.and_then(|resolved: &vole_sema::ResolvedMethod| {
+                let param_type_ids = resolution.and_then(|resolved: &ResolvedMethod| {
                     self.arena()
                         .unwrap_function(resolved.func_type_id())
                         .map(|(params, _, _)| params.clone())
@@ -305,7 +305,7 @@ impl Cg<'_, '_, '_> {
         };
 
         // Use TypeId-based params for interface boxing check
-        let param_type_ids = resolution.and_then(|resolved: &vole_sema::ResolvedMethod| {
+        let param_type_ids = resolution.and_then(|resolved: &ResolvedMethod| {
             self.arena()
                 .unwrap_function(resolved.func_type_id())
                 .map(|(params, _, _)| params.clone())
