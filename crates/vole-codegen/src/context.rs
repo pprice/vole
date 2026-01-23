@@ -846,6 +846,24 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Ok(terminated)
     }
 
+    /// Finalize a for-loop by switching to exit_block and sealing all loop blocks.
+    ///
+    /// Standard for-loop structure has 4 blocks: header, body, continue, exit.
+    /// This must be called after compile_loop_body and any continue-block logic.
+    pub fn finalize_for_loop(
+        &mut self,
+        header: cranelift::prelude::Block,
+        body_block: cranelift::prelude::Block,
+        continue_block: cranelift::prelude::Block,
+        exit_block: cranelift::prelude::Block,
+    ) {
+        self.builder.switch_to_block(exit_block);
+        self.builder.seal_block(header);
+        self.builder.seal_block(body_block);
+        self.builder.seal_block(continue_block);
+        self.builder.seal_block(exit_block);
+    }
+
     // ========== Stack allocation ==========
 
     /// Allocate a stack slot of the given size in bytes

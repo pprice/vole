@@ -428,12 +428,7 @@ impl Cg<'_, '_, '_> {
         self.builder.def_var(var, next);
         self.builder.ins().jump(header, &[]);
 
-        self.builder.switch_to_block(exit_block);
-
-        self.builder.seal_block(header);
-        self.builder.seal_block(body_block);
-        self.builder.seal_block(continue_block);
-        self.builder.seal_block(exit_block);
+        self.finalize_for_loop(header, body_block, continue_block, exit_block);
 
         Ok(false)
     }
@@ -490,12 +485,7 @@ impl Cg<'_, '_, '_> {
         self.builder.def_var(idx_var, next_idx);
         self.builder.ins().jump(header, &[]);
 
-        self.builder.switch_to_block(exit_block);
-
-        self.builder.seal_block(header);
-        self.builder.seal_block(body_block);
-        self.builder.seal_block(continue_block);
-        self.builder.seal_block(exit_block);
+        self.finalize_for_loop(header, body_block, continue_block, exit_block);
 
         Ok(false)
     }
@@ -569,12 +559,7 @@ impl Cg<'_, '_, '_> {
         self.builder.switch_to_block(continue_block);
         self.builder.ins().jump(header, &[]);
 
-        self.builder.switch_to_block(exit_block);
-
-        self.builder.seal_block(header);
-        self.builder.seal_block(body_block);
-        self.builder.seal_block(continue_block);
-        self.builder.seal_block(exit_block);
+        self.finalize_for_loop(header, body_block, continue_block, exit_block);
 
         Ok(false)
     }
@@ -628,12 +613,7 @@ impl Cg<'_, '_, '_> {
         self.builder.switch_to_block(continue_block);
         self.builder.ins().jump(header, &[]);
 
-        self.builder.switch_to_block(exit_block);
-
-        self.builder.seal_block(header);
-        self.builder.seal_block(body_block);
-        self.builder.seal_block(continue_block);
-        self.builder.seal_block(exit_block);
+        self.finalize_for_loop(header, body_block, continue_block, exit_block);
 
         Ok(false)
     }
