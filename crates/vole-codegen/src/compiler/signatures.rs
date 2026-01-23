@@ -323,6 +323,15 @@ impl Compiler<'_> {
         type_id_to_cranelift(type_id, &self.analyzed.type_arena(), self.pointer_type)
     }
 
+    /// Convert a TypeId to Option<CraneliftType>, returning None for void types.
+    pub fn return_type_to_cranelift(&self, type_id: TypeId) -> Option<CraneliftType> {
+        if type_id.is_void() {
+            None
+        } else {
+            Some(self.type_id_to_cranelift(type_id))
+        }
+    }
+
     /// Resolve parameter TypeExprs to TypeIds with SelfType substitution.
     ///
     /// This helper handles implement block methods where `Self` type needs to be

@@ -1101,28 +1101,13 @@ impl Compiler<'_> {
         let return_type_id = func_type.return_type_id;
 
         // Create signature from the concrete function type (TypeId-native)
-        let arena_ref = self.analyzed.type_arena();
-        let mut params = Vec::new();
-        if has_self_param {
-            params.push(self.pointer_type);
-        }
-        for &param_type_id in &param_type_ids {
-            params.push(type_id_to_cranelift(
-                param_type_id,
-                &arena_ref,
-                self.pointer_type,
-            ));
-        }
-        let ret = if return_type_id.is_void() {
-            None
+        let mut params = if has_self_param {
+            vec![self.pointer_type]
         } else {
-            Some(type_id_to_cranelift(
-                return_type_id,
-                &arena_ref,
-                self.pointer_type,
-            ))
+            Vec::new()
         };
-        drop(arena_ref);
+        params.extend(self.type_ids_to_cranelift(&param_type_ids));
+        let ret = self.return_type_to_cranelift(return_type_id);
 
         let sig = self.jit.create_signature(&params, ret);
         let func_id = self.jit.declare_function(&mangled_name, &sig);
@@ -1246,11 +1231,7 @@ impl Compiler<'_> {
 
         // Create function signature from concrete types (TypeId-native)
         let params = self.type_ids_to_cranelift(&param_type_ids);
-        let ret = if return_type_id.is_void() {
-            None
-        } else {
-            Some(self.type_id_to_cranelift(return_type_id))
-        };
+        let ret = self.return_type_to_cranelift(return_type_id);
         let param_types = params.clone();
         let sig = self.jit.create_signature(&params, ret);
         self.jit.ctx.func.signature = sig;
@@ -1427,11 +1408,7 @@ impl Compiler<'_> {
         let param_types = self.type_ids_to_cranelift(&param_type_ids);
         let mut params = vec![self.pointer_type]; // self
         params.extend_from_slice(&param_types);
-        let ret = if return_type_id.is_void() {
-            None
-        } else {
-            Some(self.type_id_to_cranelift(return_type_id))
-        };
+        let ret = self.return_type_to_cranelift(return_type_id);
         let sig = self.jit.create_signature(&params, ret);
         self.jit.ctx.func.signature = sig;
 
@@ -1683,11 +1660,7 @@ impl Compiler<'_> {
 
         // Create signature (no self parameter) with concrete types (TypeId-native)
         let params = self.type_ids_to_cranelift(&param_type_ids);
-        let ret = if return_type_id.is_void() {
-            None
-        } else {
-            Some(self.type_id_to_cranelift(return_type_id))
-        };
+        let ret = self.return_type_to_cranelift(return_type_id);
         let param_types = params.clone();
         let sig = self.jit.create_signature(&params, ret);
         self.jit.ctx.func.signature = sig;
