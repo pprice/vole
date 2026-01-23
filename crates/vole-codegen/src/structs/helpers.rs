@@ -32,27 +32,32 @@ pub(crate) fn get_field_slot_and_type_id(
         .as_ref()
         .ok_or_else(|| CodegenError::not_found("generic_info", "type").to_string())?;
 
-    // Build substitution map from type params to type args
-    let substitutions: FxHashMap<vole_identity::NameId, TypeId> = type_def
+    // Build combined substitution map: type params -> type args, plus monomorphization context
+    // This allows a single pass through the type tree instead of two.
+    let mut combined_subs: FxHashMap<vole_identity::NameId, TypeId> = type_def
         .type_params
         .iter()
         .zip(type_args.iter())
         .map(|(&param, &arg)| (param, arg))
         .collect();
 
+    // Merge in function-level substitutions (monomorphization context)
+    if let Some(func_subs) = func_ctx.substitutions {
+        for (&k, &v) in func_subs {
+            combined_subs.entry(k).or_insert(v);
+        }
+    }
+
     for (slot, field_name_id) in generic_info.field_names.iter().enumerate() {
         let name = type_ctx.query.last_segment(*field_name_id);
         if name.as_deref() == Some(field_name) {
             let base_type_id = generic_info.field_types[slot];
-            // Apply type substitutions from type args
-            let field_type_id = if !substitutions.is_empty() {
-                drop(arena);
-                let substituted = type_ctx.update().substitute(base_type_id, &substitutions);
-                // Apply monomorphization context substitutions
-                func_ctx.substitute_type_id(substituted, type_ctx.arena_rc())
+            // Apply combined substitutions in a single pass
+            drop(arena);
+            let field_type_id = if !combined_subs.is_empty() {
+                type_ctx.update().substitute(base_type_id, &combined_subs)
             } else {
-                drop(arena);
-                func_ctx.substitute_type_id(base_type_id, type_ctx.arena_rc())
+                base_type_id
             };
             return Ok((slot, field_type_id));
         }
@@ -85,27 +90,32 @@ pub(crate) fn get_field_slot_and_type_id_cg(
         .as_ref()
         .ok_or_else(|| CodegenError::not_found("generic_info", "type").to_string())?;
 
-    // Build substitution map from type params to type args
-    let substitutions: FxHashMap<vole_identity::NameId, TypeId> = type_def
+    // Build combined substitution map: type params -> type args, plus monomorphization context
+    // This allows a single pass through the type tree instead of two.
+    let mut combined_subs: FxHashMap<vole_identity::NameId, TypeId> = type_def
         .type_params
         .iter()
         .zip(type_args.iter())
         .map(|(&param, &arg)| (param, arg))
         .collect();
 
+    // Merge in function-level substitutions (monomorphization context)
+    if let Some(func_subs) = cg.substitutions {
+        for (&k, &v) in func_subs {
+            combined_subs.entry(k).or_insert(v);
+        }
+    }
+
     for (slot, field_name_id) in generic_info.field_names.iter().enumerate() {
         let name = type_ctx.query.last_segment(*field_name_id);
         if name.as_deref() == Some(field_name) {
             let base_type_id = generic_info.field_types[slot];
-            // Apply type substitutions from type args
-            let field_type_id = if !substitutions.is_empty() {
-                drop(arena);
-                let substituted = type_ctx.update().substitute(base_type_id, &substitutions);
-                // Apply monomorphization context substitutions
-                cg.substitute_type(substituted)
+            // Apply combined substitutions in a single pass
+            drop(arena);
+            let field_type_id = if !combined_subs.is_empty() {
+                type_ctx.update().substitute(base_type_id, &combined_subs)
             } else {
-                drop(arena);
-                cg.substitute_type(base_type_id)
+                base_type_id
             };
             return Ok((slot, field_type_id));
         }
