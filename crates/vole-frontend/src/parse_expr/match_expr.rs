@@ -7,6 +7,7 @@ use crate::errors::ParserError;
 impl<'src> Parser<'src> {
     /// Parse a when expression (subject-less conditional chains)
     /// Syntax: `when { cond1 => result1, cond2 => result2, _ => default }`
+    /// Arms can be separated by newlines, commas, or both
     pub(super) fn when_expr(&mut self) -> Result<Expr, ParseError> {
         let start_span = self.current.span;
         self.advance(); // consume 'when'
@@ -19,6 +20,8 @@ impl<'src> Parser<'src> {
         let mut arms = Vec::new();
         while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
             arms.push(self.when_arm()?);
+            // Allow comma or newline as separator (or both)
+            self.match_token(TokenType::Comma);
             self.skip_newlines();
         }
 
@@ -63,6 +66,7 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse a match expression
+    /// Arms can be separated by newlines, commas, or both
     pub(super) fn match_expr(&mut self) -> Result<Expr, ParseError> {
         let start_span = self.current.span;
         self.advance(); // consume 'match'
@@ -78,6 +82,8 @@ impl<'src> Parser<'src> {
         let mut arms = Vec::new();
         while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
             arms.push(self.match_arm()?);
+            // Allow comma or newline as separator (or both)
+            self.match_token(TokenType::Comma);
             self.skip_newlines();
         }
 

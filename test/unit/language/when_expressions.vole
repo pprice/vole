@@ -62,12 +62,14 @@ func day_type(day: i64) -> string {
     }
 }
 
-// When expression for absolute value
-func abs(x: i64) -> i64 {
-    return when {
-        x < 0 => -x
-        _ => x
-    }
+// When expression for absolute value (terse comma-separated form)
+func abs(x: i64) -> i64 => when { x < 0 => -x, _ => x }
+
+// When expression with trailing comma
+func clamp(x: i64, lo: i64, hi: i64) -> i64 => when {
+    x < lo => lo,
+    x > hi => hi,
+    _ => x,
 }
 
 // When with multiple conditions per arm
@@ -124,10 +126,16 @@ tests "when expressions" {
         assert(day_type(3) == "weekday")
     }
 
-    test "inline when" {
+    test "terse when with commas" {
         assert(abs(-5) == 5)
         assert(abs(5) == 5)
         assert(abs(0) == 0)
+    }
+
+    test "when with trailing comma" {
+        assert(clamp(5, 0, 10) == 5)
+        assert(clamp(-5, 0, 10) == 0)
+        assert(clamp(15, 0, 10) == 10)
     }
 
     test "sign function" {
