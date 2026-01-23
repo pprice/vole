@@ -170,6 +170,27 @@ impl<'a> Compiler<'a> {
         )
     }
 
+    /// Check if a function (by NameId) is an external function.
+    ///
+    /// External functions are registered by their short name in the implement registry.
+    /// This helper encapsulates the pattern of extracting the short name and checking
+    /// the registry.
+    ///
+    /// Note: This uses string-based lookup internally. A future improvement would be
+    /// to add NameId-based indexing to the implement registry.
+    fn is_external_func(&self, name_id: NameId) -> bool {
+        self.analyzed
+            .name_table()
+            .last_segment_str(name_id)
+            .map(|short_name| {
+                self.analyzed
+                    .implement_registry()
+                    .get_external_func(&short_name)
+                    .is_some()
+            })
+            .unwrap_or(false)
+    }
+
     /// Set the source file path for error reporting.
     /// The string is stored in the JitContext so it lives as long as the JIT code.
     pub fn set_source_file(&mut self, file: &str) {
