@@ -1,0 +1,62 @@
+// Tests that immutable globals with constant initializers can be used in defaults
+
+// Immutable globals with constant initializers
+let DEFAULT_VALUE = 42
+let DOUBLED_DEFAULT = DEFAULT_VALUE * 2
+let NUMBERS = [1, 2, 3]
+
+// Functions using constant globals as defaults
+func with_int_default(x: i64 = DEFAULT_VALUE) -> i64 => x
+
+func with_chained_default(x: i64 = DOUBLED_DEFAULT) -> i64 => x
+
+func with_expression_default(x: i64 = DEFAULT_VALUE + 8) -> i64 => x
+
+func with_array_default(arr: [i64] = NUMBERS) -> [i64] => arr
+
+// Multiple params, mix of literal and global defaults
+func mixed_defaults(a: i64 = DEFAULT_VALUE, b: i64 = 10, c: i64 = DOUBLED_DEFAULT) -> i64 {
+    return a + b + c
+}
+
+// Record using constant global defaults
+record ConfigWithGlobalDefaults {
+    value: i64 = DEFAULT_VALUE,
+    doubled: i64 = DOUBLED_DEFAULT,
+    computed: i64 = DEFAULT_VALUE + 100,
+}
+
+tests {
+    test "constant global as default" {
+        assert(with_int_default() == 42)
+        assert(with_int_default(10) == 10)
+    }
+
+    test "chained constant global as default" {
+        assert(with_chained_default() == 84)
+    }
+
+    test "expression with constant global as default" {
+        assert(with_expression_default() == 50)
+    }
+
+    test "array constant global as default" {
+        let arr = with_array_default()
+        assert(arr.length() == 3)
+        assert(arr[0] == 1)
+    }
+
+    test "mixed defaults with globals and literals" {
+        assert(mixed_defaults() == 42 + 10 + 84)  // 136
+        assert(mixed_defaults(1) == 1 + 10 + 84)  // 95
+        assert(mixed_defaults(1, 2) == 1 + 2 + 84)  // 87
+        assert(mixed_defaults(1, 2, 3) == 6)
+    }
+
+    test "record with constant global defaults" {
+        let config = ConfigWithGlobalDefaults {}
+        assert(config.value == 42)
+        assert(config.doubled == 84)
+        assert(config.computed == 142)
+    }
+}

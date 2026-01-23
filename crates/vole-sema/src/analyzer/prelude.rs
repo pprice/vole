@@ -7,7 +7,7 @@ use crate::module::ModuleLoader;
 use crate::resolution::MethodResolutions;
 use crate::scope::Scope;
 use rustc_hash::FxHashMap;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use vole_frontend::{Interner, Parser};
 
@@ -99,6 +99,7 @@ impl Analyzer {
             functions: HashMap::new(),
             functions_by_name: FxHashMap::default(),
             globals: HashMap::new(),
+            constant_globals: HashSet::new(),
             current_function_return: None,
             current_function_error_type: None,
             current_generator_element_type: None,

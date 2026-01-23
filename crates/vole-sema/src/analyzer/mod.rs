@@ -201,6 +201,8 @@ pub struct Analyzer {
     /// Functions registered by string name (for prelude functions that cross interner boundaries)
     functions_by_name: FxHashMap<String, FunctionType>,
     globals: HashMap<Symbol, ArenaTypeId>,
+    /// Globals with constant initializers (for constant expression checking)
+    constant_globals: HashSet<Symbol>,
     current_function_return: Option<ArenaTypeId>,
     /// Whether a return/raise was found (simple check, not full control flow analysis)
     found_return: bool,
@@ -289,6 +291,7 @@ impl Analyzer {
             functions: HashMap::new(),
             functions_by_name: FxHashMap::default(),
             globals: HashMap::new(),
+            constant_globals: HashSet::new(),
             current_function_return: None,
             found_return: false,
             current_function_error_type: None,
@@ -341,6 +344,7 @@ impl Analyzer {
             functions: HashMap::new(),
             functions_by_name: FxHashMap::default(),
             globals: HashMap::new(),
+            constant_globals: HashSet::new(),
             current_function_return: None,
             found_return: false,
             current_function_error_type: None,
@@ -829,6 +833,12 @@ impl Analyzer {
                                 mutable: let_stmt.mutable,
                             },
                         );
+
+                        // Track if this immutable global has a constant initializer
+                        // This enables using it in other constant expressions (e.g., default params)
+                        if !let_stmt.mutable && self.is_constant_expr(init_expr) {
+                            self.constant_globals.insert(let_stmt.name);
+                        }
 
                         // Register in entity registry for proper global variable tracking
                         let global_name_id = self.name_table_mut().intern(
@@ -1638,8 +1648,9 @@ impl Analyzer {
 
     /// Check if an expression is a constant expression.
     /// Constant expressions are: literals, unary/binary ops on constants,
-    /// array/tuple literals with constant elements.
-    fn is_constant_expr(expr: &Expr) -> bool {
+    /// array/tuple literals with constant elements, and references to
+    /// immutable globals with constant initializers.
+    fn is_constant_expr(&self, expr: &Expr) -> bool {
         use ast::ExprKind;
         match &expr.kind {
             // Literals are constant
@@ -1649,22 +1660,25 @@ impl Analyzer {
             | ExprKind::StringLiteral(_)
             | ExprKind::Nil => true,
 
+            // Identifier: constant if it's an immutable global with a constant initializer
+            ExprKind::Identifier(sym) => self.constant_globals.contains(sym),
+
             // Unary operators on constants
-            ExprKind::Unary(unary) => Self::is_constant_expr(&unary.operand),
+            ExprKind::Unary(unary) => self.is_constant_expr(&unary.operand),
 
             // Binary operators on constants
             ExprKind::Binary(binary) => {
-                Self::is_constant_expr(&binary.left) && Self::is_constant_expr(&binary.right)
+                self.is_constant_expr(&binary.left) && self.is_constant_expr(&binary.right)
             }
 
             // Array/tuple literals with all constant elements
-            ExprKind::ArrayLiteral(elements) => elements.iter().all(Self::is_constant_expr),
+            ExprKind::ArrayLiteral(elements) => elements.iter().all(|e| self.is_constant_expr(e)),
 
             // Repeat literals with constant element (count is already a usize)
-            ExprKind::RepeatLiteral { element, .. } => Self::is_constant_expr(element),
+            ExprKind::RepeatLiteral { element, .. } => self.is_constant_expr(element),
 
             // Grouping (parenthesized expression)
-            ExprKind::Grouping(inner) => Self::is_constant_expr(inner),
+            ExprKind::Grouping(inner) => self.is_constant_expr(inner),
 
             // Everything else is not constant
             _ => false,
@@ -1699,7 +1713,7 @@ impl Analyzer {
                 }
 
                 // Check that the default is a constant expression
-                if !Self::is_constant_expr(default_expr) {
+                if !self.is_constant_expr(default_expr) {
                     let name = interner.resolve(param.name).to_string();
                     self.add_error(
                         SemanticError::DefaultMustBeConstant {
@@ -1744,7 +1758,7 @@ impl Analyzer {
                 }
 
                 // Check that the default is a constant expression
-                if !Self::is_constant_expr(default_expr) {
+                if !self.is_constant_expr(default_expr) {
                     let field_name = interner.resolve(field.name).to_string();
                     self.add_error(
                         SemanticError::DefaultMustBeConstant {
