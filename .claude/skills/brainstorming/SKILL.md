@@ -13,13 +13,13 @@ Start by understanding the current project context, then ask questions one at a 
 
 ## Prerequisites
 
-**REQUIRED:** Verify ticket is installed. If `tk` command not available, **STOP** and tell user to install beads.
+**REQUIRED:** Verify ticket is installed. If `tk` command not available, **STOP** and tell user to install `tk`.
 
 ## The Process
 
 **Understanding the idea:**
 - Check out the current project state first (files, docs, recent commits)
-- Check active beads: `tk ls` for open tasks
+- Check active tickets: `tk ls` for open tasks
 - Ask questions one at a time to refine the idea
 - Prefer multiple choice questions when possible, but open-ended is fine too
 - Only one question per message - if a topic needs more exploration, break it into multiple questions
@@ -39,7 +39,7 @@ Start by understanding the current project context, then ask questions one at a 
 
 ## After the Design
 
-**DO NOT write design documents to `docs/plans/`** - use beads instead.
+**DO NOT write design documents to `docs/plans/`** - use `tk` instead.
 
 **Implementation (if continuing):**
 - Ask: "Ready to set up for implementation?"
