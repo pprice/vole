@@ -1334,37 +1334,7 @@ impl Compiler<'_> {
         &mut self,
         program: &Program,
     ) -> Result<(), String> {
-        // Build a map of class name -> class decl
-        let class_asts: HashMap<NameId, &vole_frontend::ClassDecl> = program
-            .declarations
-            .iter()
-            .filter_map(|decl| {
-                if let Decl::Class(class) = decl
-                    && !class.type_params.is_empty()
-                {
-                    let query = self.query();
-                    let name_id = query.try_name_id(query.main_module(), &[class.name])?;
-                    return Some((name_id, class));
-                }
-                None
-            })
-            .collect();
-
-        // Also include record decls (they can be generic too)
-        let record_asts: HashMap<NameId, &vole_frontend::RecordDecl> = program
-            .declarations
-            .iter()
-            .filter_map(|decl| {
-                if let Decl::Record(record) = decl
-                    && !record.type_params.is_empty()
-                {
-                    let query = self.query();
-                    let name_id = query.try_name_id(query.main_module(), &[record.name])?;
-                    return Some((name_id, record));
-                }
-                None
-            })
-            .collect();
+        let (class_asts, record_asts) = self.build_generic_type_asts(program);
 
         // Collect instances to avoid borrow issues
         let instances = self
@@ -1629,37 +1599,7 @@ impl Compiler<'_> {
         &mut self,
         program: &Program,
     ) -> Result<(), String> {
-        // Build a map of class name -> class decl (for generic classes)
-        let class_asts: HashMap<NameId, &vole_frontend::ClassDecl> = program
-            .declarations
-            .iter()
-            .filter_map(|decl| {
-                if let Decl::Class(class) = decl
-                    && !class.type_params.is_empty()
-                {
-                    let query = self.query();
-                    let name_id = query.try_name_id(query.main_module(), &[class.name])?;
-                    return Some((name_id, class));
-                }
-                None
-            })
-            .collect();
-
-        // Also include record decls (they can be generic too)
-        let record_asts: HashMap<NameId, &vole_frontend::RecordDecl> = program
-            .declarations
-            .iter()
-            .filter_map(|decl| {
-                if let Decl::Record(record) = decl
-                    && !record.type_params.is_empty()
-                {
-                    let query = self.query();
-                    let name_id = query.try_name_id(query.main_module(), &[record.name])?;
-                    return Some((name_id, record));
-                }
-                None
-            })
-            .collect();
+        let (class_asts, record_asts) = self.build_generic_type_asts(program);
 
         // Collect instances to avoid borrow issues
         let instances = self
@@ -1806,6 +1746,48 @@ impl Compiler<'_> {
         self.finalize_function(func_id)?;
 
         Ok(())
+    }
+
+    /// Build maps of generic class/record NameIds to their AST declarations.
+    /// Used by both class method and static method monomorphization.
+    fn build_generic_type_asts<'a>(
+        &self,
+        program: &'a Program,
+    ) -> (
+        HashMap<NameId, &'a vole_frontend::ClassDecl>,
+        HashMap<NameId, &'a vole_frontend::RecordDecl>,
+    ) {
+        let class_asts = program
+            .declarations
+            .iter()
+            .filter_map(|decl| {
+                if let Decl::Class(class) = decl
+                    && !class.type_params.is_empty()
+                {
+                    let query = self.query();
+                    let name_id = query.try_name_id(query.main_module(), &[class.name])?;
+                    return Some((name_id, class));
+                }
+                None
+            })
+            .collect();
+
+        let record_asts = program
+            .declarations
+            .iter()
+            .filter_map(|decl| {
+                if let Decl::Record(record) = decl
+                    && !record.type_params.is_empty()
+                {
+                    let query = self.query();
+                    let name_id = query.try_name_id(query.main_module(), &[record.name])?;
+                    return Some((name_id, record));
+                }
+                None
+            })
+            .collect();
+
+        (class_asts, record_asts)
     }
 
     // ═══════════════════════════════════════════════════════════════════════
