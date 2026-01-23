@@ -53,7 +53,7 @@ impl Compiler<'_> {
     pub(super) fn resolve_type_to_id(&self, ty: &TypeExpr) -> TypeId {
         let type_ctx = self.type_ctx();
         let module_id = type_ctx.query.main_module();
-        resolve_type_expr_with_ctx(ty, &type_ctx, &self.type_metadata, module_id)
+        resolve_type_expr_with_ctx(ty, &type_ctx, &self.state.type_metadata, module_id)
     }
 
     /// Resolve a type expression to TypeId using a specific interner (for module types)
@@ -64,7 +64,7 @@ impl Compiler<'_> {
     ) -> TypeId {
         let type_ctx = self.type_ctx_with_interner(interner);
         let module_id = self.func_registry.main_module();
-        resolve_type_expr_with_ctx(ty, &type_ctx, &self.type_metadata, module_id)
+        resolve_type_expr_with_ctx(ty, &type_ctx, &self.state.type_metadata, module_id)
     }
 
     /// Pre-register a class type (just the name and type_id)
@@ -89,7 +89,7 @@ impl Compiler<'_> {
             .type_arena_mut()
             .class(type_def_id, TypeIdVec::new());
 
-        self.type_metadata.insert(
+        self.state.type_metadata.insert(
             class.name,
             TypeMetadata {
                 type_id,
@@ -105,7 +105,7 @@ impl Compiler<'_> {
     pub(super) fn finalize_class(&mut self, class: &ClassDecl, program: &Program) {
         // Get the pre-registered type_id
         let type_id = self
-            .type_metadata
+                    .state.type_metadata
             .get(&class.name)
             .expect("class should be pre-registered")
             .type_id;
@@ -236,12 +236,12 @@ impl Compiler<'_> {
 
         // Reuse the vole_type_id and type_def_id from pre_register
         let pre_registered = self
-            .type_metadata
+                    .state.type_metadata
             .get(&class.name)
             .expect("class should be pre-registered");
         let vole_type_id = pre_registered.vole_type;
         let type_def_id = pre_registered.type_def_id;
-        self.type_metadata.insert(
+        self.state.type_metadata.insert(
             class.name,
             TypeMetadata {
                 type_id,
@@ -275,7 +275,7 @@ impl Compiler<'_> {
             .type_arena_mut()
             .record(type_def_id, TypeIdVec::new());
 
-        self.type_metadata.insert(
+        self.state.type_metadata.insert(
             record.name,
             TypeMetadata {
                 type_id,
@@ -291,7 +291,7 @@ impl Compiler<'_> {
     pub(super) fn finalize_record(&mut self, record: &RecordDecl, program: &Program) {
         // Get the pre-registered type_id
         let type_id = self
-            .type_metadata
+                    .state.type_metadata
             .get(&record.name)
             .expect("record should be pre-registered")
             .type_id;
@@ -394,12 +394,12 @@ impl Compiler<'_> {
 
         // Reuse the vole_type_id and type_def_id from pre_register
         let pre_registered = self
-            .type_metadata
+                    .state.type_metadata
             .get(&record.name)
             .expect("record should be pre-registered");
         let vole_type_id = pre_registered.vole_type;
         let type_def_id = pre_registered.type_def_id;
-        self.type_metadata.insert(
+        self.state.type_metadata.insert(
             record.name,
             TypeMetadata {
                 type_id,
@@ -471,7 +471,7 @@ impl Compiler<'_> {
 
             // Register in static_method_infos for codegen lookup
             if let Some(type_def_id) = type_def_id {
-                self.static_method_infos
+                self.state.static_method_infos
                     .insert((type_def_id, method_name_id), MethodInfo { func_key });
             }
         }
@@ -499,7 +499,7 @@ impl Compiler<'_> {
         tracing::debug!(type_name = %type_name_str, ?type_def_id, "Found TypeDefId for module class");
 
         // Skip if already registered - check by type name string to avoid Symbol collisions across interners
-        let already_registered = self.type_metadata.values().any(|meta| {
+        let already_registered = self.state.type_metadata.values().any(|meta| {
             let arena = self.analyzed.type_arena();
             if let Some((type_def_id, _)) = arena.unwrap_class(meta.vole_type) {
                 self.analyzed
@@ -583,7 +583,7 @@ impl Compiler<'_> {
             .analyzed
             .type_arena_mut()
             .class(type_def_id, TypeIdVec::new());
-        self.type_metadata.insert(
+        self.state.type_metadata.insert(
             main_class_symbol,
             TypeMetadata {
                 type_id,
@@ -623,7 +623,7 @@ impl Compiler<'_> {
                         method_name = %method_name_str,
                         "Registering static method"
                     );
-                    self.static_method_infos
+                    self.state.static_method_infos
                         .insert((type_def_id, method_name_id), MethodInfo { func_key });
                 }
             }

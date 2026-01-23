@@ -57,7 +57,7 @@ impl Compiler<'_> {
                             resolve_type_expr_to_id(
                                 &param.ty,
                                 query.registry(),
-                                &self.type_metadata,
+                                &self.state.type_metadata,
                                 query.interner(),
                                 &name_table,
                                 module_id,
@@ -74,7 +74,7 @@ impl Compiler<'_> {
                             resolve_type_expr_to_id(
                                 &param.ty,
                                 self.analyzed.entity_registry(),
-                                &self.type_metadata,
+                                &self.state.type_metadata,
                                 interner,
                                 &name_table,
                                 module_id,
@@ -96,7 +96,7 @@ impl Compiler<'_> {
                     resolve_type_expr_to_id(
                         t,
                         query.registry(),
-                        &self.type_metadata,
+                        &self.state.type_metadata,
                         query.interner(),
                         &name_table,
                         module_id,
@@ -108,7 +108,7 @@ impl Compiler<'_> {
                     resolve_type_expr_to_id(
                         t,
                         self.analyzed.entity_registry(),
-                        &self.type_metadata,
+                        &self.state.type_metadata,
                         interner,
                         &name_table,
                         module_id,
@@ -172,7 +172,7 @@ impl Compiler<'_> {
                             resolve_type_expr_to_id(
                                 &param.ty,
                                 query.registry(),
-                                &self.type_metadata,
+                                &self.state.type_metadata,
                                 query.interner(),
                                 &name_table,
                                 module_id,
@@ -189,7 +189,7 @@ impl Compiler<'_> {
                             resolve_type_expr_to_id(
                                 &param.ty,
                                 self.analyzed.entity_registry(),
-                                &self.type_metadata,
+                                &self.state.type_metadata,
                                 interner,
                                 &name_table,
                                 module_id,

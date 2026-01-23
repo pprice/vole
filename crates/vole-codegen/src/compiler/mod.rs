@@ -1,4 +1,41 @@
 // src/codegen/compiler/mod.rs
+
+/// Macro to construct GlobalCtx from Compiler fields.
+/// This is a macro (not a method) to allow field-level borrowing,
+/// which lets the borrow checker see that GlobalCtx uses different
+/// fields than CodegenCtx.
+macro_rules! global_ctx {
+    ($self:expr, $source_file_ptr:expr) => {
+        crate::types::GlobalCtx {
+            analyzed: $self.analyzed,
+            interner: &$self.analyzed.interner,
+            type_metadata: &$self.state.type_metadata,
+            impl_method_infos: &$self.state.impl_method_infos,
+            static_method_infos: &$self.state.static_method_infos,
+            interface_vtables: &$self.state.interface_vtables,
+            native_registry: &$self.state.native_registry,
+            global_inits: &$self.global_inits,
+            source_file_ptr: $source_file_ptr,
+            lambda_counter: &$self.state.lambda_counter,
+        }
+    };
+    // Module variant with custom interner and global_inits
+    ($self:expr, $interner:expr, $global_inits:expr, $source_file_ptr:expr) => {
+        crate::types::GlobalCtx {
+            analyzed: $self.analyzed,
+            interner: $interner,
+            type_metadata: &$self.state.type_metadata,
+            impl_method_infos: &$self.state.impl_method_infos,
+            static_method_infos: &$self.state.static_method_infos,
+            interface_vtables: &$self.state.interface_vtables,
+            native_registry: &$self.state.native_registry,
+            global_inits: $global_inits,
+            source_file_ptr: $source_file_ptr,
+            lambda_counter: &$self.state.lambda_counter,
+        }
+    };
+}
+
 pub(crate) mod common;
 mod impls;
 mod program;
@@ -8,18 +45,17 @@ mod type_registry;
 
 pub use signatures::{SelfParam, TypeResolver};
 
-use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
 
 use cranelift::prelude::types as clif_types;
 
-use crate::types::{MethodInfo, TypeMetadata};
+use crate::types::CodegenState;
 
 use crate::AnalyzedProgram;
-use crate::{FunctionRegistry, JitContext, RuntimeFn, interface_vtable::InterfaceVtableRegistry};
+use crate::{FunctionRegistry, JitContext, RuntimeFn};
 use vole_frontend::{Expr, Interner, Symbol};
-use vole_identity::{NameId, TypeDefId};
+use vole_identity::NameId;
 use vole_runtime::NativeRegistry;
 use vole_sema::{ImplTypeId, ProgramQuery, type_arena::TypeId};
 
@@ -34,24 +70,14 @@ pub struct Compiler<'a> {
     tests: Vec<TestInfo>,
     /// Global variable initializer expressions keyed by name
     global_inits: HashMap<Symbol, Expr>,
-    /// Counter for generating unique lambda names (interior mutability for cleaner API)
-    lambda_counter: Cell<usize>,
     /// NameIds for declared test functions by index
     test_name_ids: Vec<NameId>,
-    /// Class and record metadata: name -> TypeMetadata
-    type_metadata: HashMap<Symbol, TypeMetadata>,
-    /// Implement block method info keyed by (ImplTypeId, method)
-    impl_method_infos: HashMap<(ImplTypeId, NameId), MethodInfo>,
-    /// Static method info keyed by (TypeDefId, method_name)
-    static_method_infos: HashMap<(TypeDefId, NameId), MethodInfo>,
-    /// Interface vtable registry for interface-typed values
-    interface_vtables: RefCell<InterfaceVtableRegistry>,
+    /// Codegen lookup tables (type_metadata, method_infos, vtables, etc.)
+    state: CodegenState,
     /// Next type ID to assign
     next_type_id: u32,
     /// Opaque function identities and return types
     func_registry: FunctionRegistry,
-    /// Registry of native functions for external method calls
-    native_registry: NativeRegistry,
 }
 
 impl<'a> Compiler<'a> {
@@ -77,15 +103,10 @@ impl<'a> Compiler<'a> {
             pointer_type,
             tests: Vec::new(),
             global_inits: HashMap::new(),
-            lambda_counter: Cell::new(0),
             test_name_ids: Vec::new(),
-            type_metadata: HashMap::new(),
-            impl_method_infos: HashMap::new(),
-            static_method_infos: HashMap::new(),
-            interface_vtables: RefCell::new(InterfaceVtableRegistry::new()),
+            state: CodegenState::new(native_registry),
             next_type_id: 0,
             func_registry,
-            native_registry,
         }
     }
 
@@ -112,24 +133,6 @@ impl<'a> Compiler<'a> {
             self.analyzed.type_arena_ref(),
         );
         crate::types::TypeCtx::new(query, self.pointer_type)
-    }
-
-    /// Get GlobalCtx - shared lookup tables for codegen.
-    /// This bundles the read-only data that's shared across all function compilations.
-    #[allow(dead_code)]
-    fn global(&self) -> crate::types::GlobalCtx<'_> {
-        crate::types::GlobalCtx {
-            analyzed: self.analyzed,
-            interner: &self.analyzed.interner,
-            type_metadata: &self.type_metadata,
-            impl_method_infos: &self.impl_method_infos,
-            static_method_infos: &self.static_method_infos,
-            interface_vtables: &self.interface_vtables,
-            native_registry: &self.native_registry,
-            global_inits: &self.global_inits,
-            source_file_ptr: (std::ptr::null(), 0), // Set per-call
-            lambda_counter: &self.lambda_counter,
-        }
     }
 
     /// Intern a qualified function name (encapsulates borrow of interner + func_registry)

@@ -4,6 +4,8 @@
 // This module contains shared type utilities used throughout the codegen module.
 
 mod codegen_ctx;
+mod codegen_state;
+mod compile_env;
 mod conversions;
 mod function_ctx;
 mod global_ctx;
@@ -11,8 +13,10 @@ mod type_ctx;
 
 // Re-export all public types and functions
 pub use codegen_ctx::CodegenCtx;
+pub use codegen_state::CodegenState;
+pub use compile_env::CompileEnv;
 pub use function_ctx::FunctionCtx;
-pub use global_ctx::GlobalCtx;
+pub use global_ctx::GlobalCtx;  // TODO: remove after migration
 pub use type_ctx::TypeCtx;
 
 // Re-export conversion types and functions

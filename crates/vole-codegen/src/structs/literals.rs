@@ -26,8 +26,7 @@ impl Cg<'_, '_, '_> {
             .interner
             .lookup(type_name)
             .unwrap_or(sl.name);
-        let metadata = self
-            .type_metadata()
+        let metadata = self.type_metadata()
             .get(&lookup_symbol)
             .ok_or_else(|| format!("Unknown type: {}", type_name))?;
 

@@ -416,7 +416,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ///
     /// This is used during lambda compilation when sema type info is unavailable.
     /// Uses the global context for type lookups and arena mutations.
-    #[allow(dead_code)] // Will be used when compile_lambda is converted to Cg method
     pub fn infer_expr_type(&self, expr: &Expr, param_types: &[(Symbol, TypeId)]) -> TypeId {
         let primitives = self.arena().primitives;
 
@@ -548,7 +547,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Infer the return type of a lambda expression body.
-    #[allow(dead_code)] // Will be used when compile_lambda is converted to Cg method
     pub fn infer_lambda_return_type(
         &self,
         body: &vole_frontend::FuncBody,

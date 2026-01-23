@@ -487,7 +487,7 @@ impl Compiler<'_> {
         // First collect type IDs (which may access arena internally)
         let param_info: Vec<(Symbol, TypeId)> = {
             let query = self.query();
-            let type_metadata = &self.type_metadata;
+            let type_metadata = &self.state.type_metadata;
             let name_table = self.analyzed.name_table();
             func.params
                 .iter()
@@ -533,18 +533,7 @@ impl Compiler<'_> {
 
             // Create split contexts for the new compilation path
             let function_ctx = FunctionCtx::module(return_type_id, module_id);
-            let global = GlobalCtx {
-                analyzed: self.analyzed,
-                interner: module_interner, // Module-specific interner
-                type_metadata: &self.type_metadata,
-                impl_method_infos: &self.impl_method_infos,
-                static_method_infos: &self.static_method_infos,
-                interface_vtables: &self.interface_vtables,
-                native_registry: &self.native_registry,
-                global_inits: module_global_inits, // Module-specific globals
-                source_file_ptr,
-                lambda_counter: &self.lambda_counter,
-            };
+            let global = global_ctx!(self, module_interner, module_global_inits, source_file_ptr);
 
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
@@ -614,18 +603,7 @@ impl Compiler<'_> {
 
             // Create split contexts for the new compilation path
             let function_ctx = FunctionCtx::main(return_type_id);
-            let global = GlobalCtx {
-                analyzed: self.analyzed,
-                interner: &self.analyzed.interner,
-                type_metadata: &self.type_metadata,
-                impl_method_infos: &self.impl_method_infos,
-                static_method_infos: &self.static_method_infos,
-                interface_vtables: &self.interface_vtables,
-                native_registry: &self.native_registry,
-                global_inits: &self.global_inits,
-                source_file_ptr,
-                lambda_counter: &self.lambda_counter,
-            };
+            let global = global_ctx!(self, source_file_ptr);
 
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
@@ -649,7 +627,7 @@ impl Compiler<'_> {
     /// Compile a scoped function declaration (like a pure lambda).
     /// Returns the FuncId and type information needed to make it callable in tests.
     fn compile_scoped_function(&mut self, func: &FuncDecl) -> Result<ScopedFuncInfo, String> {
-        self.lambda_counter.set(self.lambda_counter.get() + 1);
+        self.state.lambda_counter.set(self.state.lambda_counter.get() + 1);
 
         // Get param types using the compiler's type resolution
         let param_type_ids: Vec<TypeId> = func
@@ -700,7 +678,7 @@ impl Compiler<'_> {
             .push(cranelift::prelude::AbiParam::new(return_type));
 
         // Create unique function name
-        let scoped_func_name = format!("__scoped_{}_{}", self.lambda_counter.get(), {
+        let scoped_func_name = format!("__scoped_{}_{}", self.state.lambda_counter.get(), {
             self.analyzed.interner.resolve(func.name)
         });
         let func_id = self
@@ -730,18 +708,7 @@ impl Compiler<'_> {
 
             // Create split contexts for the new compilation path
             let function_ctx = FunctionCtx::main(Some(return_type_id));
-            let global = GlobalCtx {
-                analyzed: self.analyzed,
-                interner: &self.analyzed.interner,
-                type_metadata: &self.type_metadata,
-                impl_method_infos: &self.impl_method_infos,
-                static_method_infos: &self.static_method_infos,
-                interface_vtables: &self.interface_vtables,
-                native_registry: &self.native_registry,
-                global_inits: &self.global_inits,
-                source_file_ptr,
-                lambda_counter: &self.lambda_counter,
-            };
+            let global = global_ctx!(self, source_file_ptr);
 
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
@@ -826,18 +793,7 @@ impl Compiler<'_> {
 
                 // Create split contexts for the new compilation path
                 let function_ctx = FunctionCtx::test();
-                let global = GlobalCtx {
-                    analyzed: self.analyzed,
-                    interner: &self.analyzed.interner,
-                    type_metadata: &self.type_metadata,
-                    impl_method_infos: &self.impl_method_infos,
-                    static_method_infos: &self.static_method_infos,
-                    interface_vtables: &self.interface_vtables,
-                    native_registry: &self.native_registry,
-                    global_inits: &self.global_inits,
-                    source_file_ptr,
-                    lambda_counter: &self.lambda_counter,
-                };
+                let global = global_ctx!(self, source_file_ptr);
 
                 let mut codegen_ctx =
                     CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
@@ -1097,13 +1053,13 @@ impl Compiler<'_> {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
                 type_metadata: &empty_type_metadata,
-                impl_method_infos: &self.impl_method_infos,
-                static_method_infos: &self.static_method_infos,
-                interface_vtables: &self.interface_vtables,
-                native_registry: &self.native_registry,
+                impl_method_infos: &self.state.impl_method_infos,
+                static_method_infos: &self.state.static_method_infos,
+                interface_vtables: &self.state.interface_vtables,
+                native_registry: &self.state.native_registry,
                 global_inits: &empty_global_inits,
                 source_file_ptr,
-                lambda_counter: &self.lambda_counter,
+                lambda_counter: &self.state.lambda_counter,
             };
 
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
@@ -1169,13 +1125,13 @@ impl Compiler<'_> {
                 analyzed: self.analyzed,
                 interner: &self.analyzed.interner,
                 type_metadata: &empty_type_metadata,
-                impl_method_infos: &self.impl_method_infos,
-                static_method_infos: &self.static_method_infos,
-                interface_vtables: &self.interface_vtables,
-                native_registry: &self.native_registry,
+                impl_method_infos: &self.state.impl_method_infos,
+                static_method_infos: &self.state.static_method_infos,
+                interface_vtables: &self.state.interface_vtables,
+                native_registry: &self.state.native_registry,
                 global_inits: &empty_global_inits,
                 source_file_ptr,
-                lambda_counter: &self.lambda_counter,
+                lambda_counter: &self.state.lambda_counter,
             };
 
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
@@ -1419,18 +1375,7 @@ impl Compiler<'_> {
 
             // Create split contexts for the new compilation path
             let function_ctx = FunctionCtx::main(Some(return_type_id));
-            let global = GlobalCtx {
-                analyzed: self.analyzed,
-                interner: &self.analyzed.interner,
-                type_metadata: &self.type_metadata,
-                impl_method_infos: &self.impl_method_infos,
-                static_method_infos: &self.static_method_infos,
-                interface_vtables: &self.interface_vtables,
-                native_registry: &self.native_registry,
-                global_inits: &self.global_inits,
-                source_file_ptr,
-                lambda_counter: &self.lambda_counter,
-            };
+            let global = global_ctx!(self, source_file_ptr);
 
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
@@ -1691,18 +1636,7 @@ impl Compiler<'_> {
             // Note: Uses monomorphized FunctionCtx for type substitutions
             let function_ctx =
                 FunctionCtx::monomorphized(Some(return_type_id), &instance.substitutions);
-            let global = GlobalCtx {
-                analyzed: self.analyzed,
-                interner: &self.analyzed.interner,
-                type_metadata: &self.type_metadata,
-                impl_method_infos: &self.impl_method_infos,
-                static_method_infos: &self.static_method_infos,
-                interface_vtables: &self.interface_vtables,
-                native_registry: &self.native_registry,
-                global_inits: &self.global_inits,
-                source_file_ptr,
-                lambda_counter: &self.lambda_counter,
-            };
+            let global = global_ctx!(self, source_file_ptr);
 
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
@@ -1798,7 +1732,7 @@ impl Compiler<'_> {
         }
 
         // Fallback: use type_metadata (for non-generic types)
-        if let Some(metadata) = self.type_metadata.get(&type_name) {
+        if let Some(metadata) = self.state.type_metadata.get(&type_name) {
             // Apply substitutions to the stored vole_type
             // Convert std HashMap to FxHashMap for type_arena
             let subs: FxHashMap<NameId, TypeId> =
@@ -2014,18 +1948,7 @@ impl Compiler<'_> {
             // Note: Uses monomorphized FunctionCtx for type substitutions
             let function_ctx =
                 FunctionCtx::monomorphized(Some(return_type_id), &instance.substitutions);
-            let global = GlobalCtx {
-                analyzed: self.analyzed,
-                interner: &self.analyzed.interner,
-                type_metadata: &self.type_metadata,
-                impl_method_infos: &self.impl_method_infos,
-                static_method_infos: &self.static_method_infos,
-                interface_vtables: &self.interface_vtables,
-                native_registry: &self.native_registry,
-                global_inits: &self.global_inits,
-                source_file_ptr,
-                lambda_counter: &self.lambda_counter,
-            };
+            let global = global_ctx!(self, source_file_ptr);
 
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 

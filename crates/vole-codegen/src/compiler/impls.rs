@@ -7,7 +7,7 @@ use super::common::{FunctionCompileConfig, compile_function_inner_with_params};
 use super::{Compiler, ControlFlowCtx, SelfParam, TypeResolver};
 use crate::stmt::compile_func_body_with_params;
 use crate::types::{
-    CodegenCtx, FunctionCtx, GlobalCtx, MethodInfo, TypeMetadata, method_name_id_with_interner,
+    CodegenCtx, FunctionCtx, MethodInfo, TypeMetadata, method_name_id_with_interner,
     resolve_type_expr_to_id, type_id_to_cranelift,
 };
 use vole_frontend::ast::PrimitiveType as AstPrimitive;
@@ -50,7 +50,7 @@ impl Compiler<'_> {
         }
 
         let metadata = self
-            .type_metadata
+                    .state.type_metadata
             .get(&class.name)
             .cloned()
             .ok_or_else(|| {
@@ -120,7 +120,7 @@ impl Compiler<'_> {
         }
 
         let metadata = self
-            .type_metadata
+                    .state.type_metadata
             .get(&record.name)
             .cloned()
             .ok_or_else(|| {
@@ -271,7 +271,7 @@ impl Compiler<'_> {
                 && let Some(method_name_id) =
                     method_name_id_with_interner(self.analyzed, interner, method.name)
             {
-                self.static_method_infos
+                self.state.static_method_infos
                     .insert((type_def_id, method_name_id), MethodInfo { func_key });
             }
         }
@@ -344,7 +344,7 @@ impl Compiler<'_> {
                 && let Some(method_name_id) =
                     method_name_id_with_interner(self.analyzed, interner, method.name)
             {
-                self.static_method_infos
+                self.state.static_method_infos
                     .insert((type_def_id, method_name_id), MethodInfo { func_key });
             }
         }
@@ -378,7 +378,7 @@ impl Compiler<'_> {
                 (type_id, impl_id)
             }
             TypeExpr::Named(sym) => {
-                let metadata = self.type_metadata.get(sym).unwrap_or_else(|| {
+                let metadata = self.state.type_metadata.get(sym).unwrap_or_else(|| {
                     panic!(
                         "INTERNAL ERROR: implement block target type not in type_metadata\n\
                          sym: {:?}",
@@ -394,7 +394,7 @@ impl Compiler<'_> {
                 let type_id = resolve_type_expr_to_id(
                     &impl_block.target_type,
                     self.analyzed.entity_registry(),
-                    &self.type_metadata,
+                    &self.state.type_metadata,
                     interner,
                     &name_table,
                     module_id,
@@ -431,7 +431,7 @@ impl Compiler<'_> {
             if let Some(impl_id) = impl_type_id {
                 let method_id = method_name_id_with_interner(self.analyzed, interner, method.name)
                     .expect("implement method name_id should be registered");
-                self.impl_method_infos
+                self.state.impl_method_infos
                     .insert((impl_id, method_id), MethodInfo { func_key });
             }
         }
@@ -483,7 +483,7 @@ impl Compiler<'_> {
                     && let Some(method_name_id) =
                         method_name_id_with_interner(self.analyzed, interner, method.name)
                 {
-                    self.static_method_infos
+                    self.state.static_method_infos
                         .insert((type_def_id, method_name_id), MethodInfo { func_key });
                 }
             }
@@ -509,7 +509,7 @@ impl Compiler<'_> {
                 self.analyzed.type_arena().primitive(prim_type)
             }
             TypeExpr::Named(sym) => self
-                .type_metadata
+                        .state.type_metadata
                 .get(sym)
                 .map(|m| m.vole_type)
                 .unwrap_or_else(|| {
@@ -524,7 +524,7 @@ impl Compiler<'_> {
                 resolve_type_expr_to_id(
                     &impl_block.target_type,
                     self.analyzed.entity_registry(),
-                    &self.type_metadata,
+                    &self.state.type_metadata,
                     &self.analyzed.interner,
                     &name_table,
                     module_id,
@@ -545,7 +545,7 @@ impl Compiler<'_> {
         for method in &impl_block.methods {
             let method_key = impl_type_id.and_then(|type_id| {
                 let method_id = self.method_name_id(method.name);
-                self.impl_method_infos.get(&(type_id, method_id)).copied()
+                self.state.impl_method_infos.get(&(type_id, method_id)).copied()
             });
             self.compile_implement_method(
                 method,
@@ -631,7 +631,7 @@ impl Compiler<'_> {
                     resolve_type_expr_to_id(
                         t,
                         self.analyzed.entity_registry(),
-                        &self.type_metadata,
+                        &self.state.type_metadata,
                         interner,
                         &name_table,
                         module_id,
@@ -659,7 +659,7 @@ impl Compiler<'_> {
                         resolve_type_expr_to_id(
                             &p.ty,
                             self.analyzed.entity_registry(),
-                            &self.type_metadata,
+                            &self.state.type_metadata,
                             interner,
                             &name_table,
                             module_id,
@@ -721,19 +721,7 @@ impl Compiler<'_> {
                 } else {
                     FunctionCtx::main(return_type_id)
                 };
-                let global = GlobalCtx {
-                    analyzed: self.analyzed,
-                    interner: &self.analyzed.interner,
-                    type_metadata: &self.type_metadata,
-                    impl_method_infos: &self.impl_method_infos,
-                    static_method_infos: &self.static_method_infos,
-                    interface_vtables: &self.interface_vtables,
-                    native_registry: &self.native_registry,
-                    global_inits: &self.global_inits,
-                    source_file_ptr,
-                    lambda_counter: &self.lambda_counter,
-                };
-
+                let global = global_ctx!(self, source_file_ptr);
                 let mut codegen_ctx =
                     CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
@@ -822,7 +810,7 @@ impl Compiler<'_> {
                         resolve_type_expr_to_id(
                             &p.ty,
                             self.analyzed.entity_registry(),
-                            &self.type_metadata,
+                            &self.state.type_metadata,
                             &self.analyzed.interner,
                             &name_table,
                             module_id,
@@ -856,7 +844,7 @@ impl Compiler<'_> {
                 resolve_type_expr_to_id(
                     t,
                     self.analyzed.entity_registry(),
-                    &self.type_metadata,
+                    &self.state.type_metadata,
                     &self.analyzed.interner,
                     &name_table,
                     module_id,
@@ -872,19 +860,7 @@ impl Compiler<'_> {
 
             // Create split contexts
             let function_ctx = FunctionCtx::main(method_return_type_id);
-            let global = GlobalCtx {
-                analyzed: self.analyzed,
-                interner: &self.analyzed.interner,
-                type_metadata: &self.type_metadata,
-                impl_method_infos: &self.impl_method_infos,
-                static_method_infos: &self.static_method_infos,
-                interface_vtables: &self.interface_vtables,
-                native_registry: &self.native_registry,
-                global_inits: &self.global_inits,
-                source_file_ptr,
-                lambda_counter: &self.lambda_counter,
-            };
-
+            let global = global_ctx!(self, source_file_ptr);
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
             let self_binding = (self_sym, self_type_id, self_cranelift_type);
@@ -961,7 +937,7 @@ impl Compiler<'_> {
             let registry = query.registry();
             let interner = query.interner();
             let name_table = self.analyzed.name_table();
-            let type_metadata = &self.type_metadata;
+            let type_metadata = &self.state.type_metadata;
             let arena = self.analyzed.type_arena_ref();
             method
                 .params
@@ -1008,19 +984,7 @@ impl Compiler<'_> {
 
             // Create split contexts
             let function_ctx = FunctionCtx::main(method_return_type_id);
-            let global = GlobalCtx {
-                analyzed: self.analyzed,
-                interner: &self.analyzed.interner,
-                type_metadata: &self.type_metadata,
-                impl_method_infos: &self.impl_method_infos,
-                static_method_infos: &self.static_method_infos,
-                interface_vtables: &self.interface_vtables,
-                native_registry: &self.native_registry,
-                global_inits: &self.global_inits,
-                source_file_ptr,
-                lambda_counter: &self.lambda_counter,
-            };
-
+            let global = global_ctx!(self, source_file_ptr);
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
             let self_binding = (self_sym, self_type_id, self.pointer_type);
             let config = FunctionCompileConfig::method(
@@ -1094,7 +1058,7 @@ impl Compiler<'_> {
             let registry = query.registry();
             let interner = query.interner();
             let name_table = self.analyzed.name_table();
-            let type_metadata = &self.type_metadata;
+            let type_metadata = &self.state.type_metadata;
             let arena = self.analyzed.type_arena_ref();
             method
                 .params
@@ -1174,19 +1138,7 @@ impl Compiler<'_> {
 
             // Create split contexts
             let function_ctx = FunctionCtx::main(method_return_type_id);
-            let global = GlobalCtx {
-                analyzed: self.analyzed,
-                interner: &self.analyzed.interner,
-                type_metadata: &self.type_metadata,
-                impl_method_infos: &self.impl_method_infos,
-                static_method_infos: &self.static_method_infos,
-                interface_vtables: &self.interface_vtables,
-                native_registry: &self.native_registry,
-                global_inits: &self.global_inits,
-                source_file_ptr,
-                lambda_counter: &self.lambda_counter,
-            };
-
+            let global = global_ctx!(self, source_file_ptr);
             let mut cf_ctx = ControlFlowCtx::default();
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
             let (terminated, expr_value) = compile_func_body_with_params(
@@ -1271,7 +1223,7 @@ impl Compiler<'_> {
             // Collect param type IDs first, then convert to cranelift types (TypeId-native)
             let param_type_ids: Vec<TypeId> = {
                 let query = self.query();
-                let type_metadata = &self.type_metadata;
+                let type_metadata = &self.state.type_metadata;
                 let arena = self.analyzed.type_arena_ref();
                 let name_table = self.analyzed.name_table();
                 method
@@ -1331,18 +1283,7 @@ impl Compiler<'_> {
 
                 // Create split contexts
                 let function_ctx = FunctionCtx::main(None);
-                let global = GlobalCtx {
-                    analyzed: self.analyzed,
-                    interner: &self.analyzed.interner,
-                    type_metadata: &self.type_metadata,
-                    impl_method_infos: &self.impl_method_infos,
-                    static_method_infos: &self.static_method_infos,
-                    interface_vtables: &self.interface_vtables,
-                    native_registry: &self.native_registry,
-                    global_inits: &self.global_inits,
-                    source_file_ptr,
-                    lambda_counter: &self.lambda_counter,
-                };
+                let global = global_ctx!(self, source_file_ptr);
 
                 // Compile method body
                 let mut cf_ctx = ControlFlowCtx::default();
@@ -1398,7 +1339,7 @@ impl Compiler<'_> {
 
         // Find the type metadata by looking for the type name string
         let metadata = self
-            .type_metadata
+                    .state.type_metadata
             .values()
             .find(|meta| {
                 let arena = self.analyzed.type_arena();
@@ -1443,7 +1384,7 @@ impl Compiler<'_> {
 
             // Resolve param type IDs (TypeId-native)
             let param_type_ids: Vec<TypeId> = {
-                let type_metadata = &self.type_metadata;
+                let type_metadata = &self.state.type_metadata;
                 let arena = self.analyzed.type_arena_ref();
                 let name_table = self.analyzed.name_table();
                 method
@@ -1486,7 +1427,7 @@ impl Compiler<'_> {
                         resolve_type_expr_to_id(
                             t,
                             self.analyzed.entity_registry(),
-                            &self.type_metadata,
+                            &self.state.type_metadata,
                             module_interner,
                             &name_table,
                             module_id,
@@ -1530,18 +1471,7 @@ impl Compiler<'_> {
 
                 // Create split contexts (use module interner)
                 let function_ctx = FunctionCtx::module(Some(return_type_id), module_id);
-                let global = GlobalCtx {
-                    analyzed: self.analyzed,
-                    interner: module_interner,
-                    type_metadata: &self.type_metadata,
-                    impl_method_infos: &self.impl_method_infos,
-                    static_method_infos: &self.static_method_infos,
-                    interface_vtables: &self.interface_vtables,
-                    native_registry: &self.native_registry,
-                    global_inits: module_global_inits,
-                    source_file_ptr,
-                    lambda_counter: &self.lambda_counter,
-                };
+                let global = global_ctx!(self, module_interner, module_global_inits, source_file_ptr);
 
                 // Compile method body
                 let mut cf_ctx = ControlFlowCtx::default();
@@ -1603,7 +1533,7 @@ impl Compiler<'_> {
                             resolve_type_expr_to_id(
                                 t,
                                 self.analyzed.entity_registry(),
-                                &self.type_metadata,
+                                &self.state.type_metadata,
                                 module_interner,
                                 &name_table,
                                 module_id,
@@ -1624,7 +1554,7 @@ impl Compiler<'_> {
 
                 // Resolve param type IDs (TypeId-native)
                 let param_type_ids: Vec<TypeId> = {
-                    let type_metadata = &self.type_metadata;
+                    let type_metadata = &self.state.type_metadata;
                     let arena = self.analyzed.type_arena_ref();
                     let name_table = self.analyzed.name_table();
                     method
@@ -1685,18 +1615,7 @@ impl Compiler<'_> {
 
                     // Create split contexts (use module interner)
                     let function_ctx = FunctionCtx::module(Some(return_type_id), module_id);
-                    let global = GlobalCtx {
-                        analyzed: self.analyzed,
-                        interner: module_interner,
-                        type_metadata: &self.type_metadata,
-                        impl_method_infos: &self.impl_method_infos,
-                        static_method_infos: &self.static_method_infos,
-                        interface_vtables: &self.interface_vtables,
-                        native_registry: &self.native_registry,
-                        global_inits: module_global_inits,
-                        source_file_ptr,
-                        lambda_counter: &self.lambda_counter,
-                    };
+                    let global = global_ctx!(self, module_interner, module_global_inits, source_file_ptr);
 
                     // Compile method body
                     let mut cf_ctx = ControlFlowCtx::default();
