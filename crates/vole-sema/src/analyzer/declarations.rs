@@ -397,12 +397,24 @@ impl Analyzer {
                     .unwrap_or_else(|| self.type_arena().void());
                 let signature_id = FunctionType::from_ids(&params_id, return_type_id, false)
                     .intern(&mut self.type_arena_mut());
-                self.entity_registry_mut().register_method(
+
+                // Calculate required_params and param_defaults for instance methods
+                let required_params = self.validate_param_defaults(&method.params, interner);
+                let param_defaults: Vec<Option<Box<Expr>>> = method
+                    .params
+                    .iter()
+                    .map(|p| p.default_value.clone())
+                    .collect();
+
+                self.entity_registry_mut().register_method_with_defaults(
                     entity_type_id,
                     method_name_id,
                     full_method_name_id,
                     signature_id,
-                    false, // class methods don't have defaults
+                    false, // class methods don't have defaults (implementation defaults)
+                    None,  // no external binding
+                    required_params,
+                    param_defaults,
                 );
             }
 
@@ -431,14 +443,24 @@ impl Analyzer {
                     let signature_id = FunctionType::from_ids(&params_id, return_type_id, false)
                         .intern(&mut self.type_arena_mut());
                     let has_default = method.is_default || method.body.is_some();
-                    self.entity_registry_mut().register_static_method(
-                        entity_type_id,
-                        method_name_id,
-                        full_method_name_id,
-                        signature_id,
-                        has_default,
-                        Vec::new(), // Non-generic class, no method type params
-                    );
+                    let required_params = self.validate_param_defaults(&method.params, interner);
+                    let param_defaults: Vec<Option<Box<Expr>>> = method
+                        .params
+                        .iter()
+                        .map(|p| p.default_value.clone())
+                        .collect();
+                    self.entity_registry_mut()
+                        .register_static_method_with_defaults(
+                            entity_type_id,
+                            method_name_id,
+                            full_method_name_id,
+                            signature_id,
+                            has_default,
+                            None,       // no external binding
+                            Vec::new(), // Non-generic class, no method type params
+                            required_params,
+                            param_defaults,
+                        );
                 }
             }
 
@@ -653,12 +675,24 @@ impl Analyzer {
 
                 let signature_id = FunctionType::from_ids(&params_id, return_type_id, false)
                     .intern(&mut self.type_arena_mut());
-                self.entity_registry_mut().register_method(
+
+                // Calculate required_params and param_defaults for instance methods
+                let required_params = self.validate_param_defaults(&method.params, interner);
+                let param_defaults: Vec<Option<Box<Expr>>> = method
+                    .params
+                    .iter()
+                    .map(|p| p.default_value.clone())
+                    .collect();
+
+                self.entity_registry_mut().register_method_with_defaults(
                     entity_type_id,
                     method_name_id,
                     full_method_name_id,
                     signature_id,
-                    false,
+                    false, // class methods don't have defaults (implementation defaults)
+                    None,  // no external binding
+                    required_params,
+                    param_defaults,
                 );
             }
 
@@ -750,14 +784,24 @@ impl Analyzer {
                     let signature_id = FunctionType::from_ids(&params_id, return_type_id, false)
                         .intern(&mut self.type_arena_mut());
                     let has_default = method.is_default || method.body.is_some();
-                    self.entity_registry_mut().register_static_method(
-                        entity_type_id,
-                        method_name_id,
-                        full_method_name_id,
-                        signature_id,
-                        has_default,
-                        method_type_params,
-                    );
+                    let required_params = self.validate_param_defaults(&method.params, interner);
+                    let param_defaults: Vec<Option<Box<Expr>>> = method
+                        .params
+                        .iter()
+                        .map(|p| p.default_value.clone())
+                        .collect();
+                    self.entity_registry_mut()
+                        .register_static_method_with_defaults(
+                            entity_type_id,
+                            method_name_id,
+                            full_method_name_id,
+                            signature_id,
+                            has_default,
+                            None, // no external binding
+                            method_type_params,
+                            required_params,
+                            param_defaults,
+                        );
                 }
             }
 
@@ -927,12 +971,24 @@ impl Analyzer {
                     .unwrap_or_else(|| self.type_arena().void());
                 let signature_id = FunctionType::from_ids(&params_id, return_type_id, false)
                     .intern(&mut self.type_arena_mut());
-                self.entity_registry_mut().register_method(
+
+                // Calculate required_params and param_defaults for instance methods
+                let required_params = self.validate_param_defaults(&method.params, interner);
+                let param_defaults: Vec<Option<Box<Expr>>> = method
+                    .params
+                    .iter()
+                    .map(|p| p.default_value.clone())
+                    .collect();
+
+                self.entity_registry_mut().register_method_with_defaults(
                     entity_type_id,
                     method_name_id,
                     full_method_name_id,
                     signature_id,
-                    false,
+                    false, // record methods don't have defaults (implementation defaults)
+                    None,  // no external binding
+                    required_params,
+                    param_defaults,
                 );
             }
 
@@ -961,14 +1017,24 @@ impl Analyzer {
                     let signature_id = FunctionType::from_ids(&params_id, return_type_id, false)
                         .intern(&mut self.type_arena_mut());
                     let has_default = method.is_default || method.body.is_some();
-                    self.entity_registry_mut().register_static_method(
-                        entity_type_id,
-                        method_name_id,
-                        full_method_name_id,
-                        signature_id,
-                        has_default,
-                        Vec::new(), // Non-generic record, no method type params
-                    );
+                    let required_params = self.validate_param_defaults(&method.params, interner);
+                    let param_defaults: Vec<Option<Box<Expr>>> = method
+                        .params
+                        .iter()
+                        .map(|p| p.default_value.clone())
+                        .collect();
+                    self.entity_registry_mut()
+                        .register_static_method_with_defaults(
+                            entity_type_id,
+                            method_name_id,
+                            full_method_name_id,
+                            signature_id,
+                            has_default,
+                            None,       // no external binding
+                            Vec::new(), // Non-generic record, no method type params
+                            required_params,
+                            param_defaults,
+                        );
                 }
             }
         } else {
@@ -1147,12 +1213,24 @@ impl Analyzer {
                 );
                 let signature_id = FunctionType::from_ids(&params_id, return_type_id, false)
                     .intern(&mut self.type_arena_mut());
-                self.entity_registry_mut().register_method(
+
+                // Calculate required_params and param_defaults for instance methods
+                let required_params = self.validate_param_defaults(&method.params, interner);
+                let param_defaults: Vec<Option<Box<Expr>>> = method
+                    .params
+                    .iter()
+                    .map(|p| p.default_value.clone())
+                    .collect();
+
+                self.entity_registry_mut().register_method_with_defaults(
                     entity_type_id,
                     method_name_id,
                     full_method_name_id,
                     signature_id,
-                    false,
+                    false, // record methods don't have defaults (implementation defaults)
+                    None,  // no external binding
+                    required_params,
+                    param_defaults,
                 );
             }
 
@@ -1244,14 +1322,24 @@ impl Analyzer {
                     let signature_id = FunctionType::from_ids(&params_id, return_type_id, false)
                         .intern(&mut self.type_arena_mut());
                     let has_default = method.is_default || method.body.is_some();
-                    self.entity_registry_mut().register_static_method(
-                        entity_type_id,
-                        method_name_id,
-                        full_method_name_id,
-                        signature_id,
-                        has_default,
-                        method_type_params,
-                    );
+                    let required_params = self.validate_param_defaults(&method.params, interner);
+                    let param_defaults: Vec<Option<Box<Expr>>> = method
+                        .params
+                        .iter()
+                        .map(|p| p.default_value.clone())
+                        .collect();
+                    self.entity_registry_mut()
+                        .register_static_method_with_defaults(
+                            entity_type_id,
+                            method_name_id,
+                            full_method_name_id,
+                            signature_id,
+                            has_default,
+                            None, // no external binding
+                            method_type_params,
+                            required_params,
+                            param_defaults,
+                        );
                 }
             }
         }
@@ -1826,14 +1914,25 @@ impl Analyzer {
                             FunctionType::from_ids(&params_id, return_type_id, false)
                                 .intern(&mut self.type_arena_mut());
 
-                        self.entity_registry_mut().register_static_method(
-                            entity_type_id,
-                            method_name_id,
-                            full_method_name_id,
-                            signature_id,
-                            false,      // implement block methods don't have defaults
-                            Vec::new(), // implement block static methods, no method type params
-                        );
+                        let required_params =
+                            self.validate_param_defaults(&method.params, interner);
+                        let param_defaults: Vec<Option<Box<Expr>>> = method
+                            .params
+                            .iter()
+                            .map(|p| p.default_value.clone())
+                            .collect();
+                        self.entity_registry_mut()
+                            .register_static_method_with_defaults(
+                                entity_type_id,
+                                method_name_id,
+                                full_method_name_id,
+                                signature_id,
+                                false, // has_default refers to interface method default body
+                                None,  // no external binding
+                                Vec::new(), // implement block static methods, no method type params
+                                required_params,
+                                param_defaults,
+                            );
                     }
 
                     // Register external static methods
@@ -1904,6 +2003,16 @@ impl Analyzer {
                 self.name_table_mut()
                     .intern(self.current_module, &[func.vole_name], interner);
 
+            // Validate parameter default ordering and count required params
+            let required_params = self.validate_param_defaults(&func.params, interner);
+
+            // Clone the default expressions for storage
+            let param_defaults: Vec<Option<Box<Expr>>> = func
+                .params
+                .iter()
+                .map(|p| p.default_value.clone())
+                .collect();
+
             // For generic external functions, set up type param scope and register with GenericFuncInfo
             if !func.type_params.is_empty() {
                 // Build TypeParamInfo list (like regular generic functions)
@@ -1953,12 +2062,14 @@ impl Analyzer {
                 // Create signature from TypeIds
                 let signature = FunctionType::from_ids(&param_type_ids, return_type_id, false);
 
-                // Register in EntityRegistry (like regular generic functions)
-                let func_id = self.entity_registry_mut().register_function(
+                // Register in EntityRegistry with default expressions (like regular generic functions)
+                let func_id = self.entity_registry_mut().register_function_full(
                     name_id,
                     name_id,
                     self.current_module,
                     signature.clone(),
+                    required_params,
+                    param_defaults,
                 );
                 self.entity_registry_mut().set_function_generic_info(
                     func_id,
@@ -2010,12 +2121,14 @@ impl Analyzer {
                 self.functions_by_name
                     .insert(name_str.clone(), func_type.clone());
 
-                // Register in EntityRegistry for consistency
-                self.entity_registry_mut().register_function(
+                // Register in EntityRegistry with default expressions
+                self.entity_registry_mut().register_function_full(
                     name_id,
                     name_id,
                     self.current_module,
                     func_type,
+                    required_params,
+                    param_defaults,
                 );
 
                 // Store the external info (module path and native name) for codegen

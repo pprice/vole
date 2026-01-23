@@ -547,6 +547,19 @@ pub enum SemanticError {
         #[label("default value has wrong type")]
         span: SourceSpan,
     },
+
+    #[error("default value for '{name}' must be a constant expression")]
+    #[diagnostic(
+        code(E2089),
+        help(
+            "use literals, operators on constants, or array/tuple literals with constant elements"
+        )
+    )]
+    DefaultMustBeConstant {
+        name: String,
+        #[label("non-constant expression")]
+        span: SourceSpan,
+    },
 }
 
 /// Semantic warnings (W3xxx) - these don't prevent compilation but indicate potential issues

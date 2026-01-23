@@ -1,0 +1,23 @@
+// Error: field default must be a constant expression
+
+func get_value() -> i32 {
+    return 42
+}
+
+let global = 100
+
+// Error: function call and variable reference are not constant expressions
+record BadConfig {
+    a: i32 = get_value(),  // Error: function call
+    b: i32 = global,       // Error: variable reference
+}
+
+// Valid: all constant expressions
+record GoodConfig {
+    count: i32 = 10,
+    enabled: bool = true,
+    name: string = "default",
+    values: [i64] = [1, 2, 3],
+    computed: i64 = 3 * 4 + 5,
+    negative: i32 = -42,
+}

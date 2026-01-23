@@ -3,6 +3,7 @@
 use super::*;
 use crate::generic::{TypeParamInfo, TypeParamVariance};
 use crate::type_arena::TypeId as ArenaTypeId;
+use vole_frontend::LambdaParam;
 
 impl Analyzer {
     /// Analyze a lambda expression, optionally with an expected function type for inference.
@@ -41,6 +42,11 @@ impl Analyzer {
         if !type_params.is_empty() {
             self.type_param_stack.push(type_params.clone());
         }
+
+        // Validate default parameter ordering and calculate required_params
+        // Note: required_params is used for validation here; the actual value is recalculated
+        // when storing lambda_variables since we need it at that point
+        let _required_params = self.validate_lambda_param_defaults(&lambda.params, interner);
 
         // Resolve parameter types as TypeIds
         let mut param_type_ids = Vec::new();
@@ -93,6 +99,9 @@ impl Analyzer {
             // Parameters are locals, not captures
             self.add_lambda_local(param.name);
         }
+
+        // Type-check default expressions (after parameters are in scope)
+        self.check_lambda_default_types(&lambda.params, &param_type_ids, interner);
 
         // Determine return type as TypeId
         let declared_return_id = lambda
@@ -210,5 +219,73 @@ impl Analyzer {
             self.type_arena_mut()
                 .function(param_type_ids, return_type_id, true),
         )
+    }
+
+    /// Validate lambda parameter defaults ordering.
+    /// Returns the number of required parameters (those without defaults).
+    fn validate_lambda_param_defaults(
+        &mut self,
+        params: &[LambdaParam],
+        interner: &Interner,
+    ) -> usize {
+        let mut seen_default = false;
+        let mut required_params = 0;
+
+        for param in params {
+            if param.default_value.is_some() {
+                seen_default = true;
+            } else if seen_default {
+                // Non-default param after a default param - emit error
+                let name = interner.resolve(param.name).to_string();
+                self.add_error(
+                    SemanticError::DefaultParamNotLast {
+                        name,
+                        span: param.span.into(),
+                    },
+                    param.span,
+                );
+            } else {
+                required_params += 1;
+            }
+        }
+
+        required_params
+    }
+
+    /// Type-check default expressions for lambda parameters.
+    fn check_lambda_default_types(
+        &mut self,
+        params: &[LambdaParam],
+        param_type_ids: &[ArenaTypeId],
+        interner: &Interner,
+    ) {
+        for (param, &expected_type_id) in params.iter().zip(param_type_ids.iter()) {
+            if let Some(default_expr) = &param.default_value {
+                // Type-check the default expression
+                match self.check_expr_expecting_id(default_expr, Some(expected_type_id), interner) {
+                    Ok(default_type_id) => {
+                        if !self.types_compatible_id(default_type_id, expected_type_id, interner) {
+                            self.add_type_mismatch_id(
+                                expected_type_id,
+                                default_type_id,
+                                default_expr.span,
+                            );
+                        }
+                    }
+                    Err(_) => {
+                        // Error already recorded
+                    }
+                }
+            }
+        }
+    }
+
+    /// Calculate required_params for a lambda (used when storing lambda info).
+    pub(crate) fn lambda_required_params(lambda: &LambdaExpr) -> usize {
+        lambda
+            .params
+            .iter()
+            .take_while(|p| p.default_value.is_none())
+            .count()
     }
 }

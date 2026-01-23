@@ -363,6 +363,25 @@ impl Cg<'_, '_, '_> {
             }
         }
 
+        // Compile default arguments if fewer args provided than expected
+        // args includes self, so provided_args = args.len() - 1, expected includes params only
+        if let Some(param_type_ids) = &param_type_ids {
+            let provided_args = args.len() - 1; // subtract self
+            let expected_params = param_type_ids.len();
+            if provided_args < expected_params {
+                // Get method_id from resolution to look up param_defaults
+                if let Some(method_id) = resolution.and_then(|r| r.method_id()) {
+                    let default_args = self.compile_method_default_args(
+                        method_id,
+                        provided_args,
+                        &param_type_ids[provided_args..],
+                        is_generic_class,
+                    )?;
+                    args.extend(default_args);
+                }
+            }
+        }
+
         let call = self.builder.ins().call(method_func_ref, &args);
         let results = self.builder.inst_results(call);
 
@@ -922,7 +941,7 @@ impl Cg<'_, '_, '_> {
             (params.clone(), ret)
         };
 
-        // Compile arguments (no receiver for static methods)
+        // Compile provided arguments (no receiver for static methods)
         let mut args = Vec::new();
         for (arg, param_id) in mc.args.iter().zip(param_ids.iter()) {
             let compiled = self.expr(arg)?;
@@ -930,10 +949,122 @@ impl Cg<'_, '_, '_> {
             args.push(compiled.value);
         }
 
+        // If there are fewer provided args than expected, compile default expressions
+        if args.len() < param_ids.len() {
+            let default_args =
+                self.compile_static_method_default_args(method_id, args.len(), &param_ids)?;
+            args.extend(default_args);
+        }
+
         // Get function reference and call
         let func_ref = self.func_ref(method_info.func_key)?;
         let call = self.builder.ins().call(func_ref, &args);
         Ok(self.call_result(call, return_type_id))
+    }
+
+    /// Compile default expressions for omitted static method parameters.
+    /// Returns compiled values for parameters starting at `start_index`.
+    ///
+    /// # Safety
+    /// This function uses raw pointers to access default expressions stored in EntityRegistry.
+    /// This is safe because EntityRegistry is owned by AnalyzedProgram which outlives all
+    /// compilation, and the expression data is not moved or modified during compilation.
+    fn compile_static_method_default_args(
+        &mut self,
+        method_id: MethodId,
+        start_index: usize,
+        param_type_ids: &[TypeId],
+    ) -> Result<Vec<Value>, String> {
+        // Get raw pointers to default expressions.
+        // These point to data in EntityRegistry which lives for the duration of AnalyzedProgram.
+        // We use raw pointers to work around the borrow checker since self.expr() needs &mut self.
+        let default_ptrs: Vec<Option<*const Expr>> = {
+            let method_def = self.query().registry().get_method(method_id);
+            method_def
+                .param_defaults
+                .iter()
+                .map(|opt| opt.as_ref().map(|e| e.as_ref() as *const Expr))
+                .collect()
+        };
+
+        let mut args = Vec::new();
+        for (i, &param_type_id) in param_type_ids.iter().enumerate().skip(start_index) {
+            if let Some(Some(default_ptr)) = default_ptrs.get(i) {
+                // SAFETY: The pointer points to data in EntityRegistry which is owned by
+                // AnalyzedProgram. AnalyzedProgram outlives this entire compilation session.
+                // The data is not moved or modified, so the pointer remains valid.
+                let default_expr: &Expr = unsafe { &**default_ptr };
+                let compiled = self.expr(default_expr)?;
+
+                // Coerce to the expected param type
+                let compiled = self.coerce_to_type(compiled, param_type_id)?;
+                args.push(compiled.value);
+            }
+        }
+
+        Ok(args)
+    }
+
+    /// Compile default expressions for omitted instance method parameters.
+    /// Returns compiled values for parameters starting at `start_index`.
+    ///
+    /// # Safety
+    /// This function uses raw pointers to access default expressions stored in EntityRegistry.
+    /// This is safe because EntityRegistry is owned by AnalyzedProgram which outlives all
+    /// compilation, and the expression data is not moved or modified during compilation.
+    fn compile_method_default_args(
+        &mut self,
+        method_id: MethodId,
+        start_index: usize,
+        expected_types: &[TypeId],
+        is_generic_class: bool,
+    ) -> Result<Vec<Value>, String> {
+        // Get raw pointers to default expressions.
+        // These point to data in EntityRegistry which lives for the duration of AnalyzedProgram.
+        // We use raw pointers to work around the borrow checker since self.expr() needs &mut self.
+        let default_ptrs: Vec<Option<*const Expr>> = {
+            let method_def = self.query().registry().get_method(method_id);
+            method_def
+                .param_defaults
+                .iter()
+                .map(|opt| opt.as_ref().map(|e| e.as_ref() as *const Expr))
+                .collect()
+        };
+
+        let mut args = Vec::new();
+        for (i, &param_type_id) in expected_types.iter().enumerate() {
+            let param_idx = start_index + i;
+            if let Some(Some(default_ptr)) = default_ptrs.get(param_idx) {
+                // SAFETY: The pointer points to data in EntityRegistry which is owned by
+                // AnalyzedProgram. AnalyzedProgram outlives this entire compilation session.
+                // The data is not moved or modified, so the pointer remains valid.
+                let default_expr: &Expr = unsafe { &**default_ptr };
+                let compiled = self.expr(default_expr)?;
+
+                // Coerce to the expected param type
+                let compiled = self.coerce_to_type(compiled, param_type_id)?;
+
+                // Generic class methods expect i64 for TypeParam, convert if needed
+                let arg_value = if is_generic_class && compiled.ty != types::I64 {
+                    let ptr_type = self.ptr_type();
+                    let arena_rc = self.arena_rc().clone();
+                    let registry = self.registry();
+                    value_to_word(
+                        self.builder,
+                        &compiled,
+                        ptr_type,
+                        None, // No heap alloc needed for primitive conversions
+                        &arena_rc,
+                        registry,
+                    )?
+                } else {
+                    compiled.value
+                };
+                args.push(arg_value);
+            }
+        }
+
+        Ok(args)
     }
 
     /// Try to compile a float intrinsic (nan, infinity, neg_infinity, epsilon).

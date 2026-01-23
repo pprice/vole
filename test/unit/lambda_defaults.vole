@@ -1,0 +1,29 @@
+// Test default parameter values for lambda expressions
+
+tests {
+    test "lambda with default param" {
+        let add = (a: i64, b: i64 = 10) => a + b
+        assert(add(5) == 15)
+        assert(add(5, 3) == 8)
+    }
+
+    test "lambda with multiple defaults" {
+        let compute = (x: i64, y: i64 = 5, z: i64 = 10) => x + y + z
+        assert(compute(1) == 16)       // 1 + 5 + 10
+        assert(compute(1, 2) == 13)    // 1 + 2 + 10
+        assert(compute(1, 2, 3) == 6)  // 1 + 2 + 3
+    }
+
+    test "lambda with string default" {
+        let greet = (name: string, greeting: string = "Hello") => "{greeting}, {name}!"
+        assert(greet("World") == "Hello, World!")
+        assert(greet("World", "Hi") == "Hi, World!")
+    }
+
+    test "lambda with bool default" {
+        let negate = (x: i64, should_negate: bool = false) => if should_negate { -x } else { x }
+        assert(negate(42) == 42)
+        assert(negate(42, false) == 42)
+        assert(negate(42, true) == -42)
+    }
+}

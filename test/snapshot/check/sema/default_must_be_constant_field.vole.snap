@@ -1,0 +1,21 @@
+[stdout]
+
+[stderr]
+  x [E2089]: default value for 'a' must be a constant expression
+    ,-[<path>/default_must_be_constant_field.vole:11:14]
+ 10 | record BadConfig {
+ 11 |     a: i32 = get_value(),  // Error: function call
+    :              ^^^^^|^^^^^
+    :                   `-- non-constant expression
+ 12 |     b: i32 = global,       // Error: variable reference
+    `----
+  help: use literals, operators on constants, or array/tuple literals with constant elements
+  x [E2089]: default value for 'b' must be a constant expression
+    ,-[<path>/default_must_be_constant_field.vole:12:14]
+ 11 |     a: i32 = get_value(),  // Error: function call
+ 12 |     b: i32 = global,       // Error: variable reference
+    :              ^^^|^^
+    :                 `-- non-constant expression
+ 13 | }
+    `----
+  help: use literals, operators on constants, or array/tuple literals with constant elements

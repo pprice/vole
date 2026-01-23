@@ -108,6 +108,13 @@ impl Analyzer {
                         // Track as a local if inside a lambda (even if preregistered)
                         // This is needed so nested functions aren't incorrectly marked as captures
                         self.add_lambda_local(let_stmt.name);
+
+                        // Track lambda variables for default parameter support
+                        if let ExprKind::Lambda(lambda) = &init_expr.kind {
+                            let required_params = Self::lambda_required_params(lambda);
+                            self.lambda_variables
+                                .insert(let_stmt.name, (init_expr.id, required_params));
+                        }
                     }
                     LetInit::TypeAlias(type_expr) => {
                         // Type alias: let Numeric = i32 | i64

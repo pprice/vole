@@ -130,7 +130,7 @@ pub(crate) fn resolve_method_target_id(
 
     if let Some(resolution) = effective_resolution {
         return match resolution {
-            ResolvedMethod::Direct { func_type_id } => {
+            ResolvedMethod::Direct { func_type_id, .. } => {
                 let arena = input.analyzed.type_arena();
                 let (_, return_type_id, _) = arena
                     .unwrap_function(*func_type_id)

@@ -227,7 +227,10 @@ impl Analyzer {
                     }
                     TypeDefKind::Class | TypeDefKind::Record => {
                         // Direct method on class/record
-                        return Some(ResolvedMethod::Direct { func_type_id });
+                        return Some(ResolvedMethod::Direct {
+                            func_type_id,
+                            method_id: Some(method_id),
+                        });
                     }
                     _ => {}
                 }

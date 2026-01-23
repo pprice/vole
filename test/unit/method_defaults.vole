@@ -1,0 +1,29 @@
+// Test: Instance method parameter defaults
+
+class Greeter {
+    name: string,
+    func greet(greeting: string = "Hello") -> string {
+        return "{greeting}, {self.name}!"
+    }
+}
+
+class GenericBox<T> {
+    value: T,
+    func describe(prefix: string = "Value") -> string {
+        return "{prefix}: box"
+    }
+}
+
+tests {
+    test "instance method default" {
+        let g = Greeter { name: "World" }
+        assert(g.greet() == "Hello, World!")
+        assert(g.greet("Hi") == "Hi, World!")
+    }
+
+    test "instance method default on generic class" {
+        let b = GenericBox { value: 42 }
+        assert(b.describe() == "Value: box")
+        assert(b.describe("Item") == "Item: box")
+    }
+}

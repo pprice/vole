@@ -5,6 +5,7 @@ use crate::generic::TypeParamInfo;
 use crate::implement_registry::ExternalMethodInfo;
 use crate::type_arena::{TypeArena, TypeId};
 use std::collections::HashSet;
+use vole_frontend::Expr;
 use vole_identity::{MethodId, NameId, TypeDefId};
 
 use super::EntityRegistry;
@@ -51,6 +52,8 @@ impl EntityRegistry {
             is_static: false,
             external_binding,
             method_type_params: Vec::new(),
+            required_params: 0, // Will be updated if defaults are present
+            param_defaults: Vec::new(),
         });
         self.method_by_full_name.insert(full_name_id, id);
         self.methods_by_type
@@ -74,7 +77,7 @@ impl EntityRegistry {
         has_default: bool,
         method_type_params: Vec<TypeParamInfo>,
     ) -> MethodId {
-        self.register_static_method_with_binding(
+        self.register_static_method_with_defaults(
             defining_type,
             name_id,
             full_name_id,
@@ -82,7 +85,48 @@ impl EntityRegistry {
             has_default,
             None,
             method_type_params,
+            0,
+            Vec::new(),
         )
+    }
+
+    /// Register a new static method on a type with required_params and param_defaults
+    #[allow(clippy::too_many_arguments)]
+    pub fn register_static_method_with_defaults(
+        &mut self,
+        defining_type: TypeDefId,
+        name_id: NameId,
+        full_name_id: NameId,
+        signature_id: TypeId,
+        has_default: bool,
+        external_binding: Option<ExternalMethodInfo>,
+        method_type_params: Vec<TypeParamInfo>,
+        required_params: usize,
+        param_defaults: Vec<Option<Box<Expr>>>,
+    ) -> MethodId {
+        let id = MethodId::new(self.method_defs.len() as u32);
+        self.method_defs.push(MethodDef {
+            id,
+            name_id,
+            full_name_id,
+            defining_type,
+            signature_id,
+            has_default,
+            is_static: true,
+            external_binding,
+            method_type_params,
+            required_params,
+            param_defaults,
+        });
+        self.method_by_full_name.insert(full_name_id, id);
+        self.static_methods_by_type
+            .get_mut(&defining_type)
+            .expect("type must be registered before adding static methods")
+            .insert(name_id, id);
+        self.type_defs[defining_type.index() as usize]
+            .static_methods
+            .push(id);
+        id
     }
 
     /// Register a new static method on a type with optional external binding
@@ -97,6 +141,32 @@ impl EntityRegistry {
         external_binding: Option<ExternalMethodInfo>,
         method_type_params: Vec<TypeParamInfo>,
     ) -> MethodId {
+        self.register_static_method_with_defaults(
+            defining_type,
+            name_id,
+            full_name_id,
+            signature_id,
+            has_default,
+            external_binding,
+            method_type_params,
+            0,
+            Vec::new(),
+        )
+    }
+
+    /// Register a new instance method on a type with required_params and param_defaults
+    #[allow(clippy::too_many_arguments)]
+    pub fn register_method_with_defaults(
+        &mut self,
+        defining_type: TypeDefId,
+        name_id: NameId,
+        full_name_id: NameId,
+        signature_id: TypeId,
+        has_default: bool,
+        external_binding: Option<ExternalMethodInfo>,
+        required_params: usize,
+        param_defaults: Vec<Option<Box<Expr>>>,
+    ) -> MethodId {
         let id = MethodId::new(self.method_defs.len() as u32);
         self.method_defs.push(MethodDef {
             id,
@@ -105,17 +175,19 @@ impl EntityRegistry {
             defining_type,
             signature_id,
             has_default,
-            is_static: true,
+            is_static: false,
             external_binding,
-            method_type_params,
+            method_type_params: Vec::new(),
+            required_params,
+            param_defaults,
         });
         self.method_by_full_name.insert(full_name_id, id);
-        self.static_methods_by_type
+        self.methods_by_type
             .get_mut(&defining_type)
-            .expect("type must be registered before adding static methods")
+            .expect("type must be registered before adding methods")
             .insert(name_id, id);
         self.type_defs[defining_type.index() as usize]
-            .static_methods
+            .methods
             .push(id);
         id
     }

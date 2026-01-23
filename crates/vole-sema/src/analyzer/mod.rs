@@ -19,6 +19,7 @@ use crate::compilation_db::CompilationDb;
 use crate::entity_defs::TypeDefKind;
 use crate::entity_registry::EntityRegistry;
 use crate::errors::{SemanticError, SemanticWarning};
+use crate::expression_data::LambdaDefaults;
 use crate::generic::{
     ClassMethodMonomorphKey, MonomorphInstance, MonomorphKey, StaticMethodMonomorphKey,
     TypeParamInfo, TypeParamScope, TypeParamScopeStack, TypeParamVariance,
@@ -253,6 +254,11 @@ pub struct Analyzer {
     /// When a method like `list.head()` is called on `List<i32>`, the generic return type `T`
     /// is substituted to `i32`. This map stores the concrete type so codegen doesn't recompute.
     substituted_return_types: HashMap<NodeId, ArenaTypeId>,
+    /// Lambda defaults for closure calls. Maps call site NodeId to lambda info.
+    lambda_defaults: HashMap<NodeId, LambdaDefaults>,
+    /// Variable to lambda expression mapping. Tracks which variables hold lambdas with defaults.
+    /// Maps Symbol -> (lambda_node_id, required_params)
+    lambda_variables: HashMap<Symbol, (NodeId, usize)>,
     /// Current module being analyzed (for proper NameId registration)
     current_module: ModuleId,
     /// Stack of type parameter scopes for nested generic contexts.
@@ -306,6 +312,8 @@ impl Analyzer {
             class_method_calls: HashMap::new(),
             static_method_calls: HashMap::new(),
             substituted_return_types: HashMap::new(),
+            lambda_defaults: HashMap::new(),
+            lambda_variables: HashMap::new(),
             current_module: main_module,
             type_param_stack: TypeParamScopeStack::new(),
             module_cache: None,
@@ -356,6 +364,8 @@ impl Analyzer {
             class_method_calls: HashMap::new(),
             static_method_calls: HashMap::new(),
             substituted_return_types: HashMap::new(),
+            lambda_defaults: HashMap::new(),
+            lambda_variables: HashMap::new(),
             current_module: main_module,
             type_param_stack: TypeParamScopeStack::new(),
             module_cache: Some(cache),
@@ -420,6 +430,7 @@ impl Analyzer {
             self.module_expr_types,
             self.module_method_resolutions,
             self.substituted_return_types,
+            self.lambda_defaults,
         );
         AnalysisOutput {
             expression_data,
@@ -1625,6 +1636,41 @@ impl Analyzer {
         Ok(())
     }
 
+    /// Check if an expression is a constant expression.
+    /// Constant expressions are: literals, unary/binary ops on constants,
+    /// array/tuple literals with constant elements.
+    fn is_constant_expr(expr: &Expr) -> bool {
+        use ast::ExprKind;
+        match &expr.kind {
+            // Literals are constant
+            ExprKind::IntLiteral(_)
+            | ExprKind::FloatLiteral(_)
+            | ExprKind::BoolLiteral(_)
+            | ExprKind::StringLiteral(_)
+            | ExprKind::Nil => true,
+
+            // Unary operators on constants
+            ExprKind::Unary(unary) => Self::is_constant_expr(&unary.operand),
+
+            // Binary operators on constants
+            ExprKind::Binary(binary) => {
+                Self::is_constant_expr(&binary.left) && Self::is_constant_expr(&binary.right)
+            }
+
+            // Array/tuple literals with all constant elements
+            ExprKind::ArrayLiteral(elements) => elements.iter().all(Self::is_constant_expr),
+
+            // Repeat literals with constant element (count is already a usize)
+            ExprKind::RepeatLiteral { element, .. } => Self::is_constant_expr(element),
+
+            // Grouping (parenthesized expression)
+            ExprKind::Grouping(inner) => Self::is_constant_expr(inner),
+
+            // Everything else is not constant
+            _ => false,
+        }
+    }
+
     /// Type-check parameter default expressions against their declared types.
     /// Called during function body analysis when parameters are in scope.
     fn check_param_defaults(
@@ -1646,6 +1692,18 @@ impl Analyzer {
                         SemanticError::DefaultExprTypeMismatch {
                             expected,
                             found,
+                            span: default_expr.span.into(),
+                        },
+                        default_expr.span,
+                    );
+                }
+
+                // Check that the default is a constant expression
+                if !Self::is_constant_expr(default_expr) {
+                    let name = interner.resolve(param.name).to_string();
+                    self.add_error(
+                        SemanticError::DefaultMustBeConstant {
+                            name,
                             span: default_expr.span.into(),
                         },
                         default_expr.span,
@@ -1679,6 +1737,18 @@ impl Analyzer {
                             expected,
                             found,
                             field: field_name,
+                            span: default_expr.span.into(),
+                        },
+                        default_expr.span,
+                    );
+                }
+
+                // Check that the default is a constant expression
+                if !Self::is_constant_expr(default_expr) {
+                    let field_name = interner.resolve(field.name).to_string();
+                    self.add_error(
+                        SemanticError::DefaultMustBeConstant {
+                            name: field_name,
                             span: default_expr.span.into(),
                         },
                         default_expr.span,

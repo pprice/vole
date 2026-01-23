@@ -141,6 +141,7 @@ impl<'src> Parser<'src> {
                 params.push(LambdaParam {
                     name: param.name,
                     ty: Some(param.ty),
+                    default_value: param.default_value,
                     span: param.span,
                 });
                 if !self.match_token(TokenType::Comma) {

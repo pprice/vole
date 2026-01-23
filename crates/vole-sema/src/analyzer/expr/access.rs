@@ -467,13 +467,28 @@ impl Analyzer {
                 self.mark_lambda_has_side_effects();
             }
 
-            // Check argument count
-            if method_call.args.len() != func_type.params_id.len() {
-                self.add_wrong_arg_count(
-                    func_type.params_id.len(),
-                    method_call.args.len(),
-                    expr.span,
-                );
+            // Look up required_params from method definition if available
+            let required_params = if let Some(method_id) = resolved.method_id() {
+                self.entity_registry().get_method(method_id).required_params
+            } else {
+                func_type.params_id.len()
+            };
+            let total_params = func_type.params_id.len();
+
+            // Check argument count with defaults support
+            let provided = method_call.args.len();
+            if provided < required_params || provided > total_params {
+                // For error message, show the range if defaults are present
+                if required_params < total_params {
+                    self.add_wrong_arg_count_range(
+                        required_params,
+                        total_params,
+                        provided,
+                        expr.span,
+                    );
+                } else {
+                    self.add_wrong_arg_count(total_params, provided, expr.span);
+                }
             }
 
             // Check argument types using TypeId directly
@@ -618,12 +633,13 @@ impl Analyzer {
             registry.find_static_method_on_type(type_def_id, method_name_id)
         };
         if let Some(method_id) = maybe_method_id {
-            let (method_type_params, signature_id) = {
+            let (method_type_params, signature_id, required_params) = {
                 let registry = self.entity_registry();
                 let method_def = registry.get_method(method_id);
                 (
                     method_def.method_type_params.clone(),
                     method_def.signature_id,
+                    method_def.required_params,
                 )
             };
 
@@ -636,9 +652,15 @@ impl Analyzer {
                 (params.to_vec(), ret, is_closure)
             };
 
-            // Check argument count
-            if args.len() != param_type_ids.len() {
-                self.add_wrong_arg_count(param_type_ids.len(), args.len(), expr.span);
+            // Check argument count with defaults support
+            let total_params = param_type_ids.len();
+            if args.len() < required_params || args.len() > total_params {
+                self.add_wrong_arg_count_range(
+                    required_params,
+                    total_params,
+                    args.len(),
+                    expr.span,
+                );
             }
 
             // Get type params from the generic class/record definition

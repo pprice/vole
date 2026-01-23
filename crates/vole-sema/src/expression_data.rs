@@ -11,6 +11,16 @@ use crate::resolution::ResolvedMethod;
 use crate::type_arena::TypeId;
 use vole_frontend::NodeId;
 
+/// Information about a lambda's parameter defaults.
+/// Used to support calling closures with default arguments.
+#[derive(Debug, Clone)]
+pub struct LambdaDefaults {
+    /// Number of required parameters (those without defaults)
+    pub required_params: usize,
+    /// NodeId of the lambda expression (for accessing default expressions in AST)
+    pub lambda_node_id: NodeId,
+}
+
 /// Encapsulates all NodeId-keyed metadata from semantic analysis.
 /// This includes expression types, method resolutions, and generic instantiation info.
 #[derive(Debug, Clone, Default)]
@@ -34,6 +44,9 @@ pub struct ExpressionData {
     /// return type `T` is substituted to `i32`. This map stores the concrete type
     /// so codegen doesn't need to recompute the substitution.
     substituted_return_types: HashMap<NodeId, TypeId>,
+    /// Lambda defaults for closure calls.
+    /// Maps a call site NodeId to the lambda's defaults info.
+    lambda_defaults: HashMap<NodeId, LambdaDefaults>,
 }
 
 impl ExpressionData {
@@ -53,6 +66,7 @@ impl ExpressionData {
         module_types: FxHashMap<String, HashMap<NodeId, TypeId>>,
         module_methods: FxHashMap<String, HashMap<NodeId, ResolvedMethod>>,
         substituted_return_types: HashMap<NodeId, TypeId>,
+        lambda_defaults: HashMap<NodeId, LambdaDefaults>,
     ) -> Self {
         Self {
             types,
@@ -63,6 +77,7 @@ impl ExpressionData {
             module_types,
             module_methods,
             substituted_return_types,
+            lambda_defaults,
         }
     }
 
@@ -244,5 +259,25 @@ impl ExpressionData {
     /// Get mutable access to substituted return types
     pub fn substituted_return_types_mut(&mut self) -> &mut HashMap<NodeId, TypeId> {
         &mut self.substituted_return_types
+    }
+
+    /// Get lambda defaults for a call site
+    pub fn get_lambda_defaults(&self, call_node: NodeId) -> Option<&LambdaDefaults> {
+        self.lambda_defaults.get(&call_node)
+    }
+
+    /// Set lambda defaults for a call site
+    pub fn set_lambda_defaults(&mut self, call_node: NodeId, defaults: LambdaDefaults) {
+        self.lambda_defaults.insert(call_node, defaults);
+    }
+
+    /// Get all lambda defaults
+    pub fn lambda_defaults(&self) -> &HashMap<NodeId, LambdaDefaults> {
+        &self.lambda_defaults
+    }
+
+    /// Get mutable access to lambda defaults
+    pub fn lambda_defaults_mut(&mut self) -> &mut HashMap<NodeId, LambdaDefaults> {
+        &mut self.lambda_defaults
     }
 }

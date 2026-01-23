@@ -51,9 +51,16 @@ impl<'src> Parser<'src> {
                     None
                 };
 
+                let default_value = if self.match_token(TokenType::Eq) {
+                    Some(Box::new(self.expression(0)?))
+                } else {
+                    None
+                };
+
                 params.push(LambdaParam {
                     name,
                     ty,
+                    default_value,
                     span: param_token.span,
                 });
 
@@ -122,9 +129,16 @@ impl<'src> Parser<'src> {
             None
         };
 
+        let first_default = if self.match_token(TokenType::Eq) {
+            Some(Box::new(self.expression(0)?))
+        } else {
+            None
+        };
+
         params.push(LambdaParam {
             name: first_name,
             ty: first_ty,
+            default_value: first_default,
             span: first_ident.span,
         });
 
@@ -140,9 +154,16 @@ impl<'src> Parser<'src> {
                 None
             };
 
+            let default_value = if self.match_token(TokenType::Eq) {
+                Some(Box::new(self.expression(0)?))
+            } else {
+                None
+            };
+
             params.push(LambdaParam {
                 name,
                 ty,
+                default_value,
                 span: param_token.span,
             });
         }

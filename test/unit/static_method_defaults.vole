@@ -1,0 +1,20 @@
+record Counter {
+    value: i64,
+}
+
+implement Counter {
+    statics {
+        func create(initial: i64 = 0) -> Counter {
+            return Counter { value: initial }
+        }
+    }
+}
+
+tests {
+    test "static method default" {
+        let c1 = Counter.create()
+        assert(c1.value == 0)
+        let c2 = Counter.create(10)
+        assert(c2.value == 10)
+    }
+}

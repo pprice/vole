@@ -1,4 +1,5 @@
 use super::super::*;
+use crate::expression_data::LambdaDefaults;
 use crate::type_arena::TypeId as ArenaTypeId;
 use rustc_hash::FxHashMap;
 use std::collections::HashMap;
@@ -231,6 +232,28 @@ impl Analyzer {
                             self.record_capture(*sym, var.mutable);
                         }
                     }
+
+                    // Check if this is a lambda with default parameters
+                    if let Some(&(lambda_node_id, required_params)) = self.lambda_variables.get(sym)
+                    {
+                        // Store lambda defaults info for codegen
+                        self.lambda_defaults.insert(
+                            expr.id,
+                            LambdaDefaults {
+                                required_params,
+                                lambda_node_id,
+                            },
+                        );
+                        return self.check_call_args_with_defaults_id(
+                            &call.args,
+                            &params,
+                            required_params,
+                            ret,
+                            expr.span,
+                            interner,
+                        );
+                    }
+
                     return self.check_call_args_id(&call.args, &params, ret, expr.span, interner);
                 }
                 // Check if it's a variable with a functional interface type

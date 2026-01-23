@@ -1,0 +1,21 @@
+[stdout]
+
+[stderr]
+  x [E2089]: default value for 'x' must be a constant expression
+   ,-[<path>/default_must_be_constant_param.vole:8:25]
+ 7 | // Error: function call is not a constant expression
+ 8 | func with_call(x: i32 = get_value()) {
+   :                         ^^^^^|^^^^^
+   :                              `-- non-constant expression
+ 9 |     print(x)
+   `----
+  help: use literals, operators on constants, or array/tuple literals with constant elements
+  x [E2089]: default value for 'x' must be a constant expression
+    ,-[<path>/default_must_be_constant_param.vole:14:24]
+ 13 | let global = 100
+ 14 | func with_var(x: i32 = global) {
+    :                        ^^^|^^
+    :                           `-- non-constant expression
+ 15 |     print(x)
+    `----
+  help: use literals, operators on constants, or array/tuple literals with constant elements

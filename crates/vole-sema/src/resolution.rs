@@ -11,7 +11,10 @@ use vole_identity::{MethodId, TypeDefId};
 #[derive(Debug, Clone)]
 pub enum ResolvedMethod {
     /// Direct method on class/record
-    Direct { func_type_id: TypeId },
+    Direct {
+        func_type_id: TypeId,
+        method_id: Option<MethodId>,
+    },
 
     /// Method from implement registry
     Implemented {
@@ -54,7 +57,7 @@ impl ResolvedMethod {
     /// Use arena.unwrap_function(id) to get (params, ret, is_closure)
     pub fn func_type_id(&self) -> TypeId {
         match self {
-            ResolvedMethod::Direct { func_type_id } => *func_type_id,
+            ResolvedMethod::Direct { func_type_id, .. } => *func_type_id,
             ResolvedMethod::Implemented { func_type_id, .. } => *func_type_id,
             ResolvedMethod::FunctionalInterface { func_type_id } => *func_type_id,
             ResolvedMethod::DefaultMethod { func_type_id, .. } => *func_type_id,
@@ -79,6 +82,15 @@ impl ResolvedMethod {
         match self {
             ResolvedMethod::Implemented { external_info, .. } => external_info.as_ref(),
             ResolvedMethod::DefaultMethod { external_info, .. } => external_info.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// Get method_id if available (for Direct and Static variants)
+    pub fn method_id(&self) -> Option<MethodId> {
+        match self {
+            ResolvedMethod::Direct { method_id, .. } => *method_id,
+            ResolvedMethod::Static { method_id, .. } => Some(*method_id),
             _ => None,
         }
     }
@@ -130,6 +142,7 @@ mod tests {
 
         let direct = ResolvedMethod::Direct {
             func_type_id: ft_id,
+            method_id: None,
         };
         assert_eq!(direct.func_type_id(), ft_id);
         // Verify we can get params from arena
@@ -158,6 +171,7 @@ mod tests {
             node_id,
             ResolvedMethod::Direct {
                 func_type_id: ft_id,
+                method_id: None,
             },
         );
 

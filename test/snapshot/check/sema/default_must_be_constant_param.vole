@@ -1,0 +1,36 @@
+// Error: parameter default must be a constant expression
+
+func get_value() -> i32 {
+    return 42
+}
+
+// Error: function call is not a constant expression
+func with_call(x: i32 = get_value()) {
+    print(x)
+}
+
+// Error: variable reference is not a constant expression
+let global = 100
+func with_var(x: i32 = global) {
+    print(x)
+}
+
+// Valid: literal is constant
+func with_literal(x: i32 = 42) {
+    print(x)
+}
+
+// Valid: unary operator on constant
+func with_unary(x: i32 = -5) {
+    print(x)
+}
+
+// Valid: binary operator on constants
+func with_binary(x: i32 = 3 + 4) {
+    print(x)
+}
+
+// Valid: array literal with constants
+func with_array(x: [i64] = [1, 2, 3]) {
+    print(x)
+}

@@ -1,0 +1,28 @@
+// Test default parameter values on external function declarations
+// This tests the full pipeline: sema accepts the call, codegen compiles defaults
+
+// Declare str_substring with default parameters.
+// The native function requires 3 args, but we default start=0 and end=-1 (full string)
+external("std:string") {
+    func "str_substring" as substr(s: string, start: i32 = 0, end: i32 = -1) -> string
+}
+
+tests "external function defaults" {
+    test "external function with defaults - all provided" {
+        // Call with all args explicitly
+        let result = substr("hello", 1, 4)
+        assert(result == "ell")
+    }
+
+    test "external function with defaults - use one default" {
+        // Call with start only, end defaults to -1 (full length from start)
+        let result = substr("hello", 1)
+        assert(result == "ello")
+    }
+
+    test "external function with defaults - use both defaults" {
+        // Call with string only, start=0 and end=-1 (full string)
+        let result = substr("hello")
+        assert(result == "hello")
+    }
+}

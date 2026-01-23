@@ -11,7 +11,9 @@ use crate::errors::CodegenError;
 
 /// SmallVec for call arguments - most calls have <= 8 args
 type ArgVec = SmallVec<[Value; 8]>;
-use vole_frontend::{CallExpr, Expr, ExprKind, NodeId, StringPart, Symbol};
+use vole_frontend::{
+    CallExpr, Decl, Expr, ExprKind, LambdaExpr, NodeId, Program, Stmt, StringPart, Symbol,
+};
 use vole_runtime::native_registry::{NativeFunction, NativeType};
 use vole_sema::type_arena::{TypeArena, TypeId};
 
@@ -221,7 +223,7 @@ impl Cg<'_, '_, '_> {
         if let Some((var, type_id)) = self.vars.get(&callee_sym)
             && self.arena().is_function(*type_id)
         {
-            return self.call_closure(*var, *type_id, call);
+            return self.call_closure(*var, *type_id, call, call_expr_id);
         }
 
         // Check if it's a captured closure (e.g., recursive lambda or captured function)
@@ -230,7 +232,7 @@ impl Cg<'_, '_, '_> {
             && self.arena().is_function(binding.vole_type)
         {
             let captured = self.load_capture(&binding)?;
-            return self.call_closure_value(captured.value, binding.vole_type, call);
+            return self.call_closure_value(captured.value, binding.vole_type, call, call_expr_id);
         }
 
         // Check if it's a functional interface variable
@@ -301,8 +303,14 @@ impl Cg<'_, '_, '_> {
             }
 
             // If it's a function type, call as closure
+            // Note: Global lambdas don't support default params lookup (use call.callee.id as placeholder)
             if self.arena().is_function(lambda_val.type_id) {
-                return self.call_closure_value(lambda_val.value, lambda_val.type_id, call);
+                return self.call_closure_value(
+                    lambda_val.value,
+                    lambda_val.type_id,
+                    call,
+                    call.callee.id,
+                );
             }
 
             // If it's an interface type (functional interface), call via vtable
@@ -409,7 +417,15 @@ impl Cg<'_, '_, '_> {
 
             // Try FFI call for external module functions
             if let Some(native_func) = self.native_funcs().lookup(&module_path, callee_name) {
-                let args = self.compile_call_args(&call.args)?;
+                // Get expected Cranelift types from native function signature
+                let expected_types: Vec<Type> = native_func
+                    .signature
+                    .params
+                    .iter()
+                    .map(|nt| native_type_to_cranelift(nt, self.ptr_type()))
+                    .collect();
+                // Compile args with defaults for omitted parameters
+                let args = self.compile_external_call_args(callee_sym, call, &expected_types)?;
                 let call_inst = self.call_native_indirect(native_func, &args);
                 let results = self.builder.inst_results(call_inst);
 
@@ -455,7 +471,15 @@ impl Cg<'_, '_, '_> {
             self.native_funcs().lookup(&module_path, &native_name)
         });
         if let Some(native_func) = native_func {
-            let args = self.compile_call_args(&call.args)?;
+            // Get expected Cranelift types from native function signature
+            let expected_types: Vec<Type> = native_func
+                .signature
+                .params
+                .iter()
+                .map(|nt| native_type_to_cranelift(nt, self.ptr_type()))
+                .collect();
+            // Compile args with defaults for omitted parameters
+            let args = self.compile_external_call_args(callee_sym, call, &expected_types)?;
             let call_inst = self.call_native_indirect(native_func, &args);
             let results = self.builder.inst_results(call_inst);
 
@@ -627,12 +651,95 @@ impl Cg<'_, '_, '_> {
         Ok(args)
     }
 
+    /// Compile call arguments for an external function, including defaults for omitted parameters.
+    /// Looks up the function by Symbol in EntityRegistry to get default expressions.
+    /// `expected_types` are the Cranelift types from the native function signature.
+    fn compile_external_call_args(
+        &mut self,
+        callee_sym: Symbol,
+        call: &CallExpr,
+        expected_types: &[Type],
+    ) -> Result<Vec<Value>, String> {
+        // Compile provided arguments
+        let mut args = self.compile_call_args(&call.args)?;
+
+        let expected_param_count = expected_types.len();
+
+        // If we have all expected arguments, we're done
+        if args.len() >= expected_param_count {
+            return Ok(args);
+        }
+
+        // Otherwise, we need to compile defaults for the missing parameters
+        let module_id = self
+            .current_module()
+            .unwrap_or_else(|| self.query().main_module());
+
+        // Get the function ID from EntityRegistry
+        let func_id = {
+            let name_id = self.query().try_function_name_id(module_id, callee_sym);
+            name_id.and_then(|id| self.query().registry().function_by_name(id))
+        };
+
+        let Some(func_id) = func_id else {
+            return Ok(args);
+        };
+
+        // Get raw pointers to default expressions.
+        // These point to data in EntityRegistry which lives for the duration of AnalyzedProgram.
+        // We use raw pointers to work around the borrow checker since self.expr() needs &mut self.
+        let default_ptrs: Vec<Option<*const Expr>> = {
+            let func_def = self.query().registry().get_function(func_id);
+            func_def
+                .param_defaults
+                .iter()
+                .map(|opt| opt.as_ref().map(|e| e.as_ref() as *const Expr))
+                .collect()
+        };
+
+        // Compile defaults for missing parameters
+        let start_index = args.len();
+        for (param_idx, &expected_ty) in expected_types
+            .iter()
+            .enumerate()
+            .skip(start_index)
+            .take(expected_param_count - start_index)
+        {
+            if let Some(Some(default_ptr)) = default_ptrs.get(param_idx) {
+                // SAFETY: The pointer points to data in EntityRegistry which is owned by
+                // AnalyzedProgram. AnalyzedProgram outlives this entire compilation session.
+                // The data is not moved or modified, so the pointer remains valid.
+                let default_expr: &Expr = unsafe { &**default_ptr };
+                let compiled = self.expr(default_expr)?;
+
+                // Narrow/extend integer types if needed
+                let arg_value = if compiled.ty.is_int()
+                    && expected_ty.is_int()
+                    && expected_ty.bits() < compiled.ty.bits()
+                {
+                    self.builder.ins().ireduce(expected_ty, compiled.value)
+                } else if compiled.ty.is_int()
+                    && expected_ty.is_int()
+                    && expected_ty.bits() > compiled.ty.bits()
+                {
+                    self.builder.ins().sextend(expected_ty, compiled.value)
+                } else {
+                    compiled.value
+                };
+                args.push(arg_value);
+            }
+        }
+
+        Ok(args)
+    }
+
     /// Compile an indirect call (closure or function value)
     fn indirect_call(&mut self, call: &CallExpr) -> Result<CompiledValue, String> {
         let callee = self.expr(&call.callee)?;
 
         if self.arena().is_function(callee.type_id) {
-            return self.call_closure_value(callee.value, callee.type_id, call);
+            // Note: Indirect calls don't support default params lookup (use callee.id as placeholder)
+            return self.call_closure_value(callee.value, callee.type_id, call, call.callee.id);
         }
 
         Err(CodegenError::type_mismatch("call expression", "function", "non-function").into())
@@ -764,9 +871,10 @@ impl Cg<'_, '_, '_> {
         func_var: Variable,
         func_type_id: TypeId,
         call: &CallExpr,
+        call_expr_id: NodeId,
     ) -> Result<CompiledValue, String> {
         let func_ptr_or_closure = self.builder.use_var(func_var);
-        self.call_closure_value(func_ptr_or_closure, func_type_id, call)
+        self.call_closure_value(func_ptr_or_closure, func_type_id, call, call_expr_id)
     }
 
     /// Call a function via value (always uses closure calling convention now that
@@ -776,10 +884,11 @@ impl Cg<'_, '_, '_> {
         func_ptr_or_closure: Value,
         func_type_id: TypeId,
         call: &CallExpr,
+        call_expr_id: NodeId,
     ) -> Result<CompiledValue, String> {
         // Always use closure calling convention since all lambdas are now
         // wrapped in Closure structs for consistency with interface dispatch
-        self.call_actual_closure(func_ptr_or_closure, func_type_id, call)
+        self.call_actual_closure(func_ptr_or_closure, func_type_id, call, call_expr_id)
     }
 
     /// Call an actual closure (with closure pointer)
@@ -788,6 +897,7 @@ impl Cg<'_, '_, '_> {
         closure_ptr: Value,
         func_type_id: TypeId,
         call: &CallExpr,
+        call_expr_id: NodeId,
     ) -> Result<CompiledValue, String> {
         let func_ptr = self.call_runtime(RuntimeFn::ClosureGetFunc, &[closure_ptr])?;
 
@@ -820,10 +930,63 @@ impl Cg<'_, '_, '_> {
         let sig_ref = self.builder.import_signature(sig);
 
         let mut args: ArgVec = smallvec![closure_ptr];
+
+        // Check if this call has lambda defaults
+        let lambda_defaults = self
+            .analyzed()
+            .expression_data
+            .get_lambda_defaults(call_expr_id)
+            .cloned();
+
+        // Compile provided arguments
         for (arg, &param_type_id) in call.args.iter().zip(params.iter()) {
             let compiled = self.expr(arg)?;
             let compiled = self.coerce_to_type(compiled, param_type_id)?;
             args.push(compiled.value);
+        }
+
+        // Compile default expressions for missing arguments
+        if let Some(defaults_info) = lambda_defaults
+            && call.args.len() < params.len()
+        {
+            // Find the lambda expression by NodeId to get its default expressions
+            // Use raw pointers to avoid borrow conflicts (the data lives in Program AST
+            // which is owned by AnalyzedProgram and outlives this compilation session)
+            let lambda_node_id = defaults_info.lambda_node_id;
+            let default_ptrs: Vec<Option<*const Expr>> = {
+                if let Some(lambda) = self.find_lambda_by_node_id(lambda_node_id) {
+                    // Get raw pointers to the default expressions for params we need
+                    lambda
+                        .params
+                        .iter()
+                        .skip(call.args.len())
+                        .map(|p| p.default_value.as_ref().map(|e| e.as_ref() as *const Expr))
+                        .collect()
+                } else {
+                    return Err(format!(
+                        "Could not find lambda expression for NodeId {:?}",
+                        lambda_node_id
+                    ));
+                }
+            };
+
+            // Compile defaults for missing params (starting from call.args.len())
+            for (default_ptr_opt, &param_type_id) in
+                default_ptrs.iter().zip(params.iter().skip(call.args.len()))
+            {
+                if let Some(default_ptr) = default_ptr_opt {
+                    // SAFETY: The pointer points to data in Program AST which is owned by
+                    // AnalyzedProgram. AnalyzedProgram outlives this entire compilation session.
+                    let default_expr = unsafe { &**default_ptr };
+                    let compiled = self.expr(default_expr)?;
+                    let compiled = self.coerce_to_type(compiled, param_type_id)?;
+                    args.push(compiled.value);
+                } else {
+                    return Err(
+                        "Missing default expression for parameter in lambda call".to_string()
+                    );
+                }
+            }
         }
 
         let call_inst = self.builder.ins().call_indirect(sig_ref, func_ptr, &args);
@@ -895,6 +1058,251 @@ impl Cg<'_, '_, '_> {
                 type_id,
             })
         }
+    }
+}
+
+impl Cg<'_, '_, '_> {
+    /// Find a lambda expression by NodeId in the program.
+    fn find_lambda_by_node_id(&self, node_id: NodeId) -> Option<&LambdaExpr> {
+        find_lambda_in_program(&self.analyzed().program, node_id)
+    }
+}
+
+/// Find a lambda expression by NodeId in a program.
+fn find_lambda_in_program(program: &Program, node_id: NodeId) -> Option<&LambdaExpr> {
+    // Search expressions in declarations and statements
+    for decl in &program.declarations {
+        if let Some(lambda) = find_lambda_in_decl(decl, node_id) {
+            return Some(lambda);
+        }
+    }
+    None
+}
+
+/// Find a lambda in a declaration.
+fn find_lambda_in_decl(decl: &Decl, node_id: NodeId) -> Option<&LambdaExpr> {
+    match decl {
+        Decl::Function(func) => {
+            // Search function body for lambdas
+            match &func.body {
+                vole_frontend::FuncBody::Expr(expr) => find_lambda_in_expr(expr, node_id),
+                vole_frontend::FuncBody::Block(block) => {
+                    find_lambda_in_stmts(&block.stmts, node_id)
+                }
+            }
+        }
+        Decl::Let(let_stmt) => {
+            if let vole_frontend::LetInit::Expr(expr) = &let_stmt.init {
+                find_lambda_in_expr(expr, node_id)
+            } else {
+                None
+            }
+        }
+        Decl::Tests(tests) => {
+            // Search scoped declarations first
+            for inner_decl in &tests.decls {
+                if let Some(lambda) = find_lambda_in_decl(inner_decl, node_id) {
+                    return Some(lambda);
+                }
+            }
+            // Then search test cases
+            for test in &tests.tests {
+                if let Some(lambda) = find_lambda_in_func_body(&test.body, node_id) {
+                    return Some(lambda);
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+/// Find a lambda in a function body.
+fn find_lambda_in_func_body(
+    body: &vole_frontend::FuncBody,
+    node_id: NodeId,
+) -> Option<&LambdaExpr> {
+    match body {
+        vole_frontend::FuncBody::Expr(expr) => find_lambda_in_expr(expr, node_id),
+        vole_frontend::FuncBody::Block(block) => find_lambda_in_stmts(&block.stmts, node_id),
+    }
+}
+
+/// Find a lambda in a list of statements.
+fn find_lambda_in_stmts(stmts: &[Stmt], node_id: NodeId) -> Option<&LambdaExpr> {
+    for stmt in stmts {
+        if let Some(lambda) = find_lambda_in_stmt(stmt, node_id) {
+            return Some(lambda);
+        }
+    }
+    None
+}
+
+/// Find a lambda in a statement.
+fn find_lambda_in_stmt(stmt: &Stmt, node_id: NodeId) -> Option<&LambdaExpr> {
+    match stmt {
+        Stmt::Let(let_stmt) => {
+            if let vole_frontend::LetInit::Expr(expr) = &let_stmt.init {
+                find_lambda_in_expr(expr, node_id)
+            } else {
+                None
+            }
+        }
+        Stmt::LetTuple(let_tuple) => find_lambda_in_expr(&let_tuple.init, node_id),
+        Stmt::Expr(expr_stmt) => find_lambda_in_expr(&expr_stmt.expr, node_id),
+        Stmt::Return(ret_stmt) => ret_stmt
+            .value
+            .as_ref()
+            .and_then(|e| find_lambda_in_expr(e, node_id)),
+        Stmt::If(if_stmt) => {
+            if let Some(lambda) = find_lambda_in_expr(&if_stmt.condition, node_id) {
+                return Some(lambda);
+            }
+            if let Some(lambda) = find_lambda_in_stmts(&if_stmt.then_branch.stmts, node_id) {
+                return Some(lambda);
+            }
+            if let Some(else_branch) = &if_stmt.else_branch
+                && let Some(lambda) = find_lambda_in_stmts(&else_branch.stmts, node_id)
+            {
+                return Some(lambda);
+            }
+            None
+        }
+        Stmt::While(while_stmt) => {
+            if let Some(lambda) = find_lambda_in_expr(&while_stmt.condition, node_id) {
+                return Some(lambda);
+            }
+            find_lambda_in_stmts(&while_stmt.body.stmts, node_id)
+        }
+        Stmt::For(for_stmt) => {
+            if let Some(lambda) = find_lambda_in_expr(&for_stmt.iterable, node_id) {
+                return Some(lambda);
+            }
+            find_lambda_in_stmts(&for_stmt.body.stmts, node_id)
+        }
+        Stmt::Raise(raise_stmt) => {
+            // Raise has fields that could contain lambdas
+            for field in &raise_stmt.fields {
+                if let Some(lambda) = find_lambda_in_expr(&field.value, node_id) {
+                    return Some(lambda);
+                }
+            }
+            None
+        }
+        Stmt::Break(_) | Stmt::Continue(_) => None,
+    }
+}
+
+/// Find a lambda in an expression.
+fn find_lambda_in_expr(expr: &Expr, node_id: NodeId) -> Option<&LambdaExpr> {
+    if expr.id == node_id
+        && let ExprKind::Lambda(lambda) = &expr.kind
+    {
+        return Some(lambda);
+    }
+
+    match &expr.kind {
+        ExprKind::Lambda(lambda) => {
+            // Check body for nested lambdas
+            match &lambda.body {
+                vole_frontend::FuncBody::Expr(body) => find_lambda_in_expr(body, node_id),
+                vole_frontend::FuncBody::Block(block) => {
+                    find_lambda_in_stmts(&block.stmts, node_id)
+                }
+            }
+        }
+        ExprKind::Call(call) => {
+            if let Some(lambda) = find_lambda_in_expr(&call.callee, node_id) {
+                return Some(lambda);
+            }
+            for arg in &call.args {
+                if let Some(lambda) = find_lambda_in_expr(arg, node_id) {
+                    return Some(lambda);
+                }
+            }
+            None
+        }
+        ExprKind::Binary(binary) => find_lambda_in_expr(&binary.left, node_id)
+            .or_else(|| find_lambda_in_expr(&binary.right, node_id)),
+        ExprKind::Unary(unary) => find_lambda_in_expr(&unary.operand, node_id),
+        ExprKind::Block(block) => find_lambda_in_stmts(&block.stmts, node_id),
+        ExprKind::If(if_expr) => {
+            if let Some(lambda) = find_lambda_in_expr(&if_expr.condition, node_id) {
+                return Some(lambda);
+            }
+            if let Some(lambda) = find_lambda_in_expr(&if_expr.then_branch, node_id) {
+                return Some(lambda);
+            }
+            if let Some(else_branch) = &if_expr.else_branch {
+                find_lambda_in_expr(else_branch, node_id)
+            } else {
+                None
+            }
+        }
+        ExprKind::ArrayLiteral(elems) => {
+            for elem in elems {
+                if let Some(lambda) = find_lambda_in_expr(elem, node_id) {
+                    return Some(lambda);
+                }
+            }
+            None
+        }
+        ExprKind::RepeatLiteral { element, .. } => find_lambda_in_expr(element, node_id),
+        ExprKind::Index(idx) => find_lambda_in_expr(&idx.object, node_id)
+            .or_else(|| find_lambda_in_expr(&idx.index, node_id)),
+        ExprKind::FieldAccess(fa) => find_lambda_in_expr(&fa.object, node_id),
+        ExprKind::MethodCall(mc) => {
+            if let Some(lambda) = find_lambda_in_expr(&mc.object, node_id) {
+                return Some(lambda);
+            }
+            for arg in &mc.args {
+                if let Some(lambda) = find_lambda_in_expr(arg, node_id) {
+                    return Some(lambda);
+                }
+            }
+            None
+        }
+        ExprKind::Assign(assign) => find_lambda_in_expr(&assign.value, node_id),
+        ExprKind::CompoundAssign(compound) => find_lambda_in_expr(&compound.value, node_id),
+        ExprKind::Grouping(inner) => find_lambda_in_expr(inner, node_id),
+        ExprKind::Range(range) => find_lambda_in_expr(&range.start, node_id)
+            .or_else(|| find_lambda_in_expr(&range.end, node_id)),
+        ExprKind::NullCoalesce(nc) => find_lambda_in_expr(&nc.value, node_id)
+            .or_else(|| find_lambda_in_expr(&nc.default, node_id)),
+        ExprKind::Is(is_expr) => find_lambda_in_expr(&is_expr.value, node_id),
+        ExprKind::StructLiteral(lit) => {
+            for field in &lit.fields {
+                if let Some(lambda) = find_lambda_in_expr(&field.value, node_id) {
+                    return Some(lambda);
+                }
+            }
+            None
+        }
+        ExprKind::OptionalChain(oc) => find_lambda_in_expr(&oc.object, node_id),
+        ExprKind::Try(inner) => find_lambda_in_expr(inner, node_id),
+        ExprKind::Yield(y) => find_lambda_in_expr(&y.value, node_id),
+        ExprKind::Match(m) => {
+            if let Some(lambda) = find_lambda_in_expr(&m.scrutinee, node_id) {
+                return Some(lambda);
+            }
+            for arm in &m.arms {
+                if let Some(lambda) = find_lambda_in_expr(&arm.body, node_id) {
+                    return Some(lambda);
+                }
+            }
+            None
+        }
+        // Leaf nodes with no sub-expressions
+        ExprKind::IntLiteral(_)
+        | ExprKind::FloatLiteral(_)
+        | ExprKind::BoolLiteral(_)
+        | ExprKind::StringLiteral(_)
+        | ExprKind::InterpolatedString(_)
+        | ExprKind::Identifier(_)
+        | ExprKind::Nil
+        | ExprKind::Done
+        | ExprKind::TypeLiteral(_)
+        | ExprKind::Import(_) => None,
     }
 }
 

@@ -773,6 +773,7 @@ pub struct LambdaExpr {
 pub struct LambdaParam {
     pub name: Symbol,
     pub ty: Option<TypeExpr>,
+    pub default_value: Option<Box<Expr>>,
     pub span: Span,
 }
 

@@ -105,6 +105,13 @@ pub struct MethodDef {
     /// Method-level type parameters (e.g., `func convert<U>` has U as a method type param)
     /// Distinct from class type params which are stored on TypeDef
     pub method_type_params: Vec<TypeParamInfo>,
+    /// Number of required parameters (without defaults).
+    /// Parameters 0..required_params are required, rest have defaults.
+    pub required_params: usize,
+    /// Default expressions for parameters (cloned from AST).
+    /// Index corresponds to parameter index.
+    /// Required params have None, defaulted params have Some.
+    pub param_defaults: Vec<Option<Box<Expr>>>,
 }
 
 /// A field definition (always belongs to a type)

@@ -121,6 +121,8 @@ impl Analyzer {
             class_method_calls: HashMap::new(),
             static_method_calls: HashMap::new(),
             substituted_return_types: HashMap::new(),
+            lambda_defaults: HashMap::new(),
+            lambda_variables: HashMap::new(),
             current_module: prelude_module, // Use the prelude module path!
             type_param_stack: TypeParamScopeStack::new(),
             module_cache: None,      // Sub-analyzers don't need the cache

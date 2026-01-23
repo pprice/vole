@@ -296,6 +296,7 @@ impl<'src> Parser<'src> {
                                         params: vec![LambdaParam {
                                             name,
                                             ty: None,
+                                            default_value: None,
                                             span: ident_span,
                                         }],
                                         return_type,

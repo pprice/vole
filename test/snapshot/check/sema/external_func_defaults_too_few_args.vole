@@ -1,0 +1,11 @@
+// check: E2088
+// Test that calling an external function with fewer than required args is an error
+
+external("std:test") {
+    func log(msg: string, level: i64 = 0)
+}
+
+func main() {
+    // Missing required 'msg' argument
+    log()
+}

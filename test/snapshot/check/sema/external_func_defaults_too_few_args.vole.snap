@@ -1,0 +1,11 @@
+[stdout]
+
+[stderr]
+  x [E2088]: expected 1 to 2 arguments, found 0
+    ,-[<path>/external_func_defaults_too_few_args.vole:10:5]
+  9 |     // Missing required 'msg' argument
+ 10 |     log()
+    :     ^^|^^
+    :       `-- wrong number of arguments
+ 11 | }
+    `----
