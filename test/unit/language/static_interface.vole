@@ -1,0 +1,145 @@
+// Test: static interface sugar
+// `static interface X { ... }` is equivalent to `interface X { statics { ... } }`
+
+// =============================================================================
+// Basic static interface - equivalent to interface with statics block
+// =============================================================================
+
+static interface Factory {
+    func make() -> i64
+}
+
+// Non-static interface for comparison
+interface FactoryExplicit {
+    statics {
+        func make_explicit() -> i64
+    }
+}
+
+// =============================================================================
+// Static interface with Self return type
+// =============================================================================
+
+static interface DefaultValue {
+    func default_value() -> Self
+}
+
+// =============================================================================
+// Static interface with multiple methods
+// =============================================================================
+
+static interface Bounded {
+    func min_bound() -> Self
+    func max_bound() -> Self
+}
+
+// =============================================================================
+// Static interface with method
+// =============================================================================
+
+static interface Counter {
+    func start_count() -> i64
+}
+
+
+// =============================================================================
+// Implementations
+// =============================================================================
+
+record MyNumber {
+    value: i64,
+}
+
+implement Factory for MyNumber {
+    statics {
+        func make() -> i64 {
+            return 42
+        }
+    }
+}
+
+implement FactoryExplicit for MyNumber {
+    statics {
+        func make_explicit() -> i64 {
+            return 42
+        }
+    }
+}
+
+implement DefaultValue for MyNumber {
+    statics {
+        func default_value() -> MyNumber {
+            return MyNumber { value: 0 }
+        }
+    }
+}
+
+implement Bounded for MyNumber {
+    statics {
+        func min_bound() -> MyNumber {
+            return MyNumber { value: -1000 }
+        }
+
+        func max_bound() -> MyNumber {
+            return MyNumber { value: 1000 }
+        }
+    }
+}
+
+implement Counter for MyNumber {
+    statics {
+        func start_count() -> i64 {
+            return 10
+        }
+    }
+}
+
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+tests "static interface basic" {
+    test "static interface method can be called on implementing type" {
+        let v = MyNumber.make()
+        assert(v == 42)
+    }
+
+    test "explicit statics block produces same behavior" {
+        let v = MyNumber.make_explicit()
+        assert(v == 42)
+    }
+}
+
+tests "static interface with Self" {
+    test "default_value returns Self type" {
+        let n = MyNumber.default_value()
+        assert(n.value == 0)
+    }
+}
+
+tests "static interface multiple methods" {
+    test "min_bound returns minimum" {
+        let min = MyNumber.min_bound()
+        assert(min.value == -1000)
+    }
+
+    test "max_bound returns maximum" {
+        let max = MyNumber.max_bound()
+        assert(max.value == 1000)
+    }
+
+    test "both bounds work together" {
+        let min = MyNumber.min_bound()
+        let max = MyNumber.max_bound()
+        assert(max.value - min.value == 2000)
+    }
+}
+
+tests "static interface counter" {
+    test "counter start method works" {
+        let start = MyNumber.start_count()
+        assert(start == 10)
+    }
+}
+

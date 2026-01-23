@@ -15,7 +15,8 @@ impl<'src> Parser<'src> {
             TokenType::KwLet => self.let_decl(),
             TokenType::KwClass => self.class_decl(),
             TokenType::KwRecord => self.record_decl(),
-            TokenType::KwInterface => self.interface_decl(),
+            TokenType::KwInterface => self.interface_decl(false),
+            TokenType::KwStatic => self.static_interface_decl(),
             TokenType::KwImplement => self.implement_block(),
             TokenType::KwError => self.error_decl(),
             TokenType::KwExternal => {
@@ -164,6 +165,7 @@ impl<'src> Parser<'src> {
                 | TokenType::KwClass
                 | TokenType::KwRecord
                 | TokenType::KwInterface
+                | TokenType::KwStatic
                 | TokenType::KwImplement
                 | TokenType::KwError
                 | TokenType::KwExternal
@@ -298,11 +300,32 @@ impl<'src> Parser<'src> {
         Ok(implements)
     }
 
+    /// Parse `static interface` declaration - sugar for interface with only statics
+    /// `static interface X { func foo() }` is equivalent to `interface X { statics { func foo() } }`
+    fn static_interface_decl(&mut self) -> Result<Decl, ParseError> {
+        let start_span = self.current.span;
+        self.advance(); // consume 'static'
+        self.consume(
+            TokenType::KwInterface,
+            "expected 'interface' after 'static'",
+        )?;
+        self.interface_decl_inner(true, start_span)
+    }
+
     /// Parse interface declaration: interface Name [extends Parent] { methods }
-    fn interface_decl(&mut self) -> Result<Decl, ParseError> {
+    /// If is_static is true, all methods and external blocks are wrapped in a statics block.
+    fn interface_decl(&mut self, is_static: bool) -> Result<Decl, ParseError> {
         let start_span = self.current.span;
         self.advance(); // consume 'interface'
+        self.interface_decl_inner(is_static, start_span)
+    }
 
+    /// Inner implementation of interface parsing, shared by regular and static interfaces
+    fn interface_decl_inner(
+        &mut self,
+        is_static: bool,
+        start_span: crate::Span,
+    ) -> Result<Decl, ParseError> {
         let name_token = self.current.clone();
         self.consume(TokenType::Identifier, "expected interface name")?;
         let name = self.interner.intern(&name_token.lexeme);
@@ -331,11 +354,27 @@ impl<'src> Parser<'src> {
         let mut external_blocks = Vec::new();
         let mut statics: Option<StaticsBlock> = None;
 
+        // For static interfaces, we collect methods/externals into these vectors
+        // and wrap them in a StaticsBlock at the end
+        let mut static_methods = Vec::new();
+        let mut static_external_blocks = Vec::new();
+        let body_start_span = self.current.span;
+
         while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
             // Check for 'default' keyword prefix
             let is_default = self.match_token(TokenType::KwDefault);
 
             if self.check(TokenType::KwStatics) {
+                if is_static {
+                    // Static interfaces cannot have explicit statics blocks
+                    return Err(ParseError::new(
+                        ParserError::UnexpectedToken {
+                            token: "statics".to_string(),
+                            span: self.current.span.into(),
+                        },
+                        self.current.span,
+                    ));
+                }
                 if statics.is_some() {
                     return Err(ParseError::new(
                         ParserError::DuplicateStaticsBlock {
@@ -348,9 +387,18 @@ impl<'src> Parser<'src> {
             } else if self.check(TokenType::KwExternal) {
                 let mut block = self.parse_external_block()?;
                 block.is_default = is_default;
-                external_blocks.push(block);
+                if is_static {
+                    static_external_blocks.push(block);
+                } else {
+                    external_blocks.push(block);
+                }
             } else if self.check(TokenType::KwFunc) {
-                methods.push(self.interface_method(is_default)?);
+                let method = self.interface_method(is_default)?;
+                if is_static {
+                    static_methods.push(method);
+                } else {
+                    methods.push(method);
+                }
             } else if is_default {
                 // 'default' keyword without 'func' or 'external'
                 return Err(ParseError::new(
@@ -362,6 +410,16 @@ impl<'src> Parser<'src> {
                     self.current.span,
                 ));
             } else if self.check(TokenType::Identifier) {
+                if is_static {
+                    // Static interfaces cannot have fields
+                    return Err(ParseError::new(
+                        ParserError::UnexpectedToken {
+                            token: self.current.ty.as_str().to_string(),
+                            span: self.current.span.into(),
+                        },
+                        self.current.span,
+                    ));
+                }
                 // Field: name: type
                 let field_span = self.current.span;
                 let name_token = self.current.clone();
@@ -395,6 +453,16 @@ impl<'src> Parser<'src> {
 
         self.consume(TokenType::RBrace, "expected '}' to close interface")?;
         let span = start_span.merge(self.previous.span);
+
+        // For static interfaces, wrap collected methods/externals in a StaticsBlock
+        if is_static && (!static_methods.is_empty() || !static_external_blocks.is_empty()) {
+            let statics_span = body_start_span.merge(self.previous.span);
+            statics = Some(StaticsBlock {
+                methods: static_methods,
+                external_blocks: static_external_blocks,
+                span: statics_span,
+            });
+        }
 
         Ok(Decl::Interface(InterfaceDecl {
             name,

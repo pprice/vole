@@ -52,6 +52,7 @@ pub enum TokenType {
     KwYield,      // yield keyword (generator yield expression)
     KwDefault,    // default keyword (interface default methods)
     KwStatics,    // statics keyword (static method blocks)
+    KwStatic,     // static keyword (static interface sugar)
 
     // Type keywords
     KwI8,
@@ -173,6 +174,7 @@ impl TokenType {
             Self::KwYield => "yield",
             Self::KwDefault => "default",
             Self::KwStatics => "statics",
+            Self::KwStatic => "static",
             Self::KwI8 => "i8",
             Self::KwI16 => "i16",
             Self::KwI32 => "i32",
