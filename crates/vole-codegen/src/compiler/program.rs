@@ -487,6 +487,7 @@ impl Compiler<'_> {
 
         // Build params: Vec<(Symbol, TypeId, Type)>
         // First collect type IDs (which may access arena internally)
+        // Note: Use module_interner since the TypeExpr Symbols come from the module's AST
         let param_info: Vec<(Symbol, TypeId)> = {
             let query = self.query();
             let type_metadata = &self.state.type_metadata;
@@ -498,7 +499,7 @@ impl Compiler<'_> {
                         &p.ty,
                         query.registry(),
                         type_metadata,
-                        query.interner(),
+                        module_interner,
                         &name_table,
                         module_id,
                         self.analyzed.type_arena_ref(),
