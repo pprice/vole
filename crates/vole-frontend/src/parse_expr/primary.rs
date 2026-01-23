@@ -10,6 +10,7 @@ impl<'src> Parser<'src> {
     /// Returns true if:
     /// - Content after `{` is `}` (empty struct literal: `Name { }`)
     /// - Content after `{` is `Identifier :` (field initialization)
+    /// - Content after `{` is `Identifier ,` or `Identifier }` (shorthand initialization)
     ///
     /// We create a temporary lexer to peek without consuming tokens.
     pub(super) fn looks_like_struct_literal(&self) -> bool {
@@ -35,9 +36,17 @@ impl<'src> Parser<'src> {
 
         if first.ty == TokenType::Identifier {
             // Check what follows the identifier
-            let second = peek_lexer.next_token();
+            let mut second = peek_lexer.next_token();
+            // Skip newlines after identifier
+            while second.ty == TokenType::Newline {
+                second = peek_lexer.next_token();
+            }
             if second.ty == TokenType::Colon {
-                // It's `Name { identifier: ...` - struct literal
+                // It's `Name { identifier: ...` - struct literal with explicit value
+                return true;
+            }
+            if second.ty == TokenType::Comma || second.ty == TokenType::RBrace {
+                // It's `Name { identifier, ...` or `Name { identifier }` - shorthand syntax
                 return true;
             }
         }
@@ -489,13 +498,25 @@ impl<'src> Parser<'src> {
             self.consume(TokenType::Identifier, "expected field name")?;
             let field_name = self.interner.intern(&field_name_token.lexeme);
 
-            self.consume(TokenType::Colon, "expected ':' after field name")?;
-            let value = self.expression(0)?;
+            // Check for shorthand syntax: `Point { x, y }` as shorthand for `Point { x: x, y: y }`
+            let (value, shorthand) = if self.check(TokenType::Colon) {
+                self.advance(); // consume ':'
+                (self.expression(0)?, false)
+            } else {
+                // Shorthand: use the field name as the value
+                let ident_expr = Expr {
+                    id: self.next_id(),
+                    kind: ExprKind::Identifier(field_name),
+                    span: field_span,
+                };
+                (ident_expr, true)
+            };
 
             fields.push(StructFieldInit {
                 name: field_name,
                 value,
                 span: field_span.merge(self.previous.span),
+                shorthand,
             });
 
             if self.check(TokenType::Comma) {

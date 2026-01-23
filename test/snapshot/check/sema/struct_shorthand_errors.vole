@@ -1,0 +1,21 @@
+// Struct field init shorthand error tests
+// Tests that undefined variable errors in shorthand syntax are clear
+
+record Point { x: i64, y: i64 }
+
+// Test 1: undefined variable with shorthand
+func test_undefined_shorthand() {
+    let p = Point { x, y: 10 }
+}
+
+// Test 2: multiple undefined shorthands
+func test_multiple_undefined() {
+    let p = Point { x, y }
+}
+
+// Test 3: shorthand with class
+class Sized { width: i64, height: i64 }
+
+func test_class_shorthand() {
+    let s = Sized { width, height }
+}

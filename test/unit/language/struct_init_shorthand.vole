@@ -1,0 +1,224 @@
+// Field init shorthand tests
+// Tests for the shorthand syntax: `Point { x, y }` equivalent to `Point { x: x, y: y }`
+
+// Basic record with two fields
+record Point {
+    x: i32,
+    y: i32,
+
+    func sum() -> i32 {
+        return self.x + self.y
+    }
+}
+
+// Record with three fields for testing multiple shorthand
+record Vector3D {
+    x: f64,
+    y: f64,
+    z: f64,
+}
+
+// Class to test shorthand works with classes too
+class Counter {
+    value: i64,
+    step: i64,
+
+    func increment() -> i64 {
+        self.value = self.value + self.step
+        return self.value
+    }
+}
+
+// Generic record to test shorthand with generics
+record Box<T> {
+    value: T,
+
+    func unwrap() -> T {
+        return self.value
+    }
+}
+
+// Generic record with multiple fields
+record Pair<A, B> {
+    first: A,
+    second: B,
+}
+
+// Record for nested struct testing
+record Rectangle {
+    top_left: Point,
+    width: i32,
+    height: i32,
+}
+
+// Record with different types to test mixed shorthand
+record Config {
+    name: string,
+    count: i32,
+    enabled: bool,
+}
+
+tests "struct init shorthand" {
+    test "basic shorthand with record" {
+        let x: i32 = 10
+        let y: i32 = 20
+        let p = Point { x, y }
+        assert(p.x == 10)
+        assert(p.y == 20)
+    }
+
+    test "shorthand preserves method access" {
+        let x: i32 = 5
+        let y: i32 = 7
+        let p = Point { x, y }
+        assert(p.sum() == 12)
+    }
+
+    test "mixed shorthand and explicit form" {
+        let x: i32 = 10
+        let p = Point { x, y: 30 }
+        assert(p.x == 10)
+        assert(p.y == 30)
+    }
+
+    test "mixed explicit first then shorthand" {
+        let y: i32 = 40
+        let p = Point { x: 5, y }
+        assert(p.x == 5)
+        assert(p.y == 40)
+    }
+
+    test "all explicit still works" {
+        let p = Point { x: 100, y: 200 }
+        assert(p.x == 100)
+        assert(p.y == 200)
+    }
+
+    test "multiple shorthand fields" {
+        let x = 1.5
+        let y = 2.5
+        let z = 3.5
+        let v = Vector3D { x, y, z }
+        assert(v.x == 1.5)
+        assert(v.y == 2.5)
+        assert(v.z == 3.5)
+    }
+
+    test "shorthand with class" {
+        let value: i64 = 100
+        let step: i64 = 5
+        let c = Counter { value, step }
+        assert(c.increment() == 105)
+        assert(c.increment() == 110)
+    }
+
+    test "shorthand with class mixed form" {
+        let step: i64 = 10
+        let c = Counter { value: 50, step }
+        assert(c.increment() == 60)
+    }
+
+    test "generic record shorthand" {
+        let value = 42
+        let b = Box { value }
+        assert(b.value == 42)
+        assert(b.unwrap() == 42)
+    }
+
+    test "generic record shorthand with string" {
+        let value = "hello"
+        let b = Box { value }
+        assert(b.value == "hello")
+        assert(b.unwrap() == "hello")
+    }
+
+    test "generic pair shorthand" {
+        let first = "key"
+        let second = 123
+        let p = Pair { first, second }
+        assert(p.first == "key")
+        assert(p.second == 123)
+    }
+
+    test "generic pair mixed form" {
+        let second = true
+        let p = Pair { first: 99, second }
+        assert(p.first == 99)
+        assert(p.second == true)
+    }
+
+    test "nested struct with shorthand" {
+        let x: i32 = 0
+        let y: i32 = 0
+        let top_left = Point { x, y }
+        let width: i32 = 100
+        let height: i32 = 50
+        let rect = Rectangle { top_left, width, height }
+        assert(rect.top_left.x == 0)
+        assert(rect.top_left.y == 0)
+        assert(rect.width == 100)
+        assert(rect.height == 50)
+    }
+
+    test "nested struct inline shorthand" {
+        let width: i32 = 200
+        let height: i32 = 150
+        let rect = Rectangle { top_left: Point { x: 10, y: 20 }, width, height }
+        assert(rect.top_left.x == 10)
+        assert(rect.top_left.y == 20)
+        assert(rect.width == 200)
+        assert(rect.height == 150)
+    }
+
+    test "config with mixed types shorthand" {
+        let name = "test"
+        let count: i32 = 5
+        let enabled = true
+        let cfg = Config { name, count, enabled }
+        assert(cfg.name == "test")
+        assert(cfg.count == 5)
+        assert(cfg.enabled == true)
+    }
+
+    test "config partial shorthand" {
+        let name = "partial"
+        let enabled = false
+        let cfg = Config { name, count: 10, enabled }
+        assert(cfg.name == "partial")
+        assert(cfg.count == 10)
+        assert(cfg.enabled == false)
+    }
+
+    test "shorthand in function return" {
+        func make_point(x: i32, y: i32) -> Point {
+            return Point { x, y }
+        }
+        let p = make_point(7, 8)
+        assert(p.x == 7)
+        assert(p.y == 8)
+    }
+
+    test "shorthand with expression bodied function" {
+        func make_box(value: i32) -> Box<i32> => Box { value }
+        let b = make_box(99)
+        assert(b.value == 99)
+    }
+
+    test "shorthand with lambda" {
+        let make_point = (x: i32, y: i32) -> Point => Point { x, y }
+        let p = make_point(3, 4)
+        assert(p.x == 3)
+        assert(p.y == 4)
+    }
+
+    test "shorthand with inner scope variable" {
+        func inner() -> Point {
+            let x: i32 = 200
+            let y: i32 = 300
+            return Point { x, y }
+        }
+        let p = inner()
+        assert(p.x == 200)
+        assert(p.y == 300)
+    }
+}

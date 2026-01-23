@@ -554,6 +554,7 @@ impl<'src> Parser<'src> {
                 name: field_name,
                 value,
                 span: field_span.merge(self.previous.span),
+                shorthand: false,
             });
             self.skip_newlines();
         }

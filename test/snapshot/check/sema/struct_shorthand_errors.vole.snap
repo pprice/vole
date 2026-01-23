@@ -1,0 +1,43 @@
+[stdout]
+
+[stderr]
+  x [E2002]: undefined variable 'x'
+   ,-[<path>/struct_shorthand_errors.vole:8:21]
+ 7 | func test_undefined_shorthand() {
+ 8 |     let p = Point { x, y: 10 }
+   :                     |
+   :                     `-- not found in scope
+ 9 | }
+   `----
+  x [E2002]: undefined variable 'x'
+    ,-[<path>/struct_shorthand_errors.vole:13:21]
+ 12 | func test_multiple_undefined() {
+ 13 |     let p = Point { x, y }
+    :                     |
+    :                     `-- not found in scope
+ 14 | }
+    `----
+  x [E2002]: undefined variable 'y'
+    ,-[<path>/struct_shorthand_errors.vole:13:24]
+ 12 | func test_multiple_undefined() {
+ 13 |     let p = Point { x, y }
+    :                        |
+    :                        `-- not found in scope
+ 14 | }
+    `----
+  x [E2002]: undefined variable 'width'
+    ,-[<path>/struct_shorthand_errors.vole:20:21]
+ 19 | func test_class_shorthand() {
+ 20 |     let s = Sized { width, height }
+    :                     ^^|^^
+    :                       `-- not found in scope
+ 21 | }
+    `----
+  x [E2002]: undefined variable 'height'
+    ,-[<path>/struct_shorthand_errors.vole:20:28]
+ 19 | func test_class_shorthand() {
+ 20 |     let s = Sized { width, height }
+    :                            ^^^|^^
+    :                               `-- not found in scope
+ 21 | }
+    `----

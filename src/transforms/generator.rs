@@ -911,6 +911,7 @@ impl<'a> GeneratorTransformer<'a> {
                 span: dummy_span,
             },
             span: dummy_span,
+            shorthand: false,
         });
 
         // Captured parameters: name: name
@@ -923,6 +924,7 @@ impl<'a> GeneratorTransformer<'a> {
                     span: dummy_span,
                 },
                 span: dummy_span,
+                shorthand: false,
             });
         }
 
@@ -933,6 +935,7 @@ impl<'a> GeneratorTransformer<'a> {
                 name: *name,
                 value: default_value,
                 span: dummy_span,
+                shorthand: false,
             });
         }
 

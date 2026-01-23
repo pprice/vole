@@ -696,6 +696,8 @@ pub struct StructFieldInit {
     pub name: Symbol,
     pub value: Expr,
     pub span: Span,
+    /// Whether this field init used shorthand syntax (e.g., `{ x }` instead of `{ x: x }`)
+    pub shorthand: bool,
 }
 
 /// Field access expression: expr.field
