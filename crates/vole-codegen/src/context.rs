@@ -208,6 +208,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Substitute type parameters using current substitutions
+    ///
+    /// Uses expect_substitute for read-only lookup since sema pre-computes all
+    /// substituted types when creating MonomorphInstance.
     #[inline]
     pub fn substitute_type(&self, ty: TypeId) -> TypeId {
         if let Some(substitutions) = self.substitutions {
@@ -218,8 +221,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             // Convert std HashMap to FxHashMap for arena compatibility
             let subs: FxHashMap<NameId, TypeId> =
                 substitutions.iter().map(|(&k, &v)| (k, v)).collect();
-            let update = vole_sema::ProgramUpdate::new(self.env.analyzed.type_arena_ref());
-            let result = update.substitute(ty, &subs);
+            let arena = self.env.analyzed.type_arena();
+            let result = arena.expect_substitute(ty, &subs, "Cg::substitute_type");
+            drop(arena);
             // Cache the result
             self.substitution_cache.borrow_mut().insert(ty, result);
             result
