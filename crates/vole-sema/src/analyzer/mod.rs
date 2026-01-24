@@ -575,6 +575,63 @@ impl Analyzer {
         }
     }
 
+    /// Pre-compute substituted method signatures for an interface instantiation.
+    ///
+    /// When a concrete type implements an interface (via implements clause or interface boxing),
+    /// this ensures that the substituted method param/return types exist in the arena.
+    /// This allows codegen to use lookup_substitute instead of substitute when building vtables.
+    fn precompute_interface_method_substitutions(
+        &self,
+        interface_type_def_id: TypeDefId,
+        type_args: &[ArenaTypeId],
+    ) {
+        // Skip if no type arguments (no substitution needed)
+        if type_args.is_empty() {
+            return;
+        }
+
+        // Get interface type params and method signature IDs upfront
+        // to avoid borrow conflicts with the arena
+        let (type_params, signature_ids): (Vec<NameId>, Vec<ArenaTypeId>) = {
+            let registry = self.entity_registry();
+            let type_params = registry.get_type(interface_type_def_id).type_params.clone();
+            let method_ids = registry.interface_methods_ordered(interface_type_def_id);
+            let signature_ids: Vec<ArenaTypeId> = method_ids
+                .iter()
+                .map(|&mid| registry.get_method(mid).signature_id)
+                .collect();
+            (type_params, signature_ids)
+        };
+
+        // Skip if type params and args don't match (error case handled elsewhere)
+        if type_params.len() != type_args.len() {
+            return;
+        }
+
+        // Build substitution map: type param NameId -> concrete TypeId
+        let subs: FxHashMap<NameId, ArenaTypeId> = type_params
+            .iter()
+            .zip(type_args.iter())
+            .map(|(&param, &arg)| (param, arg))
+            .collect();
+
+        // Pre-compute substituted types for all method signatures
+        // This ensures they exist in the arena for codegen's lookup_substitute
+        let mut arena = self.type_arena_mut();
+        for signature_id in signature_ids {
+            // Get method param and return types
+            if let Some((params, ret, _)) = arena.unwrap_function(signature_id) {
+                // Substitute each param type
+                let params = params.to_vec();
+                for param in params {
+                    arena.substitute(param, &subs);
+                }
+                // Substitute return type
+                arena.substitute(ret, &subs);
+            }
+        }
+    }
+
     /// Check if we're currently inside a lambda
     fn in_lambda(&self) -> bool {
         !self.lambda_captures.is_empty()

@@ -1410,8 +1410,11 @@ impl Analyzer {
             self.entity_registry_mut().add_implementation(
                 entity_type_id,
                 interface_type_id,
-                type_arg_ids,
+                type_arg_ids.clone(),
             );
+
+            // Pre-compute substituted method signatures for codegen's lookup_substitute
+            self.precompute_interface_method_substitutions(interface_type_id, &type_arg_ids);
         }
     }
 

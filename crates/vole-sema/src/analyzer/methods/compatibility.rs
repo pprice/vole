@@ -39,14 +39,13 @@ impl Analyzer {
         to: ArenaTypeId,
         interner: &Interner,
     ) -> bool {
-        // Extract interface info using TypeId
-        let to_iface_id = {
+        // Extract interface info using TypeId (type_def_id and type_args)
+        let (to_iface_id, to_type_args) = {
             let arena = self.type_arena();
-            arena.unwrap_interface(to).map(|(id, _)| id)
-        };
-
-        let Some(to_iface_id) = to_iface_id else {
-            return false;
+            match arena.unwrap_interface(to) {
+                Some((id, args)) => (id, args.to_vec()),
+                None => return false,
+            }
         };
 
         // Check interface extension
@@ -62,6 +61,9 @@ impl Analyzer {
 
         // Check structural compatibility using TypeId
         if self.satisfies_interface_by_type_def_id_typeid(from, to_iface_id, interner) {
+            // Pre-compute substituted method signatures for codegen's lookup_substitute
+            // This is the interface boxing case: `from` is assigned to interface `to`
+            self.precompute_interface_method_substitutions(to_iface_id, &to_type_args);
             return true;
         }
 
@@ -85,6 +87,9 @@ impl Analyzer {
                 .all(|(&p, &ip)| types_compatible_core_id(p, ip, &arena));
 
             if params_match && types_compatible_core_id(fn_ret, iface_fn.return_type_id, &arena) {
+                // Pre-compute substituted method signatures for codegen's lookup_substitute
+                // This is the functional interface boxing case
+                self.precompute_interface_method_substitutions(to_iface_id, &to_type_args);
                 return true;
             }
         }

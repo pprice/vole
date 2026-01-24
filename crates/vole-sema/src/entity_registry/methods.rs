@@ -364,10 +364,15 @@ impl EntityRegistry {
             .map(|i| i as u32)
     }
 
-    /// Collect all methods from an interface and its parents in vtable order.
+    /// Get all methods from an interface and its parents in vtable order.
     ///
     /// Parent interface methods come first, then the interface's own methods.
     /// This ordering must match the vtable layout in codegen.
+    pub fn interface_methods_ordered(&self, interface_id: TypeDefId) -> Vec<MethodId> {
+        self.collect_interface_methods_ordered(interface_id)
+    }
+
+    /// Collect all methods from an interface and its parents in vtable order.
     fn collect_interface_methods_ordered(&self, interface_id: TypeDefId) -> Vec<MethodId> {
         let mut methods = Vec::new();
         let mut seen_interfaces = HashSet::new();
