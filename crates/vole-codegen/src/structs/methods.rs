@@ -160,7 +160,7 @@ impl Cg<'_, '_, '_> {
         // without interface boxing or vtable dispatch
         let runtime_iter_elem = self.arena().unwrap_runtime_iterator(obj.type_id);
         if let Some(elem_type_id) = runtime_iter_elem {
-            return self.runtime_iterator_method(&obj, mc, method_name_str, elem_type_id);
+            return self.runtime_iterator_method(&obj, mc, method_name_str, elem_type_id, expr_id);
         }
 
         let method_name_id = self.method_name_id(mc.method);
@@ -671,6 +671,7 @@ impl Cg<'_, '_, '_> {
         mc: &MethodCallExpr,
         method_name: &str,
         elem_type_id: TypeId,
+        expr_id: NodeId,
     ) -> Result<CompiledValue, String> {
         // Look up the Iterator interface
         let iter_type_id = self
@@ -700,20 +701,28 @@ impl Cg<'_, '_, '_> {
             .get_external_binding(*method_id)
             .ok_or_else(|| format!("No external binding for Iterator.{}", method_name))?;
 
-        // Substitute the element type for T in the return type using arena substitute
-        let substitutions: FxHashMap<NameId, TypeId> = iter_def
-            .type_params
-            .iter()
-            .map(|param| (*param, elem_type_id))
-            .collect();
-        let method_return_id = {
-            let arena = self.arena();
-            let (_, ret, _) = arena
-                .unwrap_function(method.signature_id)
-                .expect("method signature must be a function type");
-            ret
-        };
-        let return_type_id = self.update().substitute(method_return_id, &substitutions);
+        // Get the substituted return type from sema (avoids recomputation).
+        // Sema computes this when analyzing method calls on Interface types.
+        // Fall back to computing it ourselves if sema didn't provide one
+        // (e.g., in monomorphized context).
+        let return_type_id = self
+            .get_substituted_return_type(&expr_id)
+            .unwrap_or_else(|| {
+                // Fallback: compute substituted return type manually
+                let substitutions: FxHashMap<NameId, TypeId> = iter_def
+                    .type_params
+                    .iter()
+                    .map(|param| (*param, elem_type_id))
+                    .collect();
+                let method_return_id = {
+                    let arena = self.arena();
+                    let (_, ret, _) = arena
+                        .unwrap_function(method.signature_id)
+                        .expect("method signature must be a function type");
+                    ret
+                };
+                self.update().substitute(method_return_id, &substitutions)
+            });
 
         // Convert Iterator<T> return types to RuntimeIterator(T) since the runtime
         // functions return raw iterator pointers, not boxed interface values

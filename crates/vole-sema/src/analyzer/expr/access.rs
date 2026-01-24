@@ -592,8 +592,9 @@ impl Analyzer {
                 }
             }
 
-            // Get external_info before moving resolved
+            // Get external_info and return_type_id before moving resolved
             let external_info = resolved.external_info().copied();
+            let resolved_return_id = resolved.return_type_id();
 
             self.method_resolutions.insert(expr.id, resolved);
 
@@ -607,8 +608,10 @@ impl Analyzer {
                 interner,
             );
 
-            // Compute and store substituted return type for generic class methods
-            // so codegen doesn't need to recompute
+            // Store the substituted return type for codegen so it doesn't need to recompute.
+            // The resolved method already has the substituted return type in most cases
+            // (InterfaceMethod, DefaultMethod), but we also handle class/record methods
+            // where we need to compute the substitution.
             let final_return_id = {
                 // Check if this is a generic class/record with type args that need substitution
                 let type_args_and_def = {
@@ -636,13 +639,16 @@ impl Analyzer {
                         let substituted = self
                             .type_arena_mut()
                             .substitute(func_type.return_type_id, &subs);
-                        if substituted != func_type.return_type_id {
-                            self.substituted_return_types.insert(expr.id, substituted);
-                        }
+                        self.substituted_return_types.insert(expr.id, substituted);
                         return Ok(substituted);
                     }
                 }
-                func_type.return_type_id
+
+                // For interface methods, the return type is already substituted in resolved.
+                // Store it for codegen to use.
+                self.substituted_return_types
+                    .insert(expr.id, resolved_return_id);
+                resolved_return_id
             };
 
             return Ok(final_return_id);
