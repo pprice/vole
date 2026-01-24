@@ -14,7 +14,7 @@ mod type_helpers;
 
 use crate::ExpressionData;
 pub use crate::ResolverEntityExt;
-use crate::analysis_cache::ModuleCache;
+use crate::analysis_cache::{IsCheckResult, ModuleCache};
 use crate::compilation_db::CompilationDb;
 use crate::entity_defs::TypeDefKind;
 use crate::entity_registry::EntityRegistry;
@@ -229,6 +229,9 @@ pub struct Analyzer {
     /// Resolved types for each expression node (for codegen)
     /// Maps expression node IDs to their interned type handles for O(1) equality.
     expr_types: HashMap<NodeId, ArenaTypeId>,
+    /// Type check results for `is` expressions and type patterns (for codegen)
+    /// Maps NodeId → IsCheckResult to eliminate runtime type lookups
+    is_check_results: HashMap<NodeId, IsCheckResult>,
     /// Resolved method calls for codegen
     pub method_resolutions: MethodResolutions,
     /// Module loader for handling imports
@@ -307,6 +310,7 @@ impl Analyzer {
             lambda_locals: Vec::new(),
             lambda_side_effects: Vec::new(),
             expr_types: HashMap::new(),
+            is_check_results: HashMap::new(),
             method_resolutions: MethodResolutions::new(),
             module_loader: ModuleLoader::new(),
             module_type_ids: FxHashMap::default(),
@@ -361,6 +365,7 @@ impl Analyzer {
             lambda_locals: Vec::new(),
             lambda_side_effects: Vec::new(),
             expr_types: HashMap::new(),
+            is_check_results: HashMap::new(),
             method_resolutions: MethodResolutions::new(),
             module_loader: ModuleLoader::new(),
             module_type_ids: FxHashMap::default(),
@@ -396,6 +401,11 @@ impl Analyzer {
     /// Get the resolved expression types as interned ArenaTypeId handles.
     pub fn expr_types(&self) -> &HashMap<NodeId, ArenaTypeId> {
         &self.expr_types
+    }
+
+    /// Get the type check results for `is` expressions and type patterns.
+    pub fn is_check_results(&self) -> &HashMap<NodeId, IsCheckResult> {
+        &self.is_check_results
     }
 
     /// Get a resolver configured for the current module context.
@@ -2746,6 +2756,7 @@ impl Analyzer {
             lambda_locals: Vec::new(),
             lambda_side_effects: Vec::new(),
             expr_types: HashMap::new(),
+            is_check_results: HashMap::new(),
             method_resolutions: MethodResolutions::new(),
             module_loader: ModuleLoader::new(),
             module_type_ids: FxHashMap::default(),

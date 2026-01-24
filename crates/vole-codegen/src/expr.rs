@@ -11,7 +11,7 @@ use crate::errors::CodegenError;
 use std::collections::HashMap;
 
 use vole_frontend::{
-    AssignTarget, BlockExpr, Expr, ExprKind, IfExpr, MatchExpr, Pattern, RangeExpr,
+    AssignTarget, BlockExpr, Expr, ExprKind, IfExpr, MatchExpr, Pattern, PatternKind, RangeExpr,
     RecordFieldPattern, Symbol, UnaryOp, WhenExpr,
 };
 use vole_sema::entity_defs::TypeDefKind;
@@ -931,9 +931,9 @@ impl Cg<'_, '_, '_> {
             // Track the effective arm block (may change for conditional extraction)
             let mut effective_arm_block = arm_block;
 
-            let pattern_matches = match &arm.pattern {
-                Pattern::Wildcard(_) => None,
-                Pattern::Identifier { name, .. } => {
+            let pattern_matches = match &arm.pattern.kind {
+                PatternKind::Wildcard => None,
+                PatternKind::Identifier { name } => {
                     // Check if this identifier is a type name (class/record)
                     // Need to look up TypeDefId from Symbol first
                     let query = self.query();
@@ -956,11 +956,11 @@ impl Cg<'_, '_, '_> {
                         None
                     }
                 }
-                Pattern::Type { type_expr, .. } => {
+                PatternKind::Type { type_expr } => {
                     let pattern_type_id = self.resolve_type_expr(type_expr);
                     self.compile_type_pattern_check(&scrutinee, pattern_type_id)?
                 }
-                Pattern::Literal(lit_expr) => {
+                PatternKind::Literal(lit_expr) => {
                     // Save and restore vars for pattern matching
                     let saved_vars = std::mem::replace(&mut self.vars, arm_variables.clone());
                     let lit_val = self.expr(lit_expr)?;
@@ -974,7 +974,7 @@ impl Cg<'_, '_, '_> {
                     )?;
                     Some(cmp)
                 }
-                Pattern::Val { name, .. } => {
+                PatternKind::Val { name } => {
                     // Val pattern - compare against existing variable's value
                     let (var, var_type_id) = *arm_variables
                         .get(name)
@@ -984,7 +984,7 @@ impl Cg<'_, '_, '_> {
                     let cmp = self.compile_equality_check(var_type_id, scrutinee.value, var_val)?;
                     Some(cmp)
                 }
-                Pattern::Success { inner, .. } => {
+                PatternKind::Success { inner } => {
                     // Check if tag == FALLIBLE_SUCCESS_TAG (0)
                     let tag = load_fallible_tag(self.builder, scrutinee.value);
                     let is_success =
@@ -1007,7 +1007,7 @@ impl Cg<'_, '_, '_> {
                                 load_fallible_payload(self.builder, scrutinee.value, payload_ty);
 
                             // Handle inner pattern (usually an identifier binding)
-                            if let Pattern::Identifier { name, .. } = inner_pat.as_ref() {
+                            if let PatternKind::Identifier { name } = &inner_pat.kind {
                                 let var = self.builder.declare_var(payload_ty);
                                 self.builder.def_var(var, payload);
                                 arm_variables.insert(*name, (var, success_type_id));
@@ -1016,12 +1016,12 @@ impl Cg<'_, '_, '_> {
                     }
                     Some(is_success)
                 }
-                Pattern::Error { inner, .. } => {
+                PatternKind::Error { inner } => {
                     // Load the tag from fallible structure
                     let tag = load_fallible_tag(self.builder, scrutinee.value);
                     self.compile_error_pattern(inner, &scrutinee, tag, &mut arm_variables)?
                 }
-                Pattern::Tuple { elements, .. } => {
+                PatternKind::Tuple { elements } => {
                     // Tuple destructuring in match - extract elements and bind
                     // Use arena methods for layout computation
                     // Extract all type info before using builder to avoid borrow conflicts
@@ -1040,8 +1040,8 @@ impl Cg<'_, '_, '_> {
                         };
                         // Precompute cranelift types for each element
                         let elem_cr_types = self.cranelift_types(&elem_type_ids);
-                        for (i, pattern) in elements.iter().enumerate() {
-                            if let Pattern::Identifier { name, .. } = pattern {
+                        for (i, pat) in elements.iter().enumerate() {
+                            if let PatternKind::Identifier { name } = &pat.kind {
                                 let offset = offsets[i];
                                 let elem_type_id = elem_type_ids[i];
                                 let elem_cr_type = elem_cr_types[i];
@@ -1060,9 +1060,7 @@ impl Cg<'_, '_, '_> {
                     }
                     None // Tuple patterns always match (type checked in sema)
                 }
-                Pattern::Record {
-                    type_name, fields, ..
-                } => {
+                PatternKind::Record { type_name, fields } => {
                     // Record destructuring in match - TypeName { x, y } or { x, y }
                     let (pattern_check, pattern_type_id) = if let Some(name) = type_name {
                         // Typed record pattern - need to check type first
@@ -1577,14 +1575,13 @@ impl Cg<'_, '_, '_> {
             return Ok(Some(is_error));
         };
 
-        match inner_pat.as_ref() {
-            Pattern::Identifier { name, .. } => {
+        match &inner_pat.kind {
+            PatternKind::Identifier { name } => {
                 self.compile_error_identifier_pattern(*name, scrutinee, tag, arm_variables)
             }
-            Pattern::Record {
+            PatternKind::Record {
                 type_name: Some(name),
                 fields,
-                ..
             } => self.compile_error_record_pattern(*name, fields, scrutinee, tag, arm_variables),
             _ => {
                 // Catch-all for other patterns (like wildcard)

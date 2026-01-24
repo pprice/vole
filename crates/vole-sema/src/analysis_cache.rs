@@ -25,6 +25,20 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use vole_frontend::{Interner, NodeId, Program};
 
+/// Result of compile-time analysis for type checks (`is` expressions and type patterns).
+///
+/// Used to eliminate runtime type lookups when the result can be determined at compile time,
+/// or to provide the tag value when a runtime check is needed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IsCheckResult {
+    /// The check always succeeds (e.g., `x is Int` when x is `Int`)
+    AlwaysTrue,
+    /// The check always fails (e.g., `x is Int` when x is `String`)
+    AlwaysFalse,
+    /// Runtime check needed - compare against this union variant tag
+    CheckTag(u32),
+}
+
 /// Cached analysis results for a single module.
 ///
 /// Note: Registry data (types, methods, fields) is NOT stored here - it lives
@@ -43,6 +57,8 @@ pub struct CachedModule {
     pub method_resolutions: HashMap<NodeId, ResolvedMethod>,
     /// Functions registered by name (for cross-interner lookup)
     pub functions_by_name: FxHashMap<String, FunctionType>,
+    /// Type check results for `is` expressions and type patterns (NodeId → IsCheckResult)
+    pub is_check_results: HashMap<NodeId, IsCheckResult>,
 }
 
 /// Cache for module analysis results.

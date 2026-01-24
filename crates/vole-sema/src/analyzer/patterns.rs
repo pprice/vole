@@ -3,6 +3,7 @@
 use super::*;
 use crate::type_arena::TypeId as ArenaTypeId;
 use crate::types::StructFieldId;
+use vole_frontend::PatternKind;
 
 impl Analyzer {
     /// Check pattern and return TypeId directly.
@@ -12,12 +13,12 @@ impl Analyzer {
         scrutinee_type_id: ArenaTypeId,
         interner: &Interner,
     ) -> Option<ArenaTypeId> {
-        match pattern {
-            Pattern::Wildcard(_) => {
+        match &pattern.kind {
+            PatternKind::Wildcard => {
                 // Wildcard always matches, nothing to check, no narrowing
                 None
             }
-            Pattern::Literal(expr) => {
+            PatternKind::Literal(expr) => {
                 // Check literal type matches scrutinee type
                 if let Ok(lit_type_id) = self.check_expr(expr, interner)
                     && !self.types_compatible_id(lit_type_id, scrutinee_type_id, interner)
@@ -36,7 +37,8 @@ impl Analyzer {
                 }
                 None
             }
-            Pattern::Identifier { name, span } => {
+            PatternKind::Identifier { name } => {
+                let span = pattern.span;
                 // Check if this identifier is a known class or record type via Resolver
                 let type_id_opt = self
                     .resolver(interner)
@@ -57,7 +59,7 @@ impl Analyzer {
                             self.check_type_pattern_compatibility_id(
                                 pattern_type_id,
                                 scrutinee_type_id,
-                                *span,
+                                span,
                                 interner,
                             );
                             Some(pattern_type_id)
@@ -71,7 +73,7 @@ impl Analyzer {
                             self.check_type_pattern_compatibility_id(
                                 pattern_type_id,
                                 scrutinee_type_id,
-                                *span,
+                                span,
                                 interner,
                             );
                             Some(pattern_type_id)
@@ -100,18 +102,20 @@ impl Analyzer {
                     None
                 }
             }
-            Pattern::Type { type_expr, span } => {
+            PatternKind::Type { type_expr } => {
+                let span = pattern.span;
                 // Resolve type and check compatibility using TypeId
                 let pattern_type_id = self.resolve_type_id(type_expr, interner);
                 self.check_type_pattern_compatibility_id(
                     pattern_type_id,
                     scrutinee_type_id,
-                    *span,
+                    span,
                     interner,
                 );
                 Some(pattern_type_id)
             }
-            Pattern::Val { name, span } => {
+            PatternKind::Val { name } => {
+                let span = pattern.span;
                 // Val pattern compares against existing variable's value
                 let var_ty_id = self.scope.get(*name).map(|v| v.ty);
                 if let Some(var_ty_id) = var_ty_id {
@@ -125,24 +129,25 @@ impl Analyzer {
                             SemanticError::PatternTypeMismatch {
                                 expected,
                                 found,
-                                span: (*span).into(),
+                                span: span.into(),
                             },
-                            *span,
+                            span,
                         );
                     }
                 } else {
                     self.add_error(
                         SemanticError::UndefinedVariable {
                             name: interner.resolve(*name).to_string(),
-                            span: (*span).into(),
+                            span: span.into(),
                         },
-                        *span,
+                        span,
                     );
                 }
                 // Val patterns don't narrow types
                 None
             }
-            Pattern::Success { inner, span } => {
+            PatternKind::Success { inner } => {
+                let span = pattern.span;
                 // Success pattern only valid when matching on fallible type
                 let fallible_info = self.type_arena().unwrap_fallible(scrutinee_type_id);
                 let Some((success_type_id, _error_type_id)) = fallible_info else {
@@ -150,9 +155,9 @@ impl Analyzer {
                     self.add_error(
                         SemanticError::SuccessPatternOnNonFallible {
                             found,
-                            span: (*span).into(),
+                            span: span.into(),
                         },
-                        *span,
+                        span,
                     );
                     return None;
                 };
@@ -165,7 +170,8 @@ impl Analyzer {
                     None
                 }
             }
-            Pattern::Error { inner, span } => {
+            PatternKind::Error { inner } => {
+                let span = pattern.span;
                 // Error pattern only valid when matching on fallible type
                 let fallible_info = self.type_arena().unwrap_fallible(scrutinee_type_id);
                 let Some((_success_type_id, error_type_id)) = fallible_info else {
@@ -173,9 +179,9 @@ impl Analyzer {
                     self.add_error(
                         SemanticError::ErrorPatternOnNonFallible {
                             found,
-                            span: (*span).into(),
+                            span: span.into(),
                         },
-                        *span,
+                        span,
                     );
                     return None;
                 };
@@ -188,7 +194,8 @@ impl Analyzer {
                     None
                 }
             }
-            Pattern::Tuple { elements, span } => {
+            PatternKind::Tuple { elements } => {
+                let span = pattern.span;
                 // Tuple pattern - check against tuple type
                 let tuple_elements = self
                     .type_arena()
@@ -200,27 +207,24 @@ impl Analyzer {
                             SemanticError::TypeMismatch {
                                 expected: format!("tuple of {} elements", elem_type_ids.len()),
                                 found: format!("tuple pattern with {} elements", elements.len()),
-                                span: (*span).into(),
+                                span: span.into(),
                             },
-                            *span,
+                            span,
                         );
                         return None;
                     }
                     // Check each element pattern against its type
-                    for (pattern, elem_type_id) in elements.iter().zip(elem_type_ids.iter()) {
-                        self.check_pattern_id(pattern, *elem_type_id, interner);
+                    for (pat, elem_type_id) in elements.iter().zip(elem_type_ids.iter()) {
+                        self.check_pattern_id(pat, *elem_type_id, interner);
                     }
                     None // No type narrowing for tuple patterns
                 } else {
-                    self.type_error_id("tuple", scrutinee_type_id, *span);
+                    self.type_error_id("tuple", scrutinee_type_id, span);
                     None
                 }
             }
-            Pattern::Record {
-                type_name,
-                fields,
-                span,
-            } => {
+            PatternKind::Record { type_name, fields } => {
+                let span = pattern.span;
                 // Typed record pattern: TypeName { x, y }
                 if let Some(name) = type_name {
                     // Look up the type via Resolver
@@ -303,23 +307,23 @@ impl Analyzer {
                                     SemanticError::PatternTypeMismatch {
                                         expected: "record, class, or error".to_string(),
                                         found: interner.resolve(*name).to_string(),
-                                        span: (*span).into(),
+                                        span: (span).into(),
                                     },
-                                    *span,
+                                    span,
                                 );
                                 (None, vec![])
                             }
                         };
 
                         // Check pattern fields
-                        self.check_record_pattern_fields_id(fields, &type_fields, *span, interner);
+                        self.check_record_pattern_fields_id(fields, &type_fields, span, interner);
 
                         // Check compatibility with scrutinee
                         if let Some(pattern_type_id) = pattern_type_id {
                             self.check_type_pattern_compatibility_id(
                                 pattern_type_id,
                                 scrutinee_type_id,
-                                *span,
+                                span,
                                 interner,
                             );
                             Some(pattern_type_id)
@@ -330,9 +334,9 @@ impl Analyzer {
                         self.add_error(
                             SemanticError::UnknownType {
                                 name: interner.resolve(*name).to_string(),
-                                span: (*span).into(),
+                                span: (span).into(),
                             },
-                            *span,
+                            span,
                         );
                         None
                     }
@@ -341,7 +345,7 @@ impl Analyzer {
                     self.check_anonymous_record_pattern_id(
                         fields,
                         scrutinee_type_id,
-                        *span,
+                        span,
                         interner,
                     );
                     None
@@ -483,9 +487,9 @@ impl Analyzer {
     ) -> bool {
         // Check for catch-all patterns (wildcard or identifier binding)
         let has_catch_all = arms.iter().any(|arm| {
-            match &arm.pattern {
-                Pattern::Wildcard(_) => true,
-                Pattern::Identifier { name, .. } => {
+            match &arm.pattern.kind {
+                PatternKind::Wildcard => true,
+                PatternKind::Identifier { name } => {
                     // Only a catch-all if NOT a known type name
                     let is_type = self
                         .resolver(interner)
@@ -544,9 +548,9 @@ impl Analyzer {
         pattern: &Pattern,
         interner: &Interner,
     ) -> Option<ArenaTypeId> {
-        match pattern {
-            Pattern::Type { type_expr, .. } => Some(self.resolve_type_id(type_expr, interner)),
-            Pattern::Identifier { name, .. } => {
+        match &pattern.kind {
+            PatternKind::Type { type_expr } => Some(self.resolve_type_id(type_expr, interner)),
+            PatternKind::Identifier { name } => {
                 // Look up via Resolver - get type_def_id first to drop ResolverGuard
                 let type_def_id = self
                     .resolver(interner)
@@ -564,7 +568,7 @@ impl Analyzer {
                     }
                 })
             }
-            Pattern::Record {
+            PatternKind::Record {
                 type_name: Some(name),
                 ..
             } => {

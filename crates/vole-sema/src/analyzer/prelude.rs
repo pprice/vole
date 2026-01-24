@@ -111,6 +111,7 @@ impl Analyzer {
             lambda_locals: Vec::new(),
             lambda_side_effects: Vec::new(),
             expr_types: HashMap::new(),
+            is_check_results: HashMap::new(),
             method_resolutions: MethodResolutions::new(),
             module_loader: ModuleLoader::new(),
             module_type_ids: FxHashMap::default(),
@@ -150,6 +151,7 @@ impl Analyzer {
                         expr_types: sub_analyzer.expr_types.clone(),
                         method_resolutions: sub_analyzer.method_resolutions.clone_inner(),
                         functions_by_name: sub_analyzer.functions_by_name.clone(),
+                        is_check_results: sub_analyzer.is_check_results.clone(),
                     },
                 );
             }

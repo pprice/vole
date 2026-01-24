@@ -3,6 +3,7 @@
 use pretty::{Arena, DocAllocator, DocBuilder};
 
 use crate::frontend::Interner;
+use crate::frontend::PatternKind;
 use crate::frontend::ast::*;
 
 /// Indent width for formatting (4 spaces)
@@ -775,15 +776,15 @@ fn print_pattern<'a>(
     pattern: &Pattern,
     interner: &Interner,
 ) -> DocBuilder<'a, Arena<'a>> {
-    match pattern {
-        Pattern::Wildcard(_) => arena.text("_"),
-        Pattern::Literal(expr) => print_expr(arena, expr, interner),
-        Pattern::Identifier { name, .. } => arena.text(interner.resolve(*name).to_string()),
-        Pattern::Type { type_expr, .. } => print_type_expr(arena, type_expr, interner),
-        Pattern::Val { name, .. } => arena
+    match &pattern.kind {
+        PatternKind::Wildcard => arena.text("_"),
+        PatternKind::Literal(expr) => print_expr(arena, expr, interner),
+        PatternKind::Identifier { name } => arena.text(interner.resolve(*name).to_string()),
+        PatternKind::Type { type_expr } => print_type_expr(arena, type_expr, interner),
+        PatternKind::Val { name } => arena
             .text("val ")
             .append(arena.text(interner.resolve(*name).to_string())),
-        Pattern::Success { inner, .. } => {
+        PatternKind::Success { inner } => {
             let base = arena.text("success");
             match inner {
                 Some(inner_pattern) => base.append(arena.text(" ")).append(print_pattern(
@@ -794,7 +795,7 @@ fn print_pattern<'a>(
                 None => base,
             }
         }
-        Pattern::Error { inner, .. } => {
+        PatternKind::Error { inner } => {
             let base = arena.text("error");
             match inner {
                 Some(inner_pattern) => base.append(arena.text(" ")).append(print_pattern(
@@ -805,7 +806,7 @@ fn print_pattern<'a>(
                 None => base,
             }
         }
-        Pattern::Tuple { elements, .. } => {
+        PatternKind::Tuple { elements } => {
             let inner = arena.intersperse(
                 elements
                     .iter()
@@ -814,7 +815,7 @@ fn print_pattern<'a>(
             );
             arena.text("[").append(inner).append(arena.text("]"))
         }
-        Pattern::Record { fields, .. } => {
+        PatternKind::Record { fields, .. } => {
             let inner = arena.intersperse(
                 fields.iter().map(|field| {
                     let field_name = interner.resolve(field.field_name);

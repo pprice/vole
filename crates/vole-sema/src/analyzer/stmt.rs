@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::type_arena::TypeId as ArenaTypeId;
+use vole_frontend::PatternKind;
 
 impl Analyzer {
     pub(crate) fn check_block(
@@ -320,15 +321,16 @@ impl Analyzer {
         init_span: Span,
         interner: &Interner,
     ) {
-        match pattern {
-            Pattern::Identifier { name, .. } => {
+        match &pattern.kind {
+            PatternKind::Identifier { name } => {
                 self.scope.define(*name, Variable { ty: ty_id, mutable });
                 self.add_lambda_local(*name);
             }
-            Pattern::Wildcard(_) => {
+            PatternKind::Wildcard => {
                 // Wildcard - nothing to bind
             }
-            Pattern::Tuple { elements, span } => {
+            PatternKind::Tuple { elements } => {
+                let span = pattern.span;
                 // Check for tuple or fixed array using arena (extract info first to avoid borrow conflicts)
                 enum TupleOrArray {
                     Tuple(crate::type_arena::TypeIdVec),
@@ -356,9 +358,9 @@ impl Analyzer {
                                         "destructuring pattern with {} elements",
                                         elements.len()
                                     ),
-                                    span: (*span).into(),
+                                    span: span.into(),
                                 },
-                                *span,
+                                span,
                             );
                         } else {
                             for (elem_pattern, &elem_type_id) in
@@ -383,9 +385,9 @@ impl Analyzer {
                                         "destructuring pattern with {} elements",
                                         elements.len()
                                     ),
-                                    span: (*span).into(),
+                                    span: span.into(),
                                 },
-                                *span,
+                                span,
                             );
                         } else {
                             for elem_pattern in elements.iter() {
@@ -404,9 +406,10 @@ impl Analyzer {
                     }
                 }
             }
-            Pattern::Record { fields, span, .. } => {
+            PatternKind::Record { fields, .. } => {
+                let span = pattern.span;
                 self.check_record_destructuring_id(
-                    ty_id, fields, mutable, *span, init_span, interner,
+                    ty_id, fields, mutable, span, init_span, interner,
                 );
             }
             _ => {

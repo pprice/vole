@@ -1,11 +1,12 @@
 use super::super::*;
 use crate::type_arena::TypeId as ArenaTypeId;
+use vole_frontend::PatternKind;
 
 impl Analyzer {
     /// Check if a pattern is a type pattern (matches a class/record/primitive type name)
     fn is_type_pattern(&self, pattern: &Pattern, interner: &Interner) -> bool {
-        match pattern {
-            Pattern::Identifier { name, .. } => {
+        match &pattern.kind {
+            PatternKind::Identifier { name } => {
                 // Check if this identifier resolves to a type name
                 self.resolver(interner)
                     .resolve_type(*name, &self.entity_registry())
@@ -55,7 +56,7 @@ impl Analyzer {
             let has_error_arm = match_expr
                 .arms
                 .iter()
-                .any(|arm| matches!(arm.pattern, Pattern::Error { .. }));
+                .any(|arm| matches!(arm.pattern.kind, PatternKind::Error { .. }));
             if !has_error_arm {
                 self.add_error(
                     SemanticError::MissingErrorArm {
@@ -90,8 +91,8 @@ impl Analyzer {
             let narrowed_type_id = self.check_pattern_id(&arm.pattern, scrutinee_type_id, interner);
 
             // For wildcard patterns on union types, compute remaining type
-            let effective_narrowed_id = if matches!(arm.pattern, Pattern::Wildcard(_))
-                || matches!(arm.pattern, Pattern::Identifier { .. }
+            let effective_narrowed_id = if matches!(arm.pattern.kind, PatternKind::Wildcard)
+                || matches!(arm.pattern.kind, PatternKind::Identifier { .. }
                     if !self.is_type_pattern(&arm.pattern, interner))
             {
                 // Wildcard or binding pattern - narrow to remaining types

@@ -373,9 +373,4 @@ impl<'src> Parser<'src> {
             span,
         })
     }
-
-    /// Get the span from a pattern
-    pub(super) fn get_pattern_span(&self, pattern: &Pattern) -> Span {
-        pattern.span
-    }
 }

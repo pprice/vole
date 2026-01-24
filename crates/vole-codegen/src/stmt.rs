@@ -6,7 +6,7 @@ use cranelift::prelude::*;
 
 use crate::RuntimeFn;
 use crate::errors::CodegenError;
-use vole_frontend::{self, ExprKind, LetInit, Pattern, RaiseStmt, Stmt, Symbol};
+use vole_frontend::{self, ExprKind, LetInit, Pattern, PatternKind, RaiseStmt, Stmt, Symbol};
 use vole_sema::type_arena::TypeId;
 
 use super::context::Cg;
@@ -685,17 +685,17 @@ impl Cg<'_, '_, '_> {
         value: Value,
         ty_id: TypeId,
     ) -> Result<(), String> {
-        match pattern {
-            Pattern::Identifier { name, .. } => {
+        match &pattern.kind {
+            PatternKind::Identifier { name } => {
                 let cr_type = self.cranelift_type(ty_id);
                 let var = self.builder.declare_var(cr_type);
                 self.builder.def_var(var, value);
                 self.vars.insert(*name, (var, ty_id));
             }
-            Pattern::Wildcard(_) => {
+            PatternKind::Wildcard => {
                 // Wildcard - nothing to bind
             }
-            Pattern::Tuple { elements, .. } => {
+            PatternKind::Tuple { elements } => {
                 let arena = self.arena();
 
                 // Try tuple first
@@ -734,7 +734,7 @@ impl Cg<'_, '_, '_> {
                     drop(arena);
                 }
             }
-            Pattern::Record { fields, .. } => {
+            PatternKind::Record { fields, .. } => {
                 // Record destructuring - extract fields via runtime
                 for field_pattern in fields {
                     let field_name = self.interner().resolve(field_pattern.field_name);
