@@ -8,7 +8,7 @@ use cranelift::prelude::*;
 use cranelift_module::Module;
 
 use vole_frontend::{LambdaExpr, NodeId, Symbol};
-use vole_sema::type_arena::{TypeArena, TypeId, TypeIdVec};
+use vole_sema::type_arena::{TypeArena, TypeId};
 
 use super::RuntimeFn;
 use super::compiler::common::{FunctionCompileConfig, compile_function_inner_with_params};
@@ -49,47 +49,24 @@ pub(crate) fn build_capture_bindings(
 }
 
 impl Cg<'_, '_, '_> {
-    /// Get lambda param and return types from explicit annotations or inference.
+    /// Get lambda param and return types from sema analysis.
     ///
-    /// First tries to get types from sema analysis via node_id.
-    /// Falls back to AST annotations or inference if sema types unavailable.
-    fn get_lambda_types(&self, lambda: &LambdaExpr, node_id: NodeId) -> (Vec<TypeId>, TypeId) {
-        // Try sema-inferred types first
-        if let Some(lambda_type_id) = self.get_expr_type(&node_id) {
-            let arena = self.arena();
-            if let Some((sema_params, ret_id, _)) = arena.unwrap_function(lambda_type_id) {
-                return (sema_params.to_vec(), ret_id);
-            }
-        }
+    /// Returns the function type ID and decomposed param/return types from sema.
+    /// Errors if sema did not store the lambda's type (which would be a bug).
+    fn get_lambda_types(&self, node_id: NodeId) -> Result<(TypeId, Vec<TypeId>, TypeId), String> {
+        let lambda_type_id = self
+            .get_expr_type(&node_id)
+            .ok_or_else(|| format!("Lambda type not found in sema for node {:?}", node_id))?;
 
-        // Fallback: resolve from AST annotations or infer
-        let primitives = self.arena().primitives;
+        let arena = self.arena();
+        let (sema_params, ret_id, _) = arena.unwrap_function(lambda_type_id).ok_or_else(|| {
+            format!(
+                "Lambda expression has non-function type {:?}",
+                lambda_type_id
+            )
+        })?;
 
-        // Build param type ids from AST annotations, defaulting to i64
-        let param_type_ids: Vec<TypeId> = lambda
-            .params
-            .iter()
-            .map(|p| {
-                p.ty.as_ref()
-                    .map(|t| self.resolve_type_expr(t))
-                    .unwrap_or(primitives.i64)
-            })
-            .collect();
-
-        // Get return type from annotation or infer from body
-        let return_type_id = if let Some(t) = &lambda.return_type {
-            self.resolve_type_expr(t)
-        } else {
-            let param_context: Vec<(Symbol, TypeId)> = lambda
-                .params
-                .iter()
-                .zip(param_type_ids.iter())
-                .map(|(p, &ty)| (p.name, ty))
-                .collect();
-            self.infer_lambda_return_type(&lambda.body, &param_context)
-        };
-
-        (param_type_ids, return_type_id)
+        Ok((lambda_type_id, sema_params.to_vec(), ret_id))
     }
 
     /// Compile a pure lambda (no captures) - returns a closure pointer.
@@ -100,8 +77,8 @@ impl Cg<'_, '_, '_> {
     ) -> Result<CompiledValue, String> {
         let lambda_id = self.next_lambda_id();
 
-        // Get param and return types
-        let (param_type_ids, return_type_id) = self.get_lambda_types(lambda, node_id);
+        // Get param and return types from sema
+        let (func_type_id, param_type_ids, return_type_id) = self.get_lambda_types(node_id)?;
 
         // Convert to Cranelift types
         let param_types = self.cranelift_types(&param_type_ids);
@@ -174,12 +151,7 @@ impl Cg<'_, '_, '_> {
             .call(alloc_ref, &[func_addr, zero_captures]);
         let closure_ptr = self.builder.inst_results(alloc_call)[0];
 
-        // Create TypeId for the closure
-        let func_type_id = {
-            let param_ids: TypeIdVec = param_type_ids.iter().copied().collect();
-            self.update().function(param_ids, return_type_id, true)
-        };
-
+        // Use the type ID from sema (already computed during type checking)
         Ok(CompiledValue {
             value: closure_ptr,
             ty: self.ptr_type(),
@@ -198,8 +170,8 @@ impl Cg<'_, '_, '_> {
 
         let lambda_id = self.next_lambda_id();
 
-        // Get param and return types
-        let (param_type_ids, return_type_id) = self.get_lambda_types(lambda, node_id);
+        // Get param and return types from sema
+        let (func_type_id, param_type_ids, return_type_id) = self.get_lambda_types(node_id)?;
 
         // Convert to Cranelift types
         let param_types = self.cranelift_types(&param_type_ids);
@@ -318,12 +290,7 @@ impl Cg<'_, '_, '_> {
                 .call(set_capture_ref, &[closure_ptr, index_val, heap_ptr]);
         }
 
-        // Create TypeId for the closure
-        let func_type_id = {
-            let param_ids: TypeIdVec = param_type_ids.iter().copied().collect();
-            self.update().function(param_ids, return_type_id, true)
-        };
-
+        // Use the type ID from sema (already computed during type checking)
         Ok(CompiledValue {
             value: closure_ptr,
             ty: ptr_type,

@@ -17,7 +17,7 @@ use rustc_hash::FxHashMap;
 use crate::errors::CodegenError;
 use crate::{FunctionKey, RuntimeFn};
 use smallvec::SmallVec;
-use vole_frontend::{BinaryOp, Expr, ExprKind, Symbol};
+use vole_frontend::{Expr, Symbol};
 use vole_identity::{ModuleId, NameId};
 use vole_runtime::native_registry::NativeType;
 use vole_sema::PrimitiveType;
@@ -29,7 +29,6 @@ use super::types::{
     CodegenCtx, CompileEnv, CompiledValue, TypeMetadataMap, native_type_to_cranelift, type_id_size,
     type_id_to_cranelift,
 };
-use vole_sema::type_arena::TypeIdVec;
 
 /// Control flow context for loops (break/continue targets)
 pub(crate) struct ControlFlow {
@@ -492,136 +491,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Get the size (in bits) of a TypeId
     pub fn type_size(&self, ty: TypeId) -> u32 {
         type_id_size(ty, self.ptr_type(), self.query().registry(), &self.arena())
-    }
-
-    /// Infer the type of an expression given parameter types as context.
-    ///
-    /// This is used during lambda compilation when sema type info is unavailable.
-    /// Uses the global context for type lookups and arena mutations.
-    pub fn infer_expr_type(&self, expr: &Expr, param_types: &[(Symbol, TypeId)]) -> TypeId {
-        let primitives = self.arena().primitives;
-
-        match &expr.kind {
-            ExprKind::IntLiteral(_) => primitives.i64,
-            ExprKind::FloatLiteral(_) => primitives.f64,
-            ExprKind::BoolLiteral(_) => primitives.bool,
-            ExprKind::StringLiteral(_) => primitives.string,
-            ExprKind::InterpolatedString(_) => primitives.string,
-            ExprKind::Nil => self.arena().nil(),
-            ExprKind::Done => self.arena().done(),
-
-            ExprKind::Identifier(sym) => {
-                // Check local parameters first
-                for (name, ty_id) in param_types {
-                    if name == sym {
-                        return *ty_id;
-                    }
-                }
-                // Try to look up global via GlobalDef
-                let name_table = self.name_table();
-                let module_id = self
-                    .current_module
-                    .unwrap_or_else(|| name_table.main_module());
-                if let Some(name_id) = name_table.name_id(module_id, &[*sym], self.interner()) {
-                    drop(name_table);
-                    if let Some(global_def) = self.query().global(name_id) {
-                        return global_def.type_id;
-                    }
-                }
-                primitives.i64
-            }
-
-            ExprKind::Binary(bin) => {
-                let left_ty = self.infer_expr_type(&bin.left, param_types);
-                let right_ty = self.infer_expr_type(&bin.right, param_types);
-
-                match bin.op {
-                    BinaryOp::Eq
-                    | BinaryOp::Ne
-                    | BinaryOp::Lt
-                    | BinaryOp::Le
-                    | BinaryOp::Gt
-                    | BinaryOp::Ge
-                    | BinaryOp::And
-                    | BinaryOp::Or => primitives.bool,
-
-                    BinaryOp::Add
-                    | BinaryOp::Sub
-                    | BinaryOp::Mul
-                    | BinaryOp::Div
-                    | BinaryOp::Mod => {
-                        if left_ty == right_ty {
-                            left_ty
-                        } else if left_ty == primitives.i64 || right_ty == primitives.i64 {
-                            primitives.i64
-                        } else if left_ty == primitives.f64 || right_ty == primitives.f64 {
-                            primitives.f64
-                        } else if left_ty == primitives.i32 || right_ty == primitives.i32 {
-                            primitives.i32
-                        } else {
-                            left_ty
-                        }
-                    }
-
-                    BinaryOp::BitAnd
-                    | BinaryOp::BitOr
-                    | BinaryOp::BitXor
-                    | BinaryOp::Shl
-                    | BinaryOp::Shr => left_ty,
-                }
-            }
-
-            ExprKind::Unary(un) => self.infer_expr_type(&un.operand, param_types),
-
-            ExprKind::Call(call) => {
-                let callee_ty = self.infer_expr_type(&call.callee, param_types);
-                let arena = self.arena();
-                if let Some((_, ret_id, _)) = arena.unwrap_function(callee_ty) {
-                    ret_id
-                } else {
-                    primitives.i64
-                }
-            }
-
-            ExprKind::Lambda(lambda) => {
-                let primitives = self.arena().primitives;
-                // Resolve param types directly to TypeIds
-                let lambda_param_ids: TypeIdVec = lambda
-                    .params
-                    .iter()
-                    .map(|p| {
-                        p.ty.as_ref()
-                            .map(|t| self.resolve_type_expr(t))
-                            .unwrap_or(primitives.i64)
-                    })
-                    .collect();
-                let return_ty_id = lambda
-                    .return_type
-                    .as_ref()
-                    .map(|t| self.resolve_type_expr(t))
-                    .unwrap_or(primitives.i64);
-
-                self.update().function(
-                    lambda_param_ids,
-                    return_ty_id,
-                    !lambda.captures.borrow().is_empty(),
-                )
-            }
-
-            _ => primitives.i64,
-        }
-    }
-
-    /// Infer the return type of a lambda expression body.
-    pub fn infer_lambda_return_type(
-        &self,
-        body: &vole_frontend::FuncBody,
-        param_types: &[(Symbol, TypeId)],
-    ) -> TypeId {
-        match body {
-            vole_frontend::FuncBody::Expr(expr) => self.infer_expr_type(expr, param_types),
-            vole_frontend::FuncBody::Block(_) => self.arena().primitives.i64,
-        }
     }
 
     /// Unwrap an interface type, returning the TypeDefId if it is one

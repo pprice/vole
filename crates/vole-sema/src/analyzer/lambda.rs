@@ -167,7 +167,7 @@ impl Analyzer {
         let has_side_effects = self.lambda_side_effects.pop().unwrap_or(false);
         lambda.has_side_effects.set(has_side_effects);
 
-        let has_captures = if let Some(captures) = self.lambda_captures.pop() {
+        if let Some(captures) = self.lambda_captures.pop() {
             let capture_list: Vec<Capture> = captures
                 .into_values()
                 .map(|info| Capture {
@@ -176,21 +176,20 @@ impl Analyzer {
                     is_mutated: info.is_mutated,
                 })
                 .collect();
-            let has_captures = !capture_list.is_empty();
             *lambda.captures.borrow_mut() = capture_list;
-            has_captures
-        } else {
-            false
-        };
+        }
 
         // Determine final return type
         let return_type_id = declared_return_id
             .or(expected_return_id)
             .unwrap_or(body_type_id);
 
-        // Build function type using arena
+        // Build function type using arena.
+        // Lambda expressions always use closure calling convention in codegen,
+        // so we set is_closure=true regardless of whether they have captures.
+        // This ensures type consistency between sema and codegen.
         self.type_arena_mut()
-            .function(param_type_ids, return_type_id, has_captures)
+            .function(param_type_ids, return_type_id, true)
     }
 
     /// Check if a lambda has fully explicit type annotations and return its function type.
