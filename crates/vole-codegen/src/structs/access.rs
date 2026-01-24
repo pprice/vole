@@ -6,7 +6,7 @@ use crate::context::Cg;
 use crate::errors::CodegenError;
 use crate::types::{CompiledValue, module_name_id};
 use cranelift::prelude::*;
-use vole_frontend::{Expr, FieldAccessExpr, OptionalChainExpr, Symbol};
+use vole_frontend::{Expr, FieldAccessExpr, NodeId, OptionalChainExpr, Symbol};
 use vole_sema::types::ConstantValue;
 
 impl Cg<'_, '_, '_> {
@@ -106,7 +106,11 @@ impl Cg<'_, '_, '_> {
         Ok(self.convert_field_value(result_raw, field_type_id))
     }
 
-    pub fn optional_chain(&mut self, oc: &OptionalChainExpr) -> Result<CompiledValue, String> {
+    pub fn optional_chain(
+        &mut self,
+        oc: &OptionalChainExpr,
+        expr_id: NodeId,
+    ) -> Result<CompiledValue, String> {
         let obj = self.expr(&oc.object)?;
 
         // The object should be an optional type (union with nil)
@@ -144,19 +148,24 @@ impl Cg<'_, '_, '_> {
         let field_name = self.interner().resolve(oc.field);
         let (slot, field_type_id) = get_field_slot_and_type_id_cg(inner_type_id, field_name, self)?;
 
-        // Result type is field_type | nil (optional)
-        // But if field type is already optional, don't double-wrap
-        let (result_type_id, is_field_optional) = {
+        // Get result type from sema (already computed as Optional<T> or T if T is already optional)
+        // Sema handles the double-wrapping logic in check_optional_chain_expr
+        let result_type_id = self.get_expr_type(&expr_id).unwrap_or_else(|| {
+            // Fallback: if sema didn't record, compute it (shouldn't happen in normal flow)
+            tracing::warn!(
+                ?expr_id,
+                "optional_chain: sema did not record type, falling back to codegen type creation"
+            );
             let arena = self.arena();
             let is_optional = arena.is_optional(field_type_id);
             drop(arena);
-            let result_id = if is_optional {
+            if is_optional {
                 field_type_id
             } else {
                 self.update().optional(field_type_id)
-            };
-            (result_id, is_optional)
-        };
+            }
+        });
+        let is_field_optional = self.arena().is_optional(field_type_id);
 
         let cranelift_type = {
             let arena = self.arena();

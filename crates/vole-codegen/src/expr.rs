@@ -75,7 +75,7 @@ impl Cg<'_, '_, '_> {
             }
             ExprKind::StructLiteral(sl) => self.struct_literal(sl, expr),
             ExprKind::FieldAccess(fa) => self.field_access(fa),
-            ExprKind::OptionalChain(oc) => self.optional_chain(oc),
+            ExprKind::OptionalChain(oc) => self.optional_chain(oc, expr.id),
             ExprKind::MethodCall(mc) => self.method_call(mc, expr.id),
             ExprKind::Try(inner) => self.try_propagate(inner),
             ExprKind::Import(_) => {
