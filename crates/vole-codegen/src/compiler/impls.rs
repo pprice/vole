@@ -243,13 +243,27 @@ impl Compiler<'_> {
                 continue;
             }
 
-            // Create signature without self parameter
-            let sig = self.build_signature(
-                &method.params,
-                method.return_type.as_ref(),
-                SelfParam::None,
-                TypeResolver::Query,
-            );
+            // Get method name id for lookup
+            let method_name_id = method_name_id_with_interner(self.analyzed, interner, method.name);
+
+            // Try to get MethodId and build signature from pre-resolved types
+            let sig = if let Some(type_def_id) = type_def_id
+                && let Some(name_id) = method_name_id
+                && let Some(method_id) = self
+                    .query()
+                    .registry()
+                    .find_static_method_on_type(type_def_id, name_id)
+            {
+                self.build_signature_for_method(method_id, SelfParam::None)
+            } else {
+                // Fallback: build from AST (shouldn't happen normally)
+                self.build_signature(
+                    &method.params,
+                    method.return_type.as_ref(),
+                    SelfParam::None,
+                    TypeResolver::Query,
+                )
+            };
 
             // Function key: TypeName::methodName
             let func_key = self.func_registry.intern_raw_qualified(
@@ -257,17 +271,16 @@ impl Compiler<'_> {
                 &[type_name.as_str(), interner.resolve(method.name)],
             );
             let display_name = self.func_registry.display(func_key);
-            let func_id = self.jit.declare_function(&display_name, &sig);
-            self.func_registry.set_func_id(func_key, func_id);
+            let jit_func_id = self.jit.declare_function(&display_name, &sig);
+            self.func_registry.set_func_id(func_key, jit_func_id);
 
             // Register in method_func_keys for codegen lookup
             if let Some(type_def_id) = type_def_id
-                && let Some(method_name_id) =
-                    method_name_id_with_interner(self.analyzed, interner, method.name)
+                && let Some(name_id) = method_name_id
             {
                 self.state
                     .method_func_keys
-                    .insert((type_def_id, method_name_id), func_key);
+                    .insert((type_def_id, name_id), func_key);
             }
         }
     }
@@ -316,13 +329,27 @@ impl Compiler<'_> {
                 continue;
             }
 
-            // Create signature without self parameter
-            let sig = self.build_signature(
-                &method.params,
-                method.return_type.as_ref(),
-                SelfParam::None,
-                TypeResolver::Query,
-            );
+            // Get method name id for lookup
+            let method_name_id = method_name_id_with_interner(self.analyzed, interner, method.name);
+
+            // Try to get MethodId and build signature from pre-resolved types
+            let sig = if let Some(type_def_id) = type_def_id
+                && let Some(name_id) = method_name_id
+                && let Some(method_id) = self
+                    .query()
+                    .registry()
+                    .find_static_method_on_type(type_def_id, name_id)
+            {
+                self.build_signature_for_method(method_id, SelfParam::None)
+            } else {
+                // Fallback: build from AST (shouldn't happen normally)
+                self.build_signature(
+                    &method.params,
+                    method.return_type.as_ref(),
+                    SelfParam::None,
+                    TypeResolver::Query,
+                )
+            };
 
             // Function key: TypeName::methodName
             let func_key = self.func_registry.intern_raw_qualified(
@@ -331,17 +358,16 @@ impl Compiler<'_> {
             );
             let display_name = self.func_registry.display(func_key);
             // Use import_function (Linkage::Import) instead of declare_function
-            let func_id = self.jit.import_function(&display_name, &sig);
-            self.func_registry.set_func_id(func_key, func_id);
+            let jit_func_id = self.jit.import_function(&display_name, &sig);
+            self.func_registry.set_func_id(func_key, jit_func_id);
 
             // Register in method_func_keys for codegen lookup
             if let Some(type_def_id) = type_def_id
-                && let Some(method_name_id) =
-                    method_name_id_with_interner(self.analyzed, interner, method.name)
+                && let Some(name_id) = method_name_id
             {
                 self.state
                     .method_func_keys
-                    .insert((type_def_id, method_name_id), func_key);
+                    .insert((type_def_id, name_id), func_key);
             }
         }
     }
@@ -419,12 +445,32 @@ impl Compiler<'_> {
 
         // Declare methods as functions: TypeName::methodName (implement block convention)
         for method in &impl_block.methods {
-            let sig = self.build_signature(
-                &method.params,
-                method.return_type.as_ref(),
-                SelfParam::TypedId(self_type_id),
-                TypeResolver::Query,
-            );
+            let method_name_id = method_name_id_with_interner(self.analyzed, interner, method.name);
+            // Get TypeDefId if available
+            let type_def_id =
+                impl_type_id.and_then(|impl_id| self.query().try_type_def_id(impl_id.name_id()));
+
+            // Try to get MethodId and build signature from pre-resolved types
+            let sig = if let Some(tdef_id) = type_def_id
+                && let Some(name_id) = method_name_id
+                && let Some(semantic_method_id) = self
+                    .analyzed
+                    .entity_registry()
+                    .find_method_on_type(tdef_id, name_id)
+            {
+                self.build_signature_for_method(
+                    semantic_method_id,
+                    SelfParam::TypedId(self_type_id),
+                )
+            } else {
+                // Fallback: build from AST
+                self.build_signature(
+                    &method.params,
+                    method.return_type.as_ref(),
+                    SelfParam::TypedId(self_type_id),
+                    TypeResolver::Query,
+                )
+            };
             let func_key = if let Some(type_sym) = type_sym {
                 self.func_registry
                     .intern_qualified(func_module, &[type_sym, method.name], interner)
@@ -437,17 +483,15 @@ impl Compiler<'_> {
                     .intern_raw_qualified(func_module, &[type_name.as_str(), method_name_str])
             };
             let display_name = self.func_registry.display(func_key);
-            let func_id = self.jit.declare_function(&display_name, &sig);
-            self.func_registry.set_func_id(func_key, func_id);
+            let jit_func_id = self.jit.declare_function(&display_name, &sig);
+            self.func_registry.set_func_id(func_key, jit_func_id);
             // Populate method_func_keys for method lookup
-            if let Some(impl_id) = impl_type_id
-                && let Some(type_def_id) = self.query().try_type_def_id(impl_id.name_id())
+            if let Some(tdef_id) = type_def_id
+                && let Some(name_id) = method_name_id
             {
-                let method_id = method_name_id_with_interner(self.analyzed, interner, method.name)
-                    .expect("implement method name_id should be registered");
                 self.state
                     .method_func_keys
-                    .insert((type_def_id, method_id), func_key);
+                    .insert((tdef_id, name_id), func_key);
             }
         }
 
@@ -638,6 +682,8 @@ impl Compiler<'_> {
         interner: &Interner,
     ) -> Result<(), String> {
         let module_id = self.query().main_module();
+        // Try to get TypeDefId for looking up pre-resolved method signatures
+        let type_def_id = self.query().resolve_type_def_by_str(module_id, type_name);
 
         for method in &statics.methods {
             // Only compile methods with bodies
@@ -651,41 +697,63 @@ impl Compiler<'_> {
             let func_key = self
                 .func_registry
                 .intern_raw_qualified(func_module, &[type_name, method_name_str]);
-            let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
+            let jit_func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
                 format!(
                     "Internal error: static method {}::{} not declared",
                     type_name, method_name_str
                 )
             })?;
 
-            // Resolve return type as TypeId for context (needed for proper literal type inference)
-            let return_type_id = {
-                let name_table = self.analyzed.name_table();
-                method.return_type.as_ref().map(|t| {
-                    resolve_type_expr_to_id(
-                        t,
-                        self.analyzed.entity_registry(),
-                        &self.state.type_metadata,
-                        interner,
-                        &name_table,
-                        module_id,
-                        self.analyzed.type_arena_ref(),
-                    )
-                })
-            };
+            // Try to get MethodId and use pre-resolved signature
+            let method_name_id = method_name_id_with_interner(self.analyzed, interner, method.name);
+            let semantic_method_id =
+                type_def_id
+                    .zip(method_name_id)
+                    .and_then(|(tdef_id, name_id)| {
+                        self.analyzed
+                            .entity_registry()
+                            .find_static_method_on_type(tdef_id, name_id)
+                    });
 
-            // Create signature (no self parameter)
-            let sig = self.build_signature(
-                &method.params,
-                method.return_type.as_ref(),
-                SelfParam::None,
-                TypeResolver::Query,
-            );
+            let (sig, param_type_ids, return_type_id) = if let Some(method_id) = semantic_method_id
+            {
+                // Use pre-resolved signature from MethodDef
+                let method_def = self.query().get_method(method_id);
+                let arena = self.analyzed.type_arena();
+                let (params, ret, _) = arena
+                    .unwrap_function(method_def.signature_id)
+                    .expect("method should have function signature");
+                let sig = self.build_signature_for_method(method_id, SelfParam::None);
+                (sig, params.to_vec(), Some(ret).filter(|r| !r.is_void()))
+            } else {
+                // Fallback: build from AST
+                let return_type_id = {
+                    let name_table = self.analyzed.name_table();
+                    method.return_type.as_ref().map(|t| {
+                        resolve_type_expr_to_id(
+                            t,
+                            self.analyzed.entity_registry(),
+                            &self.state.type_metadata,
+                            interner,
+                            &name_table,
+                            module_id,
+                            self.analyzed.type_arena_ref(),
+                        )
+                    })
+                };
+                let sig = self.build_signature(
+                    &method.params,
+                    method.return_type.as_ref(),
+                    SelfParam::None,
+                    TypeResolver::Query,
+                );
+                let param_type_ids =
+                    self.resolve_param_type_ids_with_interner(&method.params, interner, module_id);
+                (sig, param_type_ids, return_type_id)
+            };
             self.jit.ctx.func.signature = sig;
 
-            // Collect param types and build config
-            let param_type_ids =
-                self.resolve_param_type_ids_with_interner(&method.params, interner, module_id);
+            // Build param info for compilation
             let param_cranelift_types = self.type_ids_to_cranelift(&param_type_ids);
             let params: Vec<_> = method
                 .params
@@ -722,7 +790,7 @@ impl Compiler<'_> {
             }
 
             // Define the function
-            self.finalize_function(func_id)?;
+            self.finalize_function(jit_func_id)?;
         }
 
         Ok(())

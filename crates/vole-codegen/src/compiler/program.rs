@@ -8,15 +8,12 @@ use super::common::{
     DefaultReturn, FunctionCompileConfig, compile_function_inner_with_params,
     finalize_function_body,
 };
-use super::{Compiler, SelfParam, TestInfo, TypeResolver};
+use super::{Compiler, TestInfo};
 
 use crate::FunctionKey;
 use crate::RuntimeFn;
 use crate::context::Cg;
-use crate::types::{
-    CodegenCtx, CompileEnv, function_name_id_with_interner, resolve_type_expr_to_id,
-    type_id_to_cranelift,
-};
+use crate::types::{CodegenCtx, CompileEnv, function_name_id_with_interner, type_id_to_cranelift};
 use vole_frontend::{
     Block, Decl, Expr, FuncDecl, InterfaceMethod, Interner, LetInit, LetStmt, Program, Span, Stmt,
     Symbol, TestCase, TestsDecl,
@@ -131,22 +128,24 @@ impl Compiler<'_> {
                     if !func.type_params.is_empty() {
                         continue;
                     }
-                    // Get return type from entity_registry (supports inferred types)
+                    // Get FunctionId and build signature from pre-resolved types
+                    let main_module = self.query().main_module();
+                    let Some(semantic_func_id) = self.query().function_id(main_module, func.name)
+                    else {
+                        continue; // Skip if function not registered (shouldn't happen)
+                    };
+                    let sig = self.build_signature_for_function(semantic_func_id);
+                    let (func_key, display_name) = self.main_function_key_and_name(func.name);
+                    let jit_func_id = self.jit.declare_function(&display_name, &sig);
+                    self.func_registry.set_func_id(func_key, jit_func_id);
+                    // Record return type for use in call expressions (TypeId-native)
                     let return_type_id = self
                         .query()
-                        .function_return_type(self.query().main_module(), func.name);
-                    let sig = self.build_signature_with_return_type_id(
-                        &func.params,
-                        return_type_id,
-                        SelfParam::None,
-                        TypeResolver::Query,
-                    );
-                    let (func_key, display_name) = self.main_function_key_and_name(func.name);
-                    let func_id = self.jit.declare_function(&display_name, &sig);
-                    self.func_registry.set_func_id(func_key, func_id);
-                    // Record return type for use in call expressions (TypeId-native)
-                    self.func_registry
-                        .set_return_type(func_key, return_type_id.unwrap_or(TypeId::VOID));
+                        .registry()
+                        .get_function(semantic_func_id)
+                        .signature
+                        .return_type_id;
+                    self.func_registry.set_return_type(func_key, return_type_id);
                 }
                 Decl::Tests(tests_decl) => {
                     // Declare each test with a generated name and signature () -> i64
@@ -281,23 +280,23 @@ impl Compiler<'_> {
                     .expect("module function name_id should be registered");
                     let display_name = self.query().display_name(name_id);
 
-                    // Create signature and declare function
-                    let sig = self.build_signature(
-                        &func.params,
-                        func.return_type.as_ref(),
-                        SelfParam::None,
-                        TypeResolver::Query,
-                    );
-                    let func_id = self.jit.declare_function(&display_name, &sig);
+                    // Get FunctionId and build signature from pre-resolved types
+                    let Some(semantic_func_id) = self.query().registry().function_by_name(name_id)
+                    else {
+                        continue; // Skip if function not registered
+                    };
+                    let sig = self.build_signature_for_function(semantic_func_id);
+                    let jit_func_id = self.jit.declare_function(&display_name, &sig);
                     let func_key = self.func_registry.intern_name_id(name_id);
-                    self.func_registry.set_func_id(func_key, func_id);
+                    self.func_registry.set_func_id(func_key, jit_func_id);
 
-                    // Record return type
-                    let return_type_id = func
-                        .return_type
-                        .as_ref()
-                        .map(|t| self.resolve_type_to_id(t))
-                        .unwrap_or(TypeId::VOID);
+                    // Record return type from pre-resolved signature
+                    let return_type_id = self
+                        .query()
+                        .registry()
+                        .get_function(semantic_func_id)
+                        .signature
+                        .return_type_id;
                     self.func_registry.set_return_type(func_key, return_type_id);
                 }
             }
@@ -397,23 +396,24 @@ impl Compiler<'_> {
                     .expect("module function name_id should be registered");
                     let display_name = self.query().display_name(name_id);
 
+                    // Get FunctionId and build signature from pre-resolved types
+                    let Some(semantic_func_id) = self.query().registry().function_by_name(name_id)
+                    else {
+                        continue; // Skip if function not registered
+                    };
                     // Create signature and IMPORT (not declare) the function
-                    let sig = self.build_signature(
-                        &func.params,
-                        func.return_type.as_ref(),
-                        SelfParam::None,
-                        TypeResolver::Query,
-                    );
-                    let func_id = self.jit.import_function(&display_name, &sig);
+                    let sig = self.build_signature_for_function(semantic_func_id);
+                    let jit_func_id = self.jit.import_function(&display_name, &sig);
                     let func_key = self.func_registry.intern_name_id(name_id);
-                    self.func_registry.set_func_id(func_key, func_id);
+                    self.func_registry.set_func_id(func_key, jit_func_id);
 
-                    // Record return type
-                    let return_type_id = func
-                        .return_type
-                        .as_ref()
-                        .map(|t| self.resolve_type_to_id(t))
-                        .unwrap_or(TypeId::VOID);
+                    // Record return type from pre-resolved signature
+                    let return_type_id = self
+                        .query()
+                        .registry()
+                        .get_function(semantic_func_id)
+                        .signature
+                        .return_type_id;
                     self.func_registry.set_return_type(func_key, return_type_id);
                 }
             }
@@ -465,61 +465,45 @@ impl Compiler<'_> {
     ) -> Result<(), String> {
         let func_key = self.func_registry.intern_name_id(name_id);
         let display_name = self.query().display_name(name_id);
-        let func_id = self
+        let jit_func_id = self
             .func_registry
             .func_id(func_key)
             .ok_or_else(|| format!("Module function {} not declared", display_name))?;
         let module_id = self.query().module_id_or_main(module_path);
 
-        // Create function signature
-        let sig = self.build_signature(
-            &func.params,
-            func.return_type.as_ref(),
-            SelfParam::None,
-            TypeResolver::Query,
-        );
+        // Get FunctionId and extract pre-resolved signature data
+        let semantic_func_id = self
+            .query()
+            .registry()
+            .function_by_name(name_id)
+            .ok_or_else(|| format!("Function {} not found in registry", display_name))?;
+        let (param_type_ids, return_type_id) = {
+            let func_def = self.query().registry().get_function(semantic_func_id);
+            (
+                func_def.signature.params_id.clone(),
+                func_def.signature.return_type_id,
+            )
+        };
+        let sig = self.build_signature_for_function(semantic_func_id);
         self.jit.ctx.func.signature = sig;
 
         // Build params: Vec<(Symbol, TypeId, Type)>
-        // First collect type IDs (which may access arena internally)
-        // Note: Use module_interner since the TypeExpr Symbols come from the module's AST
-        let param_info: Vec<(Symbol, TypeId)> = {
-            let query = self.query();
-            let type_metadata = &self.state.type_metadata;
-            let name_table = self.analyzed.name_table();
-            func.params
-                .iter()
-                .map(|p| {
-                    let type_id = resolve_type_expr_to_id(
-                        &p.ty,
-                        query.registry(),
-                        type_metadata,
-                        module_interner,
-                        &name_table,
-                        module_id,
-                        self.analyzed.type_arena_ref(),
-                    );
-                    (p.name, type_id)
-                })
-                .collect()
-        };
+        // Combine AST param names with pre-resolved TypeIds from FunctionDef
         let params: Vec<(Symbol, TypeId, types::Type)> = {
             let arena_ref = self.analyzed.type_arena();
-            param_info
-                .into_iter()
-                .map(|(name, type_id)| {
+            func.params
+                .iter()
+                .zip(param_type_ids.iter())
+                .map(|(p, &type_id)| {
                     let cranelift_type =
                         type_id_to_cranelift(type_id, &arena_ref, self.pointer_type);
-                    (name, type_id, cranelift_type)
+                    (p.name, type_id, cranelift_type)
                 })
                 .collect()
         };
 
-        // Get function return type id (TypeId-native)
-        let return_type_id = func
-            .return_type
-            .as_ref()
-            .map(|t| self.resolve_type_to_id(t));
+        // Get function return type id from pre-resolved signature
+        let return_type_id = Some(return_type_id).filter(|id| !id.is_void());
 
         // Get source file pointer
         let source_file_ptr = self.source_file_ptr();
@@ -551,7 +535,7 @@ impl Compiler<'_> {
         }
 
         // Define the function
-        self.finalize_function(func_id)?;
+        self.finalize_function(jit_func_id)?;
 
         Ok(())
     }
@@ -559,38 +543,39 @@ impl Compiler<'_> {
     fn compile_function(&mut self, func: &FuncDecl) -> Result<(), String> {
         let main_module = self.query().main_module();
         let (func_key, display_name) = self.main_function_key_and_name(func.name);
-        let func_id = self
+        let jit_func_id = self
             .func_registry
             .func_id(func_key)
             .ok_or_else(|| format!("Function {} not declared", display_name))?;
 
-        // Get return type from entity_registry (supports inferred types)
-        let return_type_id = self.query().function_return_type(main_module, func.name);
+        // Get FunctionId and extract pre-resolved signature data
+        let semantic_func_id = self
+            .query()
+            .function_id(main_module, func.name)
+            .ok_or_else(|| format!("Function {} not found in registry", display_name))?;
+        let (param_type_ids, return_type_id) = {
+            let func_def = self.query().registry().get_function(semantic_func_id);
+            (
+                func_def.signature.params_id.clone(),
+                func_def.signature.return_type_id,
+            )
+        };
 
-        // Create function signature
-        let sig = self.build_signature_with_return_type_id(
-            &func.params,
-            return_type_id,
-            SelfParam::None,
-            TypeResolver::Query,
-        );
+        // Create function signature from pre-resolved types
+        let sig = self.build_signature_for_function(semantic_func_id);
         self.jit.ctx.func.signature = sig;
 
         // Build params: Vec<(Symbol, TypeId, Type)>
-        // First collect type IDs (may borrow arena internally), then convert to cranelift types
-        let param_info: Vec<(Symbol, TypeId)> = func
-            .params
-            .iter()
-            .map(|p| (p.name, self.resolve_type_to_id(&p.ty)))
-            .collect();
+        // Combine AST param names with pre-resolved TypeIds from FunctionDef
         let params: Vec<(Symbol, TypeId, types::Type)> = {
             let arena_ref = self.analyzed.type_arena();
-            param_info
-                .into_iter()
-                .map(|(name, type_id)| {
+            func.params
+                .iter()
+                .zip(param_type_ids.iter())
+                .map(|(p, &type_id)| {
                     let cranelift_type =
                         type_id_to_cranelift(type_id, &arena_ref, self.pointer_type);
-                    (name, type_id, cranelift_type)
+                    (p.name, type_id, cranelift_type)
                 })
                 .collect()
         };
@@ -607,7 +592,9 @@ impl Compiler<'_> {
             let env = compile_env!(self, source_file_ptr);
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
-            let config = FunctionCompileConfig::top_level(&func.body, params, return_type_id);
+            // Use pre-resolved return type (None for void)
+            let return_type_opt = Some(return_type_id).filter(|id| !id.is_void());
+            let config = FunctionCompileConfig::top_level(&func.body, params, return_type_opt);
             compile_function_inner_with_params(
                 builder,
                 &mut codegen_ctx,
@@ -619,7 +606,7 @@ impl Compiler<'_> {
         }
 
         // Define the function
-        self.finalize_function(func_id)?;
+        self.finalize_function(jit_func_id)?;
 
         Ok(())
     }
@@ -876,21 +863,23 @@ impl Compiler<'_> {
         for decl in &program.declarations {
             match decl {
                 Decl::Function(func) => {
-                    let sig = self.build_signature(
-                        &func.params,
-                        func.return_type.as_ref(),
-                        SelfParam::None,
-                        TypeResolver::Query,
-                    );
+                    // Get FunctionId and build signature from pre-resolved types
+                    let main_module = self.query().main_module();
+                    let Some(semantic_func_id) = self.query().function_id(main_module, func.name)
+                    else {
+                        continue; // Skip if function not registered
+                    };
+                    let sig = self.build_signature_for_function(semantic_func_id);
                     let (func_key, display_name) = self.main_function_key_and_name(func.name);
-                    let func_id = self.jit.declare_function(&display_name, &sig);
-                    self.func_registry.set_func_id(func_key, func_id);
-                    // Record return type for use in call expressions
-                    let return_type_id = func
-                        .return_type
-                        .as_ref()
-                        .map(|t| self.resolve_type_to_id(t))
-                        .unwrap_or(TypeId::VOID);
+                    let jit_func_id = self.jit.declare_function(&display_name, &sig);
+                    self.func_registry.set_func_id(func_key, jit_func_id);
+                    // Record return type from pre-resolved signature
+                    let return_type_id = self
+                        .query()
+                        .registry()
+                        .get_function(semantic_func_id)
+                        .signature
+                        .return_type_id;
                     self.func_registry.set_return_type(func_key, return_type_id);
                 }
                 Decl::Tests(tests_decl) if include_tests => {
@@ -937,22 +926,31 @@ impl Compiler<'_> {
     /// Build IR for a single function without defining it.
     /// Similar to compile_function but doesn't call define_function.
     fn build_function_ir(&mut self, func: &FuncDecl) -> Result<(), String> {
-        let _module_id = self.query().main_module();
-        // Create function signature
-        let sig = self.build_signature(
-            &func.params,
-            func.return_type.as_ref(),
-            SelfParam::None,
-            TypeResolver::Query,
-        );
+        let main_module = self.query().main_module();
+
+        // Get FunctionId and extract pre-resolved signature data
+        let semantic_func_id = self
+            .query()
+            .function_id(main_module, func.name)
+            .ok_or_else(|| {
+                format!(
+                    "Function '{}' not found in registry",
+                    self.analyzed.interner.resolve(func.name)
+                )
+            })?;
+        let (param_type_ids, return_type_id) = {
+            let func_def = self.query().registry().get_function(semantic_func_id);
+            (
+                func_def.signature.params_id.clone(),
+                func_def.signature.return_type_id,
+            )
+        };
+
+        // Create function signature from pre-resolved types
+        let sig = self.build_signature_for_function(semantic_func_id);
         self.jit.ctx.func.signature = sig;
 
-        // Collect param types and build config
-        let param_type_ids: Vec<TypeId> = func
-            .params
-            .iter()
-            .map(|p| self.resolve_type_to_id(&p.ty))
-            .collect();
+        // Combine AST param names with pre-resolved TypeIds
         let param_types = self.type_ids_to_cranelift(&param_type_ids);
         let params: Vec<_> = func
             .params
@@ -962,11 +960,8 @@ impl Compiler<'_> {
             .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
             .collect();
 
-        // Get function return type id
-        let return_type_id = func
-            .return_type
-            .as_ref()
-            .map(|t| self.resolve_type_to_id(t));
+        // Get function return type id from pre-resolved signature
+        let return_type_id = Some(return_type_id).filter(|id| !id.is_void());
 
         // Create function builder and compile
         let source_file_ptr = self.source_file_ptr();

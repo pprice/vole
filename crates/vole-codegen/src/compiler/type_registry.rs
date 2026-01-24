@@ -145,37 +145,31 @@ impl Compiler<'_> {
         for method in &class.methods {
             let method_name_id = self.method_name_id(method.name);
 
-            // Get return type from EntityRegistry (handles inferred types) if no explicit return type
-            let return_type = if let Some(ref return_type_expr) = method.return_type {
-                self.resolve_type_to_id(return_type_expr)
-            } else if let Some(method_id) = self
+            // Try to get MethodId and build signature from pre-resolved types
+            let sig = if let Some(method_id) = self
                 .analyzed
                 .entity_registry()
                 .find_method_on_type(type_def_id, method_name_id)
             {
-                // Look up the inferred return type from sema
-                let method_def = self.query().get_method(method_id);
-                let arena = self.analyzed.type_arena();
-                if let Some((_, ret_type_id, _)) = arena.unwrap_function(method_def.signature_id) {
-                    ret_type_id
+                self.build_signature_for_method(method_id, SelfParam::Pointer)
+            } else {
+                // Fallback: build from AST (shouldn't happen normally)
+                let return_type = if let Some(ref return_type_expr) = method.return_type {
+                    self.resolve_type_to_id(return_type_expr)
                 } else {
                     TypeId::VOID
-                }
-            } else {
-                TypeId::VOID
+                };
+                self.build_signature_with_return_type_id(
+                    &method.params,
+                    Some(return_type),
+                    SelfParam::Pointer,
+                    TypeResolver::Query,
+                )
             };
-
-            // Build signature using the (possibly inferred) return type
-            let sig = self.build_signature_with_return_type_id(
-                &method.params,
-                Some(return_type),
-                SelfParam::Pointer,
-                TypeResolver::Query,
-            );
             let func_key = self.intern_func(func_module_id, &[class.name, method.name]);
             let display_name = self.func_registry.display(func_key);
-            let func_id = self.jit.declare_function(&display_name, &sig);
-            self.func_registry.set_func_id(func_key, func_id);
+            let jit_func_id = self.jit.declare_function(&display_name, &sig);
+            self.func_registry.set_func_id(func_key, jit_func_id);
             method_infos.insert(method_name_id, MethodInfo { func_key });
             // Also populate unified method_func_keys map
             self.state
@@ -214,22 +208,32 @@ impl Compiler<'_> {
             if let Some(interface_decl) = self.find_interface_decl(program, interface_name) {
                 for method in &interface_decl.methods {
                     if method.body.is_some() && !direct_methods.contains(&method.name) {
-                        let sig = self.build_signature(
-                            &method.params,
-                            method.return_type.as_ref(),
-                            SelfParam::Pointer,
-                            TypeResolver::Query,
-                        );
+                        let method_name_id = self.query().method_name_id(method.name);
+                        // Try to get MethodId and build signature from pre-resolved types
+                        let sig = if let Some(semantic_method_id) = self
+                            .analyzed
+                            .entity_registry()
+                            .find_method_on_type(type_def_id, method_name_id)
+                        {
+                            self.build_signature_for_method(semantic_method_id, SelfParam::Pointer)
+                        } else {
+                            // Fallback: build from AST (shouldn't happen normally)
+                            self.build_signature(
+                                &method.params,
+                                method.return_type.as_ref(),
+                                SelfParam::Pointer,
+                                TypeResolver::Query,
+                            )
+                        };
                         let func_key = self.intern_func(func_module_id, &[class.name, method.name]);
                         let display_name = self.func_registry.display(func_key);
-                        let func_id = self.jit.declare_function(&display_name, &sig);
-                        self.func_registry.set_func_id(func_key, func_id);
-                        let method_id = self.query().method_name_id(method.name);
-                        method_infos.insert(method_id, MethodInfo { func_key });
+                        let jit_func_id = self.jit.declare_function(&display_name, &sig);
+                        self.func_registry.set_func_id(func_key, jit_func_id);
+                        method_infos.insert(method_name_id, MethodInfo { func_key });
                         // Also populate unified method_func_keys map
                         self.state
                             .method_func_keys
-                            .insert((type_def_id, method_id), func_key);
+                            .insert((type_def_id, method_name_id), func_key);
                     }
                 }
             }
@@ -334,27 +338,36 @@ impl Compiler<'_> {
         let func_module_id = self.func_registry.main_module();
         let mut method_infos = HashMap::new();
         for method in &record.methods {
-            // Get return type from sema (handles inferred types from expression-bodied methods)
-            let return_type = self
-                .query()
-                .method_return_type(record.name, method.name)
-                .unwrap_or(TypeId::VOID);
-            let sig = self.build_signature_with_return_type_id(
-                &method.params,
-                Some(return_type),
-                SelfParam::Pointer,
-                TypeResolver::Query,
-            );
+            let method_name_id = self.method_name_id(method.name);
+            // Try to get MethodId and build signature from pre-resolved types
+            let sig = if let Some(semantic_method_id) = self
+                .analyzed
+                .entity_registry()
+                .find_method_on_type(type_def_id, method_name_id)
+            {
+                self.build_signature_for_method(semantic_method_id, SelfParam::Pointer)
+            } else {
+                // Fallback: build from AST
+                let return_type = self
+                    .query()
+                    .method_return_type(record.name, method.name)
+                    .unwrap_or(TypeId::VOID);
+                self.build_signature_with_return_type_id(
+                    &method.params,
+                    Some(return_type),
+                    SelfParam::Pointer,
+                    TypeResolver::Query,
+                )
+            };
             let func_key = self.intern_func(func_module_id, &[record.name, method.name]);
             let display_name = self.func_registry.display(func_key);
-            let func_id = self.jit.declare_function(&display_name, &sig);
-            self.func_registry.set_func_id(func_key, func_id);
-            let method_id = self.query().method_name_id(method.name);
-            method_infos.insert(method_id, MethodInfo { func_key });
+            let jit_func_id = self.jit.declare_function(&display_name, &sig);
+            self.func_registry.set_func_id(func_key, jit_func_id);
+            method_infos.insert(method_name_id, MethodInfo { func_key });
             // Also populate unified method_func_keys map
             self.state
                 .method_func_keys
-                .insert((type_def_id, method_id), func_key);
+                .insert((type_def_id, method_name_id), func_key);
         }
 
         // Collect method names that the record directly defines
@@ -388,23 +401,33 @@ impl Compiler<'_> {
             if let Some(interface_decl) = self.find_interface_decl(program, interface_name) {
                 for method in &interface_decl.methods {
                     if method.body.is_some() && !direct_methods.contains(&method.name) {
-                        let sig = self.build_signature(
-                            &method.params,
-                            method.return_type.as_ref(),
-                            SelfParam::Pointer,
-                            TypeResolver::Query,
-                        );
+                        let method_name_id = self.query().method_name_id(method.name);
+                        // Try to get MethodId and build signature from pre-resolved types
+                        let sig = if let Some(semantic_method_id) = self
+                            .analyzed
+                            .entity_registry()
+                            .find_method_on_type(type_def_id, method_name_id)
+                        {
+                            self.build_signature_for_method(semantic_method_id, SelfParam::Pointer)
+                        } else {
+                            // Fallback: build from AST (shouldn't happen normally)
+                            self.build_signature(
+                                &method.params,
+                                method.return_type.as_ref(),
+                                SelfParam::Pointer,
+                                TypeResolver::Query,
+                            )
+                        };
                         let func_key =
                             self.intern_func(func_module_id, &[record.name, method.name]);
                         let display_name = self.func_registry.display(func_key);
-                        let func_id = self.jit.declare_function(&display_name, &sig);
-                        self.func_registry.set_func_id(func_key, func_id);
-                        let method_id = self.query().method_name_id(method.name);
-                        method_infos.insert(method_id, MethodInfo { func_key });
+                        let jit_func_id = self.jit.declare_function(&display_name, &sig);
+                        self.func_registry.set_func_id(func_key, jit_func_id);
+                        method_infos.insert(method_name_id, MethodInfo { func_key });
                         // Also populate unified method_func_keys map
                         self.state
                             .method_func_keys
-                            .insert((type_def_id, method_id), func_key);
+                            .insert((type_def_id, method_name_id), func_key);
                     }
                 }
             }
@@ -452,45 +475,34 @@ impl Compiler<'_> {
 
             let method_name_id = self.method_name_id(method.name);
 
-            // Get return type from EntityRegistry (handles inferred types) if no explicit return type
-            let return_type = if let Some(ref return_type_expr) = method.return_type {
-                self.resolve_type_to_id(return_type_expr)
-            } else if let Some(type_def_id) = type_def_id {
-                // Look up the inferred return type from sema
-                if let Some(method_id) = self
+            // Try to get MethodId and build signature from pre-resolved types
+            let sig = if let Some(type_def_id) = type_def_id
+                && let Some(semantic_method_id) = self
                     .analyzed
                     .entity_registry()
                     .find_static_method_on_type(type_def_id, method_name_id)
-                {
-                    let method_def = self.query().get_method(method_id);
-                    let arena = self.analyzed.type_arena();
-                    if let Some((_, ret_type_id, _)) =
-                        arena.unwrap_function(method_def.signature_id)
-                    {
-                        ret_type_id
-                    } else {
-                        TypeId::VOID
-                    }
+            {
+                self.build_signature_for_method(semantic_method_id, SelfParam::None)
+            } else {
+                // Fallback: build from AST
+                let return_type = if let Some(ref return_type_expr) = method.return_type {
+                    self.resolve_type_to_id(return_type_expr)
                 } else {
                     TypeId::VOID
-                }
-            } else {
-                TypeId::VOID
+                };
+                self.build_signature_with_return_type_id(
+                    &method.params,
+                    Some(return_type),
+                    SelfParam::None,
+                    TypeResolver::Query,
+                )
             };
-
-            // Create signature using the (possibly inferred) return type
-            let sig = self.build_signature_with_return_type_id(
-                &method.params,
-                Some(return_type),
-                SelfParam::None,
-                TypeResolver::Query,
-            );
 
             // Function key: TypeName::methodName
             let func_key = self.intern_func(func_module_id, &[type_name, method.name]);
             let display_name = self.func_registry.display(func_key);
-            let func_id = self.jit.declare_function(&display_name, &sig);
-            self.func_registry.set_func_id(func_key, func_id);
+            let jit_func_id = self.jit.declare_function(&display_name, &sig);
+            self.func_registry.set_func_id(func_key, jit_func_id);
 
             // Register in method_func_keys for codegen lookup
             if let Some(type_def_id) = type_def_id {
@@ -556,28 +568,40 @@ impl Compiler<'_> {
             let method_name_str = module_interner.resolve(method.name);
             tracing::debug!(type_name = %type_name_str, method_name = %method_name_str, "Processing instance method");
 
-            let sig = self.build_signature(
-                &method.params,
-                method.return_type.as_ref(),
-                SelfParam::Pointer,
-                TypeResolver::Interner(module_interner),
-            );
+            let method_name_id =
+                method_name_id_with_interner(self.analyzed, module_interner, method.name);
+
+            // Try to get MethodId and build signature from pre-resolved types
+            let sig = if let Some(name_id) = method_name_id
+                && let Some(semantic_method_id) = self
+                    .analyzed
+                    .entity_registry()
+                    .find_method_on_type(type_def_id, name_id)
+            {
+                self.build_signature_for_method(semantic_method_id, SelfParam::Pointer)
+            } else {
+                // Fallback: build from AST with interner
+                self.build_signature(
+                    &method.params,
+                    method.return_type.as_ref(),
+                    SelfParam::Pointer,
+                    TypeResolver::Interner(module_interner),
+                )
+            };
             let func_key = self
                 .func_registry
                 .intern_raw_qualified(func_module_id, &[type_name_str, method_name_str]);
             let display_name = self.func_registry.display(func_key);
-            let func_id = self.jit.declare_function(&display_name, &sig);
-            self.func_registry.set_func_id(func_key, func_id);
+            let jit_func_id = self.jit.declare_function(&display_name, &sig);
+            self.func_registry.set_func_id(func_key, jit_func_id);
 
-            if let Some(method_name_id) =
-                method_name_id_with_interner(self.analyzed, module_interner, method.name)
-            {
-                tracing::debug!(type_name = %type_name_str, method_name = %method_name_str, ?method_name_id, "Registered instance method");
-                method_infos.insert(method_name_id, MethodInfo { func_key });
+            if let Some(name_id) = method_name_id {
+                tracing::debug!(type_name = %type_name_str, method_name = %method_name_str, method_name_id = ?name_id, "Registered instance method");
+                method_infos.insert(name_id, MethodInfo { func_key });
                 // Also populate unified method_func_keys map
                 self.state
                     .method_func_keys
-                    .insert((type_def_id, method_name_id), func_key);
+                    .insert((type_def_id, name_id), func_key);
             } else {
                 tracing::warn!(type_name = %type_name_str, method_name = %method_name_str, "Could not get method_name_id for instance method");
             }
@@ -610,23 +634,35 @@ impl Compiler<'_> {
                     continue;
                 }
 
-                let sig = self.build_signature(
-                    &method.params,
-                    method.return_type.as_ref(),
-                    SelfParam::None,
-                    TypeResolver::Interner(module_interner),
-                );
+                let method_name_id =
+                    method_name_id_with_interner(self.analyzed, module_interner, method.name);
+
+                // Try to get MethodId and build signature from pre-resolved types
+                let sig = if let Some(name_id) = method_name_id
+                    && let Some(semantic_method_id) = self
+                        .analyzed
+                        .entity_registry()
+                        .find_static_method_on_type(type_def_id, name_id)
+                {
+                    self.build_signature_for_method(semantic_method_id, SelfParam::None)
+                } else {
+                    // Fallback: build from AST with interner
+                    self.build_signature(
+                        &method.params,
+                        method.return_type.as_ref(),
+                        SelfParam::None,
+                        TypeResolver::Interner(module_interner),
+                    )
+                };
                 let method_name_str = module_interner.resolve(method.name);
                 let func_key = self
                     .func_registry
                     .intern_raw_qualified(func_module_id, &[type_name_str, method_name_str]);
                 let display_name = self.func_registry.display(func_key);
-                let func_id = self.jit.declare_function(&display_name, &sig);
-                self.func_registry.set_func_id(func_key, func_id);
+                let jit_func_id = self.jit.declare_function(&display_name, &sig);
+                self.func_registry.set_func_id(func_key, jit_func_id);
 
-                if let Some(method_name_id) =
-                    method_name_id_with_interner(self.analyzed, module_interner, method.name)
-                {
+                if let Some(name_id) = method_name_id {
                     tracing::debug!(
                         type_name = %type_name_str,
                         method_name = %method_name_str,
@@ -634,7 +670,7 @@ impl Compiler<'_> {
                     );
                     self.state
                         .method_func_keys
-                        .insert((type_def_id, method_name_id), func_key);
+                        .insert((type_def_id, name_id), func_key);
                 }
             }
         }
