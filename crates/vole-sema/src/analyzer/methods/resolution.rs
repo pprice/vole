@@ -3,7 +3,7 @@ use crate::entity_defs::TypeDefKind;
 use crate::implement_registry::ImplTypeId;
 use crate::type_arena::TypeId as ArenaTypeId;
 use rustc_hash::FxHashMap;
-use vole_identity::{MethodId, TypeDefId, TypeParamId};
+use vole_identity::{NameId, TypeDefId, TypeParamId};
 
 impl Analyzer {
     /// Resolve a method on a type using EntityRegistry (TypeDefId-based)
@@ -96,6 +96,8 @@ impl Analyzer {
                     let return_type_id = binding.func_type.return_type_id;
                     let func_type_id = binding.func_type.intern(&mut self.type_arena_mut());
                     return Some(ResolvedMethod::Implemented {
+                        type_def_id: Some(tdef_id),
+                        method_name_id,
                         trait_name,
                         func_type_id,
                         return_type_id,
@@ -106,10 +108,10 @@ impl Analyzer {
             }
         }
 
-        if let Some(type_def_id) = type_def_id {
-            // Get the method name_id
-            let method_name_id = self.method_name_id(method_name, interner);
+        // Get the method name_id for general use
+        let method_name_id = self.method_name_id(method_name, interner);
 
+        if let Some(type_def_id) = type_def_id {
             // Try to find the method via EntityRegistry
             if let Some(method_id) =
                 self.find_method_via_entity_registry(type_def_id, method_name_id)
@@ -182,6 +184,8 @@ impl Analyzer {
                             if let (Some(type_sym), Some(interface_sym)) = (type_sym, interface_sym)
                             {
                                 return Some(ResolvedMethod::DefaultMethod {
+                                    type_def_id: Some(type_def_id),
+                                    method_name_id,
                                     interface_name: interface_sym,
                                     type_name: type_sym,
                                     method_name,
@@ -209,6 +213,8 @@ impl Analyzer {
                             if let (Some(type_sym), Some(interface_sym)) = (type_sym, interface_sym)
                             {
                                 return Some(ResolvedMethod::DefaultMethod {
+                                    type_def_id: Some(type_def_id),
+                                    method_name_id,
                                     interface_name: interface_sym,
                                     type_name: type_sym,
                                     method_name,
@@ -224,6 +230,7 @@ impl Analyzer {
                             self.get_type_symbol_by_name_id(defining_type_name_id, interner);
                         if let Some(interface_sym) = interface_sym {
                             return Some(ResolvedMethod::InterfaceMethod {
+                                method_name_id,
                                 interface_name: interface_sym,
                                 method_name,
                                 func_type_id,
@@ -234,6 +241,8 @@ impl Analyzer {
                     TypeDefKind::Class | TypeDefKind::Record => {
                         // Direct method on class/record
                         return Some(ResolvedMethod::Direct {
+                            type_def_id: Some(type_def_id),
+                            method_name_id,
                             func_type_id,
                             return_type_id,
                             method_id: Some(method_id),
@@ -258,6 +267,8 @@ impl Analyzer {
                 let return_type_id = binding.func_type.return_type_id;
                 let func_type_id = binding.func_type.intern(&mut self.type_arena_mut());
                 return Some(ResolvedMethod::Implemented {
+                    type_def_id: Some(type_def_id),
+                    method_name_id,
                     trait_name,
                     func_type_id,
                     return_type_id,
@@ -284,7 +295,7 @@ impl Analyzer {
                 };
                 for method_id in method_ids {
                     let (
-                        method_name_id,
+                        def_method_name_id,
                         method_has_default,
                         method_signature_id,
                         method_external_binding,
@@ -300,7 +311,7 @@ impl Analyzer {
                     };
                     let def_method_name = self
                         .name_table()
-                        .last_segment_str(method_name_id)
+                        .last_segment_str(def_method_name_id)
                         .unwrap_or_default();
                     if def_method_name == method_name_str && method_has_default {
                         // Get interface name Symbol
@@ -324,6 +335,8 @@ impl Analyzer {
                             let return_type_id = func_type.return_type_id;
                             let func_type_id = func_type.intern(&mut self.type_arena_mut());
                             return Some(ResolvedMethod::DefaultMethod {
+                                type_def_id: Some(type_def_id),
+                                method_name_id,
                                 interface_name,
                                 type_name: type_sym,
                                 method_name,
@@ -338,7 +351,6 @@ impl Analyzer {
         }
 
         // Fallback to implement_registry for builtins (Array.length, String.length, etc.)
-        let method_name_id = self.method_name_id(method_name, interner);
         let impl_type_id = {
             let arena = self.type_arena();
             ImplTypeId::from_type_id(object_type_id, &arena, &self.entity_registry())
@@ -353,6 +365,8 @@ impl Analyzer {
             let return_type_id = impl_.func_type.return_type_id;
             let func_type_id = impl_.func_type.intern(&mut self.type_arena_mut());
             return Some(ResolvedMethod::Implemented {
+                type_def_id: None, // Builtins don't have a TypeDefId
+                method_name_id,
                 trait_name: impl_.trait_name,
                 func_type_id,
                 return_type_id,
@@ -441,6 +455,7 @@ impl Analyzer {
         method_name: Symbol,
         interner: &Interner,
     ) -> Option<ResolvedMethod> {
+        let method_name_id = self.method_name_id(method_name, interner);
         let method_name_str = interner.resolve(method_name);
         tracing::trace!(
             ?param_name_id,
@@ -512,14 +527,14 @@ impl Analyzer {
 
                 // Search for the method in this interface
                 for method_id in method_ids {
-                    let (method_name_id, method_signature_id) = {
+                    let (def_method_name_id, method_signature_id) = {
                         let registry = self.entity_registry();
                         let method_def = registry.get_method(method_id);
                         (method_def.name_id, method_def.signature_id)
                     };
                     let method_def_name = self
                         .name_table()
-                        .last_segment_str(method_name_id)
+                        .last_segment_str(def_method_name_id)
                         .unwrap_or_default();
 
                     tracing::trace!(
@@ -565,6 +580,7 @@ impl Analyzer {
                         let return_type_id = func_type.return_type_id;
                         let func_type_id = func_type.intern(&mut self.type_arena_mut());
                         return Some(ResolvedMethod::InterfaceMethod {
+                            method_name_id,
                             interface_name: *interface_sym,
                             method_name,
                             func_type_id,

@@ -423,9 +423,12 @@ impl Analyzer {
                 None
             };
 
+            // For module method calls, use name_id as method_name_id
             self.method_resolutions.insert(
                 expr.id,
                 ResolvedMethod::Implemented {
+                    type_def_id: None, // Module methods don't have a TypeDefId
+                    method_name_id: name_id,
                     trait_name: None,
                     func_type_id,
                     return_type_id: return_id,
@@ -474,9 +477,12 @@ impl Analyzer {
                     let func_type_id = func_type.intern(&mut self.type_arena_mut());
 
                     // Store resolution as a structural method call
+                    // Use method.name as method_name_id for structural methods
                     self.method_resolutions.insert(
                         expr.id,
                         ResolvedMethod::Implemented {
+                            type_def_id: None, // Structural methods don't have a TypeDefId
+                            method_name_id: method.name,
                             trait_name: None,
                             func_type_id,
                             return_type_id,
@@ -507,6 +513,8 @@ impl Analyzer {
             {
                 let updated = match resolved {
                     ResolvedMethod::Implemented {
+                        type_def_id,
+                        method_name_id,
                         trait_name,
                         is_builtin,
                         external_info,
@@ -515,6 +523,8 @@ impl Analyzer {
                         let return_type_id = func_type.return_type_id;
                         let func_type_id = func_type.intern(&mut self.type_arena_mut());
                         ResolvedMethod::Implemented {
+                            type_def_id,
+                            method_name_id,
                             trait_name,
                             func_type_id,
                             return_type_id,
@@ -853,6 +863,7 @@ impl Analyzer {
             self.method_resolutions.insert(
                 expr.id,
                 ResolvedMethod::Static {
+                    method_name_id,
                     type_def_id,
                     method_id,
                     func_type_id: signature_id,

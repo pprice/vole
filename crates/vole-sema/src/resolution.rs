@@ -4,7 +4,7 @@ use crate::implement_registry::ExternalMethodInfo;
 use crate::type_arena::TypeId;
 use std::collections::HashMap;
 use vole_frontend::{NodeId, Symbol};
-use vole_identity::{MethodId, TypeDefId};
+use vole_identity::{MethodId, NameId, TypeDefId};
 
 /// Resolved method information - sema populates, codegen consumes
 /// The `return_type_id` field provides direct access to the return type,
@@ -13,6 +13,8 @@ use vole_identity::{MethodId, TypeDefId};
 pub enum ResolvedMethod {
     /// Direct method on class/record
     Direct {
+        type_def_id: Option<TypeDefId>,
+        method_name_id: NameId,
         func_type_id: TypeId,
         return_type_id: TypeId,
         method_id: Option<MethodId>,
@@ -20,6 +22,8 @@ pub enum ResolvedMethod {
 
     /// Method from implement registry
     Implemented {
+        type_def_id: Option<TypeDefId>,
+        method_name_id: NameId,
         trait_name: Option<Symbol>,
         func_type_id: TypeId,
         return_type_id: TypeId,
@@ -29,6 +33,7 @@ pub enum ResolvedMethod {
 
     /// Functional interface - call the underlying lambda
     FunctionalInterface {
+        method_name_id: NameId,
         func_type_id: TypeId,
         return_type_id: TypeId,
     },
@@ -36,6 +41,8 @@ pub enum ResolvedMethod {
     /// Default method from interface (monomorphized for concrete type)
     /// The method is compiled as TypeName_methodName
     DefaultMethod {
+        type_def_id: Option<TypeDefId>,
+        method_name_id: NameId,
         interface_name: Symbol,
         type_name: Symbol,
         method_name: Symbol,
@@ -46,6 +53,7 @@ pub enum ResolvedMethod {
 
     /// Method called through a non-functional interface value (vtable dispatch)
     InterfaceMethod {
+        method_name_id: NameId,
         interface_name: Symbol,
         method_name: Symbol,
         func_type_id: TypeId,
@@ -54,6 +62,7 @@ pub enum ResolvedMethod {
 
     /// Static method on a type (called via TypeName.method())
     Static {
+        method_name_id: NameId,
         type_def_id: TypeDefId,
         method_id: MethodId,
         func_type_id: TypeId,
@@ -116,6 +125,31 @@ impl ResolvedMethod {
             _ => None,
         }
     }
+
+    /// Get the type_def_id if available (for Direct, Implemented, DefaultMethod, and Static variants)
+    pub fn type_def_id(&self) -> Option<TypeDefId> {
+        match self {
+            ResolvedMethod::Direct { type_def_id, .. } => *type_def_id,
+            ResolvedMethod::Implemented { type_def_id, .. } => *type_def_id,
+            ResolvedMethod::DefaultMethod { type_def_id, .. } => *type_def_id,
+            ResolvedMethod::Static { type_def_id, .. } => Some(*type_def_id),
+            ResolvedMethod::FunctionalInterface { .. } | ResolvedMethod::InterfaceMethod { .. } => {
+                None
+            }
+        }
+    }
+
+    /// Get the method_name_id (available for all variants)
+    pub fn method_name_id(&self) -> NameId {
+        match self {
+            ResolvedMethod::Direct { method_name_id, .. } => *method_name_id,
+            ResolvedMethod::Implemented { method_name_id, .. } => *method_name_id,
+            ResolvedMethod::FunctionalInterface { method_name_id, .. } => *method_name_id,
+            ResolvedMethod::DefaultMethod { method_name_id, .. } => *method_name_id,
+            ResolvedMethod::InterfaceMethod { method_name_id, .. } => *method_name_id,
+            ResolvedMethod::Static { method_name_id, .. } => *method_name_id,
+        }
+    }
 }
 
 /// Storage for all method resolutions in a program
@@ -156,26 +190,38 @@ mod tests {
     use crate::TypeArena;
     use crate::types::FunctionType;
 
+    // Create a test NameId for use in tests
+    fn test_method_name_id() -> NameId {
+        NameId::new_for_test(1)
+    }
+
     #[test]
     fn resolved_method_func_type_id() {
         let mut arena = TypeArena::new();
         let ret_type = arena.bool();
         let ft = FunctionType::from_ids(&[arena.i32()], ret_type, false);
         let ft_id = ft.intern(&mut arena);
+        let method_name_id = test_method_name_id();
 
         let direct = ResolvedMethod::Direct {
+            type_def_id: None,
+            method_name_id,
             func_type_id: ft_id,
             return_type_id: ret_type,
             method_id: None,
         };
         assert_eq!(direct.func_type_id(), ft_id);
         assert_eq!(direct.return_type_id(), ret_type);
+        assert_eq!(direct.method_name_id(), method_name_id);
+        assert!(direct.type_def_id().is_none());
         // Verify we can get params from arena
         let (params, ret, _) = arena.unwrap_function(ft_id).unwrap();
         assert_eq!(params.len(), 1);
         assert_eq!(ret, arena.bool());
 
         let implemented = ResolvedMethod::Implemented {
+            type_def_id: None,
+            method_name_id,
             trait_name: None,
             func_type_id: ft_id,
             return_type_id: ret_type,
@@ -184,6 +230,7 @@ mod tests {
         };
         assert!(implemented.is_builtin());
         assert_eq!(implemented.return_type_id(), ret_type);
+        assert_eq!(implemented.method_name_id(), method_name_id);
     }
 
     #[test]
@@ -191,6 +238,7 @@ mod tests {
         let mut arena = TypeArena::new();
         let mut resolutions = MethodResolutions::new();
         let node_id = NodeId(42);
+        let method_name_id = test_method_name_id();
 
         let ret_type = arena.void();
         let ft = FunctionType::from_ids(&[], ret_type, false);
@@ -198,6 +246,8 @@ mod tests {
         resolutions.insert(
             node_id,
             ResolvedMethod::Direct {
+                type_def_id: None,
+                method_name_id,
                 func_type_id: ft_id,
                 return_type_id: ret_type,
                 method_id: None,
