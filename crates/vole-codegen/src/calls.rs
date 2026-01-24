@@ -434,6 +434,8 @@ impl Cg<'_, '_, '_> {
                 } else {
                     // For generic external functions, use sema-inferred type first.
                     // Fall back to declared type for non-generic externals.
+                    // TODO(vole-qu48): Make sema record types for module external calls
+                    // so this fallback can be removed.
                     let type_id = self.get_expr_type(&call_expr_id).unwrap_or_else(|| {
                         native_type_to_type_id(
                             &native_func.signature.return_type,
@@ -489,6 +491,8 @@ impl Cg<'_, '_, '_> {
                 // For generic external functions, the sema analyzer stores the inferred
                 // concrete return type in expr_types. Use that first.
                 // Fall back to declared type for non-generic externals.
+                // TODO(vole-qu48): Make sema record types for prelude external calls
+                // so this fallback can be removed.
                 let type_id = self.get_expr_type(&call_expr_id).unwrap_or_else(|| {
                     native_type_to_type_id(
                         &native_func.signature.return_type,

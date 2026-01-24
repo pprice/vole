@@ -150,21 +150,9 @@ impl Cg<'_, '_, '_> {
 
         // Get result type from sema (already computed as Optional<T> or T if T is already optional)
         // Sema handles the double-wrapping logic in check_optional_chain_expr
-        let result_type_id = self.get_expr_type(&expr_id).unwrap_or_else(|| {
-            // Fallback: if sema didn't record, compute it (shouldn't happen in normal flow)
-            tracing::warn!(
-                ?expr_id,
-                "optional_chain: sema did not record type, falling back to codegen type creation"
-            );
-            let arena = self.arena();
-            let is_optional = arena.is_optional(field_type_id);
-            drop(arena);
-            if is_optional {
-                field_type_id
-            } else {
-                self.update().optional(field_type_id)
-            }
-        });
+        let result_type_id = self
+            .get_expr_type(&expr_id)
+            .expect("optional_chain: sema must record type for optional chain expression");
         let is_field_optional = self.arena().is_optional(field_type_id);
 
         let cranelift_type = {
