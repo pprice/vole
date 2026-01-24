@@ -15,7 +15,7 @@ use vole_frontend::{
     CallExpr, Decl, Expr, ExprKind, LambdaExpr, NodeId, Program, Stmt, StringPart, Symbol,
 };
 use vole_runtime::native_registry::{NativeFunction, NativeType};
-use vole_sema::type_arena::{TypeArena, TypeId};
+use vole_sema::type_arena::TypeId;
 
 use super::context::Cg;
 use super::types::{CompiledValue, native_type_to_cranelift, type_id_to_cranelift};
@@ -432,17 +432,10 @@ impl Cg<'_, '_, '_> {
                 if results.is_empty() {
                     return Ok(self.void_value());
                 } else {
-                    // For generic external functions, use sema-inferred type first.
-                    // Fall back to declared type for non-generic externals.
-                    // TODO(vole-qu48): Make sema record types for module external calls
-                    // so this fallback can be removed.
-                    let type_id = self.get_expr_type(&call_expr_id).unwrap_or_else(|| {
-                        native_type_to_type_id(
-                            &native_func.signature.return_type,
-                            &self.arena(),
-                            &self.update(),
-                        )
-                    });
+                    // Sema records return types for all module external calls.
+                    let type_id = self
+                        .get_expr_type(&call_expr_id)
+                        .expect("module external call must have sema-recorded return type");
                     // Convert Iterator<T> to RuntimeIterator(T) since external functions
                     // return raw iterator pointers, not boxed interface values
                     let type_id = self.maybe_convert_iterator_return_type(type_id);
@@ -488,18 +481,10 @@ impl Cg<'_, '_, '_> {
             if results.is_empty() {
                 return Ok(self.void_value());
             } else {
-                // For generic external functions, the sema analyzer stores the inferred
-                // concrete return type in expr_types. Use that first.
-                // Fall back to declared type for non-generic externals.
-                // TODO(vole-qu48): Make sema record types for prelude external calls
-                // so this fallback can be removed.
-                let type_id = self.get_expr_type(&call_expr_id).unwrap_or_else(|| {
-                    native_type_to_type_id(
-                        &native_func.signature.return_type,
-                        &self.arena(),
-                        &self.update(),
-                    )
-                });
+                // Sema records return types for all prelude external calls.
+                let type_id = self
+                    .get_expr_type(&call_expr_id)
+                    .expect("prelude external call must have sema-recorded return type");
                 // Convert Iterator<T> to RuntimeIterator(T) since external functions
                 // return raw iterator pointers, not boxed interface values
                 let type_id = self.maybe_convert_iterator_return_type(type_id);
@@ -1295,37 +1280,5 @@ fn find_lambda_in_expr(expr: &Expr, node_id: NodeId) -> Option<&LambdaExpr> {
         | ExprKind::Done
         | ExprKind::TypeLiteral(_)
         | ExprKind::Import(_) => None,
-    }
-}
-
-/// Convert NativeType to TypeId.
-fn native_type_to_type_id(
-    nt: &NativeType,
-    arena: &TypeArena,
-    update: &vole_sema::ProgramUpdate,
-) -> TypeId {
-    match nt {
-        NativeType::I8 => arena.primitives.i8,
-        NativeType::I16 => arena.primitives.i16,
-        NativeType::I32 => arena.primitives.i32,
-        NativeType::I64 => arena.primitives.i64,
-        NativeType::I128 => arena.primitives.i128,
-        NativeType::U8 => arena.primitives.u8,
-        NativeType::U16 => arena.primitives.u16,
-        NativeType::U32 => arena.primitives.u32,
-        NativeType::U64 => arena.primitives.u64,
-        NativeType::F32 => arena.primitives.f32,
-        NativeType::F64 => arena.primitives.f64,
-        NativeType::Bool => arena.primitives.bool,
-        NativeType::String => arena.primitives.string,
-        NativeType::Nil => arena.primitives.nil,
-        NativeType::Optional(inner) => {
-            let inner_id = native_type_to_type_id(inner, arena, update);
-            update.optional(inner_id)
-        }
-        NativeType::Array(inner) => {
-            let inner_id = native_type_to_type_id(inner, arena, update);
-            update.array(inner_id)
-        }
     }
 }

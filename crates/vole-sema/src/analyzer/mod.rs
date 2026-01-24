@@ -2537,8 +2537,27 @@ impl Analyzer {
         }
 
         // Store the program and interner for compiling pure Vole functions
-        self.module_programs
-            .insert(import_path.to_string(), (program, module_interner));
+        self.module_programs.insert(
+            import_path.to_string(),
+            (program.clone(), module_interner.clone()),
+        );
+
+        // Run semantic analysis on the module to populate expr_types for function bodies.
+        // This is needed for codegen to resolve return types of calls to external functions
+        // inside the module (e.g., min(max(x, lo), hi) in math.clamp).
+        let mut sub_analyzer = self.create_module_sub_analyzer(module_id);
+        let analyze_result = sub_analyzer.analyze(&program, &module_interner);
+        if let Err(ref errors) = analyze_result {
+            tracing::warn!(import_path, ?errors, "module analysis errors");
+        }
+        // Store module-specific expr_types (NodeIds are per-program)
+        self.module_expr_types
+            .insert(import_path.to_string(), sub_analyzer.expr_types);
+        // Store module-specific method_resolutions (NodeIds are per-program)
+        self.module_method_resolutions.insert(
+            import_path.to_string(),
+            sub_analyzer.method_resolutions.into_inner(),
+        );
 
         // Create TypeId from exports and register module metadata
         let exports_vec: smallvec::SmallVec<[(NameId, ArenaTypeId); 8]> =
@@ -2560,6 +2579,47 @@ impl Analyzer {
             .insert(import_path.to_string(), type_id);
 
         Ok(type_id)
+    }
+
+    /// Create a sub-analyzer for analyzing a module's function bodies.
+    /// This shares the CompilationDb so TypeIds remain valid across analyzers.
+    fn create_module_sub_analyzer(&self, module_id: ModuleId) -> Analyzer {
+        Analyzer {
+            scope: Scope::new(),
+            functions: HashMap::new(),
+            functions_by_name: FxHashMap::default(),
+            globals: HashMap::new(),
+            constant_globals: HashSet::new(),
+            current_function_return: None,
+            found_return: false,
+            current_function_error_type: None,
+            current_generator_element_type: None,
+            current_static_method: None,
+            errors: Vec::new(),
+            warnings: Vec::new(),
+            type_overrides: HashMap::new(),
+            lambda_captures: Vec::new(),
+            lambda_locals: Vec::new(),
+            lambda_side_effects: Vec::new(),
+            expr_types: HashMap::new(),
+            method_resolutions: MethodResolutions::new(),
+            module_loader: ModuleLoader::new(),
+            module_type_ids: FxHashMap::default(),
+            module_programs: FxHashMap::default(),
+            module_expr_types: FxHashMap::default(),
+            module_method_resolutions: FxHashMap::default(),
+            loading_prelude: true, // Prevent sub-analyzer from loading prelude
+            generic_calls: HashMap::new(),
+            class_method_calls: HashMap::new(),
+            static_method_calls: HashMap::new(),
+            substituted_return_types: HashMap::new(),
+            lambda_defaults: HashMap::new(),
+            lambda_variables: HashMap::new(),
+            current_module: module_id,
+            type_param_stack: TypeParamScopeStack::new(),
+            module_cache: None,
+            db: Rc::clone(&self.db), // Share the compilation db
+        }
     }
 }
 
