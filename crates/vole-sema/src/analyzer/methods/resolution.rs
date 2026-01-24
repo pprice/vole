@@ -93,10 +93,12 @@ impl Analyzer {
                         .name_table()
                         .last_segment_str(interface_name_id)
                         .and_then(|s| interner.lookup(&s));
+                    let return_type_id = binding.func_type.return_type_id;
                     let func_type_id = binding.func_type.intern(&mut self.type_arena_mut());
                     return Some(ResolvedMethod::Implemented {
                         trait_name,
                         func_type_id,
+                        return_type_id,
                         is_builtin: binding.is_builtin,
                         external_info: binding.external_info,
                     });
@@ -153,6 +155,7 @@ impl Analyzer {
                     }
                 };
                 let func_type = self.apply_substitutions_id(&method_sig, &substitutions);
+                let return_type_id = func_type.return_type_id;
                 let func_type_id = func_type.intern(&mut self.type_arena_mut());
 
                 // Determine the resolution type based on the defining type's kind
@@ -183,6 +186,7 @@ impl Analyzer {
                                     type_name: type_sym,
                                     method_name,
                                     func_type_id,
+                                    return_type_id,
                                     external_info: method_external_binding,
                                 });
                             }
@@ -209,6 +213,7 @@ impl Analyzer {
                                     type_name: type_sym,
                                     method_name,
                                     func_type_id,
+                                    return_type_id,
                                     external_info: None,
                                 });
                             }
@@ -222,6 +227,7 @@ impl Analyzer {
                                 interface_name: interface_sym,
                                 method_name,
                                 func_type_id,
+                                return_type_id,
                             });
                         }
                     }
@@ -229,6 +235,7 @@ impl Analyzer {
                         // Direct method on class/record
                         return Some(ResolvedMethod::Direct {
                             func_type_id,
+                            return_type_id,
                             method_id: Some(method_id),
                         });
                     }
@@ -248,10 +255,12 @@ impl Analyzer {
                     .name_table()
                     .last_segment_str(interface_name_id)
                     .and_then(|s| interner.lookup(&s));
+                let return_type_id = binding.func_type.return_type_id;
                 let func_type_id = binding.func_type.intern(&mut self.type_arena_mut());
                 return Some(ResolvedMethod::Implemented {
                     trait_name,
                     func_type_id,
+                    return_type_id,
                     is_builtin: binding.is_builtin,
                     external_info: binding.external_info,
                 });
@@ -312,12 +321,14 @@ impl Analyzer {
                                     return_type_id: ret,
                                 }
                             };
+                            let return_type_id = func_type.return_type_id;
                             let func_type_id = func_type.intern(&mut self.type_arena_mut());
                             return Some(ResolvedMethod::DefaultMethod {
                                 interface_name,
                                 type_name: type_sym,
                                 method_name,
                                 func_type_id,
+                                return_type_id,
                                 external_info: method_external_binding,
                             });
                         }
@@ -339,10 +350,12 @@ impl Analyzer {
                 .cloned()
         });
         if let Some(impl_) = method_impl {
+            let return_type_id = impl_.func_type.return_type_id;
             let func_type_id = impl_.func_type.intern(&mut self.type_arena_mut());
             return Some(ResolvedMethod::Implemented {
                 trait_name: impl_.trait_name,
                 func_type_id,
+                return_type_id,
                 is_builtin: impl_.is_builtin,
                 external_info: impl_.external_info,
             });
@@ -549,11 +562,13 @@ impl Analyzer {
                             params_id: substituted_params,
                             return_type_id: substituted_ret,
                         };
+                        let return_type_id = func_type.return_type_id;
                         let func_type_id = func_type.intern(&mut self.type_arena_mut());
                         return Some(ResolvedMethod::InterfaceMethod {
                             interface_name: *interface_sym,
                             method_name,
                             func_type_id,
+                            return_type_id,
                         });
                     }
                 }

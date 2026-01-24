@@ -428,6 +428,7 @@ impl Analyzer {
                 ResolvedMethod::Implemented {
                     trait_name: None,
                     func_type_id,
+                    return_type_id: return_id,
                     is_builtin: false,
                     external_info,
                 },
@@ -469,6 +470,7 @@ impl Analyzer {
                     // Create FunctionType for resolution storage
                     let func_type =
                         FunctionType::from_ids(&method.params, method.return_type, false);
+                    let return_type_id = func_type.return_type_id;
                     let func_type_id = func_type.intern(&mut self.type_arena_mut());
 
                     // Store resolution as a structural method call
@@ -477,6 +479,7 @@ impl Analyzer {
                         ResolvedMethod::Implemented {
                             trait_name: None,
                             func_type_id,
+                            return_type_id,
                             is_builtin: false,
                             external_info: None,
                         },
@@ -509,10 +512,12 @@ impl Analyzer {
                         external_info,
                         ..
                     } => {
+                        let return_type_id = func_type.return_type_id;
                         let func_type_id = func_type.intern(&mut self.type_arena_mut());
                         ResolvedMethod::Implemented {
                             trait_name,
                             func_type_id,
+                            return_type_id,
                             is_builtin,
                             external_info,
                         }
@@ -851,6 +856,7 @@ impl Analyzer {
                     type_def_id,
                     method_id,
                     func_type_id: signature_id,
+                    return_type_id: final_return_id,
                 },
             );
 

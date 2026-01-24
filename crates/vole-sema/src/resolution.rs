@@ -7,12 +7,14 @@ use vole_frontend::{NodeId, Symbol};
 use vole_identity::{MethodId, TypeDefId};
 
 /// Resolved method information - sema populates, codegen consumes
-/// Use arena.unwrap_function(func_type_id) to get params/return type
+/// The `return_type_id` field provides direct access to the return type,
+/// eliminating the need for `arena.unwrap_function(func_type_id)` in codegen.
 #[derive(Debug, Clone)]
 pub enum ResolvedMethod {
     /// Direct method on class/record
     Direct {
         func_type_id: TypeId,
+        return_type_id: TypeId,
         method_id: Option<MethodId>,
     },
 
@@ -20,12 +22,16 @@ pub enum ResolvedMethod {
     Implemented {
         trait_name: Option<Symbol>,
         func_type_id: TypeId,
+        return_type_id: TypeId,
         is_builtin: bool,
         external_info: Option<ExternalMethodInfo>,
     },
 
     /// Functional interface - call the underlying lambda
-    FunctionalInterface { func_type_id: TypeId },
+    FunctionalInterface {
+        func_type_id: TypeId,
+        return_type_id: TypeId,
+    },
 
     /// Default method from interface (monomorphized for concrete type)
     /// The method is compiled as TypeName_methodName
@@ -34,6 +40,7 @@ pub enum ResolvedMethod {
         type_name: Symbol,
         method_name: Symbol,
         func_type_id: TypeId,
+        return_type_id: TypeId,
         external_info: Option<ExternalMethodInfo>,
     },
 
@@ -42,6 +49,7 @@ pub enum ResolvedMethod {
         interface_name: Symbol,
         method_name: Symbol,
         func_type_id: TypeId,
+        return_type_id: TypeId,
     },
 
     /// Static method on a type (called via TypeName.method())
@@ -49,6 +57,7 @@ pub enum ResolvedMethod {
         type_def_id: TypeDefId,
         method_id: MethodId,
         func_type_id: TypeId,
+        return_type_id: TypeId,
     },
 }
 
@@ -59,10 +68,23 @@ impl ResolvedMethod {
         match self {
             ResolvedMethod::Direct { func_type_id, .. } => *func_type_id,
             ResolvedMethod::Implemented { func_type_id, .. } => *func_type_id,
-            ResolvedMethod::FunctionalInterface { func_type_id } => *func_type_id,
+            ResolvedMethod::FunctionalInterface { func_type_id, .. } => *func_type_id,
             ResolvedMethod::DefaultMethod { func_type_id, .. } => *func_type_id,
             ResolvedMethod::InterfaceMethod { func_type_id, .. } => *func_type_id,
             ResolvedMethod::Static { func_type_id, .. } => *func_type_id,
+        }
+    }
+
+    /// Get the return type ID (pre-computed by sema)
+    /// This eliminates the need for arena.unwrap_function() in codegen.
+    pub fn return_type_id(&self) -> TypeId {
+        match self {
+            ResolvedMethod::Direct { return_type_id, .. } => *return_type_id,
+            ResolvedMethod::Implemented { return_type_id, .. } => *return_type_id,
+            ResolvedMethod::FunctionalInterface { return_type_id, .. } => *return_type_id,
+            ResolvedMethod::DefaultMethod { return_type_id, .. } => *return_type_id,
+            ResolvedMethod::InterfaceMethod { return_type_id, .. } => *return_type_id,
+            ResolvedMethod::Static { return_type_id, .. } => *return_type_id,
         }
     }
 
@@ -137,14 +159,17 @@ mod tests {
     #[test]
     fn resolved_method_func_type_id() {
         let mut arena = TypeArena::new();
-        let ft = FunctionType::from_ids(&[arena.i32()], arena.bool(), false);
+        let ret_type = arena.bool();
+        let ft = FunctionType::from_ids(&[arena.i32()], ret_type, false);
         let ft_id = ft.intern(&mut arena);
 
         let direct = ResolvedMethod::Direct {
             func_type_id: ft_id,
+            return_type_id: ret_type,
             method_id: None,
         };
         assert_eq!(direct.func_type_id(), ft_id);
+        assert_eq!(direct.return_type_id(), ret_type);
         // Verify we can get params from arena
         let (params, ret, _) = arena.unwrap_function(ft_id).unwrap();
         assert_eq!(params.len(), 1);
@@ -153,10 +178,12 @@ mod tests {
         let implemented = ResolvedMethod::Implemented {
             trait_name: None,
             func_type_id: ft_id,
+            return_type_id: ret_type,
             is_builtin: true,
             external_info: None,
         };
         assert!(implemented.is_builtin());
+        assert_eq!(implemented.return_type_id(), ret_type);
     }
 
     #[test]
@@ -165,12 +192,14 @@ mod tests {
         let mut resolutions = MethodResolutions::new();
         let node_id = NodeId(42);
 
-        let ft = FunctionType::from_ids(&[], arena.void(), false);
+        let ret_type = arena.void();
+        let ft = FunctionType::from_ids(&[], ret_type, false);
         let ft_id = ft.intern(&mut arena);
         resolutions.insert(
             node_id,
             ResolvedMethod::Direct {
                 func_type_id: ft_id,
+                return_type_id: ret_type,
                 method_id: None,
             },
         );
