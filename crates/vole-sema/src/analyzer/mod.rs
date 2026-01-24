@@ -1195,8 +1195,17 @@ impl Analyzer {
                         if kind == TypeDefKind::Alias
                             && let Some(aliased_type_id) = aliased_type
                         {
-                            // Use TypeId directly
+                            // Use TypeId directly - check what kind of type it is
                             let arena = self.type_arena();
+
+                            // Check if it's a structural type - return as Structural constraint
+                            if let Some(structural) = arena.unwrap_structural(aliased_type_id) {
+                                return Some(crate::generic::TypeConstraint::Structural(
+                                    structural.clone(),
+                                ));
+                            }
+
+                            // Check if it's a union type
                             let type_ids =
                                 if let Some(variants) = arena.unwrap_union(aliased_type_id) {
                                     // It's a union - use the variant TypeIds

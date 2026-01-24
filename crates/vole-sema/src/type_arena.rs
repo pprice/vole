@@ -1049,6 +1049,14 @@ impl TypeArena {
         }
     }
 
+    /// Unwrap a structural type, returning its fields and methods
+    pub fn unwrap_structural(&self, id: TypeId) -> Option<&InternedStructural> {
+        match self.get(id) {
+            SemaType::Structural(s) => Some(s),
+            _ => None,
+        }
+    }
+
     /// Display a type for error messages (basic version without name resolution)
     pub fn display_basic(&self, id: TypeId) -> String {
         match self.get(id) {

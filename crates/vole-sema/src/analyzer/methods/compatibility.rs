@@ -18,6 +18,16 @@ impl Analyzer {
             return true;
         }
 
+        // Check structural type compatibility (duck typing)
+        // If `to` is a structural type, check if `from` satisfies those constraints
+        let structural_opt = self.type_arena().unwrap_structural(to).cloned();
+        if let Some(structural) = structural_opt {
+            // check_structural_constraint_id returns None if satisfied
+            return self
+                .check_structural_constraint_id(from, &structural, interner)
+                .is_none();
+        }
+
         // Check interface compatibility using TypeId
         self.types_compatible_interface_id(from, to, interner)
     }

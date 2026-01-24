@@ -95,8 +95,30 @@ impl Analyzer {
             return Ok(ArenaTypeId::INVALID);
         }
 
-        // Get fields from object type (Class or Record)
+        // Get fields from object type (Class, Record, or Structural)
         let field_name = interner.resolve(field_access.field);
+
+        // Check for structural type first (duck typing)
+        let structural_opt = self.type_arena().unwrap_structural(object_type_id).cloned();
+        if let Some(structural) = structural_opt {
+            // Look up field in structural type's fields
+            for (name_id, field_type_id) in &structural.fields {
+                let name = self.name_table().last_segment_str(*name_id);
+                if name.as_deref() == Some(field_name) {
+                    return Ok(*field_type_id);
+                }
+            }
+            // Field not found in structural type
+            self.add_error(
+                SemanticError::UnknownField {
+                    ty: self.type_display_id(object_type_id),
+                    field: field_name.to_string(),
+                    span: field_access.field_span.into(),
+                },
+                field_access.field_span,
+            );
+            return Ok(self.ty_invalid_traced_id("structural_field_not_found"));
+        }
 
         let struct_info = {
             let arena = self.type_arena();
@@ -412,6 +434,58 @@ impl Analyzer {
             );
 
             return Ok(return_id);
+        }
+
+        // Handle structural type method calls (duck typing)
+        let structural_opt = self.type_arena().unwrap_structural(object_type_id).cloned();
+        if let Some(structural) = structural_opt {
+            for method in &structural.methods {
+                let m_name = self.name_table().last_segment_str(method.name);
+                if m_name.as_deref() == Some(method_name) {
+                    // Check argument count
+                    if method_call.args.len() != method.params.len() {
+                        self.add_error(
+                            SemanticError::WrongArgumentCount {
+                                expected: method.params.len(),
+                                found: method_call.args.len(),
+                                span: expr.span.into(),
+                            },
+                            expr.span,
+                        );
+                        for arg in &method_call.args {
+                            self.check_expr(arg, interner)?;
+                        }
+                        return Ok(ArenaTypeId::INVALID);
+                    }
+
+                    // Check argument types
+                    for (arg, &param_type) in method_call.args.iter().zip(method.params.iter()) {
+                        let arg_type = self.check_expr(arg, interner)?;
+                        if !self.types_compatible_id(arg_type, param_type, interner) {
+                            self.add_type_mismatch_id(param_type, arg_type, arg.span);
+                        }
+                    }
+
+                    // Create FunctionType for resolution storage
+                    let func_type =
+                        FunctionType::from_ids(&method.params, method.return_type, false);
+                    let func_type_id = func_type.intern(&mut self.type_arena_mut());
+
+                    // Store resolution as a structural method call
+                    self.method_resolutions.insert(
+                        expr.id,
+                        ResolvedMethod::Implemented {
+                            trait_name: None,
+                            func_type_id,
+                            is_builtin: false,
+                            external_info: None,
+                        },
+                    );
+
+                    return Ok(method.return_type);
+                }
+            }
+            // Method not found in structural type - fall through to error
         }
 
         // Get a descriptive type name for error messages

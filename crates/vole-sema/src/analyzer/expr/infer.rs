@@ -476,11 +476,24 @@ impl Analyzer {
                     self.type_error_id("bool", cond_ty_id, if_expr.condition.span);
                 }
 
-                // Type check then branch (TypeId-based)
+                // Extract narrowing info for `x is T` conditions
+                let narrowing_info = self.extract_is_narrowing_info(&if_expr.condition, interner);
+
+                // Save current overrides
+                let saved_overrides = self.type_overrides.clone();
+
+                // Type check then branch with narrowing if applicable
+                if let Some((sym, narrowed_type_id, _)) = &narrowing_info {
+                    self.type_overrides.insert(*sym, *narrowed_type_id);
+                }
                 let then_ty_id = self.check_expr(&if_expr.then_branch, interner)?;
+
+                // Restore overrides for else branch
+                self.type_overrides = saved_overrides.clone();
 
                 // If expression requires else branch
                 let Some(else_branch) = &if_expr.else_branch else {
+                    self.type_overrides = saved_overrides;
                     self.add_error(
                         SemanticError::IfExprMissingElse {
                             span: if_expr.span.into(),
@@ -490,7 +503,18 @@ impl Analyzer {
                     return Ok(ArenaTypeId::INVALID);
                 };
 
+                // Apply else-branch narrowing: if x is T, else branch has x: (original - T)
+                if let Some((sym, tested_type_id, Some(original_type_id))) = &narrowing_info
+                    && let Some(else_narrowed) =
+                        self.compute_else_narrowed_type(*tested_type_id, *original_type_id)
+                {
+                    self.type_overrides.insert(*sym, else_narrowed);
+                }
+
                 let else_ty_id = self.check_expr(else_branch, interner)?;
+
+                // Restore original overrides
+                self.type_overrides = saved_overrides;
 
                 // Both branches must have compatible types
                 if !self.types_compatible_id(then_ty_id, else_ty_id, interner) {
@@ -528,9 +552,12 @@ impl Analyzer {
                 // Check all conditions are bool and all bodies have the same type
                 let mut result_type = ArenaTypeId::INVALID;
 
+                // Save overrides once before processing arms
+                let saved_overrides = self.type_overrides.clone();
+
                 for (i, arm) in when_expr.arms.iter().enumerate() {
-                    // Check condition (if not wildcard)
-                    if let Some(ref cond) = arm.condition {
+                    // Check condition (if not wildcard) and extract narrowing info
+                    let narrowing_info = if let Some(ref cond) = arm.condition {
                         let cond_ty = self.check_expr(cond, interner)?;
                         if cond_ty != self.ty_bool_id() && cond_ty != ArenaTypeId::INVALID {
                             let found_str = self.type_display_id(cond_ty);
@@ -542,10 +569,22 @@ impl Analyzer {
                                 cond.span,
                             );
                         }
+                        // Extract narrowing info for `x is T` conditions
+                        self.extract_is_narrowing_info(cond, interner)
+                    } else {
+                        None
+                    };
+
+                    // Apply narrowing for this arm's body
+                    if let Some((sym, narrowed_type_id, _)) = &narrowing_info {
+                        self.type_overrides.insert(*sym, *narrowed_type_id);
                     }
 
-                    // Check body
+                    // Check body with narrowed type
                     let body_ty = self.check_expr(&arm.body, interner)?;
+
+                    // Restore overrides for next arm
+                    self.type_overrides = saved_overrides.clone();
 
                     if i == 0 {
                         result_type = body_ty;

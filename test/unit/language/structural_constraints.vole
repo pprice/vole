@@ -1,0 +1,550 @@
+// Test structural type constraints on generics
+//
+// SUPPORTED:
+// - Field constraints: <T: { name: string }>
+// - Method constraints (no params): <T: { func get() -> i64 }>
+// - Type compatibility with structural types (e.g., assigning Record to { field: type })
+//
+// NOT YET SUPPORTED (see tickets):
+// - Method constraints with params: <T: { func add(n: i64) -> i64 }> (v-218a)
+// - Field access in lambdas with constrained types (v-807b)
+// - Structural type function parameters with field/method access (v-5e8a)
+//   (e.g., func f(x: { name: string }) -> x.name - requires implicit generification)
+
+// ============================================================================
+// Field constraint functions
+// ============================================================================
+
+func get_name<T: { name: string }>(x: T) -> string {
+    return x.name
+}
+
+func get_name_and_age<T: { name: string, age: i64 }>(x: T) -> string {
+    return x.name
+}
+
+func get_value<T: { value: i64 }>(x: T) -> i64 {
+    return x.value
+}
+
+func is_active<T: { active: bool }>(x: T) -> bool {
+    return x.active
+}
+
+// ============================================================================
+// Method constraint functions (no parameters)
+// ============================================================================
+
+func call_get<T: { func get() -> i64 }>(x: T) -> i64 {
+    return x.get()
+}
+
+func get_label<T: { func label() -> string }>(x: T) -> string {
+    return x.label()
+}
+
+func call_validate<T: { func validate() -> bool }>(x: T) -> bool {
+    return x.validate()
+}
+
+// ============================================================================
+// Mixed constraint functions
+// ============================================================================
+
+func process<T: { name: string, func validate() -> bool }>(x: T) -> string {
+    if x.validate() {
+        return x.name
+    } else {
+        return "invalid"
+    }
+}
+
+func get_id<T: { id: i64 }>(x: T) -> i64 {
+    return x.id
+}
+
+func combine<A: { name: string }, B: { value: i64 }>(a: A, b: B) -> string {
+    return a.name
+}
+
+func sum_values<T: { value: i64 }>(items: [T]) -> i64 {
+    let total = 0
+    for item in items {
+        total = total + item.value
+    }
+    return total
+}
+
+// ============================================================================
+// Test types
+// ============================================================================
+
+record Person { name: string, age: i64, email: string }
+record Pet { name: string, species: string }
+record Company { name: string, employees: i64 }
+record Counter { value: i64 }
+record Score { value: i64, player: string }
+record User { active: bool, name: string }
+record Named { name: string }
+record Valued { value: i64 }
+record Item { value: i64 }
+
+record CounterWithGet {
+    value: i64,
+    func get() -> i64 { return self.value }
+}
+
+record ItemWithLabel {
+    name: string,
+    func label() -> string { return "Item: " + self.name }
+}
+
+record Point {
+    x: i64, y: i64,
+    func label() -> string { return "point" }
+}
+
+record Color {
+    r: i64, g: i64, b: i64,
+    func label() -> string { return "color" }
+}
+
+record ValidUser {
+    name: string,
+    func validate() -> bool { return true }
+}
+
+record InvalidUser {
+    name: string,
+    func validate() -> bool { return false }
+}
+
+class Entity {
+    id: i64,
+    
+    statics {
+        func new(id: i64) -> Entity {
+            return Entity { id: id }
+        }
+    }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+tests "field constraints - single field" {
+    test "string field" {
+        let p = Person { name: "Alice", age: 30, email: "a@test.com" }
+        assert(get_name(p) == "Alice")
+    }
+
+    test "i64 field" {
+        assert(get_value(Counter { value: 42 }) == 42)
+        assert(get_value(Score { value: 100, player: "Alice" }) == 100)
+    }
+
+    test "bool field" {
+        assert(is_active(User { active: true, name: "Alice" }))
+        assert(!is_active(User { active: false, name: "Bob" }))
+    }
+}
+
+tests "field constraints - multiple fields" {
+    test "name and age" {
+        let p = Person { name: "Bob", age: 25, email: "b@test.com" }
+        assert(get_name_and_age(p) == "Bob")
+    }
+}
+
+tests "field constraints - duck typing across types" {
+    test "different records same constraint" {
+        assert(get_name(Person { name: "Alice", age: 30, email: "a@b.c" }) == "Alice")
+        assert(get_name(Pet { name: "Fluffy", species: "cat" }) == "Fluffy")
+        assert(get_name(Company { name: "Acme", employees: 100 }) == "Acme")
+    }
+
+    test "value field from different types" {
+        assert(get_value(Counter { value: 1 }) == 1)
+        assert(get_value(Score { value: 2, player: "X" }) == 2)
+        assert(get_value(Item { value: 3 }) == 3)
+    }
+}
+
+tests "method constraints - no parameters" {
+    test "get() -> i64" {
+        let c = CounterWithGet { value: 42 }
+        assert(call_get(c) == 42)
+    }
+
+    test "label() -> string" {
+        let item = ItemWithLabel { name: "Widget" }
+        assert(get_label(item) == "Item: Widget")
+    }
+
+    test "different types same method signature" {
+        assert(get_label(Point { x: 1, y: 2 }) == "point")
+        assert(get_label(Color { r: 255, g: 0, b: 0 }) == "color")
+    }
+
+    test "validate() -> bool" {
+        assert(call_validate(ValidUser { name: "Alice" }))
+        assert(!call_validate(InvalidUser { name: "Bob" }))
+    }
+}
+
+tests "mixed field and method constraints" {
+    test "field and method together" {
+        assert(process(ValidUser { name: "Alice" }) == "Alice")
+        assert(process(InvalidUser { name: "Bob" }) == "invalid")
+    }
+}
+
+tests "structural constraints with classes" {
+    test "class satisfies field constraint" {
+        let e = Entity.new(123)
+        assert(get_id(e) == 123)
+    }
+}
+
+tests "multiple constrained type parameters" {
+    test "two type params with different constraints" {
+        let n = Named { name: "test" }
+        let v = Valued { value: 42 }
+        assert(combine(n, v) == "test")
+    }
+}
+
+tests "structural constraints with arrays" {
+    test "iterate and sum values" {
+        let items = [Item { value: 10 }, Item { value: 20 }, Item { value: 30 }]
+        assert(sum_values(items) == 60)
+    }
+}
+
+// ============================================================================
+// TYPE ALIAS AS GENERIC CONSTRAINT (DUCK TYPING)
+// Structural type aliases can be used as generic constraints for duck typing
+// ============================================================================
+
+// Define structural type aliases
+let HasName: type = { name: string }
+let HasValue: type = { value: i64 }
+let Disposable: type = { func dispose() -> void }
+let Labeled: type = { func label() -> string }
+let Validatable: type = { func validate() -> bool }
+let NamedValidatable: type = { name: string, func validate() -> bool }
+
+// Test types
+record Employee { name: string, department: string }
+record Product { name: string, price: f64 }
+record Stock { name: string, value: i64, ticker: string }
+
+record FileHandle {
+    path: string,
+    func dispose() -> void { }
+}
+
+record Connection {
+    host: string,
+    func dispose() -> void { }
+}
+
+record Widget {
+    id: i64,
+    func label() -> string { return "Widget-" + self.id.to_string() }
+}
+
+record Document {
+    title: string,
+    valid: bool,
+    func validate() -> bool { return self.valid }
+}
+
+record Form {
+    name: string,
+    submitted: bool,
+    func validate() -> bool { return self.submitted }
+}
+
+// ============================================================================
+// Functions using type aliases as generic constraints
+// ============================================================================
+
+// Field constraint via type alias
+func greet_alias<T: HasName>(x: T) -> string {
+    return "Hello, " + x.name
+}
+
+func double_alias<T: HasValue>(x: T) -> i64 {
+    return x.value * 2
+}
+
+// Method constraint via type alias
+func cleanup<T: Disposable>(x: T) -> void {
+    x.dispose()
+}
+
+func get_label_alias<T: Labeled>(x: T) -> string {
+    return x.label()
+}
+
+func is_valid<T: Validatable>(x: T) -> bool {
+    return x.validate()
+}
+
+// Mixed field + method constraint via type alias
+func validate_named<T: NamedValidatable>(x: T) -> string {
+    if x.validate() {
+        return "Valid: " + x.name
+    } else {
+        return "Invalid: " + x.name
+    }
+}
+
+// ============================================================================
+// Tests for type alias constraints
+// ============================================================================
+
+tests "type alias as field constraint" {
+    test "HasName alias constraint" {
+        assert(greet_alias(Person { name: "Alice", age: 30, email: "a@b.c" }) == "Hello, Alice")
+        assert(greet_alias(Pet { name: "Fluffy", species: "cat" }) == "Hello, Fluffy")
+        assert(greet_alias(Company { name: "Acme", employees: 100 }) == "Hello, Acme")
+        assert(greet_alias(Employee { name: "Bob", department: "Engineering" }) == "Hello, Bob")
+        assert(greet_alias(Product { name: "Widget", price: 9.99 }) == "Hello, Widget")
+    }
+
+    test "HasValue alias constraint" {
+        assert(double_alias(Counter { value: 21 }) == 42)
+        assert(double_alias(Score { value: 50, player: "X" }) == 100)
+        assert(double_alias(Item { value: 15 }) == 30)
+        assert(double_alias(Stock { name: "X", value: 100, ticker: "X" }) == 200)
+    }
+}
+
+tests "type alias as method constraint" {
+    test "Disposable alias constraint" {
+        // These should compile and run without error
+        cleanup(FileHandle { path: "/tmp/test" })
+        cleanup(Connection { host: "localhost" })
+    }
+
+    test "Labeled alias constraint" {
+        assert(get_label_alias(Widget { id: 42 }) == "Widget-42")
+        assert(get_label_alias(Point { x: 1, y: 2 }) == "point")
+        assert(get_label_alias(Color { r: 255, g: 0, b: 0 }) == "color")
+    }
+
+    test "Validatable alias constraint" {
+        assert(is_valid(Document { title: "Doc", valid: true }))
+        assert(!is_valid(Document { title: "Doc", valid: false }))
+        assert(is_valid(Form { name: "Form", submitted: true }))
+        assert(!is_valid(Form { name: "Form", submitted: false }))
+    }
+}
+
+tests "type alias with mixed constraints" {
+    test "NamedValidatable alias constraint" {
+        assert(validate_named(ValidUser { name: "Alice" }) == "Valid: Alice")
+        assert(validate_named(InvalidUser { name: "Bob" }) == "Invalid: Bob")
+        assert(validate_named(Form { name: "Survey", submitted: true }) == "Valid: Survey")
+        assert(validate_named(Form { name: "Survey", submitted: false }) == "Invalid: Survey")
+    }
+}
+
+tests "inline vs alias constraints are equivalent" {
+    // Verify that inline structural constraints work the same as alias constraints
+    test "inline field constraint" {
+        assert(get_name(Person { name: "Test", age: 1, email: "x" }) == "Test")
+        assert(greet_alias(Person { name: "Test", age: 1, email: "x" }) == "Hello, Test")
+    }
+
+    test "inline method constraint" {
+        assert(call_validate(ValidUser { name: "X" }) == true)
+        assert(is_valid(ValidUser { name: "X" }) == true)
+    }
+}
+
+// ============================================================================
+// INTERFACE DUCK TYPING
+// Interfaces support implicit satisfaction - no explicit "implements" required
+// ============================================================================
+
+interface IDisposable {
+    func dispose() -> void
+}
+
+interface ILabeled {
+    func label() -> string
+}
+
+interface IValidatable {
+    func validate() -> bool
+}
+
+// Records that satisfy interfaces WITHOUT explicit "implements"
+record Resource {
+    name: string,
+    func dispose() -> void { }
+}
+
+record DatabaseConnection {
+    url: string,
+    func dispose() -> void { }
+}
+
+record Tag {
+    text: string,
+    func label() -> string { return self.text }
+}
+
+record Submission {
+    complete: bool,
+    func validate() -> bool { return self.complete }
+}
+
+// Functions using interface constraints
+func dispose_resource<T: IDisposable>(x: T) -> void {
+    x.dispose()
+}
+
+func get_interface_label<T: ILabeled>(x: T) -> string {
+    return x.label()
+}
+
+func check_valid<T: IValidatable>(x: T) -> bool {
+    return x.validate()
+}
+
+tests "interface duck typing (implicit satisfaction)" {
+    test "IDisposable without implements" {
+        // These compile and run - duck typing!
+        dispose_resource(Resource { name: "test" })
+        dispose_resource(DatabaseConnection { url: "postgres://localhost" })
+    }
+
+    test "ILabeled without implements" {
+        assert(get_interface_label(Tag { text: "important" }) == "important")
+        // Widget from earlier also satisfies ILabeled
+        assert(get_interface_label(Widget { id: 99 }) == "Widget-99")
+    }
+
+    test "IValidatable without implements" {
+        assert(check_valid(Submission { complete: true }))
+        assert(!check_valid(Submission { complete: false }))
+        // Document from earlier also satisfies IValidatable
+        assert(check_valid(Document { title: "X", valid: true }))
+    }
+}
+
+tests "interface vs structural type alias - both work" {
+    // Both approaches achieve duck typing
+    test "interface constraint" {
+        dispose_resource(Resource { name: "via interface" })
+    }
+
+    test "structural alias constraint" {
+        cleanup(Resource { name: "via structural alias" })
+    }
+}
+
+// ============================================================================
+// COMPLEX FUNCTION-LEVEL CONSTRAINTS
+// Multiple type params with constraints referencing each other
+// ============================================================================
+
+// More complex structural types
+let HasId: type = { id: i64 }
+let HasIdAndName: type = { id: i64, name: string }
+
+record NamedEntity {
+    id: i64,
+    name: string,
+}
+
+record SimpleId {
+    id: i64,
+}
+
+// Function with multiple constrained type params
+func get_ids<T: HasId, U: HasId>(a: T, b: U) -> i64 {
+    return a.id + b.id
+}
+
+// Three type params with same constraint
+func sum_three_ids<A: HasId, B: HasId, C: HasId>(a: A, b: B, c: C) -> i64 {
+    return a.id + b.id + c.id
+}
+
+// Different constraints on different params
+func id_and_name<T: HasId, U: HasIdAndName>(a: T, b: U) -> string {
+    return b.name + " (id sum: " + (a.id + b.id).to_string() + ")"
+}
+
+// Function that doubles id
+func double_id<T: HasId>(x: T) -> i64 {
+    return x.id * 2
+}
+
+tests "multiple constrained type parameters" {
+    test "two params same constraint" {
+        assert(get_ids(NamedEntity { id: 10, name: "A" }, SimpleId { id: 5 }) == 15)
+        assert(get_ids(SimpleId { id: 3 }, SimpleId { id: 7 }) == 10)
+    }
+
+    test "three params same constraint" {
+        assert(sum_three_ids(SimpleId { id: 1 }, SimpleId { id: 2 }, SimpleId { id: 3 }) == 6)
+        assert(sum_three_ids(NamedEntity { id: 10, name: "X" }, SimpleId { id: 20 }, NamedEntity { id: 30, name: "Y" }) == 60)
+    }
+
+    test "different constraints on different params" {
+        let result = id_and_name(SimpleId { id: 5 }, NamedEntity { id: 10, name: "Test" })
+        assert(result == "Test (id sum: 15)")
+    }
+
+    test "double_id with constraint" {
+        assert(double_id(SimpleId { id: 5 }) == 10)
+        assert(double_id(NamedEntity { id: 3, name: "X" }) == 6)
+    }
+}
+
+// ============================================================================
+// CONSTRAINT COMBINATIONS
+// Combining field and method constraints
+// ============================================================================
+
+let Processable: type = { id: i64, func process() -> string }
+
+record Task {
+    id: i64,
+    desc: string,
+    func process() -> string { return "Task " + self.id.to_string() + ": " + self.desc }
+}
+
+record Job {
+    id: i64,
+    priority: i64,
+    func process() -> string { return "Job " + self.id.to_string() + " (p=" + self.priority.to_string() + ")" }
+}
+
+func run_and_get_id<T: Processable>(x: T) -> i64 {
+    let _ = x.process()  // Can call method
+    return x.id          // Can access field
+}
+
+func process_both<A: Processable, B: Processable>(a: A, b: B) -> string {
+    return a.process() + " | " + b.process()
+}
+
+tests "combined field and method constraints" {
+    test "access both field and method" {
+        assert(run_and_get_id(Task { id: 1, desc: "test" }) == 1)
+        assert(run_and_get_id(Job { id: 2, priority: 5 }) == 2)
+    }
+
+    test "two processable params" {
+        let result = process_both(Task { id: 1, desc: "A" }, Job { id: 2, priority: 3 })
+        assert(result == "Task 1: A | Job 2 (p=3)")
+    }
+}

@@ -1,0 +1,47 @@
+// FAILING TEST - see ticket v-2dfb
+// Parameterized interface constraints don't work (e.g., P: Producer<T>)
+
+interface Producer<T> {
+    func produce() -> T
+}
+
+interface Consumer<T> {
+    func consume(value: T) -> void
+}
+
+interface Transformer<T, U> {
+    func transform(input: T) -> U
+}
+
+record IntProducer {
+    value: i64,
+    func produce() -> i64 { return self.value }
+}
+
+record IntToString {
+    func transform(input: i64) -> string { return input.to_string() }
+}
+
+// This should work - IntProducer satisfies Producer<i64>
+func get_value<T, P: Producer<T>>(producer: P) -> T {
+    return producer.produce()
+}
+
+// This should work - dependent type params
+func produce_and_transform<T, P: Producer<T>, X: Transformer<T, string>>(producer: P, transformer: X) -> string {
+    let value = producer.produce()
+    return transformer.transform(value)
+}
+
+tests "parameterized interface constraints" {
+    test "Producer<T> constraint" {
+        let p = IntProducer { value: 42 }
+        let v = get_value(p)
+        assert(v == 42)
+    }
+    
+    test "dependent type params" {
+        let result = produce_and_transform(IntProducer { value: 123 }, IntToString {})
+        assert(result == "123")
+    }
+}

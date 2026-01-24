@@ -1,0 +1,32 @@
+// FAILING TEST - see ticket v-9807
+// Nested generic function calls fail at runtime
+
+let HasId: type = { id: i64 }
+
+record SimpleId { id: i64 }
+record NamedId { id: i64, name: string }
+
+func double_id<T: HasId>(x: T) -> i64 {
+    return x.id * 2
+}
+
+// Calling one generic function from another fails at runtime
+// with "function not found: double_id"
+func quad_id<T: HasId>(x: T) -> i64 {
+    return double_id(x) * 2
+}
+
+func triple_id<T: HasId>(x: T) -> i64 {
+    return double_id(x) + x.id
+}
+
+tests "nested generic function calls" {
+    test "quad_id calls double_id" {
+        assert(quad_id(SimpleId { id: 5 }) == 20)
+        assert(quad_id(NamedId { id: 3, name: "X" }) == 12)
+    }
+    
+    test "triple_id calls double_id" {
+        assert(triple_id(SimpleId { id: 5 }) == 15)
+    }
+}

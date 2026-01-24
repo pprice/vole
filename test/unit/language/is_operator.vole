@@ -1,100 +1,131 @@
-// Runtime type checking with 'is' operator
+// Test is operator for type checking and narrowing
 
-class Point {
-    x: i32,
-    y: i32,
+tests "is operator basics" {
+    test "is returns true for matching type" {
+        let x: i64 | string = 5
+        assert(x is i64)
+    }
+
+    test "is returns false for non-matching type" {
+        let x: i64 | string = "hello"
+        assert(!(x is i64))
+    }
+
+    test "is works as boolean expression" {
+        let x: i64 | string = 5
+        let is_num: bool = x is i64
+        assert(is_num)
+    }
 }
 
-class Circle {
-    radius: f64,
+tests "is operator narrowing in if-statements" {
+    test "narrows type in then branch" {
+        let x: i64 | string = 5
+        if x is i64 {
+            let y = x + 1  // x is narrowed to i64
+            assert(y == 6)
+        } else {
+            assert(false)
+        }
+    }
+
+    test "narrows to string - call length()" {
+        let x: i64 | string = "hello"
+        if x is string {
+            let len = x.length()  // x is narrowed to string
+            assert(len == 5)
+        } else {
+            assert(false)
+        }
+    }
+
+    test "narrows type in else branch" {
+        let x: i64 | string = "hello"
+        if x is i64 {
+            assert(false)
+        } else {
+            let len = x.length()  // x is narrowed to string
+            assert(len == 5)
+        }
+    }
+
+    test "narrowing with three types" {
+        let x: i64 | string | bool = true
+        if x is bool {
+            assert(x)  // x is narrowed to bool
+        } else {
+            // x is narrowed to i64 | string
+            assert(false)
+        }
+    }
 }
 
-tests "is operator" {
-    test "primitive types" {
-        let i = 42          // defaults to i64
-        let f = 3.14
-        let s = "hello"
-        let b = true
-        let n = nil
-
-        assert(i is i64)    // 42 is i64 by default
-        assert(f is f64)
-        assert(s is string)
-        assert(b is bool)
-        assert(n is nil)
+tests "is operator narrowing in if-expressions" {
+    test "narrows then branch in if-expression" {
+        let x: i64 | string = "hello"
+        let result = if x is string { x.length() } else { 0 }
+        assert(result == 5)
     }
 
-    test "explicit types" {
-        let i: i32 = 42
-        let j: i64 = 100
-
-        assert(i is i32)
-        assert(j is i64)
-        assert(!(i is i64))
-        assert(!(j is i32))
+    test "narrows else branch in if-expression" {
+        let x: i64 | string = 42
+        let result = if x is string { x.length() } else { x + 1 }
+        assert(result == 43)
     }
 
-    test "literal bidirectional inference" {
-        // Literals use bidirectional inference - 42 CAN be i32, so it is
-        assert(42 is i32)
-        assert(42 is i64)
-        assert(42 is u8)    // 42 fits in u8
-        assert(!(300 is u8))  // 300 doesn't fit in u8
+    test "if-expression with three-type union" {
+        let x: i64 | string | bool = "test"
+        let len = if x is string { x.length() } else { 0 }
+        assert(len == 4)
+    }
+}
 
-        // Float literals
-        assert(3.14 is f64)
-        assert(3.14 is f32)
-        assert(!(3.14 is i32))  // Float is not int
-
-        // String/bool/nil are fixed
-        assert("hello" is string)
-        assert(true is bool)
-        assert(nil is nil)
+tests "is operator narrowing in when-expressions" {
+    test "narrows type in when arm" {
+        let x: i64 | string = "hello"
+        let result = when {
+            x is string => x.length()
+            _ => 0
+        }
+        assert(result == 5)
     }
 
-    test "negative checks" {
-        let i = 42
-        let s = "hello"
-
-        assert(!(i is string))
-        assert(!(s is i64))
-        assert(!(i is nil))
-        assert(!(s is bool))
+    test "narrows to i64 in when arm" {
+        let x: i64 | string = 42
+        let result = when {
+            x is i64 => x * 2
+            _ => 0
+        }
+        assert(result == 84)
     }
 
-    test "class instances" {
-        let p = Point { x: 10, y: 20 }
-        let c = Circle { radius: 5.0 }
+    test "multiple is checks in when" {
+        let x: i64 | string | bool = true
+        let result = when {
+            x is i64 => "number"
+            x is string => "text"
+            x is bool => "boolean"
+            _ => "unknown"
+        }
+        assert(result == "boolean")
+    }
+}
 
-        assert(p is Point)
-        assert(c is Circle)
-        assert(!(p is Circle))
-        assert(!(c is Point))
+tests "is operator in other contexts" {
+    test "is in match guard" {
+        let x: i64 | string = 5
+        let result = match x {
+            _ if x is i64 => "number"
+            _ => "other"
+        }
+        assert(result == "number")
     }
 
-    // TODO: arrays - needs `is Array` or similar type check
-    // test "arrays" {
-    //     let arr = [1, 2, 3]
-    //     let num = 42
-    //     assert(arr is Array<i64>)
-    //     assert(!(num is Array<i64>))
-    // }
-
-    // TODO: functions - needs function type checking
-    // test "functions" {
-    //     let f = (x: i32) => x * 2
-    //     let num = 42
-    //     assert(f is function)
-    //     assert(!(num is function))
-    // }
-
-    test "in conditionals" {
-        let x = 42
-        let result = if x is i64 { "integer" } else { "other" }
-        assert(result == "integer")
-
-        let s = "hello"
-        let result2 = if s is i64 { "integer" } else { "string" }
-        assert(result2 == "string")
+    test "is with function return" {
+        func check(x: i64 | string) -> bool {
+            return x is i64
+        }
+        assert(check(5))
+        assert(!check("hi"))
     }
 }

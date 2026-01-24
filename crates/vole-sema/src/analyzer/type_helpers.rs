@@ -260,4 +260,60 @@ impl Analyzer {
     pub(crate) fn is_runtime_iterator_id(&self, id: ArenaTypeId) -> bool {
         self.type_arena().unwrap_runtime_iterator(id).is_some()
     }
+
+    // =========================================================================
+    // Type narrowing helpers (for `is` operator flow analysis)
+    // =========================================================================
+
+    /// Extract narrowing info from an `x is T` condition.
+    /// Returns Some((symbol, tested_type, original_type)) if the condition is `x is T`
+    /// where x is a simple identifier.
+    pub(crate) fn extract_is_narrowing_info(
+        &mut self,
+        condition: &Expr,
+        interner: &Interner,
+    ) -> Option<(Symbol, ArenaTypeId, Option<ArenaTypeId>)> {
+        if let ExprKind::Is(is_expr) = &condition.kind
+            && let ExprKind::Identifier(sym) = &is_expr.value.kind
+        {
+            let tested_type_id = self.resolve_type_id(&is_expr.type_expr, interner);
+            let original_type_id = self.get_variable_type_id(*sym);
+            return Some((*sym, tested_type_id, original_type_id));
+        }
+        None
+    }
+
+    /// Compute the narrowed type for an else-branch when condition was `x is T`.
+    /// Returns the type with T removed from the union, or None if not a union.
+    pub(crate) fn compute_else_narrowed_type(
+        &mut self,
+        tested_type_id: ArenaTypeId,
+        original_type_id: ArenaTypeId,
+    ) -> Option<ArenaTypeId> {
+        let union_variants: Option<Vec<ArenaTypeId>> = {
+            let arena = self.type_arena();
+            arena.unwrap_union(original_type_id).map(|v| v.to_vec())
+        };
+
+        if let Some(variants) = union_variants {
+            // Remove tested type from union
+            let remaining: Vec<_> = variants
+                .iter()
+                .filter(|&&v| v != tested_type_id)
+                .copied()
+                .collect();
+
+            if remaining.len() == 1 {
+                // Single type remaining - narrow to that
+                Some(remaining[0])
+            } else if remaining.len() > 1 {
+                // Multiple types remaining - narrow to smaller union
+                Some(self.type_arena_mut().union(remaining))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
 }
