@@ -313,7 +313,14 @@ fn resolve_generic_type_to_id(
                 precompute_field_substitutions(ctx, type_def_id, &type_args_id);
                 result
             }
-            TypeDefKind::Interface => ctx.type_arena_mut().interface(type_def_id, type_args_id),
+            TypeDefKind::Interface => {
+                let result = ctx
+                    .type_arena_mut()
+                    .interface(type_def_id, type_args_id.clone());
+                // Pre-compute substituted method signatures so codegen can use lookup_substitute
+                precompute_interface_method_substitutions(ctx, type_def_id, &type_args_id);
+                result
+            }
             TypeDefKind::Alias | TypeDefKind::ErrorType | TypeDefKind::Primitive => {
                 // These types don't support type parameters
                 ctx.type_arena_mut().invalid()
@@ -366,6 +373,64 @@ fn precompute_field_substitutions(
     let mut arena = ctx.type_arena_mut();
     for field_type in field_types {
         arena.substitute(field_type, &subs);
+    }
+}
+
+/// Pre-compute substituted method signatures for a generic interface instantiation.
+///
+/// When creating a type like Iterator<i64>, this ensures that the substituted method
+/// param/return types (e.g., `i64 | Done` for `T | Done`) exist in the arena. This
+/// allows codegen to use lookup_substitute instead of substitute, making it fully read-only.
+fn precompute_interface_method_substitutions(
+    ctx: &TypeResolutionContext<'_>,
+    type_def_id: TypeDefId,
+    type_args: &[TypeId],
+) {
+    // Skip if no type arguments (no substitution needed)
+    if type_args.is_empty() {
+        return;
+    }
+
+    // Get interface type params and method signature IDs upfront
+    // to avoid borrow conflicts with the arena
+    let (type_params, signature_ids): (Vec<vole_identity::NameId>, Vec<TypeId>) = {
+        let registry = ctx.entity_registry();
+        let type_def = registry.get_type(type_def_id);
+        let type_params = type_def.type_params.clone();
+        let method_ids = registry.interface_methods_ordered(type_def_id);
+        let signature_ids: Vec<TypeId> = method_ids
+            .iter()
+            .map(|&mid| registry.get_method(mid).signature_id)
+            .collect();
+        (type_params, signature_ids)
+    };
+
+    // Skip if type params and args don't match (error case handled elsewhere)
+    if type_params.len() != type_args.len() {
+        return;
+    }
+
+    // Build substitution map: type param NameId -> concrete TypeId
+    let subs: rustc_hash::FxHashMap<vole_identity::NameId, TypeId> = type_params
+        .iter()
+        .zip(type_args.iter())
+        .map(|(&param, &arg)| (param, arg))
+        .collect();
+
+    // Pre-compute substituted types for all method signatures
+    // This ensures they exist in the arena for codegen's lookup_substitute
+    let mut arena = ctx.type_arena_mut();
+    for signature_id in signature_ids {
+        // Get method param and return types
+        if let Some((params, ret, _)) = arena.unwrap_function(signature_id) {
+            // Substitute each param type
+            let params = params.to_vec();
+            for param in params {
+                arena.substitute(param, &subs);
+            }
+            // Substitute return type
+            arena.substitute(ret, &subs);
+        }
     }
 }
 

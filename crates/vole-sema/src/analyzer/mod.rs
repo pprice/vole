@@ -709,6 +709,8 @@ impl Analyzer {
         // Create interface type directly in arena
         let type_args_vec: crate::type_arena::TypeIdVec = type_args_id.iter().copied().collect();
         let type_id = self.type_arena_mut().interface(type_def_id, type_args_vec);
+        // Pre-compute substituted method signatures so codegen can use lookup_substitute
+        self.precompute_interface_method_substitutions(type_def_id, type_args_id);
         Some(type_id)
     }
 
