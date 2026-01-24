@@ -11,9 +11,10 @@ use crate::errors::CodegenError;
 use std::collections::HashMap;
 
 use vole_frontend::{
-    AssignTarget, BlockExpr, Expr, ExprKind, IfExpr, MatchExpr, Pattern, PatternKind, RangeExpr,
-    RecordFieldPattern, Symbol, UnaryOp, WhenExpr,
+    AssignTarget, BlockExpr, Expr, ExprKind, IfExpr, MatchExpr, NodeId, Pattern, PatternKind,
+    RangeExpr, RecordFieldPattern, Symbol, UnaryOp, WhenExpr,
 };
+use vole_sema::IsCheckResult;
 use vole_sema::entity_defs::TypeDefKind;
 
 use super::context::Cg;
@@ -67,7 +68,7 @@ impl Cg<'_, '_, '_> {
             ExprKind::Match(match_expr) => self.match_expr(match_expr),
             ExprKind::Nil => Ok(self.nil_value()),
             ExprKind::Done => Ok(self.done_value()),
-            ExprKind::Is(is_expr) => self.is_expr(is_expr),
+            ExprKind::Is(is_expr) => self.is_expr(is_expr, expr.id),
             ExprKind::NullCoalesce(nc) => self.null_coalesce(nc),
             ExprKind::Lambda(lambda) => self.lambda(lambda, expr.id),
             ExprKind::TypeLiteral(_) => {
@@ -687,24 +688,27 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile an `is` type check expression
-    fn is_expr(&mut self, is_expr: &vole_frontend::IsExpr) -> Result<CompiledValue, String> {
+    fn is_expr(
+        &mut self,
+        is_expr: &vole_frontend::IsExpr,
+        expr_id: NodeId,
+    ) -> Result<CompiledValue, String> {
         let value = self.expr(&is_expr.value)?;
-        let tested_type_id = self.resolve_type_expr(&is_expr.type_expr);
 
-        let arena = self.arena();
-        if let Some(variants) = arena.unwrap_union(value.type_id) {
-            let expected_tag = variants
-                .iter()
-                .position(|&v| v == tested_type_id)
-                .unwrap_or(usize::MAX);
-            drop(arena);
+        // Look up pre-computed type check result from sema
+        let is_check_result = self
+            .analyzed()
+            .expression_data
+            .get_is_check_result(expr_id)
+            .expect("is expression missing IsCheckResult from sema");
 
-            let result = self.tag_eq(value.value, expected_tag as i64);
-            Ok(self.bool_value(result))
-        } else {
-            drop(arena);
-            // O(1) type comparison with TypeId
-            Ok(self.bool_const(value.type_id == tested_type_id))
+        match is_check_result {
+            IsCheckResult::AlwaysTrue => Ok(self.bool_const(true)),
+            IsCheckResult::AlwaysFalse => Ok(self.bool_const(false)),
+            IsCheckResult::CheckTag(tag_index) => {
+                let result = self.tag_eq(value.value, tag_index as i64);
+                Ok(self.bool_value(result))
+            }
         }
     }
 
@@ -713,33 +717,25 @@ impl Cg<'_, '_, '_> {
     fn compile_type_pattern_check(
         &mut self,
         scrutinee: &CompiledValue,
-        pattern_type_id: TypeId,
+        pattern_id: NodeId,
     ) -> Result<Option<Value>, String> {
-        let arena = self.arena();
-        if let Some(variants) = arena.unwrap_union(scrutinee.type_id) {
-            let expected_tag = variants
-                .iter()
-                .position(|&v| v == pattern_type_id)
-                .unwrap_or(usize::MAX);
-            drop(arena);
+        // Look up pre-computed type check result from sema
+        let is_check_result = self
+            .analyzed()
+            .expression_data
+            .get_is_check_result(pattern_id)
+            .expect("type pattern missing IsCheckResult from sema");
 
-            if expected_tag == usize::MAX {
-                // Pattern type not in union - will never match
-                let never_match = self.builder.ins().iconst(types::I8, 0);
-                return Ok(Some(never_match));
-            }
-
-            let result = self.tag_eq(scrutinee.value, expected_tag as i64);
-            Ok(Some(result))
-        } else {
-            drop(arena);
-            // Non-union scrutinee - pattern matches if types are equal (O(1) with TypeId)
-            if scrutinee.type_id == pattern_type_id {
-                Ok(None) // Always matches
-            } else {
+        match is_check_result {
+            IsCheckResult::AlwaysTrue => Ok(None), // Always matches
+            IsCheckResult::AlwaysFalse => {
                 // Never matches
                 let never_match = self.builder.ins().iconst(types::I8, 0);
                 Ok(Some(never_match))
+            }
+            IsCheckResult::CheckTag(tag_index) => {
+                let result = self.tag_eq(scrutinee.value, tag_index as i64);
+                Ok(Some(result))
             }
         }
     }
@@ -945,9 +941,12 @@ impl Cg<'_, '_, '_> {
                         .try_name_id(module_id, &[*name])
                         .and_then(|name_id| query.try_type_def_id(name_id));
 
-                    if let Some(type_meta) = type_def_id.and_then(|id| self.type_meta().get(&id)) {
+                    if type_def_id
+                        .and_then(|id| self.type_meta().get(&id))
+                        .is_some()
+                    {
                         // Type pattern - compare against union variant tag
-                        self.compile_type_pattern_check(&scrutinee, type_meta.vole_type)?
+                        self.compile_type_pattern_check(&scrutinee, arm.pattern.id)?
                     } else {
                         // Regular identifier binding
                         let var = self.builder.declare_var(scrutinee.ty);
@@ -956,9 +955,8 @@ impl Cg<'_, '_, '_> {
                         None
                     }
                 }
-                PatternKind::Type { type_expr } => {
-                    let pattern_type_id = self.resolve_type_expr(type_expr);
-                    self.compile_type_pattern_check(&scrutinee, pattern_type_id)?
+                PatternKind::Type { type_expr: _ } => {
+                    self.compile_type_pattern_check(&scrutinee, arm.pattern.id)?
                 }
                 PatternKind::Literal(lit_expr) => {
                     // Save and restore vars for pattern matching
@@ -1078,7 +1076,7 @@ impl Cg<'_, '_, '_> {
                             type_def_id.and_then(|id| self.type_meta().get(&id))
                         {
                             (
-                                self.compile_type_pattern_check(&scrutinee, type_meta.vole_type)?,
+                                self.compile_type_pattern_check(&scrutinee, arm.pattern.id)?,
                                 Some(type_meta.vole_type),
                             )
                         } else {

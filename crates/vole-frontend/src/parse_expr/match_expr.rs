@@ -123,6 +123,7 @@ impl<'src> Parser<'src> {
 
         let end_span = body.span;
         Ok(MatchArm {
+            id: self.next_id(),
             pattern,
             guard,
             body,

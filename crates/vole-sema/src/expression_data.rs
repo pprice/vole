@@ -6,6 +6,7 @@
 use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 
+use crate::analysis_cache::IsCheckResult;
 use crate::generic::{ClassMethodMonomorphKey, MonomorphKey, StaticMethodMonomorphKey};
 use crate::resolution::ResolvedMethod;
 use crate::type_arena::TypeId;
@@ -51,6 +52,9 @@ pub struct ExpressionData {
     /// Maps function declaration span to its closure function type.
     /// Used for scoped functions in test blocks which are compiled as closures.
     scoped_function_types: HashMap<Span, TypeId>,
+    /// Type check results for `is` expressions and type patterns.
+    /// Maps NodeId → IsCheckResult to eliminate runtime type lookups in codegen.
+    is_check_results: HashMap<NodeId, IsCheckResult>,
 }
 
 impl ExpressionData {
@@ -72,6 +76,7 @@ impl ExpressionData {
         substituted_return_types: HashMap<NodeId, TypeId>,
         lambda_defaults: HashMap<NodeId, LambdaDefaults>,
         scoped_function_types: HashMap<Span, TypeId>,
+        is_check_results: HashMap<NodeId, IsCheckResult>,
     ) -> Self {
         Self {
             types,
@@ -84,6 +89,7 @@ impl ExpressionData {
             substituted_return_types,
             lambda_defaults,
             scoped_function_types,
+            is_check_results,
         }
     }
 
@@ -300,5 +306,25 @@ impl ExpressionData {
     /// Get all scoped function types
     pub fn scoped_function_types(&self) -> &HashMap<Span, TypeId> {
         &self.scoped_function_types
+    }
+
+    /// Get the IsCheckResult for a type check node (is expression or type pattern)
+    pub fn get_is_check_result(&self, node: NodeId) -> Option<IsCheckResult> {
+        self.is_check_results.get(&node).copied()
+    }
+
+    /// Set the IsCheckResult for a type check node
+    pub fn set_is_check_result(&mut self, node: NodeId, result: IsCheckResult) {
+        self.is_check_results.insert(node, result);
+    }
+
+    /// Get all IsCheckResults
+    pub fn is_check_results(&self) -> &HashMap<NodeId, IsCheckResult> {
+        &self.is_check_results
+    }
+
+    /// Get mutable access to IsCheckResults
+    pub fn is_check_results_mut(&mut self) -> &mut HashMap<NodeId, IsCheckResult> {
+        &mut self.is_check_results
     }
 }

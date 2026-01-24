@@ -451,6 +451,7 @@ impl Analyzer {
             self.substituted_return_types,
             self.lambda_defaults,
             self.scoped_function_types,
+            self.is_check_results,
         );
         AnalysisOutput {
             expression_data,
@@ -467,6 +468,11 @@ impl Analyzer {
         self.ensure_runtime_iterator_for_iterator(type_id);
         self.expr_types.insert(expr.id, type_id);
         type_id
+    }
+
+    /// Record the result of a type check (is expression or type pattern) for codegen.
+    fn record_is_check_result(&mut self, node_id: NodeId, result: IsCheckResult) {
+        self.is_check_results.insert(node_id, result);
     }
 
     /// If the given type is Iterator<T>, ensure RuntimeIterator(T) exists in the arena.

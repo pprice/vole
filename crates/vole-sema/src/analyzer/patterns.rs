@@ -1,6 +1,7 @@
 // src/sema/analyzer/patterns.rs
 
 use super::*;
+use crate::analysis_cache::IsCheckResult;
 use crate::type_arena::TypeId as ArenaTypeId;
 use crate::types::StructFieldId;
 use vole_frontend::PatternKind;
@@ -62,6 +63,14 @@ impl Analyzer {
                                 span,
                                 interner,
                             );
+
+                            // Compute IsCheckResult for codegen
+                            let is_check_result = self.compute_type_pattern_check_result(
+                                pattern_type_id,
+                                scrutinee_type_id,
+                            );
+                            self.record_is_check_result(pattern.id, is_check_result);
+
                             Some(pattern_type_id)
                         }
                         TypeDefKind::Record => {
@@ -76,6 +85,14 @@ impl Analyzer {
                                 span,
                                 interner,
                             );
+
+                            // Compute IsCheckResult for codegen
+                            let is_check_result = self.compute_type_pattern_check_result(
+                                pattern_type_id,
+                                scrutinee_type_id,
+                            );
+                            self.record_is_check_result(pattern.id, is_check_result);
+
                             Some(pattern_type_id)
                         }
                         _ => {
@@ -112,6 +129,12 @@ impl Analyzer {
                     span,
                     interner,
                 );
+
+                // Compute IsCheckResult for codegen
+                let is_check_result =
+                    self.compute_type_pattern_check_result(pattern_type_id, scrutinee_type_id);
+                self.record_is_check_result(pattern.id, is_check_result);
+
                 Some(pattern_type_id)
             }
             PatternKind::Val { name } => {
@@ -326,6 +349,14 @@ impl Analyzer {
                                 span,
                                 interner,
                             );
+
+                            // Compute IsCheckResult for codegen
+                            let is_check_result = self.compute_type_pattern_check_result(
+                                pattern_type_id,
+                                scrutinee_type_id,
+                            );
+                            self.record_is_check_result(pattern.id, is_check_result);
+
                             Some(pattern_type_id)
                         } else {
                             None
@@ -376,6 +407,32 @@ impl Analyzer {
                 },
                 span,
             );
+        }
+    }
+
+    /// Compute IsCheckResult for a type pattern.
+    /// Determines whether the check can be resolved at compile time or needs a runtime tag check.
+    fn compute_type_pattern_check_result(
+        &self,
+        pattern_type_id: ArenaTypeId,
+        scrutinee_type_id: ArenaTypeId,
+    ) -> IsCheckResult {
+        let union_variants = self.type_arena().unwrap_union(scrutinee_type_id).cloned();
+        if let Some(variants) = union_variants {
+            // Union type: find which variant the pattern type matches
+            if let Some(index) = variants.iter().position(|&v| v == pattern_type_id) {
+                IsCheckResult::CheckTag(index as u32)
+            } else {
+                // Pattern type is not a variant - always false
+                IsCheckResult::AlwaysFalse
+            }
+        } else {
+            // Non-union type: check direct type equality
+            if scrutinee_type_id == pattern_type_id {
+                IsCheckResult::AlwaysTrue
+            } else {
+                IsCheckResult::AlwaysFalse
+            }
         }
     }
 

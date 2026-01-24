@@ -667,6 +667,7 @@ pub struct MatchExpr {
 /// A single arm in a match expression
 #[derive(Debug, Clone)]
 pub struct MatchArm {
+    pub id: NodeId,
     pub pattern: Pattern,
     pub guard: Option<Expr>,
     pub body: Expr,

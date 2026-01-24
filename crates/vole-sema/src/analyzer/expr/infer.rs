@@ -1,4 +1,5 @@
 use super::super::*;
+use crate::analysis_cache::IsCheckResult;
 use crate::type_arena::TypeId as ArenaTypeId;
 use crate::types::PlaceholderKind;
 
@@ -352,7 +353,28 @@ impl Analyzer {
                 } else {
                     self.check_expr(&is_expr.value, interner)?
                 };
+
+                // Compute IsCheckResult for codegen
                 let union_variants = self.type_arena().unwrap_union(value_type_id).cloned();
+                let is_check_result = if let Some(variants) = &union_variants {
+                    // Union type: find which variant the tested type matches
+                    if let Some(index) = variants.iter().position(|&v| v == tested_type_id) {
+                        IsCheckResult::CheckTag(index as u32)
+                    } else {
+                        // Error: tested type is not a variant (will be reported below)
+                        IsCheckResult::AlwaysFalse
+                    }
+                } else {
+                    // Non-union type: check direct type equality
+                    if value_type_id == tested_type_id {
+                        IsCheckResult::AlwaysTrue
+                    } else {
+                        IsCheckResult::AlwaysFalse
+                    }
+                };
+                self.record_is_check_result(expr.id, is_check_result);
+
+                // Report error if tested type is not a variant of the union
                 if let Some(variants) = union_variants
                     && !variants.contains(&tested_type_id)
                 {
