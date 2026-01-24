@@ -390,6 +390,55 @@ impl Cg<'_, '_, '_> {
             }
         }
 
+        // Fallback: check late_monomorph_cache when inside a monomorphized function
+        // This handles nested generic calls where the inner call wasn't analyzed by sema
+        if let Some(substitutions) = self.type_substitutions() {
+            let main_module = self.funcs_ref().main_module();
+            // Try to get function NameId
+            if let Some(func_name_id) =
+                self.query().try_function_name_id(main_module, callee_sym)
+            {
+                // Check if this is a generic function by looking up its generic_info
+                if let Some(func_id) = self
+                    .analyzed()
+                    .entity_registry()
+                    .function_by_name(func_name_id)
+                {
+                    let func_def = self.analyzed().entity_registry().get_function(func_id);
+                    if let Some(generic_info) = &func_def.generic_info {
+                        // Build type_keys by looking up each type param in current substitutions
+                        let type_keys: Vec<TypeId> = generic_info
+                            .type_params
+                            .iter()
+                            .filter_map(|tp| substitutions.get(&tp.name_id).copied())
+                            .collect();
+
+                        // Only proceed if we resolved all type params
+                        if type_keys.len() == generic_info.type_params.len() {
+                            use vole_sema::generic::MonomorphKey;
+                            let key = MonomorphKey::new(func_name_id, type_keys);
+
+                            // Check late_monomorph_cache
+                            let late_cache = self.env.state.late_monomorph_cache.borrow();
+                            if let Some(instance) = late_cache.get(&key) {
+                                let mangled_name = instance.mangled_name;
+                                drop(late_cache);
+
+                                let func_key = self.funcs().intern_name_id(mangled_name);
+                                if let Some(func_id) = self.funcs().func_id(func_key) {
+                                    tracing::trace!(
+                                        callee = callee_name,
+                                        "using late monomorph instance for nested generic call"
+                                    );
+                                    return self.call_func_id(func_key, func_id, call, callee_sym);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Regular function call - handle module context
         // 1. Try direct function lookup
         // 2. If in module context, try mangled name

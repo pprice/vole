@@ -7,6 +7,7 @@ use std::collections::HashMap;
 
 use vole_identity::{NameId, TypeDefId};
 use vole_runtime::NativeRegistry;
+use vole_sema::generic::{MonomorphInstance, MonomorphKey};
 use vole_sema::implement_registry::ImplTypeId;
 
 use crate::interface_vtable::InterfaceVtableRegistry;
@@ -37,6 +38,8 @@ pub struct CodegenState {
     pub native_registry: NativeRegistry,
     /// Counter for generating unique lambda names (interior mutability)
     pub lambda_counter: Cell<usize>,
+    /// Late-discovered monomorphized function instances (for nested generic calls)
+    pub late_monomorph_cache: RefCell<HashMap<MonomorphKey, MonomorphInstance>>,
 }
 
 impl CodegenState {
@@ -49,6 +52,7 @@ impl CodegenState {
             interface_vtables: RefCell::new(InterfaceVtableRegistry::new()),
             native_registry,
             lambda_counter: Cell::new(0),
+            late_monomorph_cache: RefCell::new(HashMap::new()),
         }
     }
 }

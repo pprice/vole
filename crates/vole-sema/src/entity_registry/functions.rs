@@ -106,4 +106,9 @@ impl EntityRegistry {
     pub fn set_function_required_params(&mut self, func_id: FunctionId, required_params: usize) {
         self.function_defs[func_id.index() as usize].required_params = required_params;
     }
+
+    /// Iterate over all function definitions
+    pub fn iter_functions(&self) -> impl Iterator<Item = &FunctionDef> {
+        self.function_defs.iter()
+    }
 }
