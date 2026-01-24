@@ -12,7 +12,6 @@ pub mod generic;
 pub mod implement_registry;
 pub mod infer;
 pub mod module;
-pub mod program_update;
 pub mod query;
 pub mod resolution;
 pub mod resolve;
@@ -32,7 +31,6 @@ pub use implement_registry::{
     ImplTypeId, ImplementRegistry, MethodImpl, MethodKey, PrimitiveTypeId,
 };
 pub use infer::{InferCtx, InferType, InferVarId, UnifyError};
-pub use program_update::ProgramUpdate;
 pub use query::ProgramQuery;
 pub use resolution::{MethodResolutions, ResolvedMethod};
 pub use resolve::ResolverEntityExt;

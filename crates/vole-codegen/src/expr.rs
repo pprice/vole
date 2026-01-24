@@ -116,7 +116,7 @@ impl Cg<'_, '_, '_> {
             {
                 // Union layout: [tag:1][padding:7][payload]
                 let payload_ty =
-                    type_id_to_cranelift(narrowed_type_id, &self.arena(), self.ptr_type());
+                    type_id_to_cranelift(narrowed_type_id, self.arena(), self.ptr_type());
                 let payload = self.builder.ins().load(payload_ty, MemFlags::new(), val, 8);
                 return Ok(CompiledValue {
                     value: payload,
@@ -360,7 +360,7 @@ impl Cg<'_, '_, '_> {
             // Compute tag before using builder to avoid borrow conflict
             let tag = {
                 let arena = self.arena();
-                array_element_tag_id(compiled.type_id, &arena)
+                array_element_tag_id(compiled.type_id, arena)
             };
             let tag_val = self.builder.ins().iconst(types::I64, tag);
             let value_bits = convert_to_i64_for_storage(self.builder, &compiled);
@@ -396,7 +396,7 @@ impl Cg<'_, '_, '_> {
             elem_type_ids,
             self.ptr_type(),
             self.query().registry(),
-            &self.arena(),
+            self.arena(),
         );
 
         // Create stack slot for the tuple
@@ -509,7 +509,6 @@ impl Cg<'_, '_, '_> {
 
         // Try tuple first
         if let Some(elem_type_ids) = arena.unwrap_tuple(obj.type_id).cloned() {
-            drop(arena);
             // Tuple indexing - must be constant index (checked in sema)
             if let ExprKind::IntLiteral(i) = &index.kind {
                 let i = *i as usize;
@@ -517,12 +516,12 @@ impl Cg<'_, '_, '_> {
                     &elem_type_ids,
                     self.ptr_type(),
                     self.query().registry(),
-                    &self.arena(),
+                    self.arena(),
                 );
                 let offset = offsets[i];
                 let elem_type_id = elem_type_ids[i];
                 let elem_cr_type =
-                    type_id_to_cranelift(elem_type_id, &self.arena(), self.ptr_type());
+                    type_id_to_cranelift(elem_type_id, self.arena(), self.ptr_type());
 
                 let value =
                     self.builder
@@ -541,10 +540,9 @@ impl Cg<'_, '_, '_> {
 
         // Try fixed array
         if let Some((element_id, size)) = arena.unwrap_fixed_array(obj.type_id) {
-            drop(arena);
             // Fixed array indexing
             let elem_size = 8i32; // All elements aligned to 8 bytes
-            let elem_cr_type = type_id_to_cranelift(element_id, &self.arena(), self.ptr_type());
+            let elem_cr_type = type_id_to_cranelift(element_id, self.arena(), self.ptr_type());
 
             // Calculate offset: base + (index * elem_size)
             let offset = if let ExprKind::IntLiteral(i) = &index.kind {
@@ -593,7 +591,6 @@ impl Cg<'_, '_, '_> {
 
         // Try dynamic array
         if let Some(element_id) = arena.unwrap_array(obj.type_id) {
-            drop(arena);
             // Dynamic array indexing with CSE caching
             let idx = self.expr(index)?;
 
@@ -602,7 +599,6 @@ impl Cg<'_, '_, '_> {
             return Ok(self.convert_field_value(raw_value, element_id));
         }
 
-        drop(arena);
         let type_name = self.arena().display_basic(obj.type_id);
         Err(format!("cannot index type {}", type_name))
     }
@@ -620,7 +616,6 @@ impl Cg<'_, '_, '_> {
         let arena = self.arena();
         let fixed_array_info = arena.unwrap_fixed_array(arr.type_id);
         let is_dynamic_array = arena.is_array(arr.type_id);
-        drop(arena);
 
         if let Some((_elem_type_id, size)) = fixed_array_info {
             // Fixed array assignment - store directly at offset
@@ -670,7 +665,7 @@ impl Cg<'_, '_, '_> {
             // Compute tag before using builder to avoid borrow conflict
             let tag = {
                 let arena = self.arena();
-                array_element_tag_id(val.type_id, &arena)
+                array_element_tag_id(val.type_id, arena)
             };
             let tag_val = self.builder.ins().iconst(types::I64, tag);
             let value_bits = convert_to_i64_for_storage(self.builder, &val);
@@ -750,17 +745,14 @@ impl Cg<'_, '_, '_> {
     ) -> Result<Value, String> {
         let arena = self.arena();
         Ok(if arena.is_string(type_id) {
-            drop(arena);
             if self.funcs().has_runtime(RuntimeFn::StringEq) {
                 self.call_runtime(RuntimeFn::StringEq, &[left, right])?
             } else {
                 self.builder.ins().icmp(IntCC::Equal, left, right)
             }
         } else if type_id == arena.f64() {
-            drop(arena);
             self.builder.ins().fcmp(FloatCC::Equal, left, right)
         } else {
-            drop(arena);
             self.builder.ins().icmp(IntCC::Equal, left, right)
         })
     }
@@ -785,7 +777,7 @@ impl Cg<'_, '_, '_> {
             .arena()
             .unwrap_optional(value.type_id)
             .expect("unwrap expression requires optional type");
-        let cranelift_type = type_id_to_cranelift(inner_type_id, &self.arena(), self.ptr_type());
+        let cranelift_type = type_id_to_cranelift(inner_type_id, self.arena(), self.ptr_type());
         self.builder.append_block_param(merge_block, cranelift_type);
 
         self.builder
@@ -999,7 +991,7 @@ impl Cg<'_, '_, '_> {
                             let ptr_type = self.ptr_type();
                             let payload_ty = {
                                 let arena = self.arena();
-                                type_id_to_cranelift(success_type_id, &arena, ptr_type)
+                                type_id_to_cranelift(success_type_id, arena, ptr_type)
                             };
                             let payload =
                                 load_fallible_payload(self.builder, scrutinee.value, payload_ty);
@@ -1032,7 +1024,7 @@ impl Cg<'_, '_, '_> {
                                 &elem_type_ids,
                                 ptr_type,
                                 self.query().registry(),
-                                &arena,
+                                arena,
                             );
                             offsets
                         };
@@ -1367,7 +1359,7 @@ impl Cg<'_, '_, '_> {
 
         let is_void = self.arena().is_void(result_type_id);
         let result_cranelift_type =
-            type_id_to_cranelift(result_type_id, &self.arena(), self.ptr_type());
+            type_id_to_cranelift(result_type_id, self.arena(), self.ptr_type());
 
         // Create basic blocks
         let then_block = self.builder.create_block();
@@ -1453,7 +1445,7 @@ impl Cg<'_, '_, '_> {
 
         let is_void = self.arena().is_void(result_type_id);
         let result_cranelift_type =
-            type_id_to_cranelift(result_type_id, &self.arena(), self.ptr_type());
+            type_id_to_cranelift(result_type_id, self.arena(), self.ptr_type());
 
         // Create merge block
         let merge_block = self.builder.create_block();
@@ -1623,7 +1615,7 @@ impl Cg<'_, '_, '_> {
             let ptr_type = self.ptr_type();
             let payload_ty = {
                 let arena = self.arena();
-                type_id_to_cranelift(error_type_id, &arena, ptr_type)
+                type_id_to_cranelift(error_type_id, arena, ptr_type)
             };
             let payload = load_fallible_payload(self.builder, scrutinee.value, payload_ty);
             let var = self.builder.declare_var(payload_ty);
@@ -1645,7 +1637,6 @@ impl Cg<'_, '_, '_> {
         let Some((_success_type_id, error_type_id)) = arena.unwrap_fallible(scrutinee.type_id)
         else {
             // Not matching on a fallible type
-            drop(arena);
             return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
         };
 
@@ -1653,18 +1644,16 @@ impl Cg<'_, '_, '_> {
         let Some(error_tag) = fallible_error_tag_by_id(
             error_type_id,
             name,
-            &arena,
+            arena,
             self.interner(),
             &name_table,
             self.query().registry(),
         ) else {
             // Error type not found in fallible - will never match
             drop(name_table);
-            drop(arena);
             return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
         };
         drop(name_table);
-        drop(arena);
 
         let is_this_error = self.builder.ins().icmp_imm(IntCC::Equal, tag, error_tag);
         Ok(Some(is_this_error))
@@ -1698,7 +1687,6 @@ impl Cg<'_, '_, '_> {
         let Some((_success_type_id, fallible_error_type_id)) =
             arena.unwrap_fallible(scrutinee.type_id)
         else {
-            drop(arena);
             return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
         };
 
@@ -1706,18 +1694,16 @@ impl Cg<'_, '_, '_> {
         let Some(error_tag) = fallible_error_tag_by_id(
             fallible_error_type_id,
             name,
-            &arena,
+            arena,
             self.interner(),
             &name_table,
             self.query().registry(),
         ) else {
             // Error type not found in fallible
             drop(name_table);
-            drop(arena);
             return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
         };
         drop(name_table);
-        drop(arena);
 
         let is_this_error = self.builder.ins().icmp_imm(IntCC::Equal, tag, error_tag);
 

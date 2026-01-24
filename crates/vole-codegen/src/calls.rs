@@ -117,7 +117,6 @@ impl Cg<'_, '_, '_> {
             let arena = self.arena();
             if let Some(variants) = arena.unwrap_union(val.type_id) {
                 let variants_vec: Vec<TypeId> = variants.to_vec();
-                drop(arena);
                 return self.optional_to_string_by_id(val.value, &variants_vec, nil_idx);
             }
         }
@@ -175,8 +174,7 @@ impl Cg<'_, '_, '_> {
             .find(|&&v| !arena.is_nil(v))
             .copied()
             .unwrap_or(TypeId::NIL);
-        let inner_cr_type = type_id_to_cranelift(inner_type_id, &arena, self.ptr_type());
-        drop(arena);
+        let inner_cr_type = type_id_to_cranelift(inner_type_id, arena, self.ptr_type());
 
         let inner_val = self
             .builder
@@ -885,11 +883,10 @@ impl Cg<'_, '_, '_> {
         if ret != arena.void() {
             sig.returns.push(AbiParam::new(type_id_to_cranelift(
                 ret,
-                &arena,
+                arena,
                 self.ptr_type(),
             )));
         }
-        drop(arena);
 
         let sig_ref = self.builder.import_signature(sig);
 

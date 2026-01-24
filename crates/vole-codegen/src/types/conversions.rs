@@ -4,9 +4,7 @@
 
 use cranelift::prelude::*;
 use cranelift_codegen::ir::FuncRef;
-use std::cell::RefCell;
 use std::collections::HashMap;
-use std::rc::Rc;
 
 use crate::AnalyzedProgram;
 use crate::errors::CodegenError;
@@ -345,7 +343,7 @@ pub(crate) fn fallible_error_tag_with_ctx(
     fallible_error_tag_by_id(
         error_type_id,
         error_name,
-        &arena,
+        arena,
         interner,
         &name_table,
         entity_registry,
@@ -396,7 +394,7 @@ pub(crate) fn convert_to_type(
     builder: &mut FunctionBuilder,
     val: CompiledValue,
     target: Type,
-    arena: &Rc<RefCell<TypeArena>>,
+    arena: &TypeArena,
 ) -> Value {
     if val.ty == target {
         return val.value;
@@ -422,7 +420,7 @@ pub(crate) fn convert_to_type(
 
     // Integer widening - use uextend for unsigned types, sextend for signed
     if target.is_int() && val.ty.is_int() && target.bits() > val.ty.bits() {
-        if arena.borrow().is_unsigned(val.type_id) {
+        if arena.is_unsigned(val.type_id) {
             return builder.ins().uextend(target, val.value);
         } else {
             return builder.ins().sextend(target, val.value);
@@ -461,13 +459,12 @@ pub(crate) fn value_to_word(
     value: &CompiledValue,
     pointer_type: Type,
     heap_alloc_ref: Option<FuncRef>,
-    arena: &Rc<RefCell<TypeArena>>,
+    arena: &TypeArena,
     entity_registry: &EntityRegistry,
 ) -> Result<Value, String> {
     let word_type = pointer_type;
     let word_bytes = word_type.bytes();
-    let arena_ref = arena.borrow();
-    let value_size = type_id_size(value.type_id, pointer_type, entity_registry, &arena_ref);
+    let value_size = type_id_size(value.type_id, pointer_type, entity_registry, arena);
     let needs_box = value_size > word_bytes;
 
     if needs_box {
@@ -492,7 +489,7 @@ pub(crate) fn value_to_word(
     }
 
     use vole_sema::type_arena::SemaType as ArenaType;
-    let word = match arena_ref.get(value.type_id) {
+    let word = match arena.get(value.type_id) {
         ArenaType::Primitive(PrimitiveType::F64) => {
             builder
                 .ins()
@@ -565,7 +562,7 @@ pub(crate) fn word_to_value_with_ctx(
         type_id,
         type_ctx.pointer_type,
         type_ctx.entities(),
-        &arena,
+        arena,
     )
 }
 

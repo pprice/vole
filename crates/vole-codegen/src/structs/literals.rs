@@ -124,7 +124,6 @@ impl Cg<'_, '_, '_> {
                 let field_is_union = arena.is_union(field_type_id);
                 let field_is_interface = arena.is_interface(field_type_id);
                 let value_is_union = arena.is_union(value.type_id);
-                drop(arena);
 
                 if field_is_union && !value_is_union {
                     self.construct_union_heap_id(value, field_type_id)?
@@ -175,7 +174,6 @@ impl Cg<'_, '_, '_> {
                 let field_is_union = arena.is_union(field_type_id);
                 let field_is_interface = arena.is_interface(field_type_id);
                 let value_is_union = arena.is_union(value.type_id);
-                drop(arena);
 
                 if field_is_union && !value_is_union {
                     self.construct_union_heap_id(value, field_type_id)?
@@ -280,7 +278,6 @@ impl Cg<'_, '_, '_> {
         })?;
         let variants = variants.clone();
         let nil_id = arena.nil();
-        drop(arena);
 
         // If the value is already the same union type, just return it
         if value.type_id == union_type_id {

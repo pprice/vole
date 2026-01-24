@@ -28,13 +28,13 @@ impl Compiler<'_> {
         let arena = self.analyzed.type_arena();
         type_ids
             .iter()
-            .map(|&id| type_id_to_cranelift(id, &arena, self.pointer_type))
+            .map(|&id| type_id_to_cranelift(id, arena, self.pointer_type))
             .collect()
     }
 
     /// Convert a single TypeId to a Cranelift type.
     pub fn type_id_to_cranelift(&self, type_id: TypeId) -> CraneliftType {
-        type_id_to_cranelift(type_id, &self.analyzed.type_arena(), self.pointer_type)
+        type_id_to_cranelift(type_id, self.analyzed.type_arena(), self.pointer_type)
     }
 
     /// Convert a TypeId to Option<CraneliftType>, returning None for void types.
@@ -63,25 +63,20 @@ impl Compiler<'_> {
             SelfParam::None => SmallVec::new(),
             SelfParam::Pointer => smallvec![self.pointer_type],
             SelfParam::TypedId(type_id) => {
-                smallvec![type_id_to_cranelift(
-                    *type_id,
-                    &arena_ref,
-                    self.pointer_type
-                )]
+                smallvec![type_id_to_cranelift(*type_id, arena_ref, self.pointer_type)]
             }
         };
 
         // Add param types
         for &type_id in params_id {
-            cranelift_params.push(type_id_to_cranelift(type_id, &arena_ref, self.pointer_type));
+            cranelift_params.push(type_id_to_cranelift(type_id, arena_ref, self.pointer_type));
         }
 
         // Convert return type (filter out void)
         let ret = return_type_id
             .filter(|id| !id.is_void())
-            .map(|id| type_id_to_cranelift(id, &arena_ref, self.pointer_type));
+            .map(|id| type_id_to_cranelift(id, arena_ref, self.pointer_type));
 
-        drop(arena_ref);
         self.jit.create_signature(&cranelift_params, ret)
     }
 

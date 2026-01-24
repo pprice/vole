@@ -28,10 +28,10 @@ impl<'a> TypeCtx<'a> {
         }
     }
 
-    /// Convenience: borrow the type arena
+    /// Get the type arena
     #[inline]
-    pub fn arena(&self) -> std::cell::Ref<'_, TypeArena> {
-        self.query.arena().borrow()
+    pub fn arena(&self) -> &'a TypeArena {
+        self.query.arena()
     }
 
     /// Get the entity registry

@@ -35,7 +35,8 @@ pub struct ProgramQuery<'a> {
     interner: &'a Interner,
     implement_registry: &'a ImplementRegistry,
     module_programs: &'a FxHashMap<String, (Program, Interner)>,
-    type_arena: &'a Rc<RefCell<TypeArena>>,
+    /// Type arena (immutable reference)
+    type_arena: &'a TypeArena,
 }
 
 impl<'a> ProgramQuery<'a> {
@@ -47,7 +48,7 @@ impl<'a> ProgramQuery<'a> {
         interner: &'a Interner,
         implement_registry: &'a ImplementRegistry,
         module_programs: &'a FxHashMap<String, (Program, Interner)>,
-        type_arena: &'a Rc<RefCell<TypeArena>>,
+        type_arena: &'a TypeArena,
     ) -> Self {
         Self {
             registry,
@@ -457,8 +458,7 @@ impl<'a> ProgramQuery<'a> {
             .find_method_on_type(type_def_id, method_name_id)?;
         let method_def = self.registry.get_method(method_id);
         // Get return type from arena via signature_id
-        let arena = self.type_arena.borrow();
-        let (_, ret, _) = arena.unwrap_function(method_def.signature_id)?;
+        let (_, ret, _) = self.type_arena.unwrap_function(method_def.signature_id)?;
         Some(ret)
     }
 
@@ -474,8 +474,7 @@ impl<'a> ProgramQuery<'a> {
             .registry
             .find_method_on_type(type_def_id, method_name_id)?;
         let method_def = self.registry.get_method(method_id);
-        let arena = self.type_arena.borrow();
-        let (_, ret, _) = arena.unwrap_function(method_def.signature_id)?;
+        let (_, ret, _) = self.type_arena.unwrap_function(method_def.signature_id)?;
         Some(ret)
     }
 
@@ -490,8 +489,7 @@ impl<'a> ProgramQuery<'a> {
             .registry
             .find_static_method_on_type(type_def_id, method_name_id)?;
         let method_def = self.registry.get_method(method_id);
-        let arena = self.type_arena.borrow();
-        let (_, ret, _) = arena.unwrap_function(method_def.signature_id)?;
+        let (_, ret, _) = self.type_arena.unwrap_function(method_def.signature_id)?;
         Some(ret)
     }
 
@@ -596,7 +594,7 @@ impl<'a> ProgramQuery<'a> {
     }
 
     /// Get the type arena for direct type queries
-    pub fn arena(&self) -> &'a Rc<RefCell<TypeArena>> {
+    pub fn arena(&self) -> &'a TypeArena {
         self.type_arena
     }
 

@@ -7,7 +7,6 @@
 use rustc_hash::FxHashMap;
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::rc::Rc;
 
 use vole_identity::{ModuleId, NameId};
 use vole_sema::type_arena::{TypeArena, TypeId};
@@ -74,7 +73,7 @@ impl<'a> FunctionCtx<'a> {
     /// Uses expect_substitute for read-only lookup since sema pre-computes all
     /// substituted types when creating MonomorphInstance.
     /// Uses a cache to avoid repeated HashMap conversion.
-    pub fn substitute_type_id(&self, ty: TypeId, arena: &Rc<RefCell<TypeArena>>) -> TypeId {
+    pub fn substitute_type_id(&self, ty: TypeId, arena: &TypeArena) -> TypeId {
         if let Some(substitutions) = self.substitutions {
             // Check cache first
             if let Some(&cached) = self.substitution_cache.borrow().get(&ty) {
@@ -83,9 +82,7 @@ impl<'a> FunctionCtx<'a> {
             // Convert std HashMap to FxHashMap for arena compatibility
             let subs: FxHashMap<NameId, TypeId> =
                 substitutions.iter().map(|(&k, &v)| (k, v)).collect();
-            let arena_ref = arena.borrow();
-            let result = arena_ref.expect_substitute(ty, &subs, "FunctionCtx::substitute_type_id");
-            drop(arena_ref);
+            let result = arena.expect_substitute(ty, &subs, "FunctionCtx::substitute_type_id");
             // Cache the result
             self.substitution_cache.borrow_mut().insert(ty, result);
             result

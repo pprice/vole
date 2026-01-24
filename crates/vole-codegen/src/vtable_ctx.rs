@@ -3,8 +3,7 @@
 // Trait for vtable compilation context.
 // Provides unified interface for vtable operations.
 
-use std::cell::{Ref, RefCell};
-use std::rc::Rc;
+use std::cell::RefCell;
 
 use std::collections::HashMap;
 
@@ -29,11 +28,8 @@ pub trait VtableCtx {
     /// Get the analyzed program reference
     fn analyzed(&self) -> &AnalyzedProgram;
 
-    /// Borrow the type arena
-    fn arena(&self) -> Ref<'_, TypeArena>;
-
-    /// Get arena Rc for functions that need ownership
-    fn arena_rc(&self) -> &Rc<RefCell<TypeArena>>;
+    /// Get the type arena
+    fn arena(&self) -> &TypeArena;
 
     /// Get the entity registry
     fn registry(&self) -> &EntityRegistry;
@@ -89,12 +85,8 @@ impl<'a, 'ctx> VtableCtx for VtableCtxView<'a, 'ctx> {
         self.env.analyzed
     }
 
-    fn arena(&self) -> Ref<'_, TypeArena> {
+    fn arena(&self) -> &TypeArena {
         self.env.analyzed.type_arena()
-    }
-
-    fn arena_rc(&self) -> &Rc<RefCell<TypeArena>> {
-        self.env.analyzed.type_arena_ref()
     }
 
     fn registry(&self) -> &EntityRegistry {

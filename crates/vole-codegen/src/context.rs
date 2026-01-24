@@ -201,12 +201,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         super::types::TypeCtx::new(self.env.analyzed.query(), self.codegen_ctx.ptr_type())
     }
 
-    /// Get arena Rc
-    #[inline]
-    pub fn arena_rc(&self) -> &std::rc::Rc<RefCell<vole_sema::type_arena::TypeArena>> {
-        self.env.analyzed.type_arena_ref()
-    }
-
     /// Substitute type parameters using current substitutions
     ///
     /// Uses expect_substitute for read-only lookup since sema pre-computes all
@@ -223,7 +217,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 substitutions.iter().map(|(&k, &v)| (k, v)).collect();
             let arena = self.env.analyzed.type_arena();
             let result = arena.expect_substitute(ty, &subs, "Cg::substitute_type");
-            drop(arena);
             // Cache the result
             self.substitution_cache.borrow_mut().insert(ty, result);
             result
@@ -277,9 +270,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.env.analyzed.query()
     }
 
-    /// Borrow the type arena
+    /// Get the type arena
     #[inline]
-    pub fn arena(&self) -> std::cell::Ref<'_, vole_sema::type_arena::TypeArena> {
+    pub fn arena(&self) -> &vole_sema::type_arena::TypeArena {
         self.env.analyzed.type_arena()
     }
 
@@ -449,7 +442,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Convert a TypeId to a Cranelift type
     pub fn cranelift_type(&self, ty: TypeId) -> Type {
-        type_id_to_cranelift(ty, &self.arena(), self.ptr_type())
+        type_id_to_cranelift(ty, self.arena(), self.ptr_type())
     }
 
     /// Convert a slice of TypeIds to Cranelift types
@@ -457,13 +450,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let arena = self.arena();
         type_ids
             .iter()
-            .map(|&ty| type_id_to_cranelift(ty, &arena, self.ptr_type()))
+            .map(|&ty| type_id_to_cranelift(ty, arena, self.ptr_type()))
             .collect()
     }
 
     /// Get the size (in bits) of a TypeId
     pub fn type_size(&self, ty: TypeId) -> u32 {
-        type_id_size(ty, self.ptr_type(), self.query().registry(), &self.arena())
+        type_id_size(ty, self.ptr_type(), self.query().registry(), self.arena())
     }
 
     /// Unwrap an interface type, returning the TypeDefId if it is one
@@ -654,12 +647,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let arena = self.arena();
         let (ty, value) = match arena.get(type_id) {
             ArenaType::Primitive(PrimitiveType::F32) => {
-                drop(arena);
                 let v = self.builder.ins().f32const(n as f32);
                 (types::F32, v)
             }
             _ => {
-                drop(arena);
                 // Default to F64
                 let v = self.builder.ins().f64const(n);
                 (types::F64, v)
@@ -728,8 +719,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Use env.analyzed.type_arena() to avoid borrow conflict with builder
         let arena = self.env.analyzed.type_arena();
         let (value, ty) =
-            super::structs::convert_field_value_id(self.builder, raw_value, type_id, &arena);
-        drop(arena);
+            super::structs::convert_field_value_id(self.builder, raw_value, type_id, arena);
         CompiledValue { value, ty, type_id }
     }
 
@@ -869,8 +859,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             Ok(self.void_value())
         } else {
             let arena = self.arena();
-            let cranelift_ty = type_id_to_cranelift(return_type_id, &arena, ptr_type);
-            drop(arena);
+            let cranelift_ty = type_id_to_cranelift(return_type_id, arena, ptr_type);
             Ok(CompiledValue {
                 value: results[0],
                 ty: cranelift_ty,
@@ -1000,14 +989,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 // Generic class methods expect i64 for TypeParam, convert if needed
                 let arg_value = if is_generic_class && compiled.ty != types::I64 {
                     let ptr_type = self.ptr_type();
-                    let arena_rc = self.arena_rc().clone();
-                    let registry = self.registry();
+                    let arena = self.env.analyzed.type_arena();
+                    let registry = self.env.analyzed.entity_registry();
                     value_to_word(
                         self.builder,
                         &compiled,
                         ptr_type,
                         None, // No heap alloc needed for primitive conversions
-                        &arena_rc,
+                        arena,
                         registry,
                     )?
                 } else {
@@ -1026,12 +1015,8 @@ impl<'a, 'b, 'ctx> crate::vtable_ctx::VtableCtx for Cg<'a, 'b, 'ctx> {
         self.env.analyzed
     }
 
-    fn arena(&self) -> std::cell::Ref<'_, vole_sema::type_arena::TypeArena> {
+    fn arena(&self) -> &vole_sema::type_arena::TypeArena {
         self.env.analyzed.type_arena()
-    }
-
-    fn arena_rc(&self) -> &std::rc::Rc<RefCell<vole_sema::type_arena::TypeArena>> {
-        self.env.analyzed.type_arena_ref()
     }
 
     fn registry(&self) -> &vole_sema::EntityRegistry {

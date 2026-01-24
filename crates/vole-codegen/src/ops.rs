@@ -64,10 +64,8 @@ impl Cg<'_, '_, '_> {
     /// Returns the resulting string value.
     fn call_to_string(&mut self, val: &CompiledValue) -> Result<Value, String> {
         let arena = self.arena();
-        let impl_type_id =
-            ImplTypeId::from_type_id(val.type_id, &arena, self.query().registry())
-                .ok_or_else(|| format!("Cannot find ImplTypeId for type_id {:?}", val.type_id))?;
-        drop(arena);
+        let impl_type_id = ImplTypeId::from_type_id(val.type_id, arena, self.query().registry())
+            .ok_or_else(|| format!("Cannot find ImplTypeId for type_id {:?}", val.type_id))?;
 
         // Look up to_string method via query
         let method_id = self.query().method_name_id_by_str("to_string");
@@ -201,7 +199,6 @@ impl Cg<'_, '_, '_> {
                 && (inner_type_id == right.type_id
                     || (arena.is_integer(inner_type_id) && arena.is_integer(right.type_id)))
             {
-                drop(arena);
                 return self.optional_value_compare(left, right, op);
             }
             // Check if right is optional and left is a compatible value type (using TypeId)
@@ -209,10 +206,8 @@ impl Cg<'_, '_, '_> {
                 && (inner_type_id == left.type_id
                     || (arena.is_integer(inner_type_id) && arena.is_integer(left.type_id)))
             {
-                drop(arena);
                 return self.optional_value_compare(right, left, op);
             }
-            drop(arena);
         }
 
         // Determine result type - original behavior: use left's type for integers
@@ -228,10 +223,10 @@ impl Cg<'_, '_, '_> {
         let left_type_id = left.type_id;
         let left_is_string = left_type_id == TypeId::STRING;
 
-        // Convert operands - get arena_rc first to avoid borrow conflict
-        let arena_rc = self.arena_rc().clone();
-        let left_val = convert_to_type(self.builder, left, result_ty, &arena_rc);
-        let right_val = convert_to_type(self.builder, right, result_ty, &arena_rc);
+        // Convert operands - access arena via env to avoid borrow conflict
+        let arena = self.env.analyzed.type_arena();
+        let left_val = convert_to_type(self.builder, left, result_ty, arena);
+        let right_val = convert_to_type(self.builder, right, result_ty, arena);
 
         let result = match op {
             BinaryOp::Add => {
@@ -555,7 +550,7 @@ impl Cg<'_, '_, '_> {
         // Compute tag before using builder to avoid borrow conflict
         let tag = {
             let arena = self.arena();
-            array_element_tag_id(elem_type_id, &arena)
+            array_element_tag_id(elem_type_id, arena)
         };
         let tag_val = self.builder.ins().iconst(types::I64, tag);
 

@@ -74,20 +74,24 @@ impl Default for CompilationDb {
 }
 
 /// Parts extracted from CompilationDb for codegen use.
-/// Types and names are wrapped in Rc<RefCell<>> for shared mutable access.
+/// TypeArena is owned directly (immutable during codegen).
+/// NameTable remains in Rc<RefCell<>> for function name interning.
 pub struct CodegenDb {
-    pub types: std::rc::Rc<std::cell::RefCell<TypeArena>>,
+    /// Type arena - immutable during codegen
+    pub types: TypeArena,
     pub entities: EntityRegistry,
     pub implements: ImplementRegistry,
+    /// Names still need mutation for function name interning
     pub names: std::rc::Rc<std::cell::RefCell<NameTable>>,
 }
 
 impl CompilationDb {
     /// Convert to a form suitable for codegen.
-    /// Types and names are wrapped in Rc<RefCell<>> for shared mutable access.
+    /// TypeArena is moved directly (immutable during codegen).
+    /// NameTable wrapped in Rc<RefCell<>> for function name interning.
     pub fn into_codegen(self) -> CodegenDb {
         CodegenDb {
-            types: std::rc::Rc::new(std::cell::RefCell::new(self.types)),
+            types: self.types,
             entities: self.entities,
             implements: self.implements,
             names: std::rc::Rc::new(std::cell::RefCell::new(self.names)),

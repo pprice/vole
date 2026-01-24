@@ -296,11 +296,10 @@ impl Cg<'_, '_, '_> {
         } else {
             // Fallback path for monomorphized context: derive type_def_id from object type
             let arena = self.arena();
-            let type_def_id = get_type_def_id_from_type_id(obj.type_id, &arena, self.analyzed())
+            let type_def_id = get_type_def_id_from_type_id(obj.type_id, arena, self.analyzed())
                 .ok_or_else(|| {
                     format!("Cannot get TypeDefId for method {} lookup", method_name_str)
                 })?;
-            drop(arena);
 
             // Check for external method binding first (interface methods on primitives)
             if let Some(binding) = self
@@ -415,14 +414,14 @@ impl Cg<'_, '_, '_> {
                 // Generic class methods expect i64 for TypeParam, convert if needed
                 let arg_value = if is_generic_class && compiled.ty != types::I64 {
                     let ptr_type = self.ptr_type();
-                    let arena_rc = self.arena_rc().clone();
-                    let registry = self.registry();
+                    let arena = self.env.analyzed.type_arena();
+                    let registry = self.env.analyzed.entity_registry();
                     value_to_word(
                         self.builder,
                         &compiled,
                         ptr_type,
                         None, // No heap alloc needed for primitive conversions
-                        &arena_rc,
+                        arena,
                         registry,
                     )?
                 } else {
@@ -436,14 +435,14 @@ impl Cg<'_, '_, '_> {
                 // Generic class methods expect i64 for TypeParam, convert if needed
                 let arg_value = if is_generic_class && compiled.ty != types::I64 {
                     let ptr_type = self.ptr_type();
-                    let arena_rc = self.arena_rc().clone();
-                    let registry = self.registry();
+                    let arena = self.env.analyzed.type_arena();
+                    let registry = self.env.analyzed.entity_registry();
                     value_to_word(
                         self.builder,
                         &compiled,
                         ptr_type,
                         None, // No heap alloc needed for primitive conversions
-                        &arena_rc,
+                        arena,
                         registry,
                     )?
                 } else {
@@ -489,16 +488,14 @@ impl Cg<'_, '_, '_> {
                 let ptr_type = self.ptr_type();
                 let registry = self.registry();
                 let arena = self.env.analyzed.type_arena();
-                let converted = word_to_value_type_id(
+                word_to_value_type_id(
                     self.builder,
                     actual_result,
                     return_type_id,
                     ptr_type,
                     registry,
-                    &arena,
-                );
-                drop(arena);
-                converted
+                    arena,
+                )
             } else {
                 actual_result
             };
@@ -580,7 +577,6 @@ impl Cg<'_, '_, '_> {
 
         // Array methods
         if let Some(_elem_type_id) = arena.unwrap_array(obj.type_id) {
-            drop(arena);
             return match method_name {
                 "length" => {
                     let result = self.call_runtime(RuntimeFn::ArrayLen, &[obj.value])?;
@@ -603,7 +599,6 @@ impl Cg<'_, '_, '_> {
 
         // String methods
         if arena.is_string(obj.type_id) {
-            drop(arena);
             return match method_name {
                 "length" => {
                     let result = self.call_runtime(RuntimeFn::StringLen, &[obj.value])?;
@@ -629,7 +624,6 @@ impl Cg<'_, '_, '_> {
             arena.get(obj.type_id),
             vole_sema::type_arena::SemaType::Range
         ) {
-            drop(arena);
             if method_name == "iter" {
                 // Load start and end from the range struct (pointer to [start, end])
                 let start = self
@@ -653,7 +647,6 @@ impl Cg<'_, '_, '_> {
             return Ok(None);
         }
 
-        drop(arena);
         Ok(None)
     }
 
@@ -788,7 +781,7 @@ impl Cg<'_, '_, '_> {
             for param_id in param_ids.iter() {
                 sig.params.push(AbiParam::new(type_id_to_cranelift(
                     *param_id,
-                    &self.arena(),
+                    self.arena(),
                     self.ptr_type(),
                 )));
             }
@@ -796,7 +789,7 @@ impl Cg<'_, '_, '_> {
             if !is_void_return {
                 sig.returns.push(AbiParam::new(type_id_to_cranelift(
                     return_type_id,
-                    &self.arena(),
+                    self.arena(),
                     self.ptr_type(),
                 )));
             }
@@ -819,7 +812,7 @@ impl Cg<'_, '_, '_> {
             for param_id in param_ids.iter() {
                 sig.params.push(AbiParam::new(type_id_to_cranelift(
                     *param_id,
-                    &self.arena(),
+                    self.arena(),
                     self.ptr_type(),
                 )));
             }
@@ -827,7 +820,7 @@ impl Cg<'_, '_, '_> {
             if !is_void_return {
                 sig.returns.push(AbiParam::new(type_id_to_cranelift(
                     return_type_id,
-                    &self.arena(),
+                    self.arena(),
                     self.ptr_type(),
                 )));
             }
@@ -927,14 +920,14 @@ impl Cg<'_, '_, '_> {
         let mut call_args: ArgVec = smallvec![obj.value];
         for arg in args {
             let compiled = self.expr(arg)?;
-            let arena_rc = self.arena_rc().clone();
-            let registry = self.registry();
+            let arena = self.env.analyzed.type_arena();
+            let registry = self.env.analyzed.entity_registry();
             let word = value_to_word(
                 self.builder,
                 &compiled,
                 word_type,
                 Some(heap_alloc_ref),
-                &arena_rc,
+                arena,
                 registry,
             )?;
             call_args.push(word);
@@ -962,9 +955,8 @@ impl Cg<'_, '_, '_> {
             return_type_id,
             word_type,
             registry,
-            &arena,
+            arena,
         );
-        drop(arena);
 
         // Convert Iterator return types to RuntimeIterator for interface dispatch
         // since external iterator methods return raw iterator pointers, not boxed interfaces

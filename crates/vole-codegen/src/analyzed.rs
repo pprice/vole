@@ -50,7 +50,7 @@ impl AnalyzedProgram {
             &self.interner,
             self.implement_registry(),
             &self.module_programs,
-            self.type_arena_ref(),
+            self.type_arena(),
         )
     }
 
@@ -75,22 +75,7 @@ impl AnalyzedProgram {
     }
 
     /// Get read-only access to the type arena
-    pub fn type_arena(&self) -> std::cell::Ref<'_, TypeArena> {
-        self.db.types.borrow()
-    }
-
-    /// Get mutable access to the type arena
-    pub fn type_arena_mut(&self) -> std::cell::RefMut<'_, TypeArena> {
-        self.db.types.borrow_mut()
-    }
-
-    /// Get a shared reference to the type arena Rc (cloned)
-    pub fn type_arena_rc(&self) -> Rc<RefCell<TypeArena>> {
-        Rc::clone(self.type_arena_ref())
-    }
-
-    /// Get a reference to the type arena Rc (borrowed, no clone)
-    pub fn type_arena_ref(&self) -> &Rc<RefCell<TypeArena>> {
+    pub fn type_arena(&self) -> &TypeArena {
         &self.db.types
     }
 

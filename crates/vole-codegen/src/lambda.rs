@@ -196,7 +196,7 @@ impl Cg<'_, '_, '_> {
         self.funcs().set_func_id(func_key, func_id);
         self.funcs().set_return_type(func_key, return_type_id);
 
-        let capture_bindings = build_capture_bindings(&captures, &self.vars, &self.arena());
+        let capture_bindings = build_capture_bindings(&captures, &self.vars, self.arena());
 
         let mut lambda_ctx = self.jit_module().make_context();
         lambda_ctx.func.signature = sig.clone();

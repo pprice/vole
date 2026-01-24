@@ -123,7 +123,7 @@ impl Compiler<'_> {
             field_slots.insert(field_name, field_slot);
             field_type_tags.push(type_id_to_field_tag(
                 field_type_id,
-                &self.analyzed.type_arena(),
+                self.analyzed.type_arena(),
             ));
         }
 
@@ -316,7 +316,7 @@ impl Compiler<'_> {
             field_slots.insert(field_name, field_slot);
             field_type_tags.push(type_id_to_field_tag(
                 field_type_id,
-                &self.analyzed.type_arena(),
+                self.analyzed.type_arena(),
             ));
         }
 
@@ -531,7 +531,7 @@ impl Compiler<'_> {
             field_slots.insert(field_name, field_slot);
             field_type_tags.push(type_id_to_field_tag(
                 field_type_id,
-                &self.analyzed.type_arena(),
+                self.analyzed.type_arena(),
             ));
         }
 

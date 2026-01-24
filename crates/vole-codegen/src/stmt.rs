@@ -109,7 +109,6 @@ impl Cg<'_, '_, '_> {
                     let is_declared_f32 = declared_type_id == arena.f32();
                     let is_declared_f64 = declared_type_id == arena.f64();
                     let is_declared_interface = arena.is_interface(declared_type_id);
-                    drop(arena);
 
                     if is_declared_union && !self.arena().is_union(init.type_id) {
                         let wrapped = self.construct_union_id(init, declared_type_id)?;
@@ -117,8 +116,7 @@ impl Cg<'_, '_, '_> {
                     } else if is_declared_integer && init.type_id.is_integer() {
                         let arena = self.arena();
                         let declared_cty =
-                            type_id_to_cranelift(declared_type_id, &arena, self.ptr_type());
-                        drop(arena);
+                            type_id_to_cranelift(declared_type_id, arena, self.ptr_type());
                         let init_cty = init.ty;
                         if declared_cty.bits() < init_cty.bits() {
                             let narrowed = self.builder.ins().ireduce(declared_cty, init.value);
@@ -153,13 +151,11 @@ impl Cg<'_, '_, '_> {
                     let arena = self.arena();
                     let is_declared_interface = arena.is_interface(declared_type_id);
                     let is_final_interface = arena.is_interface(final_type_id);
-                    drop(arena);
 
                     if is_declared_interface && !is_final_interface {
                         let arena = self.arena();
                         let cranelift_ty =
-                            type_id_to_cranelift(final_type_id, &arena, self.ptr_type());
-                        drop(arena);
+                            type_id_to_cranelift(final_type_id, arena, self.ptr_type());
                         let boxed = self.box_interface_value(
                             CompiledValue {
                                 value: final_value,
@@ -610,7 +606,6 @@ impl Cg<'_, '_, '_> {
         })?;
         let variants = variants.clone();
         let nil_id = arena.nil();
-        drop(arena);
 
         // If the value is already the same union type, just return it
         if value.type_id == union_type_id {
@@ -635,7 +630,6 @@ impl Cg<'_, '_, '_> {
                 } else {
                     None
                 };
-                drop(arena);
 
                 match compatible {
                     Some((pos, variant_type_id)) => {
@@ -701,12 +695,11 @@ impl Cg<'_, '_, '_> {
 
                 // Try tuple first
                 if let Some(elem_type_ids) = arena.unwrap_tuple(ty_id).cloned() {
-                    drop(arena);
                     let (_, offsets) = tuple_layout_id(
                         &elem_type_ids,
                         self.ptr_type(),
                         self.query().registry(),
-                        &self.arena(),
+                        self.arena(),
                     );
                     for (i, elem_pattern) in elements.iter().enumerate() {
                         let offset = offsets[i];
@@ -720,7 +713,6 @@ impl Cg<'_, '_, '_> {
                     }
                 // Try fixed array
                 } else if let Some((element_id, _)) = arena.unwrap_fixed_array(ty_id) {
-                    drop(arena);
                     let elem_cr_type = self.cranelift_type(element_id);
                     let elem_size = self.type_size(element_id).div_ceil(8) * 8;
                     for (i, elem_pattern) in elements.iter().enumerate() {
@@ -731,8 +723,6 @@ impl Cg<'_, '_, '_> {
                                 .load(elem_cr_type, MemFlags::new(), value, offset);
                         self.compile_destructure_pattern(elem_pattern, elem_value, element_id)?;
                     }
-                } else {
-                    drop(arena);
                 }
             }
             PatternKind::Record { fields, .. } => {
@@ -785,7 +775,7 @@ impl Cg<'_, '_, '_> {
         let error_tag = fallible_error_tag_by_id(
             error_type_id,
             raise_stmt.error_name,
-            &self.arena(),
+            self.arena(),
             self.interner(),
             &self.name_table(),
             self.query().registry(),
@@ -842,7 +832,6 @@ impl Cg<'_, '_, '_> {
             )
         })?;
         drop(name_table);
-        drop(arena);
 
         // Get fields from EntityRegistry
         let error_fields: Vec<_> = self

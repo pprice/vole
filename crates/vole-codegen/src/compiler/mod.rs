@@ -145,7 +145,7 @@ impl<'a> Compiler<'a> {
     fn impl_type_id_from_type_id(&self, ty: TypeId) -> Option<ImplTypeId> {
         ImplTypeId::from_type_id(
             ty,
-            &self.analyzed.type_arena(),
+            self.analyzed.type_arena(),
             self.analyzed.entity_registry(),
         )
     }

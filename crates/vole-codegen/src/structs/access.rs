@@ -41,7 +41,6 @@ impl Cg<'_, '_, '_> {
                 let f64_id = arena.f64();
                 let i64_id = arena.i64();
                 let bool_id = arena.bool();
-                drop(arena);
                 return match const_val {
                     ConstantValue::F64(v) => {
                         let val = self.builder.ins().f64const(v);
@@ -157,7 +156,7 @@ impl Cg<'_, '_, '_> {
 
         let cranelift_type = {
             let arena = self.arena();
-            crate::types::type_id_to_cranelift(result_type_id, &arena, self.ptr_type())
+            crate::types::type_id_to_cranelift(result_type_id, arena, self.ptr_type())
         };
         self.builder.append_block_param(merge_block, cranelift_type);
 
@@ -179,7 +178,7 @@ impl Cg<'_, '_, '_> {
         // Load the actual object from the union payload (offset 8)
         let inner_cranelift_type = {
             let arena = self.arena();
-            crate::types::type_id_to_cranelift(inner_type_id, &arena, self.ptr_type())
+            crate::types::type_id_to_cranelift(inner_type_id, arena, self.ptr_type())
         };
         let inner_obj =
             self.builder

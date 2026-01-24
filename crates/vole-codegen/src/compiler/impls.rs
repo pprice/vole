@@ -872,7 +872,7 @@ impl Compiler<'_> {
 
         // Get the Cranelift type for self (using TypeId)
         let self_cranelift_type =
-            type_id_to_cranelift(self_type_id, &self.analyzed.type_arena(), self.pointer_type);
+            type_id_to_cranelift(self_type_id, self.analyzed.type_arena(), self.pointer_type);
 
         // Build params: Vec<(Symbol, TypeId, Type)>
         // Get param TypeIds from the method signature and pair with AST param names
@@ -887,7 +887,7 @@ impl Compiler<'_> {
                 .iter()
                 .zip(param_type_ids.iter())
                 .map(|(param, &type_id)| {
-                    let cranelift_type = type_id_to_cranelift(type_id, &arena, self.pointer_type);
+                    let cranelift_type = type_id_to_cranelift(type_id, arena, self.pointer_type);
                     (param.name, type_id, cranelift_type)
                 })
                 .collect()
@@ -1004,7 +1004,7 @@ impl Compiler<'_> {
                 .zip(param_type_ids.iter())
                 .map(|(param, &type_id)| {
                     let cranelift_type =
-                        type_id_to_cranelift(type_id, &arena_ref, self.pointer_type);
+                        type_id_to_cranelift(type_id, arena_ref, self.pointer_type);
                     (param.name, type_id, cranelift_type)
                 })
                 .collect()

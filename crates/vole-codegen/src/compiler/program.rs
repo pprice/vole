@@ -496,7 +496,7 @@ impl Compiler<'_> {
                 .zip(param_type_ids.iter())
                 .map(|(p, &type_id)| {
                     let cranelift_type =
-                        type_id_to_cranelift(type_id, &arena_ref, self.pointer_type);
+                        type_id_to_cranelift(type_id, arena_ref, self.pointer_type);
                     (p.name, type_id, cranelift_type)
                 })
                 .collect()
@@ -574,7 +574,7 @@ impl Compiler<'_> {
                 .zip(param_type_ids.iter())
                 .map(|(p, &type_id)| {
                     let cranelift_type =
-                        type_id_to_cranelift(type_id, &arena_ref, self.pointer_type);
+                        type_id_to_cranelift(type_id, arena_ref, self.pointer_type);
                     (p.name, type_id, cranelift_type)
                 })
                 .collect()
@@ -646,7 +646,7 @@ impl Compiler<'_> {
 
         let return_type = type_id_to_cranelift(
             return_type_id,
-            &self.analyzed.type_arena(),
+            self.analyzed.type_arena(),
             self.pointer_type,
         );
 

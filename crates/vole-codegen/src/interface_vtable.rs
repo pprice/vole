@@ -110,7 +110,7 @@ impl InterfaceVtableRegistry {
                 InterfaceConcreteType::Function { is_closure }
             } else {
                 let impl_type_id =
-                    ImplTypeId::from_type_id(concrete_type_id, &arena, ctx.registry()).ok_or_else(
+                    ImplTypeId::from_type_id(concrete_type_id, arena, ctx.registry()).ok_or_else(
                         || {
                             format!(
                                 "cannot build vtable for unsupported type {:?}",
@@ -216,7 +216,7 @@ impl InterfaceVtableRegistry {
                 InterfaceConcreteType::Function { is_closure }
             } else {
                 let impl_type_id =
-                    ImplTypeId::from_type_id(concrete_type_id, &arena, ctx.registry()).ok_or_else(
+                    ImplTypeId::from_type_id(concrete_type_id, arena, ctx.registry()).ok_or_else(
                         || {
                             format!(
                                 "cannot build vtable for unsupported type {:?}",
@@ -393,15 +393,14 @@ impl InterfaceVtableRegistry {
                     &mut builder,
                     &CompiledValue {
                         value: result,
-                        ty: type_id_to_cranelift(method.return_type_id, &arena, ctx.ptr_type()),
+                        ty: type_id_to_cranelift(method.return_type_id, arena, ctx.ptr_type()),
                         type_id: method.return_type_id,
                     },
                     ctx.ptr_type(),
                     Some(heap_alloc_ref),
-                    ctx.arena_rc(),
+                    ctx.arena(),
                     ctx.registry(),
                 )?;
-                drop(arena);
                 builder.ins().return_(&[word]);
             }
 
@@ -442,7 +441,7 @@ fn compile_function_wrapper<C: VtableCtx>(
         concrete_type_id,
         ctx.ptr_type(),
         ctx.registry(),
-        &ctx.arena(),
+        ctx.arena(),
     );
     let mut args = Vec::with_capacity(param_type_ids.len() + 1);
     for (param_word, &param_ty_id) in params[1..].iter().zip(param_type_ids.iter()) {
@@ -452,7 +451,7 @@ fn compile_function_wrapper<C: VtableCtx>(
             param_ty_id,
             ctx.ptr_type(),
             ctx.registry(),
-            &ctx.arena(),
+            ctx.arena(),
         ));
     }
 
@@ -476,24 +475,23 @@ fn compile_function_wrapper<C: VtableCtx>(
         let arena = ctx.arena();
         sig.params.push(AbiParam::new(type_id_to_cranelift(
             concrete_type_id,
-            &arena,
+            arena,
             ctx.ptr_type(),
         )));
         for &param_type_id in param_type_ids.iter() {
             sig.params.push(AbiParam::new(type_id_to_cranelift(
                 param_type_id,
-                &arena,
+                arena,
                 ctx.ptr_type(),
             )));
         }
         if ret_type_id != void_id {
             sig.returns.push(AbiParam::new(type_id_to_cranelift(
                 ret_type_id,
-                &arena,
+                arena,
                 ctx.ptr_type(),
             )));
         }
-        drop(arena);
 
         let mut call_args = Vec::with_capacity(args.len() + 1);
         call_args.push(self_val);
@@ -505,18 +503,17 @@ fn compile_function_wrapper<C: VtableCtx>(
         for &param_type_id in param_type_ids.iter() {
             sig.params.push(AbiParam::new(type_id_to_cranelift(
                 param_type_id,
-                &arena,
+                arena,
                 ctx.ptr_type(),
             )));
         }
         if ret_type_id != void_id {
             sig.returns.push(AbiParam::new(type_id_to_cranelift(
                 ret_type_id,
-                &arena,
+                arena,
                 ctx.ptr_type(),
             )));
         }
-        drop(arena);
         (self_val, args, sig)
     };
 
@@ -541,7 +538,7 @@ fn compile_method_wrapper<C: VtableCtx>(
         concrete_type_id,
         ctx.ptr_type(),
         ctx.registry(),
-        &ctx.arena(),
+        ctx.arena(),
     );
     let mut call_args = Vec::with_capacity(1 + param_type_ids.len());
     call_args.push(self_val);
@@ -552,7 +549,7 @@ fn compile_method_wrapper<C: VtableCtx>(
             param_ty_id,
             ctx.ptr_type(),
             ctx.registry(),
-            &ctx.arena(),
+            ctx.arena(),
         ));
     }
     let func_id = ctx
@@ -606,7 +603,7 @@ fn compile_external_wrapper<C: VtableCtx>(
             concrete_type_id,
             ctx.ptr_type(),
             ctx.registry(),
-            &ctx.arena(),
+            ctx.arena(),
         )
     };
 
@@ -619,7 +616,7 @@ fn compile_external_wrapper<C: VtableCtx>(
             param_ty_id,
             ctx.ptr_type(),
             ctx.registry(),
-            &ctx.arena(),
+            ctx.arena(),
         ));
     }
 
@@ -646,14 +643,14 @@ fn compile_external_wrapper<C: VtableCtx>(
     let self_param_type = if interface_name == "Iterator" {
         ctx.ptr_type()
     } else {
-        type_id_to_cranelift(concrete_type_id, &arena, ctx.ptr_type())
+        type_id_to_cranelift(concrete_type_id, arena, ctx.ptr_type())
     };
     native_sig.params.push(AbiParam::new(self_param_type));
     // Use type_id_to_cranelift for param types (handles Invalid gracefully via fallback)
     for &param_type_id in param_type_ids.iter() {
         native_sig.params.push(AbiParam::new(type_id_to_cranelift(
             param_type_id,
-            &arena,
+            arena,
             ctx.ptr_type(),
         )));
     }
@@ -662,11 +659,10 @@ fn compile_external_wrapper<C: VtableCtx>(
     if return_type_id != void_id {
         native_sig.returns.push(AbiParam::new(type_id_to_cranelift(
             return_type_id,
-            &arena,
+            arena,
             ctx.ptr_type(),
         )));
     }
-    drop(arena);
 
     let sig_ref = builder.import_signature(native_sig);
     let func_ptr_val = builder.ins().iconst(ctx.ptr_type(), native_func_ptr as i64);
@@ -829,7 +825,7 @@ pub(crate) fn box_interface_value_id<'a, 'ctx>(
         &value,
         ctx_view.ptr_type(),
         Some(heap_alloc_ref),
-        ctx_view.arena_rc(),
+        ctx_view.arena(),
         ctx_view.registry(),
     )?;
 
@@ -916,7 +912,7 @@ fn resolve_vtable_target<C: VtableCtx>(
         });
     }
 
-    let impl_type_id = ImplTypeId::from_type_id(concrete_type_id, &ctx.arena(), ctx.registry())
+    let impl_type_id = ImplTypeId::from_type_id(concrete_type_id, ctx.arena(), ctx.registry())
         .ok_or_else(|| {
             format!(
                 "cannot resolve interface method {} on type {:?}",
@@ -976,14 +972,13 @@ fn resolve_vtable_target<C: VtableCtx>(
             .unwrap_class(concrete_type_id)
             .map(|(id, _)| id)
             .or_else(|| arena.unwrap_record(concrete_type_id).map(|(id, _)| id))?;
-        drop(arena);
 
         let type_name_id = ctx.query().get_type(type_def_id).name_id;
         let meta = type_metadata_by_name_id(
             ctx.type_metadata(),
             type_name_id,
             ctx.registry(),
-            &ctx.arena(),
+            ctx.arena(),
         )?;
         let method_info = meta.method_infos.get(&method_name_id).copied()?;
 
