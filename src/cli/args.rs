@@ -40,7 +40,7 @@ pub struct Cli {
     pub color: ColorMode,
 
     /// Optimize for faster execution (disables verification, enables optimizations)
-    #[arg(long, global = true)]
+    #[arg(long, global = true, hide = true)]
     pub release: bool,
 
     #[command(subcommand)]
