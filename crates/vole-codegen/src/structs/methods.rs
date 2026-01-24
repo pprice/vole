@@ -58,11 +58,25 @@ impl Cg<'_, '_, '_> {
             return self.static_method_call(*type_def_id, *method_id, *func_type_id, mc, expr_id);
         }
 
+        // Look up method resolution early to get concrete_return_hint for builtin methods.
+        // In monomorphized context, skip sema resolution because it was computed for the type parameter,
+        // not the concrete type.
+        let resolution = if self.substitutions.is_some() {
+            None
+        } else {
+            self.analyzed()
+                .query()
+                .method_at_in_module(expr_id, current_module_path.as_deref())
+        };
+
+        // Extract concrete_return_hint for builtin iterator methods (array.iter, string.iter, range.iter)
+        let concrete_return_hint = resolution.and_then(|r| r.concrete_return_hint());
+
         // Handle range.iter() specially since range expressions can't be compiled to values directly
         if let ExprKind::Range(range) = &mc.object.kind {
             let method_name = self.interner().resolve(mc.method);
             if method_name == "iter" {
-                return self.range_iter(range);
+                return self.range_iter(range, concrete_return_hint);
             }
         }
 
@@ -137,8 +151,8 @@ impl Cg<'_, '_, '_> {
             }
         }
 
-        // Handle built-in methods
-        if let Some(result) = self.builtin_method(&obj, method_name_str)? {
+        // Handle built-in methods (passing concrete_return_hint for iter methods)
+        if let Some(result) = self.builtin_method(&obj, method_name_str, concrete_return_hint)? {
             return Ok(result);
         }
 
@@ -151,18 +165,7 @@ impl Cg<'_, '_, '_> {
 
         let method_name_id = self.method_name_id(mc.method);
 
-        // Look up method resolution to determine naming convention and return type
-        // If no resolution exists (e.g., inside default method bodies), fall back to type-based lookup
-        // In monomorphized context, skip sema resolution because it was computed for the type parameter,
-        // not the concrete type.
-        let resolution = if self.substitutions.is_some() {
-            None
-        } else {
-            self.analyzed()
-                .query()
-                .method_at_in_module(expr_id, current_module_path.as_deref())
-        };
-
+        // Resolution was already looked up earlier (before builtin_method call)
         tracing::debug!(
             obj_type_id = ?obj.type_id,
             method = %method_name_str,
@@ -259,9 +262,11 @@ impl Cg<'_, '_, '_> {
                         args.push(compiled.value);
                     }
                 }
-                // Convert Iterator return types to RuntimeIterator for external methods
-                let return_type_id =
-                    self.maybe_convert_iterator_return_type(resolved.return_type_id());
+                // Use concrete_return_hint if available (for iter() methods),
+                // otherwise fall back to maybe_convert_iterator_return_type for other methods
+                let return_type_id = resolved.concrete_return_hint().unwrap_or_else(|| {
+                    self.maybe_convert_iterator_return_type(resolved.return_type_id())
+                });
                 return self.call_external_id(external_info, &args, return_type_id);
             }
 
@@ -534,7 +539,12 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile range.iter() - creates a range iterator from start..end
-    fn range_iter(&mut self, range: &vole_frontend::RangeExpr) -> Result<CompiledValue, String> {
+    /// `iter_type_hint` is the pre-computed RuntimeIterator type from sema's concrete_return_hint.
+    fn range_iter(
+        &mut self,
+        range: &vole_frontend::RangeExpr,
+        iter_type_hint: Option<TypeId>,
+    ) -> Result<CompiledValue, String> {
         // Compile start and end expressions
         let start = self.expr(&range.start)?;
         let end_val = self.expr(&range.end)?;
@@ -549,9 +559,11 @@ impl Cg<'_, '_, '_> {
         // Call vole_range_iter(start, end) -> RuntimeIterator<i64>
         let result = self.call_runtime(RuntimeFn::RangeIter, &[start.value, end_value])?;
 
-        // Return as RuntimeIterator<i64> - concrete type for builtin iterators
-        let i64_id = self.arena().primitives.i64;
-        let iter_type_id = self.update().runtime_iterator(i64_id);
+        // Use sema's pre-computed RuntimeIterator type, or fall back to computing it
+        let iter_type_id = iter_type_hint.unwrap_or_else(|| {
+            let i64_id = self.arena().primitives.i64;
+            self.update().runtime_iterator(i64_id)
+        });
         Ok(CompiledValue {
             value: result,
             ty: self.ptr_type(),
@@ -559,10 +571,13 @@ impl Cg<'_, '_, '_> {
         })
     }
 
+    /// Handle built-in methods on arrays, strings, and ranges.
+    /// `iter_type_hint` is the pre-computed RuntimeIterator type from sema's concrete_return_hint.
     pub(crate) fn builtin_method(
         &mut self,
         obj: &CompiledValue,
         method_name: &str,
+        iter_type_hint: Option<TypeId>,
     ) -> Result<Option<CompiledValue>, String> {
         let arena = self.arena();
 
@@ -576,8 +591,9 @@ impl Cg<'_, '_, '_> {
                 }
                 "iter" => {
                     let result = self.call_runtime(RuntimeFn::ArrayIter, &[obj.value])?;
-                    // Return RuntimeIterator - a concrete type for builtin iterators
-                    let iter_type_id = self.update().runtime_iterator(elem_type_id);
+                    // Use sema's pre-computed RuntimeIterator type, or fall back to computing it
+                    let iter_type_id = iter_type_hint
+                        .unwrap_or_else(|| self.update().runtime_iterator(elem_type_id));
                     Ok(Some(CompiledValue {
                         value: result,
                         ty: self.ptr_type(),
@@ -598,8 +614,11 @@ impl Cg<'_, '_, '_> {
                 }
                 "iter" => {
                     let result = self.call_runtime(RuntimeFn::StringCharsIter, &[obj.value])?;
-                    let string_id = self.arena().string();
-                    let iter_type_id = self.update().runtime_iterator(string_id);
+                    // Use sema's pre-computed RuntimeIterator type, or fall back to computing it
+                    let iter_type_id = iter_type_hint.unwrap_or_else(|| {
+                        let string_id = self.arena().string();
+                        self.update().runtime_iterator(string_id)
+                    });
                     Ok(Some(CompiledValue {
                         value: result,
                         ty: self.ptr_type(),
@@ -627,8 +646,11 @@ impl Cg<'_, '_, '_> {
                     .ins()
                     .load(types::I64, MemFlags::new(), obj.value, 8);
                 let result = self.call_runtime(RuntimeFn::RangeIter, &[start, end])?;
-                let i64_id = self.arena().i64();
-                let iter_type_id = self.update().runtime_iterator(i64_id);
+                // Use sema's pre-computed RuntimeIterator type, or fall back to computing it
+                let iter_type_id = iter_type_hint.unwrap_or_else(|| {
+                    let i64_id = self.arena().i64();
+                    self.update().runtime_iterator(i64_id)
+                });
                 return Ok(Some(CompiledValue {
                     value: result,
                     ty: self.ptr_type(),
