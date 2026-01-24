@@ -847,12 +847,27 @@ impl Compiler<'_> {
         })?;
 
         // Create method signature with correct self type (primitives use their type, not pointer)
-        let sig = self.build_signature(
-            &method.params,
-            method.return_type.as_ref(),
-            SelfParam::TypedId(self_type_id),
-            TypeResolver::Query,
-        );
+        // Try to use pre-resolved types via MethodId, fall back to AST for generated methods
+        let type_def_id = self
+            .impl_type_id_from_type_id(self_type_id)
+            .and_then(|impl_id| self.query().try_type_def_id(impl_id.name_id()));
+        let method_name_id = self.method_name_id(method.name);
+
+        let sig = if let Some(semantic_method_id) = type_def_id.and_then(|tdef_id| {
+            self.analyzed
+                .entity_registry()
+                .find_method_on_type(tdef_id, method_name_id)
+        }) {
+            self.build_signature_for_method(semantic_method_id, SelfParam::TypedId(self_type_id))
+        } else {
+            // Fallback: build from AST (for generated types like generator records)
+            self.build_signature(
+                &method.params,
+                method.return_type.as_ref(),
+                SelfParam::TypedId(self_type_id),
+                TypeResolver::Query,
+            )
+        };
         self.jit.ctx.func.signature = sig;
 
         // Get the Cranelift type for self (using TypeId)
