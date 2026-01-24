@@ -885,23 +885,17 @@ fn resolve_vtable_target<C: VtableCtx>(
         .name_table()
         .display(interface_method.name_id);
 
-    // Apply substitutions to get concrete param/return types (using TypeId-based substitution)
+    // Apply substitutions to get concrete param/return types (read-only lookup)
     let (substituted_param_ids, substituted_return_id) = {
-        // First extract params and return type (immutable borrow)
-        let (params_vec, ret) = {
-            let arena = ctx.arena();
-            let (params, ret, _) = arena
-                .unwrap_function(interface_method.signature_id)
-                .expect("method signature must be a function type");
-            (params.to_vec(), ret)
-        };
-        // Substitute using ProgramUpdate
-        let update = ctx.update();
-        let param_ids: Vec<TypeId> = params_vec
+        let arena = ctx.arena();
+        let (params, ret, _) = arena
+            .unwrap_function(interface_method.signature_id)
+            .expect("method signature must be a function type");
+        let param_ids: Vec<TypeId> = params
             .iter()
-            .map(|&p| update.substitute(p, substitutions))
+            .map(|&p| arena.expect_substitute(p, substitutions, "vtable method param"))
             .collect();
-        let ret_id = update.substitute(ret, substitutions);
+        let ret_id = arena.expect_substitute(ret, substitutions, "vtable method return");
         (param_ids, ret_id)
     };
 
