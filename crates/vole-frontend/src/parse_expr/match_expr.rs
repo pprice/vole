@@ -1,4 +1,4 @@
-use super::super::ast::*;
+use super::super::ast::{PatternKind, *};
 use super::super::parser::{ParseError, Parser};
 use super::super::token::TokenType;
 use crate::Span;
@@ -142,18 +142,23 @@ impl<'src> Parser<'src> {
             // Check if there's an inner pattern (look for => or if which end a pattern)
             if self.check(TokenType::FatArrow) || self.check(TokenType::KwIf) {
                 // Bare success pattern
-                return Ok(Pattern::Success {
-                    inner: None,
+                return Ok(Pattern {
+                    id: self.next_id(),
+                    kind: PatternKind::Success { inner: None },
                     span: start_span,
                 });
             }
 
             // Parse inner pattern
             let inner = self.pattern()?;
-            let end_span = self.get_pattern_span(&inner);
-            return Ok(Pattern::Success {
-                inner: Some(Box::new(inner)),
-                span: start_span.merge(end_span),
+            let end_span = inner.span;
+            let span = start_span.merge(end_span);
+            return Ok(Pattern {
+                id: self.next_id(),
+                kind: PatternKind::Success {
+                    inner: Some(Box::new(inner)),
+                },
+                span,
             });
         }
 
@@ -165,26 +170,32 @@ impl<'src> Parser<'src> {
             // Check if there's an inner pattern
             if self.check(TokenType::FatArrow) || self.check(TokenType::KwIf) {
                 // Bare error pattern
-                return Ok(Pattern::Error {
-                    inner: None,
+                return Ok(Pattern {
+                    id: self.next_id(),
+                    kind: PatternKind::Error { inner: None },
                     span: start_span,
                 });
             }
 
             // Parse inner pattern
             let inner = self.pattern()?;
-            let end_span = self.get_pattern_span(&inner);
-            return Ok(Pattern::Error {
-                inner: Some(Box::new(inner)),
-                span: start_span.merge(end_span),
+            let end_span = inner.span;
+            let span = start_span.merge(end_span);
+            return Ok(Pattern {
+                id: self.next_id(),
+                kind: PatternKind::Error {
+                    inner: Some(Box::new(inner)),
+                },
+                span,
             });
         }
 
         // Check for type keyword patterns (primitives and nil)
         if let Some(type_expr) = self.token_to_type_expr(&token) {
             self.advance();
-            return Ok(Pattern::Type {
-                type_expr,
+            return Ok(Pattern {
+                id: self.next_id(),
+                kind: PatternKind::Type { type_expr },
                 span: token.span,
             });
         }
@@ -206,15 +217,21 @@ impl<'src> Parser<'src> {
                 }
                 self.advance(); // consume identifier
                 let name = self.interner.intern(&name_token.lexeme);
-                Ok(Pattern::Val {
-                    name,
-                    span: start_span.merge(name_token.span),
+                let span = start_span.merge(name_token.span);
+                Ok(Pattern {
+                    id: self.next_id(),
+                    kind: PatternKind::Val { name },
+                    span,
                 })
             }
             // Wildcard: _
             TokenType::Identifier if token.lexeme == "_" => {
                 self.advance();
-                Ok(Pattern::Wildcard(token.span))
+                Ok(Pattern {
+                    id: self.next_id(),
+                    kind: PatternKind::Wildcard,
+                    span: token.span,
+                })
             }
             // Identifier - could be binding pattern, type pattern, or type destructure (resolved in analyzer)
             TokenType::Identifier => {
@@ -226,15 +243,21 @@ impl<'src> Parser<'src> {
                     return self.parse_typed_record_pattern(name, token.span);
                 }
 
-                Ok(Pattern::Identifier {
-                    name,
+                Ok(Pattern {
+                    id: self.next_id(),
+                    kind: PatternKind::Identifier { name },
                     span: token.span,
                 })
             }
             // Integer literal pattern
             TokenType::IntLiteral => {
                 let expr = self.primary()?;
-                Ok(Pattern::Literal(expr))
+                let span = expr.span;
+                Ok(Pattern {
+                    id: self.next_id(),
+                    kind: PatternKind::Literal(expr),
+                    span,
+                })
             }
             // Negative integer pattern: -5
             TokenType::Minus => {
@@ -242,29 +265,49 @@ impl<'src> Parser<'src> {
                 self.advance(); // consume '-'
                 let operand = self.primary()?;
                 let span = start_span.merge(operand.span);
-                Ok(Pattern::Literal(Expr {
+                let expr = Expr {
                     id: self.next_id(),
                     kind: ExprKind::Unary(Box::new(UnaryExpr {
                         op: UnaryOp::Neg,
                         operand,
                     })),
                     span,
-                }))
+                };
+                Ok(Pattern {
+                    id: self.next_id(),
+                    kind: PatternKind::Literal(expr),
+                    span,
+                })
             }
             // Float literal pattern
             TokenType::FloatLiteral => {
                 let expr = self.primary()?;
-                Ok(Pattern::Literal(expr))
+                let span = expr.span;
+                Ok(Pattern {
+                    id: self.next_id(),
+                    kind: PatternKind::Literal(expr),
+                    span,
+                })
             }
             // String literal pattern
             TokenType::StringLiteral | TokenType::RawStringLiteral => {
                 let expr = self.primary()?;
-                Ok(Pattern::Literal(expr))
+                let span = expr.span;
+                Ok(Pattern {
+                    id: self.next_id(),
+                    kind: PatternKind::Literal(expr),
+                    span,
+                })
             }
             // Boolean literal patterns
             TokenType::KwTrue | TokenType::KwFalse => {
                 let expr = self.primary()?;
-                Ok(Pattern::Literal(expr))
+                let span = expr.span;
+                Ok(Pattern {
+                    id: self.next_id(),
+                    kind: PatternKind::Literal(expr),
+                    span,
+                })
             }
             _ => Err(ParseError::new(
                 ParserError::ExpectedExpression {
@@ -320,25 +363,19 @@ impl<'src> Parser<'src> {
         let end_span = self.current.span;
         self.consume(TokenType::RBrace, "expected '}' after record pattern")?;
 
-        Ok(Pattern::Record {
-            type_name: Some(type_name),
-            fields,
-            span: start_span.merge(end_span),
+        let span = start_span.merge(end_span);
+        Ok(Pattern {
+            id: self.next_id(),
+            kind: PatternKind::Record {
+                type_name: Some(type_name),
+                fields,
+            },
+            span,
         })
     }
 
     /// Get the span from a pattern
     pub(super) fn get_pattern_span(&self, pattern: &Pattern) -> Span {
-        match pattern {
-            Pattern::Wildcard(s) => *s,
-            Pattern::Identifier { span, .. } => *span,
-            Pattern::Type { span, .. } => *span,
-            Pattern::Val { span, .. } => *span,
-            Pattern::Success { span, .. } => *span,
-            Pattern::Error { span, .. } => *span,
-            Pattern::Tuple { span, .. } => *span,
-            Pattern::Record { span, .. } => *span,
-            Pattern::Literal(expr) => expr.span,
-        }
+        pattern.span
     }
 }

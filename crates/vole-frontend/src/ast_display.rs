@@ -801,10 +801,10 @@ impl<'a> AstPrinter<'a> {
     }
 
     fn write_pattern_inline(&self, out: &mut String, pattern: &crate::Pattern) {
-        use crate::Pattern;
-        match pattern {
-            Pattern::Wildcard(_) => out.push('_'),
-            Pattern::Literal(expr) => match &expr.kind {
+        use crate::PatternKind;
+        match &pattern.kind {
+            PatternKind::Wildcard => out.push('_'),
+            PatternKind::Literal(expr) => match &expr.kind {
                 ExprKind::IntLiteral(n) => write!(out, "{}", n).unwrap(),
                 ExprKind::FloatLiteral(n) => write!(out, "{}", n).unwrap(),
                 ExprKind::BoolLiteral(b) => write!(out, "{}", b).unwrap(),
@@ -819,33 +819,33 @@ impl<'a> AstPrinter<'a> {
                 }
                 _ => out.push_str("<expr>"),
             },
-            Pattern::Identifier { name, .. } => {
+            PatternKind::Identifier { name, .. } => {
                 let ident = self.interner.resolve(*name);
                 out.push_str(ident);
             }
-            Pattern::Type { type_expr, .. } => {
+            PatternKind::Type { type_expr, .. } => {
                 self.write_type_expr_inline(out, type_expr);
             }
-            Pattern::Val { name, .. } => {
+            PatternKind::Val { name, .. } => {
                 out.push_str("val ");
                 let ident = self.interner.resolve(*name);
                 out.push_str(ident);
             }
-            Pattern::Success { inner, .. } => {
+            PatternKind::Success { inner, .. } => {
                 out.push_str("success");
                 if let Some(inner_pattern) = inner {
                     out.push(' ');
                     self.write_pattern_inline(out, inner_pattern);
                 }
             }
-            Pattern::Error { inner, .. } => {
+            PatternKind::Error { inner, .. } => {
                 out.push_str("error");
                 if let Some(inner_pattern) = inner {
                     out.push(' ');
                     self.write_pattern_inline(out, inner_pattern);
                 }
             }
-            Pattern::Tuple { elements, .. } => {
+            PatternKind::Tuple { elements, .. } => {
                 out.push('[');
                 for (i, elem) in elements.iter().enumerate() {
                     if i > 0 {
@@ -855,7 +855,7 @@ impl<'a> AstPrinter<'a> {
                 }
                 out.push(']');
             }
-            Pattern::Record { fields, .. } => {
+            PatternKind::Record { fields, .. } => {
                 out.push_str("{ ");
                 for (i, field) in fields.iter().enumerate() {
                     if i > 0 {

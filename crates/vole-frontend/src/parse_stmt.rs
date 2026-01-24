@@ -2,7 +2,7 @@
 //
 // Statement parsing methods extracted from parser.rs.
 
-use super::ast::*;
+use super::ast::{PatternKind, *};
 use super::parser::{ParseError, Parser};
 use super::token::{Span, TokenType};
 use crate::errors::ParserError;
@@ -311,13 +311,18 @@ impl<'src> Parser<'src> {
             TokenType::LBrace => self.parse_record_pattern(),
             TokenType::Identifier if token.lexeme == "_" => {
                 self.advance();
-                Ok(Pattern::Wildcard(token.span))
+                Ok(Pattern {
+                    id: self.next_id(),
+                    kind: PatternKind::Wildcard,
+                    span: token.span,
+                })
             }
             TokenType::Identifier => {
                 self.advance();
                 let name = self.interner.intern(&token.lexeme);
-                Ok(Pattern::Identifier {
-                    name,
+                Ok(Pattern {
+                    id: self.next_id(),
+                    kind: PatternKind::Identifier { name },
                     span: token.span,
                 })
             }
@@ -355,9 +360,11 @@ impl<'src> Parser<'src> {
 
         self.consume(TokenType::RBracket, "expected ']' after tuple pattern")?;
 
-        Ok(Pattern::Tuple {
-            elements,
-            span: start_span.merge(self.previous.span),
+        let span = start_span.merge(self.previous.span);
+        Ok(Pattern {
+            id: self.next_id(),
+            kind: PatternKind::Tuple { elements },
+            span,
         })
     }
 
@@ -401,10 +408,14 @@ impl<'src> Parser<'src> {
 
         self.consume(TokenType::RBrace, "expected '}' after record pattern")?;
 
-        Ok(Pattern::Record {
-            type_name: None,
-            fields,
-            span: start_span.merge(self.previous.span),
+        let span = start_span.merge(self.previous.span);
+        Ok(Pattern {
+            id: self.next_id(),
+            kind: PatternKind::Record {
+                type_name: None,
+                fields,
+            },
+            span,
         })
     }
 

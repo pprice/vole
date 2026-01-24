@@ -855,35 +855,40 @@ pub struct RecordFieldPattern {
 
 /// Pattern for matching
 #[derive(Debug, Clone)]
-pub enum Pattern {
+pub struct Pattern {
+    pub id: NodeId,
+    pub kind: PatternKind,
+    pub span: Span,
+}
+
+/// Pattern kind - the different forms a pattern can take
+#[derive(Debug, Clone)]
+pub enum PatternKind {
     /// Wildcard pattern: _
-    Wildcard(Span),
+    Wildcard,
     /// Literal pattern: 1, "hello", true, -5
     Literal(Expr),
     /// Identifier pattern (binds value): n
-    Identifier { name: Symbol, span: Span },
+    Identifier { name: Symbol },
     /// Type pattern: i32, string, nil, MyClass
-    Type { type_expr: TypeExpr, span: Span },
+    Type { type_expr: TypeExpr },
     /// Val pattern: val x (compares against existing variable)
-    Val { name: Symbol, span: Span },
+    Val { name: Symbol },
     /// Success pattern for fallible match: success x, success, success Point { x, y }
     Success {
         inner: Option<Box<Pattern>>, // None = bare success, Some = success <pattern>
-        span: Span,
     },
     /// Error pattern for fallible match: error e, error, error DivByZero, error DivByZero { msg }
     Error {
         inner: Option<Box<Pattern>>, // None = bare error, Some = error <pattern>
-        span: Span,
     },
     /// Tuple destructuring pattern: [a, b, c]
-    Tuple { elements: Vec<Pattern>, span: Span },
+    Tuple { elements: Vec<Pattern> },
     /// Record destructuring pattern: { x, y } or TypeName { x, y }
     Record {
         /// Optional type name for typed patterns in match arms (e.g., Point in `Point { x, y }`)
         type_name: Option<Symbol>,
         fields: Vec<RecordFieldPattern>,
-        span: Span,
     },
 }
 
