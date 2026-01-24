@@ -953,11 +953,16 @@ fn resolve_vtable_target<C: VtableCtx>(
                 target: VtableMethodTarget::External(external_info),
             });
         }
-        let method_info = ctx
-            .impl_method_infos()
-            .get(&(impl_type_id, method_name_id))
-            .copied()
-            .ok_or_else(|| "implement method info not found".to_string())?;
+        // Look up via unified method_func_keys using TypeDefId
+        let type_def_id = ctx
+            .query()
+            .try_type_def_id(impl_type_id.name_id())
+            .ok_or_else(|| "type_def_id not found for impl_type_id".to_string())?;
+        let func_key = *ctx
+            .method_func_keys()
+            .get(&(type_def_id, method_name_id))
+            .ok_or_else(|| "implement method info not found in method_func_keys".to_string())?;
+        let method_info = MethodInfo { func_key };
         return Ok(VtableMethod {
             param_count: impl_.func_type.params_id.len(),
             returns_void,

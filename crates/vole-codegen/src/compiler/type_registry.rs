@@ -176,6 +176,10 @@ impl Compiler<'_> {
             let func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, func_id);
             method_infos.insert(method_name_id, MethodInfo { func_key });
+            // Also populate unified method_func_keys map
+            self.state
+                .method_func_keys
+                .insert((type_def_id, method_name_id), func_key);
         }
 
         // Collect method names that the class directly defines
@@ -221,6 +225,10 @@ impl Compiler<'_> {
                         self.func_registry.set_func_id(func_key, func_id);
                         let method_id = self.query().method_name_id(method.name);
                         method_infos.insert(method_id, MethodInfo { func_key });
+                        // Also populate unified method_func_keys map
+                        self.state
+                            .method_func_keys
+                            .insert((type_def_id, method_id), func_key);
                     }
                 }
             }
@@ -341,6 +349,10 @@ impl Compiler<'_> {
             self.func_registry.set_func_id(func_key, func_id);
             let method_id = self.query().method_name_id(method.name);
             method_infos.insert(method_id, MethodInfo { func_key });
+            // Also populate unified method_func_keys map
+            self.state
+                .method_func_keys
+                .insert((type_def_id, method_id), func_key);
         }
 
         // Collect method names that the record directly defines
@@ -387,6 +399,10 @@ impl Compiler<'_> {
                         self.func_registry.set_func_id(func_key, func_id);
                         let method_id = self.query().method_name_id(method.name);
                         method_infos.insert(method_id, MethodInfo { func_key });
+                        // Also populate unified method_func_keys map
+                        self.state
+                            .method_func_keys
+                            .insert((type_def_id, method_id), func_key);
                     }
                 }
             }
@@ -479,6 +495,10 @@ impl Compiler<'_> {
                 self.state
                     .static_method_infos
                     .insert((type_def_id, method_name_id), MethodInfo { func_key });
+                // Also populate unified method_func_keys map
+                self.state
+                    .method_func_keys
+                    .insert((type_def_id, method_name_id), func_key);
             }
         }
     }
@@ -556,6 +576,10 @@ impl Compiler<'_> {
             {
                 tracing::debug!(type_name = %type_name_str, method_name = %method_name_str, ?method_name_id, "Registered instance method");
                 method_infos.insert(method_name_id, MethodInfo { func_key });
+                // Also populate unified method_func_keys map
+                self.state
+                    .method_func_keys
+                    .insert((type_def_id, method_name_id), func_key);
             } else {
                 tracing::warn!(type_name = %type_name_str, method_name = %method_name_str, "Could not get method_name_id for instance method");
             }
@@ -611,6 +635,10 @@ impl Compiler<'_> {
                     self.state
                         .static_method_infos
                         .insert((type_def_id, method_name_id), MethodInfo { func_key });
+                    // Also populate unified method_func_keys map
+                    self.state
+                        .method_func_keys
+                        .insert((type_def_id, method_name_id), func_key);
                 }
             }
         }

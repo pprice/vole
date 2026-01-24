@@ -19,7 +19,7 @@ use vole_sema::type_arena::TypeArena;
 use vole_sema::{EntityRegistry, ProgramQuery, ProgramUpdate};
 
 use crate::types::{CodegenCtx, CompileEnv, MethodInfo, TypeMetadataMap};
-use crate::{AnalyzedProgram, FunctionRegistry};
+use crate::{AnalyzedProgram, FunctionKey, FunctionRegistry};
 
 /// Trait providing the interface needed for vtable compilation.
 ///
@@ -70,7 +70,11 @@ pub trait VtableCtx {
     fn type_metadata(&self) -> &TypeMetadataMap;
 
     /// Get impl method infos map
+    /// DEPRECATED: Use method_func_keys instead.
     fn impl_method_infos(&self) -> &HashMap<(ImplTypeId, NameId), MethodInfo>;
+
+    /// Get unified method function key map
+    fn method_func_keys(&self) -> &HashMap<(TypeDefId, NameId), FunctionKey>;
 }
 
 /// A view that combines CodegenCtx and CompileEnv to implement VtableCtx.
@@ -149,5 +153,9 @@ impl<'a, 'ctx> VtableCtx for VtableCtxView<'a, 'ctx> {
 
     fn impl_method_infos(&self) -> &HashMap<(ImplTypeId, NameId), MethodInfo> {
         &self.env.state.impl_method_infos
+    }
+
+    fn method_func_keys(&self) -> &HashMap<(TypeDefId, NameId), FunctionKey> {
+        &self.env.state.method_func_keys
     }
 }

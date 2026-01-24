@@ -91,14 +91,17 @@ impl Cg<'_, '_, '_> {
             return Ok(result.value);
         }
 
-        // Otherwise, it's a Vole method - look up the compiled function
-        // Get the method key from impl_method_infos
-        let method_info = self
-            .impl_methods()
-            .get(&(impl_type_id, method_id))
-            .ok_or_else(|| "to_string method info not found in impl_method_infos".to_string())?;
+        // Otherwise, it's a Vole method - look up via unified method_func_keys
+        let type_def_id = self
+            .query()
+            .try_type_def_id(impl_type_id.name_id())
+            .ok_or_else(|| "type_def_id not found for impl_type_id in to_string".to_string())?;
+        let func_key = *self
+            .method_func_keys()
+            .get(&(type_def_id, method_id))
+            .ok_or_else(|| "to_string method info not found in method_func_keys".to_string())?;
 
-        let func_ref = self.func_ref(method_info.func_key)?;
+        let func_ref = self.func_ref(func_key)?;
 
         // Call the method with `self` (the value) as the only argument
         let call = self.builder.ins().call(func_ref, &[val.value]);

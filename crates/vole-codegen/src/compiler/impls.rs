@@ -268,6 +268,10 @@ impl Compiler<'_> {
                 self.state
                     .static_method_infos
                     .insert((type_def_id, method_name_id), MethodInfo { func_key });
+                // Also populate unified method_func_keys map
+                self.state
+                    .method_func_keys
+                    .insert((type_def_id, method_name_id), func_key);
             }
         }
     }
@@ -342,6 +346,10 @@ impl Compiler<'_> {
                 self.state
                     .static_method_infos
                     .insert((type_def_id, method_name_id), MethodInfo { func_key });
+                // Also populate unified method_func_keys map
+                self.state
+                    .method_func_keys
+                    .insert((type_def_id, method_name_id), func_key);
             }
         }
     }
@@ -445,6 +453,12 @@ impl Compiler<'_> {
                 self.state
                     .impl_method_infos
                     .insert((impl_id, method_id), MethodInfo { func_key });
+                // Also populate unified method_func_keys map
+                if let Some(type_def_id) = self.query().try_type_def_id(impl_id.name_id()) {
+                    self.state
+                        .method_func_keys
+                        .insert((type_def_id, method_id), func_key);
+                }
             }
         }
 
@@ -498,6 +512,10 @@ impl Compiler<'_> {
                     self.state
                         .static_method_infos
                         .insert((type_def_id, method_name_id), MethodInfo { func_key });
+                    // Also populate unified method_func_keys map
+                    self.state
+                        .method_func_keys
+                        .insert((type_def_id, method_name_id), func_key);
                 }
             }
         }

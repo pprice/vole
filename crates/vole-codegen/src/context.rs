@@ -370,21 +370,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &self.env.state.type_metadata
     }
 
-    /// Alias for impl_method_infos (backward compat)
+    /// Get unified method function key map
     #[inline]
-    pub fn impl_methods(
+    pub fn method_func_keys(
         &self,
-    ) -> &'ctx HashMap<(vole_sema::implement_registry::ImplTypeId, NameId), super::types::MethodInfo>
-    {
-        &self.env.state.impl_method_infos
-    }
-
-    /// Get static method infos map
-    #[inline]
-    pub fn static_method_infos(
-        &self,
-    ) -> &'ctx HashMap<(vole_identity::TypeDefId, NameId), super::types::MethodInfo> {
-        &self.env.state.static_method_infos
+    ) -> &'ctx HashMap<(vole_identity::TypeDefId, NameId), FunctionKey> {
+        &self.env.state.method_func_keys
     }
 
     /// Get interface vtable registry
@@ -1114,5 +1105,9 @@ impl<'a, 'b, 'ctx> crate::vtable_ctx::VtableCtx for Cg<'a, 'b, 'ctx> {
     ) -> &HashMap<(vole_sema::implement_registry::ImplTypeId, NameId), super::types::MethodInfo>
     {
         &self.env.state.impl_method_infos
+    }
+
+    fn method_func_keys(&self) -> &HashMap<(vole_identity::TypeDefId, NameId), FunctionKey> {
+        &self.env.state.method_func_keys
     }
 }

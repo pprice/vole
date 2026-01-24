@@ -909,15 +909,15 @@ impl Cg<'_, '_, '_> {
             }
         }
 
-        // Look up the static method info (for non-generic classes)
-        let method_info = *self.static_method_infos()
+        // Look up the static method info via unified method_func_keys map
+        let func_key = *self.method_func_keys()
             .get(&(type_def_id, method_name_id))
             .ok_or_else(|| {
                 let type_def = self.query().get_type(type_def_id);
                 let name_table = self.name_table();
                 let type_name = name_table.display(type_def.name_id);
                 let method_name = name_table.display(method_name_id);
-                let registered_keys: Vec<_> = self.static_method_infos()
+                let registered_keys: Vec<_> = self.method_func_keys()
                     .keys()
                     .map(|(tid, mid)| {
                         let t = self.query().get_type(*tid);
@@ -957,7 +957,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Get function reference and call
-        let func_ref = self.func_ref(method_info.func_key)?;
+        let func_ref = self.func_ref(func_key)?;
         let call = self.builder.ins().call(func_ref, &args);
         Ok(self.call_result(call, return_type_id))
     }
