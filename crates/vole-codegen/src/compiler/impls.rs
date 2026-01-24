@@ -4,7 +4,7 @@ use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
 use cranelift_module::Module;
 
 use super::common::{FunctionCompileConfig, compile_function_inner_with_params};
-use super::{Compiler, SelfParam, TypeResolver};
+use super::{Compiler, SelfParam};
 use crate::types::{
     CodegenCtx, MethodInfo, TypeMetadata, method_name_id_with_interner, type_id_to_cranelift,
 };
@@ -829,7 +829,6 @@ impl Compiler<'_> {
         self_type_id: TypeId,
         method_info: Option<MethodInfo>,
     ) -> Result<(), String> {
-        let module_id = self.query().main_module();
         let func_key = if let Some(info) = method_info {
             info.func_key
         } else if let Some(type_sym) = type_sym {
@@ -853,21 +852,22 @@ impl Compiler<'_> {
             .and_then(|impl_id| self.query().try_type_def_id(impl_id.name_id()));
         let method_name_id = self.method_name_id(method.name);
 
-        let sig = if let Some(semantic_method_id) = type_def_id.and_then(|tdef_id| {
-            self.analyzed
-                .entity_registry()
-                .find_method_on_type(tdef_id, method_name_id)
-        }) {
-            self.build_signature_for_method(semantic_method_id, SelfParam::TypedId(self_type_id))
-        } else {
-            // Fallback: build from AST (for generated types like generator records)
-            self.build_signature(
-                &method.params,
-                method.return_type.as_ref(),
-                SelfParam::TypedId(self_type_id),
-                TypeResolver::Query,
-            )
-        };
+        let semantic_method_id = type_def_id
+            .and_then(|tdef_id| {
+                self.analyzed
+                    .entity_registry()
+                    .find_method_on_type(tdef_id, method_name_id)
+            })
+            .unwrap_or_else(|| {
+                let method_name_str = self.resolve_symbol(method.name);
+                panic!(
+                    "implement block method not registered in entity_registry: {} (type_def_id={:?}, method_name_id={:?})",
+                    method_name_str, type_def_id, method_name_id
+                )
+            });
+
+        let sig =
+            self.build_signature_for_method(semantic_method_id, SelfParam::TypedId(self_type_id));
         self.jit.ctx.func.signature = sig;
 
         // Get the Cranelift type for self (using TypeId)
@@ -875,16 +875,20 @@ impl Compiler<'_> {
             type_id_to_cranelift(self_type_id, &self.analyzed.type_arena(), self.pointer_type);
 
         // Build params: Vec<(Symbol, TypeId, Type)>
-        let param_info =
-            self.resolve_param_type_ids_with_self_type(&method.params, self_type_id, module_id);
+        // Get param TypeIds from the method signature and pair with AST param names
         let params: Vec<(Symbol, TypeId, types::Type)> = {
-            let arena_ref = self.analyzed.type_arena();
-            param_info
-                .into_iter()
-                .map(|(name, type_id)| {
-                    let cranelift_type =
-                        type_id_to_cranelift(type_id, &arena_ref, self.pointer_type);
-                    (name, type_id, cranelift_type)
+            let method_def = self.query().get_method(semantic_method_id);
+            let arena = self.analyzed.type_arena();
+            let (param_type_ids, _, _) = arena
+                .unwrap_function(method_def.signature_id)
+                .expect("method should have function signature");
+            method
+                .params
+                .iter()
+                .zip(param_type_ids.iter())
+                .map(|(param, &type_id)| {
+                    let cranelift_type = type_id_to_cranelift(type_id, &arena, self.pointer_type);
+                    (param.name, type_id, cranelift_type)
                 })
                 .collect()
         };
@@ -893,27 +897,13 @@ impl Compiler<'_> {
         let source_file_ptr = self.source_file_ptr();
         let self_sym = self.self_symbol();
 
-        // Get the method's return type: try sema first, fall back to AST for generated methods
+        // Get the method's return type from the pre-resolved signature
         let method_return_type_id = {
-            // Get TypeDefId from self_type_id
-            let type_def_id = self
-                .impl_type_id_from_type_id(self_type_id)
-                .and_then(|impl_id| self.query().try_type_def_id(impl_id.name_id()));
-            let method_name_id = self.method_name_id(method.name);
-
-            // Try sema lookup first
-            let from_sema = type_def_id.and_then(|tdef_id| {
-                self.query()
-                    .method_return_type_by_id(tdef_id, method_name_id)
-            });
-
-            // Fall back to AST for generated types (like generator records)
-            from_sema.or_else(|| {
-                method
-                    .return_type
-                    .as_ref()
-                    .map(|t| self.resolve_type_to_id(t))
-            })
+            let method_def = self.query().get_method(semantic_method_id);
+            let arena = self.analyzed.type_arena();
+            arena
+                .unwrap_function(method_def.signature_id)
+                .map(|(_, ret, _)| ret)
         };
 
         // Create function builder and compile
@@ -961,7 +951,6 @@ impl Compiler<'_> {
     ) -> Result<(), String> {
         let type_name_str = self.query().resolve_symbol(type_name).to_string();
         let method_name_str = self.query().resolve_symbol(method.name).to_string();
-        let module_id = self.query().main_module();
 
         let method_name_id = self.method_name_id(method.name);
         let method_info = metadata.method_infos.get(&method_name_id).ok_or_else(|| {
@@ -971,39 +960,52 @@ impl Compiler<'_> {
             )
         })?;
         let func_key = method_info.func_key;
-        // Look up return type from sema (removes redundant storage in MethodInfo)
-        let return_type_id_from_sema = self
-            .query()
-            .method_return_type_by_id(metadata.type_def_id, method_name_id)
-            .unwrap_or(TypeId::VOID);
+
+        // Look up MethodId from entity_registry for pre-computed signature
+        let semantic_method_id = self
+            .analyzed
+            .entity_registry()
+            .find_method_on_type(metadata.type_def_id, method_name_id)
+            .unwrap_or_else(|| {
+                panic!(
+                    "class instance method not registered in entity_registry: {}::{} (type_def_id={:?}, method_name_id={:?})",
+                    type_name_str, method_name_str, metadata.type_def_id, method_name_id
+                )
+            });
+
         let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
             let display = self.func_registry.display(func_key);
             format!("Internal error: method {} not declared", display)
         })?;
 
-        // Create method signature (self + params) - use sema return type for inferred types
-        let sig = self.build_signature_with_return_type_id(
-            &method.params,
-            Some(return_type_id_from_sema),
-            SelfParam::Pointer,
-            TypeResolver::Query,
-        );
+        // Create method signature using pre-resolved MethodId
+        let sig = self.build_signature_for_method(semantic_method_id, SelfParam::Pointer);
         self.jit.ctx.func.signature = sig;
 
         // Use TypeId directly for self binding
         let self_type_id = metadata.vole_type;
 
+        // Get param and return types from sema (pre-resolved signature)
+        let method_def = self.query().get_method(semantic_method_id);
+        let (param_type_ids, method_return_type_id) = {
+            let arena = self.analyzed.type_arena();
+            let (params, ret, _) = arena
+                .unwrap_function(method_def.signature_id)
+                .expect("method signature should be a function type");
+            (params.to_vec(), Some(ret))
+        };
+
         // Build params: Vec<(Symbol, TypeId, Type)>
-        let param_info =
-            self.resolve_param_type_ids_with_self_type(&method.params, self_type_id, module_id);
         let params: Vec<(Symbol, TypeId, types::Type)> = {
             let arena_ref = self.analyzed.type_arena();
-            param_info
-                .into_iter()
-                .map(|(name, type_id)| {
+            method
+                .params
+                .iter()
+                .zip(param_type_ids.iter())
+                .map(|(param, &type_id)| {
                     let cranelift_type =
                         type_id_to_cranelift(type_id, &arena_ref, self.pointer_type);
-                    (name, type_id, cranelift_type)
+                    (param.name, type_id, cranelift_type)
                 })
                 .collect()
         };
@@ -1011,7 +1013,6 @@ impl Compiler<'_> {
         // Get source file pointer and self symbol before borrowing ctx.func
         let source_file_ptr = self.source_file_ptr();
         let self_sym = self.self_symbol();
-        let method_return_type_id = Some(return_type_id_from_sema);
 
         // Create function builder and compile
         let mut builder_ctx = FunctionBuilderContext::new();
@@ -1054,7 +1055,6 @@ impl Compiler<'_> {
     ) -> Result<(), String> {
         let type_name_str = self.query().resolve_symbol(type_name).to_string();
         let method_name_str = self.query().resolve_symbol(method.name).to_string();
-        let module_id = self.query().main_module();
 
         let method_name_id = self.method_name_id(method.name);
         let method_info = metadata.method_infos.get(&method_name_id).ok_or_else(|| {
@@ -1064,36 +1064,38 @@ impl Compiler<'_> {
             )
         })?;
         let func_key = method_info.func_key;
-        // For default methods, the return type is explicit in the interface declaration
-        // We can't look it up on the implementing type since it's inherited
-        let return_type_id_from_sema = method
-            .return_type
-            .as_ref()
-            .map(|t| self.resolve_type_to_id(t))
-            .unwrap_or(TypeId::VOID);
+
+        // Look up MethodId - interface default methods are now registered on implementing types
+        let semantic_method_id = self
+            .analyzed
+            .entity_registry()
+            .find_method_on_type(metadata.type_def_id, method_name_id)
+            .unwrap_or_else(|| {
+                panic!(
+                    "interface default method not registered on implementing type: {}::{} (type_def_id={:?}, method_name_id={:?})",
+                    type_name_str, method_name_str, metadata.type_def_id, method_name_id
+                )
+            });
+
         let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
             let display = self.func_registry.display(func_key);
             format!("Internal error: default method {} not declared", display)
         })?;
 
-        // Create method signature (self + params) - use sema return type for inferred types
-        let sig = self.build_signature_with_return_type_id(
-            &method.params,
-            Some(return_type_id_from_sema),
-            SelfParam::Pointer,
-            TypeResolver::Query,
-        );
+        // Create method signature using pre-resolved MethodId
+        let sig = self.build_signature_for_method(semantic_method_id, SelfParam::Pointer);
         self.jit.ctx.func.signature = sig;
 
-        // Use TypeId directly for self binding
-        let self_type_id = metadata.vole_type;
+        // Get param and return types from sema (pre-resolved signature)
+        let method_def = self.query().get_method(semantic_method_id);
+        let (param_type_ids, return_type_id) = {
+            let arena = self.analyzed.type_arena();
+            let (params, ret, _) = arena
+                .unwrap_function(method_def.signature_id)
+                .expect("method signature should be a function type");
+            (params.to_vec(), ret)
+        };
 
-        // Resolve param types with SelfType substitution
-        let param_type_ids = self.resolve_param_type_ids_with_self_type_only(
-            &method.params,
-            self_type_id,
-            module_id,
-        );
         let param_types = self.type_ids_to_cranelift(&param_type_ids);
         let params: Vec<_> = method
             .params
@@ -1111,7 +1113,7 @@ impl Compiler<'_> {
             )
         })?;
 
-        // Get source file pointer and self binding
+        // Get source file pointer and self binding (use metadata.vole_type for self type)
         let source_file_ptr = self.source_file_ptr();
         let self_sym = self.self_symbol();
         let self_binding = (self_sym, metadata.vole_type, self.pointer_type);
@@ -1123,12 +1125,8 @@ impl Compiler<'_> {
             let env = compile_env!(self, source_file_ptr);
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
-            let config = FunctionCompileConfig::method(
-                body,
-                params,
-                self_binding,
-                Some(return_type_id_from_sema),
-            );
+            let config =
+                FunctionCompileConfig::method(body, params, self_binding, Some(return_type_id));
             compile_function_inner_with_params(
                 builder,
                 &mut codegen_ctx,
@@ -1157,7 +1155,16 @@ impl Compiler<'_> {
 
         // Get the TypeDefId for looking up method info
         let type_name_id = self.query().name_id(module_id, &[type_name]);
-        let type_def_id = self.query().try_type_def_id(type_name_id);
+        let type_def_id = self
+            .query()
+            .try_type_def_id(type_name_id)
+            .unwrap_or_else(|| {
+                let type_name_str = self.resolve_symbol(type_name);
+                panic!(
+                    "static method type not registered in entity_registry: {} (type_name_id={:?})",
+                    type_name_str, type_name_id
+                )
+            });
 
         for method in &statics.methods {
             // Only compile methods with bodies
@@ -1177,26 +1184,35 @@ impl Compiler<'_> {
                 )
             })?;
 
-            // Get the return type from sema directly (removes redundant storage)
+            // Look up MethodId from entity_registry for pre-computed signature
             let method_name_id = self.method_name_id(method.name);
-            let return_type_id = type_def_id
-                .and_then(|type_def_id| {
-                    self.query()
-                        .static_method_return_type_by_id(type_def_id, method_name_id)
-                })
-                .unwrap_or(TypeId::VOID);
+            let semantic_method_id = self
+                .analyzed
+                .entity_registry()
+                .find_static_method_on_type(type_def_id, method_name_id)
+                .unwrap_or_else(|| {
+                    let type_name_str = self.resolve_symbol(type_name);
+                    let method_name_str = self.resolve_symbol(method.name);
+                    panic!(
+                        "static method not registered in entity_registry: {}::{} (type_def_id={:?}, method_name_id={:?})",
+                        type_name_str, method_name_str, type_def_id, method_name_id
+                    )
+                });
 
-            // Create signature using the (possibly inferred) return type
-            let sig = self.build_signature_with_return_type_id(
-                &method.params,
-                Some(return_type_id),
-                SelfParam::None,
-                TypeResolver::Query,
-            );
+            // Create signature using pre-resolved MethodId
+            let sig = self.build_signature_for_method(semantic_method_id, SelfParam::None);
             self.jit.ctx.func.signature = sig;
 
-            // Collect param types and build config
-            let param_type_ids = self.resolve_param_type_ids(&method.params, &TypeResolver::Query);
+            // Get param and return types from sema (pre-resolved signature)
+            let method_def = self.query().get_method(semantic_method_id);
+            let (param_type_ids, return_type_id) = {
+                let arena = self.analyzed.type_arena();
+                let (params, ret, _) = arena
+                    .unwrap_function(method_def.signature_id)
+                    .expect("static method signature should be a function type");
+                (params.to_vec(), ret)
+            };
+
             let param_types = self.type_ids_to_cranelift(&param_type_ids);
             let params: Vec<_> = method
                 .params
@@ -1287,21 +1303,41 @@ impl Compiler<'_> {
                 )
             })?;
 
-            // Create method signature with self parameter (use module interner)
-            let sig = self.build_signature(
-                &method.params,
-                method.return_type.as_ref(),
-                SelfParam::Pointer,
-                TypeResolver::Interner(module_interner),
-            );
+            // Look up MethodId from sema to get pre-computed signature
+            let method_name_id =
+                method_name_id_with_interner(self.analyzed, module_interner, method.name)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "module class method name not found in name_table: {}::{}",
+                            type_name_str, method_name_str
+                        )
+                    });
+
+            let semantic_method_id = self
+                .analyzed
+                .entity_registry()
+                .find_method_on_type(metadata.type_def_id, method_name_id)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "module class method not registered in entity_registry: {}::{} (type_def_id={:?}, method_name_id={:?})",
+                        type_name_str, method_name_str, metadata.type_def_id, method_name_id
+                    )
+                });
+
+            // Create method signature using pre-resolved MethodId
+            let sig = self.build_signature_for_method(semantic_method_id, SelfParam::Pointer);
             self.jit.ctx.func.signature = sig;
 
-            // Resolve param types and build config params
-            let param_type_ids = self.resolve_param_type_ids_with_interner(
-                &method.params,
-                module_interner,
-                module_id,
-            );
+            // Get param and return types from sema
+            let method_def = self.query().get_method(semantic_method_id);
+            let (param_type_ids, return_type_id) = {
+                let arena = self.analyzed.type_arena();
+                let (params, ret, _) = arena
+                    .unwrap_function(method_def.signature_id)
+                    .expect("method signature should be a function type");
+                (params.to_vec(), Some(ret))
+            };
+
             let param_types = self.type_ids_to_cranelift(&param_type_ids);
             let params: Vec<_> = method
                 .params
@@ -1310,26 +1346,6 @@ impl Compiler<'_> {
                 .zip(param_types.iter())
                 .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
                 .collect();
-
-            // Get return type: try sema first, fall back to AST
-            let return_type_id = {
-                let method_name_id =
-                    method_name_id_with_interner(self.analyzed, module_interner, method.name);
-
-                // Try sema lookup first
-                let from_sema = method_name_id.and_then(|name_id| {
-                    self.query()
-                        .method_return_type_by_id(metadata.type_def_id, name_id)
-                });
-
-                // Fall back to AST if sema lookup fails
-                from_sema.or_else(|| {
-                    method
-                        .return_type
-                        .as_ref()
-                        .map(|t| self.resolve_type_to_id_with_interner(t, module_interner))
-                })
-            };
             let self_sym = module_interner
                 .lookup("self")
                 .expect("'self' should be interned in module");
@@ -1389,21 +1405,41 @@ impl Compiler<'_> {
                     )
                 })?;
 
-                // Create signature (no self parameter) - use module interner
-                let sig = self.build_signature(
-                    &method.params,
-                    method.return_type.as_ref(),
-                    SelfParam::None,
-                    TypeResolver::Interner(module_interner),
-                );
+                // Look up MethodId from sema to get pre-computed signature
+                let method_name_id =
+                    method_name_id_with_interner(self.analyzed, module_interner, method.name)
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "module class static method name not found in name_table: {}::{}",
+                                type_name_str, method_name_str
+                            )
+                        });
+
+                let semantic_method_id = self
+                    .analyzed
+                    .entity_registry()
+                    .find_static_method_on_type(metadata.type_def_id, method_name_id)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "module class static method not registered in entity_registry: {}::{} (type_def_id={:?}, method_name_id={:?})",
+                            type_name_str, method_name_str, metadata.type_def_id, method_name_id
+                        )
+                    });
+
+                // Create signature using pre-resolved MethodId (no self parameter for static)
+                let sig = self.build_signature_for_method(semantic_method_id, SelfParam::None);
                 self.jit.ctx.func.signature = sig;
 
-                // Resolve param types and build config params
-                let param_type_ids = self.resolve_param_type_ids_with_interner(
-                    &method.params,
-                    module_interner,
-                    module_id,
-                );
+                // Get param and return types from sema
+                let method_def = self.query().get_method(semantic_method_id);
+                let (param_type_ids, return_type_id) = {
+                    let arena = self.analyzed.type_arena();
+                    let (params, ret, _) = arena
+                        .unwrap_function(method_def.signature_id)
+                        .expect("static method signature should be a function type");
+                    (params.to_vec(), Some(ret))
+                };
+
                 let param_types = self.type_ids_to_cranelift(&param_type_ids);
                 let params: Vec<_> = method
                     .params
@@ -1412,26 +1448,6 @@ impl Compiler<'_> {
                     .zip(param_types.iter())
                     .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
                     .collect();
-
-                // Get return type: try sema first, fall back to AST
-                let return_type_id = {
-                    let method_name_id =
-                        method_name_id_with_interner(self.analyzed, module_interner, method.name);
-
-                    // Try sema lookup first
-                    let from_sema = method_name_id.and_then(|name_id| {
-                        self.query()
-                            .static_method_return_type_by_id(metadata.type_def_id, name_id)
-                    });
-
-                    // Fall back to AST if sema lookup fails
-                    from_sema.or_else(|| {
-                        method
-                            .return_type
-                            .as_ref()
-                            .map(|t| self.resolve_type_to_id_with_interner(t, module_interner))
-                    })
-                };
 
                 // Create function builder and compile
                 let source_file_ptr = self.source_file_ptr();

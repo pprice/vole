@@ -34,12 +34,6 @@ impl<'a> TypeCtx<'a> {
         self.query.arena().borrow()
     }
 
-    /// Raw arena access (for functions that need &RefCell<TypeArena>)
-    #[inline]
-    pub fn arena_rc(&self) -> &'a Rc<RefCell<TypeArena>> {
-        self.query.arena()
-    }
-
     /// Get the entity registry
     #[inline]
     pub fn entities(&self) -> &'a EntityRegistry {
