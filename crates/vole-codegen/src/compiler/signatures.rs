@@ -4,7 +4,7 @@ use smallvec::{SmallVec, smallvec};
 use super::Compiler;
 use crate::types::{resolve_type_expr_to_id, type_id_to_cranelift};
 use vole_frontend::{Interner, Param, Symbol, TypeExpr};
-use vole_identity::ModuleId;
+use vole_identity::{FunctionId, ModuleId};
 use vole_sema::type_arena::TypeId;
 
 /// SmallVec for function parameters - most functions have <= 8 params
@@ -398,5 +398,57 @@ impl Compiler<'_> {
                 }
             })
             .collect()
+    }
+
+    /// Build a Cranelift signature from pre-resolved TypeIds.
+    ///
+    /// This is the most direct method for building signatures when types are already
+    /// resolved to TypeIds (e.g., from FunctionDef.signature or type analysis).
+    pub fn build_signature_from_type_ids(
+        &self,
+        params_id: &[TypeId],
+        return_type_id: Option<TypeId>,
+        self_param: SelfParam,
+    ) -> Signature {
+        let arena_ref = self.analyzed.type_arena();
+
+        // Build cranelift params starting with self if needed
+        let mut cranelift_params: ParamVec = match &self_param {
+            SelfParam::None => SmallVec::new(),
+            SelfParam::Pointer => smallvec![self.pointer_type],
+            SelfParam::TypedId(type_id) => {
+                smallvec![type_id_to_cranelift(
+                    *type_id,
+                    &arena_ref,
+                    self.pointer_type
+                )]
+            }
+        };
+
+        // Add param types
+        for &type_id in params_id {
+            cranelift_params.push(type_id_to_cranelift(type_id, &arena_ref, self.pointer_type));
+        }
+
+        // Convert return type (filter out void)
+        let ret = return_type_id
+            .filter(|id| !id.is_void())
+            .map(|id| type_id_to_cranelift(id, &arena_ref, self.pointer_type));
+
+        drop(arena_ref);
+        self.jit.create_signature(&cranelift_params, ret)
+    }
+
+    /// Build a Cranelift signature directly from a FunctionId.
+    ///
+    /// This is a convenience method that retrieves the function definition
+    /// and builds the signature from its pre-resolved TypeIds.
+    pub fn build_signature_for_function(&self, func_id: FunctionId) -> Signature {
+        let func_def = self.query().registry().get_function(func_id);
+        self.build_signature_from_type_ids(
+            &func_def.signature.params_id,
+            Some(func_def.signature.return_type_id),
+            SelfParam::None,
+        )
     }
 }
