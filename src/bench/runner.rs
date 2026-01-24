@@ -9,7 +9,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use crate::bench::{ResourceUsage, Stats, SystemInfo};
-use crate::codegen::{Compiler, JitContext};
+use crate::codegen::{Compiler, JitContext, JitOptions};
 use crate::commands::common::AnalyzedProgram;
 use crate::frontend::{Lexer, Parser};
 use crate::sema::Analyzer;
@@ -156,9 +156,9 @@ fn compile_with_timing(source: &str, file_path: &str) -> Result<CompileTiming, S
 
     let analyzed = AnalyzedProgram::from_analysis(program, interner, output);
 
-    // Codegen phase
+    // Codegen phase - always use release mode for benchmarks
     let codegen_start = Instant::now();
-    let mut jit = JitContext::new();
+    let mut jit = JitContext::with_options(JitOptions::release());
     {
         let mut compiler = Compiler::new(&mut jit, &analyzed);
         compiler
@@ -208,8 +208,8 @@ fn compile_to_jit(source: &str, file_path: &str) -> Result<JitContext, String> {
 
     let analyzed = AnalyzedProgram::from_analysis(program, interner, output);
 
-    // Compile
-    let mut jit = JitContext::new();
+    // Compile - always use release mode for benchmarks
+    let mut jit = JitContext::with_options(JitOptions::release());
     {
         let mut compiler = Compiler::new(&mut jit, &analyzed);
         compiler

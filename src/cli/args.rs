@@ -39,6 +39,10 @@ pub struct Cli {
     #[arg(long, global = true, hide = true, value_enum, default_value_t = ColorMode::Auto)]
     pub color: ColorMode,
 
+    /// Optimize for faster execution (disables verification, enables optimizations)
+    #[arg(long, global = true)]
+    pub release: bool,
+
     #[command(subcommand)]
     pub command: Commands,
 }

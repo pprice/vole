@@ -5,12 +5,12 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use super::common::{parse_and_analyze, read_stdin};
-use crate::codegen::{Compiler, JitContext};
+use crate::codegen::{Compiler, JitContext, JitOptions};
 use crate::runtime::{push_context, replace_context};
 
 /// Run a Vole source file (or stdin if path is "-")
-pub fn run_file(path: &Path) -> ExitCode {
-    match execute(path) {
+pub fn run_file(path: &Path, release: bool) -> ExitCode {
+    match execute(path, release) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             // Empty error means diagnostics were already rendered
@@ -22,7 +22,7 @@ pub fn run_file(path: &Path) -> ExitCode {
     }
 }
 
-fn execute(path: &Path) -> Result<(), String> {
+fn execute(path: &Path, release: bool) -> Result<(), String> {
     // Read source from file or stdin
     let (source, file_path) = if path.as_os_str() == "-" {
         let source = read_stdin().map_err(|e| format!("could not read stdin: {}", e))?;
@@ -42,9 +42,14 @@ fn execute(path: &Path) -> Result<(), String> {
 
     // Codegen phase
     replace_context(&format!("{} (compiling)", file_path));
+    let options = if release {
+        JitOptions::release()
+    } else {
+        JitOptions::debug()
+    };
     let jit = {
         let _span = tracing::info_span!("codegen").entered();
-        let mut jit = JitContext::new();
+        let mut jit = JitContext::with_options(options);
         {
             let mut compiler = Compiler::new(&mut jit, &analyzed);
             compiler

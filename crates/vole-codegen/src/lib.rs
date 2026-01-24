@@ -19,7 +19,7 @@ mod vtable_ctx;
 
 pub use compiler::{Compiler, ControlFlowCtx, TestInfo};
 pub use function_registry::{FunctionKey, FunctionRegistry, RuntimeFn};
-pub use jit::{CompiledModules, JitContext};
+pub use jit::{CompiledModules, JitContext, JitOptions};
 pub use types::CompiledValue;
 
 // Error types

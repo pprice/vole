@@ -56,6 +56,25 @@ impl CompiledModules {
     }
 }
 
+/// Options for JIT compilation
+#[derive(Clone, Copy, Debug, Default)]
+pub struct JitOptions {
+    /// Release mode: disable verifier, enable speed optimizations
+    pub release: bool,
+}
+
+impl JitOptions {
+    /// Create options for debug mode (default)
+    pub fn debug() -> Self {
+        Self { release: false }
+    }
+
+    /// Create options for release mode
+    pub fn release() -> Self {
+        Self { release: true }
+    }
+}
+
 /// JIT compiler context
 pub struct JitContext {
     pub module: JITModule,
@@ -70,21 +89,40 @@ pub struct JitContext {
 }
 
 impl JitContext {
+    /// Create a new JitContext with default (debug) options
     pub fn new() -> Self {
-        Self::new_with_modules(None)
+        Self::with_options(JitOptions::default())
+    }
+
+    /// Create a new JitContext with the specified options
+    pub fn with_options(options: JitOptions) -> Self {
+        Self::new_internal(None, options)
     }
 
     /// Create a new JitContext with pre-compiled module functions available as external symbols.
     /// This allows reusing compiled module code across multiple JitContexts.
     pub fn with_modules(modules: &CompiledModules) -> Self {
-        Self::new_with_modules(Some(&modules.functions))
+        Self::with_modules_and_options(modules, JitOptions::default())
     }
 
-    fn new_with_modules(precompiled: Option<&HashMap<String, *const u8>>) -> Self {
+    /// Create a new JitContext with pre-compiled modules and custom options.
+    pub fn with_modules_and_options(modules: &CompiledModules, options: JitOptions) -> Self {
+        Self::new_internal(Some(&modules.functions), options)
+    }
+
+    fn new_internal(precompiled: Option<&HashMap<String, *const u8>>, options: JitOptions) -> Self {
         // Build JIT module with native ISA
         let mut flag_builder = settings::builder();
         flag_builder.set("use_colocated_libcalls", "false").unwrap();
         flag_builder.set("is_pic", "false").unwrap();
+
+        // Apply release mode settings
+        if options.release {
+            // Disable IR verifier for faster compilation
+            flag_builder.set("enable_verifier", "false").unwrap();
+            // Enable speed optimizations for faster runtime
+            flag_builder.set("opt_level", "speed").unwrap();
+        }
 
         let isa_builder = cranelift_native::builder().unwrap_or_else(|msg| {
             panic!("native ISA not available: {}", msg);

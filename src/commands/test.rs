@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use super::common::{TermColors, parse_and_analyze_with_cache, read_stdin};
 use crate::cli::{ColorMode, ReportMode, expand_paths, should_skip_path};
-use crate::codegen::{CompiledModules, Compiler, JitContext, TestInfo};
+use crate::codegen::{CompiledModules, Compiler, JitContext, JitOptions, TestInfo};
 use crate::runtime::{
     AssertFailure, JmpBuf, call_setjmp, clear_current_test, clear_test_jmp_buf, set_current_file,
     set_current_test, set_stdout_capture, set_test_jmp_buf, take_assert_failure,
@@ -122,13 +122,14 @@ pub fn run_tests(
     max_failures: u32,
     include_skipped: bool,
     color: ColorMode,
+    release: bool,
 ) -> ExitCode {
     let start = Instant::now();
     let colors = TermColors::with_mode(color);
 
     // Handle stdin specially (must be alone)
     if paths.len() == 1 && paths[0] == "-" {
-        return run_stdin_tests(filter, &report, &colors, start);
+        return run_stdin_tests(filter, &report, &colors, start, release);
     }
 
     // Collect all test files from the given paths
@@ -221,6 +222,7 @@ pub fn run_tests(
             &report,
             cache.clone(),
             &mut compiled_modules,
+            release,
         ) {
             Ok(results) => {
                 all_results.merge(results);
@@ -258,6 +260,7 @@ fn run_stdin_tests(
     report: &ReportMode,
     colors: &TermColors,
     start: Instant,
+    release: bool,
 ) -> ExitCode {
     let source = match read_stdin() {
         Ok(s) => s,
@@ -287,6 +290,7 @@ fn run_stdin_tests(
         colors,
         report,
         cache,
+        release,
     ) {
         Ok(results) => {
             all_results.merge(results);
@@ -324,10 +328,13 @@ fn run_file_tests_with_progress(
     colors: &TermColors,
     report: &ReportMode,
     cache: Rc<RefCell<ModuleCache>>,
+    release: bool,
 ) -> Result<TestResults, String> {
     let source = fs::read_to_string(path).map_err(|e| format!("could not read file: {}", e))?;
     let file_path = path.to_string_lossy();
-    run_source_tests_with_progress(&source, &file_path, path, filter, colors, report, cache)
+    run_source_tests_with_progress(
+        &source, &file_path, path, filter, colors, report, cache, release,
+    )
 }
 
 /// Parse, type check, compile, and run tests with shared compiled modules
@@ -338,6 +345,7 @@ fn run_file_tests_with_modules(
     report: &ReportMode,
     cache: Rc<RefCell<ModuleCache>>,
     compiled_modules: &mut Option<CompiledModules>,
+    release: bool,
 ) -> Result<TestResults, String> {
     let source = fs::read_to_string(path).map_err(|e| format!("could not read file: {}", e))?;
     let file_path = path.to_string_lossy();
@@ -350,6 +358,7 @@ fn run_file_tests_with_modules(
         report,
         cache,
         compiled_modules,
+        release,
     )
 }
 
@@ -364,6 +373,7 @@ fn run_source_tests_with_modules(
     report: &ReportMode,
     cache: Rc<RefCell<ModuleCache>>,
     compiled_modules: &mut Option<CompiledModules>,
+    release: bool,
 ) -> Result<TestResults, String> {
     let sema_start = Instant::now();
 
@@ -385,10 +395,16 @@ fn run_source_tests_with_modules(
         })
     });
 
+    let options = if release {
+        JitOptions::release()
+    } else {
+        JitOptions::debug()
+    };
+
     let (jit, compile_result, tests, modules_time, program_time) = if can_use_cache {
         let modules = compiled_modules.as_ref().unwrap();
         // Subsequent files: use pre-compiled modules
-        let mut jit = JitContext::with_modules(modules);
+        let mut jit = JitContext::with_modules_and_options(modules, options);
         let mut compiler = Compiler::new(&mut jit, &analyzed);
         compiler.set_source_file(file_path);
 
@@ -406,7 +422,7 @@ fn run_source_tests_with_modules(
         (jit, result, tests, modules_time, program_time)
     } else {
         // First file: compile normally and cache modules for future files
-        let mut jit = JitContext::new();
+        let mut jit = JitContext::with_options(options);
         let mut compiler = Compiler::new(&mut jit, &analyzed);
         compiler.set_source_file(file_path);
 
@@ -428,7 +444,7 @@ fn run_source_tests_with_modules(
 
         // If successful, create a separate modules JIT for caching
         if result.is_ok() && !analyzed.module_programs.is_empty() {
-            let mut modules_jit = JitContext::new();
+            let mut modules_jit = JitContext::with_options(options);
             let compile_result = {
                 let mut modules_compiler = Compiler::new(&mut modules_jit, &analyzed);
                 modules_compiler.compile_modules_only()
@@ -533,6 +549,7 @@ fn run_tests_from_jit(
 }
 
 /// Parse, type check, compile, and run tests with incremental progress output
+#[allow(clippy::too_many_arguments)]
 fn run_source_tests_with_progress(
     source: &str,
     file_path: &str,
@@ -541,6 +558,7 @@ fn run_source_tests_with_progress(
     colors: &TermColors,
     report: &ReportMode,
     cache: Rc<RefCell<ModuleCache>>,
+    release: bool,
 ) -> Result<TestResults, String> {
     let sema_start = Instant::now();
 
@@ -551,7 +569,12 @@ fn run_source_tests_with_progress(
 
     // Compile
     let codegen_start = Instant::now();
-    let mut jit = JitContext::new();
+    let options = if release {
+        JitOptions::release()
+    } else {
+        JitOptions::debug()
+    };
+    let mut jit = JitContext::with_options(options);
     let (compile_result, tests, modules_time, program_time) = {
         let mut compiler = Compiler::new(&mut jit, &analyzed);
         compiler.set_source_file(file_path);

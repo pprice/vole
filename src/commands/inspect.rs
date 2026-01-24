@@ -6,7 +6,7 @@ use std::process::ExitCode;
 use miette::NamedSource;
 
 use crate::cli::{InspectType, expand_paths_flat};
-use crate::codegen::{Compiler, JitContext};
+use crate::codegen::{Compiler, JitContext, JitOptions};
 use crate::commands::common::AnalyzedProgram;
 use crate::errors::render_to_stderr;
 use crate::frontend::{AstPrinter, Parser};
@@ -18,6 +18,7 @@ pub fn inspect_files(
     inspect_type: InspectType,
     no_tests: bool,
     _imports: Option<&str>,
+    release: bool,
 ) -> ExitCode {
     // Expand patterns and collect unique files
     let files = match expand_paths_flat(patterns) {
@@ -106,7 +107,12 @@ pub fn inspect_files(
 
                 // Generate IR
                 let analyzed = AnalyzedProgram::from_analysis(program, interner, output);
-                let mut jit = JitContext::new();
+                let options = if release {
+                    JitOptions::release()
+                } else {
+                    JitOptions::debug()
+                };
+                let mut jit = JitContext::with_options(options);
                 let mut compiler = Compiler::new(&mut jit, &analyzed);
                 let include_tests = !no_tests;
 
