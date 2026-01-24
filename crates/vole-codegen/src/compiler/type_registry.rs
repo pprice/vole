@@ -122,13 +122,25 @@ impl Compiler<'_> {
             .expect("class should be pre-registered")
             .type_id;
 
-        // Build field slots map (TypeId-native)
+        // Build field slots map using sema's pre-resolved field types
         let mut field_slots = HashMap::new();
         let mut field_type_tags = Vec::new();
-        for (i, field) in class.fields.iter().enumerate() {
-            let field_name = query.resolve_symbol(field.name).to_string();
-            field_slots.insert(field_name, i);
-            let field_type_id = self.resolve_type_to_id(&field.ty);
+        // Collect field IDs first to avoid borrow conflicts
+        let field_ids: Vec<_> = self
+            .analyzed
+            .entity_registry()
+            .fields_on_type(type_def_id)
+            .collect();
+        for field_id in field_ids {
+            let (field_name, field_slot, field_type_id) = {
+                let field_def = self.analyzed.entity_registry().get_field(field_id);
+                let name = self
+                    .query()
+                    .last_segment(field_def.name_id)
+                    .expect("field should have a name");
+                (name, field_def.slot, field_def.ty)
+            };
+            field_slots.insert(field_name, field_slot);
             field_type_tags.push(type_id_to_field_tag(
                 field_type_id,
                 &self.analyzed.type_arena(),
@@ -145,27 +157,13 @@ impl Compiler<'_> {
         for method in &class.methods {
             let method_name_id = self.method_name_id(method.name);
 
-            // Try to get MethodId and build signature from pre-resolved types
-            let sig = if let Some(method_id) = self
+            // Get MethodId and build signature from pre-resolved types
+            let method_id = self
                 .analyzed
                 .entity_registry()
                 .find_method_on_type(type_def_id, method_name_id)
-            {
-                self.build_signature_for_method(method_id, SelfParam::Pointer)
-            } else {
-                // Fallback: build from AST (shouldn't happen normally)
-                let return_type = if let Some(ref return_type_expr) = method.return_type {
-                    self.resolve_type_to_id(return_type_expr)
-                } else {
-                    TypeId::VOID
-                };
-                self.build_signature_with_return_type_id(
-                    &method.params,
-                    Some(return_type),
-                    SelfParam::Pointer,
-                    TypeResolver::Query,
-                )
-            };
+                .expect("method should be registered in entity registry");
+            let sig = self.build_signature_for_method(method_id, SelfParam::Pointer);
             let func_key = self.intern_func(func_module_id, &[class.name, method.name]);
             let display_name = self.func_registry.display(func_key);
             let jit_func_id = self.jit.declare_function(&display_name, &sig);
@@ -318,13 +316,25 @@ impl Compiler<'_> {
             .expect("record should be pre-registered")
             .type_id;
 
-        // Build field slots map (TypeId-native)
+        // Build field slots map using sema's pre-resolved field types
         let mut field_slots = HashMap::new();
         let mut field_type_tags = Vec::new();
-        for (i, field) in record.fields.iter().enumerate() {
-            let field_name = query.resolve_symbol(field.name).to_string();
-            field_slots.insert(field_name, i);
-            let field_type_id = self.resolve_type_to_id(&field.ty);
+        // Collect field IDs first to avoid borrow conflicts
+        let field_ids: Vec<_> = self
+            .analyzed
+            .entity_registry()
+            .fields_on_type(type_def_id)
+            .collect();
+        for field_id in field_ids {
+            let (field_name, field_slot, field_type_id) = {
+                let field_def = self.analyzed.entity_registry().get_field(field_id);
+                let name = self
+                    .query()
+                    .last_segment(field_def.name_id)
+                    .expect("field should have a name");
+                (name, field_def.slot, field_def.ty)
+            };
+            field_slots.insert(field_name, field_slot);
             field_type_tags.push(type_id_to_field_tag(
                 field_type_id,
                 &self.analyzed.type_arena(),
@@ -465,7 +475,9 @@ impl Compiler<'_> {
         let query = self.query();
         let module_id = query.main_module();
         let type_name_id = query.name_id(module_id, &[type_name]);
-        let type_def_id = query.try_type_def_id(type_name_id);
+        let type_def_id = query
+            .try_type_def_id(type_name_id)
+            .expect("type should be registered in entity registry");
 
         for method in &statics.methods {
             // Only register methods with bodies (not abstract ones)
@@ -475,28 +487,13 @@ impl Compiler<'_> {
 
             let method_name_id = self.method_name_id(method.name);
 
-            // Try to get MethodId and build signature from pre-resolved types
-            let sig = if let Some(type_def_id) = type_def_id
-                && let Some(semantic_method_id) = self
-                    .analyzed
-                    .entity_registry()
-                    .find_static_method_on_type(type_def_id, method_name_id)
-            {
-                self.build_signature_for_method(semantic_method_id, SelfParam::None)
-            } else {
-                // Fallback: build from AST
-                let return_type = if let Some(ref return_type_expr) = method.return_type {
-                    self.resolve_type_to_id(return_type_expr)
-                } else {
-                    TypeId::VOID
-                };
-                self.build_signature_with_return_type_id(
-                    &method.params,
-                    Some(return_type),
-                    SelfParam::None,
-                    TypeResolver::Query,
-                )
-            };
+            // Get MethodId and build signature from pre-resolved types
+            let method_id = self
+                .analyzed
+                .entity_registry()
+                .find_static_method_on_type(type_def_id, method_name_id)
+                .expect("static method should be registered in entity registry");
+            let sig = self.build_signature_for_method(method_id, SelfParam::None);
 
             // Function key: TypeName::methodName
             let func_key = self.intern_func(func_module_id, &[type_name, method.name]);
@@ -505,11 +502,9 @@ impl Compiler<'_> {
             self.func_registry.set_func_id(func_key, jit_func_id);
 
             // Register in method_func_keys for codegen lookup
-            if let Some(type_def_id) = type_def_id {
-                self.state
-                    .method_func_keys
-                    .insert((type_def_id, method_name_id), func_key);
-            }
+            self.state
+                .method_func_keys
+                .insert((type_def_id, method_name_id), func_key);
         }
     }
 
@@ -543,13 +538,25 @@ impl Compiler<'_> {
         let type_id = self.next_type_id;
         self.next_type_id += 1;
 
-        // Build field slots map (TypeId-native)
+        // Build field slots map using sema's pre-resolved field types
         let mut field_slots = HashMap::new();
         let mut field_type_tags = Vec::new();
-        for (i, field) in class.fields.iter().enumerate() {
-            let field_name = module_interner.resolve(field.name).to_string();
-            field_slots.insert(field_name, i);
-            let field_type_id = self.resolve_type_to_id_with_interner(&field.ty, module_interner);
+        // Collect field IDs first to avoid borrow conflicts
+        let field_ids: Vec<_> = self
+            .analyzed
+            .entity_registry()
+            .fields_on_type(type_def_id)
+            .collect();
+        for field_id in field_ids {
+            let (field_name, field_slot, field_type_id) = {
+                let field_def = self.analyzed.entity_registry().get_field(field_id);
+                let name = self
+                    .query()
+                    .last_segment(field_def.name_id)
+                    .expect("field should have a name");
+                (name, field_def.slot, field_def.ty)
+            };
+            field_slots.insert(field_name, field_slot);
             field_type_tags.push(type_id_to_field_tag(
                 field_type_id,
                 &self.analyzed.type_arena(),
