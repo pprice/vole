@@ -535,6 +535,46 @@ impl Analyzer {
         std::cell::RefMut::map(self.db.borrow_mut(), |db| &mut db.implements)
     }
 
+    /// Pre-compute substituted field types for a generic class/record instantiation.
+    ///
+    /// When creating a type like Box<String>, this ensures that the substituted field
+    /// types (e.g., String for a field of type T) exist in the arena. This allows
+    /// codegen to use lookup_substitute instead of substitute, making it fully read-only.
+    fn precompute_field_substitutions(&self, type_def_id: TypeDefId, type_args: &[ArenaTypeId]) {
+        // Skip if no type arguments (no substitution needed)
+        if type_args.is_empty() {
+            return;
+        }
+
+        // Get field types and type params from the type definition
+        let (field_types, type_params): (Vec<ArenaTypeId>, Vec<NameId>) = {
+            let registry = self.entity_registry();
+            let type_def = registry.get_type(type_def_id);
+            if let Some(generic_info) = &type_def.generic_info {
+                (
+                    generic_info.field_types.clone(),
+                    type_def.type_params.clone(),
+                )
+            } else {
+                return;
+            }
+        };
+
+        // Build substitution map: type param NameId -> concrete TypeId
+        let subs: FxHashMap<NameId, ArenaTypeId> = type_params
+            .iter()
+            .zip(type_args.iter())
+            .map(|(&param, &arg)| (param, arg))
+            .collect();
+
+        // Pre-compute substituted types for all fields
+        // This ensures they exist in the arena for codegen's lookup_substitute
+        let mut arena = self.type_arena_mut();
+        for field_type in field_types {
+            arena.substitute(field_type, &subs);
+        }
+    }
+
     /// Check if we're currently inside a lambda
     fn in_lambda(&self) -> bool {
         !self.lambda_captures.is_empty()

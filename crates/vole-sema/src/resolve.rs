@@ -297,8 +297,22 @@ fn resolve_generic_type_to_id(
 
     if let Some((type_def_id, kind)) = lookup_result {
         match kind {
-            TypeDefKind::Class => ctx.type_arena_mut().class(type_def_id, type_args_id),
-            TypeDefKind::Record => ctx.type_arena_mut().record(type_def_id, type_args_id),
+            TypeDefKind::Class => {
+                let result = ctx
+                    .type_arena_mut()
+                    .class(type_def_id, type_args_id.clone());
+                // Pre-compute substituted field types so codegen can use lookup_substitute
+                precompute_field_substitutions(ctx, type_def_id, &type_args_id);
+                result
+            }
+            TypeDefKind::Record => {
+                let result = ctx
+                    .type_arena_mut()
+                    .record(type_def_id, type_args_id.clone());
+                // Pre-compute substituted field types so codegen can use lookup_substitute
+                precompute_field_substitutions(ctx, type_def_id, &type_args_id);
+                result
+            }
             TypeDefKind::Interface => ctx.type_arena_mut().interface(type_def_id, type_args_id),
             TypeDefKind::Alias | TypeDefKind::ErrorType | TypeDefKind::Primitive => {
                 // These types don't support type parameters
@@ -308,6 +322,50 @@ fn resolve_generic_type_to_id(
     } else {
         // Unknown type name
         ctx.type_arena_mut().invalid()
+    }
+}
+
+/// Pre-compute substituted field types for a generic class/record instantiation.
+///
+/// When creating a type like Box<String>, this ensures that the substituted field
+/// types (e.g., String for a field of type T) exist in the arena. This allows
+/// codegen to use lookup_substitute instead of substitute, making it fully read-only.
+fn precompute_field_substitutions(
+    ctx: &TypeResolutionContext<'_>,
+    type_def_id: TypeDefId,
+    type_args: &[TypeId],
+) {
+    // Skip if no type arguments (no substitution needed)
+    if type_args.is_empty() {
+        return;
+    }
+
+    // Get field types and type params from the type definition
+    let (field_types, type_params): (Vec<TypeId>, Vec<vole_identity::NameId>) = {
+        let registry = ctx.entity_registry();
+        let type_def = registry.get_type(type_def_id);
+        if let Some(generic_info) = &type_def.generic_info {
+            (
+                generic_info.field_types.clone(),
+                type_def.type_params.clone(),
+            )
+        } else {
+            return;
+        }
+    };
+
+    // Build substitution map: type param NameId -> concrete TypeId
+    let subs: rustc_hash::FxHashMap<vole_identity::NameId, TypeId> = type_params
+        .iter()
+        .zip(type_args.iter())
+        .map(|(&param, &arg)| (param, arg))
+        .collect();
+
+    // Pre-compute substituted types for all fields
+    // This ensures they exist in the arena for codegen's lookup_substitute
+    let mut arena = ctx.type_arena_mut();
+    for field_type in field_types {
+        arena.substitute(field_type, &subs);
     }
 }
 
@@ -538,5 +596,97 @@ mod tests {
                 panic!("Expected tuple type");
             }
         });
+    }
+
+    // ========================================================================
+    // Pre-computation of field substitutions tests
+    // ========================================================================
+
+    #[test]
+    fn precompute_field_substitutions_creates_types() {
+        use crate::entity_defs::{GenericTypeInfo, TypeDefKind};
+        use crate::generic::TypeParamInfo;
+        use std::cell::RefCell;
+
+        let mut interner = Interner::new();
+        let t_sym = interner.intern("T");
+        let box_sym = interner.intern("Box");
+        let value_sym = interner.intern("value");
+
+        let db = RefCell::new(CompilationDb::new());
+        let module_id = db.borrow_mut().names.main_module();
+
+        // Create type param name ID
+        let t_name_id = db.borrow_mut().names.intern(module_id, &[t_sym], &interner);
+        let box_name_id = db
+            .borrow_mut()
+            .names
+            .intern(module_id, &[box_sym], &interner);
+        let value_name_id = db
+            .borrow_mut()
+            .names
+            .intern(module_id, &[value_sym], &interner);
+
+        // Create a type param TypeId (T)
+        let t_type_id = db.borrow_mut().types.type_param(t_name_id);
+
+        // Register Box<T> type with a field of type T
+        let box_type_def_id = {
+            let mut db_mut = db.borrow_mut();
+            // First register the type
+            let id = db_mut
+                .entities
+                .register_type(box_name_id, TypeDefKind::Class, module_id);
+            // Set type params
+            db_mut.entities.set_type_params(id, vec![t_name_id]);
+            // Set generic info with field of type T
+            db_mut.entities.set_generic_info(
+                id,
+                GenericTypeInfo {
+                    type_params: vec![TypeParamInfo {
+                        name: t_sym,
+                        name_id: t_name_id,
+                        constraint: None,
+                        type_param_id: None,
+                        variance: crate::generic::TypeParamVariance::Invariant,
+                    }],
+                    field_names: vec![value_name_id],
+                    field_types: vec![t_type_id], // Field of type T
+                    field_has_default: vec![false],
+                },
+            );
+            id
+        };
+
+        // Now resolve Box<String>
+        let mut ctx = TypeResolutionContext::new(&db, &interner, module_id);
+        let box_string_expr = TypeExpr::Generic {
+            name: box_sym,
+            args: vec![TypeExpr::Primitive(FrontendPrimitiveType::String)],
+        };
+        let box_string_id = resolve_type_to_id(&box_string_expr, &mut ctx);
+
+        // Verify Box<String> was created
+        let arena = ctx.type_arena();
+        assert!(
+            arena.unwrap_class(box_string_id).is_some(),
+            "Expected class type"
+        );
+
+        // The key test: verify that the substituted field type (String) can be looked up
+        // using lookup_substitute instead of substitute
+        let subs = {
+            let registry = ctx.entity_registry();
+            registry.substitution_map_id(box_type_def_id, &[TypeId::STRING])
+        };
+
+        // lookup_substitute should succeed because precompute_field_substitutions
+        // already called substitute for the field type
+        let result = arena.lookup_substitute(t_type_id, &subs);
+        assert_eq!(
+            result,
+            Some(TypeId::STRING),
+            "Field type substitution should be pre-computed and findable via lookup"
+        );
     }
 }

@@ -385,6 +385,9 @@ impl Analyzer {
             .filter_map(|tp| inferred_id.get(&tp.name_id).copied())
             .collect();
 
+        // Pre-compute substituted field types so codegen can use lookup_substitute
+        self.precompute_field_substitutions(type_def_id, &type_args_id);
+
         Ok(self
             .type_arena_mut()
             .record(type_def_id, type_args_id.to_vec()))
@@ -548,6 +551,9 @@ impl Analyzer {
                 ArenaTypeId::INVALID // Unknown type
             })
             .collect();
+
+        // Pre-compute substituted field types so codegen can use lookup_substitute
+        self.precompute_field_substitutions(type_def_id, &type_args_id);
 
         Ok(self
             .type_arena_mut()
