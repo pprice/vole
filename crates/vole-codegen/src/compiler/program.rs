@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use std::io::Write;
 
-use rustc_hash::FxHashMap;
-
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, InstBuilder, types};
 use cranelift_module::{FuncId, Module};
 
@@ -24,12 +22,11 @@ use vole_frontend::{
     Symbol, TestCase, TestsDecl,
 };
 use vole_identity::NameId;
-use vole_sema::entity_defs::TypeDefKind;
 use vole_sema::generic::{
     ClassMethodMonomorphInstance, MonomorphInstance, MonomorphInstanceTrait,
     StaticMethodMonomorphInstance,
 };
-use vole_sema::type_arena::{TypeId, TypeIdVec};
+use vole_sema::type_arena::TypeId;
 
 /// Information about a compiled scoped function, used to make it available in tests
 struct ScopedFuncInfo {
@@ -1275,7 +1272,7 @@ impl Compiler<'_> {
                     .iter()
                     .find(|m| self.query().resolve_symbol(m.name) == method_name_str);
                 if let Some(method) = method {
-                    self.compile_monomorphized_class_method(method, &instance, class.name)?;
+                    self.compile_monomorphized_class_method(method, &instance)?;
                     continue;
                 }
             }
@@ -1288,7 +1285,7 @@ impl Compiler<'_> {
                     .iter()
                     .find(|m| self.query().resolve_symbol(m.name) == method_name_str);
                 if let Some(method) = method {
-                    self.compile_monomorphized_class_method(method, &instance, record.name)?;
+                    self.compile_monomorphized_class_method(method, &instance)?;
                     continue;
                 }
             }
@@ -1310,7 +1307,6 @@ impl Compiler<'_> {
         &mut self,
         method: &FuncDecl,
         instance: &ClassMethodMonomorphInstance,
-        type_name: Symbol,
     ) -> Result<(), String> {
         let mangled_name = self.query().display_name(instance.mangled_name);
         let func_key = self.func_registry.intern_name_id(instance.mangled_name);
@@ -1338,8 +1334,8 @@ impl Compiler<'_> {
         let sig = self.jit.create_signature(&sig_params, ret);
         self.jit.ctx.func.signature = sig;
 
-        // Build self binding with concrete type args
-        let self_type_id = self.build_concrete_self_type_id(type_name, &instance.substitutions);
+        // Use pre-computed self type from sema
+        let self_type_id = instance.self_type;
         let self_sym = self.self_symbol();
         let self_binding = (self_sym, self_type_id, self.pointer_type);
 
@@ -1371,83 +1367,6 @@ impl Compiler<'_> {
         self.finalize_function(func_id)?;
 
         Ok(())
-    }
-
-    /// Build the concrete self type with type arguments substituted
-    /// Build a concrete self type for monomorphized class methods (TypeId-native)
-    fn build_concrete_self_type_id(
-        &self,
-        type_name: Symbol,
-        substitutions: &HashMap<NameId, TypeId>,
-    ) -> TypeId {
-        let query = self.query();
-        let module_id = query.main_module();
-        let type_name_str = self.analyzed.interner.resolve(type_name);
-
-        tracing::debug!(
-            type_name = %type_name_str,
-            substitutions = ?substitutions,
-            "build_concrete_self_type_id"
-        );
-
-        // Try to get NameId and TypeDefId for this type
-        let type_def_id = query
-            .try_name_id(module_id, &[type_name])
-            .and_then(|name_id| {
-                tracing::debug!(name_id = ?name_id, "found name_id");
-                query.try_type_def_id(name_id)
-            });
-
-        if let Some(type_def_id) = type_def_id {
-            let type_def = query.get_type(type_def_id);
-            tracing::debug!(
-                type_def_id = ?type_def_id,
-                has_generic_info = type_def.generic_info.is_some(),
-                "found type_def"
-            );
-
-            // If it has generic_info, use it to build the type with proper TypeParam substitution
-            if let Some(generic_info) = &type_def.generic_info {
-                tracing::debug!(
-                    field_types = ?generic_info.field_types,
-                    "using generic_info"
-                );
-
-                // Build type_args from substituted type params (TypeId-native)
-                let type_args_id: TypeIdVec = generic_info
-                    .type_params
-                    .iter()
-                    .map(|param| {
-                        substitutions
-                            .get(&param.name_id)
-                            .copied()
-                            .unwrap_or_else(|| {
-                                self.analyzed.type_arena_mut().type_param(param.name_id)
-                            })
-                    })
-                    .collect();
-
-                // Determine if it's a class or record based on TypeDefKind
-                let update = vole_sema::ProgramUpdate::new(self.analyzed.type_arena_ref());
-                return match &type_def.kind {
-                    TypeDefKind::Record => update.record(type_def_id, type_args_id),
-                    TypeDefKind::Class => update.class(type_def_id, type_args_id),
-                    _ => update.record(type_def_id, type_args_id), // Fallback
-                };
-            }
-
-            // Non-generic type: use type_metadata
-            if let Some(metadata) = self.state.type_metadata.get(&type_def_id) {
-                // Apply substitutions to the stored vole_type
-                let subs: FxHashMap<NameId, TypeId> =
-                    substitutions.iter().map(|(&k, &v)| (k, v)).collect();
-                return vole_sema::ProgramUpdate::new(self.analyzed.type_arena_ref())
-                    .substitute(metadata.vole_type, &subs);
-            }
-        }
-
-        // Final fallback (type not in entity registry or type_metadata)
-        self.analyzed.type_arena().primitives.i64
     }
 
     /// Declare all monomorphized static method instances

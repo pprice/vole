@@ -597,6 +597,8 @@ pub struct ClassMethodMonomorphInstance {
     pub substitutions: HashMap<NameId, ArenaTypeId>,
     /// External method info (if this is an external method, call the runtime function)
     pub external_info: Option<ExternalMethodInfo>,
+    /// Pre-computed self type (e.g., Foo<String> for a method on Foo<String>)
+    pub self_type: ArenaTypeId,
 }
 
 impl MonomorphInstanceTrait for ClassMethodMonomorphInstance {

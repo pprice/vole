@@ -1025,6 +1025,7 @@ impl Analyzer {
                 func_type: func_type.clone(),
                 substitutions,
                 external_info,
+                self_type: object_type_id,
             };
 
             tracing::debug!(
