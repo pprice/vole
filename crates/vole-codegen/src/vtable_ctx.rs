@@ -15,7 +15,7 @@ use vole_frontend::Interner;
 use vole_identity::{NameId, TypeDefId};
 use vole_runtime::NativeRegistry;
 use vole_sema::type_arena::TypeArena;
-use vole_sema::{EntityRegistry, ProgramQuery, ProgramUpdate};
+use vole_sema::{EntityRegistry, ProgramQuery};
 
 use crate::types::{CodegenCtx, CompileEnv, TypeMetadataMap};
 use crate::{AnalyzedProgram, FunctionKey, FunctionRegistry};
@@ -43,9 +43,6 @@ pub trait VtableCtx {
 
     /// Get query interface
     fn query(&self) -> ProgramQuery<'_>;
-
-    /// Get update interface for arena mutations
-    fn update(&self) -> ProgramUpdate<'_>;
 
     /// Get the pointer type
     fn ptr_type(&self) -> Type;
@@ -110,10 +107,6 @@ impl<'a, 'ctx> VtableCtx for VtableCtxView<'a, 'ctx> {
 
     fn query(&self) -> ProgramQuery<'_> {
         self.env.analyzed.query()
-    }
-
-    fn update(&self) -> ProgramUpdate<'_> {
-        ProgramUpdate::new(self.env.analyzed.type_arena_ref())
     }
 
     fn ptr_type(&self) -> Type {

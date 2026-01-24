@@ -1049,10 +1049,6 @@ impl<'a, 'b, 'ctx> crate::vtable_ctx::VtableCtx for Cg<'a, 'b, 'ctx> {
         self.env.analyzed.query()
     }
 
-    fn update(&self) -> vole_sema::ProgramUpdate<'_> {
-        vole_sema::ProgramUpdate::new(self.env.analyzed.type_arena_ref())
-    }
-
     fn ptr_type(&self) -> Type {
         self.codegen_ctx.ptr_type()
     }
