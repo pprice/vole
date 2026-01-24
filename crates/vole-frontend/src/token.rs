@@ -264,7 +264,7 @@ impl TokenType {
 }
 
 /// Source location span
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
 pub struct Span {
     pub start: usize,    // Byte offset
     pub end: usize,      // Byte offset (exclusive)

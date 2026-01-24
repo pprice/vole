@@ -20,8 +20,8 @@ use crate::types::{
     type_id_to_cranelift,
 };
 use vole_frontend::{
-    Block, Decl, Expr, FuncBody, FuncDecl, InterfaceMethod, Interner, LetInit, LetStmt, Program,
-    Span, Stmt, Symbol, TestCase, TestsDecl,
+    Block, Decl, Expr, FuncDecl, InterfaceMethod, Interner, LetInit, LetStmt, Program, Span, Stmt,
+    Symbol, TestCase, TestsDecl,
 };
 use vole_identity::NameId;
 use vole_sema::entity_defs::TypeDefKind;
@@ -37,10 +37,8 @@ struct ScopedFuncInfo {
     name: Symbol,
     /// The compiled function ID
     func_id: FuncId,
-    /// The function's return type
-    return_type_id: TypeId,
-    /// The function's parameter types
-    param_type_ids: Vec<TypeId>,
+    /// The closure function type (pre-computed by sema)
+    func_type_id: TypeId,
 }
 
 impl Compiler<'_> {
@@ -636,25 +634,27 @@ impl Compiler<'_> {
             .lambda_counter
             .set(self.state.lambda_counter.get() + 1);
 
-        // Get param types using the compiler's type resolution
-        let param_type_ids: Vec<TypeId> = func
-            .params
-            .iter()
-            .map(|p| self.resolve_type_to_id(&p.ty))
-            .collect();
+        // Look up the closure function type from sema (pre-computed during analysis)
+        let func_type_id = self
+            .query()
+            .scoped_function_type(func.span)
+            .ok_or_else(|| {
+                format!(
+                    "Scoped function type not found for '{}'",
+                    self.analyzed.interner.resolve(func.name)
+                )
+            })?;
 
-        // Get return type:
-        // 1. If declared, use the declared type
-        // 2. If expression body, get the type from sema (stored in expr_types)
-        // 3. Fall back to void
-        let return_type_id = if let Some(t) = &func.return_type {
-            self.resolve_type_to_id(t)
-        } else {
-            // For expression bodies, get the type from the body expression
-            match &func.body {
-                FuncBody::Expr(expr) => self.query().type_of(expr.id).unwrap_or(TypeId::VOID),
-                FuncBody::Block(_) => TypeId::VOID,
-            }
+        // Extract param and return types from the function type
+        let (param_type_ids, return_type_id) = {
+            let arena = self.analyzed.type_arena();
+            let (params, ret, _) = arena.unwrap_function(func_type_id).ok_or_else(|| {
+                format!(
+                    "Scoped function has non-function type for '{}'",
+                    self.analyzed.interner.resolve(func.name)
+                )
+            })?;
+            (params.to_vec(), ret)
         };
 
         // Convert to Cranelift types
@@ -729,8 +729,7 @@ impl Compiler<'_> {
         Ok(ScopedFuncInfo {
             name: func.name,
             func_id,
-            return_type_id,
-            param_type_ids,
+            func_type_id,
         })
     }
 
@@ -813,21 +812,11 @@ impl Compiler<'_> {
                     let alloc_call = builder.ins().call(alloc_ref, &[func_addr, zero_captures]);
                     let closure_ptr = builder.inst_results(alloc_call)[0];
 
-                    // Create function type for the variable
-                    let func_type_id = {
-                        let param_ids: TypeIdVec =
-                            scoped_func.param_type_ids.iter().copied().collect();
-                        vole_sema::ProgramUpdate::new(env.analyzed.type_arena_ref()).function(
-                            param_ids,
-                            scoped_func.return_type_id,
-                            true,
-                        ) // is_closure=true
-                    };
-
                     // Declare Cranelift variable and add to map
+                    // Use the pre-computed closure function type from sema
                     let var = builder.declare_var(self.pointer_type);
                     builder.def_var(var, closure_ptr);
-                    variables.insert(scoped_func.name, (var, func_type_id));
+                    variables.insert(scoped_func.name, (var, scoped_func.func_type_id));
                 }
 
                 // Compile scoped let declarations and test body

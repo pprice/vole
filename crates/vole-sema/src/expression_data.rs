@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use crate::generic::{ClassMethodMonomorphKey, MonomorphKey, StaticMethodMonomorphKey};
 use crate::resolution::ResolvedMethod;
 use crate::type_arena::TypeId;
-use vole_frontend::NodeId;
+use vole_frontend::{NodeId, Span};
 
 /// Information about a lambda's parameter defaults.
 /// Used to support calling closures with default arguments.
@@ -47,6 +47,10 @@ pub struct ExpressionData {
     /// Lambda defaults for closure calls.
     /// Maps a call site NodeId to the lambda's defaults info.
     lambda_defaults: HashMap<NodeId, LambdaDefaults>,
+    /// Scoped function closure types.
+    /// Maps function declaration span to its closure function type.
+    /// Used for scoped functions in test blocks which are compiled as closures.
+    scoped_function_types: HashMap<Span, TypeId>,
 }
 
 impl ExpressionData {
@@ -67,6 +71,7 @@ impl ExpressionData {
         module_methods: FxHashMap<String, HashMap<NodeId, ResolvedMethod>>,
         substituted_return_types: HashMap<NodeId, TypeId>,
         lambda_defaults: HashMap<NodeId, LambdaDefaults>,
+        scoped_function_types: HashMap<Span, TypeId>,
     ) -> Self {
         Self {
             types,
@@ -78,6 +83,7 @@ impl ExpressionData {
             module_methods,
             substituted_return_types,
             lambda_defaults,
+            scoped_function_types,
         }
     }
 
@@ -279,5 +285,20 @@ impl ExpressionData {
     /// Get mutable access to lambda defaults
     pub fn lambda_defaults_mut(&mut self) -> &mut HashMap<NodeId, LambdaDefaults> {
         &mut self.lambda_defaults
+    }
+
+    /// Get the closure function type for a scoped function by its declaration span
+    pub fn get_scoped_function_type(&self, span: Span) -> Option<TypeId> {
+        self.scoped_function_types.get(&span).copied()
+    }
+
+    /// Set the closure function type for a scoped function
+    pub fn set_scoped_function_type(&mut self, span: Span, type_id: TypeId) {
+        self.scoped_function_types.insert(span, type_id);
+    }
+
+    /// Get all scoped function types
+    pub fn scoped_function_types(&self) -> &HashMap<Span, TypeId> {
+        &self.scoped_function_types
     }
 }

@@ -261,6 +261,9 @@ pub struct Analyzer {
     /// Variable to lambda expression mapping. Tracks which variables hold lambdas with defaults.
     /// Maps Symbol -> (lambda_node_id, required_params)
     lambda_variables: HashMap<Symbol, (NodeId, usize)>,
+    /// Scoped function closure types. Maps function declaration span to its closure function type.
+    /// Used for scoped functions in test blocks which are compiled as closures.
+    scoped_function_types: HashMap<Span, ArenaTypeId>,
     /// Current module being analyzed (for proper NameId registration)
     current_module: ModuleId,
     /// Stack of type parameter scopes for nested generic contexts.
@@ -317,6 +320,7 @@ impl Analyzer {
             substituted_return_types: HashMap::new(),
             lambda_defaults: HashMap::new(),
             lambda_variables: HashMap::new(),
+            scoped_function_types: HashMap::new(),
             current_module: main_module,
             type_param_stack: TypeParamScopeStack::new(),
             module_cache: None,
@@ -370,6 +374,7 @@ impl Analyzer {
             substituted_return_types: HashMap::new(),
             lambda_defaults: HashMap::new(),
             lambda_variables: HashMap::new(),
+            scoped_function_types: HashMap::new(),
             current_module: main_module,
             type_param_stack: TypeParamScopeStack::new(),
             module_cache: Some(cache),
@@ -435,6 +440,7 @@ impl Analyzer {
             self.module_method_resolutions,
             self.substituted_return_types,
             self.lambda_defaults,
+            self.scoped_function_types,
         );
         AnalysisOutput {
             expression_data,
@@ -2494,11 +2500,15 @@ impl Analyzer {
         }
         self.exit_function_context(saved_ctx);
 
-        // Build function type and register in scope as a variable
+        // Build closure function type and register in scope as a variable.
+        // Scoped functions are always compiled as closures, so we use is_closure=true.
         let param_ids: crate::type_arena::TypeIdVec = param_types.iter().copied().collect();
         let func_type_id = self
             .type_arena_mut()
-            .function(param_ids, final_return_type, false);
+            .function(param_ids, final_return_type, true);
+
+        // Store the closure type for codegen to look up
+        self.scoped_function_types.insert(func.span, func_type_id);
 
         self.scope.define(
             func.name,
@@ -2749,6 +2759,7 @@ impl Analyzer {
             substituted_return_types: HashMap::new(),
             lambda_defaults: HashMap::new(),
             lambda_variables: HashMap::new(),
+            scoped_function_types: HashMap::new(),
             current_module: module_id,
             type_param_stack: TypeParamScopeStack::new(),
             module_cache: None,

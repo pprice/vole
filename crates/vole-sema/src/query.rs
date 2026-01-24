@@ -16,7 +16,7 @@ use crate::generic::{MonomorphCache, MonomorphInstance, MonomorphKey, StaticMeth
 use crate::implement_registry::{ExternalMethodInfo, ImplementRegistry};
 use crate::resolution::ResolvedMethod;
 use crate::type_arena::{TypeArena, TypeId};
-use vole_frontend::{Expr, Interner, NodeId, Program, Symbol};
+use vole_frontend::{Expr, Interner, NodeId, Program, Span, Symbol};
 use vole_identity::{FieldId, MethodId, ModuleId, NameId, NameTable, Resolver, TypeDefId};
 
 use crate::resolve::ResolverEntityExt;
@@ -94,6 +94,14 @@ impl<'a> ProgramQuery<'a> {
     #[must_use]
     pub fn static_method_generic_at(&self, node: NodeId) -> Option<&'a StaticMethodMonomorphKey> {
         self.expr_data.get_static_method_generic(node)
+    }
+
+    /// Get the closure function type for a scoped function by its declaration span.
+    /// Scoped functions (in test blocks) are compiled as closures, and sema pre-computes
+    /// their function types so codegen doesn't need to create them.
+    #[must_use]
+    pub fn scoped_function_type(&self, span: Span) -> Option<TypeId> {
+        self.expr_data.get_scoped_function_type(span)
     }
 
     // =========================================================================
