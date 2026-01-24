@@ -1867,21 +1867,49 @@ impl Analyzer {
                     },
                 );
 
-                // Also register in EntityRegistry if we have a type and interface
-                if let (Some(entity_type_id), Some(interface_type_id)) =
-                    (entity_type_id, interface_type_id)
-                {
-                    use crate::entity_defs::MethodBinding;
-                    self.entity_registry_mut().add_method_binding(
+                // Register in EntityRegistry.methods_by_type for all implement blocks
+                // This enables codegen to look up method signatures via find_method_on_type
+                if let Some(entity_type_id) = entity_type_id {
+                    // Build full method name for entity registry
+                    let type_name_str = match &impl_block.target_type {
+                        TypeExpr::Named(sym) => interner.resolve(*sym).to_string(),
+                        TypeExpr::Primitive(prim) => {
+                            let name_id = self.name_table().primitives.from_ast(*prim);
+                            self.name_table().display(name_id)
+                        }
+                        _ => "unknown".to_string(),
+                    };
+                    let method_name_str = interner.resolve(method.name);
+                    let full_method_name_id = self
+                        .name_table_mut()
+                        .intern_raw(self.current_module, &[&type_name_str, method_name_str]);
+
+                    // Intern the signature in the arena
+                    let signature_id = func_type.clone().intern(&mut self.type_arena_mut());
+
+                    // Register the method in entity_registry.methods_by_type
+                    self.entity_registry_mut().register_method(
                         entity_type_id,
-                        interface_type_id,
-                        MethodBinding {
-                            method_name: method_name_id,
-                            func_type,
-                            is_builtin: false,
-                            external_info: None,
-                        },
+                        method_name_id,
+                        full_method_name_id,
+                        signature_id,
+                        false, // implement block methods don't have defaults
                     );
+
+                    // Also add method binding if implementing an interface
+                    if let Some(interface_type_id) = interface_type_id {
+                        use crate::entity_defs::MethodBinding;
+                        self.entity_registry_mut().add_method_binding(
+                            entity_type_id,
+                            interface_type_id,
+                            MethodBinding {
+                                method_name: method_name_id,
+                                func_type,
+                                is_builtin: false,
+                                external_info: None,
+                            },
+                        );
+                    }
                 }
             }
 
