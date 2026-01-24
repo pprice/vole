@@ -4,7 +4,7 @@ use smallvec::{SmallVec, smallvec};
 use super::Compiler;
 use crate::types::{resolve_type_expr_to_id, type_id_to_cranelift};
 use vole_frontend::{Interner, Param, Symbol, TypeExpr};
-use vole_identity::{FunctionId, ModuleId};
+use vole_identity::{FunctionId, MethodId, ModuleId};
 use vole_sema::type_arena::TypeId;
 
 /// SmallVec for function parameters - most functions have <= 8 params
@@ -450,5 +450,22 @@ impl Compiler<'_> {
             Some(func_def.signature.return_type_id),
             SelfParam::None,
         )
+    }
+
+    /// Build a Cranelift signature directly from a MethodId.
+    ///
+    /// This is a convenience method that retrieves the method definition
+    /// and builds the signature from its pre-resolved TypeIds.
+    pub fn build_signature_for_method(
+        &self,
+        method_id: MethodId,
+        self_param: SelfParam,
+    ) -> Signature {
+        let method_def = self.query().registry().get_method(method_id);
+        let arena = self.analyzed.type_arena();
+        let (params, ret, _) = arena
+            .unwrap_function(method_def.signature_id)
+            .expect("method should have function signature");
+        self.build_signature_from_type_ids(params, Some(ret), self_param)
     }
 }
