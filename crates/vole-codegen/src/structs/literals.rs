@@ -49,8 +49,8 @@ impl Cg<'_, '_, '_> {
 
         let type_id = metadata.type_id;
         let field_count = metadata.field_slots.len() as u32;
-        // Prefer the type from semantic analysis (handles generic instantiation)
-        let result_type_id = self.query().type_of(expr.id).unwrap_or(metadata.vole_type);
+        // Prefer the type from semantic analysis (handles generic instantiation, module-aware)
+        let result_type_id = self.get_expr_type(&expr.id).unwrap_or(metadata.vole_type);
         let field_slots = metadata.field_slots.clone();
 
         let type_id_val = self.builder.ins().iconst(types::I32, type_id as i64);

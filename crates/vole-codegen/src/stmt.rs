@@ -327,8 +327,8 @@ impl Cg<'_, '_, '_> {
                 if let ExprKind::Range(range) = &for_stmt.iterable.kind {
                     self.for_range(for_stmt, range)
                 } else {
-                    // Check if iterable is an Iterator type or string type using TypeId
-                    let iterable_type_id = self.query().type_of(for_stmt.iterable.id);
+                    // Check if iterable is an Iterator type or string type using TypeId (module-aware)
+                    let iterable_type_id = self.get_expr_type(&for_stmt.iterable.id);
                     let is_iterator =
                         iterable_type_id.is_some_and(|id| self.is_iterator_type_id(id));
                     let is_string = iterable_type_id.is_some_and(|id| self.arena().is_string(id));

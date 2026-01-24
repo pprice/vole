@@ -339,8 +339,8 @@ impl Cg<'_, '_, '_> {
 
     /// Compile an array or tuple literal
     fn array_literal(&mut self, elements: &[Expr], expr: &Expr) -> Result<CompiledValue, String> {
-        // Check the inferred type from semantic analysis
-        let inferred_type_id = self.query().type_of(expr.id);
+        // Check the inferred type from semantic analysis (module-aware)
+        let inferred_type_id = self.get_expr_type(&expr.id);
 
         // If it's a tuple, use stack allocation
         if let Some(type_id) = inferred_type_id {
@@ -354,15 +354,8 @@ impl Cg<'_, '_, '_> {
         let arr_ptr = self.call_runtime(RuntimeFn::ArrayNew, &[])?;
         let array_push_ref = self.runtime_func_ref(RuntimeFn::ArrayPush)?;
 
-        // Use i64 as default - will be overwritten by first element if any
-        let mut elem_type_id = TypeId::I64;
-
-        for (i, elem) in elements.iter().enumerate() {
+        for elem in elements.iter() {
             let compiled = self.expr(elem)?;
-
-            if i == 0 {
-                elem_type_id = compiled.type_id;
-            }
 
             // Compute tag before using builder to avoid borrow conflict
             let tag = {
@@ -377,8 +370,13 @@ impl Cg<'_, '_, '_> {
                 .call(array_push_ref, &[arr_ptr, tag_val, value_bits]);
         }
 
-        // Use type from ExpressionData if available, otherwise create it
-        let array_type_id = inferred_type_id.unwrap_or_else(|| self.update().array(elem_type_id));
+        // Use type from ExpressionData - sema always records array/tuple types
+        let array_type_id = inferred_type_id.unwrap_or_else(|| {
+            unreachable!(
+                "array literal at line {} has no type from sema",
+                expr.span.line
+            )
+        });
         Ok(CompiledValue {
             value: arr_ptr,
             ty: self.ptr_type(),
@@ -432,11 +430,6 @@ impl Cg<'_, '_, '_> {
         count: usize,
         expr: &Expr,
     ) -> Result<CompiledValue, String> {
-        // Get the element type from semantic analysis
-        let elem_type_id = self
-            .get_expr_type(&element.id)
-            .unwrap_or(self.arena().primitives.i64);
-
         // Compile the element once
         let elem_value = self.expr(element)?;
 
@@ -459,10 +452,13 @@ impl Cg<'_, '_, '_> {
         let ptr_type = self.ptr_type();
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
 
-        // Get the full type from sema, or create fixed array type from element type
-        let type_id = self
-            .get_expr_type(&expr.id)
-            .unwrap_or_else(|| self.update().fixed_array(elem_type_id, count));
+        // Get the full type from sema - sema always records repeat literal types
+        let type_id = self.get_expr_type(&expr.id).unwrap_or_else(|| {
+            unreachable!(
+                "repeat literal at line {} has no type from sema",
+                expr.span.line
+            )
+        });
 
         Ok(CompiledValue {
             value: ptr,
