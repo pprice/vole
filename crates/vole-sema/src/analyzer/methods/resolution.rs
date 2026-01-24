@@ -103,6 +103,7 @@ impl Analyzer {
                         return_type_id,
                         is_builtin: binding.is_builtin,
                         external_info: binding.external_info,
+                        concrete_return_hint: None,
                     });
                 }
             }
@@ -229,12 +230,19 @@ impl Analyzer {
                         let interface_sym =
                             self.get_type_symbol_by_name_id(defining_type_name_id, interner);
                         if let Some(interface_sym) = interface_sym {
+                            // Compute vtable slot index for direct dispatch
+                            let method_index = self
+                                .entity_registry()
+                                .interface_method_slot(method_defining_type_id, method_name_id)
+                                .unwrap_or(0);
                             return Some(ResolvedMethod::InterfaceMethod {
                                 method_name_id,
                                 interface_name: interface_sym,
                                 method_name,
                                 func_type_id,
                                 return_type_id,
+                                interface_type_def_id: method_defining_type_id,
+                                method_index,
                             });
                         }
                     }
@@ -274,6 +282,7 @@ impl Analyzer {
                     return_type_id,
                     is_builtin: binding.is_builtin,
                     external_info: binding.external_info,
+                    concrete_return_hint: None,
                 });
             }
 
@@ -364,6 +373,37 @@ impl Analyzer {
         if let Some(impl_) = method_impl {
             let return_type_id = impl_.func_type.return_type_id;
             let func_type_id = impl_.func_type.intern(&mut self.type_arena_mut());
+
+            // Compute concrete_return_hint for builtin iterator methods.
+            // For iter() on array/string/range, hint is RuntimeIterator(element_type).
+            let concrete_return_hint = if impl_.external_info.is_some() {
+                // This is an external builtin method - check if it's an iterator method
+                let method_name_str = interner.resolve(method_name);
+                if method_name_str == "iter" {
+                    // Determine the iterator element type based on the object type
+                    let element_type = {
+                        let arena = self.type_arena();
+                        if let Some(elem) = arena.unwrap_array(object_type_id) {
+                            // array.iter() -> RuntimeIterator(element)
+                            Some(elem)
+                        } else if object_type_id == arena.string() {
+                            // string.iter() -> RuntimeIterator(string) for char iteration
+                            Some(arena.string())
+                        } else if object_type_id == arena.range() {
+                            // range.iter() -> RuntimeIterator(i64)
+                            Some(arena.i64())
+                        } else {
+                            None
+                        }
+                    };
+                    element_type.map(|elem| self.type_arena_mut().runtime_iterator(elem))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
             return Some(ResolvedMethod::Implemented {
                 type_def_id: None, // Builtins don't have a TypeDefId
                 method_name_id,
@@ -372,6 +412,7 @@ impl Analyzer {
                 return_type_id,
                 is_builtin: impl_.is_builtin,
                 external_info: impl_.external_info,
+                concrete_return_hint,
             });
         }
 
@@ -579,12 +620,19 @@ impl Analyzer {
                         };
                         let return_type_id = func_type.return_type_id;
                         let func_type_id = func_type.intern(&mut self.type_arena_mut());
+                        // Compute vtable slot index for direct dispatch
+                        let method_index = self
+                            .entity_registry()
+                            .interface_method_slot(interface_type_id, method_name_id)
+                            .unwrap_or(0);
                         return Some(ResolvedMethod::InterfaceMethod {
                             method_name_id,
                             interface_name: *interface_sym,
                             method_name,
                             func_type_id,
                             return_type_id,
+                            interface_type_def_id: interface_type_id,
+                            method_index,
                         });
                     }
                 }

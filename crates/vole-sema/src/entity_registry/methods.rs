@@ -346,4 +346,65 @@ impl EntityRegistry {
             method.external_binding.is_some() && !method.has_default
         })
     }
+
+    /// Get the vtable slot index for an interface method.
+    ///
+    /// Returns the 0-based index of the method in the vtable ordering.
+    /// Parent interface methods come first, then the interface's own methods.
+    /// This ordering must match the vtable layout in codegen.
+    pub fn interface_method_slot(
+        &self,
+        interface_id: TypeDefId,
+        method_name_id: NameId,
+    ) -> Option<u32> {
+        let methods = self.collect_interface_methods_ordered(interface_id);
+        methods
+            .iter()
+            .position(|&mid| self.get_method(mid).name_id == method_name_id)
+            .map(|i| i as u32)
+    }
+
+    /// Collect all methods from an interface and its parents in vtable order.
+    ///
+    /// Parent interface methods come first, then the interface's own methods.
+    /// This ordering must match the vtable layout in codegen.
+    fn collect_interface_methods_ordered(&self, interface_id: TypeDefId) -> Vec<MethodId> {
+        let mut methods = Vec::new();
+        let mut seen_interfaces = HashSet::new();
+        let mut seen_methods = HashSet::new();
+        self.collect_interface_methods_inner(
+            interface_id,
+            &mut methods,
+            &mut seen_interfaces,
+            &mut seen_methods,
+        );
+        methods
+    }
+
+    fn collect_interface_methods_inner(
+        &self,
+        interface_id: TypeDefId,
+        methods: &mut Vec<MethodId>,
+        seen_interfaces: &mut HashSet<TypeDefId>,
+        seen_methods: &mut HashSet<NameId>,
+    ) {
+        if !seen_interfaces.insert(interface_id) {
+            return;
+        }
+
+        let interface = self.get_type(interface_id);
+
+        // Process parent interfaces first (to match vtable order)
+        for parent_id in interface.extends.clone() {
+            self.collect_interface_methods_inner(parent_id, methods, seen_interfaces, seen_methods);
+        }
+
+        // Add this interface's methods
+        for method_id in &interface.methods {
+            let method = self.get_method(*method_id);
+            if seen_methods.insert(method.name_id) {
+                methods.push(*method_id);
+            }
+        }
+    }
 }

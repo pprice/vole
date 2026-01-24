@@ -434,6 +434,7 @@ impl Analyzer {
                     return_type_id: return_id,
                     is_builtin: false,
                     external_info,
+                    concrete_return_hint: None,
                 },
             );
 
@@ -488,6 +489,7 @@ impl Analyzer {
                             return_type_id,
                             is_builtin: false,
                             external_info: None,
+                            concrete_return_hint: None,
                         },
                     );
 
@@ -518,6 +520,7 @@ impl Analyzer {
                         trait_name,
                         is_builtin,
                         external_info,
+                        concrete_return_hint,
                         ..
                     } => {
                         let return_type_id = func_type.return_type_id;
@@ -530,6 +533,7 @@ impl Analyzer {
                             return_type_id,
                             is_builtin,
                             external_info,
+                            concrete_return_hint,
                         }
                     }
                     other => other,

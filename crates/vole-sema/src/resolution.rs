@@ -29,6 +29,10 @@ pub enum ResolvedMethod {
         return_type_id: TypeId,
         is_builtin: bool,
         external_info: Option<ExternalMethodInfo>,
+        /// Concrete runtime type hint for codegen. For builtin iterators
+        /// (array.iter(), string.iter(), range.iter()), this is the RuntimeIterator(T)
+        /// type. Codegen can use this instead of creating the type itself.
+        concrete_return_hint: Option<TypeId>,
     },
 
     /// Functional interface - call the underlying lambda
@@ -58,6 +62,10 @@ pub enum ResolvedMethod {
         method_name: Symbol,
         func_type_id: TypeId,
         return_type_id: TypeId,
+        /// The interface's TypeDefId (for vtable lookup)
+        interface_type_def_id: TypeDefId,
+        /// The vtable slot index (pre-computed by sema)
+        method_index: u32,
     },
 
     /// Static method on a type (called via TypeName.method())
@@ -133,9 +141,11 @@ impl ResolvedMethod {
             ResolvedMethod::Implemented { type_def_id, .. } => *type_def_id,
             ResolvedMethod::DefaultMethod { type_def_id, .. } => *type_def_id,
             ResolvedMethod::Static { type_def_id, .. } => Some(*type_def_id),
-            ResolvedMethod::FunctionalInterface { .. } | ResolvedMethod::InterfaceMethod { .. } => {
-                None
-            }
+            ResolvedMethod::FunctionalInterface { .. } => None,
+            ResolvedMethod::InterfaceMethod {
+                interface_type_def_id,
+                ..
+            } => Some(*interface_type_def_id),
         }
     }
 
@@ -148,6 +158,27 @@ impl ResolvedMethod {
             ResolvedMethod::DefaultMethod { method_name_id, .. } => *method_name_id,
             ResolvedMethod::InterfaceMethod { method_name_id, .. } => *method_name_id,
             ResolvedMethod::Static { method_name_id, .. } => *method_name_id,
+        }
+    }
+
+    /// Get the method_index for InterfaceMethod (vtable slot)
+    pub fn method_index(&self) -> Option<u32> {
+        match self {
+            ResolvedMethod::InterfaceMethod { method_index, .. } => Some(*method_index),
+            _ => None,
+        }
+    }
+
+    /// Get the concrete_return_hint for Implemented methods.
+    /// This provides the actual runtime type when it differs from the declared return type.
+    /// For builtin iterators (array.iter(), string.iter(), range.iter()), this is RuntimeIterator(T).
+    pub fn concrete_return_hint(&self) -> Option<TypeId> {
+        match self {
+            ResolvedMethod::Implemented {
+                concrete_return_hint,
+                ..
+            } => *concrete_return_hint,
+            _ => None,
         }
     }
 }
@@ -227,10 +258,30 @@ mod tests {
             return_type_id: ret_type,
             is_builtin: true,
             external_info: None,
+            concrete_return_hint: None,
         };
         assert!(implemented.is_builtin());
         assert_eq!(implemented.return_type_id(), ret_type);
         assert_eq!(implemented.method_name_id(), method_name_id);
+        assert!(implemented.concrete_return_hint().is_none());
+
+        // Test with concrete_return_hint set
+        let iter_elem = arena.i64();
+        let runtime_iter = arena.runtime_iterator(iter_elem);
+        let with_hint = ResolvedMethod::Implemented {
+            type_def_id: None,
+            method_name_id,
+            trait_name: None,
+            func_type_id: ft_id,
+            return_type_id: ret_type,
+            is_builtin: true,
+            external_info: None,
+            concrete_return_hint: Some(runtime_iter),
+        };
+        assert_eq!(with_hint.concrete_return_hint(), Some(runtime_iter));
+        // Verify the hint is a RuntimeIterator
+        assert!(arena.is_runtime_iterator(runtime_iter));
+        assert_eq!(arena.unwrap_runtime_iterator(runtime_iter), Some(iter_elem));
     }
 
     #[test]

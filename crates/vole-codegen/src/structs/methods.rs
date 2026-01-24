@@ -172,7 +172,23 @@ impl Cg<'_, '_, '_> {
 
         // Handle special cases from ResolvedMethod
         if let Some(resolved) = resolution {
+            // Interface dispatch with pre-computed slot (optimized path)
+            if let ResolvedMethod::InterfaceMethod {
+                func_type_id,
+                method_index,
+                ..
+            } = resolved
+            {
+                return self.interface_dispatch_call_args_by_slot(
+                    &obj,
+                    &mc.args,
+                    *method_index,
+                    *func_type_id,
+                );
+            }
+
             // Interface dispatch - check if object is an interface type and dispatch via vtable
+            // This is a fallback path when we don't have InterfaceMethod (e.g., in monomorphized context)
             // Extract interface info before mutable borrow
             let interface_info = {
                 let arena = self.arena();
@@ -831,6 +847,18 @@ impl Cg<'_, '_, '_> {
             self.registry(),
         )?;
         self.interface_dispatch_call_args_inner(obj, args, slot, func_type_id)
+    }
+
+    /// Dispatch an interface method call with pre-computed vtable slot index.
+    /// This is the optimized path where sema has already computed the slot.
+    pub(crate) fn interface_dispatch_call_args_by_slot(
+        &mut self,
+        obj: &CompiledValue,
+        args: &[Expr],
+        slot: u32,
+        func_type_id: TypeId,
+    ) -> Result<CompiledValue, String> {
+        self.interface_dispatch_call_args_inner(obj, args, slot as usize, func_type_id)
     }
 
     fn interface_dispatch_call_args_inner(
