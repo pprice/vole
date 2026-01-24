@@ -52,10 +52,9 @@ pub(crate) fn get_field_slot_and_type_id(
         let name = type_ctx.query.last_segment(*field_name_id);
         if name.as_deref() == Some(field_name) {
             let base_type_id = generic_info.field_types[slot];
-            // Apply combined substitutions in a single pass
-            drop(arena);
+            // Apply combined substitutions in a single pass (read-only lookup)
             let field_type_id = if !combined_subs.is_empty() {
-                type_ctx.update().substitute(base_type_id, &combined_subs)
+                arena.expect_substitute(base_type_id, &combined_subs, "field access substitution")
             } else {
                 base_type_id
             };
@@ -110,10 +109,9 @@ pub(crate) fn get_field_slot_and_type_id_cg(
         let name = type_ctx.query.last_segment(*field_name_id);
         if name.as_deref() == Some(field_name) {
             let base_type_id = generic_info.field_types[slot];
-            // Apply combined substitutions in a single pass
-            drop(arena);
+            // Apply combined substitutions in a single pass (read-only lookup)
             let field_type_id = if !combined_subs.is_empty() {
-                type_ctx.update().substitute(base_type_id, &combined_subs)
+                arena.expect_substitute(base_type_id, &combined_subs, "field access substitution")
             } else {
                 base_type_id
             };

@@ -40,13 +40,6 @@ impl<'a> TypeCtx<'a> {
         self.query.arena()
     }
 
-    /// Get an update interface for arena mutations.
-    /// Centralizes all borrow_mut() calls for cleaner code.
-    #[inline]
-    pub fn update(&self) -> vole_sema::ProgramUpdate<'a> {
-        vole_sema::ProgramUpdate::new(self.query.arena())
-    }
-
     /// Get the entity registry
     #[inline]
     pub fn entities(&self) -> &'a EntityRegistry {
