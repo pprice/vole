@@ -375,6 +375,9 @@ impl Analyzer {
             let self_type_id = self
                 .type_arena_mut()
                 .class(entity_type_id, TypeIdVec::new());
+            // Store base_type_id for codegen to look up without mutable arena access
+            self.entity_registry_mut()
+                .set_base_type_id(entity_type_id, self_type_id);
             let builtin_mod = self.name_table_mut().builtin_module();
             for method in &class.methods {
                 let method_name_str = interner.resolve(method.name);
@@ -642,6 +645,12 @@ impl Analyzer {
                 .map(|tp| self.type_arena_mut().type_param(tp.name_id))
                 .collect();
             let self_type_id = self.type_arena_mut().class(entity_type_id, type_arg_ids);
+            // Store base_type_id (with empty type args) for codegen to look up
+            let base_type_id = self
+                .type_arena_mut()
+                .class(entity_type_id, TypeIdVec::new());
+            self.entity_registry_mut()
+                .set_base_type_id(entity_type_id, base_type_id);
             for method in &class.methods {
                 let method_name_str = interner.resolve(method.name);
                 let method_name_id = self
@@ -949,6 +958,9 @@ impl Analyzer {
             let self_type_id = self
                 .type_arena_mut()
                 .record(entity_type_id, TypeIdVec::new());
+            // Store base_type_id for codegen to look up without mutable arena access
+            self.entity_registry_mut()
+                .set_base_type_id(entity_type_id, self_type_id);
             let builtin_mod = self.name_table_mut().builtin_module();
             for method in &record.methods {
                 let method_name_str = interner.resolve(method.name);
@@ -1171,6 +1183,12 @@ impl Analyzer {
                 .map(|tp| self.type_arena_mut().type_param(tp.name_id))
                 .collect();
             let self_type_id = self.type_arena_mut().record(entity_type_id, type_arg_ids);
+            // Store base_type_id (with empty type args) for codegen to look up
+            let base_type_id = self
+                .type_arena_mut()
+                .record(entity_type_id, TypeIdVec::new());
+            self.entity_registry_mut()
+                .set_base_type_id(entity_type_id, base_type_id);
 
             for method in &record.methods {
                 // Resolve types directly to TypeId

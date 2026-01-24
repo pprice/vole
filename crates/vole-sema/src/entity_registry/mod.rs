@@ -339,6 +339,7 @@ impl EntityRegistry {
             generic_info: None,
             error_info: None,
             implements: Vec::new(),
+            base_type_id: None,
         });
         self.type_by_name.insert(name_id, id);
         self.methods_by_type.insert(id, HashMap::new());

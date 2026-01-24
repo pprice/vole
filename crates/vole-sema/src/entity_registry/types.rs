@@ -34,6 +34,7 @@ impl EntityRegistry {
             generic_info: None,
             error_info: None,
             implements: Vec::new(),
+            base_type_id: None,
         });
         self.type_by_name.insert(name_id, id);
         self.methods_by_type.insert(id, HashMap::new());
@@ -79,6 +80,16 @@ impl EntityRegistry {
     /// Get the NameId for a type definition
     pub fn name_id(&self, id: TypeDefId) -> NameId {
         self.get_type(id).name_id
+    }
+
+    /// Set the base_type_id for a class/record type.
+    /// This stores the TypeId for the type with empty type args (e.g., `Foo` for `class Foo<T>`).
+    pub fn set_base_type_id(
+        &mut self,
+        type_def_id: TypeDefId,
+        base_type_id: crate::type_arena::TypeId,
+    ) {
+        self.get_type_mut(type_def_id).base_type_id = Some(base_type_id);
     }
 
     /// Look up a type by its NameId

@@ -86,6 +86,9 @@ pub struct TypeDef {
     pub error_info: Option<crate::ErrorTypeInfo>,
     /// Interface implementations for this type
     pub implements: Vec<Implementation>,
+    /// For Class/Record types - the base TypeId (with empty type args).
+    /// Pre-computed by sema so codegen can look up without mutable arena access.
+    pub base_type_id: Option<TypeId>,
 }
 
 /// A method definition (always belongs to a type)

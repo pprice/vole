@@ -8,7 +8,7 @@ use vole_frontend::{
     ClassDecl, Decl, InterfaceDecl, Interner, Program, RecordDecl, StaticsBlock, Symbol, TypeExpr,
 };
 use vole_runtime::type_registry::{FieldTypeTag, register_instance_type};
-use vole_sema::type_arena::{TypeId, TypeIdVec};
+use vole_sema::type_arena::TypeId;
 
 /// Convert a TypeId to a FieldTypeTag for runtime cleanup
 fn type_id_to_field_tag(ty: TypeId, arena: &vole_sema::type_arena::TypeArena) -> FieldTypeTag {
@@ -83,11 +83,12 @@ impl Compiler<'_> {
             .try_type_def_id(name_id)
             .expect("class should be registered in entity registry");
 
-        // Create a placeholder vole_type_id (will be replaced in finalize_class)
+        // Use pre-computed base_type_id from sema (no mutable arena access needed)
         let vole_type_id = self
-            .analyzed
-            .type_arena_mut()
-            .class(type_def_id, TypeIdVec::new());
+            .query()
+            .get_type(type_def_id)
+            .base_type_id
+            .expect("sema should pre-compute base_type_id for classes");
 
         self.state.type_metadata.insert(
             type_def_id,
@@ -274,11 +275,12 @@ impl Compiler<'_> {
             .try_type_def_id(name_id)
             .expect("record should be registered in entity registry");
 
-        // Create a placeholder vole_type_id (will be replaced in finalize_record)
+        // Use pre-computed base_type_id from sema (no mutable arena access needed)
         let vole_type_id = self
-            .analyzed
-            .type_arena_mut()
-            .record(type_def_id, TypeIdVec::new());
+            .query()
+            .get_type(type_def_id)
+            .base_type_id
+            .expect("sema should pre-compute base_type_id for records");
 
         self.state.type_metadata.insert(
             type_def_id,
@@ -584,10 +586,12 @@ impl Compiler<'_> {
 
         // Register type metadata (keyed by TypeDefId - no cross-interner Symbol collision issues)
         tracing::debug!(type_name = %type_name_str, ?type_def_id, "Inserting type_metadata");
+        // Use pre-computed base_type_id from sema (no mutable arena access needed)
         let vole_type_id = self
-            .analyzed
-            .type_arena_mut()
-            .class(type_def_id, TypeIdVec::new());
+            .query()
+            .get_type(type_def_id)
+            .base_type_id
+            .expect("sema should pre-compute base_type_id for module classes");
         self.state.type_metadata.insert(
             type_def_id,
             TypeMetadata {
