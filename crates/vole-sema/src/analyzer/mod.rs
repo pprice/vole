@@ -267,6 +267,9 @@ pub struct Analyzer {
     /// Scoped function closure types. Maps function declaration span to its closure function type.
     /// Used for scoped functions in test blocks which are compiled as closures.
     scoped_function_types: HashMap<Span, ArenaTypeId>,
+    /// Declared variable types for let statements with explicit type annotations.
+    /// Maps init expression NodeId → declared TypeId for codegen to use.
+    declared_var_types: HashMap<NodeId, ArenaTypeId>,
     /// Current module being analyzed (for proper NameId registration)
     current_module: ModuleId,
     /// Stack of type parameter scopes for nested generic contexts.
@@ -325,6 +328,7 @@ impl Analyzer {
             lambda_defaults: HashMap::new(),
             lambda_variables: HashMap::new(),
             scoped_function_types: HashMap::new(),
+            declared_var_types: HashMap::new(),
             current_module: main_module,
             type_param_stack: TypeParamScopeStack::new(),
             module_cache: None,
@@ -380,6 +384,7 @@ impl Analyzer {
             lambda_defaults: HashMap::new(),
             lambda_variables: HashMap::new(),
             scoped_function_types: HashMap::new(),
+            declared_var_types: HashMap::new(),
             current_module: main_module,
             type_param_stack: TypeParamScopeStack::new(),
             module_cache: Some(cache),
@@ -452,6 +457,7 @@ impl Analyzer {
             self.lambda_defaults,
             self.scoped_function_types,
             self.is_check_results,
+            self.declared_var_types,
         );
         AnalysisOutput {
             expression_data,
@@ -2777,6 +2783,7 @@ impl Analyzer {
             lambda_defaults: HashMap::new(),
             lambda_variables: HashMap::new(),
             scoped_function_types: HashMap::new(),
+            declared_var_types: HashMap::new(),
             current_module: module_id,
             type_param_stack: TypeParamScopeStack::new(),
             module_cache: None,

@@ -315,6 +315,23 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .get_substituted_return_type(*node_id)
     }
 
+    /// Get declared variable type for let statements with explicit type annotations.
+    /// Used for union wrapping, numeric widening, and interface boxing.
+    /// Only available for main program code (not module code) since declared_var_types
+    /// are stored with main program NodeIds only.
+    #[inline]
+    pub fn get_declared_var_type(&self, init_node_id: &vole_frontend::NodeId) -> Option<TypeId> {
+        // Don't use declared_var_types for module code - NodeIds would collide
+        if self.current_module.is_some() {
+            return None;
+        }
+        self.env
+            .analyzed
+            .query()
+            .expr_data()
+            .get_declared_var_type(*init_node_id)
+    }
+
     /// Get type metadata map
     #[inline]
     pub fn type_metadata(&self) -> &'ctx TypeMetadataMap {
@@ -419,30 +436,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     // ========== Arena helpers ==========
-
-    /// Resolve a type expression to a TypeId using this context's module and substitutions.
-    pub fn resolve_type_expr(&self, ty: &vole_frontend::TypeExpr) -> TypeId {
-        let type_ctx = self.type_ctx();
-        let name_table = type_ctx.name_table_rc().borrow();
-        let module_id = self
-            .current_module
-            .unwrap_or_else(|| name_table.main_module());
-
-        // Use the TypeId-native resolution function directly
-        let type_id = super::types::resolve_type_expr_to_id(
-            ty,
-            type_ctx.entities(),
-            &self.env.state.type_metadata,
-            type_ctx.interner(),
-            &name_table,
-            module_id,
-            type_ctx.arena_rc(),
-        );
-        drop(name_table);
-
-        // Apply type substitutions if compiling a monomorphized context
-        self.substitute_type(type_id)
-    }
 
     /// Find the nil variant index in a union (for optional handling)
     pub fn find_nil_variant(&self, ty: TypeId) -> Option<usize> {

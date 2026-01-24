@@ -55,6 +55,10 @@ pub struct ExpressionData {
     /// Type check results for `is` expressions and type patterns.
     /// Maps NodeId → IsCheckResult to eliminate runtime type lookups in codegen.
     is_check_results: HashMap<NodeId, IsCheckResult>,
+    /// Declared variable types for let statements with explicit type annotations.
+    /// Maps init expression NodeId → declared TypeId, enabling codegen to handle
+    /// union wrapping, numeric widening, and interface boxing without re-resolving types.
+    declared_var_types: HashMap<NodeId, TypeId>,
 }
 
 impl ExpressionData {
@@ -77,6 +81,7 @@ impl ExpressionData {
         lambda_defaults: HashMap<NodeId, LambdaDefaults>,
         scoped_function_types: HashMap<Span, TypeId>,
         is_check_results: HashMap<NodeId, IsCheckResult>,
+        declared_var_types: HashMap<NodeId, TypeId>,
     ) -> Self {
         Self {
             types,
@@ -90,6 +95,7 @@ impl ExpressionData {
             lambda_defaults,
             scoped_function_types,
             is_check_results,
+            declared_var_types,
         }
     }
 
@@ -326,5 +332,21 @@ impl ExpressionData {
     /// Get mutable access to IsCheckResults
     pub fn is_check_results_mut(&mut self) -> &mut HashMap<NodeId, IsCheckResult> {
         &mut self.is_check_results
+    }
+
+    /// Get the declared type for a variable's init expression.
+    /// Used for let statements with explicit type annotations (e.g., `let x: SomeType = ...`).
+    pub fn get_declared_var_type(&self, init_node: NodeId) -> Option<TypeId> {
+        self.declared_var_types.get(&init_node).copied()
+    }
+
+    /// Set the declared type for a variable's init expression.
+    pub fn set_declared_var_type(&mut self, init_node: NodeId, type_id: TypeId) {
+        self.declared_var_types.insert(init_node, type_id);
+    }
+
+    /// Get all declared variable types
+    pub fn declared_var_types(&self) -> &HashMap<NodeId, TypeId> {
+        &self.declared_var_types
     }
 }

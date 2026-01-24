@@ -97,11 +97,12 @@ impl Cg<'_, '_, '_> {
                 // Clear self_capture context
                 self.self_capture = None;
 
-                let mut declared_type_id_opt = None;
-                let (mut final_value, mut final_type_id) = if let Some(ty_expr) = &let_stmt.ty {
-                    let declared_type_id = self.resolve_type_expr(ty_expr);
-                    declared_type_id_opt = Some(declared_type_id);
+                // Look up the declared type from sema (pre-computed for let statements with type annotations)
+                let declared_type_id_opt = self.get_declared_var_type(&init_expr.id);
 
+                let (mut final_value, mut final_type_id) = if let Some(declared_type_id) =
+                    declared_type_id_opt
+                {
                     let arena = self.arena();
                     let is_declared_union = arena.is_union(declared_type_id);
                     let is_declared_integer = arena.is_integer(declared_type_id);

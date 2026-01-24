@@ -126,6 +126,7 @@ impl Analyzer {
             lambda_defaults: HashMap::new(),
             lambda_variables: HashMap::new(),
             scoped_function_types: HashMap::new(),
+            declared_var_types: HashMap::new(),
             current_module: prelude_module, // Use the prelude module path!
             type_param_stack: TypeParamScopeStack::new(),
             module_cache: None,      // Sub-analyzers don't need the cache

@@ -51,6 +51,11 @@ impl Analyzer {
                             .as_ref()
                             .map(|t| self.resolve_type_id(t, interner));
 
+                        // Store declared type for codegen (keyed by init expression id)
+                        if let Some(decl_type_id) = declared_type_id {
+                            self.declared_var_types.insert(init_expr.id, decl_type_id);
+                        }
+
                         // For recursive lambdas: if lambda has fully explicit types,
                         // pre-register the variable so it's in scope during body analysis.
                         // This enables recursive self-reference by making the binding
