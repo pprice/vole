@@ -1316,6 +1316,253 @@ impl TypeArena {
         }
     }
 
+    /// Look up a substituted type without creating new types.
+    ///
+    /// This is the read-only version of `substitute`. Returns `Some(type_id)` if
+    /// the substituted type already exists in the arena, `None` if any intermediate
+    /// or final type would need to be created.
+    ///
+    /// Use this in codegen where all types should already be fully instantiated.
+    pub fn lookup_substitute(
+        &self,
+        ty: TypeId,
+        subs: &FxHashMap<NameId, TypeId>,
+    ) -> Option<TypeId> {
+        // Early exit if no substitutions
+        if subs.is_empty() {
+            return Some(ty);
+        }
+
+        match self.get(ty) {
+            // Direct substitution for type parameters
+            SemaType::TypeParam(name_id) => subs.get(name_id).copied(),
+
+            // TypeParamRef doesn't substitute based on NameId
+            SemaType::TypeParamRef(_) => Some(ty),
+
+            // Recursive lookup for compound types
+            SemaType::Array(elem) => {
+                let new_elem = self.lookup_substitute(*elem, subs)?;
+                if new_elem == *elem {
+                    return Some(ty);
+                }
+                let result_ty = SemaType::Array(new_elem);
+                self.intern_map.get(&result_ty).copied()
+            }
+
+            SemaType::Union(variants) => {
+                let new_variants: Option<TypeIdVec> = variants
+                    .iter()
+                    .map(|&v| self.lookup_substitute(v, subs))
+                    .collect();
+                let new_variants = new_variants?;
+                if new_variants == *variants {
+                    return Some(ty);
+                }
+                // For unions, we need to look up the normalized result
+                // Since union normalization is complex, we look up the exact union structure
+                let result_ty = SemaType::Union(new_variants);
+                self.intern_map.get(&result_ty).copied()
+            }
+
+            SemaType::Tuple(elements) => {
+                let new_elements: Option<TypeIdVec> = elements
+                    .iter()
+                    .map(|&e| self.lookup_substitute(e, subs))
+                    .collect();
+                let new_elements = new_elements?;
+                if new_elements == *elements {
+                    return Some(ty);
+                }
+                let result_ty = SemaType::Tuple(new_elements);
+                self.intern_map.get(&result_ty).copied()
+            }
+
+            SemaType::Function {
+                params,
+                ret,
+                is_closure,
+            } => {
+                let new_params: Option<TypeIdVec> = params
+                    .iter()
+                    .map(|&p| self.lookup_substitute(p, subs))
+                    .collect();
+                let new_params = new_params?;
+                let new_ret = self.lookup_substitute(*ret, subs)?;
+                if new_params == *params && new_ret == *ret {
+                    return Some(ty);
+                }
+                let result_ty = SemaType::Function {
+                    params: new_params,
+                    ret: new_ret,
+                    is_closure: *is_closure,
+                };
+                self.intern_map.get(&result_ty).copied()
+            }
+
+            SemaType::Class {
+                type_def_id,
+                type_args,
+            } => {
+                let new_args: Option<TypeIdVec> = type_args
+                    .iter()
+                    .map(|&a| self.lookup_substitute(a, subs))
+                    .collect();
+                let new_args = new_args?;
+                if new_args == *type_args {
+                    return Some(ty);
+                }
+                let result_ty = SemaType::Class {
+                    type_def_id: *type_def_id,
+                    type_args: new_args,
+                };
+                self.intern_map.get(&result_ty).copied()
+            }
+
+            SemaType::Record {
+                type_def_id,
+                type_args,
+            } => {
+                let new_args: Option<TypeIdVec> = type_args
+                    .iter()
+                    .map(|&a| self.lookup_substitute(a, subs))
+                    .collect();
+                let new_args = new_args?;
+                if new_args == *type_args {
+                    return Some(ty);
+                }
+                let result_ty = SemaType::Record {
+                    type_def_id: *type_def_id,
+                    type_args: new_args,
+                };
+                self.intern_map.get(&result_ty).copied()
+            }
+
+            SemaType::Interface {
+                type_def_id,
+                type_args,
+            } => {
+                let new_args: Option<TypeIdVec> = type_args
+                    .iter()
+                    .map(|&a| self.lookup_substitute(a, subs))
+                    .collect();
+                let new_args = new_args?;
+                if new_args == *type_args {
+                    return Some(ty);
+                }
+                let result_ty = SemaType::Interface {
+                    type_def_id: *type_def_id,
+                    type_args: new_args,
+                };
+                self.intern_map.get(&result_ty).copied()
+            }
+
+            SemaType::RuntimeIterator(elem) => {
+                let new_elem = self.lookup_substitute(*elem, subs)?;
+                if new_elem == *elem {
+                    return Some(ty);
+                }
+                let result_ty = SemaType::RuntimeIterator(new_elem);
+                self.intern_map.get(&result_ty).copied()
+            }
+
+            SemaType::FixedArray { element, size } => {
+                let new_elem = self.lookup_substitute(*element, subs)?;
+                if new_elem == *element {
+                    return Some(ty);
+                }
+                let result_ty = SemaType::FixedArray {
+                    element: new_elem,
+                    size: *size,
+                };
+                self.intern_map.get(&result_ty).copied()
+            }
+
+            SemaType::Fallible { success, error } => {
+                let new_success = self.lookup_substitute(*success, subs)?;
+                let new_error = self.lookup_substitute(*error, subs)?;
+                if new_success == *success && new_error == *error {
+                    return Some(ty);
+                }
+                let result_ty = SemaType::Fallible {
+                    success: new_success,
+                    error: new_error,
+                };
+                self.intern_map.get(&result_ty).copied()
+            }
+
+            SemaType::Structural(st) => {
+                let new_fields: Option<SmallVec<[(NameId, TypeId); 4]>> = st
+                    .fields
+                    .iter()
+                    .map(|(name, ty)| Some((*name, self.lookup_substitute(*ty, subs)?)))
+                    .collect();
+                let new_fields = new_fields?;
+                let new_methods: Option<SmallVec<[InternedStructuralMethod; 2]>> = st
+                    .methods
+                    .iter()
+                    .map(|m| {
+                        let new_params: Option<TypeIdVec> = m
+                            .params
+                            .iter()
+                            .map(|&p| self.lookup_substitute(p, subs))
+                            .collect();
+                        Some(InternedStructuralMethod {
+                            name: m.name,
+                            params: new_params?,
+                            return_type: self.lookup_substitute(m.return_type, subs)?,
+                        })
+                    })
+                    .collect();
+                let new_methods = new_methods?;
+                if new_fields == st.fields && new_methods == st.methods {
+                    return Some(ty);
+                }
+                let result_ty = SemaType::Structural(Box::new(InternedStructural {
+                    fields: new_fields,
+                    methods: new_methods,
+                }));
+                self.intern_map.get(&result_ty).copied()
+            }
+
+            // Types without nested type parameters - return unchanged
+            SemaType::Primitive(_)
+            | SemaType::Void
+            | SemaType::Nil
+            | SemaType::Done
+            | SemaType::Range
+            | SemaType::MetaType
+            | SemaType::Invalid { .. }
+            | SemaType::Error { .. }
+            | SemaType::Module(_)
+            | SemaType::Placeholder(_) => Some(ty),
+        }
+    }
+
+    /// Look up a substituted type, panicking if it doesn't exist.
+    ///
+    /// This is a helper for codegen where all types should be fully instantiated.
+    /// Panics with a detailed error message if the lookup fails.
+    #[track_caller]
+    pub fn expect_substitute(
+        &self,
+        ty: TypeId,
+        subs: &FxHashMap<NameId, TypeId>,
+        context: &str,
+    ) -> TypeId {
+        self.lookup_substitute(ty, subs).unwrap_or_else(|| {
+            panic!(
+                "INTERNAL ERROR: Type not found after substitution\n\
+                 Context: {}\n\
+                 Original type: {}\n\
+                 Location: {}",
+                context,
+                self.display_basic(ty),
+                std::panic::Location::caller()
+            )
+        })
+    }
+
     /// Substitute SelfType placeholders with a concrete type.
     ///
     /// Used when resolving interface method signatures on type parameters:
@@ -1889,5 +2136,171 @@ mod tests {
         let inner = arena.unwrap_array(result).unwrap();
         let innermost = arena.unwrap_array(inner).unwrap();
         assert_eq!(innermost, arena.bool());
+    }
+
+    // ========================================================================
+    // lookup_substitute tests
+    // ========================================================================
+
+    #[test]
+    fn lookup_substitute_empty_subs() {
+        let mut arena = TypeArena::new();
+        let arr = arena.array(arena.i32());
+        let empty_subs: FxHashMap<NameId, TypeId> = FxHashMap::default();
+
+        // Empty substitutions should return the same type
+        let result = arena.lookup_substitute(arr, &empty_subs);
+        assert_eq!(result, Some(arr));
+    }
+
+    #[test]
+    fn lookup_substitute_primitive_unchanged() {
+        let arena = TypeArena::new();
+        let mut subs = FxHashMap::default();
+        let name_id = NameId::new_for_test(999);
+        subs.insert(name_id, arena.string());
+
+        // Primitive with unrelated substitution should return unchanged
+        let result = arena.lookup_substitute(arena.i32(), &subs);
+        assert_eq!(result, Some(arena.i32()));
+    }
+
+    #[test]
+    fn lookup_substitute_type_param_found() {
+        let mut arena = TypeArena::new();
+        let name_id = NameId::new_for_test(999);
+        let t = arena.type_param(name_id);
+
+        let mut subs = FxHashMap::default();
+        subs.insert(name_id, arena.i32());
+
+        // Direct type param lookup
+        let result = arena.lookup_substitute(t, &subs);
+        assert_eq!(result, Some(arena.i32()));
+    }
+
+    #[test]
+    fn lookup_substitute_type_param_not_in_subs() {
+        let mut arena = TypeArena::new();
+        let name_id = NameId::new_for_test(999);
+        let other_id = NameId::new_for_test(888);
+        let t = arena.type_param(name_id);
+
+        let mut subs = FxHashMap::default();
+        subs.insert(other_id, arena.i32()); // Different name_id
+
+        // Type param not in substitutions should return None
+        let result = arena.lookup_substitute(t, &subs);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn lookup_substitute_existing_type() {
+        let mut arena = TypeArena::new();
+        let name_id = NameId::new_for_test(999);
+        let t = arena.type_param(name_id);
+        let arr_t = arena.array(t);
+
+        // First, create the substituted type so it exists
+        let mut subs = FxHashMap::default();
+        subs.insert(name_id, arena.string());
+        let expected = arena.substitute(arr_t, &subs);
+
+        // Now lookup should find it
+        let result = arena.lookup_substitute(arr_t, &subs);
+        assert_eq!(result, Some(expected));
+    }
+
+    #[test]
+    fn lookup_substitute_nonexistent_type() {
+        let mut arena = TypeArena::new();
+        let name_id = NameId::new_for_test(999);
+        let t = arena.type_param(name_id);
+        let arr_t = arena.array(t);
+
+        // Create a type that substitutes T -> i64, but we'll query T -> f32
+        let mut subs1 = FxHashMap::default();
+        subs1.insert(name_id, arena.i64());
+        let _ = arena.substitute(arr_t, &subs1);
+
+        // Now lookup with a different substitution that wasn't created
+        let mut subs2 = FxHashMap::default();
+        subs2.insert(name_id, arena.f32());
+
+        let result = arena.lookup_substitute(arr_t, &subs2);
+        assert_eq!(result, None); // Array<f32> doesn't exist
+    }
+
+    #[test]
+    fn lookup_substitute_class_type() {
+        let mut arena = TypeArena::new();
+        let name_id = NameId::new_for_test(100);
+        let type_def_id = TypeDefId::new(42);
+
+        let t = arena.type_param(name_id);
+        let cls = arena.class(type_def_id, smallvec::smallvec![t]);
+
+        // Create the substituted type first
+        let mut subs = FxHashMap::default();
+        subs.insert(name_id, arena.i64());
+        let expected = arena.substitute(cls, &subs);
+
+        // Lookup should find it
+        let result = arena.lookup_substitute(cls, &subs);
+        assert_eq!(result, Some(expected));
+    }
+
+    #[test]
+    fn lookup_substitute_function_type() {
+        let mut arena = TypeArena::new();
+        let t_id = NameId::new_for_test(100);
+        let u_id = NameId::new_for_test(101);
+
+        let t = arena.type_param(t_id);
+        let u = arena.type_param(u_id);
+        let func = arena.function(smallvec::smallvec![t], u, false);
+
+        // Create the substituted type first
+        let mut subs = FxHashMap::default();
+        subs.insert(t_id, arena.i32());
+        subs.insert(u_id, arena.string());
+        let expected = arena.substitute(func, &subs);
+
+        // Lookup should find it
+        let result = arena.lookup_substitute(func, &subs);
+        assert_eq!(result, Some(expected));
+    }
+
+    #[test]
+    #[should_panic(expected = "Type not found after substitution")]
+    fn expect_substitute_panics_on_missing() {
+        let mut arena = TypeArena::new();
+        let name_id = NameId::new_for_test(999);
+        let t = arena.type_param(name_id);
+        let arr_t = arena.array(t);
+
+        // Don't create the substituted type
+        let mut subs = FxHashMap::default();
+        subs.insert(name_id, arena.f64());
+
+        // This should panic
+        arena.expect_substitute(arr_t, &subs, "test context");
+    }
+
+    #[test]
+    fn expect_substitute_returns_existing() {
+        let mut arena = TypeArena::new();
+        let name_id = NameId::new_for_test(999);
+        let t = arena.type_param(name_id);
+        let arr_t = arena.array(t);
+
+        // Create the substituted type first
+        let mut subs = FxHashMap::default();
+        subs.insert(name_id, arena.string());
+        let expected = arena.substitute(arr_t, &subs);
+
+        // expect_substitute should return it
+        let result = arena.expect_substitute(arr_t, &subs, "test context");
+        assert_eq!(result, expected);
     }
 }
