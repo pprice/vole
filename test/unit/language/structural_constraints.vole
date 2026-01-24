@@ -68,7 +68,7 @@ func combine<A: { name: string }, B: { value: i64 }>(a: A, b: B) -> string {
 }
 
 func sum_values<T: { value: i64 }>(items: [T]) -> i64 {
-    let total = 0
+    let mut total = 0
     for item in items {
         total = total + item.value
     }

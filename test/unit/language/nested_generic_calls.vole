@@ -1,5 +1,7 @@
 // FAILING TEST - see ticket v-9807
-// Nested generic function calls fail at runtime
+// Test nested generic function calls
+// Verifies that when one generic function calls another, 
+// the nested call is properly monomorphized.
 
 let HasId: type = { id: i64 }
 
@@ -10,8 +12,7 @@ func double_id<T: HasId>(x: T) -> i64 {
     return x.id * 2
 }
 
-// Calling one generic function from another fails at runtime
-// with "function not found: double_id"
+// Calling one generic function from another
 func quad_id<T: HasId>(x: T) -> i64 {
     return double_id(x) * 2
 }

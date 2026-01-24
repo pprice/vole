@@ -695,6 +695,10 @@ impl Analyzer {
         // Pass 2: type check function bodies and tests
         self.check_declaration_bodies(program, interner)?;
 
+        // Pass 3: analyze monomorphized function bodies to discover nested generic calls
+        // This iterates until no new MonomorphInstances are created
+        self.analyze_monomorph_bodies(program, interner);
+
         if self.errors.is_empty() {
             Ok(())
         } else {
@@ -1653,6 +1657,149 @@ impl Analyzer {
         self.exit_function_context(saved_ctx);
 
         Ok(())
+    }
+
+    /// Analyze a generic function body with type substitutions applied.
+    /// This discovers nested generic function calls and creates their MonomorphInstances.
+    fn analyze_monomorph_body(
+        &mut self,
+        func: &FuncDecl,
+        substitutions: &HashMap<NameId, ArenaTypeId>,
+        interner: &Interner,
+    ) {
+        // Build concrete parameter types by applying substitutions
+        let subs_hashbrown: FxHashMap<_, _> = substitutions.iter().map(|(&k, &v)| (k, v)).collect();
+
+        // Get the generic function info to resolve parameter and return types
+        let name_id = self
+            .name_table_mut()
+            .intern(self.current_module, &[func.name], interner);
+        let generic_info = {
+            let registry = self.entity_registry();
+            registry
+                .function_by_name(name_id)
+                .and_then(|fid| registry.get_function(fid).generic_info.clone())
+        };
+
+        let Some(generic_info) = generic_info else {
+            return;
+        };
+
+        // Compute concrete parameter and return types
+        let (concrete_param_ids, concrete_return_id) = {
+            let mut arena = self.type_arena_mut();
+            let param_ids: Vec<_> = generic_info
+                .param_types
+                .iter()
+                .map(|&t| arena.substitute(t, &subs_hashbrown))
+                .collect();
+            let return_id = arena.substitute(generic_info.return_type, &subs_hashbrown);
+            (param_ids, return_id)
+        };
+
+        // Set up function context with the concrete return type
+        let saved_ctx = self.enter_function_context(concrete_return_id);
+
+        // Create new scope with parameters (using concrete types)
+        let parent_scope = std::mem::take(&mut self.scope);
+        self.scope = Scope::with_parent(parent_scope);
+
+        for (param, &ty_id) in func.params.iter().zip(concrete_param_ids.iter()) {
+            self.scope.define(
+                param.name,
+                Variable {
+                    ty: ty_id,
+                    mutable: false,
+                },
+            );
+        }
+
+        // Set up type parameter scope with the substitutions
+        // This maps type param names to their concrete types
+        let mut type_param_scope = TypeParamScope::new();
+        for tp in &generic_info.type_params {
+            // Create TypeParamInfo with the substituted type
+            type_param_scope.add(tp.clone());
+        }
+        self.type_param_stack.push_scope(type_param_scope);
+
+        // Store substitutions for use during type resolution
+        // We need to make type param lookups return the substituted concrete types
+        // This is handled via type_arena.substitute during check_call_expr
+
+        // Check the function body - this will discover nested generic calls
+        // and create MonomorphInstances for them
+        let _ = self.check_func_body(&func.body, interner);
+
+        // Pop type parameter scope
+        self.type_param_stack.pop();
+
+        // Restore scope
+        if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
+            self.scope = parent;
+        }
+        self.exit_function_context(saved_ctx);
+    }
+
+    /// Analyze all monomorphized function bodies to discover nested generic calls.
+    /// Iterates until no new MonomorphInstances are created (fixpoint).
+    fn analyze_monomorph_bodies(&mut self, program: &Program, interner: &Interner) {
+        // Build map of generic function names to their ASTs
+        let generic_func_asts: HashMap<NameId, &FuncDecl> = program
+            .declarations
+            .iter()
+            .filter_map(|decl| {
+                if let Decl::Function(func) = decl
+                    && !func.type_params.is_empty()
+                {
+                    let name_id =
+                        self.name_table_mut()
+                            .intern(self.current_module, &[func.name], interner);
+                    return Some((name_id, func));
+                }
+                None
+            })
+            .collect();
+
+        // Track which instances we've already analyzed
+        let mut analyzed_keys: HashSet<MonomorphKey> = HashSet::new();
+
+        // Iterate until fixpoint
+        loop {
+            // Collect current instances that haven't been analyzed yet
+            let instances: Vec<_> = self
+                .entity_registry()
+                .monomorph_cache
+                .collect_instances()
+                .into_iter()
+                .filter(|inst| {
+                    let key = MonomorphKey::new(
+                        inst.original_name,
+                        inst.substitutions.values().copied().collect(),
+                    );
+                    !analyzed_keys.contains(&key)
+                })
+                .collect();
+
+            if instances.is_empty() {
+                break;
+            }
+
+            for instance in instances {
+                // Mark as analyzed
+                let key = MonomorphKey::new(
+                    instance.original_name,
+                    instance.substitutions.values().copied().collect(),
+                );
+                analyzed_keys.insert(key);
+
+                // Find the function AST
+                if let Some(func) = generic_func_asts.get(&instance.original_name) {
+                    // Analyze the body with substitutions
+                    self.analyze_monomorph_body(func, &instance.substitutions, interner);
+                }
+            }
+        }
     }
 
     /// Check if an expression is a constant expression.
