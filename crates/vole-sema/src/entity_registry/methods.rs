@@ -259,6 +259,44 @@ impl EntityRegistry {
             .and_then(|methods| methods.get(&name_id).copied())
     }
 
+    /// Register interface default methods on an implementing type.
+    ///
+    /// When a type implements an interface, the interface's default methods
+    /// should be accessible via `find_method_on_type` on the implementing type.
+    /// This copies the method entries to the implementing type's methods_by_type map.
+    pub fn register_interface_default_methods_on_implementing_type(
+        &mut self,
+        implementing_type_id: TypeDefId,
+        interface_type_id: TypeDefId,
+    ) {
+        // Collect interface default methods (methods with has_default=true)
+        let interface_methods: Vec<(NameId, MethodId)> = self.type_defs
+            [interface_type_id.index() as usize]
+            .methods
+            .iter()
+            .filter_map(|&method_id| {
+                let method = &self.method_defs[method_id.index() as usize];
+                if method.has_default {
+                    Some((method.name_id, method_id))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Register them on the implementing type (if not already defined)
+        let implementing_methods = self
+            .methods_by_type
+            .get_mut(&implementing_type_id)
+            .expect("implementing type must be registered");
+
+        for (name_id, method_id) in interface_methods {
+            // Only add if the implementing type doesn't already have a method with this name
+            // (i.e., the implementing type may override the default)
+            implementing_methods.entry(name_id).or_insert(method_id);
+        }
+    }
+
     /// Resolve a method on a type, checking inherited methods too
     #[must_use]
     pub fn resolve_method(&self, type_id: TypeDefId, method_name: NameId) -> Option<MethodId> {

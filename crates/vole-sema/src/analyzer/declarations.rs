@@ -1431,6 +1431,14 @@ impl Analyzer {
                 type_arg_ids.clone(),
             );
 
+            // Register interface default methods on the implementing type
+            // so that find_method_on_type works for inherited default methods
+            self.entity_registry_mut()
+                .register_interface_default_methods_on_implementing_type(
+                    entity_type_id,
+                    interface_type_id,
+                );
+
             // Pre-compute substituted method signatures for codegen's lookup_substitute
             self.precompute_interface_method_substitutions(interface_type_id, &type_arg_ids);
         }
