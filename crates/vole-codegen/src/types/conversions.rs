@@ -17,8 +17,8 @@ use vole_sema::entity_defs::TypeDefKind;
 use vole_sema::type_arena::{TypeArena, TypeId, TypeIdVec};
 use vole_sema::{EntityRegistry, PrimitiveType, ResolverEntityExt};
 
+use super::TypeCtx;
 use super::codegen_state::TypeMetadataMap;
-use super::{FunctionCtx, TypeCtx};
 
 /// Compiled value with its type
 #[derive(Clone, Copy)]
@@ -105,38 +105,6 @@ pub(crate) fn type_metadata_by_name_id<'a>(
         );
     }
     result
-}
-
-/// Resolve a type expression to a TypeId using split contexts.
-///
-/// Takes TypeCtx for type-system lookups, FunctionCtx for per-function state
-/// (module, substitutions), and type_metadata for class/record lookups.
-#[allow(dead_code)]
-pub(crate) fn resolve_type_expr_id(
-    ty: &TypeExpr,
-    type_ctx: &TypeCtx,
-    func_ctx: &FunctionCtx,
-    type_metadata: &TypeMetadataMap,
-) -> TypeId {
-    let name_table = type_ctx.name_table_rc().borrow();
-    let module_id = func_ctx
-        .current_module
-        .unwrap_or_else(|| name_table.main_module());
-
-    // Use the TypeId-native resolution function directly
-    let type_id = resolve_type_expr_to_id(
-        ty,
-        type_ctx.entities(),
-        type_metadata,
-        type_ctx.interner(),
-        &name_table,
-        module_id,
-        type_ctx.arena_rc(),
-    );
-    drop(name_table);
-
-    // Apply type substitutions if compiling a monomorphized context
-    func_ctx.substitute_type_id(type_id, type_ctx.arena_rc())
 }
 
 pub(crate) fn module_name_id(
