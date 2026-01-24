@@ -60,13 +60,15 @@ impl Analyzer {
                     Ok(ty_id)
                 } else if let Some(func_type) = self.get_function_type(*sym, interner) {
                     // Identifier refers to a function - treat it as a function value
-                    // Use the pre-interned TypeId fields from FunctionType
+                    // When a named function is used as a value, it becomes a closure type
+                    // (is_closure: true) because codegen wraps it in a closure struct.
+                    // This allows codegen to use the type directly without creating it.
                     let params_id = &func_type.params_id;
                     let return_id = func_type.return_type_id;
                     Ok(self.type_arena_mut().function(
                         params_id.clone(),
                         return_id,
-                        func_type.is_closure,
+                        true, // Always closure when used as a value
                     ))
                 } else {
                     let name = interner.resolve(*sym);

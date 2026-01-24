@@ -278,12 +278,11 @@ impl Cg<'_, '_, '_> {
             .call(alloc_ref, &[wrapper_func_addr, zero_captures]);
         let closure_ptr = self.builder.inst_results(alloc_call)[0];
 
-        // Create closure type directly using arena (is_closure: true)
-        let closure_type_id = self.update().function(param_ids, return_type_id, true);
+        // Use closure type from sema (already has is_closure: true)
         Ok(CompiledValue {
             value: closure_ptr,
             ty: self.ptr_type(),
-            type_id: closure_type_id,
+            type_id: func_type_id,
         })
     }
 
