@@ -7,7 +7,7 @@
 use crate::implement_registry::ExternalMethodInfo;
 use crate::type_arena::{InternedStructural, TypeId as ArenaTypeId};
 use crate::types::FunctionType;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::hash::Hash;
 use std::sync::atomic::{AtomicU32, Ordering};
 use vole_frontend::Symbol;
@@ -30,7 +30,7 @@ use vole_identity::{NameId, TypeParamId};
 /// Also tracks cache hit/miss statistics for debugging monomorphization performance.
 #[derive(Debug)]
 pub struct MonomorphCacheBase<K, V> {
-    instances: HashMap<K, V>,
+    instances: FxHashMap<K, V>,
     next_id: u32,
     /// Number of cache hits (successful lookups). Uses AtomicU32 for thread-safe interior mutability.
     hits: AtomicU32,
@@ -59,7 +59,7 @@ impl<K: Hash + Eq, V> MonomorphCacheBase<K, V> {
     /// Create a new empty cache
     pub fn new() -> Self {
         Self {
-            instances: HashMap::new(),
+            instances: FxHashMap::default(),
             next_id: 0,
             hits: AtomicU32::new(0),
             misses: AtomicU32::new(0),
@@ -520,7 +520,7 @@ pub trait MonomorphInstanceTrait {
     /// Get the concrete function type after substitution
     fn func_type(&self) -> &FunctionType;
     /// Get the type parameter substitutions (as TypeId handles)
-    fn substitutions(&self) -> &HashMap<NameId, ArenaTypeId>;
+    fn substitutions(&self) -> &FxHashMap<NameId, ArenaTypeId>;
 }
 
 /// A monomorphized function instance
@@ -535,7 +535,7 @@ pub struct MonomorphInstance {
     /// The concrete function type after substitution
     pub func_type: FunctionType,
     /// Map from type param NameId to concrete type (as TypeId handles)
-    pub substitutions: HashMap<NameId, ArenaTypeId>,
+    pub substitutions: FxHashMap<NameId, ArenaTypeId>,
 }
 
 impl MonomorphInstanceTrait for MonomorphInstance {
@@ -548,7 +548,7 @@ impl MonomorphInstanceTrait for MonomorphInstance {
     fn func_type(&self) -> &FunctionType {
         &self.func_type
     }
-    fn substitutions(&self) -> &HashMap<NameId, ArenaTypeId> {
+    fn substitutions(&self) -> &FxHashMap<NameId, ArenaTypeId> {
         &self.substitutions
     }
 }
@@ -594,7 +594,7 @@ pub struct ClassMethodMonomorphInstance {
     /// The concrete method type after substitution
     pub func_type: FunctionType,
     /// Map from type param NameId to concrete type (as TypeId handles)
-    pub substitutions: HashMap<NameId, ArenaTypeId>,
+    pub substitutions: FxHashMap<NameId, ArenaTypeId>,
     /// External method info (if this is an external method, call the runtime function)
     pub external_info: Option<ExternalMethodInfo>,
     /// Pre-computed self type (e.g., Foo<String> for a method on Foo<String>)
@@ -611,7 +611,7 @@ impl MonomorphInstanceTrait for ClassMethodMonomorphInstance {
     fn func_type(&self) -> &FunctionType {
         &self.func_type
     }
-    fn substitutions(&self) -> &HashMap<NameId, ArenaTypeId> {
+    fn substitutions(&self) -> &FxHashMap<NameId, ArenaTypeId> {
         &self.substitutions
     }
 }
@@ -666,7 +666,7 @@ pub struct StaticMethodMonomorphInstance {
     /// The concrete method type after substitution
     pub func_type: FunctionType,
     /// Map from type param NameId to concrete type (as TypeId handles)
-    pub substitutions: HashMap<NameId, ArenaTypeId>,
+    pub substitutions: FxHashMap<NameId, ArenaTypeId>,
 }
 
 impl MonomorphInstanceTrait for StaticMethodMonomorphInstance {
@@ -679,7 +679,7 @@ impl MonomorphInstanceTrait for StaticMethodMonomorphInstance {
     fn func_type(&self) -> &FunctionType {
         &self.func_type
     }
-    fn substitutions(&self) -> &HashMap<NameId, ArenaTypeId> {
+    fn substitutions(&self) -> &FxHashMap<NameId, ArenaTypeId> {
         &self.substitutions
     }
 }
@@ -741,7 +741,7 @@ mod tests {
                 mangled_name: names.intern_raw(names.main_module(), &["foo__mono_0"]),
                 instance_id: 0,
                 func_type: FunctionType::from_ids(&[arena.i64()], arena.i64(), false),
-                substitutions: HashMap::new(),
+                substitutions: FxHashMap::default(),
             },
         );
 

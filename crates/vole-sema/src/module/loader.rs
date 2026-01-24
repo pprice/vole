@@ -6,8 +6,10 @@
 //! - Circular import detection
 //! - Module caching
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+
+use rustc_hash::FxHashMap;
 
 use super::locator::StdlibLocator;
 
@@ -48,7 +50,7 @@ pub struct ModuleLoader {
     /// Stdlib root directory
     stdlib_root: Option<PathBuf>,
     /// Cache of loaded modules by canonical path
-    cache: HashMap<PathBuf, ModuleInfo>,
+    cache: FxHashMap<PathBuf, ModuleInfo>,
     /// Stack of currently loading modules (for cycle detection)
     loading_stack: HashSet<PathBuf>,
 }
@@ -58,7 +60,7 @@ impl ModuleLoader {
         let stdlib_root = StdlibLocator::locate().map(|loc| loc.path);
         Self {
             stdlib_root,
-            cache: HashMap::new(),
+            cache: FxHashMap::default(),
             loading_stack: HashSet::new(),
         }
     }
@@ -67,7 +69,7 @@ impl ModuleLoader {
     pub fn with_stdlib(stdlib_path: PathBuf) -> Self {
         Self {
             stdlib_root: Some(stdlib_path),
-            cache: HashMap::new(),
+            cache: FxHashMap::default(),
             loading_stack: HashSet::new(),
         }
     }

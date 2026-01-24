@@ -11,5 +11,8 @@ libc = "0.2"
 # High-performance hash map for Map<K,V> and Set<T> collections
 hashbrown = "0.16"
 
+# High-performance hash map for internal registries
+rustc-hash = "2.1"
+
 [lints]
 workspace = true

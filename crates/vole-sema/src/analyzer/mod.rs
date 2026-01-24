@@ -35,9 +35,9 @@ use crate::{
     resolve::TypeResolutionContext,
     scope::{Scope, Variable},
 };
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::rc::Rc;
 use vole_frontend::*;
 use vole_identity::{self, MethodId, ModuleId, NameId, NameTable, Namer, Resolver, TypeDefId};
@@ -197,10 +197,10 @@ struct FunctionCheckContext {
 
 pub struct Analyzer {
     scope: Scope,
-    functions: HashMap<Symbol, FunctionType>,
+    functions: FxHashMap<Symbol, FunctionType>,
     /// Functions registered by string name (for prelude functions that cross interner boundaries)
     functions_by_name: FxHashMap<String, FunctionType>,
-    globals: HashMap<Symbol, ArenaTypeId>,
+    globals: FxHashMap<Symbol, ArenaTypeId>,
     /// Globals with constant initializers (for constant expression checking)
     constant_globals: HashSet<Symbol>,
     current_function_return: Option<ArenaTypeId>,
@@ -217,10 +217,10 @@ pub struct Analyzer {
     errors: Vec<TypeError>,
     warnings: Vec<TypeWarning>,
     /// Type overrides from flow-sensitive narrowing (e.g., after `if x is T`)
-    type_overrides: HashMap<Symbol, ArenaTypeId>,
-    /// Stack of lambda scopes for capture analysis. Each entry is a HashMap
+    type_overrides: FxHashMap<Symbol, ArenaTypeId>,
+    /// Stack of lambda scopes for capture analysis. Each entry is a FxHashMap
     /// mapping captured variable names to their capture info.
-    lambda_captures: Vec<HashMap<Symbol, CaptureInfo>>,
+    lambda_captures: Vec<FxHashMap<Symbol, CaptureInfo>>,
     /// Stack of sets tracking variables defined locally in each lambda
     /// (parameters and let bindings inside the lambda body)
     lambda_locals: Vec<HashSet<Symbol>>,
@@ -228,10 +228,10 @@ pub struct Analyzer {
     lambda_side_effects: Vec<bool>,
     /// Resolved types for each expression node (for codegen)
     /// Maps expression node IDs to their interned type handles for O(1) equality.
-    expr_types: HashMap<NodeId, ArenaTypeId>,
+    expr_types: FxHashMap<NodeId, ArenaTypeId>,
     /// Type check results for `is` expressions and type patterns (for codegen)
     /// Maps NodeId → IsCheckResult to eliminate runtime type lookups
-    is_check_results: HashMap<NodeId, IsCheckResult>,
+    is_check_results: FxHashMap<NodeId, IsCheckResult>,
     /// Resolved method calls for codegen
     pub method_resolutions: MethodResolutions,
     /// Module loader for handling imports
@@ -243,33 +243,33 @@ pub struct Analyzer {
     /// Expression types for module programs (keyed by module path -> NodeId -> ArenaTypeId)
     /// Stored separately since NodeIds are per-program and can't be merged into main expr_types.
     /// Uses interned ArenaTypeId handles for O(1) equality during analysis.
-    pub module_expr_types: FxHashMap<String, HashMap<NodeId, ArenaTypeId>>,
+    pub module_expr_types: FxHashMap<String, FxHashMap<NodeId, ArenaTypeId>>,
     /// Method resolutions for module programs (keyed by module path -> NodeId -> ResolvedMethod)
     /// Stored separately since NodeIds are per-program and can't be merged into main method_resolutions
-    pub module_method_resolutions: FxHashMap<String, HashMap<NodeId, ResolvedMethod>>,
+    pub module_method_resolutions: FxHashMap<String, FxHashMap<NodeId, ResolvedMethod>>,
     /// Flag to prevent recursive prelude loading
     loading_prelude: bool,
     /// Mapping from call expression NodeId to MonomorphKey (for generic function calls)
-    generic_calls: HashMap<NodeId, MonomorphKey>,
+    generic_calls: FxHashMap<NodeId, MonomorphKey>,
     /// Mapping from method call expression NodeId to ClassMethodMonomorphKey (for generic class method calls)
-    class_method_calls: HashMap<NodeId, ClassMethodMonomorphKey>,
+    class_method_calls: FxHashMap<NodeId, ClassMethodMonomorphKey>,
     /// Mapping from static method call expression NodeId to StaticMethodMonomorphKey (for generic static method calls)
-    static_method_calls: HashMap<NodeId, StaticMethodMonomorphKey>,
+    static_method_calls: FxHashMap<NodeId, StaticMethodMonomorphKey>,
     /// Substituted return types for generic method calls.
     /// When a method like `list.head()` is called on `List<i32>`, the generic return type `T`
     /// is substituted to `i32`. This map stores the concrete type so codegen doesn't recompute.
-    substituted_return_types: HashMap<NodeId, ArenaTypeId>,
+    substituted_return_types: FxHashMap<NodeId, ArenaTypeId>,
     /// Lambda defaults for closure calls. Maps call site NodeId to lambda info.
-    lambda_defaults: HashMap<NodeId, LambdaDefaults>,
+    lambda_defaults: FxHashMap<NodeId, LambdaDefaults>,
     /// Variable to lambda expression mapping. Tracks which variables hold lambdas with defaults.
     /// Maps Symbol -> (lambda_node_id, required_params)
-    lambda_variables: HashMap<Symbol, (NodeId, usize)>,
+    lambda_variables: FxHashMap<Symbol, (NodeId, usize)>,
     /// Scoped function closure types. Maps function declaration span to its closure function type.
     /// Used for scoped functions in test blocks which are compiled as closures.
-    scoped_function_types: HashMap<Span, ArenaTypeId>,
+    scoped_function_types: FxHashMap<Span, ArenaTypeId>,
     /// Declared variable types for let statements with explicit type annotations.
     /// Maps init expression NodeId → declared TypeId for codegen to use.
-    declared_var_types: HashMap<NodeId, ArenaTypeId>,
+    declared_var_types: FxHashMap<NodeId, ArenaTypeId>,
     /// Current module being analyzed (for proper NameId registration)
     current_module: ModuleId,
     /// Stack of type parameter scopes for nested generic contexts.
@@ -297,9 +297,9 @@ impl Analyzer {
 
         let mut analyzer = Self {
             scope: Scope::new(),
-            functions: HashMap::new(),
+            functions: FxHashMap::default(),
             functions_by_name: FxHashMap::default(),
-            globals: HashMap::new(),
+            globals: FxHashMap::default(),
             constant_globals: HashSet::new(),
             current_function_return: None,
             found_return: false,
@@ -308,12 +308,12 @@ impl Analyzer {
             current_static_method: None,
             errors: Vec::new(),
             warnings: Vec::new(),
-            type_overrides: HashMap::new(),
+            type_overrides: FxHashMap::default(),
             lambda_captures: Vec::new(),
             lambda_locals: Vec::new(),
             lambda_side_effects: Vec::new(),
-            expr_types: HashMap::new(),
-            is_check_results: HashMap::new(),
+            expr_types: FxHashMap::default(),
+            is_check_results: FxHashMap::default(),
             method_resolutions: MethodResolutions::new(),
             module_loader: ModuleLoader::new(),
             module_type_ids: FxHashMap::default(),
@@ -321,14 +321,14 @@ impl Analyzer {
             module_expr_types: FxHashMap::default(),
             module_method_resolutions: FxHashMap::default(),
             loading_prelude: false,
-            generic_calls: HashMap::new(),
-            class_method_calls: HashMap::new(),
-            static_method_calls: HashMap::new(),
-            substituted_return_types: HashMap::new(),
-            lambda_defaults: HashMap::new(),
-            lambda_variables: HashMap::new(),
-            scoped_function_types: HashMap::new(),
-            declared_var_types: HashMap::new(),
+            generic_calls: FxHashMap::default(),
+            class_method_calls: FxHashMap::default(),
+            static_method_calls: FxHashMap::default(),
+            substituted_return_types: FxHashMap::default(),
+            lambda_defaults: FxHashMap::default(),
+            lambda_variables: FxHashMap::default(),
+            scoped_function_types: FxHashMap::default(),
+            declared_var_types: FxHashMap::default(),
             current_module: main_module,
             type_param_stack: TypeParamScopeStack::new(),
             module_cache: None,
@@ -353,9 +353,9 @@ impl Analyzer {
 
         let mut analyzer = Self {
             scope: Scope::new(),
-            functions: HashMap::new(),
+            functions: FxHashMap::default(),
             functions_by_name: FxHashMap::default(),
-            globals: HashMap::new(),
+            globals: FxHashMap::default(),
             constant_globals: HashSet::new(),
             current_function_return: None,
             found_return: false,
@@ -364,12 +364,12 @@ impl Analyzer {
             current_static_method: None,
             errors: Vec::new(),
             warnings: Vec::new(),
-            type_overrides: HashMap::new(),
+            type_overrides: FxHashMap::default(),
             lambda_captures: Vec::new(),
             lambda_locals: Vec::new(),
             lambda_side_effects: Vec::new(),
-            expr_types: HashMap::new(),
-            is_check_results: HashMap::new(),
+            expr_types: FxHashMap::default(),
+            is_check_results: FxHashMap::default(),
             method_resolutions: MethodResolutions::new(),
             module_loader: ModuleLoader::new(),
             module_type_ids: FxHashMap::default(),
@@ -377,14 +377,14 @@ impl Analyzer {
             module_expr_types: FxHashMap::default(),
             module_method_resolutions: FxHashMap::default(),
             loading_prelude: false,
-            generic_calls: HashMap::new(),
-            class_method_calls: HashMap::new(),
-            static_method_calls: HashMap::new(),
-            substituted_return_types: HashMap::new(),
-            lambda_defaults: HashMap::new(),
-            lambda_variables: HashMap::new(),
-            scoped_function_types: HashMap::new(),
-            declared_var_types: HashMap::new(),
+            generic_calls: FxHashMap::default(),
+            class_method_calls: FxHashMap::default(),
+            static_method_calls: FxHashMap::default(),
+            substituted_return_types: FxHashMap::default(),
+            lambda_defaults: FxHashMap::default(),
+            lambda_variables: FxHashMap::default(),
+            scoped_function_types: FxHashMap::default(),
+            declared_var_types: FxHashMap::default(),
             current_module: main_module,
             type_param_stack: TypeParamScopeStack::new(),
             module_cache: Some(cache),
@@ -404,12 +404,12 @@ impl Analyzer {
     // Type inference: inference.rs
 
     /// Get the resolved expression types as interned ArenaTypeId handles.
-    pub fn expr_types(&self) -> &HashMap<NodeId, ArenaTypeId> {
+    pub fn expr_types(&self) -> &FxHashMap<NodeId, ArenaTypeId> {
         &self.expr_types
     }
 
     /// Get the type check results for `is` expressions and type patterns.
-    pub fn is_check_results(&self) -> &HashMap<NodeId, IsCheckResult> {
+    pub fn is_check_results(&self) -> &FxHashMap<NodeId, IsCheckResult> {
         &self.is_check_results
     }
 
@@ -434,7 +434,7 @@ impl Analyzer {
     }
 
     /// Take ownership of the expression types (consuming self)
-    pub fn into_expr_types(self) -> HashMap<NodeId, ArenaTypeId> {
+    pub fn into_expr_types(self) -> FxHashMap<NodeId, ArenaTypeId> {
         self.expr_types
     }
 
@@ -1474,7 +1474,7 @@ impl Analyzer {
     fn check_type_param_constraints_id(
         &mut self,
         type_params: &[TypeParamInfo],
-        inferred: &HashMap<NameId, ArenaTypeId>,
+        inferred: &FxHashMap<NameId, ArenaTypeId>,
         span: Span,
         interner: &Interner,
     ) {
@@ -1826,11 +1826,11 @@ impl Analyzer {
     fn analyze_monomorph_body(
         &mut self,
         func: &FuncDecl,
-        substitutions: &HashMap<NameId, ArenaTypeId>,
+        substitutions: &FxHashMap<NameId, ArenaTypeId>,
         interner: &Interner,
     ) {
         // Build concrete parameter types by applying substitutions
-        let subs_hashbrown: FxHashMap<_, _> = substitutions.iter().map(|(&k, &v)| (k, v)).collect();
+        let subs_hashbrown = substitutions;
 
         // Get the generic function info to resolve parameter and return types
         let name_id = self
@@ -1853,9 +1853,9 @@ impl Analyzer {
             let param_ids: Vec<_> = generic_info
                 .param_types
                 .iter()
-                .map(|&t| arena.substitute(t, &subs_hashbrown))
+                .map(|&t| arena.substitute(t, subs_hashbrown))
                 .collect();
-            let return_id = arena.substitute(generic_info.return_type, &subs_hashbrown);
+            let return_id = arena.substitute(generic_info.return_type, subs_hashbrown);
             (param_ids, return_id)
         };
 
@@ -1907,7 +1907,7 @@ impl Analyzer {
     /// Iterates until no new MonomorphInstances are created (fixpoint).
     fn analyze_monomorph_bodies(&mut self, program: &Program, interner: &Interner) {
         // Build map of generic function names to their ASTs
-        let generic_func_asts: HashMap<NameId, &FuncDecl> = program
+        let generic_func_asts: FxHashMap<NameId, &FuncDecl> = program
             .declarations
             .iter()
             .filter_map(|decl| {
@@ -2599,9 +2599,9 @@ impl Analyzer {
         };
 
         // Collect exports, constants, and track external functions
-        let mut exports = HashMap::new();
-        let mut constants = HashMap::new();
-        let mut external_funcs = HashSet::new();
+        let mut exports = FxHashMap::default();
+        let mut constants = FxHashMap::default();
+        let mut external_funcs = FxHashSet::default();
         let module_interner = parser.into_interner();
 
         let module_id = self.name_table_mut().module_id(import_path);
@@ -2752,9 +2752,9 @@ impl Analyzer {
     fn create_module_sub_analyzer(&self, module_id: ModuleId) -> Analyzer {
         Analyzer {
             scope: Scope::new(),
-            functions: HashMap::new(),
+            functions: FxHashMap::default(),
             functions_by_name: FxHashMap::default(),
-            globals: HashMap::new(),
+            globals: FxHashMap::default(),
             constant_globals: HashSet::new(),
             current_function_return: None,
             found_return: false,
@@ -2763,12 +2763,12 @@ impl Analyzer {
             current_static_method: None,
             errors: Vec::new(),
             warnings: Vec::new(),
-            type_overrides: HashMap::new(),
+            type_overrides: FxHashMap::default(),
             lambda_captures: Vec::new(),
             lambda_locals: Vec::new(),
             lambda_side_effects: Vec::new(),
-            expr_types: HashMap::new(),
-            is_check_results: HashMap::new(),
+            expr_types: FxHashMap::default(),
+            is_check_results: FxHashMap::default(),
             method_resolutions: MethodResolutions::new(),
             module_loader: ModuleLoader::new(),
             module_type_ids: FxHashMap::default(),
@@ -2776,14 +2776,14 @@ impl Analyzer {
             module_expr_types: FxHashMap::default(),
             module_method_resolutions: FxHashMap::default(),
             loading_prelude: true, // Prevent sub-analyzer from loading prelude
-            generic_calls: HashMap::new(),
-            class_method_calls: HashMap::new(),
-            static_method_calls: HashMap::new(),
-            substituted_return_types: HashMap::new(),
-            lambda_defaults: HashMap::new(),
-            lambda_variables: HashMap::new(),
-            scoped_function_types: HashMap::new(),
-            declared_var_types: HashMap::new(),
+            generic_calls: FxHashMap::default(),
+            class_method_calls: FxHashMap::default(),
+            static_method_calls: FxHashMap::default(),
+            substituted_return_types: FxHashMap::default(),
+            lambda_defaults: FxHashMap::default(),
+            lambda_variables: FxHashMap::default(),
+            scoped_function_types: FxHashMap::default(),
+            declared_var_types: FxHashMap::default(),
             current_module: module_id,
             type_param_stack: TypeParamScopeStack::new(),
             module_cache: None,

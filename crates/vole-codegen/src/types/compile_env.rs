@@ -2,7 +2,7 @@
 //
 // Compilation environment - session/unit level context.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use vole_frontend::{Expr, Interner, Symbol};
 use vole_identity::ModuleId;
@@ -28,7 +28,7 @@ pub struct CompileEnv<'a> {
     /// Interner for symbol resolution (main or module-specific)
     pub interner: &'a Interner,
     /// Global variable initializer expressions (main or module-specific)
-    pub global_inits: &'a HashMap<Symbol, Expr>,
+    pub global_inits: &'a FxHashMap<Symbol, Expr>,
     /// Source file pointer for error reporting
     pub source_file_ptr: (*const u8, usize),
     /// Module being compiled (None for main program)

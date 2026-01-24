@@ -8,7 +8,7 @@ use cranelift_module::Module;
 
 use crate::RuntimeFn;
 use crate::errors::CodegenError;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use vole_frontend::{
     AssignTarget, BlockExpr, Expr, ExprKind, IfExpr, MatchExpr, NodeId, Pattern, PatternKind,
@@ -1554,7 +1554,7 @@ impl Cg<'_, '_, '_> {
         inner: &Option<Box<Pattern>>,
         scrutinee: &CompiledValue,
         tag: Value,
-        arm_variables: &mut HashMap<Symbol, (Variable, TypeId)>,
+        arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
     ) -> Result<Option<Value>, String> {
         let Some(inner_pat) = inner else {
             // Bare error pattern: error => ...
@@ -1591,7 +1591,7 @@ impl Cg<'_, '_, '_> {
         name: Symbol,
         scrutinee: &CompiledValue,
         tag: Value,
-        arm_variables: &mut HashMap<Symbol, (Variable, TypeId)>,
+        arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
     ) -> Result<Option<Value>, String> {
         // Check if this is an error type name via EntityRegistry
         let is_error_type = self
@@ -1666,7 +1666,7 @@ impl Cg<'_, '_, '_> {
         fields: &[RecordFieldPattern],
         scrutinee: &CompiledValue,
         tag: Value,
-        arm_variables: &mut HashMap<Symbol, (Variable, TypeId)>,
+        arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
     ) -> Result<Option<Value>, String> {
         // Look up error type_def_id via EntityRegistry
         let error_type_id = self.resolve_type(name).and_then(|type_id| {

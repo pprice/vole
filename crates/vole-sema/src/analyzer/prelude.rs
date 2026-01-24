@@ -7,7 +7,7 @@ use crate::module::ModuleLoader;
 use crate::resolution::MethodResolutions;
 use crate::scope::Scope;
 use rustc_hash::FxHashMap;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::rc::Rc;
 use vole_frontend::{Interner, Parser};
 
@@ -96,9 +96,9 @@ impl Analyzer {
         // Note: We don't call new() because that would try to load prelude again
         let mut sub_analyzer = Analyzer {
             scope: Scope::new(),
-            functions: HashMap::new(),
+            functions: FxHashMap::default(),
             functions_by_name: FxHashMap::default(),
-            globals: HashMap::new(),
+            globals: FxHashMap::default(),
             constant_globals: HashSet::new(),
             current_function_return: None,
             current_function_error_type: None,
@@ -106,12 +106,12 @@ impl Analyzer {
             current_static_method: None,
             errors: Vec::new(),
             warnings: Vec::new(),
-            type_overrides: HashMap::new(),
+            type_overrides: FxHashMap::default(),
             lambda_captures: Vec::new(),
             lambda_locals: Vec::new(),
             lambda_side_effects: Vec::new(),
-            expr_types: HashMap::new(),
-            is_check_results: HashMap::new(),
+            expr_types: FxHashMap::default(),
+            is_check_results: FxHashMap::default(),
             method_resolutions: MethodResolutions::new(),
             module_loader: ModuleLoader::new(),
             module_type_ids: FxHashMap::default(),
@@ -119,14 +119,14 @@ impl Analyzer {
             module_expr_types: FxHashMap::default(),
             module_method_resolutions: FxHashMap::default(),
             loading_prelude: true, // Prevent sub-analyzer from loading prelude
-            generic_calls: HashMap::new(),
-            class_method_calls: HashMap::new(),
-            static_method_calls: HashMap::new(),
-            substituted_return_types: HashMap::new(),
-            lambda_defaults: HashMap::new(),
-            lambda_variables: HashMap::new(),
-            scoped_function_types: HashMap::new(),
-            declared_var_types: HashMap::new(),
+            generic_calls: FxHashMap::default(),
+            class_method_calls: FxHashMap::default(),
+            static_method_calls: FxHashMap::default(),
+            substituted_return_types: FxHashMap::default(),
+            lambda_defaults: FxHashMap::default(),
+            lambda_variables: FxHashMap::default(),
+            scoped_function_types: FxHashMap::default(),
+            declared_var_types: FxHashMap::default(),
             current_module: prelude_module, // Use the prelude module path!
             type_param_stack: TypeParamScopeStack::new(),
             module_cache: None,      // Sub-analyzers don't need the cache

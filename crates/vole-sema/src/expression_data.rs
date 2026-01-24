@@ -4,7 +4,6 @@
 //! including type information, method resolutions, and generic instantiations.
 
 use rustc_hash::FxHashMap;
-use std::collections::HashMap;
 
 use crate::analysis_cache::IsCheckResult;
 use crate::generic::{ClassMethodMonomorphKey, MonomorphKey, StaticMethodMonomorphKey};
@@ -27,38 +26,38 @@ pub struct LambdaDefaults {
 #[derive(Debug, Clone, Default)]
 pub struct ExpressionData {
     /// Type of each expression node (stored as interned TypeId handles)
-    types: HashMap<NodeId, TypeId>,
+    types: FxHashMap<NodeId, TypeId>,
     /// Resolved method information for method calls
-    methods: HashMap<NodeId, ResolvedMethod>,
+    methods: FxHashMap<NodeId, ResolvedMethod>,
     /// Monomorphization key for generic function calls
-    generics: HashMap<NodeId, MonomorphKey>,
+    generics: FxHashMap<NodeId, MonomorphKey>,
     /// Monomorphization key for generic class method calls
-    class_method_generics: HashMap<NodeId, ClassMethodMonomorphKey>,
+    class_method_generics: FxHashMap<NodeId, ClassMethodMonomorphKey>,
     /// Monomorphization key for generic static method calls
-    static_method_generics: HashMap<NodeId, StaticMethodMonomorphKey>,
+    static_method_generics: FxHashMap<NodeId, StaticMethodMonomorphKey>,
     /// Per-module type mappings (for multi-module compilation)
-    module_types: FxHashMap<String, HashMap<NodeId, TypeId>>,
+    module_types: FxHashMap<String, FxHashMap<NodeId, TypeId>>,
     /// Per-module method resolutions (for multi-module compilation)
-    module_methods: FxHashMap<String, HashMap<NodeId, ResolvedMethod>>,
+    module_methods: FxHashMap<String, FxHashMap<NodeId, ResolvedMethod>>,
     /// Substituted return types for generic method calls.
     /// When sema resolves a call like `list.head()` on `List<i32>`, the generic
     /// return type `T` is substituted to `i32`. This map stores the concrete type
     /// so codegen doesn't need to recompute the substitution.
-    substituted_return_types: HashMap<NodeId, TypeId>,
+    substituted_return_types: FxHashMap<NodeId, TypeId>,
     /// Lambda defaults for closure calls.
     /// Maps a call site NodeId to the lambda's defaults info.
-    lambda_defaults: HashMap<NodeId, LambdaDefaults>,
+    lambda_defaults: FxHashMap<NodeId, LambdaDefaults>,
     /// Scoped function closure types.
     /// Maps function declaration span to its closure function type.
     /// Used for scoped functions in test blocks which are compiled as closures.
-    scoped_function_types: HashMap<Span, TypeId>,
+    scoped_function_types: FxHashMap<Span, TypeId>,
     /// Type check results for `is` expressions and type patterns.
     /// Maps NodeId → IsCheckResult to eliminate runtime type lookups in codegen.
-    is_check_results: HashMap<NodeId, IsCheckResult>,
+    is_check_results: FxHashMap<NodeId, IsCheckResult>,
     /// Declared variable types for let statements with explicit type annotations.
     /// Maps init expression NodeId → declared TypeId, enabling codegen to handle
     /// union wrapping, numeric widening, and interface boxing without re-resolving types.
-    declared_var_types: HashMap<NodeId, TypeId>,
+    declared_var_types: FxHashMap<NodeId, TypeId>,
 }
 
 impl ExpressionData {
@@ -70,18 +69,18 @@ impl ExpressionData {
     /// Create ExpressionData from analysis results
     #[allow(clippy::too_many_arguments)]
     pub fn from_analysis(
-        types: HashMap<NodeId, TypeId>,
-        methods: HashMap<NodeId, ResolvedMethod>,
-        generics: HashMap<NodeId, MonomorphKey>,
-        class_method_generics: HashMap<NodeId, ClassMethodMonomorphKey>,
-        static_method_generics: HashMap<NodeId, StaticMethodMonomorphKey>,
-        module_types: FxHashMap<String, HashMap<NodeId, TypeId>>,
-        module_methods: FxHashMap<String, HashMap<NodeId, ResolvedMethod>>,
-        substituted_return_types: HashMap<NodeId, TypeId>,
-        lambda_defaults: HashMap<NodeId, LambdaDefaults>,
-        scoped_function_types: HashMap<Span, TypeId>,
-        is_check_results: HashMap<NodeId, IsCheckResult>,
-        declared_var_types: HashMap<NodeId, TypeId>,
+        types: FxHashMap<NodeId, TypeId>,
+        methods: FxHashMap<NodeId, ResolvedMethod>,
+        generics: FxHashMap<NodeId, MonomorphKey>,
+        class_method_generics: FxHashMap<NodeId, ClassMethodMonomorphKey>,
+        static_method_generics: FxHashMap<NodeId, StaticMethodMonomorphKey>,
+        module_types: FxHashMap<String, FxHashMap<NodeId, TypeId>>,
+        module_methods: FxHashMap<String, FxHashMap<NodeId, ResolvedMethod>>,
+        substituted_return_types: FxHashMap<NodeId, TypeId>,
+        lambda_defaults: FxHashMap<NodeId, LambdaDefaults>,
+        scoped_function_types: FxHashMap<Span, TypeId>,
+        is_check_results: FxHashMap<NodeId, IsCheckResult>,
+        declared_var_types: FxHashMap<NodeId, TypeId>,
     ) -> Self {
         Self {
             types,
@@ -159,32 +158,32 @@ impl ExpressionData {
     }
 
     /// Get all expression types (as TypeId handles)
-    pub fn types(&self) -> &HashMap<NodeId, TypeId> {
+    pub fn types(&self) -> &FxHashMap<NodeId, TypeId> {
         &self.types
     }
 
     /// Get mutable access to expression types
-    pub fn types_mut(&mut self) -> &mut HashMap<NodeId, TypeId> {
+    pub fn types_mut(&mut self) -> &mut FxHashMap<NodeId, TypeId> {
         &mut self.types
     }
 
     /// Get all method resolutions
-    pub fn methods(&self) -> &HashMap<NodeId, ResolvedMethod> {
+    pub fn methods(&self) -> &FxHashMap<NodeId, ResolvedMethod> {
         &self.methods
     }
 
     /// Get mutable access to method resolutions
-    pub fn methods_mut(&mut self) -> &mut HashMap<NodeId, ResolvedMethod> {
+    pub fn methods_mut(&mut self) -> &mut FxHashMap<NodeId, ResolvedMethod> {
         &mut self.methods
     }
 
     /// Get all monomorphization keys
-    pub fn generics(&self) -> &HashMap<NodeId, MonomorphKey> {
+    pub fn generics(&self) -> &FxHashMap<NodeId, MonomorphKey> {
         &self.generics
     }
 
     /// Get mutable access to monomorphization keys
-    pub fn generics_mut(&mut self) -> &mut HashMap<NodeId, MonomorphKey> {
+    pub fn generics_mut(&mut self) -> &mut FxHashMap<NodeId, MonomorphKey> {
         &mut self.generics
     }
 
@@ -199,12 +198,12 @@ impl ExpressionData {
     }
 
     /// Get all class method monomorphization keys
-    pub fn class_method_generics(&self) -> &HashMap<NodeId, ClassMethodMonomorphKey> {
+    pub fn class_method_generics(&self) -> &FxHashMap<NodeId, ClassMethodMonomorphKey> {
         &self.class_method_generics
     }
 
     /// Get mutable access to class method monomorphization keys
-    pub fn class_method_generics_mut(&mut self) -> &mut HashMap<NodeId, ClassMethodMonomorphKey> {
+    pub fn class_method_generics_mut(&mut self) -> &mut FxHashMap<NodeId, ClassMethodMonomorphKey> {
         &mut self.class_method_generics
     }
 
@@ -219,42 +218,48 @@ impl ExpressionData {
     }
 
     /// Get all static method monomorphization keys
-    pub fn static_method_generics(&self) -> &HashMap<NodeId, StaticMethodMonomorphKey> {
+    pub fn static_method_generics(&self) -> &FxHashMap<NodeId, StaticMethodMonomorphKey> {
         &self.static_method_generics
     }
 
     /// Get mutable access to static method monomorphization keys
-    pub fn static_method_generics_mut(&mut self) -> &mut HashMap<NodeId, StaticMethodMonomorphKey> {
+    pub fn static_method_generics_mut(
+        &mut self,
+    ) -> &mut FxHashMap<NodeId, StaticMethodMonomorphKey> {
         &mut self.static_method_generics
     }
 
     /// Get types for a specific module (as TypeId handles)
-    pub fn module_types(&self, module: &str) -> Option<&HashMap<NodeId, TypeId>> {
+    pub fn module_types(&self, module: &str) -> Option<&FxHashMap<NodeId, TypeId>> {
         self.module_types.get(module)
     }
 
     /// Set types for a specific module
-    pub fn set_module_types(&mut self, module: String, types: HashMap<NodeId, TypeId>) {
+    pub fn set_module_types(&mut self, module: String, types: FxHashMap<NodeId, TypeId>) {
         self.module_types.insert(module, types);
     }
 
     /// Get all module type mappings
-    pub fn all_module_types(&self) -> &FxHashMap<String, HashMap<NodeId, TypeId>> {
+    pub fn all_module_types(&self) -> &FxHashMap<String, FxHashMap<NodeId, TypeId>> {
         &self.module_types
     }
 
     /// Get methods for a specific module
-    pub fn module_methods(&self, module: &str) -> Option<&HashMap<NodeId, ResolvedMethod>> {
+    pub fn module_methods(&self, module: &str) -> Option<&FxHashMap<NodeId, ResolvedMethod>> {
         self.module_methods.get(module)
     }
 
     /// Set methods for a specific module
-    pub fn set_module_methods(&mut self, module: String, methods: HashMap<NodeId, ResolvedMethod>) {
+    pub fn set_module_methods(
+        &mut self,
+        module: String,
+        methods: FxHashMap<NodeId, ResolvedMethod>,
+    ) {
         self.module_methods.insert(module, methods);
     }
 
     /// Get all module method mappings
-    pub fn all_module_methods(&self) -> &FxHashMap<String, HashMap<NodeId, ResolvedMethod>> {
+    pub fn all_module_methods(&self) -> &FxHashMap<String, FxHashMap<NodeId, ResolvedMethod>> {
         &self.module_methods
     }
 
@@ -270,12 +275,12 @@ impl ExpressionData {
     }
 
     /// Get all substituted return types
-    pub fn substituted_return_types(&self) -> &HashMap<NodeId, TypeId> {
+    pub fn substituted_return_types(&self) -> &FxHashMap<NodeId, TypeId> {
         &self.substituted_return_types
     }
 
     /// Get mutable access to substituted return types
-    pub fn substituted_return_types_mut(&mut self) -> &mut HashMap<NodeId, TypeId> {
+    pub fn substituted_return_types_mut(&mut self) -> &mut FxHashMap<NodeId, TypeId> {
         &mut self.substituted_return_types
     }
 
@@ -290,12 +295,12 @@ impl ExpressionData {
     }
 
     /// Get all lambda defaults
-    pub fn lambda_defaults(&self) -> &HashMap<NodeId, LambdaDefaults> {
+    pub fn lambda_defaults(&self) -> &FxHashMap<NodeId, LambdaDefaults> {
         &self.lambda_defaults
     }
 
     /// Get mutable access to lambda defaults
-    pub fn lambda_defaults_mut(&mut self) -> &mut HashMap<NodeId, LambdaDefaults> {
+    pub fn lambda_defaults_mut(&mut self) -> &mut FxHashMap<NodeId, LambdaDefaults> {
         &mut self.lambda_defaults
     }
 
@@ -310,7 +315,7 @@ impl ExpressionData {
     }
 
     /// Get all scoped function types
-    pub fn scoped_function_types(&self) -> &HashMap<Span, TypeId> {
+    pub fn scoped_function_types(&self) -> &FxHashMap<Span, TypeId> {
         &self.scoped_function_types
     }
 
@@ -325,12 +330,12 @@ impl ExpressionData {
     }
 
     /// Get all IsCheckResults
-    pub fn is_check_results(&self) -> &HashMap<NodeId, IsCheckResult> {
+    pub fn is_check_results(&self) -> &FxHashMap<NodeId, IsCheckResult> {
         &self.is_check_results
     }
 
     /// Get mutable access to IsCheckResults
-    pub fn is_check_results_mut(&mut self) -> &mut HashMap<NodeId, IsCheckResult> {
+    pub fn is_check_results_mut(&mut self) -> &mut FxHashMap<NodeId, IsCheckResult> {
         &mut self.is_check_results
     }
 
@@ -346,7 +351,7 @@ impl ExpressionData {
     }
 
     /// Get all declared variable types
-    pub fn declared_var_types(&self) -> &HashMap<NodeId, TypeId> {
+    pub fn declared_var_types(&self) -> &FxHashMap<NodeId, TypeId> {
         &self.declared_var_types
     }
 }

@@ -4,7 +4,6 @@
 // Methods are implemented across multiple files using split impl blocks.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 
 use cranelift::prelude::{
     AbiParam, FunctionBuilder, InstBuilder, IntCC, MemFlags, StackSlotData, StackSlotKind, Type,
@@ -73,7 +72,7 @@ impl Default for ControlFlow {
 
 /// Capture context for closures
 pub(crate) struct Captures<'a> {
-    pub bindings: &'a HashMap<Symbol, CaptureBinding>,
+    pub bindings: &'a FxHashMap<Symbol, CaptureBinding>,
     pub closure_var: Variable,
 }
 
@@ -97,23 +96,23 @@ pub type CallCacheKey = (RuntimeFn, SmallVec<[Value; 4]>);
 pub(crate) struct Cg<'a, 'b, 'ctx> {
     pub builder: &'a mut FunctionBuilder<'b>,
     /// Variable bindings - owned, fresh per function
-    pub vars: HashMap<Symbol, (Variable, TypeId)>,
+    pub vars: FxHashMap<Symbol, (Variable, TypeId)>,
     pub cf: ControlFlow,
     pub captures: Option<Captures<'a>>,
     /// For recursive lambdas: the binding name that captures itself
     pub self_capture: Option<Symbol>,
     /// Cache for pure runtime function calls: (func, args) -> result
-    pub call_cache: HashMap<CallCacheKey, Value>,
+    pub call_cache: FxHashMap<CallCacheKey, Value>,
     /// Cache for field access: (instance_ptr, slot) -> field_value
-    pub field_cache: HashMap<(Value, u32), Value>,
+    pub field_cache: FxHashMap<(Value, u32), Value>,
     /// Return type of the current function
     pub return_type: Option<TypeId>,
     /// Module being compiled (None for main program)
     pub current_module: Option<ModuleId>,
     /// Type parameter substitutions for monomorphized generics
-    pub substitutions: Option<&'a HashMap<NameId, TypeId>>,
+    pub substitutions: Option<&'a FxHashMap<NameId, TypeId>>,
     /// Cache for substituted types
-    substitution_cache: RefCell<HashMap<TypeId, TypeId>>,
+    substitution_cache: RefCell<FxHashMap<TypeId, TypeId>>,
 
     // ========== Shared context fields ==========
     /// Mutable JIT infrastructure (module, func_registry)
@@ -137,16 +136,16 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ) -> Self {
         Self {
             builder,
-            vars: HashMap::new(),
+            vars: FxHashMap::default(),
             cf: ControlFlow::new(),
             captures: None,
             self_capture: None,
-            call_cache: HashMap::new(),
-            field_cache: HashMap::new(),
+            call_cache: FxHashMap::default(),
+            field_cache: FxHashMap::default(),
             return_type: None,
             current_module: None,
             substitutions: None,
-            substitution_cache: RefCell::new(HashMap::new()),
+            substitution_cache: RefCell::new(FxHashMap::default()),
             codegen_ctx,
             env,
         }
@@ -171,20 +170,20 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Set type parameter substitutions for monomorphized generics.
-    pub fn with_substitutions(mut self, subs: Option<&'a HashMap<NameId, TypeId>>) -> Self {
+    pub fn with_substitutions(mut self, subs: Option<&'a FxHashMap<NameId, TypeId>>) -> Self {
         self.substitutions = subs;
         self
     }
 
     /// Set pre-populated variables (for cases where params are bound before Cg creation).
-    pub fn with_vars(mut self, vars: HashMap<Symbol, (Variable, TypeId)>) -> Self {
+    pub fn with_vars(mut self, vars: FxHashMap<Symbol, (Variable, TypeId)>) -> Self {
         self.vars = vars;
         self
     }
 
     /// Get mutable reference to variables map (for binding params after creation).
     #[allow(dead_code)]
-    pub fn vars_mut(&mut self) -> &mut HashMap<Symbol, (Variable, TypeId)> {
+    pub fn vars_mut(&mut self) -> &mut FxHashMap<Symbol, (Variable, TypeId)> {
         &mut self.vars
     }
 
@@ -235,14 +234,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Get type substitutions
     #[inline]
     #[allow(dead_code)]
-    pub fn type_substitutions(&self) -> Option<&HashMap<NameId, TypeId>> {
+    pub fn type_substitutions(&self) -> Option<&FxHashMap<NameId, TypeId>> {
         self.substitutions
     }
 
     /// Alias for type_substitutions (backward compat)
     #[inline]
     #[allow(dead_code)]
-    pub fn get_substitutions(&self) -> Option<&HashMap<NameId, TypeId>> {
+    pub fn get_substitutions(&self) -> Option<&FxHashMap<NameId, TypeId>> {
         self.substitutions
     }
 
@@ -379,7 +378,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn method_func_keys(
         &self,
-    ) -> &'ctx HashMap<(vole_identity::TypeDefId, NameId), FunctionKey> {
+    ) -> &'ctx FxHashMap<(vole_identity::TypeDefId, NameId), FunctionKey> {
         &self.env.state.method_func_keys
     }
 
@@ -1063,7 +1062,7 @@ impl<'a, 'b, 'ctx> crate::vtable_ctx::VtableCtx for Cg<'a, 'b, 'ctx> {
         &self.env.state.type_metadata
     }
 
-    fn method_func_keys(&self) -> &HashMap<(vole_identity::TypeDefId, NameId), FunctionKey> {
+    fn method_func_keys(&self) -> &FxHashMap<(vole_identity::TypeDefId, NameId), FunctionKey> {
         &self.env.state.method_func_keys
     }
 }

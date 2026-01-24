@@ -37,8 +37,9 @@ mod type_registry;
 
 pub use signatures::SelfParam;
 
-use std::collections::HashMap;
 use std::rc::Rc;
+
+use rustc_hash::FxHashMap;
 
 use cranelift::prelude::types as clif_types;
 
@@ -61,7 +62,7 @@ pub struct Compiler<'a> {
     pointer_type: clif_types::Type,
     tests: Vec<TestInfo>,
     /// Global variable initializer expressions keyed by name
-    global_inits: HashMap<Symbol, Expr>,
+    global_inits: FxHashMap<Symbol, Expr>,
     /// NameIds for declared test functions by index
     test_name_ids: Vec<NameId>,
     /// Codegen lookup tables (type_metadata, method_infos, vtables, etc.)
@@ -94,7 +95,7 @@ impl<'a> Compiler<'a> {
             analyzed,
             pointer_type,
             tests: Vec::new(),
-            global_inits: HashMap::new(),
+            global_inits: FxHashMap::default(),
             test_name_ids: Vec::new(),
             state: CodegenState::new(native_registry),
             next_type_id: 0,

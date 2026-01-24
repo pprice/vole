@@ -4,7 +4,7 @@
 // This module provides a unified helper for the common pattern across all
 // function compilation paths (top-level funcs, methods, lambdas).
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use cranelift::prelude::{FunctionBuilder, InstBuilder, Type, Variable, types};
 use vole_frontend::{FuncBody, Symbol};
@@ -35,7 +35,7 @@ pub struct FunctionCompileConfig<'a> {
     /// Self binding for methods: (name, vole_type_id, cranelift_type)
     pub self_binding: Option<(Symbol, TypeId, Type)>,
     /// Capture bindings for closures. If Some, the first block param is the closure pointer.
-    pub capture_bindings: Option<&'a HashMap<Symbol, CaptureBinding>>,
+    pub capture_bindings: Option<&'a FxHashMap<Symbol, CaptureBinding>>,
     /// Cranelift type for the closure pointer (needed when capture_bindings is Some)
     pub closure_ptr_type: Option<Type>,
     /// Return type (for nested return type context)
@@ -107,7 +107,7 @@ impl<'a> FunctionCompileConfig<'a> {
     pub fn capturing_lambda(
         body: &'a FuncBody,
         params: Vec<(Symbol, TypeId, Type)>,
-        capture_bindings: &'a HashMap<Symbol, CaptureBinding>,
+        capture_bindings: &'a FxHashMap<Symbol, CaptureBinding>,
         closure_ptr_type: Type,
         return_type_id: TypeId,
     ) -> Self {
@@ -134,7 +134,7 @@ impl<'a> FunctionCompileConfig<'a> {
 pub(crate) fn setup_function_entry<'a>(
     builder: &mut FunctionBuilder,
     config: &FunctionCompileConfig<'a>,
-) -> (HashMap<Symbol, (Variable, TypeId)>, Option<Captures<'a>>) {
+) -> (FxHashMap<Symbol, (Variable, TypeId)>, Option<Captures<'a>>) {
     // Create entry block and switch to it
     let entry_block = builder.create_block();
     builder.append_block_params_for_function_params(entry_block);
@@ -145,7 +145,7 @@ pub(crate) fn setup_function_entry<'a>(
     let mut param_offset = config.skip_block_params;
 
     // Build variables map
-    let mut variables: HashMap<Symbol, (Variable, TypeId)> = HashMap::new();
+    let mut variables: FxHashMap<Symbol, (Variable, TypeId)> = FxHashMap::default();
 
     // Set up closure variable if this is a capturing lambda
     let captures = if let (Some(bindings), Some(closure_ptr_type)) =
@@ -252,7 +252,7 @@ pub fn compile_function_inner_with_params<'ctx>(
     env: &CompileEnv<'ctx>,
     config: FunctionCompileConfig,
     module_id: Option<vole_identity::ModuleId>,
-    substitutions: Option<&HashMap<vole_identity::NameId, TypeId>>,
+    substitutions: Option<&FxHashMap<vole_identity::NameId, TypeId>>,
 ) -> Result<(), String> {
     // Set up entry block and bind parameters
     let (variables, captures) = setup_function_entry(&mut builder, &config);

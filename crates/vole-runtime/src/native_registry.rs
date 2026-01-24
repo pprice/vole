@@ -1,7 +1,7 @@
 // src/runtime/native_registry.rs
 //! Registry for native functions callable from Vole via external blocks.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 /// Type representation for native function signatures
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,7 +54,7 @@ impl std::fmt::Debug for NativeFunction {
 /// A module containing native functions
 #[derive(Debug, Default)]
 pub struct NativeModule {
-    functions: HashMap<String, NativeFunction>,
+    functions: FxHashMap<String, NativeFunction>,
 }
 
 impl NativeModule {
@@ -79,7 +79,7 @@ impl NativeModule {
 /// Registry of all native modules
 #[derive(Debug, Default)]
 pub struct NativeRegistry {
-    modules: HashMap<String, NativeModule>,
+    modules: FxHashMap<String, NativeModule>,
 }
 
 impl NativeRegistry {

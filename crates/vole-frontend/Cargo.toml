@@ -15,5 +15,8 @@ unicode-ident = "1.0.22"
 # Tracing for debug output
 tracing = "0.1"
 
+# High-performance hash map
+rustc-hash = "2.1"
+
 [lints]
 workspace = true

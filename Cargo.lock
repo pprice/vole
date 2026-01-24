@@ -1435,6 +1435,7 @@ name = "vole-frontend"
 version = "0.1.0"
 dependencies = [
  "miette",
+ "rustc-hash",
  "thiserror",
  "tracing",
  "unicode-ident",
@@ -1444,6 +1445,7 @@ dependencies = [
 name = "vole-identity"
 version = "0.1.0"
 dependencies = [
+ "rustc-hash",
  "vole-frontend",
 ]
 
@@ -1453,6 +1455,7 @@ version = "0.1.0"
 dependencies = [
  "hashbrown 0.16.1",
  "libc",
+ "rustc-hash",
 ]
 
 [[package]]

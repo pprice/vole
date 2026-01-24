@@ -3,8 +3,9 @@
 // Opaque function identity registry for codegen.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
+
+use rustc_hash::FxHashMap;
 
 use cranelift_module::FuncId;
 
@@ -115,8 +116,8 @@ struct FunctionEntry {
 pub struct FunctionRegistry {
     names: Rc<RefCell<NameTable>>,
     entries: Vec<FunctionEntry>,
-    qualified_lookup: HashMap<NameId, FunctionKey>,
-    runtime_lookup: HashMap<RuntimeFn, FunctionKey>,
+    qualified_lookup: FxHashMap<NameId, FunctionKey>,
+    runtime_lookup: FxHashMap<RuntimeFn, FunctionKey>,
 }
 
 impl FunctionRegistry {
@@ -124,8 +125,8 @@ impl FunctionRegistry {
         Self {
             names,
             entries: Vec::new(),
-            qualified_lookup: HashMap::new(),
-            runtime_lookup: HashMap::new(),
+            qualified_lookup: FxHashMap::default(),
+            runtime_lookup: FxHashMap::default(),
         }
     }
 

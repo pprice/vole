@@ -2,7 +2,7 @@
 
 use crate::implement_registry::ExternalMethodInfo;
 use crate::type_arena::TypeId;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use vole_frontend::{NodeId, Symbol};
 use vole_identity::{MethodId, NameId, TypeDefId};
 
@@ -186,7 +186,7 @@ impl ResolvedMethod {
 /// Storage for all method resolutions in a program
 #[derive(Debug, Default, Clone)]
 pub struct MethodResolutions {
-    resolutions: HashMap<NodeId, ResolvedMethod>,
+    resolutions: FxHashMap<NodeId, ResolvedMethod>,
 }
 
 impl MethodResolutions {
@@ -204,13 +204,13 @@ impl MethodResolutions {
         self.resolutions.get(&node_id)
     }
 
-    /// Consume and return the inner HashMap
-    pub fn into_inner(self) -> HashMap<NodeId, ResolvedMethod> {
+    /// Consume and return the inner FxHashMap
+    pub fn into_inner(self) -> FxHashMap<NodeId, ResolvedMethod> {
         self.resolutions
     }
 
-    /// Clone the inner HashMap without consuming self
-    pub fn clone_inner(&self) -> HashMap<NodeId, ResolvedMethod> {
+    /// Clone the inner FxHashMap without consuming self
+    pub fn clone_inner(&self) -> FxHashMap<NodeId, ResolvedMethod> {
         self.resolutions.clone()
     }
 }

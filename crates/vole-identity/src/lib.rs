@@ -2,7 +2,7 @@
 //
 // Shared name interning for fully-qualified item identities.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use vole_frontend::{Interner, Span, Symbol};
 
@@ -177,11 +177,11 @@ impl WellKnownMethods {
 #[derive(Debug, Clone)]
 pub struct NameTable {
     modules: Vec<String>,
-    module_lookup: HashMap<String, ModuleId>,
+    module_lookup: FxHashMap<String, ModuleId>,
     names: Vec<QualifiedName>,
-    name_lookup: HashMap<NameKey, NameId>,
+    name_lookup: FxHashMap<NameKey, NameId>,
     main_module: ModuleId,
-    diagnostics: HashMap<NameId, DefLocation>,
+    diagnostics: FxHashMap<NameId, DefLocation>,
     pub primitives: Primitives,
     pub well_known: WellKnownTypes,
 }
@@ -192,11 +192,11 @@ impl NameTable {
         let placeholder = NameId(0);
         let mut table = Self {
             modules: Vec::new(),
-            module_lookup: HashMap::new(),
+            module_lookup: FxHashMap::default(),
             names: Vec::new(),
-            name_lookup: HashMap::new(),
+            name_lookup: FxHashMap::default(),
             main_module: ModuleId(0),
-            diagnostics: HashMap::new(),
+            diagnostics: FxHashMap::default(),
             primitives: Primitives {
                 i8: placeholder,
                 i16: placeholder,

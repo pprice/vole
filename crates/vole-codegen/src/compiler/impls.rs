@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
 use cranelift_module::Module;
@@ -1255,7 +1255,7 @@ impl Compiler<'_> {
         class: &ClassDecl,
         module_interner: &Interner,
         module_path: &str,
-        module_global_inits: &HashMap<Symbol, Expr>,
+        module_global_inits: &FxHashMap<Symbol, Expr>,
     ) -> Result<(), String> {
         let type_name_str = module_interner.resolve(class.name);
         // Look up the actual module_id from the module_path (not main_module!)

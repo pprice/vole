@@ -15,7 +15,9 @@ mod globals;
 mod methods;
 mod types;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
+
+use rustc_hash::FxHashMap;
 
 use crate::entity_defs::{FieldDef, FunctionDef, GlobalDef, MethodDef, TypeDef, TypeDefKind};
 use crate::generic::{ClassMethodMonomorphCache, MonomorphCache, StaticMethodMonomorphCache};
@@ -36,23 +38,23 @@ pub struct EntityRegistry {
     pub(crate) global_defs: Vec<GlobalDef>,
 
     // Primary lookups by NameId
-    pub(crate) type_by_name: HashMap<NameId, TypeDefId>,
-    pub(crate) method_by_full_name: HashMap<NameId, MethodId>,
-    pub(crate) field_by_full_name: HashMap<NameId, FieldId>,
-    pub(crate) function_by_name: HashMap<NameId, FunctionId>,
-    pub(crate) global_by_name: HashMap<NameId, GlobalId>,
+    pub(crate) type_by_name: FxHashMap<NameId, TypeDefId>,
+    pub(crate) method_by_full_name: FxHashMap<NameId, MethodId>,
+    pub(crate) field_by_full_name: FxHashMap<NameId, FieldId>,
+    pub(crate) function_by_name: FxHashMap<NameId, FunctionId>,
+    pub(crate) global_by_name: FxHashMap<NameId, GlobalId>,
 
     // Scoped lookups: (type, method_name) -> MethodId
-    pub(crate) methods_by_type: HashMap<TypeDefId, HashMap<NameId, MethodId>>,
-    pub(crate) fields_by_type: HashMap<TypeDefId, HashMap<NameId, FieldId>>,
+    pub(crate) methods_by_type: FxHashMap<TypeDefId, FxHashMap<NameId, MethodId>>,
+    pub(crate) fields_by_type: FxHashMap<TypeDefId, FxHashMap<NameId, FieldId>>,
     // Static method lookups: (type, static_method_name) -> MethodId
-    pub(crate) static_methods_by_type: HashMap<TypeDefId, HashMap<NameId, MethodId>>,
+    pub(crate) static_methods_by_type: FxHashMap<TypeDefId, FxHashMap<NameId, MethodId>>,
 
     // Alias index: maps a TypeId to all aliases that resolve to that type
-    pub(crate) alias_index: HashMap<ArenaTypeId, Vec<TypeDefId>>,
+    pub(crate) alias_index: FxHashMap<ArenaTypeId, Vec<TypeDefId>>,
 
     /// NameIds for primitive types (for method dispatch)
-    pub(crate) primitive_names: HashMap<PrimitiveTypeId, NameId>,
+    pub(crate) primitive_names: FxHashMap<PrimitiveTypeId, NameId>,
     /// NameId for the array type (for method dispatch)
     pub(crate) array_name: Option<NameId>,
 
@@ -77,16 +79,16 @@ impl EntityRegistry {
             field_defs: Vec::new(),
             function_defs: Vec::new(),
             global_defs: Vec::new(),
-            type_by_name: HashMap::new(),
-            method_by_full_name: HashMap::new(),
-            field_by_full_name: HashMap::new(),
-            function_by_name: HashMap::new(),
-            global_by_name: HashMap::new(),
-            methods_by_type: HashMap::new(),
-            fields_by_type: HashMap::new(),
-            static_methods_by_type: HashMap::new(),
-            alias_index: HashMap::new(),
-            primitive_names: HashMap::new(),
+            type_by_name: FxHashMap::default(),
+            method_by_full_name: FxHashMap::default(),
+            field_by_full_name: FxHashMap::default(),
+            function_by_name: FxHashMap::default(),
+            global_by_name: FxHashMap::default(),
+            methods_by_type: FxHashMap::default(),
+            fields_by_type: FxHashMap::default(),
+            static_methods_by_type: FxHashMap::default(),
+            alias_index: FxHashMap::default(),
+            primitive_names: FxHashMap::default(),
             array_name: None,
             monomorph_cache: MonomorphCache::new(),
             class_method_monomorph_cache: ClassMethodMonomorphCache::new(),
@@ -342,9 +344,9 @@ impl EntityRegistry {
             base_type_id: None,
         });
         self.type_by_name.insert(name_id, id);
-        self.methods_by_type.insert(id, HashMap::new());
-        self.fields_by_type.insert(id, HashMap::new());
-        self.static_methods_by_type.insert(id, HashMap::new());
+        self.methods_by_type.insert(id, FxHashMap::default());
+        self.fields_by_type.insert(id, FxHashMap::default());
+        self.static_methods_by_type.insert(id, FxHashMap::default());
 
         // Update the alias index for inverse lookups (use TypeId directly as key)
         self.alias_index.entry(aliased_type).or_default().push(id);
@@ -358,7 +360,7 @@ impl EntityRegistry {
     /// This is used when merging prelude definitions into the main analyzer.
     pub fn merge(&mut self, other: &EntityRegistry) {
         // Build a mapping from other's IDs to our new IDs
-        let mut type_id_map: HashMap<TypeDefId, TypeDefId> = HashMap::new();
+        let mut type_id_map: FxHashMap<TypeDefId, TypeDefId> = FxHashMap::default();
 
         // First pass: register all types (without methods/fields to avoid ID confusion)
         for other_type in &other.type_defs {
@@ -379,9 +381,10 @@ impl EntityRegistry {
                 new_type.static_methods = Vec::new(); // Will be filled in later
                 self.type_defs.push(new_type);
                 self.type_by_name.insert(other_type.name_id, new_id);
-                self.methods_by_type.insert(new_id, HashMap::new());
-                self.fields_by_type.insert(new_id, HashMap::new());
-                self.static_methods_by_type.insert(new_id, HashMap::new());
+                self.methods_by_type.insert(new_id, FxHashMap::default());
+                self.fields_by_type.insert(new_id, FxHashMap::default());
+                self.static_methods_by_type
+                    .insert(new_id, FxHashMap::default());
                 type_id_map.insert(other_type.id, new_id);
             }
         }

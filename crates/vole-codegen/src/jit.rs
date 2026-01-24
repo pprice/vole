@@ -3,7 +3,7 @@
 use cranelift::prelude::*;
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 /// Cache of compiled module functions that can be shared across JitContexts.
 /// The JitContext that compiled these functions must be kept alive.
@@ -12,7 +12,7 @@ pub struct CompiledModules {
     #[allow(dead_code)]
     jit: JitContext,
     /// Function name -> function pointer for all compiled module functions
-    pub functions: HashMap<String, *const u8>,
+    pub functions: FxHashMap<String, *const u8>,
 }
 
 // Safety: Function pointers are valid for the lifetime of the CompiledModules
@@ -28,7 +28,7 @@ impl CompiledModules {
         let _ = jit.finalize();
 
         // Extract all function pointers
-        let functions: HashMap<String, *const u8> = jit
+        let functions: FxHashMap<String, *const u8> = jit
             .func_ids
             .iter()
             .map(|(name, &func_id)| {
@@ -80,9 +80,9 @@ pub struct JitContext {
     pub module: JITModule,
     pub ctx: codegen::Context,
     /// Functions declared with Export linkage (will be compiled)
-    pub func_ids: HashMap<String, FuncId>,
+    pub func_ids: FxHashMap<String, FuncId>,
     /// Functions declared with Import linkage (runtime/external functions)
-    pub imported_func_ids: HashMap<String, FuncId>,
+    pub imported_func_ids: FxHashMap<String, FuncId>,
     /// Source file path stored here so it lives as long as the JIT code.
     /// Used by assert failure messages.
     source_file: Option<Box<str>>,
@@ -110,7 +110,10 @@ impl JitContext {
         Self::new_internal(Some(&modules.functions), options)
     }
 
-    fn new_internal(precompiled: Option<&HashMap<String, *const u8>>, options: JitOptions) -> Self {
+    fn new_internal(
+        precompiled: Option<&FxHashMap<String, *const u8>>,
+        options: JitOptions,
+    ) -> Self {
         // Build JIT module with native ISA
         let mut flag_builder = settings::builder();
         flag_builder.set("use_colocated_libcalls", "false").unwrap();
@@ -150,8 +153,8 @@ impl JitContext {
         let mut jit = Self {
             module,
             ctx,
-            func_ids: HashMap::new(),
-            imported_func_ids: HashMap::new(),
+            func_ids: FxHashMap::default(),
+            imported_func_ids: FxHashMap::default(),
             source_file: None,
         };
 
@@ -990,7 +993,7 @@ impl JitContext {
     ) -> (
         &mut cranelift_codegen::ir::Function,
         &mut JITModule,
-        &mut HashMap<String, FuncId>,
+        &mut FxHashMap<String, FuncId>,
     ) {
         (&mut self.ctx.func, &mut self.module, &mut self.func_ids)
     }

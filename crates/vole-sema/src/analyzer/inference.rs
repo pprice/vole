@@ -3,7 +3,7 @@
 use super::Analyzer;
 use crate::generic::TypeParamInfo;
 use crate::type_arena::TypeId as ArenaTypeId;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use vole_identity::NameId;
 
 impl Analyzer {
@@ -14,8 +14,8 @@ impl Analyzer {
         type_params: &[TypeParamInfo],
         param_type_ids: &[ArenaTypeId],
         arg_type_ids: &[ArenaTypeId],
-    ) -> HashMap<NameId, ArenaTypeId> {
-        let mut inferred = HashMap::new();
+    ) -> FxHashMap<NameId, ArenaTypeId> {
+        let mut inferred = FxHashMap::default();
 
         // For each parameter, try to match its type against the argument type
         for (&param_type_id, &arg_type_id) in param_type_ids.iter().zip(arg_type_ids.iter()) {
@@ -31,7 +31,7 @@ impl Analyzer {
         pattern_id: ArenaTypeId,
         actual_id: ArenaTypeId,
         type_params: &[TypeParamInfo],
-        inferred: &mut HashMap<NameId, ArenaTypeId>,
+        inferred: &mut FxHashMap<NameId, ArenaTypeId>,
     ) {
         let arena = self.type_arena();
 
@@ -161,7 +161,7 @@ impl Analyzer {
         name_id: NameId,
         actual_id: ArenaTypeId,
         type_params: &[TypeParamInfo],
-        inferred: &mut HashMap<NameId, ArenaTypeId>,
+        inferred: &mut FxHashMap<NameId, ArenaTypeId>,
     ) {
         // Only bind if it's one of our type params
         if type_params.iter().any(|tp| tp.name_id == name_id) {

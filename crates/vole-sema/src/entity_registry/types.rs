@@ -1,7 +1,7 @@
 //! Type registration and lookup for EntityRegistry.
 
 use crate::entity_defs::{TypeDef, TypeDefKind};
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use vole_identity::{ModuleId, NameId, TypeDefId};
 
 use super::EntityRegistry;
@@ -37,9 +37,9 @@ impl EntityRegistry {
             base_type_id: None,
         });
         self.type_by_name.insert(name_id, id);
-        self.methods_by_type.insert(id, HashMap::new());
-        self.fields_by_type.insert(id, HashMap::new());
-        self.static_methods_by_type.insert(id, HashMap::new());
+        self.methods_by_type.insert(id, FxHashMap::default());
+        self.fields_by_type.insert(id, FxHashMap::default());
+        self.static_methods_by_type.insert(id, FxHashMap::default());
         id
     }
 

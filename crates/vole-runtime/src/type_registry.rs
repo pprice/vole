@@ -5,7 +5,7 @@
 // reference-counted fields when instances are freed.
 
 use crate::value::{TYPE_ARRAY, TYPE_INSTANCE, TYPE_STRING};
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::sync::RwLock;
 
 /// Field type info for cleanup purposes
@@ -53,13 +53,13 @@ impl InstanceTypeInfo {
 }
 
 /// Global type registry for field cleanup info
-static TYPE_REGISTRY: RwLock<Option<HashMap<u32, InstanceTypeInfo>>> = RwLock::new(None);
+static TYPE_REGISTRY: RwLock<Option<FxHashMap<u32, InstanceTypeInfo>>> = RwLock::new(None);
 
 /// Initialize the type registry (call once at startup)
 pub fn init_type_registry() {
     let mut guard = TYPE_REGISTRY.write().unwrap();
     if guard.is_none() {
-        *guard = Some(HashMap::new());
+        *guard = Some(FxHashMap::default());
     }
 }
 
@@ -67,7 +67,7 @@ pub fn init_type_registry() {
 /// Called from JIT compilation when a class/record is registered
 pub fn register_instance_type(type_id: u32, field_types: Vec<FieldTypeTag>) {
     let mut guard = TYPE_REGISTRY.write().unwrap();
-    let registry = guard.get_or_insert_with(HashMap::new);
+    let registry = guard.get_or_insert_with(FxHashMap::default);
     registry.insert(type_id, InstanceTypeInfo { field_types });
 }
 

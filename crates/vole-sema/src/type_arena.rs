@@ -7,7 +7,7 @@
 // - TypeArena: per-compilation storage with automatic deduplication
 // - SemaType: the canonical type representation using TypeId for child types
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 
 use crate::types::{ConstantValue, PlaceholderKind, PrimitiveType};
@@ -208,9 +208,9 @@ pub struct InternedModule {
 #[derive(Debug, Clone, Default)]
 pub struct ModuleMetadata {
     /// Compile-time constant values (e.g., math.PI = 3.14159...)
-    pub constants: std::collections::HashMap<NameId, ConstantValue>,
+    pub constants: FxHashMap<NameId, ConstantValue>,
     /// Functions implemented via FFI rather than Vole code
-    pub external_funcs: std::collections::HashSet<NameId>,
+    pub external_funcs: FxHashSet<NameId>,
 }
 
 /// The canonical type representation in Vole.

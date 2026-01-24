@@ -1,12 +1,12 @@
 // src/frontend/intern.rs
 
 use crate::ast::Symbol;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 /// Interns strings to unique Symbol IDs
 #[derive(Debug, Default, Clone)]
 pub struct Interner {
-    map: HashMap<String, Symbol>,
+    map: FxHashMap<String, Symbol>,
     strings: Vec<String>,
 }
 

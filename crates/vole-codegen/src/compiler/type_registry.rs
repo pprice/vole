@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use super::{Compiler, SelfParam};
 use crate::types::{MethodInfo, TypeMetadata, method_name_id_with_interner};
@@ -74,10 +74,10 @@ impl Compiler<'_> {
             type_def_id,
             TypeMetadata {
                 type_id,
-                field_slots: HashMap::new(),
+                field_slots: FxHashMap::default(),
                 vole_type: vole_type_id,
                 type_def_id,
-                method_infos: HashMap::new(),
+                method_infos: FxHashMap::default(),
             },
         );
     }
@@ -103,7 +103,7 @@ impl Compiler<'_> {
             .type_id;
 
         // Build field slots map using sema's pre-resolved field types
-        let mut field_slots = HashMap::new();
+        let mut field_slots = FxHashMap::default();
         let mut field_type_tags = Vec::new();
         // Collect field IDs first to avoid borrow conflicts
         let field_ids: Vec<_> = self
@@ -133,7 +133,7 @@ impl Compiler<'_> {
         // Collect method return types (TypeId-native)
         // type_def_id already looked up above
         let func_module_id = self.func_registry.main_module();
-        let mut method_infos = HashMap::new();
+        let mut method_infos = FxHashMap::default();
         for method in &class.methods {
             let method_name_id = self.method_name_id(method.name);
 
@@ -267,10 +267,10 @@ impl Compiler<'_> {
             type_def_id,
             TypeMetadata {
                 type_id,
-                field_slots: HashMap::new(),
+                field_slots: FxHashMap::default(),
                 vole_type: vole_type_id,
                 type_def_id,
-                method_infos: HashMap::new(),
+                method_infos: FxHashMap::default(),
             },
         );
     }
@@ -296,7 +296,7 @@ impl Compiler<'_> {
             .type_id;
 
         // Build field slots map using sema's pre-resolved field types
-        let mut field_slots = HashMap::new();
+        let mut field_slots = FxHashMap::default();
         let mut field_type_tags = Vec::new();
         // Collect field IDs first to avoid borrow conflicts
         let field_ids: Vec<_> = self
@@ -325,7 +325,7 @@ impl Compiler<'_> {
 
         // Collect method return types (TypeId-native)
         let func_module_id = self.func_registry.main_module();
-        let mut method_infos = HashMap::new();
+        let mut method_infos = FxHashMap::default();
         for method in &record.methods {
             let method_name_id = self.method_name_id(method.name);
             // Get MethodId and build signature from pre-resolved types
@@ -511,7 +511,7 @@ impl Compiler<'_> {
         self.next_type_id += 1;
 
         // Build field slots map using sema's pre-resolved field types
-        let mut field_slots = HashMap::new();
+        let mut field_slots = FxHashMap::default();
         let mut field_type_tags = Vec::new();
         // Collect field IDs first to avoid borrow conflicts
         let field_ids: Vec<_> = self
@@ -540,7 +540,7 @@ impl Compiler<'_> {
 
         // Collect method info and declare methods (TypeId-native)
         let func_module_id = self.func_registry.main_module();
-        let mut method_infos = HashMap::new();
+        let mut method_infos = FxHashMap::default();
 
         tracing::debug!(type_name = %type_name_str, method_count = class.methods.len(), "Registering instance methods");
         for method in &class.methods {

@@ -1587,7 +1587,7 @@ impl Analyzer {
         // Collect method names for external block validation
         let method_names: HashSet<Symbol> = method_data.iter().map(|(name, ..)| *name).collect();
 
-        let mut external_methods: HashMap<String, ExternalMethodInfo> = HashMap::new();
+        let mut external_methods: FxHashMap<String, ExternalMethodInfo> = FxHashMap::default();
         for external in &interface_decl.external_blocks {
             for func in &external.functions {
                 if !method_names.contains(&func.vole_name) {
@@ -1693,7 +1693,8 @@ impl Analyzer {
                 .collect();
 
             // Build external methods map for static methods
-            let mut static_external_methods: HashMap<String, ExternalMethodInfo> = HashMap::new();
+            let mut static_external_methods: FxHashMap<String, ExternalMethodInfo> =
+                FxHashMap::default();
             for external in &statics_block.external_blocks {
                 for func in &external.functions {
                     let native_name_str = func

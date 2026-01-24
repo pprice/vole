@@ -21,7 +21,6 @@ use crate::type_arena::TypeId;
 use crate::types::FunctionType;
 use rustc_hash::FxHashMap;
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
 use vole_frontend::{Interner, NodeId, Program};
 
@@ -52,13 +51,13 @@ pub struct CachedModule {
     pub interner: Interner,
     /// Expression types from analysis (NodeId → TypeId).
     /// TypeIds are valid because all analyzers share the same TypeArena.
-    pub expr_types: HashMap<NodeId, TypeId>,
+    pub expr_types: FxHashMap<NodeId, TypeId>,
     /// Method resolutions from analysis (NodeId → ResolvedMethod)
-    pub method_resolutions: HashMap<NodeId, ResolvedMethod>,
+    pub method_resolutions: FxHashMap<NodeId, ResolvedMethod>,
     /// Functions registered by name (for cross-interner lookup)
     pub functions_by_name: FxHashMap<String, FunctionType>,
     /// Type check results for `is` expressions and type patterns (NodeId → IsCheckResult)
-    pub is_check_results: HashMap<NodeId, IsCheckResult>,
+    pub is_check_results: FxHashMap<NodeId, IsCheckResult>,
 }
 
 /// Cache for module analysis results.
@@ -69,7 +68,7 @@ pub struct CachedModule {
 /// valid across all Analyzers that use this cache.
 pub struct ModuleCache {
     /// Cached modules keyed by import path (e.g., "std:prelude/string", "std:math")
-    entries: HashMap<String, CachedModule>,
+    entries: FxHashMap<String, CachedModule>,
     /// Shared compilation database - all analyzers using this cache must share this db
     /// so that TypeIds in cached entries remain valid.
     db: Rc<RefCell<CompilationDb>>,
@@ -85,7 +84,7 @@ impl ModuleCache {
     /// Create a new empty cache with a fresh CompilationDb.
     pub fn new() -> Self {
         Self {
-            entries: HashMap::new(),
+            entries: FxHashMap::default(),
             db: Rc::new(RefCell::new(CompilationDb::new())),
         }
     }

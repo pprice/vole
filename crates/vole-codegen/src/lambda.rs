@@ -2,7 +2,7 @@
 //
 // Lambda/closure compilation support for code generation.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use cranelift::prelude::*;
 use cranelift_module::Module;
@@ -33,10 +33,10 @@ impl CaptureBinding {
 /// Build capture bindings from a list of captures and variable types
 pub(crate) fn build_capture_bindings(
     captures: &[vole_frontend::Capture],
-    variables: &HashMap<Symbol, (Variable, TypeId)>,
+    variables: &FxHashMap<Symbol, (Variable, TypeId)>,
     arena: &TypeArena,
-) -> HashMap<Symbol, CaptureBinding> {
-    let mut bindings = HashMap::new();
+) -> FxHashMap<Symbol, CaptureBinding> {
+    let mut bindings = FxHashMap::default();
     let default_type_id = arena.primitives.i64;
     for (i, capture) in captures.iter().enumerate() {
         let vole_type_id = variables

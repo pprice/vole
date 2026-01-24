@@ -4,7 +4,7 @@
 
 use cranelift::prelude::*;
 use cranelift_codegen::ir::FuncRef;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use crate::AnalyzedProgram;
 use crate::errors::CodegenError;
@@ -43,13 +43,13 @@ pub(crate) struct TypeMetadata {
     /// Unique type ID for runtime
     pub type_id: u32,
     /// Map from field name to slot index
-    pub field_slots: HashMap<String, usize>,
+    pub field_slots: FxHashMap<String, usize>,
     /// The Vole type (Class or Record) - interned TypeId handle
     pub vole_type: TypeId,
     /// TypeDefId for sema lookups (method return types, etc.)
     pub type_def_id: TypeDefId,
     /// Method info: method name -> method info
-    pub method_infos: HashMap<NameId, MethodInfo>,
+    pub method_infos: FxHashMap<NameId, MethodInfo>,
 }
 
 /// Metadata for a compiled method (opaque function key)

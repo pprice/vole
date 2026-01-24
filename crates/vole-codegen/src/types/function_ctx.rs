@@ -6,7 +6,6 @@
 
 use rustc_hash::FxHashMap;
 use std::cell::RefCell;
-use std::collections::HashMap;
 
 use vole_identity::{ModuleId, NameId};
 use vole_sema::type_arena::{TypeArena, TypeId};
@@ -19,9 +18,9 @@ pub struct FunctionCtx<'a> {
     /// Module being compiled (None for main program)
     pub current_module: Option<ModuleId>,
     /// Type parameter substitutions for monomorphized generics
-    pub substitutions: Option<&'a HashMap<NameId, TypeId>>,
+    pub substitutions: Option<&'a FxHashMap<NameId, TypeId>>,
     /// Cache for substituted types (avoids repeated HashMap conversion and arena mutations)
-    pub(crate) substitution_cache: RefCell<HashMap<TypeId, TypeId>>,
+    pub(crate) substitution_cache: RefCell<FxHashMap<TypeId, TypeId>>,
 }
 
 impl<'a> FunctionCtx<'a> {
@@ -31,7 +30,7 @@ impl<'a> FunctionCtx<'a> {
             return_type,
             current_module: None,
             substitutions: None,
-            substitution_cache: RefCell::new(HashMap::new()),
+            substitution_cache: RefCell::new(FxHashMap::default()),
         }
     }
 
@@ -41,20 +40,20 @@ impl<'a> FunctionCtx<'a> {
             return_type,
             current_module: Some(module_id),
             substitutions: None,
-            substitution_cache: RefCell::new(HashMap::new()),
+            substitution_cache: RefCell::new(FxHashMap::default()),
         }
     }
 
     /// Create context for monomorphized generic function
     pub fn monomorphized(
         return_type: Option<TypeId>,
-        substitutions: &'a HashMap<NameId, TypeId>,
+        substitutions: &'a FxHashMap<NameId, TypeId>,
     ) -> Self {
         Self {
             return_type,
             current_module: None,
             substitutions: Some(substitutions),
-            substitution_cache: RefCell::new(HashMap::new()),
+            substitution_cache: RefCell::new(FxHashMap::default()),
         }
     }
 
@@ -64,7 +63,7 @@ impl<'a> FunctionCtx<'a> {
             return_type: None,
             current_module: None,
             substitutions: None,
-            substitution_cache: RefCell::new(HashMap::new()),
+            substitution_cache: RefCell::new(FxHashMap::default()),
         }
     }
 

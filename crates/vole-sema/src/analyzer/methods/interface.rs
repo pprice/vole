@@ -277,7 +277,7 @@ impl Analyzer {
         &mut self,
         type_name: Symbol,
         iface_name: Symbol,
-        type_methods: &HashMap<String, FunctionType>,
+        type_methods: &FxHashMap<String, FunctionType>,
         span: Span,
         interner: &Interner,
     ) {
@@ -596,8 +596,8 @@ impl Analyzer {
         &self,
         type_name: Symbol,
         interner: &Interner,
-    ) -> HashMap<String, FunctionType> {
-        let mut method_sigs = HashMap::new();
+    ) -> FxHashMap<String, FunctionType> {
+        let mut method_sigs = FxHashMap::default();
 
         let method_name_str = |method_id: NameId| {
             self.name_table()

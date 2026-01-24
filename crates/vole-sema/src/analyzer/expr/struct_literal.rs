@@ -261,7 +261,7 @@ impl Analyzer {
 
         // First, type-check all field values to get their actual types (as TypeId)
         // Use string keys since Symbols may be from different interners
-        let mut field_value_type_ids: HashMap<String, ArenaTypeId> = HashMap::new();
+        let mut field_value_type_ids: FxHashMap<String, ArenaTypeId> = FxHashMap::default();
         for field_init in &struct_lit.fields {
             // Check for shorthand syntax with undefined variable first
             if self.check_shorthand_undefined(field_init, interner) {
@@ -406,7 +406,7 @@ impl Analyzer {
 
         // First, type-check all field values to get their actual types (as TypeId)
         // Use string keys since Symbols may be from different interners
-        let mut field_value_type_ids: HashMap<String, ArenaTypeId> = HashMap::new();
+        let mut field_value_type_ids: FxHashMap<String, ArenaTypeId> = FxHashMap::default();
         for field_init in &struct_lit.fields {
             // Check for shorthand syntax with undefined variable first
             if self.check_shorthand_undefined(field_init, interner) {

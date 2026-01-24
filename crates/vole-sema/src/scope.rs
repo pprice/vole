@@ -1,7 +1,7 @@
 // src/sema/scope.rs
 
 use crate::type_arena::TypeId;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use vole_frontend::Symbol;
 
 #[derive(Debug)]
@@ -12,7 +12,7 @@ pub struct Variable {
 
 #[derive(Debug, Default)]
 pub struct Scope {
-    variables: HashMap<Symbol, Variable>,
+    variables: FxHashMap<Symbol, Variable>,
     parent: Option<Box<Scope>>,
 }
 
@@ -23,7 +23,7 @@ impl Scope {
 
     pub fn with_parent(parent: Scope) -> Self {
         Self {
-            variables: HashMap::new(),
+            variables: FxHashMap::default(),
             parent: Some(Box::new(parent)),
         }
     }

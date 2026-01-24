@@ -2,8 +2,8 @@
 //
 // Grouped codegen lookup tables - created once per Compiler, read-only after pass 1.
 
+use rustc_hash::FxHashMap;
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
 
 use vole_identity::{NameId, TypeDefId};
 use vole_runtime::NativeRegistry;
@@ -15,7 +15,7 @@ use super::TypeMetadata;
 
 /// Type metadata lookup map.
 /// Keyed by TypeDefId for stable cross-interner identity.
-pub type TypeMetadataMap = HashMap<TypeDefId, TypeMetadata>;
+pub type TypeMetadataMap = FxHashMap<TypeDefId, TypeMetadata>;
 
 /// Grouped codegen lookup tables.
 ///
@@ -28,7 +28,7 @@ pub struct CodegenState {
     /// Class and record metadata for struct literals, field access, and method calls.
     pub type_metadata: TypeMetadataMap,
     /// Unified method function key lookup: (TypeDefId, method_name) -> FunctionKey
-    pub method_func_keys: HashMap<(TypeDefId, NameId), FunctionKey>,
+    pub method_func_keys: FxHashMap<(TypeDefId, NameId), FunctionKey>,
     /// Interface vtable registry (uses interior mutability)
     pub interface_vtables: RefCell<InterfaceVtableRegistry>,
     /// Registry of native functions for external method calls
@@ -41,8 +41,8 @@ impl CodegenState {
     /// Create a new CodegenState with empty lookup tables.
     pub fn new(native_registry: NativeRegistry) -> Self {
         Self {
-            type_metadata: HashMap::new(),
-            method_func_keys: HashMap::new(),
+            type_metadata: FxHashMap::default(),
+            method_func_keys: FxHashMap::default(),
             interface_vtables: RefCell::new(InterfaceVtableRegistry::new()),
             native_registry,
             lambda_counter: Cell::new(0),

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::io::Write;
 
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, InstBuilder, types};
@@ -253,7 +253,7 @@ impl Compiler<'_> {
             // Access module_programs directly to avoid borrow conflict with mutable self operations
             let (program, module_interner) = &self.analyzed.module_programs[module_path];
             // Extract module global initializer expressions
-            let module_global_inits: HashMap<Symbol, Expr> = program
+            let module_global_inits: FxHashMap<Symbol, Expr> = program
                 .declarations
                 .iter()
                 .filter_map(|decl| {
@@ -461,7 +461,7 @@ impl Compiler<'_> {
         name_id: NameId,
         func: &FuncDecl,
         module_interner: &Interner,
-        module_global_inits: &HashMap<Symbol, Expr>,
+        module_global_inits: &FxHashMap<Symbol, Expr>,
     ) -> Result<(), String> {
         let func_key = self.func_registry.intern_name_id(name_id);
         let display_name = self.query().display_name(name_id);
@@ -775,7 +775,7 @@ impl Compiler<'_> {
                     CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
                 // Build pre-seeded variables map with scoped functions
-                let mut variables = HashMap::new();
+                let mut variables = FxHashMap::default();
                 for scoped_func in &scoped_funcs {
                     // Get func_ref for this function in the current test's context
                     let func_ref = codegen_ctx
@@ -968,7 +968,7 @@ impl Compiler<'_> {
         let mut builder_ctx = FunctionBuilderContext::new();
         {
             let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-            let empty_global_inits = HashMap::new();
+            let empty_global_inits = FxHashMap::default();
             let env = CompileEnv {
                 analyzed: self.analyzed,
                 state: &self.state,
@@ -1015,7 +1015,7 @@ impl Compiler<'_> {
             builder.switch_to_block(entry_block);
 
             // Compile test body (no parameters, no return type)
-            let empty_global_inits = HashMap::new();
+            let empty_global_inits = FxHashMap::default();
             let env = CompileEnv {
                 analyzed: self.analyzed,
                 state: &self.state,
@@ -1094,7 +1094,7 @@ impl Compiler<'_> {
     /// Compile all monomorphized function instances
     fn compile_monomorphized_instances(&mut self, program: &Program) -> Result<(), String> {
         // Build a map of generic function names to their ASTs
-        let generic_func_asts: HashMap<NameId, &FuncDecl> = program
+        let generic_func_asts: FxHashMap<NameId, &FuncDecl> = program
             .declarations
             .iter()
             .filter_map(|decl| {
@@ -1523,8 +1523,8 @@ impl Compiler<'_> {
         &self,
         program: &'a Program,
     ) -> (
-        HashMap<NameId, &'a vole_frontend::ClassDecl>,
-        HashMap<NameId, &'a vole_frontend::RecordDecl>,
+        FxHashMap<NameId, &'a vole_frontend::ClassDecl>,
+        FxHashMap<NameId, &'a vole_frontend::RecordDecl>,
     ) {
         let class_asts = program
             .declarations

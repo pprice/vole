@@ -5,7 +5,7 @@
 
 use std::cell::RefCell;
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use cranelift::prelude::Type;
 use cranelift_jit::JITModule;
@@ -62,7 +62,7 @@ pub trait VtableCtx {
     fn type_metadata(&self) -> &TypeMetadataMap;
 
     /// Get unified method function key map
-    fn method_func_keys(&self) -> &HashMap<(TypeDefId, NameId), FunctionKey>;
+    fn method_func_keys(&self) -> &FxHashMap<(TypeDefId, NameId), FunctionKey>;
 }
 
 /// A view that combines CodegenCtx and CompileEnv to implement VtableCtx.
@@ -131,7 +131,7 @@ impl<'a, 'ctx> VtableCtx for VtableCtxView<'a, 'ctx> {
         &self.env.state.type_metadata
     }
 
-    fn method_func_keys(&self) -> &HashMap<(TypeDefId, NameId), FunctionKey> {
+    fn method_func_keys(&self) -> &FxHashMap<(TypeDefId, NameId), FunctionKey> {
         &self.env.state.method_func_keys
     }
 }

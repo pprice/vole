@@ -2,7 +2,7 @@
 
 use crate::type_arena::{SemaType as ArenaType, TypeArena, TypeId};
 use crate::types::{FunctionType, PrimitiveType};
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use vole_frontend::Symbol;
 use vole_identity::NameId;
 
@@ -135,9 +135,9 @@ pub struct MethodImpl {
 /// Registry of methods added to types via `implement` blocks
 #[derive(Debug, Default, Clone)]
 pub struct ImplementRegistry {
-    methods: HashMap<MethodKey, MethodImpl>,
+    methods: FxHashMap<MethodKey, MethodImpl>,
     /// External function info by string name (module path and native name) for prelude functions
-    external_func_info: HashMap<String, ExternalMethodInfo>,
+    external_func_info: FxHashMap<String, ExternalMethodInfo>,
 }
 
 impl ImplementRegistry {

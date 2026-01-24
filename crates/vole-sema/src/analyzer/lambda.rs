@@ -14,7 +14,7 @@ impl Analyzer {
         interner: &Interner,
     ) -> ArenaTypeId {
         // Push capture analysis stacks and side effects flag
-        self.lambda_captures.push(HashMap::new());
+        self.lambda_captures.push(FxHashMap::default());
         self.lambda_locals.push(HashSet::new());
         self.lambda_side_effects.push(false);
 

@@ -2,7 +2,6 @@ use super::super::*;
 use crate::expression_data::LambdaDefaults;
 use crate::type_arena::TypeId as ArenaTypeId;
 use rustc_hash::FxHashMap;
-use std::collections::HashMap;
 use vole_identity::{NameId, Namer};
 
 impl Analyzer {
@@ -195,7 +194,7 @@ impl Analyzer {
                     };
                     // Use inferred_id directly as substitutions (already TypeId-based)
                     // MonomorphInstance uses std HashMap
-                    let substitutions: HashMap<NameId, ArenaTypeId> = inferred_id.clone();
+                    let substitutions: FxHashMap<NameId, ArenaTypeId> = inferred_id.clone();
                     let func_type =
                         FunctionType::from_ids(&concrete_param_ids, concrete_return_id, false);
                     self.entity_registry_mut().monomorph_cache.insert(

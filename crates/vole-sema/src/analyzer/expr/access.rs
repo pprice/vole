@@ -6,7 +6,6 @@ use crate::generic::{
 use crate::implement_registry::ExternalMethodInfo;
 use crate::type_arena::TypeId as ArenaTypeId;
 use rustc_hash::FxHashMap;
-use std::collections::HashMap;
 use vole_identity::{NameId, TypeDefId};
 
 impl Analyzer {
@@ -789,7 +788,7 @@ impl Analyzer {
             let (final_param_ids, final_return_id, maybe_inferred) = if !all_type_params.is_empty()
             {
                 // Build substitution map from explicit type args if provided (TypeId version)
-                let inferred: HashMap<NameId, ArenaTypeId> = if !explicit_type_args.is_empty() {
+                let inferred: FxHashMap<NameId, ArenaTypeId> = if !explicit_type_args.is_empty() {
                     // Resolve explicit type args and map to class type params
                     if explicit_type_args.len() != class_type_params.len() {
                         self.add_error(
@@ -801,7 +800,7 @@ impl Analyzer {
                             method_span,
                         );
                     }
-                    let mut explicit_map = HashMap::new();
+                    let mut explicit_map = FxHashMap::default();
                     for (param, type_expr) in
                         class_type_params.iter().zip(explicit_type_args.iter())
                     {
@@ -990,13 +989,13 @@ impl Analyzer {
                 registry.get_type(class_type_def_id).generic_info.clone()
             };
             let substitutions = if let Some(generic_info) = &generic_info {
-                let mut subs = HashMap::new();
+                let mut subs = FxHashMap::default();
                 for (param, &arg_id) in generic_info.type_params.iter().zip(type_args_id.iter()) {
                     subs.insert(param.name_id, arg_id);
                 }
                 subs
             } else {
-                HashMap::new()
+                FxHashMap::default()
             };
 
             // Generate unique mangled name
@@ -1053,7 +1052,7 @@ impl Analyzer {
         func_type: &FunctionType,
         class_type_params: &[TypeParamInfo],
         method_type_params: &[TypeParamInfo],
-        inferred: &HashMap<NameId, ArenaTypeId>,
+        inferred: &FxHashMap<NameId, ArenaTypeId>,
         interner: &Interner,
     ) {
         // Get the type def to extract name and type args
@@ -1131,7 +1130,7 @@ impl Analyzer {
                 FunctionType::from_ids(&subst_param_ids, subst_return_id, func_type.is_closure);
 
             // Convert back to std::collections::HashMap for storage
-            let substitutions: HashMap<NameId, ArenaTypeId> =
+            let substitutions: FxHashMap<NameId, ArenaTypeId> =
                 inferred_hb.iter().map(|(&k, &v)| (k, v)).collect();
 
             let instance = StaticMethodMonomorphInstance {
