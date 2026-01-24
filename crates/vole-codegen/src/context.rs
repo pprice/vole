@@ -416,12 +416,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     // ========== Arena helpers ==========
 
-    /// Get an update interface for arena mutations.
-    #[inline]
-    pub fn update(&self) -> vole_sema::ProgramUpdate<'_> {
-        vole_sema::ProgramUpdate::new(self.env.analyzed.type_arena_ref())
-    }
-
     /// Resolve a type expression to a TypeId using this context's module and substitutions.
     pub fn resolve_type_expr(&self, ty: &vole_frontend::TypeExpr) -> TypeId {
         let type_ctx = self.type_ctx();

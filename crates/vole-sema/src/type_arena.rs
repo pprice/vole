@@ -1017,6 +1017,13 @@ impl TypeArena {
         }
     }
 
+    /// Look up an existing RuntimeIterator type by element type (read-only).
+    /// Returns None if the type doesn't exist in the arena.
+    pub fn lookup_runtime_iterator(&self, element: TypeId) -> Option<TypeId> {
+        let ty = SemaType::RuntimeIterator(element);
+        self.intern_map.get(&ty).copied()
+    }
+
     /// Unwrap a fallible type, returning (success, error)
     pub fn unwrap_fallible(&self, id: TypeId) -> Option<(TypeId, TypeId)> {
         match self.get(id) {

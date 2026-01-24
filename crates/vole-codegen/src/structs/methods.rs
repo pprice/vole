@@ -2,7 +2,6 @@
 
 use cranelift::prelude::*;
 use cranelift_module::Module;
-use rustc_hash::FxHashMap;
 use smallvec::{SmallVec, smallvec};
 
 use crate::RuntimeFn;
@@ -559,11 +558,9 @@ impl Cg<'_, '_, '_> {
         // Call vole_range_iter(start, end) -> RuntimeIterator<i64>
         let result = self.call_runtime(RuntimeFn::RangeIter, &[start.value, end_value])?;
 
-        // Use sema's pre-computed RuntimeIterator type, or fall back to computing it
-        let iter_type_id = iter_type_hint.unwrap_or_else(|| {
-            let i64_id = self.arena().primitives.i64;
-            self.update().runtime_iterator(i64_id)
-        });
+        // Use sema's pre-computed RuntimeIterator type
+        let iter_type_id =
+            iter_type_hint.expect("sema must provide concrete_return_hint for range iterator");
         Ok(CompiledValue {
             value: result,
             ty: self.ptr_type(),
@@ -582,7 +579,7 @@ impl Cg<'_, '_, '_> {
         let arena = self.arena();
 
         // Array methods
-        if let Some(elem_type_id) = arena.unwrap_array(obj.type_id) {
+        if let Some(_elem_type_id) = arena.unwrap_array(obj.type_id) {
             drop(arena);
             return match method_name {
                 "length" => {
@@ -591,9 +588,9 @@ impl Cg<'_, '_, '_> {
                 }
                 "iter" => {
                     let result = self.call_runtime(RuntimeFn::ArrayIter, &[obj.value])?;
-                    // Use sema's pre-computed RuntimeIterator type, or fall back to computing it
+                    // Use sema's pre-computed RuntimeIterator type
                     let iter_type_id = iter_type_hint
-                        .unwrap_or_else(|| self.update().runtime_iterator(elem_type_id));
+                        .expect("sema must provide concrete_return_hint for array.iter()");
                     Ok(Some(CompiledValue {
                         value: result,
                         ty: self.ptr_type(),
@@ -614,11 +611,9 @@ impl Cg<'_, '_, '_> {
                 }
                 "iter" => {
                     let result = self.call_runtime(RuntimeFn::StringCharsIter, &[obj.value])?;
-                    // Use sema's pre-computed RuntimeIterator type, or fall back to computing it
-                    let iter_type_id = iter_type_hint.unwrap_or_else(|| {
-                        let string_id = self.arena().string();
-                        self.update().runtime_iterator(string_id)
-                    });
+                    // Use sema's pre-computed RuntimeIterator type
+                    let iter_type_id = iter_type_hint
+                        .expect("sema must provide concrete_return_hint for string.iter()");
                     Ok(Some(CompiledValue {
                         value: result,
                         ty: self.ptr_type(),
@@ -646,11 +641,9 @@ impl Cg<'_, '_, '_> {
                     .ins()
                     .load(types::I64, MemFlags::new(), obj.value, 8);
                 let result = self.call_runtime(RuntimeFn::RangeIter, &[start, end])?;
-                // Use sema's pre-computed RuntimeIterator type, or fall back to computing it
-                let iter_type_id = iter_type_hint.unwrap_or_else(|| {
-                    let i64_id = self.arena().i64();
-                    self.update().runtime_iterator(i64_id)
-                });
+                // Use sema's pre-computed RuntimeIterator type
+                let iter_type_id = iter_type_hint
+                    .expect("sema must provide concrete_return_hint for range.iter()");
                 return Ok(Some(CompiledValue {
                     value: result,
                     ty: self.ptr_type(),
@@ -670,7 +663,7 @@ impl Cg<'_, '_, '_> {
         obj: &CompiledValue,
         mc: &MethodCallExpr,
         method_name: &str,
-        elem_type_id: TypeId,
+        _elem_type_id: TypeId,
         expr_id: NodeId,
     ) -> Result<CompiledValue, String> {
         // Look up the Iterator interface
@@ -693,36 +686,16 @@ impl Cg<'_, '_, '_> {
             })
             .ok_or_else(|| format!("Method {} not found on Iterator", method_name))?;
 
-        let method = self.query().get_method(*method_id);
-
         // Get the external binding for this method
         let external_info = *self
             .registry()
             .get_external_binding(*method_id)
             .ok_or_else(|| format!("No external binding for Iterator.{}", method_name))?;
 
-        // Get the substituted return type from sema (avoids recomputation).
-        // Sema computes this when analyzing method calls on Interface types.
-        // Fall back to computing it ourselves if sema didn't provide one
-        // (e.g., in monomorphized context).
+        // Get the substituted return type from sema
         let return_type_id = self
             .get_substituted_return_type(&expr_id)
-            .unwrap_or_else(|| {
-                // Fallback: compute substituted return type manually
-                let substitutions: FxHashMap<NameId, TypeId> = iter_def
-                    .type_params
-                    .iter()
-                    .map(|param| (*param, elem_type_id))
-                    .collect();
-                let method_return_id = {
-                    let arena = self.arena();
-                    let (_, ret, _) = arena
-                        .unwrap_function(method.signature_id)
-                        .expect("method signature must be a function type");
-                    ret
-                };
-                self.update().substitute(method_return_id, &substitutions)
-            });
+            .expect("sema must provide substituted_return_type for iterator method calls");
 
         // Convert Iterator<T> return types to RuntimeIterator(T) since the runtime
         // functions return raw iterator pointers, not boxed interface values
@@ -773,8 +746,14 @@ impl Cg<'_, '_, '_> {
             && type_def_id == iterator_type_id
             && let Some(&elem_type_id) = type_args.first()
         {
-            drop(arena);
-            return self.update().runtime_iterator(elem_type_id);
+            // Look up existing RuntimeIterator type - sema must have created it
+            if let Some(runtime_iter_id) = arena.lookup_runtime_iterator(elem_type_id) {
+                return runtime_iter_id;
+            }
+            panic!(
+                "codegen: RuntimeIterator({:?}) not found in arena - sema must create all RuntimeIterator types",
+                elem_type_id
+            );
         }
         ty
     }

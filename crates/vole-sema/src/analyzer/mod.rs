@@ -444,9 +444,44 @@ impl Analyzer {
     }
 
     /// Record the resolved type for an expression using TypeId directly.
+    /// Also pre-creates RuntimeIterator types for Iterator<T> return types,
+    /// so codegen can look them up without needing mutable arena access.
     fn record_expr_type_id(&mut self, expr: &Expr, type_id: ArenaTypeId) -> ArenaTypeId {
+        // Pre-create RuntimeIterator(T) for Iterator<T> types so codegen can look them up
+        self.ensure_runtime_iterator_for_iterator(type_id);
         self.expr_types.insert(expr.id, type_id);
         type_id
+    }
+
+    /// If the given type is Iterator<T>, ensure RuntimeIterator(T) exists in the arena.
+    /// This allows codegen to convert Iterator return types to RuntimeIterator without
+    /// needing mutable arena access.
+    fn ensure_runtime_iterator_for_iterator(&mut self, type_id: ArenaTypeId) {
+        // Check if this is an Iterator interface type
+        let elem_type_id = {
+            let arena = self.type_arena();
+            if let Some((type_def_id, type_args)) = arena.unwrap_interface(type_id) {
+                // Get the type's name_id from the registry
+                let type_name_id = self.entity_registry().get_type(type_def_id).name_id;
+                // Check if it's the Iterator interface by looking up the type name
+                let is_iterator = self
+                    .name_table()
+                    .last_segment_str(type_name_id)
+                    .is_some_and(|name| name == "Iterator");
+                if is_iterator {
+                    type_args.first().copied()
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+
+        // Create the RuntimeIterator type if needed
+        if let Some(elem) = elem_type_id {
+            self.type_arena_mut().runtime_iterator(elem);
+        }
     }
 
     // === Backward-compatible accessors for db fields ===
