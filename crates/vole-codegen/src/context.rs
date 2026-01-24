@@ -317,15 +317,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &self.env.state.type_metadata
     }
 
-    /// Get impl method infos map
-    #[inline]
-    pub fn impl_method_infos(
-        &self,
-    ) -> &'ctx HashMap<(vole_sema::implement_registry::ImplTypeId, NameId), super::types::MethodInfo>
-    {
-        &self.env.state.impl_method_infos
-    }
-
     /// Get global variable initializer by name
     #[inline]
     pub fn global_init(&self, name: Symbol) -> Option<&Expr> {
@@ -1098,13 +1089,6 @@ impl<'a, 'b, 'ctx> crate::vtable_ctx::VtableCtx for Cg<'a, 'b, 'ctx> {
 
     fn type_metadata(&self) -> &TypeMetadataMap {
         &self.env.state.type_metadata
-    }
-
-    fn impl_method_infos(
-        &self,
-    ) -> &HashMap<(vole_sema::implement_registry::ImplTypeId, NameId), super::types::MethodInfo>
-    {
-        &self.env.state.impl_method_infos
     }
 
     fn method_func_keys(&self) -> &HashMap<(vole_identity::TypeDefId, NameId), FunctionKey> {

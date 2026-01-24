@@ -11,7 +11,7 @@ use crate::RuntimeFn;
 type ArgVec = SmallVec<[Value; 8]>;
 use crate::context::Cg;
 use crate::errors::CodegenError;
-use crate::method_resolution::{MethodResolutionInputId, MethodTarget, resolve_method_target_id};
+use crate::method_resolution::get_type_def_id_from_type_id;
 use crate::types::{
     CompiledValue, module_name_id, type_id_to_cranelift, value_to_word, word_to_value_type_id,
 };
@@ -149,12 +149,12 @@ impl Cg<'_, '_, '_> {
             return self.runtime_iterator_method(&obj, mc, method_name_str, elem_type_id);
         }
 
-        let method_id = self.method_name_id(mc.method);
+        let method_name_id = self.method_name_id(mc.method);
 
         // Look up method resolution to determine naming convention and return type
         // If no resolution exists (e.g., inside default method bodies), fall back to type-based lookup
         // In monomorphized context, skip sema resolution because it was computed for the type parameter,
-        // not the concrete type. Let resolve_method_target do dynamic resolution based on object_type.
+        // not the concrete type.
         let resolution = if self.substitutions.is_some() {
             None
         } else {
@@ -170,56 +170,66 @@ impl Cg<'_, '_, '_> {
             "method call"
         );
 
-        let target = resolve_method_target_id(MethodResolutionInputId {
-            analyzed: self.analyzed(),
-            type_metadata: self.type_metadata(),
-            impl_method_infos: self.impl_method_infos(),
-            method_name_str,
-            object_type_id: obj.type_id,
-            method_id,
-            resolution,
-        })?;
+        // Handle special cases from ResolvedMethod
+        if let Some(resolved) = resolution {
+            // Interface dispatch - check if object is an interface type and dispatch via vtable
+            // Extract interface info before mutable borrow
+            let interface_info = {
+                let arena = self.arena();
+                if arena.is_interface(obj.type_id) {
+                    arena.unwrap_interface(obj.type_id).map(|(id, _)| id)
+                } else {
+                    None
+                }
+            };
+            if let Some(interface_type_id) = interface_info {
+                return self.interface_dispatch_call_args_by_type_def_id(
+                    &obj,
+                    &mc.args,
+                    interface_type_id,
+                    method_name_id,
+                    resolved.func_type_id(),
+                );
+            }
 
-        let (method_info, return_type_id) = match target {
-            MethodTarget::FunctionalInterface { func_type_id } => {
+            // Functional interface calls
+            if let ResolvedMethod::FunctionalInterface { func_type_id, .. } = resolved {
                 // Use TypeDefId directly for EntityRegistry-based dispatch
-                let interface_type_def_id =
-                    self.arena().unwrap_interface(obj.type_id).map(|(id, _)| id);
+                let interface_type_def_id = {
+                    let arena = self.arena();
+                    arena.unwrap_interface(obj.type_id).map(|(id, _)| id)
+                };
                 if let Some(interface_type_def_id) = interface_type_def_id {
-                    let method_name_id = self.method_name_id(mc.method);
                     return self.interface_dispatch_call_args_by_type_def_id(
                         &obj,
                         &mc.args,
                         interface_type_def_id,
                         method_name_id,
-                        func_type_id,
+                        *func_type_id,
                     );
                 }
                 // For functional interfaces, the object holds the function ptr or closure
-                // The actual is_closure status depends on the lambda's compilation.
-                // Get is_closure from the object's type if available, otherwise from func_type_id
-                let is_closure = self
-                    .arena()
-                    .unwrap_function(obj.type_id)
-                    .map(|(_, _, is_closure)| is_closure)
-                    .or_else(|| {
-                        self.arena()
-                            .unwrap_function(func_type_id)
-                            .map(|(_, _, is_closure)| is_closure)
-                    })
-                    .unwrap_or(true);
-                return self.functional_interface_call(obj.value, func_type_id, is_closure, mc);
+                let is_closure = {
+                    let arena = self.arena();
+                    arena
+                        .unwrap_function(obj.type_id)
+                        .map(|(_, _, is_closure)| is_closure)
+                        .or_else(|| {
+                            arena
+                                .unwrap_function(*func_type_id)
+                                .map(|(_, _, is_closure)| is_closure)
+                        })
+                        .unwrap_or(true)
+                };
+                return self.functional_interface_call(obj.value, *func_type_id, is_closure, mc);
             }
-            MethodTarget::External {
-                external_info,
-                return_type,
-            } => {
-                // Use TypeId-based params for interface boxing check
-                let param_type_ids = resolution.and_then(|resolved: &ResolvedMethod| {
-                    self.arena()
-                        .unwrap_function(resolved.func_type_id())
-                        .map(|(params, _, _)| params.clone())
-                });
+
+            // External method calls
+            if let Some(external_info) = resolved.external_info() {
+                let param_type_ids = self
+                    .arena()
+                    .unwrap_function(resolved.func_type_id())
+                    .map(|(params, _, _)| params.clone());
                 let mut args: ArgVec = smallvec![obj.value];
                 if let Some(param_type_ids) = &param_type_ids {
                     for (arg, &param_type_id) in mc.args.iter().zip(param_type_ids.iter()) {
@@ -234,39 +244,99 @@ impl Cg<'_, '_, '_> {
                     }
                 }
                 // Convert Iterator return types to RuntimeIterator for external methods
-                let return_type_id = self.maybe_convert_iterator_return_type(return_type);
+                let return_type_id =
+                    self.maybe_convert_iterator_return_type(resolved.return_type_id());
+                return self.call_external_id(external_info, &args, return_type_id);
+            }
+
+            // Builtin methods - return error since they should have been handled earlier
+            if resolved.is_builtin() {
+                return Err(CodegenError::internal_with_context(
+                    "unhandled builtin method",
+                    method_name_str,
+                )
+                .into());
+            }
+        }
+
+        // Get func_key and return_type_id from resolution or fallback
+        let (func_key, return_type_id) = if let Some(resolved) = resolution {
+            // Use ResolvedMethod's type_def_id and method_name_id for method_func_keys lookup
+            let type_def_id = resolved.type_def_id().ok_or_else(|| {
+                format!("Method {} requires type_def_id for lookup", method_name_str)
+            })?;
+            let resolved_method_name_id = resolved.method_name_id();
+            let func_key = *self
+                .method_func_keys()
+                .get(&(type_def_id, resolved_method_name_id))
+                .ok_or_else(|| {
+                    format!("Method {} not found in method_func_keys", method_name_str)
+                })?;
+            (func_key, resolved.return_type_id())
+        } else {
+            // Fallback path for monomorphized context: derive type_def_id from object type
+            let arena = self.arena();
+            let type_def_id = get_type_def_id_from_type_id(obj.type_id, &arena, self.analyzed())
+                .ok_or_else(|| {
+                    format!("Cannot get TypeDefId for method {} lookup", method_name_str)
+                })?;
+            drop(arena);
+
+            // Check for external method binding first (interface methods on primitives)
+            if let Some(binding) = self
+                .analyzed()
+                .entity_registry()
+                .find_method_binding(type_def_id, method_name_id)
+                && let Some(external_info) = binding.external_info
+            {
+                // External method - call via FFI
+                let param_type_ids = &binding.func_type.params_id;
+                let mut args: ArgVec = smallvec![obj.value];
+                for (arg, &param_type_id) in mc.args.iter().zip(param_type_ids.iter()) {
+                    let compiled = self.expr(arg)?;
+                    let compiled = self.coerce_to_type(compiled, param_type_id)?;
+                    args.push(compiled.value);
+                }
+                let return_type_id =
+                    self.maybe_convert_iterator_return_type(binding.func_type.return_type_id);
                 return self.call_external_id(&external_info, &args, return_type_id);
             }
-            MethodTarget::InterfaceDispatch {
-                interface_type_id,
-                method_name_id,
-                func_type_id,
-            } => {
-                return self.interface_dispatch_call_args_by_type_def_id(
-                    &obj,
-                    &mc.args,
-                    interface_type_id,
-                    method_name_id,
-                    func_type_id,
-                );
+
+            // Try method_func_keys lookup
+            let func_key = self
+                .method_func_keys()
+                .get(&(type_def_id, method_name_id))
+                .copied();
+
+            if let Some(func_key) = func_key {
+                // Get return type from entity registry
+                let return_type_id = self
+                    .analyzed()
+                    .entity_registry()
+                    .find_method_binding(type_def_id, method_name_id)
+                    .map(|binding| binding.func_type.return_type_id)
+                    .or_else(|| {
+                        self.analyzed()
+                            .entity_registry()
+                            .find_method_on_type(type_def_id, method_name_id)
+                            .map(|mid| {
+                                let method = self.analyzed().entity_registry().get_method(mid);
+                                let arena = self.analyzed().type_arena();
+                                arena
+                                    .unwrap_function(method.signature_id)
+                                    .map(|(_, ret, _)| ret)
+                                    .unwrap_or(TypeId::VOID)
+                            })
+                    })
+                    .unwrap_or(TypeId::VOID);
+
+                (func_key, return_type_id)
+            } else {
+                return Err(format!(
+                    "Method {} not found in method_func_keys (fallback path)",
+                    method_name_str
+                ));
             }
-            MethodTarget::StaticMethod { .. } => {
-                // Static method calls are handled early in method_call() before resolve_method_target
-                // This branch should never be reached
-                unreachable!("Static method calls should be handled early in method_call()")
-            }
-            MethodTarget::Direct {
-                method_info,
-                return_type,
-            }
-            | MethodTarget::Implemented {
-                method_info,
-                return_type,
-            }
-            | MethodTarget::Default {
-                method_info,
-                return_type,
-            } => (method_info, return_type),
         };
 
         // Use sema's cached substituted return type if available (avoids recomputation)
@@ -287,12 +357,12 @@ impl Cg<'_, '_, '_> {
                 .class_method_monomorph_cache
                 .get(monomorph_key)
             {
-                let func_key = self.funcs().intern_name_id(instance.mangled_name);
+                let monomorph_func_key = self.funcs().intern_name_id(instance.mangled_name);
                 // Monomorphized methods have concrete types, no i64 conversion needed
-                (self.func_ref(func_key)?, false)
+                (self.func_ref(monomorph_func_key)?, false)
             } else {
                 // Fallback to regular method if monomorph not found
-                (self.func_ref(method_info.func_key)?, false)
+                (self.func_ref(func_key)?, false)
             }
         } else {
             // Not a monomorphized class method, use regular dispatch
@@ -301,7 +371,7 @@ impl Cg<'_, '_, '_> {
                 .unwrap_class(obj.type_id)
                 .map(|(_, type_args)| !type_args.is_empty())
                 .unwrap_or(false);
-            (self.func_ref(method_info.func_key)?, is_generic_class)
+            (self.func_ref(func_key)?, is_generic_class)
         };
 
         // Use TypeId-based params for interface boxing check

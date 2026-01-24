@@ -14,11 +14,10 @@ use cranelift_jit::JITModule;
 use vole_frontend::Interner;
 use vole_identity::{NameId, TypeDefId};
 use vole_runtime::NativeRegistry;
-use vole_sema::implement_registry::ImplTypeId;
 use vole_sema::type_arena::TypeArena;
 use vole_sema::{EntityRegistry, ProgramQuery, ProgramUpdate};
 
-use crate::types::{CodegenCtx, CompileEnv, MethodInfo, TypeMetadataMap};
+use crate::types::{CodegenCtx, CompileEnv, TypeMetadataMap};
 use crate::{AnalyzedProgram, FunctionKey, FunctionRegistry};
 
 /// Trait providing the interface needed for vtable compilation.
@@ -68,10 +67,6 @@ pub trait VtableCtx {
 
     /// Get type metadata map
     fn type_metadata(&self) -> &TypeMetadataMap;
-
-    /// Get impl method infos map
-    /// DEPRECATED: Use method_func_keys instead.
-    fn impl_method_infos(&self) -> &HashMap<(ImplTypeId, NameId), MethodInfo>;
 
     /// Get unified method function key map
     fn method_func_keys(&self) -> &HashMap<(TypeDefId, NameId), FunctionKey>;
@@ -149,10 +144,6 @@ impl<'a, 'ctx> VtableCtx for VtableCtxView<'a, 'ctx> {
 
     fn type_metadata(&self) -> &TypeMetadataMap {
         &self.env.state.type_metadata
-    }
-
-    fn impl_method_infos(&self) -> &HashMap<(ImplTypeId, NameId), MethodInfo> {
-        &self.env.state.impl_method_infos
     }
 
     fn method_func_keys(&self) -> &HashMap<(TypeDefId, NameId), FunctionKey> {

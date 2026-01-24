@@ -490,12 +490,8 @@ impl Compiler<'_> {
             let func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, func_id);
 
-            // Register in static_method_infos for codegen lookup
+            // Register in method_func_keys for codegen lookup
             if let Some(type_def_id) = type_def_id {
-                self.state
-                    .static_method_infos
-                    .insert((type_def_id, method_name_id), MethodInfo { func_key });
-                // Also populate unified method_func_keys map
                 self.state
                     .method_func_keys
                     .insert((type_def_id, method_name_id), func_key);
@@ -632,10 +628,6 @@ impl Compiler<'_> {
                         method_name = %method_name_str,
                         "Registering static method"
                     );
-                    self.state
-                        .static_method_infos
-                        .insert((type_def_id, method_name_id), MethodInfo { func_key });
-                    // Also populate unified method_func_keys map
                     self.state
                         .method_func_keys
                         .insert((type_def_id, method_name_id), func_key);

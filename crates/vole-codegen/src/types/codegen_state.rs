@@ -7,12 +7,11 @@ use std::collections::HashMap;
 
 use vole_identity::{NameId, TypeDefId};
 use vole_runtime::NativeRegistry;
-use vole_sema::implement_registry::ImplTypeId;
 
 use crate::FunctionKey;
 use crate::interface_vtable::InterfaceVtableRegistry;
 
-use super::{MethodInfo, TypeMetadata};
+use super::TypeMetadata;
 
 /// Type metadata lookup map.
 /// Keyed by TypeDefId for stable cross-interner identity.
@@ -29,14 +28,7 @@ pub struct CodegenState {
     /// Class and record metadata for struct literals, field access, and method calls.
     pub type_metadata: TypeMetadataMap,
     /// Unified method function key lookup: (TypeDefId, method_name) -> FunctionKey
-    /// This replaces impl_method_infos, static_method_infos, and TypeMetadata.method_infos.
     pub method_func_keys: HashMap<(TypeDefId, NameId), FunctionKey>,
-    /// Implement block method info for primitive and named types
-    /// DEPRECATED: Use method_func_keys instead. Will be removed.
-    pub impl_method_infos: HashMap<(ImplTypeId, NameId), MethodInfo>,
-    /// Static method info keyed by (TypeDefId, method_name)
-    /// DEPRECATED: Use method_func_keys instead. Will be removed.
-    pub static_method_infos: HashMap<(TypeDefId, NameId), MethodInfo>,
     /// Interface vtable registry (uses interior mutability)
     pub interface_vtables: RefCell<InterfaceVtableRegistry>,
     /// Registry of native functions for external method calls
@@ -51,8 +43,6 @@ impl CodegenState {
         Self {
             type_metadata: HashMap::new(),
             method_func_keys: HashMap::new(),
-            impl_method_infos: HashMap::new(),
-            static_method_infos: HashMap::new(),
             interface_vtables: RefCell::new(InterfaceVtableRegistry::new()),
             native_registry,
             lambda_counter: Cell::new(0),

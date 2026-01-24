@@ -260,15 +260,11 @@ impl Compiler<'_> {
             let func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, func_id);
 
-            // Register in static_method_infos for codegen lookup
+            // Register in method_func_keys for codegen lookup
             if let Some(type_def_id) = type_def_id
                 && let Some(method_name_id) =
                     method_name_id_with_interner(self.analyzed, interner, method.name)
             {
-                self.state
-                    .static_method_infos
-                    .insert((type_def_id, method_name_id), MethodInfo { func_key });
-                // Also populate unified method_func_keys map
                 self.state
                     .method_func_keys
                     .insert((type_def_id, method_name_id), func_key);
@@ -338,15 +334,11 @@ impl Compiler<'_> {
             let func_id = self.jit.import_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, func_id);
 
-            // Register in static_method_infos for codegen lookup
+            // Register in method_func_keys for codegen lookup
             if let Some(type_def_id) = type_def_id
                 && let Some(method_name_id) =
                     method_name_id_with_interner(self.analyzed, interner, method.name)
             {
-                self.state
-                    .static_method_infos
-                    .insert((type_def_id, method_name_id), MethodInfo { func_key });
-                // Also populate unified method_func_keys map
                 self.state
                     .method_func_keys
                     .insert((type_def_id, method_name_id), func_key);
@@ -447,18 +439,15 @@ impl Compiler<'_> {
             let display_name = self.func_registry.display(func_key);
             let func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, func_id);
-            if let Some(impl_id) = impl_type_id {
+            // Populate method_func_keys for method lookup
+            if let Some(impl_id) = impl_type_id
+                && let Some(type_def_id) = self.query().try_type_def_id(impl_id.name_id())
+            {
                 let method_id = method_name_id_with_interner(self.analyzed, interner, method.name)
                     .expect("implement method name_id should be registered");
                 self.state
-                    .impl_method_infos
-                    .insert((impl_id, method_id), MethodInfo { func_key });
-                // Also populate unified method_func_keys map
-                if let Some(type_def_id) = self.query().try_type_def_id(impl_id.name_id()) {
-                    self.state
-                        .method_func_keys
-                        .insert((type_def_id, method_id), func_key);
-                }
+                    .method_func_keys
+                    .insert((type_def_id, method_id), func_key);
             }
         }
 
@@ -504,15 +493,11 @@ impl Compiler<'_> {
                 let func_id = self.jit.declare_function(&display_name, &sig);
                 self.func_registry.set_func_id(func_key, func_id);
 
-                // Register in static_method_infos for codegen lookup
+                // Register in method_func_keys for codegen lookup
                 if let Some(type_def_id) = type_def_id
                     && let Some(method_name_id) =
                         method_name_id_with_interner(self.analyzed, interner, method.name)
                 {
-                    self.state
-                        .static_method_infos
-                        .insert((type_def_id, method_name_id), MethodInfo { func_key });
-                    // Also populate unified method_func_keys map
                     self.state
                         .method_func_keys
                         .insert((type_def_id, method_name_id), func_key);
@@ -584,16 +569,17 @@ impl Compiler<'_> {
             self.func_registry.main_module()
         };
 
-        // Get impl_type_id for method lookup
+        // Get TypeDefId for method lookup via method_func_keys
         let impl_type_id = self.impl_type_id_from_type_id(self_type_id);
+        let type_def_id = impl_type_id.and_then(|id| self.query().try_type_def_id(id.name_id()));
 
         for method in &impl_block.methods {
-            let method_key = impl_type_id.and_then(|type_id| {
+            let method_key = type_def_id.and_then(|type_def_id| {
                 let method_id = self.method_name_id(method.name);
                 self.state
-                    .impl_method_infos
-                    .get(&(type_id, method_id))
-                    .copied()
+                    .method_func_keys
+                    .get(&(type_def_id, method_id))
+                    .map(|&func_key| MethodInfo { func_key })
             });
             self.compile_implement_method(
                 method,
