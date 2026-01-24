@@ -6,8 +6,7 @@ use cranelift_module::Module;
 use super::common::{FunctionCompileConfig, compile_function_inner_with_params};
 use super::{Compiler, SelfParam, TypeResolver};
 use crate::types::{
-    CodegenCtx, MethodInfo, TypeMetadata, method_name_id_with_interner, resolve_type_expr_to_id,
-    type_id_to_cranelift,
+    CodegenCtx, MethodInfo, TypeMetadata, method_name_id_with_interner, type_id_to_cranelift,
 };
 use vole_frontend::ast::PrimitiveType as AstPrimitive;
 use vole_frontend::{
@@ -427,19 +426,12 @@ impl Compiler<'_> {
                     (metadata.vole_type, impl_id)
                 }
                 _ => {
-                    let name_table = self.analyzed.name_table();
-                    let type_id = resolve_type_expr_to_id(
-                        &impl_block.target_type,
-                        self.analyzed.entity_registry(),
-                        &self.state.type_metadata,
-                        interner,
-                        &name_table,
-                        module_id,
-                        self.analyzed.type_arena_ref(),
-                    );
-                    drop(name_table);
-                    let impl_id = self.impl_type_id_from_type_id(type_id);
-                    (type_id, impl_id)
+                    // This branch is unreachable: get_type_name_from_expr() returns None
+                    // for non-Primitive/non-Named types, causing early return at line 384
+                    unreachable!(
+                        "target_type was neither Primitive nor Named, \
+                         but passed get_type_name_from_expr check"
+                    )
                 }
             };
 
@@ -555,7 +547,6 @@ impl Compiler<'_> {
         &mut self,
         impl_block: &ImplementBlock,
     ) -> Result<(), String> {
-        let module_id = self.query().main_module();
         // Get type name string (works for primitives and named types)
         let Some(type_name) = self.get_type_name_from_expr(&impl_block.target_type) else {
             return Ok(()); // Unsupported type for implement block
@@ -594,15 +585,11 @@ impl Compiler<'_> {
                     })
             }
             _ => {
-                let name_table = self.analyzed.name_table();
-                resolve_type_expr_to_id(
-                    &impl_block.target_type,
-                    self.analyzed.entity_registry(),
-                    &self.state.type_metadata,
-                    &self.analyzed.interner,
-                    &name_table,
-                    module_id,
-                    self.analyzed.type_arena_ref(),
+                // This branch is unreachable: get_type_name_from_expr() returns None
+                // for non-Primitive/non-Named types, causing early return at line 553
+                unreachable!(
+                    "target_type was neither Primitive nor Named, \
+                     but passed get_type_name_from_expr check"
                 )
             }
         };
@@ -715,42 +702,24 @@ impl Compiler<'_> {
                             .find_static_method_on_type(tdef_id, name_id)
                     });
 
-            let (sig, param_type_ids, return_type_id) = if let Some(method_id) = semantic_method_id
-            {
-                // Use pre-resolved signature from MethodDef
-                let method_def = self.query().get_method(method_id);
-                let arena = self.analyzed.type_arena();
-                let (params, ret, _) = arena
-                    .unwrap_function(method_def.signature_id)
-                    .expect("method should have function signature");
-                let sig = self.build_signature_for_method(method_id, SelfParam::None);
-                (sig, params.to_vec(), Some(ret).filter(|r| !r.is_void()))
-            } else {
-                // Fallback: build from AST
-                let return_type_id = {
-                    let name_table = self.analyzed.name_table();
-                    method.return_type.as_ref().map(|t| {
-                        resolve_type_expr_to_id(
-                            t,
-                            self.analyzed.entity_registry(),
-                            &self.state.type_metadata,
-                            interner,
-                            &name_table,
-                            module_id,
-                            self.analyzed.type_arena_ref(),
-                        )
-                    })
-                };
-                let sig = self.build_signature(
-                    &method.params,
-                    method.return_type.as_ref(),
-                    SelfParam::None,
-                    TypeResolver::Query,
-                );
-                let param_type_ids =
-                    self.resolve_param_type_ids_with_interner(&method.params, interner, module_id);
-                (sig, param_type_ids, return_type_id)
-            };
+            // Get method signature from sema - method must be registered by codegen time
+            let method_id = semantic_method_id.unwrap_or_else(|| {
+                let method_name_str = interner.resolve(method.name);
+                panic!(
+                    "INTERNAL ERROR: static method {}::{} not found in entity registry",
+                    type_name, method_name_str
+                )
+            });
+
+            // Use pre-resolved signature from MethodDef
+            let method_def = self.query().get_method(method_id);
+            let arena = self.analyzed.type_arena();
+            let (params, ret, _) = arena
+                .unwrap_function(method_def.signature_id)
+                .expect("method should have function signature");
+            let sig = self.build_signature_for_method(method_id, SelfParam::None);
+            let (param_type_ids, return_type_id) =
+                (params.to_vec(), Some(ret).filter(|r| !r.is_void()));
             self.jit.ctx.func.signature = sig;
 
             // Build param info for compilation
@@ -855,19 +824,26 @@ impl Compiler<'_> {
         let source_file_ptr = self.source_file_ptr();
         let self_sym = self.self_symbol();
 
-        // Compute the method's return type as TypeId for proper union wrapping
+        // Get the method's return type: try sema first, fall back to AST for generated methods
         let method_return_type_id = {
-            let name_table = self.analyzed.name_table();
-            method.return_type.as_ref().map(|t| {
-                resolve_type_expr_to_id(
-                    t,
-                    self.analyzed.entity_registry(),
-                    &self.state.type_metadata,
-                    &self.analyzed.interner,
-                    &name_table,
-                    module_id,
-                    self.analyzed.type_arena_ref(),
-                )
+            // Get TypeDefId from self_type_id
+            let type_def_id = self
+                .impl_type_id_from_type_id(self_type_id)
+                .and_then(|impl_id| self.query().try_type_def_id(impl_id.name_id()));
+            let method_name_id = self.method_name_id(method.name);
+
+            // Try sema lookup first
+            let from_sema = type_def_id.and_then(|tdef_id| {
+                self.query()
+                    .method_return_type_by_id(tdef_id, method_name_id)
+            });
+
+            // Fall back to AST for generated types (like generator records)
+            from_sema.or_else(|| {
+                method
+                    .return_type
+                    .as_ref()
+                    .map(|t| self.resolve_type_to_id(t))
             })
         };
 
@@ -1266,19 +1242,23 @@ impl Compiler<'_> {
                 .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
                 .collect();
 
-            // Resolve return type and self binding
+            // Get return type: try sema first, fall back to AST
             let return_type_id = {
-                let name_table = self.analyzed.name_table();
-                method.return_type.as_ref().map(|t| {
-                    resolve_type_expr_to_id(
-                        t,
-                        self.analyzed.entity_registry(),
-                        &self.state.type_metadata,
-                        module_interner,
-                        &name_table,
-                        module_id,
-                        self.analyzed.type_arena_ref(),
-                    )
+                let method_name_id =
+                    method_name_id_with_interner(self.analyzed, module_interner, method.name);
+
+                // Try sema lookup first
+                let from_sema = method_name_id.and_then(|name_id| {
+                    self.query()
+                        .method_return_type_by_id(metadata.type_def_id, name_id)
+                });
+
+                // Fall back to AST if sema lookup fails
+                from_sema.or_else(|| {
+                    method
+                        .return_type
+                        .as_ref()
+                        .map(|t| self.resolve_type_to_id_with_interner(t, module_interner))
                 })
             };
             let self_sym = module_interner
@@ -1364,19 +1344,23 @@ impl Compiler<'_> {
                     .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
                     .collect();
 
-                // Resolve return type
+                // Get return type: try sema first, fall back to AST
                 let return_type_id = {
-                    let name_table = self.analyzed.name_table();
-                    method.return_type.as_ref().map(|t| {
-                        resolve_type_expr_to_id(
-                            t,
-                            self.analyzed.entity_registry(),
-                            &self.state.type_metadata,
-                            module_interner,
-                            &name_table,
-                            module_id,
-                            self.analyzed.type_arena_ref(),
-                        )
+                    let method_name_id =
+                        method_name_id_with_interner(self.analyzed, module_interner, method.name);
+
+                    // Try sema lookup first
+                    let from_sema = method_name_id.and_then(|name_id| {
+                        self.query()
+                            .static_method_return_type_by_id(metadata.type_def_id, name_id)
+                    });
+
+                    // Fall back to AST if sema lookup fails
+                    from_sema.or_else(|| {
+                        method
+                            .return_type
+                            .as_ref()
+                            .map(|t| self.resolve_type_to_id_with_interner(t, module_interner))
                     })
                 };
 
