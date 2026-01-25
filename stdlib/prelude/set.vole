@@ -1,4 +1,5 @@
 // stdlib/prelude/set.vole
+//
 // Set - Hash set collection for i64 values
 //
 // Note: Generic Set<T> requires fixing constraint resolution for lambdas

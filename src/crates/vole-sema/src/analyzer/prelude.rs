@@ -1,4 +1,10 @@
 //! Prelude file loading for standard library definitions.
+//!
+//! Prelude files use standard imports to declare dependencies:
+//!
+//! ```vole
+//! let _ = import "std:prelude/traits"
+//! ```
 
 use super::Analyzer;
 use crate::analysis_cache::CachedModule;
@@ -14,6 +20,9 @@ use vole_frontend::{Interner, Parser};
 impl Analyzer {
     /// Load prelude files (trait definitions and primitive type implementations)
     /// This is called at the start of analyze() to make stdlib methods available.
+    ///
+    /// Files use standard imports (`let _ = import "..."`) to declare dependencies,
+    /// so traits.vole must be loaded first.
     pub(super) fn load_prelude(&mut self, interner: &Interner) {
         // Don't load prelude if we're already loading it (prevents recursion)
         if self.loading_prelude {
@@ -27,10 +36,11 @@ impl Analyzer {
 
         self.loading_prelude = true;
 
-        // Load traits first (defines interfaces like Sized)
+        // Load traits first (defines interfaces like Equatable, Comparable, etc.)
         self.load_prelude_file("std:prelude/traits", interner);
 
         // Load type preludes (implement blocks for primitive types)
+        // These import traits.vole, so must be loaded after.
         // TODO: v-a5bd - auto-discover prelude files instead of hardcoded list
         for path in [
             "std:prelude/string",
