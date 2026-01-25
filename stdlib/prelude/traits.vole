@@ -16,17 +16,7 @@ interface Bounded {
     }
 }
 
-interface Zero {
-    statics {
-        func zero() -> Self
-    }
-}
 
-interface One {
-    statics {
-        func one() -> Self
-    }
-}
 
 // Float constant interface - provides special float values
 // These are compiled directly to constants by the codegen (no function call)

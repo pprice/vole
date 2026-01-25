@@ -32,21 +32,7 @@ implement Default for i64 {
     }
 }
 
-implement Zero for i64 {
-    statics {
-        func zero() -> i64 {
-            return 0
-        }
-    }
-}
 
-implement One for i64 {
-    statics {
-        func one() -> i64 {
-            return 1
-        }
-    }
-}
 
 implement Bounded for i64 {
     statics {

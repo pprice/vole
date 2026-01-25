@@ -32,21 +32,7 @@ implement Default for i128 {
     }
 }
 
-implement Zero for i128 {
-    statics {
-        func zero() -> i128 {
-            return 0
-        }
-    }
-}
 
-implement One for i128 {
-    statics {
-        func one() -> i128 {
-            return 1
-        }
-    }
-}
 
 implement Bounded for i128 {
     statics {

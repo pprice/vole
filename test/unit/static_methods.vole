@@ -646,21 +646,6 @@ tests {
         assert(i64.max_value() == 9223372036854775807)
     }
 
-    test "Zero and One interfaces - i32" {
-        assert(i32.zero() == 0)
-        assert(i32.one() == 1)
-    }
-
-    test "Zero and One interfaces - i64" {
-        assert(i64.zero() == 0)
-        assert(i64.one() == 1)
-    }
-
-    test "Zero and One interfaces - f64" {
-        assert(f64.zero() == 0.0)
-        assert(f64.one() == 1.0)
-    }
-
     // -------------------------------------------------------------------------
     // Cross-Type Static Method Interactions
     // -------------------------------------------------------------------------

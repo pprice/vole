@@ -26,21 +26,7 @@ implement Default for f64 {
     }
 }
 
-implement Zero for f64 {
-    statics {
-        func zero() -> f64 {
-            return 0.0
-        }
-    }
-}
 
-implement One for f64 {
-    statics {
-        func one() -> f64 {
-            return 1.0
-        }
-    }
-}
 
 // FloatConstants - these are compiled directly to constants by the codegen
 // The function bodies here are placeholders that will never be executed

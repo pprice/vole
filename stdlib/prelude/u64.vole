@@ -26,21 +26,7 @@ implement Default for u64 {
     }
 }
 
-implement Zero for u64 {
-    statics {
-        func zero() -> u64 {
-            return 0
-        }
-    }
-}
 
-implement One for u64 {
-    statics {
-        func one() -> u64 {
-            return 1
-        }
-    }
-}
 
 implement Bounded for u64 {
     statics {

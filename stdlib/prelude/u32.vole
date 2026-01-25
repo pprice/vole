@@ -26,21 +26,7 @@ implement Default for u32 {
     }
 }
 
-implement Zero for u32 {
-    statics {
-        func zero() -> u32 {
-            return 0
-        }
-    }
-}
 
-implement One for u32 {
-    statics {
-        func one() -> u32 {
-            return 1
-        }
-    }
-}
 
 implement Bounded for u32 {
     statics {

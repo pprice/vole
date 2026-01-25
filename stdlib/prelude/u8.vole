@@ -26,21 +26,7 @@ implement Default for u8 {
     }
 }
 
-implement Zero for u8 {
-    statics {
-        func zero() -> u8 {
-            return 0
-        }
-    }
-}
 
-implement One for u8 {
-    statics {
-        func one() -> u8 {
-            return 1
-        }
-    }
-}
 
 implement Bounded for u8 {
     statics {

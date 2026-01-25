@@ -1,4 +1,4 @@
-// Test i128 prelude methods (Equatable, Comparable, Hashable, Stringable, Default, Zero, One, Bounded)
+// Test i128 prelude methods (Equatable, Comparable, Hashable, Stringable, Default, Bounded)
 
 tests "i128 Equatable" {
     test "i128 equals same value" {
@@ -110,20 +110,6 @@ tests "i128 Default" {
     test "i128 default_value" {
         let x = i128.default_value()
         assert(x == 0)
-    }
-}
-
-tests "i128 Zero" {
-    test "i128 zero" {
-        let x = i128.zero()
-        assert(x == 0)
-    }
-}
-
-tests "i128 One" {
-    test "i128 one" {
-        let x = i128.one()
-        assert(x == 1)
     }
 }
 

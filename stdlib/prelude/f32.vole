@@ -26,21 +26,7 @@ implement Default for f32 {
     }
 }
 
-implement Zero for f32 {
-    statics {
-        func zero() -> f32 {
-            return 0.0
-        }
-    }
-}
 
-implement One for f32 {
-    statics {
-        func one() -> f32 {
-            return 1.0
-        }
-    }
-}
 
 // FloatConstants - these are compiled directly to constants by the codegen
 // The function bodies here are placeholders that will never be executed

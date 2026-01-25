@@ -26,21 +26,7 @@ implement Default for i16 {
     }
 }
 
-implement Zero for i16 {
-    statics {
-        func zero() -> i16 {
-            return 0
-        }
-    }
-}
 
-implement One for i16 {
-    statics {
-        func one() -> i16 {
-            return 1
-        }
-    }
-}
 
 implement Bounded for i16 {
     statics {
