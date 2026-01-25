@@ -294,12 +294,17 @@ impl Cg<'_, '_, '_> {
                 })?;
             (func_key, resolved.return_type_id())
         } else {
-            // Fallback path for monomorphized context: derive type_def_id from object type
+            // Fallback path for monomorphized context: derive type_def_id from object type.
+            // When inside a monomorphized method body, the object type may still be a type
+            // parameter (e.g. T from class<T: Disposable>). Apply substitutions to get the
+            // concrete type before looking up the TypeDefId.
+            let resolved_obj_type_id = self.substitute_type(obj.type_id);
             let arena = self.arena();
-            let type_def_id = get_type_def_id_from_type_id(obj.type_id, arena, self.analyzed())
-                .ok_or_else(|| {
-                    format!("Cannot get TypeDefId for method {} lookup", method_name_str)
-                })?;
+            let type_def_id =
+                get_type_def_id_from_type_id(resolved_obj_type_id, arena, self.analyzed())
+                    .ok_or_else(|| {
+                        format!("Cannot get TypeDefId for method {} lookup", method_name_str)
+                    })?;
 
             // Check for external method binding first (interface methods on primitives)
             if let Some(binding) = self
@@ -348,6 +353,12 @@ impl Cg<'_, '_, '_> {
                             })
                     })
                     .unwrap_or(TypeId::VOID);
+
+                // In monomorphized context, the return type may still reference type
+                // parameters (e.g. a method `getItem() -> T`). Apply substitutions to
+                // get the concrete return type so subsequent operations on the returned
+                // value use the correct type.
+                let return_type_id = self.substitute_type(return_type_id);
 
                 (func_key, return_type_id)
             } else {

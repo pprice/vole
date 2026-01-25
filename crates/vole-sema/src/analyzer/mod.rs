@@ -2149,18 +2149,33 @@ impl Analyzer {
         let self_sym = interner
             .lookup("self")
             .expect("'self' should be interned during parsing");
-        // Build self type directly as TypeId
+        // Build self type directly as TypeId.
+        // For generic types, include type parameter TypeIds as type args so that
+        // method calls on `self` (e.g. self.getItem()) properly record class method
+        // monomorphizations with the type parameters.
         let kind = {
             let registry = self.entity_registry();
             registry.get_type(type_def_id).kind
         };
+        let type_args = {
+            let generic_info = {
+                let registry = self.entity_registry();
+                registry.get_generic_info(type_def_id).cloned()
+            };
+            if let Some(gi) = generic_info {
+                let mut args = crate::type_arena::TypeIdVec::new();
+                for tp in &gi.type_params {
+                    let tp_type_id = self.type_arena_mut().type_param(tp.name_id);
+                    args.push(tp_type_id);
+                }
+                args
+            } else {
+                crate::type_arena::TypeIdVec::new()
+            }
+        };
         let self_type_id = match kind {
-            TypeDefKind::Class => self
-                .type_arena_mut()
-                .class(type_def_id, crate::type_arena::TypeIdVec::new()),
-            TypeDefKind::Record => self
-                .type_arena_mut()
-                .record(type_def_id, crate::type_arena::TypeIdVec::new()),
+            TypeDefKind::Class => self.type_arena_mut().class(type_def_id, type_args),
+            TypeDefKind::Record => self.type_arena_mut().record(type_def_id, type_args),
             _ => self.type_arena().invalid(),
         };
         self.scope.define(

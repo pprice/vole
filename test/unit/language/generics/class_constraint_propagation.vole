@@ -1,0 +1,56 @@
+// Test: class-level type constraints propagated through method return types
+// When a generic class method returns T, calling constraint methods on the
+// result should work because T's constraints are known from the class definition.
+
+interface Disposable {
+    func dispose() -> i64
+}
+
+class Manager<T: Disposable> {
+    item: T,
+
+    // Direct constraint method call on field - this already works
+    func directCleanup() -> i64 {
+        return self.item.dispose()
+    }
+
+    // Method that returns T
+    func getItem() -> T {
+        return self.item
+    }
+
+    // Indirect constraint method call: get T via method, then call constraint method
+    func indirectCleanup() -> i64 {
+        let t = self.getItem()
+        return t.dispose()
+    }
+}
+
+record Resource implements Disposable {
+    id: i64,
+}
+
+implement Disposable for Resource {
+    func dispose() -> i64 {
+        return self.id
+    }
+}
+
+tests {
+    test "direct constraint method call on field" {
+        let mgr = Manager { item: Resource { id: 42 } }
+        assert(mgr.directCleanup() == 42)
+    }
+
+    test "indirect constraint method call via getItem" {
+        let mgr = Manager { item: Resource { id: 42 } }
+        assert(mgr.indirectCleanup() == 42)
+    }
+
+    test "constraint propagation with multiple instances" {
+        let mgr1 = Manager { item: Resource { id: 10 } }
+        let mgr2 = Manager { item: Resource { id: 20 } }
+        assert(mgr1.indirectCleanup() == 10)
+        assert(mgr2.indirectCleanup() == 20)
+    }
+}
