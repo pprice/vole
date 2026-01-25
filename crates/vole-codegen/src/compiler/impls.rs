@@ -843,7 +843,7 @@ impl Compiler<'_> {
         } else if let Some(type_sym) = type_sym {
             self.intern_func(func_module, &[type_sym, method.name])
         } else if let Some(impl_id) = self.impl_type_id_from_type_id(self_type_id) {
-            self.intern_func_prefixed(impl_id.name_id(), method.name)
+            self.lookup_func_prefixed(impl_id.name_id(), method.name)
         } else {
             let method_name_str = self.resolve_symbol(method.name);
             self.func_registry

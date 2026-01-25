@@ -114,10 +114,11 @@ impl<'a> Compiler<'a> {
             .intern_qualified(module, segments, &self.analyzed.interner)
     }
 
-    /// Intern a function name with a NameId prefix (for implement block methods)
-    fn intern_func_prefixed(&mut self, prefix: NameId, method: Symbol) -> FunctionKey {
+    /// Look up a function name with a NameId prefix (for implement block methods).
+    /// Uses read-only access to NameTable; panics if the name was not interned by sema.
+    fn lookup_func_prefixed(&mut self, prefix: NameId, method: Symbol) -> FunctionKey {
         self.func_registry
-            .intern_with_prefix(prefix, method, &self.analyzed.interner)
+            .lookup_with_prefix(prefix, method, &self.analyzed.interner)
     }
 
     /// Resolve a Symbol to a string (owned, for use across mutable operations)
