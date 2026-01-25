@@ -81,6 +81,18 @@ fn render_sema_warning(warn: &TypeWarning, file_path: &str, source: &str) {
     render_to_stderr(report.as_ref());
 }
 
+/// Render a semantic warning to a writer (for snapshots)
+fn render_sema_warning_to<W: Write>(
+    warn: &TypeWarning,
+    file_path: &str,
+    source: &str,
+    writer: &mut W,
+) {
+    let report = miette::Report::new(warn.warning.clone())
+        .with_source_code(NamedSource::new(file_path, source.to_string()));
+    let _ = render_to_writer(report.as_ref(), writer);
+}
+
 /// Parse and analyze a source file, rendering any diagnostics on error.
 ///
 /// Returns `Ok(AnalyzedProgram)` on success, or `Err(())` if there were
@@ -343,6 +355,11 @@ pub fn check_captured<W: Write + Send + 'static>(
             render_sema_error_to(err, file_path, source, &mut stderr);
         }
         return Err(());
+    }
+
+    // Render warnings (non-fatal diagnostics)
+    for warn in &analyzer.take_warnings() {
+        render_sema_warning_to(warn, file_path, source, &mut stderr);
     }
 
     Ok(())

@@ -15,7 +15,6 @@ impl Analyzer {
     }
 
     /// Helper to add a type warning
-    #[allow(dead_code)] // Infrastructure for future warnings
     pub(super) fn add_warning(&mut self, warning: SemanticWarning, span: Span) {
         self.warnings.push(TypeWarning::new(warning, span));
     }

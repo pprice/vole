@@ -130,7 +130,30 @@ impl Analyzer {
                 }
             }
             Stmt::Expr(expr_stmt) => {
-                self.check_expr(&expr_stmt.expr, interner)?;
+                let expr_type_id = self.check_expr(&expr_stmt.expr, interner)?;
+
+                // Check for unused expression result
+                // Don't warn if:
+                // 1. The expression is void (nothing to discard)
+                // 2. The expression is an assignment (regular or discard - assignments are
+                //    inherently used for their side effect)
+                // 3. The expression is a compound assignment (+=, -=, etc.)
+                // 4. The type is invalid (already has errors)
+                let is_assignment = matches!(
+                    &expr_stmt.expr.kind,
+                    ExprKind::Assign(_) | ExprKind::CompoundAssign(_)
+                );
+                if !is_assignment && expr_type_id != ArenaTypeId::VOID && !expr_type_id.is_invalid()
+                {
+                    let ty = self.type_display_id(expr_type_id);
+                    self.add_warning(
+                        SemanticWarning::UnusedExpressionResult {
+                            ty,
+                            span: expr_stmt.expr.span.into(),
+                        },
+                        expr_stmt.expr.span,
+                    );
+                }
             }
             Stmt::While(while_stmt) => {
                 let cond_type_id = self.check_expr(&while_stmt.condition, interner)?;

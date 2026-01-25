@@ -632,4 +632,12 @@ pub enum SemanticWarning {
         #[label("consider using an interface instead")]
         span: SourceSpan,
     },
+
+    #[error("unused expression result of type '{ty}'")]
+    #[diagnostic(code(W3002), help("use `_ = expr` to discard explicitly"))]
+    UnusedExpressionResult {
+        ty: String,
+        #[label("expression result is not used")]
+        span: SourceSpan,
+    },
 }

@@ -1,0 +1,46 @@
+// Test unused expression result warning
+
+// Should warn: 1 + 2 returns i64, discarded
+func unused_arithmetic() {
+    1 + 2
+}
+
+// Should NOT warn: print() returns void
+func bar() {
+    print("hi")
+}
+
+// Should NOT warn: explicit discard
+func explicit_discard() {
+    _ = 1 + 2
+}
+
+// Should NOT warn: void function call
+func noop() {
+}
+
+func uses_noop() {
+    noop()
+}
+
+// Should warn: string literal unused
+func unused_string() {
+    "hello"
+}
+
+// Should warn: boolean expression unused
+func unused_bool() {
+    true
+}
+
+// Should NOT warn: regular assignment (used for side effect)
+func regular_assignment() {
+    let mut x = 1
+    x = 2
+}
+
+// Should NOT warn: compound assignment (used for side effect)
+func compound_assignment() {
+    let mut x = 1
+    x += 1
+}
