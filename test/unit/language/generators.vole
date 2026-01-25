@@ -62,9 +62,9 @@ tests {
         let iter = simple_gen()
 
         // Consume all 3 yields
-        iter.next()
-        iter.next()
-        iter.next()
+        _ = iter.next()
+        _ = iter.next()
+        _ = iter.next()
 
         // Fourth call should return Done
         let r4 = iter.next()

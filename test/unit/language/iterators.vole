@@ -40,7 +40,7 @@ tests "iterators" {
         let arr = [1]
         let iter = arr.iter()
 
-        iter.next()  // consume the one element
+        _ = iter.next()  // consume the one element
         let second = iter.next()
 
         let is_done = second is Done

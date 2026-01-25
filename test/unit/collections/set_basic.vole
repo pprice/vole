@@ -25,9 +25,9 @@ tests {
 
     test "set::remove" {
         let s = Set.new()
-        s.add(1)
-        s.add(2)
-        s.add(3)
+        _ = s.add(1)
+        _ = s.add(2)
+        _ = s.add(3)
         assert(s.len() == 3)
 
         assert(s.remove(2))  // returns true for existing element
@@ -44,9 +44,9 @@ tests {
 
     test "set::clear" {
         let s = Set.new()
-        s.add(1)
-        s.add(2)
-        s.add(3)
+        _ = s.add(1)
+        _ = s.add(2)
+        _ = s.add(3)
         assert(s.len() == 3)
 
         s.clear()
@@ -59,18 +59,18 @@ tests {
         let s = Set.with_capacity(100)
         assert(s.len() == 0)
         assert(s.is_empty())
-        s.add(42)
+        _ = s.add(42)
         assert(s.len() == 1)
     }
 
     test "set::union" {
         let a = Set.new()
-        a.add(1)
-        a.add(2)
+        _ = a.add(1)
+        _ = a.add(2)
 
         let b = Set.new()
-        b.add(2)
-        b.add(3)
+        _ = b.add(2)
+        _ = b.add(3)
 
         let u = a.union(b)
         assert(u.len() == 3)
@@ -81,14 +81,14 @@ tests {
 
     test "set::intersection" {
         let a = Set.new()
-        a.add(1)
-        a.add(2)
-        a.add(3)
+        _ = a.add(1)
+        _ = a.add(2)
+        _ = a.add(3)
 
         let b = Set.new()
-        b.add(2)
-        b.add(3)
-        b.add(4)
+        _ = b.add(2)
+        _ = b.add(3)
+        _ = b.add(4)
 
         let i = a.intersection(b)
         assert(i.len() == 2)
@@ -100,14 +100,14 @@ tests {
 
     test "set::difference" {
         let a = Set.new()
-        a.add(1)
-        a.add(2)
-        a.add(3)
+        _ = a.add(1)
+        _ = a.add(2)
+        _ = a.add(3)
 
         let b = Set.new()
-        b.add(2)
-        b.add(3)
-        b.add(4)
+        _ = b.add(2)
+        _ = b.add(3)
+        _ = b.add(4)
 
         let d = a.difference(b)
         assert(d.len() == 1)
@@ -117,13 +117,13 @@ tests {
 
     test "set::is_subset" {
         let a = Set.new()
-        a.add(1)
-        a.add(2)
+        _ = a.add(1)
+        _ = a.add(2)
 
         let b = Set.new()
-        b.add(1)
-        b.add(2)
-        b.add(3)
+        _ = b.add(1)
+        _ = b.add(2)
+        _ = b.add(3)
 
         assert(a.is_subset(b))
         assert(!b.is_subset(a))
@@ -131,18 +131,18 @@ tests {
 
     test "set::is_disjoint" {
         let a = Set.new()
-        a.add(1)
-        a.add(2)
+        _ = a.add(1)
+        _ = a.add(2)
 
         let b = Set.new()
-        b.add(3)
-        b.add(4)
+        _ = b.add(3)
+        _ = b.add(4)
 
         assert(a.is_disjoint(b))
 
         let c = Set.new()
-        c.add(2)
-        c.add(3)
+        _ = c.add(2)
+        _ = c.add(3)
 
         assert(!a.is_disjoint(c))
     }

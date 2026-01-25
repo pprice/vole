@@ -62,9 +62,9 @@ tests "manual iterator basics" {
     test "counter can be iterated manually" {
         let iter = count_to(3)
         // Consume all values
-        iter.next()  // 0
-        iter.next()  // 1
-        iter.next()  // 2
+        _ = iter.next()  // 0
+        _ = iter.next()  // 1
+        _ = iter.next()  // 2
         // Fourth call should return Done
         let result = iter.next()
         match result {
@@ -75,9 +75,9 @@ tests "manual iterator basics" {
 
     test "range iterator returns Done when exhausted" {
         let iter = range(5, 8)
-        iter.next()  // 5
-        iter.next()  // 6
-        iter.next()  // 7
+        _ = iter.next()  // 5
+        _ = iter.next()  // 6
+        _ = iter.next()  // 7
         // Should be done now
         let result = iter.next()
         match result {

@@ -156,7 +156,7 @@ class BankAccount {
         // Static utility method
         func transfer(from: BankAccount, to: BankAccount, amount: i64) -> bool {
             if from.balance >= amount {
-                from.withdraw(amount)
+                _ = from.withdraw(amount)
                 to.deposit(amount)
                 return true
             }
@@ -725,8 +725,8 @@ tests {
         let checking = BankAccount.with_initial_deposit(500)
         let investment = BankAccount.empty()
 
-        BankAccount.transfer(savings, investment, 200)
-        BankAccount.transfer(checking, investment, 100)
+        _ = BankAccount.transfer(savings, investment, 200)
+        _ = BankAccount.transfer(checking, investment, 100)
 
         assert(savings.get_balance() == 800)
         assert(checking.get_balance() == 400)

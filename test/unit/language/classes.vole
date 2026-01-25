@@ -63,8 +63,8 @@ tests "classes" {
     test "multiple instances" {
         let c1 = Counter { value: 10 }
         let c2 = Counter { value: 100 }
-        c1.increment()
-        c2.increment()
+        _ = c1.increment()
+        _ = c2.increment()
         assert(c1.get() == 11)
         assert(c2.get() == 101)
     }
