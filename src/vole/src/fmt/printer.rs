@@ -639,6 +639,7 @@ fn print_assign_target<'a>(
 ) -> DocBuilder<'a, Arena<'a>> {
     match target {
         AssignTarget::Variable(sym) => arena.text(interner.resolve(*sym).to_string()),
+        AssignTarget::Discard => arena.text("_"),
         AssignTarget::Index { object, index } => print_expr(arena, object, interner)
             .append(arena.text("["))
             .append(print_expr(arena, index, interner))

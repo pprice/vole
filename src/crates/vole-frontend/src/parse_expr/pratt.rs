@@ -36,7 +36,13 @@ impl<'src> Parser<'src> {
                     let span = left.span.merge(value.span);
 
                     let target = match left.kind {
-                        ExprKind::Identifier(sym) => AssignTarget::Variable(sym),
+                        ExprKind::Identifier(sym) => {
+                            if self.interner.resolve(sym) == "_" {
+                                AssignTarget::Discard
+                            } else {
+                                AssignTarget::Variable(sym)
+                            }
+                        }
                         ExprKind::FieldAccess(fa) => AssignTarget::Field {
                             object: Box::new(fa.object),
                             field: fa.field,

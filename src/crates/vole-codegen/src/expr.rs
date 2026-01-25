@@ -305,6 +305,17 @@ impl Cg<'_, '_, '_> {
     /// Compile an assignment expression
     fn assign(&mut self, assign: &vole_frontend::AssignExpr) -> Result<CompiledValue, String> {
         match &assign.target {
+            AssignTarget::Discard => {
+                // Discard pattern: _ = expr
+                // Compile the expression for side effects, discard result
+                let _value = self.expr(&assign.value)?;
+                // Return a void value
+                Ok(CompiledValue {
+                    value: self.builder.ins().iconst(types::I64, 0),
+                    ty: types::I64,
+                    type_id: TypeId::VOID,
+                })
+            }
             AssignTarget::Variable(sym) => {
                 let mut value = self.expr(&assign.value)?;
 

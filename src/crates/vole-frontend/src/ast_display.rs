@@ -536,6 +536,7 @@ impl<'a> AstPrinter<'a> {
                 self.write_indent(out);
                 let target_str = match &a.target {
                     AssignTarget::Variable(sym) => self.interner.resolve(*sym).to_string(),
+                    AssignTarget::Discard => "_".to_string(),
                     AssignTarget::Index { .. } => "<index>".to_string(),
                     AssignTarget::Field { field, .. } => {
                         format!("<field>.{}", self.interner.resolve(*field))
@@ -555,6 +556,7 @@ impl<'a> AstPrinter<'a> {
                 };
                 let target_str = match &c.target {
                     AssignTarget::Variable(sym) => self.interner.resolve(*sym).to_string(),
+                    AssignTarget::Discard => "_".to_string(),
                     AssignTarget::Index { .. } => "<index>".to_string(),
                     AssignTarget::Field { field, .. } => {
                         format!("<field>.{}", self.interner.resolve(*field))

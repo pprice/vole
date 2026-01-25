@@ -485,6 +485,11 @@ impl Cg<'_, '_, '_> {
         compound: &CompoundAssignExpr,
     ) -> Result<CompiledValue, String> {
         match &compound.target {
+            AssignTarget::Discard => {
+                // Compound assignment to discard doesn't make sense
+                // Sema should catch this, but handle it gracefully
+                Err("cannot use compound assignment with discard pattern".to_string())
+            }
             AssignTarget::Variable(sym) => self.compound_assign_var(*sym, compound),
             AssignTarget::Index { object, index } => {
                 self.compound_assign_index(object, index, compound)

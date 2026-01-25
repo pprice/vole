@@ -691,6 +691,8 @@ pub struct AssignExpr {
 pub enum AssignTarget {
     /// Simple variable: x
     Variable(Symbol),
+    /// Discard pattern: _ = expr
+    Discard,
     /// Array index: arr[i]
     Index { object: Box<Expr>, index: Box<Expr> },
     /// Field access: obj.field

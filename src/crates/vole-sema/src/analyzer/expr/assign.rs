@@ -11,6 +11,12 @@ impl Analyzer {
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
         // First, determine the expected type from the target (bidirectional type checking)
         let (target_ty_id, is_mutable, target_valid) = match &assign.target {
+            AssignTarget::Discard => {
+                // Discard pattern: _ = expr
+                // Just type-check the RHS for errors, then return VOID
+                let _value_ty_id = self.check_expr(&assign.value, interner)?;
+                return Ok(ArenaTypeId::VOID);
+            }
             AssignTarget::Variable(sym) => {
                 if let Some(var) = self.scope.get(*sym) {
                     (var.ty, var.mutable, true)
@@ -212,6 +218,17 @@ impl Analyzer {
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
         // Get target type and check mutability
         let target_type_id = match &compound.target {
+            AssignTarget::Discard => {
+                // Compound assignment to discard is invalid - you can't read from _
+                self.add_error(
+                    SemanticError::UndefinedVariable {
+                        name: "_".to_string(),
+                        span: expr.span.into(),
+                    },
+                    expr.span,
+                );
+                return Ok(ArenaTypeId::INVALID);
+            }
             AssignTarget::Variable(sym) => {
                 if let Some(var) = self.scope.get(*sym) {
                     let is_mutable = var.mutable;
