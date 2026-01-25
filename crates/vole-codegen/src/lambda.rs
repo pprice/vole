@@ -92,8 +92,8 @@ impl Cg<'_, '_, '_> {
         }
         sig.returns.push(AbiParam::new(return_type));
 
-        let (name_id, func_key) = self.funcs().intern_lambda_name(lambda_id);
-        let lambda_name = self.funcs().name_table_rc().borrow().display(name_id);
+        let func_key = self.funcs().intern_lambda(lambda_id);
+        let lambda_name = self.funcs().display(func_key);
         let func_id = self
             .jit_module()
             .declare_function(&lambda_name, cranelift_module::Linkage::Local, &sig)
@@ -186,8 +186,8 @@ impl Cg<'_, '_, '_> {
         }
         sig.returns.push(AbiParam::new(return_type));
 
-        let (name_id, func_key) = self.funcs().intern_lambda_name(lambda_id);
-        let lambda_name = self.funcs().name_table_rc().borrow().display(name_id);
+        let func_key = self.funcs().intern_lambda(lambda_id);
+        let lambda_name = self.funcs().display(func_key);
         let func_id = self
             .jit_module()
             .declare_function(&lambda_name, cranelift_module::Linkage::Local, &sig)
