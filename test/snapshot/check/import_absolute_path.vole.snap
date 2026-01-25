@@ -1,0 +1,11 @@
+[stdout]
+
+[stderr]
+  x [E2066]: module not found: /etc/passwd
+   ,-[<path>/import_absolute_path.vole:2:12]
+ 1 | // Test that absolute imports are rejected
+ 2 | let evil = import "/etc/passwd"
+   :            ^^^^^^^^^^|^^^^^^^^^
+   :                      `-- import here
+   `----
+  help: absolute imports not allowed: /etc/passwd

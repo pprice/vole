@@ -38,6 +38,7 @@ use crate::{
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::rc::Rc;
 use vole_frontend::*;
 use vole_identity::{self, MethodId, ModuleId, NameId, NameTable, Namer, Resolver, TypeDefId};
@@ -259,7 +260,7 @@ pub struct Analyzer {
     /// Maps expression node IDs to their interned type handles for O(1) equality.
     expr_types: FxHashMap<NodeId, ArenaTypeId>,
     /// Type check results for `is` expressions and type patterns (for codegen)
-    /// Maps NodeId → IsCheckResult to eliminate runtime type lookups
+    /// Maps NodeId -> IsCheckResult to eliminate runtime type lookups
     is_check_results: FxHashMap<NodeId, IsCheckResult>,
     /// Resolved method calls for codegen
     pub method_resolutions: MethodResolutions,
@@ -297,7 +298,7 @@ pub struct Analyzer {
     /// Used for scoped functions in test blocks which are compiled as closures.
     scoped_function_types: FxHashMap<Span, ArenaTypeId>,
     /// Declared variable types for let statements with explicit type annotations.
-    /// Maps init expression NodeId → declared TypeId for codegen to use.
+    /// Maps init expression NodeId -> declared TypeId for codegen to use.
     declared_var_types: FxHashMap<NodeId, ArenaTypeId>,
     /// Current module being analyzed (for proper NameId registration)
     current_module: ModuleId,
@@ -310,6 +311,10 @@ pub struct Analyzer {
     /// Shared via Rc<RefCell> so sub-analyzers use the same db, making TypeIds
     /// valid across all analyzers and eliminating clone/merge operations.
     pub db: Rc<RefCell<CompilationDb>>,
+    /// Current file path being analyzed (for relative imports).
+    /// This is set from the file path passed to Analyzer::new() and updated
+    /// when analyzing imported modules.
+    current_file_path: Option<PathBuf>,
 }
 
 /// Result of looking up a method on a type via EntityRegistry
@@ -319,10 +324,22 @@ pub struct MethodLookup {
 }
 
 impl Analyzer {
-    pub fn new(_file: &str, _source: &str) -> Self {
+    pub fn new(file: &str, _source: &str) -> Self {
         // Create the shared CompilationDb
         let db = Rc::new(RefCell::new(CompilationDb::new()));
         let main_module = db.borrow().main_module();
+
+        // Determine current file path and project root
+        let file_path = std::path::Path::new(file);
+        let current_file_path = file_path.canonicalize().ok();
+        let project_root = current_file_path
+            .as_ref()
+            .map(|p| ModuleLoader::detect_project_root(p));
+
+        let mut module_loader = ModuleLoader::new();
+        if let Some(root) = project_root {
+            module_loader.set_project_root(root);
+        }
 
         let mut analyzer = Self {
             scope: Scope::new(),
@@ -343,7 +360,7 @@ impl Analyzer {
             expr_types: FxHashMap::default(),
             is_check_results: FxHashMap::default(),
             method_resolutions: MethodResolutions::new(),
-            module_loader: ModuleLoader::new(),
+            module_loader,
             module_type_ids: FxHashMap::default(),
             module_programs: FxHashMap::default(),
             module_expr_types: FxHashMap::default(),
@@ -361,6 +378,7 @@ impl Analyzer {
             type_param_stack: TypeParamScopeStack::new(),
             module_cache: None,
             db,
+            current_file_path,
         };
 
         // Register built-in interfaces and implementations
@@ -374,10 +392,22 @@ impl Analyzer {
     /// The cache is shared across multiple Analyzer instances to avoid
     /// re-analyzing the same modules (prelude, stdlib, user imports).
     /// The analyzer uses the CompilationDb from the cache to ensure TypeIds remain valid.
-    pub fn with_cache(_file: &str, _source: &str, cache: Rc<RefCell<ModuleCache>>) -> Self {
+    pub fn with_cache(file: &str, _source: &str, cache: Rc<RefCell<ModuleCache>>) -> Self {
         // Get the shared db from the cache BEFORE borrowing cache again
         let shared_db = cache.borrow().db();
         let main_module = shared_db.borrow().main_module();
+
+        // Determine current file path and project root
+        let file_path = std::path::Path::new(file);
+        let current_file_path = file_path.canonicalize().ok();
+        let project_root = current_file_path
+            .as_ref()
+            .map(|p| ModuleLoader::detect_project_root(p));
+
+        let mut module_loader = ModuleLoader::new();
+        if let Some(root) = project_root {
+            module_loader.set_project_root(root);
+        }
 
         let mut analyzer = Self {
             scope: Scope::new(),
@@ -398,7 +428,7 @@ impl Analyzer {
             expr_types: FxHashMap::default(),
             is_check_results: FxHashMap::default(),
             method_resolutions: MethodResolutions::new(),
-            module_loader: ModuleLoader::new(),
+            module_loader,
             module_type_ids: FxHashMap::default(),
             module_programs: FxHashMap::default(),
             module_expr_types: FxHashMap::default(),
@@ -416,6 +446,7 @@ impl Analyzer {
             type_param_stack: TypeParamScopeStack::new(),
             module_cache: Some(cache),
             db: shared_db,
+            current_file_path,
         };
 
         // Register built-in interfaces and implementations
@@ -2765,19 +2796,54 @@ impl Analyzer {
             return Ok(type_id);
         }
 
-        // Load the module
-        let module_info = match self.module_loader.load(import_path) {
-            Ok(info) => info,
-            Err(e) => {
-                self.add_error(
-                    SemanticError::ModuleNotFound {
-                        path: import_path.to_string(),
-                        message: e.to_string(),
-                        span: span.into(),
-                    },
-                    span,
-                );
-                return Err(());
+        // Load the module - use load_relative for relative imports
+        let is_relative = import_path.starts_with("./") || import_path.starts_with("../");
+        let module_info = if is_relative {
+            // Relative import requires current file context
+            match &self.current_file_path {
+                Some(current_path) => {
+                    match self.module_loader.load_relative(import_path, current_path) {
+                        Ok(info) => info,
+                        Err(e) => {
+                            self.add_error(
+                                SemanticError::ModuleNotFound {
+                                    path: import_path.to_string(),
+                                    message: e.to_string(),
+                                    span: span.into(),
+                                },
+                                span,
+                            );
+                            return Err(());
+                        }
+                    }
+                }
+                None => {
+                    self.add_error(
+                        SemanticError::ModuleNotFound {
+                            path: import_path.to_string(),
+                            message: "relative imports require a source file context".to_string(),
+                            span: span.into(),
+                        },
+                        span,
+                    );
+                    return Err(());
+                }
+            }
+        } else {
+            // Standard library or other non-relative import
+            match self.module_loader.load(import_path) {
+                Ok(info) => info,
+                Err(e) => {
+                    self.add_error(
+                        SemanticError::ModuleNotFound {
+                            path: import_path.to_string(),
+                            message: e.to_string(),
+                            span: span.into(),
+                        },
+                        span,
+                    );
+                    return Err(());
+                }
             }
         };
 
@@ -2987,6 +3053,7 @@ impl Analyzer {
             type_param_stack: TypeParamScopeStack::new(),
             module_cache: None,
             db: Rc::clone(&self.db), // Share the compilation db
+            current_file_path: self.current_file_path.clone(), // Inherit file context
         }
     }
 }

@@ -1,0 +1,14 @@
+// Test importing from parent directory
+
+// Import utils from parent directory
+let utils = import "../utils"
+
+tests {
+    test "import from parent directory constant" {
+        assert(utils.VERSION == 42)
+    }
+
+    test "import from parent directory function" {
+        assert(utils.add(10, 20) == 30)
+    }
+}

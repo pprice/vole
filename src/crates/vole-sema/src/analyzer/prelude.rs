@@ -153,6 +153,7 @@ impl Analyzer {
             type_param_stack: TypeParamScopeStack::new(),
             module_cache: None,      // Sub-analyzers don't need the cache
             db: Rc::clone(&self.db), // Share the compilation db
+            current_file_path: None, // Prelude doesn't need relative imports
         };
 
         // Analyze the prelude file

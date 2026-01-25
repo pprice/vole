@@ -22,5 +22,8 @@ miette = { version = "7.4", features = ["fancy"] }
 # Tracing/observability
 tracing = "0.1"
 
+[dev-dependencies]
+tempfile = "3"
+
 [lints]
 workspace = true

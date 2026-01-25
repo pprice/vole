@@ -1,0 +1,7 @@
+// A nested module for testing relative imports from subdirectories
+
+let NESTED_VALUE = 100
+
+func square(x: i64) -> i64 {
+    return x * x
+}

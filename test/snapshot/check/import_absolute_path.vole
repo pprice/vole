@@ -1,0 +1,2 @@
+// Test that absolute imports are rejected
+let evil = import "/etc/passwd"
