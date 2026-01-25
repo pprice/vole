@@ -28,7 +28,7 @@ snap:
 
 # Run snapshot tests in release mode
 snap-release:
-    cargo run --release --bin vole-snap -- test test/snapshot/
+    cargo run --release -p vole-snap -- test test/snapshot/
 
 # Run vole unit tests in debug mode (failures only)
 unit:
