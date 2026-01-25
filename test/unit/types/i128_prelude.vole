@@ -1,0 +1,108 @@
+// Test i128 prelude methods (Hashable, Stringable, Default, Zero, One, Bounded)
+// NOTE: Equatable and Comparable tests are skipped because Self type resolution
+// for primitive types doesn't work correctly yet (pre-existing issue).
+
+tests "i128 Stringable" {
+    test "i128 to_string positive" {
+        let x: i128 = 42
+        assert(x.to_string() == "42")
+    }
+
+    test "i128 to_string negative" {
+        let x: i128 = -123
+        assert(x.to_string() == "-123")
+    }
+
+    test "i128 to_string zero" {
+        let x: i128 = 0
+        assert(x.to_string() == "0")
+    }
+
+    test "i128 to_string large positive" {
+        let x: i128 = 9223372036854775807
+        assert(x.to_string() == "9223372036854775807")
+    }
+
+    test "i128 to_string large negative" {
+        let x: i128 = -9223372036854775807
+        assert(x.to_string() == "-9223372036854775807")
+    }
+}
+
+tests "i128 Hashable" {
+    test "i128 hash consistency" {
+        let a: i128 = 42
+        let b: i128 = 42
+        assert(a.hash() == b.hash())
+    }
+
+    test "i128 hash different values produce different hashes" {
+        let a: i128 = 1
+        let b: i128 = 2
+        assert(a.hash() != b.hash())
+    }
+
+    test "i128 hash zero" {
+        let x: i128 = 0
+        let h = x.hash()
+        // Hash of 0 should be non-zero (good mixing)
+        assert(h != 0)
+    }
+
+    test "i128 hash negative" {
+        let a: i128 = -1
+        let b: i128 = 1
+        assert(a.hash() != b.hash())
+    }
+}
+
+tests "i128 Default" {
+    test "i128 default_value" {
+        let x = i128.default_value()
+        assert(x == 0)
+    }
+}
+
+tests "i128 Zero" {
+    test "i128 zero" {
+        let x = i128.zero()
+        assert(x == 0)
+    }
+}
+
+tests "i128 One" {
+    test "i128 one" {
+        let x = i128.one()
+        assert(x == 1)
+    }
+}
+
+tests "i128 Bounded" {
+    test "i128 max_value exists" {
+        let max = i128.max_value()
+        // max_value should be positive and larger than i64::MAX
+        assert(max > 9223372036854775807)
+    }
+
+    test "i128 min_value exists" {
+        let min = i128.min_value()
+        // min_value should be negative and smaller than i64::MIN
+        assert(min < -9223372036854775807)
+    }
+
+    test "i128 max is greater than min" {
+        let max = i128.max_value()
+        let min = i128.min_value()
+        assert(max > min)
+    }
+
+    test "i128 max_value string representation" {
+        let max = i128.max_value()
+        assert(max.to_string() == "170141183460469231731687303715884105727")
+    }
+
+    test "i128 min_value string representation" {
+        let min = i128.min_value()
+        assert(min.to_string() == "-170141183460469231731687303715884105728")
+    }
+}

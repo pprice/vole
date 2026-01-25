@@ -118,6 +118,10 @@ impl JitContext {
         let mut flag_builder = settings::builder();
         flag_builder.set("use_colocated_libcalls", "false").unwrap();
         flag_builder.set("is_pic", "false").unwrap();
+        // Enable LLVM ABI extensions for i128 support in function signatures
+        flag_builder
+            .set("enable_llvm_abi_extensions", "true")
+            .unwrap();
 
         // Apply release mode settings
         if options.release {

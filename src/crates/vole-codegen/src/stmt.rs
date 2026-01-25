@@ -13,7 +13,7 @@ use super::context::Cg;
 use super::structs::{convert_to_i64_for_storage, get_field_slot_and_type_id_cg};
 use super::types::{
     CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET,
-    fallible_error_tag_by_id, tuple_layout_id, type_id_to_cranelift,
+    convert_to_type, fallible_error_tag_by_id, tuple_layout_id, type_id_to_cranelift,
 };
 
 impl Cg<'_, '_, '_> {
@@ -249,7 +249,17 @@ impl Cg<'_, '_, '_> {
                         self.builder.ins().return_(&[wrapped.value]);
                     } else {
                         // Non-fallible function, return value directly
-                        self.builder.ins().return_(&[compiled.value]);
+                        // Convert to return type if needed (e.g., i64 -> i128)
+                        // Access arena via env to avoid borrow conflict with builder
+                        let return_value = if let Some(ret_type_id) = return_type_id {
+                            let arena = self.env.analyzed.type_arena();
+                            let ptr_type = self.ptr_type();
+                            let target_ty = type_id_to_cranelift(ret_type_id, arena, ptr_type);
+                            convert_to_type(self.builder, compiled, target_ty, arena)
+                        } else {
+                            compiled.value
+                        };
+                        self.builder.ins().return_(&[return_value]);
                     }
                 } else {
                     self.builder.ins().return_(&[]);

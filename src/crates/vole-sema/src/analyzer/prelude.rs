@@ -34,6 +34,7 @@ impl Analyzer {
         for path in [
             "std:prelude/string",
             "std:prelude/i64",
+            "std:prelude/i128",
             "std:prelude/i32",
             "std:prelude/f64",
             "std:prelude/f32",

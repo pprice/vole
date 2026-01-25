@@ -637,7 +637,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Create an integer constant with a specific Vole type
     pub fn int_const(&mut self, n: i64, type_id: TypeId) -> CompiledValue {
         let ty = self.cranelift_type(type_id);
-        let value = self.builder.ins().iconst(ty, n);
+        // Cranelift's iconst doesn't support I128 directly - we need to create
+        // an i64 constant and sign-extend it to i128
+        let value = if ty == types::I128 {
+            let i64_val = self.builder.ins().iconst(types::I64, n);
+            self.builder.ins().sextend(types::I128, i64_val)
+        } else {
+            self.builder.ins().iconst(ty, n)
+        };
         CompiledValue { value, ty, type_id }
     }
 

@@ -283,6 +283,40 @@ pub fn module() -> NativeModule {
         },
     );
 
+    // i128 functions
+    m.register(
+        "i128_equals",
+        i128_equals as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I128, NativeType::I128],
+            return_type: NativeType::Bool,
+        },
+    );
+    m.register(
+        "i128_compare",
+        i128_compare as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I128, NativeType::I128],
+            return_type: NativeType::I32,
+        },
+    );
+    m.register(
+        "i128_to_string",
+        i128_to_string as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I128],
+            return_type: NativeType::String,
+        },
+    );
+    m.register(
+        "i128_hash",
+        i128_hash as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I128],
+            return_type: NativeType::I64,
+        },
+    );
+
     // f32 functions
     m.register(
         "f32_equals",
@@ -859,6 +893,43 @@ pub extern "C" fn u64_compare(a: u64, b: u64) -> i32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn u64_hash(n: u64) -> i64 {
     hash_bits(n)
+}
+
+// =============================================================================
+// i128 functions
+// =============================================================================
+
+/// Check if two i128 values are equal
+#[unsafe(no_mangle)]
+pub extern "C" fn i128_equals(a: i128, b: i128) -> i8 {
+    if a == b { 1 } else { 0 }
+}
+
+/// Compare two i128 values, returns -1, 0, or 1
+#[unsafe(no_mangle)]
+pub extern "C" fn i128_compare(a: i128, b: i128) -> i32 {
+    match a.cmp(&b) {
+        std::cmp::Ordering::Less => -1,
+        std::cmp::Ordering::Equal => 0,
+        std::cmp::Ordering::Greater => 1,
+    }
+}
+
+/// Convert an i128 to a string
+#[unsafe(no_mangle)]
+pub extern "C" fn i128_to_string(n: i128) -> *const RcString {
+    RcString::new(&n.to_string())
+}
+
+/// Hash an i128 value using Thomas Wang's hash (hashes both halves and combines)
+#[unsafe(no_mangle)]
+pub extern "C" fn i128_hash(n: i128) -> i64 {
+    let low = n as u64;
+    let high = (n >> 64) as u64;
+    // Rotate high hash to avoid XOR cancellation when low == high
+    let low_hash = hash_bits(low);
+    let high_hash = hash_bits(high).rotate_left(31);
+    low_hash ^ high_hash
 }
 
 // =============================================================================

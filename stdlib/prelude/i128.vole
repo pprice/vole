@@ -1,0 +1,64 @@
+// stdlib/prelude/i128.vole
+
+implement Equatable for i128 {
+    external("std:intrinsics") {
+        func "i128_equals" as equals(other: Self) -> bool
+    }
+}
+
+implement Comparable for i128 {
+    external("std:intrinsics") {
+        func "i128_compare" as compare(other: Self) -> i32
+    }
+}
+
+implement Hashable for i128 {
+    external("std:intrinsics") {
+        func "i128_hash" as hash() -> i64
+    }
+}
+
+implement Stringable for i128 {
+    external("std:intrinsics") {
+        func "i128_to_string" as to_string() -> string
+    }
+}
+
+implement Default for i128 {
+    statics {
+        func default_value() -> i128 {
+            return 0
+        }
+    }
+}
+
+implement Zero for i128 {
+    statics {
+        func zero() -> i128 {
+            return 0
+        }
+    }
+}
+
+implement One for i128 {
+    statics {
+        func one() -> i128 {
+            return 1
+        }
+    }
+}
+
+implement Bounded for i128 {
+    statics {
+        func min_value() -> i128 {
+            // i128::MIN = -2^127 = -170141183460469231731687303715884105728
+            let one: i128 = 1
+            return -(one << 127)
+        }
+        func max_value() -> i128 {
+            // i128::MAX = 2^127 - 1 = 170141183460469231731687303715884105727
+            let one: i128 = 1
+            return (one << 127) - 1
+        }
+    }
+}
