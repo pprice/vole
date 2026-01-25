@@ -381,6 +381,22 @@ impl NameTable {
         id
     }
 
+    /// Read-only lookup for a name built from a prefix NameId plus a symbol segment.
+    /// Returns `None` if the name has not been interned.
+    pub fn name_id_with_symbol(
+        &self,
+        prefix: NameId,
+        symbol: Symbol,
+        interner: &Interner,
+    ) -> Option<NameId> {
+        let name = self.name(prefix);
+        let module = name.module;
+        let mut segments = name.segments.clone();
+        segments.push(interner.resolve(symbol).to_string());
+        let key = NameKey { module, segments };
+        self.name_lookup.get(&key).copied()
+    }
+
     pub fn display(&self, id: NameId) -> String {
         let name = self.name(id);
         let module = self.module_path(name.module);

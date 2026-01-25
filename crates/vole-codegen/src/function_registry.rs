@@ -184,6 +184,49 @@ impl FunctionRegistry {
         self.intern_name_id(name_id)
     }
 
+    /// Look up an existing qualified name. Panics if not found (sema bug).
+    /// Uses read-only access to NameTable.
+    pub fn lookup_qualified(
+        &mut self,
+        module: ModuleId,
+        segments: &[Symbol],
+        interner: &Interner,
+    ) -> FunctionKey {
+        let name_id = self
+            .names
+            .borrow()
+            .name_id(module, segments, interner)
+            .expect("function name should exist from sema");
+        self.intern_name_id(name_id)
+    }
+
+    /// Look up an existing raw qualified name. Panics if not found (sema bug).
+    /// Uses read-only access to NameTable.
+    pub fn lookup_raw_qualified(&mut self, module: ModuleId, segments: &[&str]) -> FunctionKey {
+        let name_id = self
+            .names
+            .borrow()
+            .name_id_raw(module, segments)
+            .expect("function name should exist from sema");
+        self.intern_name_id(name_id)
+    }
+
+    /// Look up an existing prefixed name. Panics if not found (sema bug).
+    /// Uses read-only access to NameTable.
+    pub fn lookup_with_prefix(
+        &mut self,
+        prefix: NameId,
+        segment: Symbol,
+        interner: &Interner,
+    ) -> FunctionKey {
+        let name_id = self
+            .names
+            .borrow()
+            .name_id_with_symbol(prefix, segment, interner)
+            .expect("prefixed name should exist from sema");
+        self.intern_name_id(name_id)
+    }
+
     pub fn intern_runtime(&mut self, runtime: RuntimeFn) -> FunctionKey {
         if let Some(key) = self.runtime_lookup.get(&runtime) {
             return *key;
