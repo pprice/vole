@@ -1,5 +1,5 @@
 [workspace]
-members = ["src/vole", "src/crates/*"]
+members = ["src/vole", "src/crates/*", "src/tools/*"]
 default-members = ["src/vole", "src/crates/*"]
 resolver = "2"
 

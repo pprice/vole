@@ -1,0 +1,13 @@
+[package]
+name = "vole-stress"
+version = "0.1.0"
+edition = "2024"
+description = "Generate synthetic Vole codebases for benchmarking"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+rand = "0.8"
+vole-frontend = { path = "../../crates/vole-frontend" }
+
+[lints]
+workspace = true
