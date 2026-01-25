@@ -569,6 +569,10 @@ impl Compiler<'_> {
                 });
 
             let sig = self.build_signature_for_method(semantic_method_id, SelfParam::Pointer);
+            // NOTE: Cannot use lookup_raw_qualified here because module class methods are
+            // interned by sema under the source module ID, but codegen uses main_module().
+            // This mismatch means the name won't be found. Keep intern_raw_qualified until
+            // the module ID is fixed to match sema's.
             let func_key = self
                 .func_registry
                 .intern_raw_qualified(func_module_id, &[type_name_str, method_name_str]);
@@ -634,6 +638,9 @@ impl Compiler<'_> {
                     });
 
                 let sig = self.build_signature_for_method(semantic_method_id, SelfParam::None);
+                // NOTE: Cannot use lookup_raw_qualified here because module class static methods
+                // are interned by sema under the source module ID, but codegen uses main_module().
+                // Keep intern_raw_qualified until module ID is fixed.
                 let func_key = self
                     .func_registry
                     .intern_raw_qualified(func_module_id, &[type_name_str, method_name_str]);

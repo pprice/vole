@@ -278,6 +278,9 @@ impl Compiler<'_> {
             };
 
             // Function key: TypeName::methodName
+            // NOTE: Cannot use lookup_raw_qualified here because module implement block statics
+            // are interned by sema under the source module ID, but codegen uses main_module()
+            // for non-primitive types. Keep intern_raw_qualified until module ID is fixed.
             let func_key = self.func_registry.intern_raw_qualified(
                 func_module,
                 &[type_name.as_str(), interner.resolve(method.name)],
@@ -373,6 +376,9 @@ impl Compiler<'_> {
             };
 
             // Function key: TypeName::methodName
+            // NOTE: Cannot use lookup_raw_qualified here because module implement block methods
+            // are interned by sema under the source module ID, but codegen uses main_module()
+            // for non-primitive types. Keep intern_raw_qualified until module ID is fixed.
             let func_key = self.func_registry.intern_raw_qualified(
                 func_module,
                 &[type_name.as_str(), interner.resolve(method.name)],
@@ -503,7 +509,7 @@ impl Compiler<'_> {
             } else {
                 let method_name_str = interner.resolve(method.name);
                 self.func_registry
-                    .intern_raw_qualified(func_module, &[type_name.as_str(), method_name_str])
+                    .lookup_raw_qualified(func_module, &[type_name.as_str(), method_name_str])
             };
             let display_name = self.func_registry.display(func_key);
             let jit_func_id = self.jit.declare_function(&display_name, &sig);
@@ -580,6 +586,9 @@ impl Compiler<'_> {
                 };
 
                 // Function key: TypeName::methodName
+                // NOTE: Cannot use lookup_raw_qualified here because module implement block
+                // statics are interned by sema under the source module ID, but codegen uses
+                // main_module() for non-primitive types. Keep intern_raw_qualified until fixed.
                 let func_key = self.func_registry.intern_raw_qualified(
                     func_module,
                     &[type_name.as_str(), interner.resolve(method.name)],
@@ -737,7 +746,7 @@ impl Compiler<'_> {
             let method_name_str = interner.resolve(method.name);
             let func_key = self
                 .func_registry
-                .intern_raw_qualified(func_module, &[type_name, method_name_str]);
+                .lookup_raw_qualified(func_module, &[type_name, method_name_str]);
             let jit_func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
                 format!(
                     "Internal error: static method {}::{} not declared",
@@ -838,7 +847,7 @@ impl Compiler<'_> {
         } else {
             let method_name_str = self.resolve_symbol(method.name);
             self.func_registry
-                .intern_raw_qualified(func_module, &[type_name, &method_name_str])
+                .lookup_raw_qualified(func_module, &[type_name, &method_name_str])
         };
         let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
             let display = self.func_registry.display(func_key);
@@ -1293,6 +1302,9 @@ impl Compiler<'_> {
         // Compile instance methods
         for method in &class.methods {
             let method_name_str = module_interner.resolve(method.name);
+            // NOTE: Cannot use lookup_raw_qualified here because module class methods are
+            // interned by sema under the source module ID, but codegen uses main_module().
+            // Keep intern_raw_qualified until module ID is fixed.
             let func_key = self
                 .func_registry
                 .intern_raw_qualified(func_module_id, &[type_name_str, method_name_str]);
@@ -1395,6 +1407,9 @@ impl Compiler<'_> {
                 };
 
                 let method_name_str = module_interner.resolve(method.name);
+                // NOTE: Cannot use lookup_raw_qualified here because module class static methods
+                // are interned by sema under the source module ID, but codegen uses main_module().
+                // Keep intern_raw_qualified until module ID is fixed.
                 let func_key = self
                     .func_registry
                     .intern_raw_qualified(func_module_id, &[type_name_str, method_name_str]);
