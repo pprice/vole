@@ -214,6 +214,7 @@ impl Cg<'_, '_, '_> {
             "print" | "println" => return self.call_println(call, callee_name == "println"),
             "print_char" => return self.call_print_char(call),
             "assert" => return self.call_assert(call, call_line),
+            "panic" => return self.call_panic(call, call_line),
             _ => {}
         }
 
@@ -825,6 +826,40 @@ impl Cg<'_, '_, '_> {
         self.builder.ins().jump(pass_block, &[]);
 
         self.switch_and_seal(pass_block);
+
+        Ok(self.void_value())
+    }
+
+    /// Compile panic
+    fn call_panic(&mut self, call: &CallExpr, call_line: u32) -> Result<CompiledValue, String> {
+        if call.args.is_empty() {
+            return Err(CodegenError::arg_count("panic", 1, 0).into());
+        }
+
+        // Get the message argument - must be a string
+        let msg = self.expr(&call.args[0])?;
+
+        // vole_panic(msg, file_ptr, file_len, line)
+        let (file_ptr, file_len) = self.source_file();
+        let ptr_type = self.ptr_type();
+        let file_ptr_val = self.builder.ins().iconst(ptr_type, file_ptr as i64);
+        let file_len_val = self.builder.ins().iconst(ptr_type, file_len as i64);
+        let line_val = self.builder.ins().iconst(types::I32, call_line as i64);
+
+        self.call_runtime_void(
+            RuntimeFn::Panic,
+            &[msg.value, file_ptr_val, file_len_val, line_val],
+        )?;
+
+        // Since panic never returns, we need to emit unreachable code
+        // to satisfy Cranelift's control flow requirements.
+        // The trap terminates this block, so we create a new unreachable block
+        // for any code that follows (which will never execute).
+        self.builder.ins().trap(TrapCode::unwrap_user(3));
+
+        // Create an unreachable block for code that follows the panic call
+        let unreachable_block = self.builder.create_block();
+        self.switch_and_seal(unreachable_block);
 
         Ok(self.void_value())
     }

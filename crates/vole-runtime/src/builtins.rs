@@ -1,13 +1,16 @@
 // src/runtime/builtins.rs
+// src/runtime/builtins.rs
 
 use crate::RcString;
 use crate::array::RcArray;
 use crate::value::TaggedValue;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::io::{self, Write};
 
 thread_local! {
     static STDOUT_CAPTURE: RefCell<Option<Box<dyn Write + Send>>> = const { RefCell::new(None) };
+    static STDERR_CAPTURE: RefCell<Option<Box<dyn Write + Send>>> = const { RefCell::new(None) };
+    static CAPTURE_MODE: Cell<bool> = const { Cell::new(false) };
 }
 
 /// Set a custom writer for stdout capture. Pass None to restore normal stdout.
@@ -15,6 +18,27 @@ pub fn set_stdout_capture(writer: Option<Box<dyn Write + Send>>) {
     STDOUT_CAPTURE.with(|cell| {
         *cell.borrow_mut() = writer;
     });
+}
+
+/// Set a custom writer for stderr capture. Pass None to restore normal stderr.
+pub fn set_stderr_capture(writer: Option<Box<dyn Write + Send>>) {
+    STDERR_CAPTURE.with(|cell| {
+        *cell.borrow_mut() = writer;
+    });
+}
+
+/// Set capture mode. When enabled, panic will not call exit().
+/// This is used for snapshot testing where we want to capture output
+/// without killing the test runner process.
+pub fn set_capture_mode(enabled: bool) {
+    CAPTURE_MODE.with(|cell| {
+        cell.set(enabled);
+    });
+}
+
+/// Check if capture mode is enabled.
+fn is_capture_mode() -> bool {
+    CAPTURE_MODE.with(|cell| cell.get())
 }
 
 /// Write to captured stdout or real stdout
@@ -36,6 +60,17 @@ fn writeln_stdout(s: &str) {
             let _ = writeln!(writer, "{}", s);
         } else {
             println!("{}", s);
+        }
+    });
+}
+
+fn writeln_stderr(s: &str) {
+    STDERR_CAPTURE.with(|cell| {
+        let mut borrow = cell.borrow_mut();
+        if let Some(ref mut writer) = *borrow {
+            let _ = writeln!(writer, "{}", s);
+        } else {
+            eprintln!("{}", s);
         }
     });
 }
@@ -197,6 +232,47 @@ pub extern "C" fn vole_flush() {
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_print_char(c: u8) {
     write_stdout(&(c as char).to_string());
+}
+
+/// Panic with a message - prints to stderr and exits with code 1
+/// In capture mode (for snapshot testing), it uses longjmp to escape.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_panic(
+    msg: *const RcString,
+    file: *const u8,
+    file_len: usize,
+    line: u32,
+) -> ! {
+    let msg_str = unsafe { if msg.is_null() { "" } else { (*msg).as_str() } };
+
+    let file_str = unsafe {
+        if file.is_null() || file_len == 0 {
+            "<unknown>"
+        } else {
+            std::str::from_utf8_unchecked(std::slice::from_raw_parts(file, file_len))
+        }
+    };
+
+    writeln_stderr(&format!("panic: {}", msg_str));
+    writeln_stderr(&format!("  at {}:{}", file_str, line));
+
+    if is_capture_mode() {
+        // In capture mode, use longjmp to escape back to the test harness
+        // This reuses the assert jmp_buf mechanism
+        use crate::assert::{ASSERT_JMP_BUF, siglongjmp};
+        ASSERT_JMP_BUF.with(|jb| {
+            let buf = jb.get();
+            if !buf.is_null() {
+                unsafe {
+                    siglongjmp(buf, 2); // Use value 2 to distinguish from assert failure
+                }
+            }
+        });
+    }
+
+    // Not in capture mode or no jmp_buf set - exit process
+    std::process::exit(1);
 }
 
 // Array FFI functions

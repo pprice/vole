@@ -52,6 +52,7 @@ fn execute(path: &Path, release: bool) -> Result<(), String> {
         let mut jit = JitContext::with_options(options);
         {
             let mut compiler = Compiler::new(&mut jit, &analyzed);
+            compiler.set_source_file(&file_path);
             compiler
                 .compile_program(&analyzed.program)
                 .map_err(|e| format!("compilation error: {}", e))?;

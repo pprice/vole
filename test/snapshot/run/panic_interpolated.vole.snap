@@ -1,0 +1,5 @@
+[stdout]
+
+[stderr]
+panic: error code: 42
+  at <path>/panic_interpolated.vole:3

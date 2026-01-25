@@ -12,7 +12,10 @@ use crate::cli::ColorMode;
 use crate::codegen::{Compiler, JitContext};
 use crate::errors::{LexerError, render_to_stderr, render_to_writer};
 use crate::frontend::{AstPrinter, ParseError, Parser};
-use crate::runtime::set_stdout_capture;
+use crate::runtime::{
+    JmpBuf, call_setjmp, clear_test_jmp_buf, set_capture_mode, set_stderr_capture,
+    set_stdout_capture, set_test_jmp_buf,
+};
 use crate::sema::{Analyzer, ModuleCache, TypeError, TypeWarning};
 use crate::transforms;
 
@@ -405,6 +408,7 @@ pub fn run_captured<W: Write + Send + 'static>(
     let mut jit = JitContext::new();
     {
         let mut compiler = Compiler::new(&mut jit, &analyzed);
+        compiler.set_source_file(file_path);
         if let Err(e) = compiler.compile_program(&analyzed.program) {
             let _ = writeln!(stderr, "compilation error: {}", e);
             return Err(());
@@ -421,14 +425,30 @@ pub fn run_captured<W: Write + Send + 'static>(
         }
     };
 
-    // Set up stdout capture
+    // Set up stdout and stderr capture, and enable capture mode for panic
     set_stdout_capture(Some(Box::new(stdout)));
+    set_stderr_capture(Some(Box::new(stderr)));
+    set_capture_mode(true);
+
+    // Set up jmp_buf for panic recovery
+    let mut jmp_buf = JmpBuf::zeroed();
+    set_test_jmp_buf(&mut jmp_buf);
 
     let main: extern "C" fn() = unsafe { std::mem::transmute(fn_ptr) };
-    main();
 
-    // Restore normal stdout
+    unsafe {
+        if call_setjmp(&mut jmp_buf) == 0 {
+            // Normal execution path
+            main();
+        }
+        // If longjmp occurred (from panic), we just continue
+    }
+
+    // Restore normal stdout and stderr, disable capture mode
+    clear_test_jmp_buf();
     set_stdout_capture(None);
+    set_stderr_capture(None);
+    set_capture_mode(false);
 
     Ok(())
 }

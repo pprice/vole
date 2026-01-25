@@ -1,0 +1,5 @@
+func main() {
+    println("before panic")
+    panic("something went wrong!")
+    println("after panic")  // should never execute
+}

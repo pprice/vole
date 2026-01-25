@@ -1,0 +1,4 @@
+func main() {
+    let code = 42
+    panic("error code: {code}")
+}

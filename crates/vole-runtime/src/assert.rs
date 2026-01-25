@@ -32,11 +32,11 @@ unsafe extern "C" {
     fn sigsetjmp(buf: *mut JmpBuf, savemask: libc::c_int) -> libc::c_int;
 
     // siglongjmp jumps back to the sigsetjmp call point
-    fn siglongjmp(buf: *mut JmpBuf, val: libc::c_int) -> !;
+    pub(crate) fn siglongjmp(buf: *mut JmpBuf, val: libc::c_int) -> !;
 }
 
 thread_local! {
-    static ASSERT_JMP_BUF: Cell<*mut JmpBuf> = const { Cell::new(std::ptr::null_mut()) };
+    pub(crate) static ASSERT_JMP_BUF: Cell<*mut JmpBuf> = const { Cell::new(std::ptr::null_mut()) };
     static ASSERT_FAILURE: Cell<Option<AssertFailure>> = const { Cell::new(None) };
 }
 

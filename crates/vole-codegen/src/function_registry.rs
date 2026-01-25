@@ -57,6 +57,7 @@ runtime_fns! {
     ArrayI64ToString => "vole_array_i64_to_string",
     Flush => "vole_flush",
     AssertFail => "vole_assert_fail",
+    Panic => "vole_panic",
     ArrayNew => "vole_array_new",
     ArrayPush => "vole_array_push",
     ArrayGetValue => "vole_array_get_value",

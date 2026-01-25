@@ -17,6 +17,8 @@ pub use assert::{
     AssertFailure, JmpBuf, call_setjmp, clear_test_jmp_buf, set_test_jmp_buf, take_assert_failure,
     vole_assert_fail,
 };
+pub use builtins::set_capture_mode;
+pub use builtins::set_stderr_capture;
 pub use builtins::set_stdout_capture;
 pub use instance::RcInstance;
 pub use native_registry::{

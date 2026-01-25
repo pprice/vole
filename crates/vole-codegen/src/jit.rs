@@ -248,6 +248,10 @@ impl JitContext {
         let sig = self.create_signature(&[ptr_ty, types::I64, types::I32], None);
         self.import_function("vole_assert_fail", &sig);
 
+        // vole_panic(msg: *const RcString, file_ptr: *const u8, file_len: usize, line: u32)
+        let sig = self.create_signature(&[ptr_ty, ptr_ty, types::I64, types::I32], None);
+        self.import_function("vole_panic", &sig);
+
         // vole_array_new() -> *mut RcArray
         let sig = self.create_signature(&[], Some(ptr_ty));
         self.import_function("vole_array_new", &sig);
@@ -620,6 +624,12 @@ impl JitContext {
         builder.symbol(
             "vole_assert_fail",
             vole_runtime::assert::vole_assert_fail as *const u8,
+        );
+
+        // Panic function
+        builder.symbol(
+            "vole_panic",
+            vole_runtime::builtins::vole_panic as *const u8,
         );
 
         // Array functions

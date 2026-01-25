@@ -1,0 +1,6 @@
+[stdout]
+before panic
+
+[stderr]
+panic: something went wrong!
+  at <path>/panic_basic.vole:3
