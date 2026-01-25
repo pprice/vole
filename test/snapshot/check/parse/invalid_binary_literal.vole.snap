@@ -1,0 +1,9 @@
+[stdout]
+
+[stderr]
+  x [E0005]: invalid number literal
+   ,-[<path>/invalid_binary_literal.vole:1:9]
+ 1 | let x = 0b
+   :         ^|
+   :          `-- invalid number
+   `----

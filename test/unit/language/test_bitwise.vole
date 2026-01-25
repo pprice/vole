@@ -1,5 +1,4 @@
 // Bitwise operator tests
-// Note: Binary (0b) and hex (0x) literals are not supported, using decimal
 
 tests {
     test "bitwise AND" {

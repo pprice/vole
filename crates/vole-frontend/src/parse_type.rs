@@ -295,8 +295,22 @@ impl<'src> Parser<'src> {
         }
         self.advance(); // consume the integer literal
 
-        // Parse the integer value
-        token.lexeme.parse::<usize>().map_err(|_| {
+        // Parse the integer value (supports hex, binary, underscore separators)
+        let cleaned = token.lexeme.replace('_', "");
+        let result = if let Some(hex) = cleaned
+            .strip_prefix("0x")
+            .or_else(|| cleaned.strip_prefix("0X"))
+        {
+            usize::from_str_radix(hex, 16)
+        } else if let Some(bin) = cleaned
+            .strip_prefix("0b")
+            .or_else(|| cleaned.strip_prefix("0B"))
+        {
+            usize::from_str_radix(bin, 2)
+        } else {
+            cleaned.parse::<usize>()
+        };
+        result.map_err(|_| {
             ParseError::new(
                 ParserError::ExpectedExpression {
                     found: token.lexeme.clone(),

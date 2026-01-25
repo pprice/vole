@@ -344,7 +344,6 @@ impl<'src> Lexer<'src> {
     }
 
     /// Create an error token and collect an error for an invalid number literal.
-    #[allow(dead_code)] // Available for future use
     fn error_invalid_number(&mut self) -> Token {
         let span = Span::new_with_end(
             self.start,
@@ -466,10 +465,64 @@ impl<'src> Lexer<'src> {
     }
 
     /// Scan a number literal (integer or float)
+    ///
+    /// Supports:
+    /// - Decimal: `42`, `1_000_000`
+    /// - Hex: `0xFF`, `0xFF_FF`
+    /// - Binary: `0b1010`, `0b1111_0000`
+    /// - Float: `3.14`, `1_000.5`
+    /// - Scientific: `1e10`, `1.5e-3`, `2E+6`
+    /// - Underscores as separators in all formats
     fn number(&mut self) -> Token {
-        // Consume integer part
+        // The first digit has already been consumed by next_token().
+        // Check if it was '0' to detect hex/binary prefix.
+        let first_char = self.source.as_bytes()[self.start];
+
+        if first_char == b'0'
+            && let Some(prefix) = self.peek()
+        {
+            if prefix == 'x' || prefix == 'X' {
+                // Hex literal: 0x...
+                self.advance(); // consume 'x'/'X'
+                let mut has_digits = false;
+                while let Some(c) = self.peek() {
+                    if c.is_ascii_hexdigit() {
+                        has_digits = true;
+                        self.advance();
+                    } else if c == '_' {
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
+                if !has_digits {
+                    return self.error_invalid_number();
+                }
+                return self.make_token(TokenType::IntLiteral);
+            } else if prefix == 'b' || prefix == 'B' {
+                // Binary literal: 0b...
+                self.advance(); // consume 'b'/'B'
+                let mut has_digits = false;
+                while let Some(c) = self.peek() {
+                    if c == '0' || c == '1' {
+                        has_digits = true;
+                        self.advance();
+                    } else if c == '_' {
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
+                if !has_digits {
+                    return self.error_invalid_number();
+                }
+                return self.make_token(TokenType::IntLiteral);
+            }
+        }
+
+        // Decimal integer part (continue consuming digits and underscores)
         while let Some(c) = self.peek() {
-            if c.is_ascii_digit() {
+            if c.is_ascii_digit() || c == '_' {
                 self.advance();
             } else {
                 break;
@@ -485,7 +538,51 @@ impl<'src> Lexer<'src> {
             self.advance();
             // Consume the fractional part
             while let Some(c) = self.peek() {
-                if c.is_ascii_digit() {
+                if c.is_ascii_digit() || c == '_' {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+
+            // Check for scientific notation exponent on float
+            if let Some(e) = self.peek()
+                && (e == 'e' || e == 'E')
+            {
+                self.advance(); // consume 'e'/'E'
+                // Optional sign
+                if let Some(sign) = self.peek()
+                    && (sign == '+' || sign == '-')
+                {
+                    self.advance();
+                }
+                // Consume exponent digits
+                while let Some(c) = self.peek() {
+                    if c.is_ascii_digit() || c == '_' {
+                        self.advance();
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            return self.make_token(TokenType::FloatLiteral);
+        }
+
+        // Check for scientific notation on integer (makes it a float)
+        if let Some(e) = self.peek()
+            && (e == 'e' || e == 'E')
+        {
+            self.advance(); // consume 'e'/'E'
+            // Optional sign
+            if let Some(sign) = self.peek()
+                && (sign == '+' || sign == '-')
+            {
+                self.advance();
+            }
+            // Consume exponent digits
+            while let Some(c) = self.peek() {
+                if c.is_ascii_digit() || c == '_' {
                     self.advance();
                 } else {
                     break;
@@ -890,5 +987,170 @@ mod tests {
         let mut lexer = Lexer::new("class record");
         assert_eq!(lexer.next_token().ty, TokenType::KwClass);
         assert_eq!(lexer.next_token().ty, TokenType::KwRecord);
+    }
+
+    #[test]
+    fn lex_hex_literals() {
+        let mut lexer = Lexer::new("0xFF 0x1A2B 0X00 0xDEAD_BEEF");
+        let t1 = lexer.next_token();
+        assert_eq!(t1.ty, TokenType::IntLiteral);
+        assert_eq!(t1.lexeme, "0xFF");
+
+        let t2 = lexer.next_token();
+        assert_eq!(t2.ty, TokenType::IntLiteral);
+        assert_eq!(t2.lexeme, "0x1A2B");
+
+        let t3 = lexer.next_token();
+        assert_eq!(t3.ty, TokenType::IntLiteral);
+        assert_eq!(t3.lexeme, "0X00");
+
+        let t4 = lexer.next_token();
+        assert_eq!(t4.ty, TokenType::IntLiteral);
+        assert_eq!(t4.lexeme, "0xDEAD_BEEF");
+
+        assert_eq!(lexer.next_token().ty, TokenType::Eof);
+    }
+
+    #[test]
+    fn lex_binary_literals() {
+        let mut lexer = Lexer::new("0b1010 0B11110000 0b1111_0000");
+        let t1 = lexer.next_token();
+        assert_eq!(t1.ty, TokenType::IntLiteral);
+        assert_eq!(t1.lexeme, "0b1010");
+
+        let t2 = lexer.next_token();
+        assert_eq!(t2.ty, TokenType::IntLiteral);
+        assert_eq!(t2.lexeme, "0B11110000");
+
+        let t3 = lexer.next_token();
+        assert_eq!(t3.ty, TokenType::IntLiteral);
+        assert_eq!(t3.lexeme, "0b1111_0000");
+
+        assert_eq!(lexer.next_token().ty, TokenType::Eof);
+    }
+
+    #[test]
+    fn lex_underscore_separators() {
+        let mut lexer = Lexer::new("1_000_000 1_0 99_99");
+        let t1 = lexer.next_token();
+        assert_eq!(t1.ty, TokenType::IntLiteral);
+        assert_eq!(t1.lexeme, "1_000_000");
+
+        let t2 = lexer.next_token();
+        assert_eq!(t2.ty, TokenType::IntLiteral);
+        assert_eq!(t2.lexeme, "1_0");
+
+        let t3 = lexer.next_token();
+        assert_eq!(t3.ty, TokenType::IntLiteral);
+        assert_eq!(t3.lexeme, "99_99");
+
+        assert_eq!(lexer.next_token().ty, TokenType::Eof);
+    }
+
+    #[test]
+    fn lex_float_with_underscores() {
+        let mut lexer = Lexer::new("1_000.5 3.14_15");
+        let t1 = lexer.next_token();
+        assert_eq!(t1.ty, TokenType::FloatLiteral);
+        assert_eq!(t1.lexeme, "1_000.5");
+
+        let t2 = lexer.next_token();
+        assert_eq!(t2.ty, TokenType::FloatLiteral);
+        assert_eq!(t2.lexeme, "3.14_15");
+
+        assert_eq!(lexer.next_token().ty, TokenType::Eof);
+    }
+
+    #[test]
+    fn lex_scientific_notation() {
+        let mut lexer = Lexer::new("1e10 1.5e-3 2E+6 1e0");
+        let t1 = lexer.next_token();
+        assert_eq!(t1.ty, TokenType::FloatLiteral);
+        assert_eq!(t1.lexeme, "1e10");
+
+        let t2 = lexer.next_token();
+        assert_eq!(t2.ty, TokenType::FloatLiteral);
+        assert_eq!(t2.lexeme, "1.5e-3");
+
+        let t3 = lexer.next_token();
+        assert_eq!(t3.ty, TokenType::FloatLiteral);
+        assert_eq!(t3.lexeme, "2E+6");
+
+        let t4 = lexer.next_token();
+        assert_eq!(t4.ty, TokenType::FloatLiteral);
+        assert_eq!(t4.lexeme, "1e0");
+
+        assert_eq!(lexer.next_token().ty, TokenType::Eof);
+    }
+
+    #[test]
+    fn lex_scientific_notation_with_underscores() {
+        let mut lexer = Lexer::new("1_000e10 1.5_0e-3");
+        let t1 = lexer.next_token();
+        assert_eq!(t1.ty, TokenType::FloatLiteral);
+        assert_eq!(t1.lexeme, "1_000e10");
+
+        let t2 = lexer.next_token();
+        assert_eq!(t2.ty, TokenType::FloatLiteral);
+        assert_eq!(t2.lexeme, "1.5_0e-3");
+
+        assert_eq!(lexer.next_token().ty, TokenType::Eof);
+    }
+
+    #[test]
+    fn lex_invalid_hex_no_digits() {
+        let mut lexer = Lexer::new("0x");
+        let t = lexer.next_token();
+        assert_eq!(t.ty, TokenType::Error);
+        assert!(lexer.has_errors());
+        let errors = lexer.take_errors();
+        assert_eq!(errors.len(), 1);
+        assert!(matches!(&errors[0], LexerError::InvalidNumber { .. }));
+    }
+
+    #[test]
+    fn lex_invalid_binary_no_digits() {
+        let mut lexer = Lexer::new("0b");
+        let t = lexer.next_token();
+        assert_eq!(t.ty, TokenType::Error);
+        assert!(lexer.has_errors());
+        let errors = lexer.take_errors();
+        assert_eq!(errors.len(), 1);
+        assert!(matches!(&errors[0], LexerError::InvalidNumber { .. }));
+    }
+
+    #[test]
+    fn lex_hex_followed_by_operator() {
+        let mut lexer = Lexer::new("0xFF+1");
+        let t1 = lexer.next_token();
+        assert_eq!(t1.ty, TokenType::IntLiteral);
+        assert_eq!(t1.lexeme, "0xFF");
+        assert_eq!(lexer.next_token().ty, TokenType::Plus);
+        let t3 = lexer.next_token();
+        assert_eq!(t3.ty, TokenType::IntLiteral);
+        assert_eq!(t3.lexeme, "1");
+    }
+
+    #[test]
+    fn lex_binary_followed_by_operator() {
+        let mut lexer = Lexer::new("0b1010&0b1100");
+        let t1 = lexer.next_token();
+        assert_eq!(t1.ty, TokenType::IntLiteral);
+        assert_eq!(t1.lexeme, "0b1010");
+        assert_eq!(lexer.next_token().ty, TokenType::Ampersand);
+        let t3 = lexer.next_token();
+        assert_eq!(t3.ty, TokenType::IntLiteral);
+        assert_eq!(t3.lexeme, "0b1100");
+    }
+
+    #[test]
+    fn lex_zero_is_still_valid() {
+        let mut lexer = Lexer::new("0 00");
+        let t1 = lexer.next_token();
+        assert_eq!(t1.ty, TokenType::IntLiteral);
+        assert_eq!(t1.lexeme, "0");
+        let t2 = lexer.next_token();
+        assert_eq!(t2.ty, TokenType::IntLiteral);
+        assert_eq!(t2.lexeme, "00");
     }
 }

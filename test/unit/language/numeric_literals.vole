@@ -1,0 +1,91 @@
+// Tests for numeric literal formats:
+// hex, binary, scientific notation, and underscore separators
+
+tests {
+    test "hex literals" {
+        assert(0xFF == 255)
+        assert(0x00 == 0)
+        assert(0x1A2B == 6699)
+        assert(0xDEAD == 57005)
+        assert(0X10 == 16)
+    }
+
+    test "binary literals" {
+        assert(0b0 == 0)
+        assert(0b1 == 1)
+        assert(0b1010 == 10)
+        assert(0b11110000 == 240)
+        assert(0B1100 == 12)
+        assert(0b11111111 == 255)
+    }
+
+    test "underscore separators in integers" {
+        assert(1_000_000 == 1000000)
+        assert(1_0 == 10)
+        assert(99_99 == 9999)
+        assert(1_2_3 == 123)
+    }
+
+    test "underscore separators in hex" {
+        assert(0xFF_FF == 65535)
+        assert(0xDEAD_BEEF == 3735928559)
+        assert(0x00_FF == 255)
+    }
+
+    test "underscore separators in binary" {
+        assert(0b1111_0000 == 240)
+        assert(0b1010_1010 == 170)
+        assert(0b0000_0001 == 1)
+    }
+
+    test "scientific notation" {
+        assert(1e0 == 1.0)
+        assert(1e1 == 10.0)
+        assert(1e2 == 100.0)
+        assert(1.5e2 == 150.0)
+        assert(2.5e0 == 2.5)
+    }
+
+    test "scientific notation with signs" {
+        assert(1e+2 == 100.0)
+        assert(1e-1 == 0.1)
+        assert(1.5e-1 == 0.15)
+        assert(2E+3 == 2000.0)
+    }
+
+    test "hex in bitwise operations" {
+        // Using hex makes bitwise operations more readable
+        assert((0xFF & 0x0F) == 0x0F)
+        assert((0xF0 | 0x0F) == 0xFF)
+        assert((0xFF ^ 0x0F) == 0xF0)
+        assert((0x01 << 4) == 0x10)
+    }
+
+    test "binary in bitwise operations" {
+        // Using binary makes bit manipulation very clear
+        assert((0b1100 & 0b1010) == 0b1000)
+        assert((0b1100 | 0b1010) == 0b1110)
+        assert((0b1100 ^ 0b1010) == 0b0110)
+    }
+
+    test "mixed literal formats" {
+        // Mix decimal, hex, and binary in the same expression
+        assert(0xFF == 255)
+        assert(0b11111111 == 255)
+        assert(0xFF == 0b11111111)
+        assert(16 == 0x10)
+        assert(16 == 0b10000)
+    }
+
+    test "masking with hex literals" {
+        let value = 0xABCD
+
+        // Extract low byte
+        let low = value & 0xFF
+        assert(low == 0xCD)
+
+        // Extract high byte
+        let high = (value >> 8) & 0xFF
+        assert(high == 0xAB)
+    }
+}

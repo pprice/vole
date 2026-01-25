@@ -62,7 +62,7 @@ impl<'src> Parser<'src> {
         match token.ty {
             TokenType::IntLiteral => {
                 self.advance();
-                let value: i64 = token.lexeme.parse().map_err(|_| {
+                let value: i64 = Self::parse_int_literal(&token.lexeme).map_err(|_| {
                     ParseError::new(
                         ParserError::UnexpectedToken {
                             token: "invalid integer literal".to_string(),
@@ -79,7 +79,8 @@ impl<'src> Parser<'src> {
             }
             TokenType::FloatLiteral => {
                 self.advance();
-                let value: f64 = token.lexeme.parse().map_err(|_| {
+                let cleaned = token.lexeme.replace('_', "");
+                let value: f64 = cleaned.parse().map_err(|_| {
                     ParseError::new(
                         ParserError::UnexpectedToken {
                             token: "invalid float literal".to_string(),
@@ -471,7 +472,22 @@ impl<'src> Parser<'src> {
             ));
         }
         self.advance();
-        token.lexeme.parse::<usize>().map_err(|_| {
+        // Support hex, binary, and underscore-separated repeat counts
+        let cleaned = token.lexeme.replace('_', "");
+        let result = if let Some(hex) = cleaned
+            .strip_prefix("0x")
+            .or_else(|| cleaned.strip_prefix("0X"))
+        {
+            usize::from_str_radix(hex, 16)
+        } else if let Some(bin) = cleaned
+            .strip_prefix("0b")
+            .or_else(|| cleaned.strip_prefix("0B"))
+        {
+            usize::from_str_radix(bin, 2)
+        } else {
+            cleaned.parse::<usize>()
+        };
+        result.map_err(|_| {
             ParseError::new(
                 ParserError::UnexpectedToken {
                     token: "invalid repeat count (must be non-negative integer)".to_string(),
@@ -644,5 +660,23 @@ impl<'src> Parser<'src> {
             })),
             span: start_span.merge(end_span),
         })
+    }
+
+    /// Parse an integer literal string, handling hex (0x), binary (0b), and underscore separators.
+    pub(super) fn parse_int_literal(lexeme: &str) -> Result<i64, std::num::ParseIntError> {
+        let cleaned = lexeme.replace('_', "");
+        if let Some(hex) = cleaned
+            .strip_prefix("0x")
+            .or_else(|| cleaned.strip_prefix("0X"))
+        {
+            i64::from_str_radix(hex, 16)
+        } else if let Some(bin) = cleaned
+            .strip_prefix("0b")
+            .or_else(|| cleaned.strip_prefix("0B"))
+        {
+            i64::from_str_radix(bin, 2)
+        } else {
+            cleaned.parse::<i64>()
+        }
     }
 }
