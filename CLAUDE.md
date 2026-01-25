@@ -18,13 +18,15 @@ This project uses a CLI ticket system for task management. Run `tk help` when yo
 ### Workspace Structure
 
 ```
-crates/
-├── vole-identity/   # NameId, NameTable, entity IDs
-├── vole-frontend/   # lexer, parser, AST, interner
-├── vole-sema/       # type checking, module loading
-├── vole-runtime/    # builtins, values, instance
-├── vole-codegen/    # Cranelift JIT (isolated - heavy deps)
-src/                 # CLI, commands, binaries
+src/
+├── vole/            # CLI, commands, binaries
+├── crates/
+│   ├── vole-identity/   # NameId, NameTable, entity IDs
+│   ├── vole-frontend/   # lexer, parser, AST, interner
+│   ├── vole-sema/       # type checking, module loading
+│   ├── vole-runtime/    # builtins, values, instance
+│   └── vole-codegen/    # Cranelift JIT (isolated - heavy deps)
+└── tools/           # Development tools (vole-snap, vole-stress)
 ```
 
 ## Tools
