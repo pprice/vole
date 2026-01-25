@@ -40,6 +40,18 @@ pub struct QualifiedName {
     segments: Vec<String>,
 }
 
+impl QualifiedName {
+    /// Get the module this name belongs to.
+    pub fn module(&self) -> ModuleId {
+        self.module
+    }
+
+    /// Get the segments of this qualified name.
+    pub fn segments(&self) -> &[String] {
+        &self.segments
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct NameKey {
     module: ModuleId,

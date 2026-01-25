@@ -6,7 +6,7 @@ use crate::implement_registry::ExternalMethodInfo;
 use crate::type_arena::{TypeArena, TypeId};
 use std::collections::HashSet;
 use vole_frontend::Expr;
-use vole_identity::{MethodId, NameId, TypeDefId};
+use vole_identity::{MethodId, NameId, NameTable, TypeDefId};
 
 use super::EntityRegistry;
 
@@ -263,37 +263,73 @@ impl EntityRegistry {
     ///
     /// When a type implements an interface, the interface's default methods
     /// should be accessible via `find_method_on_type` on the implementing type.
-    /// This copies the method entries to the implementing type's methods_by_type map.
+    /// Creates new MethodDef entries with the implementing type's qualified name
+    /// (e.g., `MyRecord::greaterThan` instead of `Comparable::greaterThan`).
     pub fn register_interface_default_methods_on_implementing_type(
         &mut self,
         implementing_type_id: TypeDefId,
         interface_type_id: TypeDefId,
+        names: &mut NameTable,
     ) {
         // Collect interface default methods (methods with has_default=true)
-        let interface_methods: Vec<(NameId, MethodId)> = self.type_defs
-            [interface_type_id.index() as usize]
+        // that the implementing type doesn't already override.
+        let implementing_has_method = |name_id: NameId| -> bool {
+            self.methods_by_type
+                .get(&implementing_type_id)
+                .is_some_and(|methods| methods.contains_key(&name_id))
+        };
+
+        let interface_methods: Vec<MethodDef> = self.type_defs[interface_type_id.index() as usize]
             .methods
             .iter()
             .filter_map(|&method_id| {
                 let method = &self.method_defs[method_id.index() as usize];
-                if method.has_default {
-                    Some((method.name_id, method_id))
+                if method.has_default && !implementing_has_method(method.name_id) {
+                    Some(method.clone())
                 } else {
                     None
                 }
             })
             .collect();
 
-        // Register them on the implementing type (if not already defined)
-        let implementing_methods = self
-            .methods_by_type
-            .get_mut(&implementing_type_id)
-            .expect("implementing type must be registered");
+        // Build the implementing type's name segments for constructing full_name_ids
+        let impl_type_name_id = self.type_defs[implementing_type_id.index() as usize].name_id;
 
-        for (name_id, method_id) in interface_methods {
-            // Only add if the implementing type doesn't already have a method with this name
-            // (i.e., the implementing type may override the default)
-            implementing_methods.entry(name_id).or_insert(method_id);
+        // Register new MethodDefs with the implementing type's qualified name
+        for interface_method in interface_methods {
+            // Build full_name_id: e.g., MyRecord::greaterThan
+            let method_short_name = names
+                .last_segment_str(interface_method.name_id)
+                .expect("method name must have at least one segment");
+            let impl_name = names.name(impl_type_name_id);
+            let module = impl_name.module();
+            let mut segments: Vec<String> = impl_name.segments().to_vec();
+            segments.push(method_short_name);
+            let segment_refs: Vec<&str> = segments.iter().map(|s| s.as_str()).collect();
+            let full_name_id = names.intern_raw(module, &segment_refs);
+
+            let new_id = MethodId::new(self.method_defs.len() as u32);
+            self.method_defs.push(MethodDef {
+                id: new_id,
+                name_id: interface_method.name_id,
+                full_name_id,
+                defining_type: implementing_type_id,
+                signature_id: interface_method.signature_id,
+                has_default: interface_method.has_default,
+                is_static: interface_method.is_static,
+                external_binding: interface_method.external_binding,
+                method_type_params: interface_method.method_type_params.clone(),
+                required_params: interface_method.required_params,
+                param_defaults: interface_method.param_defaults.clone(),
+            });
+            self.method_by_full_name.insert(full_name_id, new_id);
+            self.methods_by_type
+                .get_mut(&implementing_type_id)
+                .expect("implementing type must be registered")
+                .insert(interface_method.name_id, new_id);
+            self.type_defs[implementing_type_id.index() as usize]
+                .methods
+                .push(new_id);
         }
     }
 

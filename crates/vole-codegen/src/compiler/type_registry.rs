@@ -206,11 +206,11 @@ impl Compiler<'_> {
                             });
                         let sig =
                             self.build_signature_for_method(semantic_method_id, SelfParam::Pointer);
-                        // NOTE: Cannot use full_name_id here because for interface default methods,
-                        // full_name_id refers to the interface's method (e.g., Comparable::greaterThan),
-                        // not the implementing class's method. We need the class-qualified name.
-                        let func_module_id = self.func_registry.main_module();
-                        let func_key = self.intern_func(func_module_id, &[class.name, method.name]);
+                        let method_def = self
+                            .analyzed
+                            .entity_registry()
+                            .get_method(semantic_method_id);
+                        let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
                         let display_name = self.func_registry.display(func_key);
                         let jit_func_id = self.jit.declare_function(&display_name, &sig);
                         self.func_registry.set_func_id(func_key, jit_func_id);
@@ -412,12 +412,11 @@ impl Compiler<'_> {
                             });
                         let sig =
                             self.build_signature_for_method(semantic_method_id, SelfParam::Pointer);
-                        // NOTE: Cannot use full_name_id here because for interface default methods,
-                        // full_name_id refers to the interface's method (e.g., Comparable::greaterThan),
-                        // not the implementing record's method. We need the record-qualified name.
-                        let func_module_id = self.func_registry.main_module();
-                        let func_key =
-                            self.intern_func(func_module_id, &[record.name, method.name]);
+                        let method_def = self
+                            .analyzed
+                            .entity_registry()
+                            .get_method(semantic_method_id);
+                        let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
                         let display_name = self.func_registry.display(func_key);
                         let jit_func_id = self.jit.declare_function(&display_name, &sig);
                         self.func_registry.set_func_id(func_key, jit_func_id);
