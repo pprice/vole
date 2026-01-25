@@ -182,6 +182,38 @@ pub struct AnalysisOutput {
     pub db: Rc<RefCell<CompilationDb>>,
 }
 
+/// Tracks return analysis results for a code path.
+///
+/// This struct collects information about return statements encountered during
+/// analysis of a block or function body, used to:
+/// - Infer return types when not declared
+/// - Check for missing returns in non-void functions
+/// - Validate return type consistency across branches
+#[derive(Default, Clone)]
+#[allow(dead_code)] // Infrastructure for return flow analysis (epic v-d409)
+pub(crate) struct ReturnInfo {
+    /// Whether this code path definitely returns or raises.
+    /// A path "definitely returns" if every control flow path ends in a
+    /// return/raise statement.
+    pub definitely_returns: bool,
+    /// Types from all return statements encountered on this path.
+    /// Used for return type inference and consistency checking.
+    pub return_types: Vec<ArenaTypeId>,
+}
+
+#[allow(dead_code)] // Infrastructure for return flow analysis (epic v-d409)
+impl ReturnInfo {
+    /// Merge another ReturnInfo into this one.
+    ///
+    /// This combines return types from both paths. The caller is responsible
+    /// for handling `definitely_returns` based on the control flow context
+    /// (e.g., for if/else both branches must return, for loops the merge
+    /// semantics differ).
+    pub fn merge(&mut self, other: ReturnInfo) {
+        self.return_types.extend(other.return_types);
+    }
+}
+
 /// Saved state when entering a function/method check context.
 /// Used by enter_function_context/exit_function_context for uniform save/restore.
 struct FunctionCheckContext {
