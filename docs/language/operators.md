@@ -165,12 +165,12 @@ if debug || verbose {
 Operate on individual bits:
 
 ```vole
-let a = 10  // binary: 1010
-let b = 12  // binary: 1100
+let a = 0b1010  // 10
+let b = 0b1100  // 12
 
-println(a & b)   // 8 (binary: 1000) - AND
-println(a | b)   // 14 (binary: 1110) - OR
-println(a ^ b)   // 6 (binary: 0110) - XOR
+println(a & b)   // 8 (0b1000) - AND
+println(a | b)   // 14 (0b1110) - OR
+println(a ^ b)   // 6 (0b0110) - XOR
 println(~a)      // inverts all bits
 ```
 
@@ -186,17 +186,17 @@ Common uses:
 
 ```vole
 // Check if bit is set
-let flags = 10  // binary: 1010
-let has_flag = (flags & 2) != 0  // true (bit 1 is set)
+let flags = 0b1010
+let has_flag = (flags & 0b0010) != 0  // true (bit 1 is set)
 
 // Set a bit
-let new_flags = flags | 1  // 11 (binary: 1011)
+let new_flags = flags | 0b0001  // 0b1011
 
 // Clear a bit
-let cleared = flags & ~2  // 8 (binary: 1000)
+let cleared = flags & ~0b0010  // 0b1000
 
 // Toggle a bit
-let toggled = flags ^ 2  // 8 (binary: 1000)
+let toggled = flags ^ 0b0010   // 0b1000
 ```
 
 ### Type Operators

@@ -24,6 +24,16 @@ string                  // "hello"
 nil                     // Absence of value
 Done                    // Iterator termination sentinel
 
+// Numeric literals
+42                      // Decimal integer (i32)
+0xFF                    // Hex integer
+0b1010                  // Binary integer
+3.14                    // Float (f64)
+1.5e-3                  // Scientific notation (float)
+1_000_000               // Underscore separators
+42_u8                   // Typed suffix: u8
+3.14_f32                // Typed suffix: f32
+
 // Compound
 [T]                     // Array: [1, 2, 3]
 T?                      // Optional: string?

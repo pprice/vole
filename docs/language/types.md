@@ -19,6 +19,40 @@ Vole is statically typed with type inference. Types are checked at compile time.
 
 **Default inference:** Integer literals are `i32`, float literals are `f64`.
 
+## Numeric Literals
+
+Vole supports several numeric literal formats:
+
+| Format | Example | Notes |
+|--------|---------|-------|
+| Decimal | `42`, `1_000_000` | Default integer format |
+| Hex | `0xFF`, `0x1A2B` | Prefix `0x` or `0X` |
+| Binary | `0b1010`, `0b1111_0000` | Prefix `0b` or `0B` |
+| Float | `3.14`, `0.5` | Decimal point makes it float |
+| Scientific | `1e10`, `1.5e-3`, `2E+6` | Always produces a float |
+| Underscore separators | `1_000_000`, `0xFF_FF` | Ignored during parsing, purely for readability |
+
+### Typed Literal Suffixes
+
+Append a type suffix to control the exact type of a numeric literal:
+
+```vole
+// Integer suffixes
+let a = 42_u8       // u8
+let b = 1000_i32    // i32
+let c = 0xFF_u16    // u16, hex with suffix
+let d = 0b1010_u8   // u8, binary with suffix
+
+// Float suffixes
+let e = 3.14_f32    // f32
+let f = 1.5e3_f64   // f64, scientific with suffix
+let g = 100_f32     // f32 (decimal integer with float suffix)
+```
+
+Without a suffix, integer literals default to `i32` and float literals default to `f64`.
+
+Suffix type must match the literal kind: integer suffixes (`_u8`, `_i32`, etc.) cannot be applied to float literals, and float suffixes (`_f32`, `_f64`) cannot be applied to hex or binary literals.
+
 ## In Depth
 
 ### Integer Types
@@ -45,15 +79,18 @@ Unsigned integers store only non-negative values:
 ```vole
 let small: i8 = 127
 let byte: u8 = 255
-let count: i32 = 1000000
-let big: i64 = 9223372036854775807
+let count: i32 = 1_000_000
+let big: i64 = 9_223_372_036_854_775_807
+let mask: u8 = 0xFF
+let bits: u8 = 0b1010_0101
 ```
 
 Integer literals default to `i32`:
 
 ```vole
-let x = 42        // x is i32
-let y: i64 = 42   // explicit i64
+let x = 42          // x is i32
+let y: i64 = 42     // explicit i64
+let z = 42_u8       // u8 via suffix
 ```
 
 ### Floating Point Types
@@ -66,13 +103,16 @@ let y: i64 = 42   // explicit i64
 ```vole
 let pi: f64 = 3.14159265358979
 let approx: f32 = 3.14
+let sci = 1.5e-3   // 0.0015, scientific notation
 ```
 
 Float literals default to `f64`:
 
 ```vole
-let x = 3.14      // x is f64
-let y: f32 = 3.14 // explicit f32
+let x = 3.14        // x is f64
+let y: f32 = 3.14   // explicit f32
+let z = 3.14_f32    // f32 via suffix
+let w = 2.5e6_f64   // f64, scientific with suffix
 ```
 
 ### Booleans
