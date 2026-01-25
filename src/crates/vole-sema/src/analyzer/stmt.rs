@@ -9,12 +9,17 @@ impl Analyzer {
         &mut self,
         block: &Block,
         interner: &Interner,
-    ) -> Result<(), Vec<TypeError>> {
+    ) -> Result<ReturnInfo, Vec<TypeError>> {
+        let mut info = ReturnInfo::default();
         for stmt in &block.stmts {
-            // TODO(v-bd6c): Aggregate ReturnInfo from statements
-            let _ = self.check_stmt(stmt, interner)?;
+            let stmt_info = self.check_stmt(stmt, interner)?;
+            info.return_types.extend(stmt_info.return_types);
+            if stmt_info.definitely_returns {
+                info.definitely_returns = true;
+                // Future: could warn about unreachable code after this
+            }
         }
-        Ok(())
+        Ok(info)
     }
 
     pub(crate) fn check_stmt(
@@ -171,7 +176,10 @@ impl Analyzer {
 
                 let parent = std::mem::take(&mut self.scope);
                 self.scope = Scope::with_parent(parent);
-                self.check_block(&while_stmt.body, interner)?;
+                // While loop body may never execute, so we collect return_types
+                // but don't propagate definitely_returns
+                let body_info = self.check_block(&while_stmt.body, interner)?;
+                let _ = body_info; // Return info from loops handled in v-2602
                 if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
                     self.scope = parent;
                 }
@@ -201,7 +209,9 @@ impl Analyzer {
                 if let Some((sym, narrowed_type_id, _)) = &narrowing_info {
                     self.type_overrides.insert(*sym, *narrowed_type_id);
                 }
-                self.check_block(&if_stmt.then_branch, interner)?;
+                // Collect then-branch return info (proper handling in v-2602)
+                let then_info = self.check_block(&if_stmt.then_branch, interner)?;
+                let _ = then_info;
                 if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
                     self.scope = parent;
                 }
@@ -221,7 +231,9 @@ impl Analyzer {
                         self.type_overrides.insert(*sym, else_narrowed);
                     }
 
-                    self.check_block(else_branch, interner)?;
+                    // Collect else-branch return info (proper handling in v-2602)
+                    let else_info = self.check_block(else_branch, interner)?;
+                    let _ = else_info;
                     if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
                         self.scope = parent;
                     }
@@ -268,7 +280,10 @@ impl Analyzer {
                     },
                 );
 
-                self.check_block(&for_stmt.body, interner)?;
+                // For loop body may never execute, so we collect return_types
+                // but don't propagate definitely_returns
+                let body_info = self.check_block(&for_stmt.body, interner)?;
+                let _ = body_info; // Return info from loops handled in v-2602
 
                 if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
                     self.scope = parent;

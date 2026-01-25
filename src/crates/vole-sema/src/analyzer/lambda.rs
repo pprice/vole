@@ -141,7 +141,7 @@ impl Analyzer {
                     (self.enter_function_context_inferring(), true)
                 };
 
-                let _ = self.check_block(block, interner);
+                let _block_info = self.check_block(block, interner);
 
                 let ret = if inferring {
                     self.current_function_return.unwrap_or(ArenaTypeId::VOID)

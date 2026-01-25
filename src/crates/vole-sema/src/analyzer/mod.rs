@@ -1897,7 +1897,7 @@ impl Analyzer {
         self.check_param_defaults(&func.params, &func_type.params_id, interner)?;
 
         // Check body
-        self.check_func_body(&func.body, interner)?;
+        let _body_info = self.check_func_body(&func.body, interner)?;
 
         // If we were inferring the return type, update the function signature
         if needs_inference {
@@ -2348,7 +2348,7 @@ impl Analyzer {
         self.check_param_defaults(&method.params, &params_id, interner)?;
 
         // Check body
-        self.check_func_body(&method.body, interner)?;
+        let _body_info = self.check_func_body(&method.body, interner)?;
 
         // If we were inferring the return type, update the method signature
         if needs_inference {
@@ -2403,7 +2403,7 @@ impl Analyzer {
         &mut self,
         body: &FuncBody,
         interner: &Interner,
-    ) -> Result<(), Vec<TypeError>> {
+    ) -> Result<ReturnInfo, Vec<TypeError>> {
         match body {
             FuncBody::Block(block) => self.check_block(block, interner),
             FuncBody::Expr(expr) => {
@@ -2430,7 +2430,11 @@ impl Analyzer {
                     // Inference mode - set the return type
                     self.current_function_return = Some(expr_type);
                 }
-                Ok(())
+                // Expression body definitely returns with the expression type
+                Ok(ReturnInfo {
+                    definitely_returns: true,
+                    return_types: vec![expr_type],
+                })
             }
         }
     }
@@ -2543,7 +2547,7 @@ impl Analyzer {
         }
 
         // Check body
-        self.check_func_body(body, interner)?;
+        let _body_info = self.check_func_body(body, interner)?;
 
         // If we were inferring the return type, update the method signature
         if needs_inference {
@@ -2604,7 +2608,7 @@ impl Analyzer {
             let saved_ctx = self.enter_function_context(void_id);
 
             // Type check the test body
-            self.check_func_body(&test_case.body, interner)?;
+            let _body_info = self.check_func_body(&test_case.body, interner)?;
 
             // Restore to tests block scope
             if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
@@ -2699,7 +2703,7 @@ impl Analyzer {
         self.check_param_defaults(&func.params, &param_type_vec, interner)?;
 
         // Check body
-        self.check_func_body(&func.body, interner)?;
+        let _body_info = self.check_func_body(&func.body, interner)?;
 
         // Get inferred return type if needed
         let final_return_type = if needs_inference {
