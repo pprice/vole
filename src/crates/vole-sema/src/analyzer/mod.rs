@@ -196,9 +196,10 @@ pub(crate) struct ReturnInfo {
     /// A path "definitely returns" if every control flow path ends in a
     /// return/raise statement.
     pub definitely_returns: bool,
-    /// Types from all return statements encountered on this path.
-    /// Used for return type inference and consistency checking.
-    pub return_types: Vec<ArenaTypeId>,
+    /// Types and spans from all return statements encountered on this path.
+    /// Used for return type inference, consistency checking, and error reporting.
+    /// Each entry is (type, span) where span points to the return expression.
+    pub return_types: Vec<(ArenaTypeId, Span)>,
 }
 
 #[allow(dead_code)] // Infrastructure for return flow analysis (epic v-d409)
@@ -1831,10 +1832,12 @@ impl Analyzer {
         if info.return_types.is_empty() {
             ArenaTypeId::VOID
         } else if info.return_types.len() == 1 {
-            info.return_types[0]
+            info.return_types[0].0
         } else {
+            // Extract just the types for union creation
+            let types: Vec<ArenaTypeId> = info.return_types.iter().map(|(ty, _)| *ty).collect();
             // Create union of all return types (the union method handles deduplication)
-            self.type_arena_mut().union(info.return_types.clone())
+            self.type_arena_mut().union(types)
         }
     }
 
@@ -2421,7 +2424,7 @@ impl Analyzer {
                         let expected_str = self.type_display_id(expected_return);
                         let found = self.type_display_id(expr_type);
                         self.add_error(
-                            SemanticError::TypeMismatch {
+                            SemanticError::ReturnTypeMismatch {
                                 expected: expected_str,
                                 found,
                                 span: expr.span.into(),
@@ -2436,7 +2439,7 @@ impl Analyzer {
                 // Expression body definitely returns with the expression type
                 Ok(ReturnInfo {
                     definitely_returns: true,
-                    return_types: vec![expr_type],
+                    return_types: vec![(expr_type, expr.span)],
                 })
             }
         }

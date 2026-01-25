@@ -1,0 +1,14 @@
+// Test: E2096 - return type mismatch error with branch info
+
+func wrong_return() -> i64 {
+    return "oops"
+}
+
+// Test mismatch in if branch
+func branch_mismatch(x: bool) -> i64 {
+    if x {
+        return 42
+    } else {
+        return "not a number"
+    }
+}

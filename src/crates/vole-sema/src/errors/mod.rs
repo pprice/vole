@@ -613,6 +613,15 @@ pub enum SemanticError {
         #[label("value {value} does not fit in `{suffix}` ({range})")]
         span: SourceSpan,
     },
+
+    #[error("return type mismatch in function expecting {expected}")]
+    #[diagnostic(code(E2096), help("function expects {expected}"))]
+    ReturnTypeMismatch {
+        expected: String,
+        found: String,
+        #[label("this returns {found}")]
+        span: SourceSpan,
+    },
 }
 
 /// Semantic warnings (W3xxx) - these don't prevent compilation but indicate potential issues

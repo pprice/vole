@@ -310,7 +310,7 @@ impl Analyzer {
                 // Could validate we're in a loop, skip for now
             }
             Stmt::Return(ret) => {
-                // Determine expected type for bidirectional type checking (TypeId-based)
+                // Determine expected type for type checking (TypeId-based)
                 // Only use expected type if we're NOT in inference mode (current_function_return is set)
                 let expected_value_type_id = self.current_function_return.map(|expected| {
                     // If expected is fallible, extract success type for comparison
@@ -322,8 +322,14 @@ impl Analyzer {
                     }
                 });
 
+                // Get the span of the return value expression (or the return keyword for bare returns)
+                let ret_value_span = ret.value.as_ref().map(|v| v.span).unwrap_or(ret.span);
+
+                // Type check the return expression.
+                // We DON'T pass expected type to avoid double error reporting (E2001 + E2096).
+                // Instead we check compatibility ourselves and report the more specific E2096.
                 let ret_type_id = if let Some(value) = &ret.value {
-                    self.check_expr_expecting_id(value, expected_value_type_id, interner)?
+                    self.check_expr(value, interner)?
                 } else {
                     self.ty_void_id()
                 };
@@ -337,18 +343,18 @@ impl Analyzer {
                     let expected_str = self.type_display_id(expected_id);
                     let found = self.type_display_id(ret_type_id);
                     self.add_error(
-                        SemanticError::TypeMismatch {
+                        SemanticError::ReturnTypeMismatch {
                             expected: expected_str,
                             found,
-                            span: ret.span.into(),
+                            span: ret_value_span.into(),
                         },
-                        ret.span,
+                        ret_value_span,
                     );
                 }
 
                 return Ok(ReturnInfo {
                     definitely_returns: true,
-                    return_types: vec![ret_type_id],
+                    return_types: vec![(ret_type_id, ret_value_span)],
                 });
             }
             Stmt::Raise(raise_stmt) => {

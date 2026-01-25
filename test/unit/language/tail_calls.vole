@@ -3,7 +3,7 @@
 // Simple tail recursive function that counts down
 func countdown(n: i32) -> i32 {
     if n <= 0 {
-        return 0
+        return 0_i32
     }
     return countdown(n - 1)
 }
@@ -17,7 +17,7 @@ func factorial_tail(n: i32, acc: i32) -> i32 {
 }
 
 func factorial(n: i32) -> i32 {
-    return factorial_tail(n, 1)
+    return factorial_tail(n, 1_i32)
 }
 
 // Mutual tail recursion

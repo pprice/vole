@@ -1,7 +1,7 @@
 // Error: parameter default must be a constant expression
 
 func get_value() -> i32 {
-    return 42
+    return 42_i32
 }
 
 // Error: function call is not a constant expression
