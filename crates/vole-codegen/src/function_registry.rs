@@ -9,7 +9,6 @@ use rustc_hash::FxHashMap;
 
 use cranelift_module::FuncId;
 
-use vole_frontend::{Interner, Symbol};
 use vole_identity::{ModuleId, NameId, NameTable};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -147,16 +146,6 @@ impl FunctionRegistry {
         self.names.borrow_mut().module_id(path)
     }
 
-    pub fn intern_qualified(
-        &mut self,
-        module: ModuleId,
-        segments: &[Symbol],
-        interner: &Interner,
-    ) -> FunctionKey {
-        let name_id = self.names.borrow_mut().intern(module, segments, interner);
-        self.intern_name_id(name_id)
-    }
-
     pub fn intern_name_id(&mut self, name_id: NameId) -> FunctionKey {
         if let Some(key) = self.qualified_lookup.get(&name_id) {
             return *key;
@@ -164,63 +153,6 @@ impl FunctionRegistry {
         let key = self.insert(FunctionName::Qualified(name_id));
         self.qualified_lookup.insert(name_id, key);
         key
-    }
-
-    pub fn intern_with_prefix(
-        &mut self,
-        prefix: NameId,
-        segment: Symbol,
-        interner: &Interner,
-    ) -> FunctionKey {
-        let name_id = self
-            .names
-            .borrow_mut()
-            .intern_with_symbol(prefix, segment, interner);
-        self.intern_name_id(name_id)
-    }
-
-    pub fn intern_raw_qualified(&mut self, module: ModuleId, segments: &[&str]) -> FunctionKey {
-        let name_id = self.names.borrow_mut().intern_raw(module, segments);
-        self.intern_name_id(name_id)
-    }
-
-    /// Look up an existing qualified name. Panics if not found (sema bug).
-    /// Uses read-only access to NameTable.
-    pub fn lookup_qualified(
-        &mut self,
-        module: ModuleId,
-        segments: &[Symbol],
-        interner: &Interner,
-    ) -> FunctionKey {
-        let name_id = self
-            .names
-            .borrow()
-            .name_id(module, segments, interner)
-            .expect("function name should exist from sema");
-        self.intern_name_id(name_id)
-    }
-
-    /// Try to look up an existing qualified name. Returns None if the name
-    /// doesn't exist in the NameTable. Uses read-only access to NameTable.
-    pub fn try_lookup_qualified(
-        &mut self,
-        module: ModuleId,
-        segments: &[Symbol],
-        interner: &Interner,
-    ) -> Option<FunctionKey> {
-        let name_id = self.names.borrow().name_id(module, segments, interner)?;
-        Some(self.intern_name_id(name_id))
-    }
-
-    /// Look up an existing raw qualified name. Panics if not found (sema bug).
-    /// Uses read-only access to NameTable.
-    pub fn lookup_raw_qualified(&mut self, module: ModuleId, segments: &[&str]) -> FunctionKey {
-        let name_id = self
-            .names
-            .borrow()
-            .name_id_raw(module, segments)
-            .expect("function name should exist from sema");
-        self.intern_name_id(name_id)
     }
 
     pub fn intern_runtime(&mut self, runtime: RuntimeFn) -> FunctionKey {

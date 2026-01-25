@@ -108,12 +108,6 @@ impl<'a> Compiler<'a> {
         self.analyzed.query()
     }
 
-    /// Intern a qualified function name (encapsulates borrow of interner + func_registry)
-    fn intern_func(&mut self, module: vole_identity::ModuleId, segments: &[Symbol]) -> FunctionKey {
-        self.func_registry
-            .intern_qualified(module, segments, &self.analyzed.interner)
-    }
-
     /// Resolve a Symbol to a string (owned, for use across mutable operations)
     fn resolve_symbol(&self, sym: Symbol) -> String {
         self.analyzed.interner.resolve(sym).to_string()

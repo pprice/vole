@@ -46,12 +46,14 @@ impl Compiler<'_> {
             )
         };
         // Mutable operations on func_registry
-        let func_module = self.func_registry.main_module();
-        let key = if let Some(name_id) = name_id {
-            self.func_registry.intern_name_id(name_id)
-        } else {
-            self.intern_func(func_module, &[sym])
-        };
+        let key = self
+            .func_registry
+            .intern_name_id(name_id.unwrap_or_else(|| {
+            panic!(
+                "function '{}' not found in NameTable - all functions should be interned by sema",
+                display_name
+            )
+        }));
         (key, display_name)
     }
 

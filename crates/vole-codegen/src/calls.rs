@@ -393,13 +393,15 @@ impl Cg<'_, '_, '_> {
         // 2. If in module context, try mangled name
         // 3. If in module context, try FFI call
         let main_module = self.funcs_ref().main_module();
-        let interner = self.interner();
-        if let Some(func_key) =
-            self.funcs()
-                .try_lookup_qualified(main_module, &[callee_sym], interner)
-            && let Some(func_id) = self.funcs_ref().func_id(func_key)
-        {
-            return self.call_func_id(func_key, func_id, call, callee_sym);
+        let direct_name_id = {
+            let names = self.name_table();
+            names.name_id(main_module, &[callee_sym], self.interner())
+        };
+        if let Some(name_id) = direct_name_id {
+            let func_key = self.funcs().intern_name_id(name_id);
+            if let Some(func_id) = self.funcs_ref().func_id(func_key) {
+                return self.call_func_id(func_key, func_id, call, callee_sym);
+            }
         }
 
         // Check module context for mangled name or FFI
