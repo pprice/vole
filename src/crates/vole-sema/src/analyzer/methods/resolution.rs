@@ -93,8 +93,24 @@ impl Analyzer {
                         .name_table()
                         .last_segment_str(interface_name_id)
                         .and_then(|s| interner.lookup(&s));
-                    let return_type_id = binding.func_type.return_type_id;
-                    let func_type_id = binding.func_type.intern(&mut self.type_arena_mut());
+                    // Substitute Self placeholder with the concrete primitive type.
+                    // Interface methods like `equals(other: Self)` need Self -> i64, etc.
+                    let substituted_params: smallvec::SmallVec<[_; 4]> = binding
+                        .func_type
+                        .params_id
+                        .iter()
+                        .map(|&p| self.type_arena_mut().substitute_self(p, object_type_id))
+                        .collect();
+                    let substituted_ret = self
+                        .type_arena_mut()
+                        .substitute_self(binding.func_type.return_type_id, object_type_id);
+                    let func_type = FunctionType {
+                        is_closure: binding.func_type.is_closure,
+                        params_id: substituted_params,
+                        return_type_id: substituted_ret,
+                    };
+                    let return_type_id = func_type.return_type_id;
+                    let func_type_id = func_type.intern(&mut self.type_arena_mut());
                     return Some(ResolvedMethod::Implemented {
                         type_def_id: Some(tdef_id),
                         method_name_id,

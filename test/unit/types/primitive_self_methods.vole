@@ -1,0 +1,111 @@
+// Test that Self type is correctly substituted for primitive type methods.
+// This verifies the fix for ticket v-c51e: Self type not substituted in primitive impl methods.
+//
+// When calling methods like `equals(other: Self)` on primitive types, the `Self` placeholder
+// must be substituted with the actual primitive type (e.g., i64, i32, string, etc.).
+
+tests "Primitive Equatable methods" {
+    test "i64 equals" {
+        let a: i64 = 42
+        let b: i64 = 42
+        assert(a.equals(b))
+    }
+
+    test "i64 not equals" {
+        let a: i64 = 42
+        let b: i64 = 43
+        assert(!a.equals(b))
+    }
+
+    test "i32 equals" {
+        let a: i32 = 10_i32
+        let b: i32 = 10_i32
+        assert(a.equals(b))
+    }
+
+    test "f64 equals" {
+        let a: f64 = 1.5
+        let b: f64 = 1.5
+        assert(a.equals(b))
+    }
+
+    test "f32 equals" {
+        let a: f32 = 1.5_f32
+        let b: f32 = 1.5_f32
+        assert(a.equals(b))
+    }
+
+    test "string equals" {
+        let a = "hello"
+        let b = "hello"
+        assert(a.equals(b))
+    }
+
+    test "string not equals" {
+        let a = "hello"
+        let b = "world"
+        assert(!a.equals(b))
+    }
+
+    test "bool equals true" {
+        let a = true
+        let b = true
+        assert(a.equals(b))
+    }
+
+    test "bool equals false" {
+        let a = false
+        let b = false
+        assert(a.equals(b))
+    }
+}
+
+tests "Primitive Comparable methods" {
+    test "i64 compare less" {
+        let a: i64 = 5
+        let b: i64 = 10
+        assert(a.compare(b) < 0)
+    }
+
+    test "i64 compare greater" {
+        let a: i64 = 10
+        let b: i64 = 5
+        assert(a.compare(b) > 0)
+    }
+
+    test "i64 compare equal" {
+        let a: i64 = 42
+        let b: i64 = 42
+        assert(a.compare(b) == 0)
+    }
+
+    test "i32 compare less" {
+        let a: i32 = 5_i32
+        let b: i32 = 10_i32
+        assert(a.compare(b) < 0)
+    }
+
+    test "f64 compare less" {
+        let a: f64 = 1.5
+        let b: f64 = 2.5
+        assert(a.compare(b) < 0)
+    }
+
+    test "f32 compare greater" {
+        let a: f32 = 2.5_f32
+        let b: f32 = 1.5_f32
+        assert(a.compare(b) > 0)
+    }
+
+    test "string compare less" {
+        let a = "apple"
+        let b = "banana"
+        assert(a.compare(b) < 0)
+    }
+
+    test "string compare equal" {
+        let a = "hello"
+        let b = "hello"
+        assert(a.compare(b) == 0)
+    }
+}

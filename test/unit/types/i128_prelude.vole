@@ -1,6 +1,56 @@
-// Test i128 prelude methods (Hashable, Stringable, Default, Zero, One, Bounded)
-// NOTE: Equatable and Comparable tests are skipped because Self type resolution
-// for primitive types doesn't work correctly yet (pre-existing issue).
+// Test i128 prelude methods (Equatable, Comparable, Hashable, Stringable, Default, Zero, One, Bounded)
+
+tests "i128 Equatable" {
+    test "i128 equals same value" {
+        let a: i128 = 42
+        let b: i128 = 42
+        assert(a.equals(b))
+    }
+
+    test "i128 equals different values" {
+        let a: i128 = 42
+        let b: i128 = 43
+        assert(!a.equals(b))
+    }
+
+    test "i128 equals zero" {
+        let a: i128 = 0
+        let b: i128 = 0
+        assert(a.equals(b))
+    }
+
+    test "i128 equals negative" {
+        let a: i128 = -123
+        let b: i128 = -123
+        assert(a.equals(b))
+    }
+}
+
+tests "i128 Comparable" {
+    test "i128 compare less than" {
+        let a: i128 = 5
+        let b: i128 = 10
+        assert(a.compare(b) < 0)
+    }
+
+    test "i128 compare greater than" {
+        let a: i128 = 10
+        let b: i128 = 5
+        assert(a.compare(b) > 0)
+    }
+
+    test "i128 compare equal" {
+        let a: i128 = 42
+        let b: i128 = 42
+        assert(a.compare(b) == 0)
+    }
+
+    test "i128 compare negative" {
+        let a: i128 = -10
+        let b: i128 = -5
+        assert(a.compare(b) < 0)
+    }
+}
 
 tests "i128 Stringable" {
     test "i128 to_string positive" {
