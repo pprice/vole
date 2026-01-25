@@ -576,7 +576,7 @@ impl Cg<'_, '_, '_> {
         let arena = self.arena();
 
         // Array methods
-        if let Some(_elem_type_id) = arena.unwrap_array(obj.type_id) {
+        if let Some(elem_type_id) = arena.unwrap_array(obj.type_id) {
             return match method_name {
                 "length" => {
                     let result = self.call_runtime(RuntimeFn::ArrayLen, &[obj.value])?;
@@ -584,9 +584,14 @@ impl Cg<'_, '_, '_> {
                 }
                 "iter" => {
                     let result = self.call_runtime(RuntimeFn::ArrayIter, &[obj.value])?;
-                    // Use sema's pre-computed RuntimeIterator type
-                    let iter_type_id = iter_type_hint
-                        .expect("sema must provide concrete_return_hint for array.iter()");
+                    // Use sema's pre-computed RuntimeIterator type, or look it up from
+                    // the element type (needed for monomorphized generic functions where
+                    // sema resolution is skipped).
+                    let iter_type_id = iter_type_hint.unwrap_or_else(|| {
+                        self.arena()
+                            .lookup_runtime_iterator(elem_type_id)
+                            .expect("RuntimeIterator type must be pre-created by sema")
+                    });
                     Ok(Some(CompiledValue {
                         value: result,
                         ty: self.ptr_type(),

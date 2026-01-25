@@ -1,0 +1,137 @@
+// Test field access on structurally constrained generic types inside lambdas
+// Bug: v-807b - field access inside lambdas loses structural constraint info
+
+record Thing { name: string, value: i64 }
+record Point { x: i64, y: i64 }
+
+// These work fine (no map):
+func get_name<T: { name: string }>(x: T) -> string {
+    return x.name
+}
+
+func first_name<T: { name: string }>(items: [T]) -> string {
+    let first = items[0]
+    let getter = () => first.name
+    return getter()
+}
+
+// This was the bug - map with field access on constrained generic
+func get_names<T: { name: string }>(items: [T]) -> [string] {
+    return items.iter().map((item) => item.name).collect()
+}
+
+// Map changing types on concrete types (non-generic)
+func get_thing_names(items: [Thing]) -> [string] {
+    return items.iter().map((item) => item.name).collect()
+}
+
+func get_thing_values(items: [Thing]) -> [i64] {
+    return items.iter().map((item) => item.value).collect()
+}
+
+// Map extracting i64 fields
+func get_values<T: { value: i64 }>(items: [T]) -> [i64] {
+    return items.iter().map((item) => item.value).collect()
+}
+
+// Map with expression in body
+func get_doubled_values<T: { value: i64 }>(items: [T]) -> [i64] {
+    return items.iter().map((item) => item.value * 2).collect()
+}
+
+// Chained transforms
+func get_name_lengths<T: { name: string }>(items: [T]) -> [i64] {
+    return items.iter().map((item) => item.name).map((n) => n.length()).collect()
+}
+
+// Non-generic map that still changes type (i64 -> string)
+func to_strings(items: [i64]) -> [string] {
+    return items.iter().map((x) => "" + x).collect()
+}
+
+// Map on Point record fields
+func get_x_values(items: [Point]) -> [i64] {
+    return items.iter().map((p) => p.x).collect()
+}
+
+// Identity map (T -> T) should still work
+func identity_map(items: [i64]) -> [i64] {
+    return items.iter().map((x) => x * 2).collect()
+}
+
+tests "structural constraint field access in lambdas" {
+    test "direct field access works" {
+        let t = Thing { name: "hello", value: 42 }
+        assert(get_name(t) == "hello")
+    }
+
+    test "capturing lambda works" {
+        let things = [Thing { name: "hello", value: 42 }]
+        assert(first_name(things) == "hello")
+    }
+
+    test "map with field access on constrained generic" {
+        let things = [Thing { name: "a", value: 1 }, Thing { name: "b", value: 2 }]
+        let names = get_names(things)
+        assert(names[0] == "a")
+        assert(names[1] == "b")
+    }
+
+    test "concrete map with string field access" {
+        let things = [Thing { name: "x", value: 10 }, Thing { name: "y", value: 20 }]
+        let names = get_thing_names(things)
+        assert(names[0] == "x")
+        assert(names[1] == "y")
+    }
+
+    test "concrete map with i64 field access" {
+        let things = [Thing { name: "x", value: 10 }, Thing { name: "y", value: 20 }]
+        let values = get_thing_values(things)
+        assert(values[0] == 10)
+        assert(values[1] == 20)
+    }
+
+    test "generic map with i64 field access" {
+        let things = [Thing { name: "x", value: 10 }, Thing { name: "y", value: 20 }]
+        let values = get_values(things)
+        assert(values[0] == 10)
+        assert(values[1] == 20)
+    }
+
+    test "map with expression body" {
+        let things = [Thing { name: "x", value: 5 }, Thing { name: "y", value: 10 }]
+        let doubled = get_doubled_values(things)
+        assert(doubled[0] == 10)
+        assert(doubled[1] == 20)
+    }
+
+    test "chained type-changing maps" {
+        let things = [Thing { name: "abc", value: 1 }, Thing { name: "de", value: 2 }]
+        let lengths = get_name_lengths(things)
+        assert(lengths[0] == 3)
+        assert(lengths[1] == 2)
+    }
+
+    test "map i64 to string" {
+        let nums = [1, 2, 3]
+        let strs = to_strings(nums)
+        assert(strs[0] == "1")
+        assert(strs[1] == "2")
+        assert(strs[2] == "3")
+    }
+
+    test "map record field access" {
+        let points = [Point { x: 10, y: 20 }, Point { x: 30, y: 40 }]
+        let xs = get_x_values(points)
+        assert(xs[0] == 10)
+        assert(xs[1] == 30)
+    }
+
+    test "identity map still works" {
+        let nums = [1, 2, 3]
+        let doubled = identity_map(nums)
+        assert(doubled[0] == 2)
+        assert(doubled[1] == 4)
+        assert(doubled[2] == 6)
+    }
+}

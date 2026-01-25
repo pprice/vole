@@ -584,17 +584,115 @@ impl Analyzer {
                 }
             }
 
+            // Detect type-transforming iterator methods (map, flat_map).
+            // These methods have signatures like `(T) -> T` but should support
+            // type-changing lambdas `(T) -> U`, returning `Iterator<U>`.
+            // We detect this case and infer the actual output type from the lambda.
+            let is_map_transform = {
+                let method_name_str = interner.resolve(method_call.method);
+                let is_transform_method = method_name_str == "map" || method_name_str == "flat_map";
+                let is_on_iterator = {
+                    let arena = self.type_arena();
+                    arena.unwrap_interface(object_type_id).is_some()
+                        || arena.unwrap_runtime_iterator(object_type_id).is_some()
+                };
+                is_transform_method && is_on_iterator && !func_type.params_id.is_empty()
+            };
+
+            // For type-transforming iterator methods, we modify the expected type
+            // so the lambda return type is inferred from its body rather than constrained.
+            let mut map_inferred_return_type: Option<ArenaTypeId> = None;
+
             // Check argument types using TypeId directly
             for (arg, &param_ty_id) in method_call.args.iter().zip(func_type.params_id.iter()) {
-                let arg_ty_id = self.check_expr_expecting_id(arg, Some(param_ty_id), interner)?;
-                if !self.types_compatible_id(arg_ty_id, param_ty_id, interner) {
-                    self.add_type_mismatch_id(param_ty_id, arg_ty_id, arg.span);
+                if is_map_transform {
+                    // For map/flat_map on iterators, the param is a function type like (T) -> T.
+                    // We want the lambda's parameter type to be inferred from T, but allow
+                    // the return type to be freely inferred from the lambda body.
+                    let modified_expected = {
+                        let arena = self.type_arena();
+                        arena.unwrap_function(param_ty_id).map(|(params, _ret, _)| {
+                            // Create expected type with only parameter types (no return constraint)
+                            // by using the params from the expected type but void as return
+                            // This lets analyze_lambda infer param types but freely infer return type
+                            params.to_vec()
+                        })
+                    };
+                    if let Some(input_params) = modified_expected {
+                        // Analyze lambda with only parameter type hints
+                        let arg_ty_id = if let ExprKind::Lambda(lambda) = &arg.kind {
+                            // Build expected with correct params but let return be inferred.
+                            // INVALID signals to analyze_lambda to skip expected return type.
+                            let param_only_expected = FunctionType {
+                                is_closure: false,
+                                params_id: input_params.into(),
+                                return_type_id: ArenaTypeId::INVALID,
+                            };
+                            let lambda_ty_id =
+                                self.analyze_lambda(lambda, Some(&param_only_expected), interner);
+                            self.record_expr_type_id(arg, lambda_ty_id);
+                            lambda_ty_id
+                        } else {
+                            self.check_expr_expecting_id(arg, Some(param_ty_id), interner)?
+                        };
+
+                        // Extract the lambda's actual return type
+                        let lambda_return = {
+                            let arena = self.type_arena();
+                            arena
+                                .unwrap_function(arg_ty_id)
+                                .map(|(_params, ret, _)| ret)
+                        };
+                        if let Some(ret_ty) = lambda_return {
+                            map_inferred_return_type = Some(ret_ty);
+                        }
+                        // Don't emit type mismatch for the lambda - the return type is intentionally different
+                    } else {
+                        // Not a function parameter - check normally
+                        let arg_ty_id =
+                            self.check_expr_expecting_id(arg, Some(param_ty_id), interner)?;
+                        if !self.types_compatible_id(arg_ty_id, param_ty_id, interner) {
+                            self.add_type_mismatch_id(param_ty_id, arg_ty_id, arg.span);
+                        }
+                    }
+                } else {
+                    let arg_ty_id =
+                        self.check_expr_expecting_id(arg, Some(param_ty_id), interner)?;
+                    if !self.types_compatible_id(arg_ty_id, param_ty_id, interner) {
+                        self.add_type_mismatch_id(param_ty_id, arg_ty_id, arg.span);
+                    }
                 }
             }
 
             // Get external_info and return_type_id before moving resolved
             let external_info = resolved.external_info().copied();
-            let resolved_return_id = resolved.return_type_id();
+            let resolved_return_id = if let Some(inferred_elem) = map_inferred_return_type {
+                // For type-transforming iterator methods, override the return type.
+                // map: Iterator<T> -> Iterator<U> where U is the lambda return type
+                // flat_map: Iterator<T> -> Iterator<U> where U is the element type of [U]
+                let method_name_str = interner.resolve(method_call.method);
+                let new_elem_type = if method_name_str == "flat_map" {
+                    // flat_map lambda returns [U], so unwrap the array to get U
+                    self.type_arena()
+                        .unwrap_array(inferred_elem)
+                        .unwrap_or(inferred_elem)
+                } else {
+                    // map lambda returns U directly
+                    inferred_elem
+                };
+                // Create Iterator<U> return type
+                let iterator_interface_id = self
+                    .resolver(interner)
+                    .resolve_type_str_or_interface("Iterator", &self.entity_registry());
+                if let Some(iface_id) = iterator_interface_id {
+                    self.type_arena_mut()
+                        .interface(iface_id, smallvec::smallvec![new_elem_type])
+                } else {
+                    resolved.return_type_id()
+                }
+            } else {
+                resolved.return_type_id()
+            };
 
             self.method_resolutions.insert(expr.id, resolved);
 

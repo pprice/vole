@@ -108,7 +108,9 @@ impl Analyzer {
             .return_type
             .as_ref()
             .map(|t| self.resolve_type_id(t, interner));
-        let expected_return_id = expected_type.map(|ft| ft.return_type_id);
+        let expected_return_id = expected_type
+            .map(|ft| ft.return_type_id)
+            .filter(|&id| !id.is_invalid());
 
         // Analyze body and infer return type
         // Use the same function context mechanism as regular functions
