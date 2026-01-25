@@ -14,8 +14,10 @@ use vole_frontend::{
     AssignTarget, BlockExpr, Expr, ExprKind, IfExpr, MatchExpr, NodeId, Pattern, PatternKind,
     RangeExpr, RecordFieldPattern, Symbol, UnaryOp, WhenExpr,
 };
+use vole_identity::ModuleId;
 use vole_sema::IsCheckResult;
 use vole_sema::entity_defs::TypeDefKind;
+use vole_sema::type_arena::TypeId;
 
 use super::context::Cg;
 use super::structs::{convert_to_i64_for_storage, get_field_slot_and_type_id_cg};
@@ -24,7 +26,6 @@ use super::types::{
     fallible_error_tag_by_id, load_fallible_payload, load_fallible_tag, tuple_layout_id,
     type_id_to_cranelift,
 };
-use vole_sema::type_arena::TypeId;
 
 impl Cg<'_, '_, '_> {
     /// Compile an expression.
@@ -130,6 +131,11 @@ impl Cg<'_, '_, '_> {
                 ty,
                 type_id: *type_id,
             })
+        } else if let Some(&(module_id, export_name, export_type_id)) =
+            self.module_bindings.get(&sym)
+        {
+            // Module binding - look up the constant value
+            self.module_binding_value(module_id, export_name, export_type_id)
         } else if let Some(global_init) = self.global_init(sym).cloned() {
             // Compile global's initializer inline
             let mut value = self.expr(&global_init)?;
@@ -153,6 +159,78 @@ impl Cg<'_, '_, '_> {
             self.function_reference(sym, func_type_id)
         } else {
             Err(CodegenError::not_found("variable", self.interner().resolve(sym)).into())
+        }
+    }
+
+    /// Compile a module binding value (from destructuring import).
+    /// Returns the constant value for constants, or an error for functions.
+    fn module_binding_value(
+        &mut self,
+        module_id: ModuleId,
+        export_name: Symbol,
+        export_type_id: TypeId,
+    ) -> Result<CompiledValue, String> {
+        let export_name_str = self.interner().resolve(export_name);
+        let module_path = self.name_table().module_path(module_id).to_string();
+
+        // Get the name_id for this export
+        let name_id = crate::types::module_name_id(self.analyzed(), module_id, export_name_str);
+
+        // Look up constant value in module metadata
+        let const_val = {
+            let arena = self.arena();
+            name_id.and_then(|nid| {
+                arena
+                    .module_metadata(module_id)
+                    .and_then(|meta| meta.constants.get(&nid).cloned())
+            })
+        };
+
+        if let Some(const_val) = const_val {
+            let arena = self.arena();
+            let f64_id = arena.f64();
+            let i64_id = arena.i64();
+            let bool_id = arena.bool();
+            match const_val {
+                vole_sema::types::ConstantValue::F64(v) => {
+                    let val = self.builder.ins().f64const(v);
+                    Ok(CompiledValue {
+                        value: val,
+                        ty: types::F64,
+                        type_id: f64_id,
+                    })
+                }
+                vole_sema::types::ConstantValue::I64(v) => {
+                    let val = self.builder.ins().iconst(types::I64, v);
+                    Ok(CompiledValue {
+                        value: val,
+                        ty: types::I64,
+                        type_id: i64_id,
+                    })
+                }
+                vole_sema::types::ConstantValue::Bool(v) => {
+                    let val = self.builder.ins().iconst(types::I8, if v { 1 } else { 0 });
+                    Ok(CompiledValue {
+                        value: val,
+                        ty: types::I8,
+                        type_id: bool_id,
+                    })
+                }
+                vole_sema::types::ConstantValue::String(s) => self.string_literal(&s),
+            }
+        } else if self.arena().is_function(export_type_id) {
+            // Functions cannot be used as values directly - must be called
+            Err(CodegenError::unsupported_with_context(
+                "function as value",
+                format!("use {}() to call the function", export_name_str),
+            )
+            .into())
+        } else {
+            Err(CodegenError::not_found(
+                "module export constant",
+                format!("{}.{}", module_path, export_name_str),
+            )
+            .into())
         }
     }
 

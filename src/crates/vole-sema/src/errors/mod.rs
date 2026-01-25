@@ -649,4 +649,11 @@ pub enum SemanticWarning {
         #[label("expression result is not used")]
         span: SourceSpan,
     },
+
+    #[error("mutable binding on module import has no effect")]
+    #[diagnostic(code(W3003), help("module bindings are always immutable"))]
+    MutableModuleBinding {
+        #[label("'mut' has no effect here")]
+        span: SourceSpan,
+    },
 }

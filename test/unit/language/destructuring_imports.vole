@@ -1,0 +1,52 @@
+// Destructuring imports tests
+
+tests {
+    // Test basic destructuring import with single name
+    test "destructuring single export" {
+        let { PI } = import "std:math"
+        assert(PI > 3.14)
+        assert(PI < 3.15)
+    }
+
+    // Test destructuring import with multiple names
+    test "destructuring multiple exports" {
+        let { sin, cos, PI } = import "std:math"
+        assert(PI > 3.14)
+        assert(PI < 3.15)
+        assert(sin(0.0) == 0.0)
+        assert(cos(0.0) == 1.0)
+    }
+
+    // Test destructuring import with rename using 'as'
+    test "destructuring with as rename" {
+        let { sqrt as squareRoot, PI as pi } = import "std:math"
+        assert(squareRoot(4.0) == 2.0)
+        assert(pi > 3.14)
+        assert(pi < 3.15)
+    }
+
+    // Test destructuring import with mixed - some renamed, some not
+    test "destructuring with mixed rename" {
+        let { sqrt, pow as power } = import "std:math"
+        assert(sqrt(16.0) == 4.0)
+        assert(power(2.0, 3.0) == 8.0)
+    }
+
+    // Test destructuring import functions work correctly
+    test "destructured functions work" {
+        let { min, max, clamp } = import "std:math"
+        assert(min(3.0, 5.0) == 3.0)
+        assert(max(3.0, 5.0) == 5.0)
+        assert(clamp(5.0, 0.0, 10.0) == 5.0)
+        assert(clamp(-5.0, 0.0, 10.0) == 0.0)
+    }
+
+    // Test destructuring import pure vole functions
+    test "destructured pure vole functions" {
+        let { lerp, deg_to_rad } = import "std:math"
+        assert(lerp(0.0, 10.0, 0.5) == 5.0)
+        let rad = deg_to_rad(180.0)
+        assert(rad > 3.14)
+        assert(rad < 3.15)
+    }
+}

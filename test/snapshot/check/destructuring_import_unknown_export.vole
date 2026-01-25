@@ -1,0 +1,6 @@
+// Test error when destructuring unknown export from module
+tests {
+    test "unknown export" {
+        let { unknownExport } = import "std:math"
+    }
+}

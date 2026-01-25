@@ -740,6 +740,14 @@ impl Analyzer {
         init_span: Span,
         interner: &Interner,
     ) {
+        // First check if this is a module type - if so, use module destructuring
+        // Clone to avoid borrow conflicts with the mutable method call
+        let module_info = self.type_arena().unwrap_module(ty_id).cloned();
+        if let Some(module_info) = module_info {
+            self.check_module_destructuring(&module_info, fields, mutable, init_span, interner);
+            return;
+        }
+
         // Get type_def_id from the type using arena
         let type_def_id = {
             let arena = self.type_arena();
@@ -753,7 +761,7 @@ impl Analyzer {
         };
 
         let Some(type_def_id) = type_def_id else {
-            self.type_error_id("record or class", ty_id, init_span);
+            self.type_error_id("record, class, or module", ty_id, init_span);
             return;
         };
 
@@ -807,6 +815,65 @@ impl Analyzer {
                     field_pattern.span,
                 );
             }
+        }
+    }
+
+    /// Check module destructuring and bind variables.
+    /// Handles `let { A, B as C } = import "..."`.
+    fn check_module_destructuring(
+        &mut self,
+        module_info: &crate::type_arena::InternedModule,
+        fields: &[RecordFieldPattern],
+        mutable: bool,
+        init_span: Span,
+        interner: &Interner,
+    ) {
+        // Get the module path for error messages
+        let module_path = self
+            .name_table()
+            .module_path(module_info.module_id)
+            .to_string();
+
+        // Check each destructured field against module exports
+        for field_pattern in fields {
+            let export_name_str = interner.resolve(field_pattern.field_name);
+
+            // Find the export by name in module_info.exports
+            let found = module_info.exports.iter().find(|(name_id, _)| {
+                self.name_table().last_segment_str(*name_id).as_deref() == Some(export_name_str)
+            });
+
+            if let Some((_, export_type_id)) = found {
+                // Bind the export to the binding name
+                self.scope.define(
+                    field_pattern.binding,
+                    Variable {
+                        ty: *export_type_id,
+                        mutable,
+                    },
+                );
+                self.add_lambda_local(field_pattern.binding);
+            } else {
+                // Export not found
+                self.add_error(
+                    SemanticError::ModuleNoExport {
+                        module: module_path.clone(),
+                        name: export_name_str.to_string(),
+                        span: field_pattern.span.into(),
+                    },
+                    field_pattern.span,
+                );
+            }
+        }
+
+        // Emit a warning if mutable is used with module destructuring
+        if mutable {
+            self.add_warning(
+                SemanticWarning::MutableModuleBinding {
+                    span: init_span.into(),
+                },
+                init_span,
+            );
         }
     }
 }

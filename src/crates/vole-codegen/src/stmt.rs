@@ -736,6 +736,13 @@ impl Cg<'_, '_, '_> {
                 }
             }
             PatternKind::Record { fields, .. } => {
+                // Check if this is a module type - if so, register module bindings
+                let module_info = self.arena().unwrap_module(ty_id).cloned();
+                if let Some(module_info) = module_info {
+                    self.compile_module_destructure(fields, &module_info)?;
+                    return Ok(());
+                }
+
                 // Record destructuring - extract fields via runtime
                 for field_pattern in fields {
                     let field_name = self.interner().resolve(field_pattern.field_name);
@@ -752,6 +759,39 @@ impl Cg<'_, '_, '_> {
                 }
             }
             _ => {}
+        }
+        Ok(())
+    }
+
+    /// Compile module destructuring - registers bindings for module exports.
+    /// No runtime code is generated; bindings are used at compile time for calls.
+    fn compile_module_destructure(
+        &mut self,
+        fields: &[vole_frontend::RecordFieldPattern],
+        module_info: &vole_sema::type_arena::InternedModule,
+    ) -> Result<(), String> {
+        for field_pattern in fields {
+            let export_name = field_pattern.field_name;
+            let export_name_str = self.interner().resolve(export_name);
+
+            // Find the export type in the module
+            let export_type_id = module_info
+                .exports
+                .iter()
+                .find(|(name_id, _)| {
+                    self.name_table().last_segment_str(*name_id).as_deref() == Some(export_name_str)
+                })
+                .map(|(_, ty)| *ty);
+
+            if let Some(export_type_id) = export_type_id {
+                // Register the module binding: local_name -> (module_id, export_name, type_id)
+                self.module_bindings.insert(
+                    field_pattern.binding,
+                    (module_info.module_id, export_name, export_type_id),
+                );
+            } else {
+                return Err(format!("Module export '{}' not found", export_name_str));
+            }
         }
         Ok(())
     }

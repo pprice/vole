@@ -389,6 +389,12 @@ impl<'src> Parser<'src> {
                 self.consume(TokenType::Identifier, "expected binding name after ':'")?;
                 field_end_span = binding_token.span;
                 self.interner.intern(&binding_token.lexeme)
+            } else if self.match_token(TokenType::KwAs) {
+                // Renamed binding: { x as alias } (for destructuring imports)
+                let binding_token = self.current.clone();
+                self.consume(TokenType::Identifier, "expected binding name after 'as'")?;
+                field_end_span = binding_token.span;
+                self.interner.intern(&binding_token.lexeme)
             } else {
                 // Same name binding: { x }
                 field_name

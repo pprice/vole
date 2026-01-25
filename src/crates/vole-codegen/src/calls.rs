@@ -14,6 +14,7 @@ type ArgVec = SmallVec<[Value; 8]>;
 use vole_frontend::{
     CallExpr, Decl, Expr, ExprKind, LambdaExpr, NodeId, Program, Stmt, StringPart, Symbol,
 };
+use vole_identity::ModuleId;
 use vole_runtime::native_registry::{NativeFunction, NativeType};
 use vole_sema::type_arena::TypeId;
 
@@ -216,6 +217,19 @@ impl Cg<'_, '_, '_> {
             "assert" => return self.call_assert(call, call_line),
             "panic" => return self.call_panic(call, call_line),
             _ => {}
+        }
+
+        // Check if it's a module binding (from destructuring import)
+        if let Some(&(module_id, export_name, export_type_id)) =
+            self.module_bindings.get(&callee_sym)
+        {
+            return self.call_module_binding(
+                module_id,
+                export_name,
+                export_type_id,
+                call,
+                call_expr_id,
+            );
         }
 
         // Check if it's a closure variable
@@ -501,6 +515,67 @@ impl Cg<'_, '_, '_> {
         }
 
         Err(CodegenError::not_found("function", callee_name).into())
+    }
+
+    /// Call a function via destructured module binding.
+    /// Looks up the function by module_id and export_name, then calls via FFI or compiled function.
+    fn call_module_binding(
+        &mut self,
+        module_id: ModuleId,
+        export_name: Symbol,
+        export_type_id: TypeId,
+        call: &CallExpr,
+        call_expr_id: NodeId,
+    ) -> Result<CompiledValue, String> {
+        let module_path = self.name_table().module_path(module_id).to_string();
+        let export_name_str = self.interner().resolve(export_name);
+
+        // Try to find the function by qualified name in the function registry
+        let name_id = crate::types::module_name_id(self.analyzed(), module_id, export_name_str);
+        if let Some(name_id) = name_id {
+            let func_key = self.funcs().intern_name_id(name_id);
+            if let Some(func_id) = self.funcs_ref().func_id(func_key) {
+                // Found compiled module function
+                return self.call_func_id(func_key, func_id, call, export_name);
+            }
+        }
+
+        // Try FFI call for external module functions
+        if let Some(native_func) = self.native_funcs().lookup(&module_path, export_name_str) {
+            // Get expected Cranelift types from native function signature
+            let expected_types: Vec<Type> = native_func
+                .signature
+                .params
+                .iter()
+                .map(|nt| native_type_to_cranelift(nt, self.ptr_type()))
+                .collect();
+            // Compile args with defaults for omitted parameters
+            let args = self.compile_external_call_args(export_name, call, &expected_types)?;
+            let call_inst = self.call_native_indirect(native_func, &args);
+            let results = self.builder.inst_results(call_inst);
+
+            if results.is_empty() {
+                return Ok(self.void_value());
+            } else {
+                // Get the return type from the sema-recorded type or export type
+                let type_id = self.get_expr_type(&call_expr_id).unwrap_or(export_type_id);
+                let type_id = self.maybe_convert_iterator_return_type(type_id);
+                return Ok(CompiledValue {
+                    value: results[0],
+                    ty: native_type_to_cranelift(
+                        &native_func.signature.return_type,
+                        self.ptr_type(),
+                    ),
+                    type_id,
+                });
+            }
+        }
+
+        Err(CodegenError::not_found(
+            "module function",
+            format!("{}.{}", module_path, export_name_str),
+        )
+        .into())
     }
 
     /// Helper to call a function by its FuncId

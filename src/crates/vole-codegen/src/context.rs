@@ -79,6 +79,9 @@ pub(crate) struct Captures<'a> {
 /// Key for caching pure runtime function calls
 pub type CallCacheKey = (RuntimeFn, SmallVec<[Value; 4]>);
 
+/// Module export binding info: (module_id, export_name_symbol, export_type_id).
+pub type ModuleExportBinding = (ModuleId, Symbol, TypeId);
+
 /// Unified codegen context - all state needed for code generation.
 ///
 /// Lifetimes:
@@ -113,6 +116,8 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     pub substitutions: Option<&'a FxHashMap<NameId, TypeId>>,
     /// Cache for substituted types
     substitution_cache: RefCell<FxHashMap<TypeId, TypeId>>,
+    /// Module export bindings from destructuring imports: local_name -> (module_id, export_name, type_id)
+    pub module_bindings: FxHashMap<Symbol, ModuleExportBinding>,
 
     // ========== Shared context fields ==========
     /// Mutable JIT infrastructure (module, func_registry)
@@ -146,6 +151,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             current_module: None,
             substitutions: None,
             substitution_cache: RefCell::new(FxHashMap::default()),
+            module_bindings: FxHashMap::default(),
             codegen_ctx,
             env,
         }
