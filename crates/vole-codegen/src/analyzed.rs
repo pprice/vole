@@ -26,11 +26,17 @@ pub struct AnalyzedProgram {
 
 impl AnalyzedProgram {
     /// Construct AnalyzedProgram from parsed program and analysis output.
+    ///
+    /// When the CompilationDb has a single owner (non-cached path), unwraps it
+    /// directly. When shared (cached path, where module cache holds a reference),
+    /// creates a CodegenDb that shares type/entity/implement data via Rc (O(1)),
+    /// only cloning the NameTable (needed for RefCell wrapping in codegen).
     pub fn from_analysis(program: Program, interner: Interner, output: AnalysisOutput) -> Self {
-        // Convert CompilationDb to CodegenDb (wraps types/names in Rc<RefCell<>>)
         let db = match Rc::try_unwrap(output.db) {
+            // Non-cached path: sole owner, move data directly (zero-cost)
             Ok(cell) => cell.into_inner().into_codegen(),
-            Err(rc) => (*rc.borrow()).clone().into_codegen(),
+            // Cached path: share Rc-wrapped fields instead of cloning entire CompilationDb
+            Err(rc) => rc.borrow().to_codegen_shared(),
         };
         Self {
             program,

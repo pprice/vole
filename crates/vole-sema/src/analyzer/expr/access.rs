@@ -31,9 +31,10 @@ impl Analyzer {
                 let field_type_id = generic_info.field_types[i];
 
                 // Use arena-based substitution - get raw pointer to arena to avoid borrow conflict
+                // Rc::make_mut provides copy-on-write (free when refcount is 1)
                 let mut db = self.db.borrow_mut();
-                let arena = &mut db.types as *mut _;
-                let substituted_id = db.entities.substitute_type_id_with_args(
+                let arena = Rc::make_mut(&mut db.types) as *mut _;
+                let substituted_id = Rc::make_mut(&mut db.entities).substitute_type_id_with_args(
                     type_def_id,
                     type_args_id,
                     field_type_id,

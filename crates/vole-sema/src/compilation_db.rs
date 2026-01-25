@@ -2,16 +2,28 @@
 //
 // Unified compilation database containing all registries.
 // Wrapped in Rc<RefCell<>> for shared access across analyzer instances.
+//
+// Fields (types, entities, implements) are Rc-wrapped for cheap sharing
+// with CodegenDb. This avoids expensive clones when the module cache
+// holds a reference to the CompilationDb during codegen conversion.
+// Mutation during analysis uses Rc::make_mut (copy-on-write), which is
+// free when the Rc has a single owner (the typical case).
 
 use crate::entity_registry::EntityRegistry;
 use crate::implement_registry::ImplementRegistry;
 use crate::type_arena::TypeArena;
+use std::rc::Rc;
 use vole_identity::NameTable;
 
 /// Unified compilation database containing all type/entity/method registries.
 ///
 /// This is shared across analyzer instances via `Rc<RefCell<CompilationDb>>`,
 /// eliminating expensive clone/merge operations when analyzing modules.
+///
+/// The `types`, `entities`, and `implements` fields are `Rc`-wrapped so that
+/// `CodegenDb` can share them without cloning. During analysis, mutation goes
+/// through `Rc::make_mut` which is zero-cost when the refcount is 1 (the
+/// common case, since `CodegenDb` is dropped before the next analysis).
 ///
 /// # Usage
 /// ```ignore
@@ -20,8 +32,8 @@ use vole_identity::NameTable;
 /// // Read access
 /// let method = db.borrow().entities.get_method(id);
 ///
-/// // Write access
-/// db.borrow_mut().entities.register_method(...);
+/// // Write access (uses Rc::make_mut internally via accessor methods)
+/// db.borrow_mut().entities_mut().register_method(...);
 ///
 /// // Multiple reads - borrow once
 /// {
@@ -32,12 +44,15 @@ use vole_identity::NameTable;
 /// ```
 #[derive(Debug, Clone)]
 pub struct CompilationDb {
-    /// Interned type representations (TypeId -> SemaType)
-    pub types: TypeArena,
-    /// Type/method/field/function definitions
-    pub entities: EntityRegistry,
-    /// Methods added via implement blocks
-    pub implements: ImplementRegistry,
+    /// Interned type representations (TypeId -> SemaType).
+    /// Rc-wrapped for cheap sharing with CodegenDb.
+    pub types: Rc<TypeArena>,
+    /// Type/method/field/function definitions.
+    /// Rc-wrapped for cheap sharing with CodegenDb.
+    pub entities: Rc<EntityRegistry>,
+    /// Methods added via implement blocks.
+    /// Rc-wrapped for cheap sharing with CodegenDb.
+    pub implements: Rc<ImplementRegistry>,
     /// Fully-qualified name interner
     pub names: NameTable,
 }
@@ -49,11 +64,32 @@ impl CompilationDb {
         let mut entities = EntityRegistry::new();
         entities.register_primitives(&names);
         Self {
-            types: TypeArena::new(),
-            entities,
-            implements: ImplementRegistry::new(),
+            types: Rc::new(TypeArena::new()),
+            entities: Rc::new(entities),
+            implements: Rc::new(ImplementRegistry::new()),
             names,
         }
+    }
+
+    /// Get mutable access to the type arena (copy-on-write via Rc::make_mut).
+    /// Free when refcount is 1 (the common case).
+    #[inline]
+    pub fn types_mut(&mut self) -> &mut TypeArena {
+        Rc::make_mut(&mut self.types)
+    }
+
+    /// Get mutable access to the entity registry (copy-on-write via Rc::make_mut).
+    /// Free when refcount is 1 (the common case).
+    #[inline]
+    pub fn entities_mut(&mut self) -> &mut EntityRegistry {
+        Rc::make_mut(&mut self.entities)
+    }
+
+    /// Get mutable access to the implement registry (copy-on-write via Rc::make_mut).
+    /// Free when refcount is 1 (the common case).
+    #[inline]
+    pub fn implements_mut(&mut self) -> &mut ImplementRegistry {
+        Rc::make_mut(&mut self.implements)
     }
 
     /// Get the main module ID
@@ -74,27 +110,43 @@ impl Default for CompilationDb {
 }
 
 /// Parts extracted from CompilationDb for codegen use.
-/// TypeArena is owned directly (immutable during codegen).
-/// NameTable remains in Rc<RefCell<>> for function name interning.
+/// TypeArena, EntityRegistry, and ImplementRegistry are Rc-shared with CompilationDb
+/// (immutable during codegen). NameTable is wrapped in Rc<RefCell<>> for function
+/// name interning during codegen.
 pub struct CodegenDb {
-    /// Type arena - immutable during codegen
-    pub types: TypeArena,
-    pub entities: EntityRegistry,
-    pub implements: ImplementRegistry,
+    /// Type arena - Rc-shared, immutable during codegen
+    pub types: Rc<TypeArena>,
+    /// Entity registry - Rc-shared, immutable during codegen
+    pub entities: Rc<EntityRegistry>,
+    /// Implement registry - Rc-shared, immutable during codegen
+    pub implements: Rc<ImplementRegistry>,
     /// Names still need mutation for function name interning
-    pub names: std::rc::Rc<std::cell::RefCell<NameTable>>,
+    pub names: Rc<std::cell::RefCell<NameTable>>,
 }
 
 impl CompilationDb {
-    /// Convert to a form suitable for codegen.
-    /// TypeArena is moved directly (immutable during codegen).
-    /// NameTable wrapped in Rc<RefCell<>> for function name interning.
+    /// Convert to a form suitable for codegen (consuming self).
+    /// Shares Rc references for types/entities/implements (O(1)).
+    /// NameTable is moved and wrapped in Rc<RefCell<>> for function name interning.
     pub fn into_codegen(self) -> CodegenDb {
         CodegenDb {
             types: self.types,
             entities: self.entities,
             implements: self.implements,
-            names: std::rc::Rc::new(std::cell::RefCell::new(self.names)),
+            names: Rc::new(std::cell::RefCell::new(self.names)),
+        }
+    }
+
+    /// Create a CodegenDb that shares data with this CompilationDb via Rc.
+    /// This is the zero-clone path used when the CompilationDb has multiple owners
+    /// (e.g., when the module cache holds a reference).
+    /// Only NameTable is cloned (required because CodegenDb wraps it in RefCell).
+    pub fn to_codegen_shared(&self) -> CodegenDb {
+        CodegenDb {
+            types: Rc::clone(&self.types),
+            entities: Rc::clone(&self.entities),
+            implements: Rc::clone(&self.implements),
+            names: Rc::new(std::cell::RefCell::new(self.names.clone())),
         }
     }
 }

@@ -518,25 +518,25 @@ impl Analyzer {
     /// Get the type arena (read access)
     #[inline]
     fn type_arena(&self) -> std::cell::Ref<'_, TypeArena> {
-        std::cell::Ref::map(self.db.borrow(), |db| &db.types)
+        std::cell::Ref::map(self.db.borrow(), |db| &*db.types)
     }
 
-    /// Get the type arena (write access) - borrows the entire db mutably
+    /// Get the type arena (write access) - uses Rc::make_mut for copy-on-write
     #[inline]
     fn type_arena_mut(&self) -> std::cell::RefMut<'_, TypeArena> {
-        std::cell::RefMut::map(self.db.borrow_mut(), |db| &mut db.types)
+        std::cell::RefMut::map(self.db.borrow_mut(), |db| db.types_mut())
     }
 
     /// Get the entity registry (read access)
     #[inline]
     fn entity_registry(&self) -> std::cell::Ref<'_, EntityRegistry> {
-        std::cell::Ref::map(self.db.borrow(), |db| &db.entities)
+        std::cell::Ref::map(self.db.borrow(), |db| &*db.entities)
     }
 
-    /// Get the entity registry (write access)
+    /// Get the entity registry (write access) - uses Rc::make_mut for copy-on-write
     #[inline]
     fn entity_registry_mut(&self) -> std::cell::RefMut<'_, EntityRegistry> {
-        std::cell::RefMut::map(self.db.borrow_mut(), |db| &mut db.entities)
+        std::cell::RefMut::map(self.db.borrow_mut(), |db| db.entities_mut())
     }
 
     /// Get the name table (read access)
@@ -554,13 +554,13 @@ impl Analyzer {
     /// Get the implement registry (read access)
     #[inline]
     fn implement_registry(&self) -> std::cell::Ref<'_, ImplementRegistry> {
-        std::cell::Ref::map(self.db.borrow(), |db| &db.implements)
+        std::cell::Ref::map(self.db.borrow(), |db| &*db.implements)
     }
 
-    /// Get the implement registry (write access)
+    /// Get the implement registry (write access) - uses Rc::make_mut for copy-on-write
     #[inline]
     fn implement_registry_mut(&self) -> std::cell::RefMut<'_, ImplementRegistry> {
-        std::cell::RefMut::map(self.db.borrow_mut(), |db| &mut db.implements)
+        std::cell::RefMut::map(self.db.borrow_mut(), |db| db.implements_mut())
     }
 
     /// Pre-compute substituted field types for a generic class/record instantiation.
@@ -2205,7 +2205,11 @@ impl Analyzer {
                     ref mut types,
                     ..
                 } = *db;
-                entities.update_method_return_type(lookup.method_id, inferred_return_type, types);
+                Rc::make_mut(entities).update_method_return_type(
+                    lookup.method_id,
+                    inferred_return_type,
+                    Rc::make_mut(types),
+                );
             }
         } else {
             // Check for missing return statement when return type is explicit and non-void
@@ -2373,7 +2377,11 @@ impl Analyzer {
                     ref mut types,
                     ..
                 } = *db;
-                entities.update_method_return_type(method_id, inferred_return_type, types);
+                Rc::make_mut(entities).update_method_return_type(
+                    method_id,
+                    inferred_return_type,
+                    Rc::make_mut(types),
+                );
             }
         }
 

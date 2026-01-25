@@ -119,7 +119,7 @@ impl<'a> TypeResolutionContext<'a> {
 
     /// Get the entity registry (read access)
     pub fn entity_registry(&self) -> std::cell::Ref<'_, EntityRegistry> {
-        std::cell::Ref::map(self.db.borrow(), |db| &db.entities)
+        std::cell::Ref::map(self.db.borrow(), |db| &*db.entities)
     }
 
     /// Get the name table (read access)
@@ -134,12 +134,12 @@ impl<'a> TypeResolutionContext<'a> {
 
     /// Get the type arena (read access)
     pub fn type_arena(&self) -> std::cell::Ref<'_, TypeArena> {
-        std::cell::Ref::map(self.db.borrow(), |db| &db.types)
+        std::cell::Ref::map(self.db.borrow(), |db| &*db.types)
     }
 
-    /// Get the type arena (write access)
+    /// Get the type arena (write access) - uses Rc::make_mut for copy-on-write
     pub fn type_arena_mut(&self) -> std::cell::RefMut<'_, TypeArena> {
-        std::cell::RefMut::map(self.db.borrow_mut(), |db| &mut db.types)
+        std::cell::RefMut::map(self.db.borrow_mut(), |db| db.types_mut())
     }
 
     /// Resolve a type or interface by symbol.
@@ -693,19 +693,20 @@ mod tests {
             .intern(module_id, &[value_sym], &interner);
 
         // Create a type param TypeId (T)
-        let t_type_id = db.borrow_mut().types.type_param(t_name_id);
+        let t_type_id = db.borrow_mut().types_mut().type_param(t_name_id);
 
         // Register Box<T> type with a field of type T
         let box_type_def_id = {
             let mut db_mut = db.borrow_mut();
             // First register the type
-            let id = db_mut
-                .entities
-                .register_type(box_name_id, TypeDefKind::Class, module_id);
+            let id =
+                db_mut
+                    .entities_mut()
+                    .register_type(box_name_id, TypeDefKind::Class, module_id);
             // Set type params
-            db_mut.entities.set_type_params(id, vec![t_name_id]);
+            db_mut.entities_mut().set_type_params(id, vec![t_name_id]);
             // Set generic info with field of type T
-            db_mut.entities.set_generic_info(
+            db_mut.entities_mut().set_generic_info(
                 id,
                 GenericTypeInfo {
                     type_params: vec![TypeParamInfo {
