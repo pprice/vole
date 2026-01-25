@@ -474,10 +474,10 @@ pub enum SemanticError {
         span: SourceSpan,
     },
 
-    #[error("type '{found}' does not satisfy structural constraint for '{type_param}'")]
+    #[error("type '{found}' does not satisfy structural constraint '{constraint}'")]
     #[diagnostic(code(E2081), help("{mismatch}"))]
     StructuralConstraintMismatch {
-        type_param: String,
+        constraint: String,
         found: String,
         mismatch: String,
         #[label("structural constraint not satisfied")]

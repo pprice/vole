@@ -1567,9 +1567,10 @@ impl Analyzer {
                         self.check_structural_constraint_id(found_id, structural, interner)
                     {
                         let found_display = self.type_display_id(found_id);
+                        let constraint_display = self.structural_display(structural);
                         self.add_error(
                             SemanticError::StructuralConstraintMismatch {
-                                type_param: self.get_type_param_display_name(param, interner),
+                                constraint: constraint_display,
                                 found: found_display,
                                 mismatch,
                                 span: span.into(),

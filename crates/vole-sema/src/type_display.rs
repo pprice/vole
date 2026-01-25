@@ -3,7 +3,7 @@
 //! This module provides functions to display types directly from TypeId.
 
 use crate::entity_registry::EntityRegistry;
-use crate::type_arena::{SemaType, TypeArena, TypeId};
+use crate::type_arena::{InternedStructural, SemaType, TypeArena, TypeId};
 use vole_identity::NameTable;
 
 /// Display a TypeId by matching on SemaType.
@@ -15,6 +15,33 @@ pub fn display_type_id(
     entity_registry: &EntityRegistry,
 ) -> String {
     display_sema_type(type_id, arena, names, entity_registry)
+}
+
+/// Display an InternedStructural constraint for error messages.
+/// Returns a string like `{ name: string, age: i64 }`.
+pub fn display_structural_constraint(
+    structural: &InternedStructural,
+    arena: &TypeArena,
+    names: &NameTable,
+    entity_registry: &EntityRegistry,
+) -> String {
+    let mut parts = Vec::new();
+    for (name_id, type_id) in &structural.fields {
+        let name = names.last_segment_str(*name_id).unwrap_or_default();
+        let ty = display_sema_type(*type_id, arena, names, entity_registry);
+        parts.push(format!("{}: {}", name, ty));
+    }
+    for method in &structural.methods {
+        let name = names.last_segment_str(method.name).unwrap_or_default();
+        let params: Vec<String> = method
+            .params
+            .iter()
+            .map(|&p| display_sema_type(p, arena, names, entity_registry))
+            .collect();
+        let ret = display_sema_type(method.return_type, arena, names, entity_registry);
+        parts.push(format!("func {}({}) -> {}", name, params.join(", "), ret));
+    }
+    format!("{{ {} }}", parts.join(", "))
 }
 
 fn display_sema_type(

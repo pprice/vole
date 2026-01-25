@@ -2,8 +2,8 @@
 
 use super::{TypeError, TypeWarning};
 use crate::errors::{SemanticError, SemanticWarning};
-use crate::type_arena::TypeId as ArenaTypeId;
-use crate::type_display::display_type_id;
+use crate::type_arena::{InternedStructural, TypeId as ArenaTypeId};
+use crate::type_display::{display_structural_constraint, display_type_id};
 use vole_frontend::Span;
 
 use super::Analyzer;
@@ -24,6 +24,16 @@ impl Analyzer {
     pub(super) fn type_display_id(&self, id: ArenaTypeId) -> String {
         display_type_id(
             id,
+            &self.type_arena(),
+            &self.name_table(),
+            &self.entity_registry(),
+        )
+    }
+
+    /// Display a structural constraint for error messages.
+    pub(super) fn structural_display(&self, structural: &InternedStructural) -> String {
+        display_structural_constraint(
+            structural,
             &self.type_arena(),
             &self.name_table(),
             &self.entity_registry(),
