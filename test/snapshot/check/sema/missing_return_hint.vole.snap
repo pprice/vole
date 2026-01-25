@@ -1,0 +1,12 @@
+[stdout]
+
+[stderr]
+  x [E2083]: missing return statement in function 'with_hint'
+   ,-[<path>/missing_return_hint.vole:3:1]
+ 2 |     
+ 3 | ,-> func with_hint() -> i64 {
+ 4 | |       42
+ 5 | |-> }
+   : `---- function expects to return i64
+   `----
+  help: did you mean to add `return` before the last expression?

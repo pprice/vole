@@ -1,0 +1,5 @@
+// Test: E2083 - missing return without hint when last expression doesn't match return type
+
+func without_hint() -> i64 {
+    print("hi")
+}

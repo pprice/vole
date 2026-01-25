@@ -1894,10 +1894,16 @@ impl Analyzer {
             if !is_void && !self.found_return {
                 let func_name = interner.resolve(func.name).to_string();
                 let expected = self.type_display_id(func_type.return_type_id);
+                let hint = self.compute_missing_return_hint(
+                    &func.body,
+                    func_type.return_type_id,
+                    interner,
+                );
                 self.add_error(
                     SemanticError::MissingReturn {
                         name: func_name,
                         expected,
+                        hint,
                         span: func.span.into(),
                     },
                     func.span,
@@ -2338,10 +2344,12 @@ impl Analyzer {
             if !is_void && !self.found_return {
                 let method_name = interner.resolve(method.name).to_string();
                 let expected = self.type_display_id(return_type_id);
+                let hint = self.compute_missing_return_hint(&method.body, return_type_id, interner);
                 self.add_error(
                     SemanticError::MissingReturn {
                         name: method_name,
                         expected,
+                        hint,
                         span: method.span.into(),
                     },
                     method.span,
@@ -2393,6 +2401,30 @@ impl Analyzer {
                 Ok(())
             }
         }
+    }
+
+    /// Compute the hint for a MissingReturn error.
+    /// If the last statement in the block is an expression whose type matches the expected return type,
+    /// suggest adding `return` before it. Otherwise, provide a generic hint.
+    fn compute_missing_return_hint(
+        &mut self,
+        body: &FuncBody,
+        expected_return_type: ArenaTypeId,
+        interner: &Interner,
+    ) -> String {
+        if let FuncBody::Block(block) = body
+            && let Some(Stmt::Expr(expr_stmt)) = block.stmts.last()
+        {
+            // Check if we have a recorded type for this expression
+            if let Some(&expr_type) = self.expr_types.get(&expr_stmt.expr.id) {
+                // Check if it matches the expected return type
+                if self.types_compatible_id(expr_type, expected_return_type, interner) {
+                    return "did you mean to add `return` before the last expression?".to_string();
+                }
+            }
+        }
+        // Default hint
+        "add a return statement, or change return type to void".to_string()
     }
 
     /// Check a static method body (no `self` access allowed)

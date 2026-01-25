@@ -496,13 +496,11 @@ pub enum SemanticError {
     },
 
     #[error("missing return statement in function '{name}'")]
-    #[diagnostic(
-        code(E2083),
-        help("add a return statement, or change return type to void")
-    )]
+    #[diagnostic(code(E2083), help("{hint}"))]
     MissingReturn {
         name: String,
         expected: String,
+        hint: String,
         #[label("function expects to return {expected}")]
         span: SourceSpan,
     },

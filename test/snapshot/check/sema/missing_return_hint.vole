@@ -1,0 +1,5 @@
+// Test: E2083 - missing return with hint when last expression matches return type
+
+func with_hint() -> i64 {
+    42
+}
