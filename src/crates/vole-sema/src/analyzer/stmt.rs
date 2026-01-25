@@ -209,9 +209,7 @@ impl Analyzer {
                 if let Some((sym, narrowed_type_id, _)) = &narrowing_info {
                     self.type_overrides.insert(*sym, *narrowed_type_id);
                 }
-                // Collect then-branch return info (proper handling in v-2602)
                 let then_info = self.check_block(&if_stmt.then_branch, interner)?;
-                let _ = then_info;
                 if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
                     self.scope = parent;
                 }
@@ -219,7 +217,8 @@ impl Analyzer {
                 // Restore overrides for else branch
                 self.type_overrides = saved_overrides.clone();
 
-                if let Some(else_branch) = &if_stmt.else_branch {
+                // Check else branch if present
+                let (else_info, has_else) = if let Some(else_branch) = &if_stmt.else_branch {
                     let parent = std::mem::take(&mut self.scope);
                     self.scope = Scope::with_parent(parent);
 
@@ -231,16 +230,31 @@ impl Analyzer {
                         self.type_overrides.insert(*sym, else_narrowed);
                     }
 
-                    // Collect else-branch return info (proper handling in v-2602)
-                    let else_info = self.check_block(else_branch, interner)?;
-                    let _ = else_info;
+                    let info = self.check_block(else_branch, interner)?;
                     if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
                         self.scope = parent;
                     }
-                }
+                    (info, true)
+                } else {
+                    // No else branch means the if might not execute, so definitely_returns is false
+                    (ReturnInfo::default(), false)
+                };
 
                 // Restore original overrides after the entire if statement
                 self.type_overrides = saved_overrides;
+
+                // Aggregate return info from both branches:
+                // - definitely_returns only if BOTH branches return AND there is an else branch
+                // - collect return_types from both branches
+                let mut return_types = then_info.return_types;
+                return_types.extend(else_info.return_types);
+
+                return Ok(ReturnInfo {
+                    definitely_returns: has_else
+                        && then_info.definitely_returns
+                        && else_info.definitely_returns,
+                    return_types,
+                });
             }
             Stmt::For(for_stmt) => {
                 let iterable_ty_id = self.check_expr(&for_stmt.iterable, interner)?;
