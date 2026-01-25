@@ -3,7 +3,6 @@
 // Minimal context for type-system lookups in codegen.
 
 use cranelift::prelude::Type;
-use std::cell::RefCell;
 use std::rc::Rc;
 
 use vole_frontend::Interner;
@@ -48,7 +47,7 @@ impl<'a> TypeCtx<'a> {
 
     /// Get the name table Rc
     #[inline]
-    pub fn name_table_rc(&self) -> &'a Rc<RefCell<NameTable>> {
+    pub fn name_table_rc(&self) -> &'a Rc<NameTable> {
         self.query.name_table_rc()
     }
 }

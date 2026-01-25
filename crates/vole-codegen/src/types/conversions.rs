@@ -125,7 +125,7 @@ pub(crate) fn method_name_id_with_interner(
     name: Symbol,
 ) -> Option<NameId> {
     let name_table = analyzed.name_table();
-    let namer = NamerLookup::new(&name_table, interner);
+    let namer = NamerLookup::new(name_table, interner);
     namer.method(name)
 }
 
@@ -136,7 +136,7 @@ pub(crate) fn method_name_id_by_str(
     name_str: &str,
 ) -> Option<NameId> {
     let name_table = analyzed.name_table();
-    vole_identity::method_name_id_by_str(&name_table, interner, name_str)
+    vole_identity::method_name_id_by_str(name_table, interner, name_str)
 }
 
 /// Look up a function NameId by Symbol with explicit interner (for cross-interner usage)
@@ -147,7 +147,7 @@ pub(crate) fn function_name_id_with_interner(
     name: Symbol,
 ) -> Option<NameId> {
     let name_table = analyzed.name_table();
-    let namer = NamerLookup::new(&name_table, interner);
+    let namer = NamerLookup::new(name_table, interner);
     namer.function(module, name)
 }
 
@@ -338,14 +338,13 @@ pub(crate) fn fallible_error_tag_with_ctx(
 ) -> Option<i64> {
     let arena = type_ctx.arena();
     let interner = type_ctx.interner();
-    let name_table = type_ctx.name_table_rc().borrow();
     let entity_registry = type_ctx.entities();
     fallible_error_tag_by_id(
         error_type_id,
         error_name,
         arena,
         interner,
-        &name_table,
+        type_ctx.name_table_rc(),
         entity_registry,
     )
 }

@@ -110,9 +110,7 @@ impl Default for CompilationDb {
 }
 
 /// Parts extracted from CompilationDb for codegen use.
-/// TypeArena, EntityRegistry, and ImplementRegistry are Rc-shared with CompilationDb
-/// (immutable during codegen). NameTable is wrapped in Rc<RefCell<>> for function
-/// name interning during codegen.
+/// All fields are Rc-shared with CompilationDb and immutable during codegen.
 pub struct CodegenDb {
     /// Type arena - Rc-shared, immutable during codegen
     pub types: Rc<TypeArena>,
@@ -120,33 +118,32 @@ pub struct CodegenDb {
     pub entities: Rc<EntityRegistry>,
     /// Implement registry - Rc-shared, immutable during codegen
     pub implements: Rc<ImplementRegistry>,
-    /// Names still need mutation for function name interning
-    pub names: Rc<std::cell::RefCell<NameTable>>,
+    /// Name table - Rc-shared, immutable during codegen
+    pub names: Rc<NameTable>,
 }
 
 impl CompilationDb {
     /// Convert to a form suitable for codegen (consuming self).
-    /// Shares Rc references for types/entities/implements (O(1)).
-    /// NameTable is moved and wrapped in Rc<RefCell<>> for function name interning.
+    /// Shares Rc references for all fields (O(1)).
     pub fn into_codegen(self) -> CodegenDb {
         CodegenDb {
             types: self.types,
             entities: self.entities,
             implements: self.implements,
-            names: Rc::new(std::cell::RefCell::new(self.names)),
+            names: Rc::new(self.names),
         }
     }
 
     /// Create a CodegenDb that shares data with this CompilationDb via Rc.
     /// This is the zero-clone path used when the CompilationDb has multiple owners
     /// (e.g., when the module cache holds a reference).
-    /// Only NameTable is cloned (required because CodegenDb wraps it in RefCell).
+    /// NameTable is cloned (other fields are Rc-shared).
     pub fn to_codegen_shared(&self) -> CodegenDb {
         CodegenDb {
             types: Rc::clone(&self.types),
             entities: Rc::clone(&self.entities),
             implements: Rc::clone(&self.implements),
-            names: Rc::new(std::cell::RefCell::new(self.names.clone())),
+            names: Rc::new(self.names.clone()),
         }
     }
 }

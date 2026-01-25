@@ -2,7 +2,6 @@
 //
 // Opaque function identity registry for codegen.
 
-use std::cell::RefCell;
 use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
@@ -115,14 +114,14 @@ struct FunctionEntry {
 }
 
 pub struct FunctionRegistry {
-    names: Rc<RefCell<NameTable>>,
+    names: Rc<NameTable>,
     entries: Vec<FunctionEntry>,
     qualified_lookup: FxHashMap<NameId, FunctionKey>,
     runtime_lookup: FxHashMap<RuntimeFn, FunctionKey>,
 }
 
 impl FunctionRegistry {
-    pub fn new(names: Rc<RefCell<NameTable>>) -> Self {
+    pub fn new(names: Rc<NameTable>) -> Self {
         Self {
             names,
             entries: Vec::new(),
@@ -132,18 +131,13 @@ impl FunctionRegistry {
     }
 
     pub fn main_module(&self) -> ModuleId {
-        self.names.borrow().main_module()
+        self.names.main_module()
     }
 
     pub fn builtin_module(&self) -> ModuleId {
-        let names = self.names.borrow();
-        names
+        self.names
             .builtin_module_id()
-            .unwrap_or_else(|| names.main_module())
-    }
-
-    pub fn module_id(&mut self, path: &str) -> ModuleId {
-        self.names.borrow_mut().module_id(path)
+            .unwrap_or_else(|| self.names.main_module())
     }
 
     pub fn intern_name_id(&mut self, name_id: NameId) -> FunctionKey {
@@ -194,7 +188,7 @@ impl FunctionRegistry {
 
     pub fn display(&self, key: FunctionKey) -> String {
         match &self.entries[key.0 as usize].name {
-            FunctionName::Qualified(name_id) => self.names.borrow().display(*name_id),
+            FunctionName::Qualified(name_id) => self.names.display(*name_id),
             FunctionName::Runtime(runtime) => runtime.name().to_string(),
             FunctionName::Lambda(idx) => format!("__lambda_{idx}"),
             FunctionName::Test(idx) => format!("__test_{idx}"),
@@ -220,7 +214,7 @@ impl FunctionRegistry {
             .is_some()
     }
 
-    pub fn name_table_rc(&self) -> &Rc<RefCell<NameTable>> {
+    pub fn name_table_rc(&self) -> &Rc<NameTable> {
         &self.names
     }
 

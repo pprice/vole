@@ -24,7 +24,7 @@ impl Cg<'_, '_, '_> {
     /// Look up a method NameId using the context's interner (which may be a module interner)
     fn method_name_id(&self, name: Symbol) -> NameId {
         let name_table = self.name_table();
-        let namer = NamerLookup::new(&name_table, self.interner());
+        let namer = NamerLookup::new(name_table, self.interner());
         namer.method(name).unwrap_or_else(|| {
             panic!(
                 "method name_id not found for '{}'",
@@ -1133,7 +1133,6 @@ impl Cg<'_, '_, '_> {
         let name_table = self.name_table();
         let is_f32 = type_name_id == name_table.primitives.f32;
         let is_f64 = type_name_id == name_table.primitives.f64;
-        drop(name_table);
 
         if !is_f32 && !is_f64 {
             return Ok(None);

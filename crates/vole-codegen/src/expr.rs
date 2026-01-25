@@ -140,11 +140,10 @@ impl Cg<'_, '_, '_> {
             let module_id = self
                 .current_module()
                 .unwrap_or_else(|| name_table.main_module());
-            if let Some(name_id) = name_table.name_id(module_id, &[sym], self.interner()) {
-                drop(name_table);
-                if let Some(global_def) = self.query().global(name_id) {
-                    value = self.coerce_to_type(value, global_def.type_id)?;
-                }
+            if let Some(name_id) = name_table.name_id(module_id, &[sym], self.interner())
+                && let Some(global_def) = self.query().global(name_id)
+            {
+                value = self.coerce_to_type(value, global_def.type_id)?;
             }
             Ok(value)
         } else if let Some(func_type_id) = self.get_expr_type(&expr.id)
@@ -1642,14 +1641,12 @@ impl Cg<'_, '_, '_> {
             name,
             arena,
             self.interner(),
-            &name_table,
+            name_table,
             self.query().registry(),
         ) else {
             // Error type not found in fallible - will never match
-            drop(name_table);
             return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
         };
-        drop(name_table);
 
         let is_this_error = self.builder.ins().icmp_imm(IntCC::Equal, tag, error_tag);
         Ok(Some(is_this_error))
@@ -1692,14 +1689,12 @@ impl Cg<'_, '_, '_> {
             name,
             arena,
             self.interner(),
-            &name_table,
+            name_table,
             self.query().registry(),
         ) else {
             // Error type not found in fallible
-            drop(name_table);
             return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
         };
-        drop(name_table);
 
         let is_this_error = self.builder.ins().icmp_imm(IntCC::Equal, tag, error_tag);
 

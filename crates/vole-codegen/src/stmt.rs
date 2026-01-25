@@ -777,7 +777,7 @@ impl Cg<'_, '_, '_> {
             raise_stmt.error_name,
             self.arena(),
             self.interner(),
-            &self.name_table(),
+            self.name_table(),
             self.query().registry(),
         )
         .ok_or_else(|| {
@@ -831,7 +831,6 @@ impl Cg<'_, '_, '_> {
                 self.interner().resolve(raise_stmt.error_name)
             )
         })?;
-        drop(name_table);
 
         // Get fields from EntityRegistry
         let error_fields: Vec<_> = self

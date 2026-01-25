@@ -369,7 +369,6 @@ impl Cg<'_, '_, '_> {
                     let name_table = self.name_table();
                     let module_path = name_table.last_segment_str(ext_info.module_path);
                     let native_name = name_table.last_segment_str(ext_info.native_name);
-                    drop(name_table);
                     if let (Some(module_path), Some(native_name)) = (module_path, native_name)
                         && let Some(native_func) =
                             self.native_funcs().lookup(&module_path, &native_name)

@@ -2,7 +2,6 @@
 //! Result of parsing and analyzing a source file.
 
 use rustc_hash::FxHashMap;
-use std::cell::RefCell;
 use std::rc::Rc;
 
 use vole_frontend::{Interner, Program};
@@ -20,7 +19,7 @@ pub struct AnalyzedProgram {
     pub expression_data: ExpressionData,
     /// Parsed module programs for compiling pure Vole functions
     pub module_programs: FxHashMap<String, (Program, Interner)>,
-    /// Compilation database converted for codegen use (types/names wrapped in Rc<RefCell<>>)
+    /// Compilation database converted for codegen use (Rc-shared, immutable)
     pub db: CodegenDb,
 }
 
@@ -30,7 +29,7 @@ impl AnalyzedProgram {
     /// When the CompilationDb has a single owner (non-cached path), unwraps it
     /// directly. When shared (cached path, where module cache holds a reference),
     /// creates a CodegenDb that shares type/entity/implement data via Rc (O(1)),
-    /// only cloning the NameTable (needed for RefCell wrapping in codegen).
+    /// only cloning the NameTable.
     pub fn from_analysis(program: Program, interner: Interner, output: AnalysisOutput) -> Self {
         let db = match Rc::try_unwrap(output.db) {
             // Non-cached path: sole owner, move data directly (zero-cost)
@@ -61,22 +60,17 @@ impl AnalyzedProgram {
     }
 
     /// Get read-only access to the name table
-    pub fn name_table(&self) -> std::cell::Ref<'_, NameTable> {
-        self.db.names.borrow()
-    }
-
-    /// Get mutable access to the name table (for interning new names in codegen)
-    pub fn name_table_mut(&self) -> std::cell::RefMut<'_, NameTable> {
-        self.db.names.borrow_mut()
+    pub fn name_table(&self) -> &NameTable {
+        &self.db.names
     }
 
     /// Get a shared reference to the name table Rc (cloned)
-    pub fn name_table_rc(&self) -> Rc<RefCell<NameTable>> {
+    pub fn name_table_rc(&self) -> Rc<NameTable> {
         Rc::clone(self.name_table_ref())
     }
 
     /// Get a reference to the name table Rc (borrowed, no clone)
-    pub fn name_table_ref(&self) -> &Rc<RefCell<NameTable>> {
+    pub fn name_table_ref(&self) -> &Rc<NameTable> {
         &self.db.names
     }
 

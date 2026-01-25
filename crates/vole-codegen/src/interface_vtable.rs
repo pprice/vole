@@ -628,7 +628,6 @@ fn compile_external_wrapper<C: VtableCtx>(
     let native_name = name_table
         .last_segment_str(external_info.native_name)
         .ok_or_else(|| "native_name NameId has no segment".to_string())?;
-    drop(name_table);
 
     // Extract just the pointer value to end the borrow before jit_module() call
     let native_func_ptr = ctx
