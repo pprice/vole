@@ -553,13 +553,24 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse implement block: implement [Trait for] Type { methods }
+    /// Trait can be a qualified path like mod.Interface or mod.Interface<T>
     fn implement_block(&mut self) -> Result<Decl, ParseError> {
         let start_span = self.current.span;
         self.advance(); // consume 'implement'
 
         // Parse: Trait for Type  OR  just Type
-        // Trait can be a generic type like Iterator<i64>
-        let first_type = self.parse_type()?;
+        // For the first type:
+        //   - If identifier: could be Interface, Interface<T>, mod.Interface
+        //   - If keyword (string, i64, etc.): must be a type extension
+        // We can only use parse_interface_path() for identifiers since qualified
+        // paths start with identifiers (module names).
+        let first_type = if self.check(TokenType::Identifier) {
+            // Could be interface path or simple type name
+            self.parse_interface_path()?
+        } else {
+            // Must be a primitive type or other type expression (type extension)
+            self.parse_type()?
+        };
 
         let (trait_type, target_type) = if self.match_token(TokenType::KwFor) {
             // implement Trait for Type (Trait may be generic like Iterator<i64>)
@@ -614,6 +625,67 @@ impl<'src> Parser<'src> {
             statics,
             span,
         }))
+    }
+
+    /// Parse an interface path for implement blocks.
+    /// Supports:
+    ///   - Simple: Interface
+    ///   - Generic: Interface<T>
+    ///   - Qualified: mod.Interface
+    ///   - Qualified generic: mod.Interface<T>
+    fn parse_interface_path(&mut self) -> Result<TypeExpr, ParseError> {
+        // Must start with identifier
+        let first_token = self.current.clone();
+        self.consume(TokenType::Identifier, "expected interface name")?;
+        let first_sym = self.interner.intern(&first_token.lexeme);
+
+        // Check for dotted path: mod.Interface
+        if self.check(TokenType::Dot) {
+            let mut segments = vec![first_sym];
+            while self.match_token(TokenType::Dot) {
+                let seg_token = self.current.clone();
+                self.consume(TokenType::Identifier, "expected identifier after '.'")?;
+                segments.push(self.interner.intern(&seg_token.lexeme));
+            }
+
+            // Check for generic arguments: mod.Interface<T>
+            let args = if self.check(TokenType::Lt) {
+                self.advance(); // consume '<'
+                let mut type_args = Vec::new();
+                if !self.check_gt_in_type_context() {
+                    type_args.push(self.parse_type()?);
+                    while self.match_token(TokenType::Comma) {
+                        type_args.push(self.parse_type()?);
+                    }
+                }
+                self.consume_gt_in_type_context()?;
+                type_args
+            } else {
+                Vec::new()
+            };
+
+            return Ok(TypeExpr::QualifiedPath { segments, args });
+        }
+
+        // Check for generic arguments: Interface<T>
+        if self.check(TokenType::Lt) {
+            self.advance(); // consume '<'
+            let mut args = Vec::new();
+            if !self.check_gt_in_type_context() {
+                args.push(self.parse_type()?);
+                while self.match_token(TokenType::Comma) {
+                    args.push(self.parse_type()?);
+                }
+            }
+            self.consume_gt_in_type_context()?;
+            return Ok(TypeExpr::Generic {
+                name: first_sym,
+                args,
+            });
+        }
+
+        // Simple interface name
+        Ok(TypeExpr::Named(first_sym))
     }
 
     #[allow(clippy::type_complexity)]

@@ -622,6 +622,18 @@ pub enum SemanticError {
         #[label("this returns {found}")]
         span: SourceSpan,
     },
+
+    #[error("expected module, found {found}")]
+    #[diagnostic(
+        code(E2097),
+        help("'{name}' must be a module for qualified interface access")
+    )]
+    ExpectedModule {
+        name: String,
+        found: String,
+        #[label("'{name}' is {found}, not a module")]
+        span: SourceSpan,
+    },
 }
 
 /// Semantic warnings (W3xxx) - these don't prevent compilation but indicate potential issues

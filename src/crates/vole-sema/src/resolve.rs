@@ -230,6 +230,11 @@ pub fn resolve_type_to_id(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) ->
             // Type combinations are constraint-only, not resolved to a concrete type
             ctx.type_arena_mut().invalid()
         }
+        TypeExpr::QualifiedPath { .. } => {
+            // Qualified paths are handled specially in implement block resolution
+            // They should not appear in general type positions
+            ctx.type_arena_mut().invalid()
+        }
     }
 }
 

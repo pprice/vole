@@ -1136,6 +1136,26 @@ fn print_type_expr<'a>(
                 .collect();
             arena.intersperse(type_docs, arena.text(" + "))
         }
+        TypeExpr::QualifiedPath { segments, args } => {
+            let path_doc = arena.intersperse(
+                segments
+                    .iter()
+                    .map(|s| arena.text(interner.resolve(*s).to_string())),
+                arena.text("."),
+            );
+            if args.is_empty() {
+                path_doc
+            } else {
+                let arg_docs: Vec<_> = args
+                    .iter()
+                    .map(|t| print_type_expr(arena, t, interner))
+                    .collect();
+                path_doc
+                    .append(arena.text("<"))
+                    .append(arena.intersperse(arg_docs, arena.text(", ")))
+                    .append(arena.text(">"))
+            }
+        }
     }
 }
 

@@ -1,0 +1,8 @@
+// Error: unknown interface in module for qualified implement
+let traits = import "std:prelude/traits"
+
+implement traits.NonexistentInterface for i64 {
+    func foo() -> bool {
+        return true
+    }
+}

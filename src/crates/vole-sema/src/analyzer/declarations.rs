@@ -9,12 +9,19 @@ use vole_frontend::ast::{ExprKind, FieldDef as AstFieldDef, LetInit, TypeExpr};
 
 /// Extract the base interface name from a TypeExpr.
 /// For `Iterator` returns `Iterator`, for `Iterator<i64>` returns `Iterator`.
+/// For `mod.Interface` returns the last segment `Interface`.
 fn interface_base_name(type_expr: &TypeExpr) -> Option<Symbol> {
     match type_expr {
         TypeExpr::Named(sym) => Some(*sym),
         TypeExpr::Generic { name, .. } => Some(*name),
+        TypeExpr::QualifiedPath { segments, .. } => segments.last().copied(),
         _ => None,
     }
+}
+
+/// Check if a TypeExpr is a qualified path (mod.Interface).
+fn is_qualified_path(type_expr: &TypeExpr) -> bool {
+    matches!(type_expr, TypeExpr::QualifiedPath { .. })
 }
 
 /// Format a TypeExpr for error messages.
@@ -25,6 +32,20 @@ fn format_type_expr(type_expr: &TypeExpr, interner: &Interner) -> String {
             let args_str: Vec<String> =
                 args.iter().map(|a| format_type_expr(a, interner)).collect();
             format!("{}<{}>", interner.resolve(*name), args_str.join(", "))
+        }
+        TypeExpr::QualifiedPath { segments, args } => {
+            let path_str: String = segments
+                .iter()
+                .map(|s| interner.resolve(*s))
+                .collect::<Vec<_>>()
+                .join(".");
+            if args.is_empty() {
+                path_str
+            } else {
+                let args_str: Vec<String> =
+                    args.iter().map(|a| format_type_expr(a, interner)).collect();
+                format!("{}<{}>", path_str, args_str.join(", "))
+            }
         }
         _ => "unknown".to_string(),
     }
@@ -1944,22 +1965,144 @@ impl Analyzer {
         }
     }
 
+    /// Resolve a qualified interface path like `mod.Interface` or `mod.Interface<T>`.
+    /// Returns (interface_type_def_id, type_arg_exprs) if successful.
+    /// The type_arg_exprs are left unresolved and should be resolved by the caller.
+    /// For non-qualified paths, delegates to the standard resolver.
+    fn resolve_interface_path<'a>(
+        &self,
+        trait_type: &'a TypeExpr,
+        interner: &Interner,
+    ) -> Option<(TypeDefId, &'a [TypeExpr])> {
+        match trait_type {
+            TypeExpr::QualifiedPath { segments, args } => {
+                // Qualified path: mod.Interface or mod.sub.Interface
+                if segments.is_empty() {
+                    return None;
+                }
+
+                // First segment should be a module variable
+                let first_sym = segments[0];
+                let module_type_id = self.get_variable_type_id(first_sym)?;
+
+                // Walk through the segments
+                let mut current_type_id = module_type_id;
+                for (i, &segment_sym) in segments.iter().enumerate().skip(1) {
+                    let segment_name = interner.resolve(segment_sym);
+                    let arena = self.type_arena();
+
+                    // Must be a module type
+                    let module_info = arena.unwrap_module(current_type_id);
+                    let Some(module) = module_info else {
+                        // Not a module - emit error (will be handled by caller)
+                        return None;
+                    };
+
+                    // Find the export
+                    let name_id = self.module_name_id(module.module_id, segment_name)?;
+                    let export_type_id = module
+                        .exports
+                        .iter()
+                        .find(|(n, _)| *n == name_id)
+                        .map(|&(_, type_id)| type_id)?;
+
+                    // Last segment should be an interface
+                    if i == segments.len() - 1 {
+                        // This should be an interface
+                        let type_def_id = arena.type_def_id(export_type_id)?;
+
+                        // Verify it's an interface
+                        let kind = self.entity_registry().get_type(type_def_id).kind;
+                        if kind != TypeDefKind::Interface {
+                            return None;
+                        }
+
+                        // Return type args as references for caller to resolve
+                        return Some((type_def_id, args.as_slice()));
+                    } else {
+                        // Not the last segment - must be a module
+                        current_type_id = export_type_id;
+                    }
+                }
+                None
+            }
+            TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => {
+                // Non-qualified: use standard resolver
+                let iface_str = interner.resolve(*sym);
+                let type_def_id = self
+                    .resolver(interner)
+                    .resolve_type_str_or_interface(iface_str, &self.entity_registry())?;
+
+                // Verify it's an interface
+                let kind = self.entity_registry().get_type(type_def_id).kind;
+                if kind != TypeDefKind::Interface {
+                    return None;
+                }
+
+                // Return type args as references for caller to resolve
+                let type_args: &[TypeExpr] = match trait_type {
+                    TypeExpr::Generic { args, .. } => args.as_slice(),
+                    _ => &[],
+                };
+
+                Some((type_def_id, type_args))
+            }
+            _ => None,
+        }
+    }
+
     fn collect_implement_block(&mut self, impl_block: &ImplementBlock, interner: &Interner) {
         // Extract trait name symbol from trait_type (if present)
         let trait_name = impl_block.trait_type.as_ref().and_then(interface_base_name);
 
-        // Validate trait exists if specified
-        if let Some(ref trait_type) = impl_block.trait_type
-            && let Some(name) = interface_base_name(trait_type)
-        {
-            // Validate interface exists via EntityRegistry using resolver
-            let iface_str = interner.resolve(name);
-            let iface_exists = self
-                .resolver(interner)
-                .resolve_type_str_or_interface(iface_str, &self.entity_registry())
-                .is_some();
+        // Resolve interface from trait_type if specified
+        let resolved_interface = impl_block
+            .trait_type
+            .as_ref()
+            .and_then(|trait_type| self.resolve_interface_path(trait_type, interner));
 
-            if !iface_exists {
+        // Validate trait exists if specified
+        if impl_block.trait_type.is_some() && resolved_interface.is_none() {
+            let trait_type = impl_block.trait_type.as_ref().unwrap();
+
+            // Provide more specific error for qualified paths
+            if is_qualified_path(trait_type) {
+                if let TypeExpr::QualifiedPath { segments, .. } = trait_type {
+                    let first_sym = segments[0];
+                    // Check if first segment is a module
+                    if let Some(type_id) = self.get_variable_type_id(first_sym) {
+                        if self.type_arena().unwrap_module(type_id).is_none() {
+                            // First segment exists but is not a module
+                            self.add_error(
+                                SemanticError::ExpectedModule {
+                                    name: interner.resolve(first_sym).to_string(),
+                                    found: self.type_display_id(type_id),
+                                    span: impl_block.span.into(),
+                                },
+                                impl_block.span,
+                            );
+                        } else {
+                            // Module exists but interface not found in exports
+                            self.add_error(
+                                SemanticError::UnknownInterface {
+                                    name: format_type_expr(trait_type, interner),
+                                    span: impl_block.span.into(),
+                                },
+                                impl_block.span,
+                            );
+                        }
+                    } else {
+                        // First segment not found
+                        self.add_error(
+                            SemanticError::UndefinedVariable {
+                                name: interner.resolve(first_sym).to_string(),
+                                span: impl_block.span.into(),
+                            },
+                            impl_block.span,
+                        );
+                    }
+                }
+            } else {
                 self.add_error(
                     SemanticError::UnknownInterface {
                         name: format_type_expr(trait_type, interner),
@@ -2002,10 +2145,13 @@ impl Analyzer {
                 .or_else(|| self.entity_registry().type_by_name(impl_type_id.name_id()));
 
             // Get interface TypeDefId if implementing an interface
-            let interface_type_id = trait_name.and_then(|name| {
-                let iface_str = interner.resolve(name);
-                self.resolver(interner)
-                    .resolve_type_str_or_interface(iface_str, &self.entity_registry())
+            // Use resolved_interface if available, otherwise fall back to trait_name lookup
+            let interface_type_id = resolved_interface.map(|(id, _)| id).or_else(|| {
+                trait_name.and_then(|name| {
+                    let iface_str = interner.resolve(name);
+                    self.resolver(interner)
+                        .resolve_type_str_or_interface(iface_str, &self.entity_registry())
+                })
             });
 
             for method in &impl_block.methods {

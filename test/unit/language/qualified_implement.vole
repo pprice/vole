@@ -1,0 +1,42 @@
+// Test qualified implement syntax: implement mod.Interface for Type
+// This tests the ability to reference interfaces from imported modules
+
+// Create a simple module with an interface
+let traits = import "std:prelude/traits"
+
+// Simple record to implement interfaces on
+record Point {
+    x: i64,
+    y: i64,
+}
+
+// Define a simple local interface without Self for testing
+interface Showable {
+    func show() -> string
+}
+
+// First test: local interface (should work)
+implement Showable for Point {
+    func show() -> string {
+        return "Point"
+    }
+}
+
+// Second test: qualified interface path
+implement traits.Hashable for Point {
+    func hash() -> i64 {
+        return self.x + self.y
+    }
+}
+
+tests "qualified implement syntax" {
+    test "local interface implementation" {
+        let p = Point { x: 1, y: 2 }
+        assert(p.show() == "Point")
+    }
+
+    test "qualified interface implementation (traits.Hashable)" {
+        let p = Point { x: 10, y: 20 }
+        assert(p.hash() == 30)
+    }
+}

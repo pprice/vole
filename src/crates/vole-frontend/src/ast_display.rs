@@ -311,6 +311,24 @@ impl<'a> AstPrinter<'a> {
                     self.write_type_inline(out, ty);
                 }
             }
+            TypeExpr::QualifiedPath { segments, args } => {
+                for (i, sym) in segments.iter().enumerate() {
+                    if i > 0 {
+                        out.push('.');
+                    }
+                    out.push_str(self.interner.resolve(*sym));
+                }
+                if !args.is_empty() {
+                    out.push('<');
+                    for (i, arg) in args.iter().enumerate() {
+                        if i > 0 {
+                            out.push_str(", ");
+                        }
+                        self.write_type_inline(out, arg);
+                    }
+                    out.push('>');
+                }
+            }
         }
     }
 
@@ -998,6 +1016,24 @@ impl<'a> AstPrinter<'a> {
                         out.push_str(" + ");
                     }
                     self.write_type_expr_inline(out, ty);
+                }
+            }
+            TypeExpr::QualifiedPath { segments, args } => {
+                for (i, sym) in segments.iter().enumerate() {
+                    if i > 0 {
+                        out.push('.');
+                    }
+                    out.push_str(self.interner.resolve(*sym));
+                }
+                if !args.is_empty() {
+                    out.push('<');
+                    for (i, arg) in args.iter().enumerate() {
+                        if i > 0 {
+                            out.push_str(", ");
+                        }
+                        self.write_type_expr_inline(out, arg);
+                    }
+                    out.push('>');
                 }
             }
         }

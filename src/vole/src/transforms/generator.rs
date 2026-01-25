@@ -733,6 +733,23 @@ impl<'a> GeneratorTransformer<'a> {
                 .map(|p| self.type_expr_to_string(p))
                 .collect::<Vec<_>>()
                 .join(" + "),
+            TypeExpr::QualifiedPath { segments, args } => {
+                let path_str = segments
+                    .iter()
+                    .map(|s| self.interner.resolve(*s))
+                    .collect::<Vec<_>>()
+                    .join(".");
+                if args.is_empty() {
+                    path_str
+                } else {
+                    let args_str = args
+                        .iter()
+                        .map(|a| self.type_expr_to_string(a))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("{}<{}>", path_str, args_str)
+                }
+            }
         }
     }
 

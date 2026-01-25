@@ -274,6 +274,14 @@ pub enum TypeExpr {
         fields: Vec<StructuralField>,
         methods: Vec<StructuralMethod>,
     },
+    /// Qualified path: mod.Interface or mod.Interface<T>
+    /// Used for implement blocks with module-qualified interface names.
+    QualifiedPath {
+        /// Path segments: [mod, Interface] for mod.Interface
+        segments: Vec<Symbol>,
+        /// Optional type arguments for generic interfaces
+        args: Vec<TypeExpr>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

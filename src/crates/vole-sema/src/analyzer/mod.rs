@@ -911,6 +911,9 @@ impl Analyzer {
         // Pass 0: Resolve type aliases (now that shells exist, can reference forward types)
         self.collect_type_aliases(program, interner);
 
+        // Pass 0.75: Process module imports so they're available for implement block resolution
+        self.process_module_imports(program, interner);
+
         // Pass 1: Collect signatures for all declarations (shells already exist)
         self.collect_signatures(program, interner);
 
@@ -1007,6 +1010,35 @@ impl Analyzer {
             .set_aliased_type(type_id, aliased_type_id);
     }
 
+    /// Process module imports early so they're available for qualified implement syntax.
+    /// This runs before signature collection to allow `implement mod.Interface for Type`.
+    fn process_module_imports(&mut self, program: &Program, interner: &Interner) {
+        for decl in &program.declarations {
+            if let Decl::Let(let_stmt) = decl
+                && let LetInit::Expr(init_expr) = &let_stmt.init
+                && let ExprKind::Import(import_path) = &init_expr.kind
+            {
+                // Process the import and register the binding
+                if let Ok(module_type_id) =
+                    self.analyze_module(import_path, init_expr.span, interner)
+                {
+                    // Register in scope so it's available for implement block resolution
+                    self.scope.define(
+                        let_stmt.name,
+                        Variable {
+                            ty: module_type_id,
+                            mutable: false,
+                        },
+                    );
+                    // Also register in globals for consistency
+                    self.globals.insert(let_stmt.name, module_type_id);
+                    // Record the expression type so codegen can look it up
+                    self.record_expr_type_id(init_expr, module_type_id);
+                }
+            }
+        }
+    }
+
     /// Process global let declarations (type check and add to scope)
     fn process_global_lets(
         &mut self,
@@ -1020,6 +1052,11 @@ impl Analyzer {
                         // Type aliases are already handled in collect_type_aliases
                     }
                     LetInit::Expr(init_expr) => {
+                        // Skip imports - already handled in process_module_imports
+                        if matches!(&init_expr.kind, ExprKind::Import(_)) {
+                            continue;
+                        }
+
                         // Check for ambiguous type alias: let Alias = TypeName
                         if let ExprKind::Identifier(ident_sym) = &init_expr.kind {
                             let ident_name = interner.resolve(*ident_sym);
@@ -2868,6 +2905,8 @@ impl Analyzer {
         let mut exports = FxHashMap::default();
         let mut constants = FxHashMap::default();
         let mut external_funcs = FxHashSet::default();
+        // Interfaces are collected separately for post-analysis lookup
+        let mut interface_names: Vec<(NameId, Symbol)> = Vec::new();
         let module_interner = parser.into_interner();
 
         let module_id = self.name_table_mut().module_id(import_path);
@@ -2964,6 +3003,15 @@ impl Analyzer {
                         external_funcs.insert(name_id);
                     }
                 }
+                Decl::Interface(iface) => {
+                    // Export interfaces to allow qualified implement syntax
+                    // We'll populate the actual TypeId after sub-analysis registers them
+                    let name_id =
+                        self.name_table_mut()
+                            .intern(module_id, &[iface.name], &module_interner);
+                    // Store interface name for post-analysis lookup
+                    interface_names.push((name_id, iface.name));
+                }
                 _ => {} // Skip other declarations for now
             }
         }
@@ -2990,6 +3038,24 @@ impl Analyzer {
             import_path.to_string(),
             sub_analyzer.method_resolutions.into_inner(),
         );
+
+        // Now populate interface exports after sub-analysis has registered them
+        for (name_id, iface_sym) in interface_names {
+            // Look up interface type from entity registry
+            // Use block to ensure resolver guard is dropped before type_arena_mut
+            let type_def_id = {
+                let iface_str = module_interner.resolve(iface_sym);
+                self.resolver(&module_interner)
+                    .resolve_type_str_or_interface(iface_str, &self.entity_registry())
+            };
+            if let Some(type_def_id) = type_def_id {
+                // Create interface type and add to exports
+                let iface_type_id = self
+                    .type_arena_mut()
+                    .interface(type_def_id, smallvec::smallvec![]);
+                exports.insert(name_id, iface_type_id);
+            }
+        }
 
         // Create TypeId from exports and register module metadata
         let exports_vec: smallvec::SmallVec<[(NameId, ArenaTypeId); 8]> =
