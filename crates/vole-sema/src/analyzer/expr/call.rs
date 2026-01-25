@@ -124,8 +124,7 @@ impl Analyzer {
 
                 // Create the concrete function type by substituting via arena
                 // Collect substitutions into an owned map for arena.substitute
-                let subs: FxHashMap<_, _> =
-                    inferred_id.iter().map(|(&k, &v)| (k, v)).collect();
+                let subs: FxHashMap<_, _> = inferred_id.iter().map(|(&k, &v)| (k, v)).collect();
                 let (concrete_param_ids, concrete_return_id) = {
                     let mut arena = self.type_arena_mut();
                     // Substitute all types using TypeId-based substitutions directly
