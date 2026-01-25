@@ -200,6 +200,18 @@ impl FunctionRegistry {
         self.intern_name_id(name_id)
     }
 
+    /// Try to look up an existing qualified name. Returns None if the name
+    /// doesn't exist in the NameTable. Uses read-only access to NameTable.
+    pub fn try_lookup_qualified(
+        &mut self,
+        module: ModuleId,
+        segments: &[Symbol],
+        interner: &Interner,
+    ) -> Option<FunctionKey> {
+        let name_id = self.names.borrow().name_id(module, segments, interner)?;
+        Some(self.intern_name_id(name_id))
+    }
+
     /// Look up an existing raw qualified name. Panics if not found (sema bug).
     /// Uses read-only access to NameTable.
     pub fn lookup_raw_qualified(&mut self, module: ModuleId, segments: &[&str]) -> FunctionKey {
