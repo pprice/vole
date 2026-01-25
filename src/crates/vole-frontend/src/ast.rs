@@ -56,6 +56,7 @@ pub enum Decl {
     Function(FuncDecl),
     Tests(TestsDecl),
     Let(LetStmt),
+    LetTuple(LetTupleStmt), // Top-level destructuring: let { a, b } = import "..."
     Class(ClassDecl),
     Record(RecordDecl),
     Interface(InterfaceDecl),

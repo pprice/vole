@@ -108,7 +108,7 @@ impl Analyzer {
                 Decl::Tests(_) => {
                     // Tests don't need signatures in the first pass
                 }
-                Decl::Let(_) => {
+                Decl::Let(_) | Decl::LetTuple(_) => {
                     // Let declarations are processed before the second pass
                 }
                 Decl::Class(class) => {

@@ -38,6 +38,7 @@ fn print_decl<'a>(
     match decl {
         Decl::Function(func) => print_func_decl(arena, func, interner),
         Decl::Let(let_stmt) => print_let_stmt(arena, let_stmt, interner),
+        Decl::LetTuple(_) => todo!("let tuple decl printing"),
         Decl::Tests(tests) => print_tests_decl(arena, tests, interner),
         Decl::Class(class) => print_class_decl(arena, class, interner),
         Decl::Record(record) => print_record_decl(arena, record, interner),

@@ -15,8 +15,8 @@ use crate::RuntimeFn;
 use crate::context::Cg;
 use crate::types::{CodegenCtx, CompileEnv, function_name_id_with_interner, type_id_to_cranelift};
 use vole_frontend::{
-    Block, Decl, Expr, FuncDecl, InterfaceMethod, Interner, LetInit, LetStmt, Program, Span, Stmt,
-    Symbol, TestCase, TestsDecl,
+    Block, Decl, Expr, ExprKind, FuncDecl, InterfaceMethod, Interner, LetInit, LetStmt,
+    LetTupleStmt, PatternKind, Program, Span, Stmt, Symbol, TestCase, TestsDecl,
 };
 use vole_identity::NameId;
 use vole_sema::generic::{
@@ -75,6 +75,57 @@ impl Compiler<'_> {
 
     fn test_display_name(&self, func_key: FunctionKey) -> String {
         self.func_registry.display(func_key)
+    }
+
+    /// Register global module bindings from a top-level destructuring import.
+    /// This extracts module exports from the pattern and stores them in global_module_bindings.
+    fn register_global_module_bindings(&mut self, let_tuple: &LetTupleStmt, _import_path: &str) {
+        // Get the module type from semantic analysis
+        let module_type_id = self.analyzed.expression_data.get_type(let_tuple.init.id);
+        let module_type_id = match module_type_id {
+            Some(id) => id,
+            None => return, // No type info available
+        };
+
+        // Get module info from the type arena
+        let module_info = self
+            .analyzed
+            .type_arena()
+            .unwrap_module(module_type_id)
+            .cloned();
+        let module_info = match module_info {
+            Some(info) => info,
+            None => return, // Not a module type
+        };
+
+        // Extract bindings from the record pattern
+        if let PatternKind::Record { fields, .. } = &let_tuple.pattern.kind {
+            for field_pattern in fields {
+                let export_name = field_pattern.field_name;
+                let export_name_str = self.analyzed.interner.resolve(export_name);
+
+                // Find the export type in the module
+                let export_type_id = module_info
+                    .exports
+                    .iter()
+                    .find(|(name_id, _)| {
+                        self.analyzed
+                            .name_table()
+                            .last_segment_str(*name_id)
+                            .as_deref()
+                            == Some(export_name_str)
+                    })
+                    .map(|(_, ty)| *ty);
+
+                if let Some(export_type_id) = export_type_id {
+                    // Register the module binding: local_name -> (module_id, export_name, type_id)
+                    self.global_module_bindings.insert(
+                        field_pattern.binding,
+                        (module_info.module_id, export_name, export_type_id),
+                    );
+                }
+            }
+        }
     }
 
     /// Compile a complete program
@@ -167,6 +218,13 @@ impl Compiler<'_> {
                         self.global_inits.insert(let_stmt.name, expr.clone());
                     }
                 }
+                Decl::LetTuple(let_tuple) => {
+                    // Handle top-level destructuring imports
+                    // Populate global_module_bindings for each destructured name
+                    if let ExprKind::Import(import_path) = &let_tuple.init.kind {
+                        self.register_global_module_bindings(let_tuple, import_path);
+                    }
+                }
                 Decl::Class(class) => {
                     self.finalize_class(class, program);
                 }
@@ -231,8 +289,9 @@ impl Compiler<'_> {
                 Decl::Tests(tests_decl) => {
                     self.compile_tests(tests_decl, &mut test_count)?;
                 }
-                Decl::Let(_) => {
+                Decl::Let(_) | Decl::LetTuple(_) => {
                     // Globals are handled during identifier lookup
+                    // LetTuple (destructuring imports) don't generate code
                 }
                 Decl::Class(class) => {
                     self.compile_class_methods(class, program)?;
@@ -999,6 +1058,7 @@ impl Compiler<'_> {
                 global_inits: &empty_global_inits,
                 source_file_ptr,
                 current_module: None,
+                global_module_bindings: &self.global_module_bindings,
             };
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
@@ -1046,6 +1106,7 @@ impl Compiler<'_> {
                 global_inits: &empty_global_inits,
                 source_file_ptr,
                 current_module: None,
+                global_module_bindings: &self.global_module_bindings,
             };
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
             let (terminated, _) =

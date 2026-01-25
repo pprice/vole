@@ -1,10 +1,11 @@
 //! Prelude file loading for standard library definitions.
 //!
-//! Prelude files use standard imports to declare dependencies:
+//! The prelude loader auto-discovers files from `stdlib/prelude/*.vole` and
+//! loads them. traits.vole is always loaded first as the foundation for all
+//! other prelude files.
 //!
-//! ```vole
-//! let _ = import "std:prelude/traits"
-//! ```
+//! Note: Prelude files don't need imports between themselves because all symbols
+//! from traits.vole are globally available after it's loaded.
 
 use super::Analyzer;
 use crate::analysis_cache::CachedModule;
@@ -21,8 +22,8 @@ impl Analyzer {
     /// Load prelude files (trait definitions and primitive type implementations)
     /// This is called at the start of analyze() to make stdlib methods available.
     ///
-    /// Files use standard imports (`let _ = import "..."`) to declare dependencies,
-    /// so traits.vole must be loaded first.
+    /// traits.vole is loaded first (defines interfaces like Equatable, Comparable, etc.),
+    /// then all other prelude files are auto-discovered and loaded.
     pub(super) fn load_prelude(&mut self, interner: &Interner) {
         // Don't load prelude if we're already loading it (prevents recursion)
         if self.loading_prelude {
@@ -30,44 +31,51 @@ impl Analyzer {
         }
 
         // Check if stdlib is available
-        if self.module_loader.stdlib_root().is_none() {
-            return;
-        }
+        let stdlib_root = match self.module_loader.stdlib_root() {
+            Some(root) => root.to_path_buf(),
+            None => return,
+        };
 
         self.loading_prelude = true;
+
+        // Auto-discover prelude files from stdlib/prelude/*.vole
+        let prelude_dir = stdlib_root.join("prelude");
+        let prelude_files = self.discover_prelude_files(&prelude_dir);
 
         // Load traits first (defines interfaces like Equatable, Comparable, etc.)
         self.load_prelude_file("std:prelude/traits", interner);
 
-        // Load type preludes (implement blocks for primitive types)
-        // These import traits.vole, so must be loaded after.
-        // TODO: v-a5bd - auto-discover prelude files instead of hardcoded list
-        for path in [
-            "std:prelude/string",
-            "std:prelude/bool",
-            // Signed integers
-            "std:prelude/i8",
-            "std:prelude/i16",
-            "std:prelude/i32",
-            "std:prelude/i64",
-            "std:prelude/i128",
-            // Unsigned integers
-            "std:prelude/u8",
-            "std:prelude/u16",
-            "std:prelude/u32",
-            "std:prelude/u64",
-            // Floats
-            "std:prelude/f32",
-            "std:prelude/f64",
-            // Collections and utilities
-            "std:prelude/iterators",
-            "std:prelude/map",
-            "std:prelude/set",
-        ] {
-            self.load_prelude_file(path, interner);
+        // Load remaining prelude files (auto-discovered)
+        for file_name in prelude_files {
+            if file_name == "traits" {
+                continue; // Already loaded
+            }
+            let import_path = format!("std:prelude/{}", file_name);
+            self.load_prelude_file(&import_path, interner);
         }
 
         self.loading_prelude = false;
+    }
+
+    /// Discover prelude files from the prelude directory.
+    /// Returns file names without the .vole extension, sorted for deterministic order.
+    fn discover_prelude_files(&self, prelude_dir: &std::path::Path) -> Vec<String> {
+        let mut files = Vec::new();
+
+        if let Ok(entries) = std::fs::read_dir(prelude_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().is_some_and(|ext| ext == "vole")
+                    && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+                {
+                    files.push(stem.to_string());
+                }
+            }
+        }
+
+        // Sort for deterministic load order (after traits.vole)
+        files.sort();
+        files
     }
 
     /// Load a single prelude file and merge its registries

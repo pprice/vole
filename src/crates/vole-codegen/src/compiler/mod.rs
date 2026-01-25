@@ -13,6 +13,7 @@ macro_rules! compile_env {
             global_inits: &$self.global_inits,
             source_file_ptr: $source_file_ptr,
             current_module: None,
+            global_module_bindings: &$self.global_module_bindings,
         }
     };
     // Module variant with custom interner, global_inits, and module_id
@@ -24,6 +25,7 @@ macro_rules! compile_env {
             global_inits: $global_inits,
             source_file_ptr: $source_file_ptr,
             current_module: Some($module_id),
+            global_module_bindings: &$self.global_module_bindings,
         }
     };
 }
@@ -43,6 +45,7 @@ use rustc_hash::FxHashMap;
 
 use cranelift::prelude::types as clif_types;
 
+use crate::context::ModuleExportBinding;
 use crate::types::CodegenState;
 
 use crate::AnalyzedProgram;
@@ -71,6 +74,9 @@ pub struct Compiler<'a> {
     next_type_id: u32,
     /// Opaque function identities and return types
     func_registry: FunctionRegistry,
+    /// Global module bindings from top-level destructuring imports
+    /// local_name -> (module_id, export_name, type_id)
+    global_module_bindings: FxHashMap<Symbol, ModuleExportBinding>,
 }
 
 impl<'a> Compiler<'a> {
@@ -100,6 +106,7 @@ impl<'a> Compiler<'a> {
             state: CodegenState::new(native_registry),
             next_type_id: 0,
             func_registry,
+            global_module_bindings: FxHashMap::default(),
         }
     }
 

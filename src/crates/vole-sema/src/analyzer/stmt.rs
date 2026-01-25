@@ -383,7 +383,7 @@ impl Analyzer {
     }
 
     /// Recursively check a destructuring pattern against a type.
-    fn check_destructure_pattern_id(
+    pub(super) fn check_destructure_pattern_id(
         &mut self,
         pattern: &Pattern,
         ty_id: ArenaTypeId,

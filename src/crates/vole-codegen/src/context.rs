@@ -79,8 +79,8 @@ pub(crate) struct Captures<'a> {
 /// Key for caching pure runtime function calls
 pub type CallCacheKey = (RuntimeFn, SmallVec<[Value; 4]>);
 
-/// Module export binding info: (module_id, export_name_symbol, export_type_id).
-pub type ModuleExportBinding = (ModuleId, Symbol, TypeId);
+// Re-export ModuleExportBinding from types module
+pub use crate::types::ModuleExportBinding;
 
 /// Unified codegen context - all state needed for code generation.
 ///
@@ -151,7 +151,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             current_module: None,
             substitutions: None,
             substitution_cache: RefCell::new(FxHashMap::default()),
-            module_bindings: FxHashMap::default(),
+            // Initialize with global module bindings from top-level destructuring imports
+            module_bindings: env.global_module_bindings.clone(),
             codegen_ctx,
             env,
         }

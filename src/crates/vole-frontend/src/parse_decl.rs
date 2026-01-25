@@ -173,7 +173,43 @@ impl<'src> Parser<'src> {
     }
 
     fn let_decl(&mut self) -> Result<Decl, ParseError> {
-        let stmt = self.let_statement()?;
+        let start_span = self.current.span;
+        self.advance(); // consume 'let'
+
+        let mutable = self.match_token(TokenType::KwMut);
+
+        // Check for tuple destructuring: let [a, b] = expr
+        if self.check(TokenType::LBracket) {
+            let pattern = self.parse_tuple_pattern()?;
+            self.consume(TokenType::Eq, "expected '=' in let statement")?;
+            let init = self.expression(0)?;
+            let span = start_span.merge(init.span);
+
+            return Ok(Decl::LetTuple(LetTupleStmt {
+                pattern,
+                mutable,
+                init,
+                span,
+            }));
+        }
+
+        // Check for record destructuring: let { x, y } = expr
+        if self.check(TokenType::LBrace) {
+            let pattern = self.parse_record_pattern()?;
+            self.consume(TokenType::Eq, "expected '=' in let statement")?;
+            let init = self.expression(0)?;
+            let span = start_span.merge(init.span);
+
+            return Ok(Decl::LetTuple(LetTupleStmt {
+                pattern,
+                mutable,
+                init,
+                span,
+            }));
+        }
+
+        // Regular let declaration
+        let stmt = self.let_statement_inner(mutable, start_span)?;
         Ok(Decl::Let(stmt))
     }
 

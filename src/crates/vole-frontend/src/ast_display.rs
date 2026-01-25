@@ -63,6 +63,9 @@ impl<'a> AstPrinter<'a> {
             Decl::Function(f) => self.write_func_decl(out, f),
             Decl::Tests(t) => self.write_tests_decl(out, t),
             Decl::Let(l) => self.write_let(out, l),
+            Decl::LetTuple(_) => {
+                // TODO: implement let tuple display
+            }
             Decl::Class(_) | Decl::Record(_) => {
                 // TODO: implement class/record display
             }

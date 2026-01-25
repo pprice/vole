@@ -1036,6 +1036,27 @@ impl Analyzer {
                     self.record_expr_type_id(init_expr, module_type_id);
                 }
             }
+
+            // Handle destructuring imports: let { x, y } = import "..."
+            if let Decl::LetTuple(let_tuple) = decl
+                && let ExprKind::Import(import_path) = &let_tuple.init.kind
+            {
+                // Process the import
+                if let Ok(module_type_id) =
+                    self.analyze_module(import_path, let_tuple.init.span, interner)
+                {
+                    // Record the expression type for the import
+                    self.record_expr_type_id(&let_tuple.init, module_type_id);
+                    // Destructure the module exports into scope
+                    self.check_destructure_pattern_id(
+                        &let_tuple.pattern,
+                        module_type_id,
+                        let_tuple.mutable,
+                        let_tuple.init.span,
+                        interner,
+                    );
+                }
+            }
         }
     }
 
@@ -1134,6 +1155,24 @@ impl Analyzer {
                     }
                 }
             }
+
+            // Handle destructuring let declarations: let { x, y } = expr
+            if let Decl::LetTuple(let_tuple) = decl {
+                // Skip imports - already handled in process_module_imports
+                if matches!(&let_tuple.init.kind, ExprKind::Import(_)) {
+                    continue;
+                }
+
+                // Check the initializer expression
+                let init_type_id = self.check_expr(&let_tuple.init, interner)?;
+                self.check_destructure_pattern_id(
+                    &let_tuple.pattern,
+                    init_type_id,
+                    let_tuple.mutable,
+                    let_tuple.init.span,
+                    interner,
+                );
+            }
         }
         Ok(())
     }
@@ -1152,8 +1191,8 @@ impl Analyzer {
                 Decl::Tests(tests_decl) => {
                     self.check_tests(tests_decl, interner)?;
                 }
-                Decl::Let(_) => {
-                    // Already processed in process_global_lets
+                Decl::Let(_) | Decl::LetTuple(_) => {
+                    // Already processed in process_global_lets/process_module_imports
                 }
                 Decl::Class(class) => {
                     // Set up type param scope for generic class methods
@@ -2829,6 +2868,7 @@ impl Analyzer {
         _interner: &Interner,
     ) -> Result<ArenaTypeId, ()> {
         // Check cache first - return cached TypeId directly
+        // Note: We check again after loading to handle path canonicalization
         if let Some(&type_id) = self.module_type_ids.get(import_path) {
             return Ok(type_id);
         }
@@ -2884,6 +2924,18 @@ impl Analyzer {
             }
         };
 
+        // Use canonical path as the cache key to handle different import paths
+        // pointing to the same file (e.g., "std:prelude/traits" vs "./traits")
+        let canonical_path = module_info.path.to_string_lossy().to_string();
+
+        // Check cache again with canonical path
+        if let Some(&type_id) = self.module_type_ids.get(&canonical_path) {
+            // Also cache with original import_path for faster subsequent lookups
+            self.module_type_ids
+                .insert(import_path.to_string(), type_id);
+            return Ok(type_id);
+        }
+
         // Parse the module
         let mut parser = Parser::new(&module_info.source);
         let program = match parser.parse_program() {
@@ -2909,6 +2961,7 @@ impl Analyzer {
         let mut interface_names: Vec<(NameId, Symbol)> = Vec::new();
         let module_interner = parser.into_interner();
 
+        // Use import_path for module_id (not canonical path) to match codegen expectations
         let module_id = self.name_table_mut().module_id(import_path);
 
         for decl in &program.declarations {
@@ -3072,7 +3125,9 @@ impl Analyzer {
         let type_id = arena.module(module_id, exports_vec);
         drop(arena);
 
-        // Cache the TypeId for subsequent imports
+        // Cache the TypeId with canonical path for consistent lookups
+        self.module_type_ids.insert(canonical_path, type_id);
+        // Also cache with original import_path for faster subsequent lookups
         self.module_type_ids
             .insert(import_path.to_string(), type_id);
 

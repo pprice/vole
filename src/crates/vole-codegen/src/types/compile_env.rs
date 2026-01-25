@@ -6,10 +6,14 @@ use rustc_hash::FxHashMap;
 
 use vole_frontend::{Expr, Interner, Symbol};
 use vole_identity::ModuleId;
+use vole_sema::type_arena::TypeId;
 
 use crate::AnalyzedProgram;
 
 use super::CodegenState;
+
+/// Module export binding: (module_id, export_name, type_id)
+pub type ModuleExportBinding = (ModuleId, Symbol, TypeId);
 
 /// Compilation environment for a session/unit.
 ///
@@ -34,4 +38,6 @@ pub struct CompileEnv<'a> {
     /// Module being compiled (None for main program)
     #[allow(dead_code)] // Reserved for future module-aware codegen
     pub current_module: Option<ModuleId>,
+    /// Global module bindings from top-level destructuring imports
+    pub global_module_bindings: &'a FxHashMap<Symbol, ModuleExportBinding>,
 }

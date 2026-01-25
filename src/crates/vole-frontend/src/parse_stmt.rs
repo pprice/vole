@@ -249,7 +249,7 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse the rest of a let statement (after 'let' and optional 'mut')
-    fn let_statement_inner(
+    pub(super) fn let_statement_inner(
         &mut self,
         mutable: bool,
         start_span: Span,
@@ -294,14 +294,6 @@ impl<'src> Parser<'src> {
         })
     }
 
-    /// Parse a let statement (returns LetStmt directly)
-    pub(super) fn let_statement(&mut self) -> Result<LetStmt, ParseError> {
-        let start_span = self.current.span;
-        self.advance(); // consume 'let'
-        let mutable = self.match_token(TokenType::KwMut);
-        self.let_statement_inner(mutable, start_span)
-    }
-
     /// Parse a destructuring pattern (for let statements): supports identifiers, wildcards, tuples, and records
     fn parse_destructure_pattern(&mut self) -> Result<Pattern, ParseError> {
         let token = self.current.clone();
@@ -338,7 +330,7 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse a tuple destructuring pattern: [a, b, c] or [[a, b], c]
-    fn parse_tuple_pattern(&mut self) -> Result<Pattern, ParseError> {
+    pub(super) fn parse_tuple_pattern(&mut self) -> Result<Pattern, ParseError> {
         let start_span = self.current.span;
         self.advance(); // consume '['
 
@@ -369,7 +361,7 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse a record destructuring pattern: { x, y } or { x: a, y: b }
-    fn parse_record_pattern(&mut self) -> Result<Pattern, ParseError> {
+    pub(super) fn parse_record_pattern(&mut self) -> Result<Pattern, ParseError> {
         let start_span = self.current.span;
         self.advance(); // consume '{'
         self.skip_newlines();
