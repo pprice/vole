@@ -38,6 +38,7 @@ just check          # Fast type check (run after ANY change)
 just ci             # All checks (format, clippy, test, snap)
 just unit           # Run vole unit tests
 just snap           # Run snapshot tests
+just dev            # List dev tools (see just/dev.justfile)
 ```
 
 Cargo
@@ -46,10 +47,11 @@ cargo run -- run file.vole    # Execute
 cargo run -- test dir/        # Run test blocks
 ```
 
-Recommended
+Recommended system tools
 ```
 ast-grep    # Use for large scale renames and finds with -l rust
 tk          # Use for tracking work
+rg          # Ripgrep
 lldb        # Debugger
 gdb         # Debugger
 ```
