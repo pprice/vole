@@ -494,7 +494,8 @@ impl Analyzer {
             ExprKind::Block(block) => {
                 // Type check all statements
                 for stmt in &block.stmts {
-                    self.check_stmt(stmt, interner)?;
+                    // TODO(v-bd6c): Aggregate ReturnInfo from statements
+                    let _ = self.check_stmt(stmt, interner)?;
                 }
 
                 // Block evaluates to its trailing expression, if present

@@ -11,7 +11,8 @@ impl Analyzer {
         interner: &Interner,
     ) -> Result<(), Vec<TypeError>> {
         for stmt in &block.stmts {
-            self.check_stmt(stmt, interner)?;
+            // TODO(v-bd6c): Aggregate ReturnInfo from statements
+            let _ = self.check_stmt(stmt, interner)?;
         }
         Ok(())
     }
@@ -20,7 +21,7 @@ impl Analyzer {
         &mut self,
         stmt: &Stmt,
         interner: &Interner,
-    ) -> Result<(), Vec<TypeError>> {
+    ) -> Result<ReturnInfo, Vec<TypeError>> {
         match stmt {
             Stmt::Let(let_stmt) => {
                 match &let_stmt.init {
@@ -280,7 +281,7 @@ impl Analyzer {
                 // Could validate we're in a loop, skip for now
             }
             Stmt::Return(ret) => {
-                // Mark that we found a return statement
+                // Mark that we found a return statement (backward compat until v-22bf)
                 self.found_return = true;
 
                 // Determine expected type for bidirectional type checking (TypeId-based)
@@ -317,11 +318,21 @@ impl Analyzer {
                         ret.span,
                     );
                 }
+
+                return Ok(ReturnInfo {
+                    definitely_returns: true,
+                    return_types: vec![ret_type_id],
+                });
             }
             Stmt::Raise(raise_stmt) => {
-                // Mark that we found a terminating statement (raise is like return for error path)
+                // Mark that we found a terminating statement (backward compat until v-22bf)
                 self.found_return = true;
                 self.analyze_raise_stmt(raise_stmt, interner);
+
+                return Ok(ReturnInfo {
+                    definitely_returns: true,
+                    return_types: vec![],
+                });
             }
             Stmt::LetTuple(let_tuple) => {
                 // Check the initializer
@@ -337,7 +348,7 @@ impl Analyzer {
                 );
             }
         }
-        Ok(())
+        Ok(ReturnInfo::default())
     }
 
     /// Recursively check a destructuring pattern against a type.

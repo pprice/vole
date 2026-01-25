@@ -2634,7 +2634,7 @@ impl Analyzer {
             Decl::Let(let_stmt) => {
                 // Process let like a local let (check init, add to scope)
                 // We create a temporary Stmt::Let wrapper to reuse the existing logic
-                self.check_stmt(&Stmt::Let(let_stmt.clone()), interner)?;
+                let _ = self.check_stmt(&Stmt::Let(let_stmt.clone()), interner)?;
             }
             _ => {
                 // record, class, interface, implement, error, external
