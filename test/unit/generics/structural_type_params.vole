@@ -1,0 +1,72 @@
+// Tests for structural types that reference type parameters
+// e.g., func foo<T>(a: { name: T }) -> T
+
+// Simple case: structural type with one type param field
+func get_name<T>(a: { name: T }) -> T {
+    return a.name
+}
+
+// Multiple fields, one with type param
+func get_first<T>(a: { first: T, second: i64 }) -> T {
+    return a.first
+}
+
+// Returning a type param from structural
+func get_second<T>(a: { first: i64, second: T }) -> T {
+    return a.second
+}
+
+// Constrained type param in structural
+func get_value<T: Hashable>(a: { value: T }) -> T {
+    return a.value
+}
+
+// Records for testing
+record StringNamed {
+    name: string
+}
+
+record IntNamed {
+    name: i64
+}
+
+record Pair {
+    first: string,
+    second: i64
+}
+
+record SecondString {
+    first: i64,
+    second: string
+}
+
+record HashValue {
+    value: string
+}
+
+tests {
+    test "structural type param infers from string field" {
+        let p = StringNamed { name: "test" }
+        assert(get_name(p) == "test")
+    }
+
+    test "structural type param infers from i64 field" {
+        let p = IntNamed { name: 42 }
+        assert(get_name(p) == 42)
+    }
+
+    test "structural type param with multiple fields" {
+        let p = Pair { first: "hello", second: 100 }
+        assert(get_first(p) == "hello")
+    }
+
+    test "second type param field in structural" {
+        let p = SecondString { first: 10, second: "world" }
+        assert(get_second(p) == "world")
+    }
+
+    test "constrained type param in structural" {
+        let h = HashValue { value: "hashable" }
+        assert(get_value(h) == "hashable")
+    }
+}

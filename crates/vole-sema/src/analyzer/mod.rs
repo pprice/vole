@@ -1562,12 +1562,20 @@ impl Analyzer {
                     }
                 }
                 crate::generic::TypeConstraint::Structural(structural) => {
+                    // Substitute any type params in the structural constraint before checking.
+                    // This handles cases like `func foo<T, __T0: { name: T }>(a: __T0)` where
+                    // the structural constraint references another type param T.
+                    let substituted_structural =
+                        self.substitute_structural_constraint(structural, inferred);
+
                     // Use TypeId-based structural constraint checking
-                    if let Some(mismatch) =
-                        self.check_structural_constraint_id(found_id, structural, interner)
-                    {
+                    if let Some(mismatch) = self.check_structural_constraint_id(
+                        found_id,
+                        &substituted_structural,
+                        interner,
+                    ) {
                         let found_display = self.type_display_id(found_id);
-                        let constraint_display = self.structural_display(structural);
+                        let constraint_display = self.structural_display(&substituted_structural);
                         self.add_error(
                             SemanticError::StructuralConstraintMismatch {
                                 constraint: constraint_display,
@@ -1580,6 +1588,52 @@ impl Analyzer {
                     }
                 }
             }
+        }
+    }
+
+    /// Substitute type parameters in a structural constraint.
+    /// This is needed when the structural constraint references other type params,
+    /// e.g., in `func foo<T, __T0: { name: T }>(a: __T0)`, the constraint `{ name: T }`
+    /// needs T substituted with the inferred type before checking.
+    fn substitute_structural_constraint(
+        &mut self,
+        structural: &crate::type_arena::InternedStructural,
+        inferred: &FxHashMap<NameId, ArenaTypeId>,
+    ) -> crate::type_arena::InternedStructural {
+        use crate::type_arena::{InternedStructural, InternedStructuralMethod};
+
+        // Substitute field types
+        let new_fields: smallvec::SmallVec<[(NameId, ArenaTypeId); 4]> = structural
+            .fields
+            .iter()
+            .map(|&(name, ty)| {
+                let new_ty = self.type_arena_mut().substitute(ty, inferred);
+                (name, new_ty)
+            })
+            .collect();
+
+        // Substitute method signatures
+        let new_methods: smallvec::SmallVec<[InternedStructuralMethod; 2]> = structural
+            .methods
+            .iter()
+            .map(|m| {
+                let new_params: crate::type_arena::TypeIdVec = m
+                    .params
+                    .iter()
+                    .map(|&p| self.type_arena_mut().substitute(p, inferred))
+                    .collect();
+                let new_return_type = self.type_arena_mut().substitute(m.return_type, inferred);
+                InternedStructuralMethod {
+                    name: m.name,
+                    params: new_params,
+                    return_type: new_return_type,
+                }
+            })
+            .collect();
+
+        InternedStructural {
+            fields: new_fields,
+            methods: new_methods,
         }
     }
 

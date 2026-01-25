@@ -113,12 +113,14 @@ impl Analyzer {
         }
     }
 
-    /// Check if a TypeExpr resolves to a structural type (either directly or via a type alias).
-    /// Returns the InternedStructural if so, enabling implicit generification.
-    fn extract_structural_from_type_expr(
+    /// Check if a TypeExpr resolves to a structural type, with type params in scope.
+    /// This is needed when the structural type may reference explicit type parameters
+    /// (e.g., `{ name: T }` where T is a type param).
+    fn extract_structural_from_type_expr_with_scope(
         &self,
         ty: &TypeExpr,
         interner: &Interner,
+        type_param_scope: Option<&TypeParamScope>,
     ) -> Option<InternedStructural> {
         match ty {
             TypeExpr::Structural {
@@ -127,7 +129,11 @@ impl Analyzer {
             } => {
                 // Direct structural type - resolve it to an InternedStructural
                 let module_id = self.current_module;
-                let mut ctx = TypeResolutionContext::new(&self.db, interner, module_id);
+                let mut ctx = if let Some(scope) = type_param_scope {
+                    TypeResolutionContext::with_type_params(&self.db, interner, module_id, scope)
+                } else {
+                    TypeResolutionContext::new(&self.db, interner, module_id)
+                };
                 let type_id = resolve_type_to_id(ty, &mut ctx);
                 self.type_arena().unwrap_structural(type_id).cloned()
             }
@@ -173,11 +179,39 @@ impl Analyzer {
             .map(|p| p.default_value.clone())
             .collect();
 
+        // Build initial type param scope from explicit type params (if any)
+        // This is needed so that structural types like { name: T } can resolve T
+        let builtin_mod = self.name_table_mut().builtin_module();
+        let explicit_type_param_scope: Option<TypeParamScope> = if !func.type_params.is_empty() {
+            let mut scope = TypeParamScope::new();
+            for tp in &func.type_params {
+                let tp_name_str = interner.resolve(tp.name);
+                let tp_name_id = self
+                    .name_table_mut()
+                    .intern_raw(builtin_mod, &[tp_name_str]);
+                scope.add(TypeParamInfo {
+                    name: tp.name,
+                    name_id: tp_name_id,
+                    constraint: None,
+                    type_param_id: None,
+                    variance: TypeParamVariance::default(),
+                });
+            }
+            Some(scope)
+        } else {
+            None
+        };
+
         // Check for parameters with structural types (duck typing)
         // These need implicit generification: func f(x: { name: string }) -> func f<__T0: { name: string }>(x: __T0)
+        // Use the explicit type param scope so that structural types can reference type params like T
         let mut synthetic_type_params: Vec<(usize, InternedStructural)> = Vec::new();
         for (i, param) in func.params.iter().enumerate() {
-            if let Some(structural) = self.extract_structural_from_type_expr(&param.ty, interner) {
+            if let Some(structural) = self.extract_structural_from_type_expr_with_scope(
+                &param.ty,
+                interner,
+                explicit_type_param_scope.as_ref(),
+            ) {
                 let func_name = interner.resolve(func.name);
                 tracing::debug!(
                     ?func_name,
