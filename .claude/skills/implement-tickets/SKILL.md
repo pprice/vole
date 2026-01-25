@@ -35,19 +35,32 @@ You are to implement the ticket as specified, you must first gather context
 if the context is useful add comments to the ticket with `tk add-note {id} [text]`
 you must follow these rules.
 
-1. NEVER "Simplify" tests
+1. NEVER "Simplify" tests, they are **the source of truth** for correctness.
 2. NEVER Assume failures are a "pre-existing condition". If you need to prove
-   this to yourself, stack and run `just ci`
+   this to yourself, stash your changes and run `just ci`
 3. NEVER decide that the work is "too complex", a "deep refactor" or "large change"
    and take shortcuts. If you cannot complete the task, provide suggetions on
    how to decompose it to the user.
-4. Avoid shortcuts in implementation, this is false progress.
+4. NEVER use shortcuts in implementation, this is **false progress**.
+5. ALWAYS use existing functions and helpers, do not create duplicates.
 5. Use your tools, `ast-grep`, `just`, `rg`, `lldb` etc; your default tools suck.
+6. If `just unit` (`void test`) is failing, NEVER grep output if running >1 times
+   you often fail to locate the issue without seeing full output.
+
+## Limits
+1. Functions should be no longer than ~80 lines, if they are, break them apart.
+2. Functions should have no more than 5 arguments, if they need more, re-consider
+   the design, or use a struct to pass in context.
+3. Files should be no longer than ~1000 lines, if they are, break them apart.
 
 ## Completing work
 1. Add a unit test, to `test/unit` if adding language features
 2. Add a sema test to `test/sema` if adding sema features
-3. Before declaring success `just pre-commit` must pass
-4. NEVER ignore clippy warnings, this is a sign of bad code 
-5. If successful, commit the work to `git`.
-
+3. Before declaring success `just pre-commit` must pass. You do not need to run 
+   `just ci` if `just pre-commit` passes
+4. NEVER ignore clippy warnings, this is a sign of bad code
+5. If successful, do a brief code review of your changes, make sure the rules and
+   limits and followed, and we didn't write crap to just get things working. It
+   is okay to clean-up your code after the fact.
+6. If cleaning up after code-review, verify again with with `just pre-commit`
+7. If task and code-review successful, commit the work to `git`.

@@ -26,15 +26,22 @@ tk create "Task title" -d "Description"
 - Exact file paths
 - Specific code/commands (not "add validation")
 - TDD: test first, implement, commit
+- Explore to add appropriate context to ticks
+- Tickets details, design and acceptance criteria should be enough for
+  an isolated sub-agent to understand what to do. 
 
-## Task Description Format
+## Example Task Description Format
 
-```
 Goal: What this accomplishes
 Files: exact/paths/here
-Steps: 1. Write test 2. Implement 3. Verify
+Steps (example): 
+  1. Implement x in y file
+  2. Implement z in y file
+  3. Verify
+  4. Add tests for new functionality
+  5. Verify
+  5. Run checks
 Acceptance: Tests pass, no regressions
-```
 
 ## After Creating
 
