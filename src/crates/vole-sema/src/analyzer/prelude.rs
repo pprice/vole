@@ -31,14 +31,25 @@ impl Analyzer {
         self.load_prelude_file("std:prelude/traits", interner);
 
         // Load type preludes (implement blocks for primitive types)
+        // TODO: v-a5bd - auto-discover prelude files instead of hardcoded list
         for path in [
             "std:prelude/string",
+            "std:prelude/bool",
+            // Signed integers
+            "std:prelude/i8",
+            "std:prelude/i16",
+            "std:prelude/i32",
             "std:prelude/i64",
             "std:prelude/i128",
-            "std:prelude/i32",
-            "std:prelude/f64",
+            // Unsigned integers
+            "std:prelude/u8",
+            "std:prelude/u16",
+            "std:prelude/u32",
+            "std:prelude/u64",
+            // Floats
             "std:prelude/f32",
-            "std:prelude/bool",
+            "std:prelude/f64",
+            // Collections and utilities
             "std:prelude/iterators",
             "std:prelude/map",
             "std:prelude/set",
