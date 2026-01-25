@@ -1,0 +1,10 @@
+// Test error when assigning inferred union return to incompatible type
+
+func inferred_union(x: bool) {
+    if x { return 1 }
+    return "hello"
+}
+
+func main() {
+    let n: i64 = inferred_union(true)
+}
