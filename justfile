@@ -233,3 +233,7 @@ trace-module module file:
 # Run tests with tracing enabled
 trace-test path:
     VOLE_LOG=vole=info cargo run --quiet -- test "{{path}}" 2>&1
+
+# Update all dependencies
+update:
+    cargo update
