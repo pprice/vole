@@ -55,25 +55,24 @@ impl Compiler<'_> {
         (key, display_name)
     }
 
-    fn test_function_key(&mut self, test_index: usize) -> (NameId, FunctionKey) {
-        if let Some(name_id) = self.test_name_ids.get(test_index).copied() {
-            let key = self.func_registry.intern_name_id(name_id);
-            return (name_id, key);
+    fn test_function_key(&mut self, test_index: usize) -> FunctionKey {
+        if let Some(func_key) = self.test_func_keys.get(test_index).copied() {
+            return func_key;
         }
 
-        let (name_id, key) = self.func_registry.intern_test_name(test_index);
-        if self.test_name_ids.len() == test_index {
-            self.test_name_ids.push(name_id);
-        } else if self.test_name_ids.len() < test_index {
-            self.test_name_ids.resize(test_index + 1, name_id);
+        let func_key = self.func_registry.intern_test(test_index);
+        if self.test_func_keys.len() == test_index {
+            self.test_func_keys.push(func_key);
+        } else if self.test_func_keys.len() < test_index {
+            self.test_func_keys.resize(test_index + 1, func_key);
         } else {
-            self.test_name_ids[test_index] = name_id;
+            self.test_func_keys[test_index] = func_key;
         }
-        (name_id, key)
+        func_key
     }
 
-    fn test_display_name(&self, name_id: NameId) -> String {
-        self.func_registry.name_table_rc().borrow().display(name_id)
+    fn test_display_name(&self, func_key: FunctionKey) -> String {
+        self.func_registry.display(func_key)
     }
 
     /// Compile a complete program
@@ -151,8 +150,8 @@ impl Compiler<'_> {
                     // Declare each test with a generated name and signature () -> i64
                     let i64_type_id = self.analyzed.type_arena().primitives.i64;
                     for _ in &tests_decl.tests {
-                        let (name_id, func_key) = self.test_function_key(test_count);
-                        let func_name = self.test_display_name(name_id);
+                        let func_key = self.test_function_key(test_count);
+                        let func_name = self.test_display_name(func_key);
                         let sig = self.jit.create_signature(&[], Some(types::I64));
                         let func_id = self.jit.declare_function(&func_name, &sig);
                         self.func_registry.set_return_type(func_key, i64_type_id);
@@ -747,8 +746,8 @@ impl Compiler<'_> {
 
         // Phase 2: Compile each test
         for test in &tests_decl.tests {
-            let (name_id, func_key) = self.test_function_key(*test_count);
-            let func_name = self.test_display_name(name_id);
+            let func_key = self.test_function_key(*test_count);
+            let func_name = self.test_display_name(func_key);
             let func_id = self
                 .func_registry
                 .func_id(func_key)
@@ -837,7 +836,7 @@ impl Compiler<'_> {
             let line = test.span.line;
             self.tests.push(TestInfo {
                 name: test.name.clone(),
-                func_name_id: name_id,
+                func_key,
                 func_id,
                 file: self.source_file_str(),
                 line,
@@ -885,8 +884,8 @@ impl Compiler<'_> {
                 Decl::Tests(tests_decl) if include_tests => {
                     let i64_type_id = self.analyzed.type_arena().primitives.i64;
                     for _ in &tests_decl.tests {
-                        let (name_id, func_key) = self.test_function_key(test_count);
-                        let func_name = self.test_display_name(name_id);
+                        let func_key = self.test_function_key(test_count);
+                        let func_name = self.test_display_name(func_key);
                         let sig = self.jit.create_signature(&[], Some(types::I64));
                         let func_id = self.jit.declare_function(&func_name, &sig);
                         self.func_registry.set_return_type(func_key, i64_type_id);

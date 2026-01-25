@@ -46,7 +46,7 @@ use cranelift::prelude::types as clif_types;
 use crate::types::CodegenState;
 
 use crate::AnalyzedProgram;
-use crate::{FunctionRegistry, JitContext, RuntimeFn};
+use crate::{FunctionKey, FunctionRegistry, JitContext, RuntimeFn};
 use vole_frontend::{Expr, Symbol};
 use vole_identity::NameId;
 use vole_runtime::NativeRegistry;
@@ -63,8 +63,8 @@ pub struct Compiler<'a> {
     tests: Vec<TestInfo>,
     /// Global variable initializer expressions keyed by name
     global_inits: FxHashMap<Symbol, Expr>,
-    /// NameIds for declared test functions by index
-    test_name_ids: Vec<NameId>,
+    /// FunctionKeys for declared test functions by index
+    test_func_keys: Vec<FunctionKey>,
     /// Codegen lookup tables (type_metadata, method_infos, vtables, etc.)
     state: CodegenState,
     /// Next type ID to assign
@@ -96,7 +96,7 @@ impl<'a> Compiler<'a> {
             pointer_type,
             tests: Vec::new(),
             global_inits: FxHashMap::default(),
-            test_name_ids: Vec::new(),
+            test_func_keys: Vec::new(),
             state: CodegenState::new(native_registry),
             next_type_id: 0,
             func_registry,
@@ -109,17 +109,13 @@ impl<'a> Compiler<'a> {
     }
 
     /// Intern a qualified function name (encapsulates borrow of interner + func_registry)
-    fn intern_func(
-        &mut self,
-        module: vole_identity::ModuleId,
-        segments: &[Symbol],
-    ) -> crate::FunctionKey {
+    fn intern_func(&mut self, module: vole_identity::ModuleId, segments: &[Symbol]) -> FunctionKey {
         self.func_registry
             .intern_qualified(module, segments, &self.analyzed.interner)
     }
 
     /// Intern a function name with a NameId prefix (for implement block methods)
-    fn intern_func_prefixed(&mut self, prefix: NameId, method: Symbol) -> crate::FunctionKey {
+    fn intern_func_prefixed(&mut self, prefix: NameId, method: Symbol) -> FunctionKey {
         self.func_registry
             .intern_with_prefix(prefix, method, &self.analyzed.interner)
     }
