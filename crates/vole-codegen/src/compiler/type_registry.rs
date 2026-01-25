@@ -132,7 +132,6 @@ impl Compiler<'_> {
 
         // Collect method return types (TypeId-native)
         // type_def_id already looked up above
-        let func_module_id = self.func_registry.main_module();
         let mut method_infos = FxHashMap::default();
         for method in &class.methods {
             let method_name_id = self.method_name_id(method.name);
@@ -144,7 +143,12 @@ impl Compiler<'_> {
                 .find_method_on_type(type_def_id, method_name_id)
                 .expect("method should be registered in entity registry");
             let sig = self.build_signature_for_method(method_id, SelfParam::Pointer);
-            let func_key = self.intern_func(func_module_id, &[class.name, method.name]);
+            let full_name_id = self
+                .analyzed
+                .entity_registry()
+                .get_method(method_id)
+                .full_name_id;
+            let func_key = self.func_registry.intern_name_id(full_name_id);
             let display_name = self.func_registry.display(func_key);
             let jit_func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, jit_func_id);
@@ -202,6 +206,10 @@ impl Compiler<'_> {
                             });
                         let sig =
                             self.build_signature_for_method(semantic_method_id, SelfParam::Pointer);
+                        // NOTE: Cannot use full_name_id here because for interface default methods,
+                        // full_name_id refers to the interface's method (e.g., Comparable::greaterThan),
+                        // not the implementing class's method. We need the class-qualified name.
+                        let func_module_id = self.func_registry.main_module();
                         let func_key = self.intern_func(func_module_id, &[class.name, method.name]);
                         let display_name = self.func_registry.display(func_key);
                         let jit_func_id = self.jit.declare_function(&display_name, &sig);
@@ -324,7 +332,6 @@ impl Compiler<'_> {
         register_instance_type(type_id, field_type_tags);
 
         // Collect method return types (TypeId-native)
-        let func_module_id = self.func_registry.main_module();
         let mut method_infos = FxHashMap::default();
         for method in &record.methods {
             let method_name_id = self.method_name_id(method.name);
@@ -342,7 +349,12 @@ impl Compiler<'_> {
                     )
                 });
             let sig = self.build_signature_for_method(semantic_method_id, SelfParam::Pointer);
-            let func_key = self.intern_func(func_module_id, &[record.name, method.name]);
+            let full_name_id = self
+                .analyzed
+                .entity_registry()
+                .get_method(semantic_method_id)
+                .full_name_id;
+            let func_key = self.func_registry.intern_name_id(full_name_id);
             let display_name = self.func_registry.display(func_key);
             let jit_func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, jit_func_id);
@@ -400,6 +412,10 @@ impl Compiler<'_> {
                             });
                         let sig =
                             self.build_signature_for_method(semantic_method_id, SelfParam::Pointer);
+                        // NOTE: Cannot use full_name_id here because for interface default methods,
+                        // full_name_id refers to the interface's method (e.g., Comparable::greaterThan),
+                        // not the implementing record's method. We need the record-qualified name.
+                        let func_module_id = self.func_registry.main_module();
                         let func_key =
                             self.intern_func(func_module_id, &[record.name, method.name]);
                         let display_name = self.func_registry.display(func_key);
@@ -441,8 +457,6 @@ impl Compiler<'_> {
 
     /// Register static methods from a statics block for a type
     fn register_static_methods(&mut self, statics: &StaticsBlock, type_name: Symbol) {
-        let func_module_id = self.func_registry.main_module();
-
         // Get the TypeDefId for this type from entity_registry
         let query = self.query();
         let module_id = query.main_module();
@@ -467,8 +481,9 @@ impl Compiler<'_> {
                 .expect("static method should be registered in entity registry");
             let sig = self.build_signature_for_method(method_id, SelfParam::None);
 
-            // Function key: TypeName::methodName
-            let func_key = self.intern_func(func_module_id, &[type_name, method.name]);
+            // Function key from entity registry
+            let method_def = self.analyzed.entity_registry().get_method(method_id);
+            let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
             let display_name = self.func_registry.display(func_key);
             let jit_func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, jit_func_id);
@@ -539,7 +554,6 @@ impl Compiler<'_> {
         register_instance_type(type_id, field_type_tags);
 
         // Collect method info and declare methods (TypeId-native)
-        let func_module_id = self.func_registry.main_module();
         let mut method_infos = FxHashMap::default();
 
         tracing::debug!(type_name = %type_name_str, method_count = class.methods.len(), "Registering instance methods");
@@ -569,13 +583,11 @@ impl Compiler<'_> {
                 });
 
             let sig = self.build_signature_for_method(semantic_method_id, SelfParam::Pointer);
-            // NOTE: Cannot use lookup_raw_qualified here because module class methods are
-            // interned by sema under the source module ID, but codegen uses main_module().
-            // This mismatch means the name won't be found. Keep intern_raw_qualified until
-            // the module ID is fixed to match sema's.
-            let func_key = self
-                .func_registry
-                .intern_raw_qualified(func_module_id, &[type_name_str, method_name_str]);
+            let method_def = self
+                .analyzed
+                .entity_registry()
+                .get_method(semantic_method_id);
+            let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
             let display_name = self.func_registry.display(func_key);
             let jit_func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, jit_func_id);
@@ -638,12 +650,11 @@ impl Compiler<'_> {
                     });
 
                 let sig = self.build_signature_for_method(semantic_method_id, SelfParam::None);
-                // NOTE: Cannot use lookup_raw_qualified here because module class static methods
-                // are interned by sema under the source module ID, but codegen uses main_module().
-                // Keep intern_raw_qualified until module ID is fixed.
-                let func_key = self
-                    .func_registry
-                    .intern_raw_qualified(func_module_id, &[type_name_str, method_name_str]);
+                let method_def = self
+                    .analyzed
+                    .entity_registry()
+                    .get_method(semantic_method_id);
+                let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
                 let display_name = self.func_registry.display(func_key);
                 let jit_func_id = self.jit.declare_function(&display_name, &sig);
                 self.func_registry.set_func_id(func_key, jit_func_id);

@@ -223,37 +223,6 @@ impl FunctionRegistry {
         self.intern_name_id(name_id)
     }
 
-    /// Look up an existing prefixed name. Panics if not found (sema bug).
-    /// Uses read-only access to NameTable.
-    pub fn lookup_with_prefix(
-        &mut self,
-        prefix: NameId,
-        segment: Symbol,
-        interner: &Interner,
-    ) -> FunctionKey {
-        let name_id = self
-            .names
-            .borrow()
-            .name_id_with_symbol(prefix, segment, interner)
-            .expect("prefixed name should exist from sema");
-        self.intern_name_id(name_id)
-    }
-
-    /// Try to look up an existing prefixed name. Returns None if the name
-    /// doesn't exist in the NameTable. Uses read-only access to NameTable.
-    pub fn try_lookup_with_prefix(
-        &mut self,
-        prefix: NameId,
-        segment: Symbol,
-        interner: &Interner,
-    ) -> Option<FunctionKey> {
-        let name_id = self
-            .names
-            .borrow()
-            .name_id_with_symbol(prefix, segment, interner)?;
-        Some(self.intern_name_id(name_id))
-    }
-
     pub fn intern_runtime(&mut self, runtime: RuntimeFn) -> FunctionKey {
         if let Some(key) = self.runtime_lookup.get(&runtime) {
             return *key;

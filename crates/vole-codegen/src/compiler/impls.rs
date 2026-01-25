@@ -13,7 +13,6 @@ use vole_frontend::{
     ClassDecl, Expr, FuncDecl, ImplementBlock, InterfaceMethod, Interner, RecordDecl, StaticsBlock,
     Symbol, TypeExpr,
 };
-use vole_identity::ModuleId;
 use vole_sema::type_arena::TypeId;
 
 /// Get the canonical name for an AST primitive type
@@ -171,18 +170,6 @@ impl Compiler<'_> {
         Ok(())
     }
 
-    /// Get the type name symbol from a TypeExpr (for implement blocks on records/classes)
-    /// Returns None for primitives since they should use the TypeId path which is interner-independent
-    fn get_type_name_symbol(&self, ty: &TypeExpr) -> Option<Symbol> {
-        match ty {
-            TypeExpr::Named(sym) => Some(*sym),
-            // Primitives return None so we use the TypeId path instead,
-            // which avoids cross-interner issues with module programs
-            TypeExpr::Primitive(_) => None,
-            _ => None,
-        }
-    }
-
     /// Get the type name string from a TypeExpr (works for primitives and named types)
     fn get_type_name_from_expr(&self, ty: &TypeExpr) -> Option<String> {
         match ty {
@@ -209,12 +196,6 @@ impl Compiler<'_> {
         let Some(type_name) = self.get_type_name_from_expr(&impl_block.target_type) else {
             return; // Unsupported type for implement block
         };
-        let func_module = if matches!(&impl_block.target_type, TypeExpr::Primitive(_)) {
-            self.func_registry.builtin_module()
-        } else {
-            self.func_registry.main_module()
-        };
-
         // Skip if no statics block
         let Some(ref statics) = impl_block.statics else {
             return;
@@ -245,8 +226,8 @@ impl Compiler<'_> {
             // Get method name id for lookup
             let method_name_id = method_name_id_with_interner(self.analyzed, interner, method.name);
 
-            // Build signature from pre-resolved types via sema
-            let sig = {
+            // Build signature and method_id from pre-resolved types via sema
+            let (method_id, sig) = {
                 let tdef_id = type_def_id.unwrap_or_else(|| {
                     panic!(
                         "implement statics method without TypeDefId: {}.{}",
@@ -274,17 +255,13 @@ impl Compiler<'_> {
                             name_id
                         )
                     });
-                self.build_signature_for_method(method_id, SelfParam::None)
+                let sig = self.build_signature_for_method(method_id, SelfParam::None);
+                (method_id, sig)
             };
 
-            // Function key: TypeName::methodName
-            // NOTE: Cannot use lookup_raw_qualified here because module implement block statics
-            // are interned by sema under the source module ID, but codegen uses main_module()
-            // for non-primitive types. Keep intern_raw_qualified until module ID is fixed.
-            let func_key = self.func_registry.intern_raw_qualified(
-                func_module,
-                &[type_name.as_str(), interner.resolve(method.name)],
-            );
+            // Function key from EntityRegistry full_name_id
+            let method_def = self.analyzed.entity_registry().get_method(method_id);
+            let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
             let display_name = self.func_registry.display(func_key);
             let jit_func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, jit_func_id);
@@ -307,12 +284,6 @@ impl Compiler<'_> {
         let Some(type_name) = self.get_type_name_from_expr(&impl_block.target_type) else {
             return; // Unsupported type for implement block
         };
-        let func_module = if matches!(&impl_block.target_type, TypeExpr::Primitive(_)) {
-            self.func_registry.builtin_module()
-        } else {
-            self.func_registry.main_module()
-        };
-
         // Skip if no statics block
         let Some(ref statics) = impl_block.statics else {
             return;
@@ -343,8 +314,8 @@ impl Compiler<'_> {
             // Get method name id for lookup
             let method_name_id = method_name_id_with_interner(self.analyzed, interner, method.name);
 
-            // Build signature from pre-resolved types via sema
-            let sig = {
+            // Build signature and method_id from pre-resolved types via sema
+            let (method_id, sig) = {
                 let tdef_id = type_def_id.unwrap_or_else(|| {
                     panic!(
                         "import statics method without TypeDefId: {}.{}",
@@ -372,17 +343,13 @@ impl Compiler<'_> {
                             name_id
                         )
                     });
-                self.build_signature_for_method(method_id, SelfParam::None)
+                let sig = self.build_signature_for_method(method_id, SelfParam::None);
+                (method_id, sig)
             };
 
-            // Function key: TypeName::methodName
-            // NOTE: Cannot use lookup_raw_qualified here because module implement block methods
-            // are interned by sema under the source module ID, but codegen uses main_module()
-            // for non-primitive types. Keep intern_raw_qualified until module ID is fixed.
-            let func_key = self.func_registry.intern_raw_qualified(
-                func_module,
-                &[type_name.as_str(), interner.resolve(method.name)],
-            );
+            // Function key from EntityRegistry full_name_id
+            let method_def = self.analyzed.entity_registry().get_method(method_id);
+            let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
             let display_name = self.func_registry.display(func_key);
             // Use import_function (Linkage::Import) instead of declare_function
             let jit_func_id = self.jit.import_function(&display_name, &sig);
@@ -405,12 +372,6 @@ impl Compiler<'_> {
         // Get type name string (works for primitives and named types)
         let Some(type_name) = self.get_type_name_from_expr(&impl_block.target_type) else {
             return; // Unsupported type for implement block
-        };
-        let type_sym = self.get_type_name_symbol(&impl_block.target_type);
-        let func_module = if matches!(&impl_block.target_type, TypeExpr::Primitive(_)) {
-            self.func_registry.builtin_module()
-        } else {
-            self.func_registry.main_module()
         };
 
         // For named types (records/classes), look up in type_metadata since they're not in type_aliases
@@ -467,7 +428,7 @@ impl Compiler<'_> {
                 impl_type_id.and_then(|impl_id| self.query().try_type_def_id(impl_id.name_id()));
 
             // Build signature from pre-resolved types via sema
-            let sig = {
+            let (sig, semantic_method_id) = {
                 let tdef_id = type_def_id.unwrap_or_else(|| {
                     panic!(
                         "implement block instance method without TypeDefId: {}.{}",
@@ -495,22 +456,17 @@ impl Compiler<'_> {
                             name_id
                         )
                     });
-                self.build_signature_for_method(
+                let sig = self.build_signature_for_method(
                     semantic_method_id,
                     SelfParam::TypedId(self_type_id),
-                )
+                );
+                (sig, semantic_method_id)
             };
-            let func_key = if let Some(type_sym) = type_sym {
-                self.func_registry
-                    .intern_qualified(func_module, &[type_sym, method.name], interner)
-            } else if let Some(impl_id) = impl_type_id {
-                self.func_registry
-                    .intern_with_prefix(impl_id.name_id(), method.name, interner)
-            } else {
-                let method_name_str = interner.resolve(method.name);
-                self.func_registry
-                    .lookup_raw_qualified(func_module, &[type_name.as_str(), method_name_str])
-            };
+            let method_def = self
+                .analyzed
+                .entity_registry()
+                .get_method(semantic_method_id);
+            let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
             let display_name = self.func_registry.display(func_key);
             let jit_func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, jit_func_id);
@@ -554,7 +510,7 @@ impl Compiler<'_> {
                     method_name_id_with_interner(self.analyzed, interner, method.name);
 
                 // Build signature from pre-resolved types via sema
-                let sig = {
+                let (sig, semantic_method_id) = {
                     let tdef_id = type_def_id.unwrap_or_else(|| {
                         panic!(
                             "implement statics method without TypeDefId: {}.{}",
@@ -582,17 +538,16 @@ impl Compiler<'_> {
                                 name_id
                             )
                         });
-                    self.build_signature_for_method(method_id, SelfParam::None)
+                    let sig = self.build_signature_for_method(method_id, SelfParam::None);
+                    (sig, method_id)
                 };
 
-                // Function key: TypeName::methodName
-                // NOTE: Cannot use lookup_raw_qualified here because module implement block
-                // statics are interned by sema under the source module ID, but codegen uses
-                // main_module() for non-primitive types. Keep intern_raw_qualified until fixed.
-                let func_key = self.func_registry.intern_raw_qualified(
-                    func_module,
-                    &[type_name.as_str(), interner.resolve(method.name)],
-                );
+                // Function key via entity registry full_name_id
+                let method_def = self
+                    .analyzed
+                    .entity_registry()
+                    .get_method(semantic_method_id);
+                let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
                 let display_name = self.func_registry.display(func_key);
                 let func_id = self.jit.declare_function(&display_name, &sig);
                 self.func_registry.set_func_id(func_key, func_id);
@@ -656,13 +611,6 @@ impl Compiler<'_> {
                 )
             }
         };
-        let type_sym = self.get_type_name_symbol(&impl_block.target_type);
-        let func_module = if matches!(&impl_block.target_type, TypeExpr::Primitive(_)) {
-            self.func_registry.builtin_module()
-        } else {
-            self.func_registry.main_module()
-        };
-
         // Get TypeDefId for method lookup via method_func_keys
         let impl_type_id = self.impl_type_id_from_type_id(self_type_id);
         let type_def_id = impl_type_id.and_then(|id| self.query().try_type_def_id(id.name_id()));
@@ -675,20 +623,13 @@ impl Compiler<'_> {
                     .get(&(type_def_id, method_id))
                     .map(|&func_key| MethodInfo { func_key })
             });
-            self.compile_implement_method(
-                method,
-                &type_name,
-                type_sym,
-                func_module,
-                self_type_id,
-                method_key,
-            )?;
+            self.compile_implement_method(method, self_type_id, method_key)?;
         }
 
         // Compile static methods from statics block (if present)
         if let Some(ref statics) = impl_block.statics {
             let interner = self.analyzed.interner.clone();
-            self.compile_implement_statics(statics, &type_name, func_module, None, &interner)?;
+            self.compile_implement_statics(statics, &type_name, None, &interner)?;
         }
 
         Ok(())
@@ -704,20 +645,9 @@ impl Compiler<'_> {
         let Some(type_name) = self.get_type_name_from_expr(&impl_block.target_type) else {
             return Ok(()); // Unsupported type
         };
-        let func_module = if matches!(&impl_block.target_type, TypeExpr::Primitive(_)) {
-            self.func_registry.builtin_module()
-        } else {
-            self.func_registry.main_module()
-        };
 
         if let Some(ref statics) = impl_block.statics {
-            self.compile_implement_statics(
-                statics,
-                &type_name,
-                func_module,
-                module_path,
-                interner,
-            )?;
+            self.compile_implement_statics(statics, &type_name, module_path, interner)?;
         }
         Ok(())
     }
@@ -727,7 +657,6 @@ impl Compiler<'_> {
         &mut self,
         statics: &StaticsBlock,
         type_name: &str,
-        func_module: ModuleId,
         module_path: Option<&str>,
         interner: &Interner,
     ) -> Result<(), String> {
@@ -742,19 +671,7 @@ impl Compiler<'_> {
                 None => continue,
             };
 
-            // Look up the registered function
-            let method_name_str = interner.resolve(method.name);
-            let func_key = self
-                .func_registry
-                .lookup_raw_qualified(func_module, &[type_name, method_name_str]);
-            let jit_func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
-                format!(
-                    "Internal error: static method {}::{} not declared",
-                    type_name, method_name_str
-                )
-            })?;
-
-            // Try to get MethodId and use pre-resolved signature
+            // Resolve MethodId for this static method
             let method_name_id = method_name_id_with_interner(self.analyzed, interner, method.name);
             let semantic_method_id =
                 type_def_id
@@ -765,7 +682,6 @@ impl Compiler<'_> {
                             .find_static_method_on_type(tdef_id, name_id)
                     });
 
-            // Get method signature from sema - method must be registered by codegen time
             let method_id = semantic_method_id.unwrap_or_else(|| {
                 let method_name_str = interner.resolve(method.name);
                 panic!(
@@ -773,6 +689,17 @@ impl Compiler<'_> {
                     type_name, method_name_str
                 )
             });
+
+            // Look up the registered function via EntityRegistry full_name_id
+            let method_def = self.analyzed.entity_registry().get_method(method_id);
+            let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
+            let jit_func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
+                let method_name_str = interner.resolve(method.name);
+                format!(
+                    "Internal error: static method {}::{} not declared",
+                    type_name, method_name_str
+                )
+            })?;
 
             // Use pre-resolved signature from MethodDef
             let method_def = self.query().get_method(method_id);
@@ -832,30 +759,10 @@ impl Compiler<'_> {
     fn compile_implement_method(
         &mut self,
         method: &FuncDecl,
-        type_name: &str,
-        type_sym: Option<Symbol>,
-        func_module: ModuleId,
         self_type_id: TypeId,
         method_info: Option<MethodInfo>,
     ) -> Result<(), String> {
-        let func_key = if let Some(info) = method_info {
-            info.func_key
-        } else if let Some(type_sym) = type_sym {
-            self.intern_func(func_module, &[type_sym, method.name])
-        } else if let Some(impl_id) = self.impl_type_id_from_type_id(self_type_id) {
-            self.lookup_func_prefixed(impl_id.name_id(), method.name)
-        } else {
-            let method_name_str = self.resolve_symbol(method.name);
-            self.func_registry
-                .lookup_raw_qualified(func_module, &[type_name, &method_name_str])
-        };
-        let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
-            let display = self.func_registry.display(func_key);
-            format!("Internal error: implement method {} not declared", display)
-        })?;
-
-        // Create method signature with correct self type (primitives use their type, not pointer)
-        // Try to use pre-resolved types via MethodId, fall back to AST for generated methods
+        // Look up MethodId from entity_registry first (needed for func_key and signature)
         let type_def_id = self
             .impl_type_id_from_type_id(self_type_id)
             .and_then(|impl_id| self.query().try_type_def_id(impl_id.name_id()));
@@ -874,6 +781,20 @@ impl Compiler<'_> {
                     method_name_str, type_def_id, method_name_id
                 )
             });
+
+        let func_key = if let Some(info) = method_info {
+            info.func_key
+        } else {
+            let method_def = self
+                .analyzed
+                .entity_registry()
+                .get_method(semantic_method_id);
+            self.func_registry.intern_name_id(method_def.full_name_id)
+        };
+        let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
+            let display = self.func_registry.display(func_key);
+            format!("Internal error: implement method {} not declared", display)
+        })?;
 
         let sig =
             self.build_signature_for_method(semantic_method_id, SelfParam::TypedId(self_type_id));
@@ -1160,7 +1081,6 @@ impl Compiler<'_> {
         type_name: Symbol,
     ) -> Result<(), String> {
         let module_id = self.query().main_module();
-        let func_module = self.func_registry.main_module();
 
         // Get the TypeDefId for looking up method info
         let type_name_id = self.query().name_id(module_id, &[type_name]);
@@ -1182,17 +1102,6 @@ impl Compiler<'_> {
                 None => continue,
             };
 
-            // Look up the registered function
-            let func_key = self.intern_func(func_module, &[type_name, method.name]);
-            let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
-                let type_name_str = self.query().resolve_symbol(type_name);
-                let method_name_str = self.query().resolve_symbol(method.name);
-                format!(
-                    "Internal error: static method {}::{} not declared",
-                    type_name_str, method_name_str
-                )
-            })?;
-
             // Look up MethodId from entity_registry for pre-computed signature
             let method_name_id = self.method_name_id(method.name);
             let semantic_method_id = self
@@ -1208,12 +1117,26 @@ impl Compiler<'_> {
                     )
                 });
 
+            // Function key from EntityRegistry full_name_id
+            let method_def = self
+                .analyzed
+                .entity_registry()
+                .get_method(semantic_method_id);
+            let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
+            let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
+                let type_name_str = self.query().resolve_symbol(type_name);
+                let method_name_str = self.query().resolve_symbol(method.name);
+                format!(
+                    "Internal error: static method {}::{} not declared",
+                    type_name_str, method_name_str
+                )
+            })?;
+
             // Create signature using pre-resolved MethodId
             let sig = self.build_signature_for_method(semantic_method_id, SelfParam::None);
             self.jit.ctx.func.signature = sig;
 
             // Get param and return types from sema (pre-resolved signature)
-            let method_def = self.query().get_method(semantic_method_id);
             let (param_type_ids, return_type_id) = {
                 let arena = self.analyzed.type_arena();
                 let (params, ret, _) = arena
@@ -1273,8 +1196,6 @@ impl Compiler<'_> {
             .name_table()
             .module_id_if_known(module_path)
             .unwrap_or_else(|| self.query().main_module());
-        let func_module_id = self.func_registry.main_module();
-
         // Find the type metadata by looking for the type name string
         let metadata = self
             .state
@@ -1302,18 +1223,6 @@ impl Compiler<'_> {
         // Compile instance methods
         for method in &class.methods {
             let method_name_str = module_interner.resolve(method.name);
-            // NOTE: Cannot use lookup_raw_qualified here because module class methods are
-            // interned by sema under the source module ID, but codegen uses main_module().
-            // Keep intern_raw_qualified until module ID is fixed.
-            let func_key = self
-                .func_registry
-                .intern_raw_qualified(func_module_id, &[type_name_str, method_name_str]);
-            let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
-                format!(
-                    "Internal error: method {}::{} not declared",
-                    type_name_str, method_name_str
-                )
-            })?;
 
             // Look up MethodId from sema to get pre-computed signature
             let method_name_id =
@@ -1335,6 +1244,18 @@ impl Compiler<'_> {
                         type_name_str, method_name_str, metadata.type_def_id, method_name_id
                     )
                 });
+
+            let method_def = self
+                .analyzed
+                .entity_registry()
+                .get_method(semantic_method_id);
+            let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
+            let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
+                format!(
+                    "Internal error: method {}::{} not declared",
+                    type_name_str, method_name_str
+                )
+            })?;
 
             // Create method signature using pre-resolved MethodId
             let sig = self.build_signature_for_method(semantic_method_id, SelfParam::Pointer);
@@ -1407,18 +1328,6 @@ impl Compiler<'_> {
                 };
 
                 let method_name_str = module_interner.resolve(method.name);
-                // NOTE: Cannot use lookup_raw_qualified here because module class static methods
-                // are interned by sema under the source module ID, but codegen uses main_module().
-                // Keep intern_raw_qualified until module ID is fixed.
-                let func_key = self
-                    .func_registry
-                    .intern_raw_qualified(func_module_id, &[type_name_str, method_name_str]);
-                let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
-                    format!(
-                        "Internal error: static method {}::{} not declared",
-                        type_name_str, method_name_str
-                    )
-                })?;
 
                 // Look up MethodId from sema to get pre-computed signature
                 let method_name_id =
@@ -1440,6 +1349,18 @@ impl Compiler<'_> {
                             type_name_str, method_name_str, metadata.type_def_id, method_name_id
                         )
                     });
+
+                let method_def = self
+                    .analyzed
+                    .entity_registry()
+                    .get_method(semantic_method_id);
+                let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
+                let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
+                    format!(
+                        "Internal error: static method {}::{} not declared",
+                        type_name_str, method_name_str
+                    )
+                })?;
 
                 // Create signature using pre-resolved MethodId (no self parameter for static)
                 let sig = self.build_signature_for_method(semantic_method_id, SelfParam::None);
