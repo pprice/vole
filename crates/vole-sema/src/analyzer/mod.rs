@@ -1969,8 +1969,8 @@ impl Analyzer {
         use ast::ExprKind;
         match &expr.kind {
             // Literals are constant
-            ExprKind::IntLiteral(_)
-            | ExprKind::FloatLiteral(_)
+            ExprKind::IntLiteral(..)
+            | ExprKind::FloatLiteral(..)
             | ExprKind::BoolLiteral(_)
             | ExprKind::StringLiteral(_)
             | ExprKind::Nil => true,
@@ -2669,8 +2669,8 @@ impl Analyzer {
                             .intern(module_id, &[l.name], &module_interner);
                     let arena = self.type_arena();
                     let (ty_id, const_val) = match &init_expr.kind {
-                        ExprKind::FloatLiteral(v) => (arena.f64(), Some(ConstantValue::F64(*v))),
-                        ExprKind::IntLiteral(v) => (arena.i64(), Some(ConstantValue::I64(*v))),
+                        ExprKind::FloatLiteral(v, _) => (arena.f64(), Some(ConstantValue::F64(*v))),
+                        ExprKind::IntLiteral(v, _) => (arena.i64(), Some(ConstantValue::I64(*v))),
                         ExprKind::BoolLiteral(v) => (arena.bool(), Some(ConstantValue::Bool(*v))),
                         ExprKind::StringLiteral(v) => {
                             (arena.string(), Some(ConstantValue::String(v.clone())))

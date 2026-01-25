@@ -259,8 +259,8 @@ impl<'a> GeneratorTransformer<'a> {
                     || self.expr_contains_yield(&arm.body)
             }),
             // Leaf expressions that can't contain yield
-            ExprKind::IntLiteral(_)
-            | ExprKind::FloatLiteral(_)
+            ExprKind::IntLiteral(..)
+            | ExprKind::FloatLiteral(..)
             | ExprKind::BoolLiteral(_)
             | ExprKind::StringLiteral(_)
             | ExprKind::Identifier(_)
@@ -545,8 +545,8 @@ impl<'a> GeneratorTransformer<'a> {
                 }
             }
             // Leaf expressions
-            ExprKind::IntLiteral(_)
-            | ExprKind::FloatLiteral(_)
+            ExprKind::IntLiteral(..)
+            | ExprKind::FloatLiteral(..)
             | ExprKind::BoolLiteral(_)
             | ExprKind::StringLiteral(_)
             | ExprKind::Identifier(_)
@@ -591,11 +591,23 @@ impl<'a> GeneratorTransformer<'a> {
     /// Returns (TypeExpr, type_name_string) if successful.
     fn infer_literal_type(&self, expr: &Expr) -> Option<(TypeExpr, String)> {
         match &expr.kind {
-            ExprKind::IntLiteral(_) => {
-                Some((TypeExpr::Primitive(PrimitiveType::I64), "i64".to_string()))
+            ExprKind::IntLiteral(_, suffix) => {
+                let prim = suffix
+                    .map(|s| s.to_primitive_type())
+                    .unwrap_or(PrimitiveType::I64);
+                let name = suffix
+                    .map(|s| s.as_str().to_string())
+                    .unwrap_or_else(|| "i64".to_string());
+                Some((TypeExpr::Primitive(prim), name))
             }
-            ExprKind::FloatLiteral(_) => {
-                Some((TypeExpr::Primitive(PrimitiveType::F64), "f64".to_string()))
+            ExprKind::FloatLiteral(_, suffix) => {
+                let prim = suffix
+                    .map(|s| s.to_primitive_type())
+                    .unwrap_or(PrimitiveType::F64);
+                let name = suffix
+                    .map(|s| s.as_str().to_string())
+                    .unwrap_or_else(|| "f64".to_string());
+                Some((TypeExpr::Primitive(prim), name))
             }
             ExprKind::BoolLiteral(_) => {
                 Some((TypeExpr::Primitive(PrimitiveType::Bool), "bool".to_string()))
@@ -829,7 +841,7 @@ impl<'a> GeneratorTransformer<'a> {
                     op: BinaryOp::Eq,
                     right: Expr {
                         id: self.next_id(),
-                        kind: ExprKind::IntLiteral(i as i64),
+                        kind: ExprKind::IntLiteral(i as i64, None),
                         span: dummy_span,
                     },
                 })),
@@ -848,7 +860,7 @@ impl<'a> GeneratorTransformer<'a> {
                         },
                         value: Expr {
                             id: self.next_id(),
-                            kind: ExprKind::IntLiteral((i + 1) as i64),
+                            kind: ExprKind::IntLiteral((i + 1) as i64, None),
                             span: dummy_span,
                         },
                     })),
@@ -924,7 +936,7 @@ impl<'a> GeneratorTransformer<'a> {
             name: state_sym,
             value: Expr {
                 id: self.next_id(),
-                kind: ExprKind::IntLiteral(0),
+                kind: ExprKind::IntLiteral(0, None),
                 span: dummy_span,
             },
             span: dummy_span,
@@ -998,13 +1010,13 @@ impl<'a> GeneratorTransformer<'a> {
             | TypeExpr::Primitive(PrimitiveType::U32)
             | TypeExpr::Primitive(PrimitiveType::U64) => Expr {
                 id: self.next_id(),
-                kind: ExprKind::IntLiteral(0),
+                kind: ExprKind::IntLiteral(0, None),
                 span: dummy_span,
             },
             TypeExpr::Primitive(PrimitiveType::F32) | TypeExpr::Primitive(PrimitiveType::F64) => {
                 Expr {
                     id: self.next_id(),
-                    kind: ExprKind::FloatLiteral(0.0),
+                    kind: ExprKind::FloatLiteral(0.0, None),
                     span: dummy_span,
                 }
             }
@@ -1020,7 +1032,7 @@ impl<'a> GeneratorTransformer<'a> {
             },
             _ => Expr {
                 id: self.next_id(),
-                kind: ExprKind::IntLiteral(0),
+                kind: ExprKind::IntLiteral(0, None),
                 span: dummy_span,
             },
         }

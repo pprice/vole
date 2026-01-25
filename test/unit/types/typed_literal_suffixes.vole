@@ -1,0 +1,206 @@
+// Test typed numeric literal suffixes
+
+tests "integer suffix basics" {
+    test "u8 suffix" {
+        let x = 42_u8
+        assert(x == 42)
+    }
+
+    test "u16 suffix" {
+        let x = 1000_u16
+        assert(x == 1000)
+    }
+
+    test "u32 suffix" {
+        let x = 100000_u32
+        assert(x == 100000)
+    }
+
+    test "u64 suffix" {
+        let x = 100_u64
+        assert(x == 100)
+    }
+
+    test "i8 suffix" {
+        let x = 100_i8
+        assert(x == 100)
+    }
+
+    test "i16 suffix" {
+        let x = 1000_i16
+        assert(x == 1000)
+    }
+
+    test "i32 suffix" {
+        let x = 42_i32
+        assert(x == 42)
+    }
+
+    test "i64 suffix" {
+        let x = 42_i64
+        assert(x == 42)
+    }
+}
+
+tests "float suffix basics" {
+    test "f32 suffix" {
+        let x = 3.14_f32
+        assert(x > 3.0)
+    }
+
+    test "f64 suffix" {
+        let x = 3.14_f64
+        assert(x > 3.0)
+    }
+}
+
+tests "suffix with type annotation" {
+    test "matching suffix and annotation" {
+        let x: u8 = 42_u8
+        assert(x == 42)
+    }
+
+    test "i32 suffix with i32 annotation" {
+        let x: i32 = 100_i32
+        assert(x == 100)
+    }
+
+    test "f64 suffix with f64 annotation" {
+        let x: f64 = 1.5_f64
+        assert(x > 1.0)
+    }
+}
+
+tests "suffix with hex and binary" {
+    test "hex with u8 suffix" {
+        let x = 0xFF_u8
+        assert(x == 255)
+    }
+
+    test "hex with i32 suffix" {
+        let x = 0xFF_i32
+        assert(x == 255)
+    }
+
+    test "binary with u8 suffix" {
+        let x = 0b1010_u8
+        assert(x == 10)
+    }
+}
+
+tests "suffix arithmetic" {
+    test "u8 arithmetic" {
+        let a = 10_u8
+        let b = 20_u8
+        assert(a + b == 30)
+    }
+
+    test "i32 arithmetic" {
+        let a = 100_i32
+        let b = 200_i32
+        assert(a + b == 300)
+    }
+
+    test "f32 arithmetic" {
+        let a = 1.5_f32
+        let b = 2.5_f32
+        assert(a + b > 3.9)
+    }
+}
+
+tests "suffix with underscore separators" {
+    test "u32 with separator" {
+        let x = 1_000_u32
+        assert(x == 1000)
+    }
+
+    test "i64 with separator" {
+        let x = 1_000_000_i64
+        assert(x == 1000000)
+    }
+}
+
+tests "suffix inference overrides default" {
+    test "u8 inferred type" {
+        let x = 42_u8
+        let y: u8 = x
+        assert(y == 42)
+    }
+
+    test "i32 inferred type" {
+        let x = 42_i32
+        let y: i32 = x
+        assert(y == 42)
+    }
+
+    test "f32 inferred type" {
+        let x = 1.0_f32
+        let y: f32 = x
+        assert(y > 0.9)
+    }
+}
+
+tests "negative suffix literals" {
+    test "negative i8" {
+        let x = -100_i8
+        assert(x == -100)
+    }
+
+    test "negative i32" {
+        let x = -42_i32
+        assert(x == -42)
+    }
+}
+
+tests "scientific notation with suffix" {
+    test "scientific f64" {
+        let x = 1.5e3_f64
+        assert(x > 1499.0)
+    }
+
+    test "scientific f32" {
+        let x = 1.0e2_f32
+        assert(x > 99.0)
+    }
+}
+
+tests "float suffix on decimal integer" {
+    test "100_f32 is valid" {
+        let x = 100_f32
+        let y: f32 = x
+        assert(y > 99.0)
+    }
+
+    test "42_f64 is valid" {
+        let x = 42_f64
+        let y: f64 = x
+        assert(y > 41.0)
+    }
+}
+
+tests "boundary values" {
+    test "i8 max" {
+        let x = 127_i8
+        assert(x == 127)
+    }
+
+    test "i8 min positive" {
+        let x = 0_i8
+        assert(x == 0)
+    }
+
+    test "u8 max" {
+        let x = 255_u8
+        assert(x == 255)
+    }
+
+    test "u8 min" {
+        let x = 0_u8
+        assert(x == 0)
+    }
+
+    test "u16 max" {
+        let x = 65535_u16
+        assert(x == 65535)
+    }
+}

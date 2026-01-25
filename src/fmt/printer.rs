@@ -335,8 +335,23 @@ fn print_expr<'a>(
     interner: &Interner,
 ) -> DocBuilder<'a, Arena<'a>> {
     match &expr.kind {
-        ExprKind::IntLiteral(n) => arena.text(n.to_string()),
-        ExprKind::FloatLiteral(f) => print_float_literal(arena, *f),
+        ExprKind::IntLiteral(n, suffix) => {
+            let mut s = n.to_string();
+            if let Some(sfx) = suffix {
+                s.push('_');
+                s.push_str(sfx.as_str());
+            }
+            arena.text(s)
+        }
+        ExprKind::FloatLiteral(f, suffix) => {
+            if let Some(sfx) = suffix {
+                let base = print_float_literal(arena, *f);
+                let sfx_doc = arena.text(format!("_{}", sfx.as_str()));
+                base.append(sfx_doc)
+            } else {
+                print_float_literal(arena, *f)
+            }
+        }
         ExprKind::BoolLiteral(b) => arena.text(if *b { "true" } else { "false" }),
         ExprKind::StringLiteral(s) => print_string_literal(arena, s),
         ExprKind::InterpolatedString(parts) => print_interpolated_string(arena, parts, interner),

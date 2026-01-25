@@ -38,13 +38,13 @@ impl Cg<'_, '_, '_> {
         }
 
         match &expr.kind {
-            ExprKind::IntLiteral(n) => {
+            ExprKind::IntLiteral(n, _) => {
                 // Look up inferred type from semantic analysis for bidirectional type inference
                 // Uses get_expr_type helper to check module-specific expr_types when compiling prelude
                 let type_id = self.get_expr_type(&expr.id).unwrap_or(TypeId::I64);
                 Ok(self.int_const(*n, type_id))
             }
-            ExprKind::FloatLiteral(n) => {
+            ExprKind::FloatLiteral(n, _) => {
                 // Look up inferred type from semantic analysis for bidirectional type inference
                 let type_id = self.get_expr_type(&expr.id).unwrap_or(TypeId::F64);
                 Ok(self.float_const(*n, type_id))
@@ -505,7 +505,7 @@ impl Cg<'_, '_, '_> {
         // Try tuple first
         if let Some(elem_type_ids) = arena.unwrap_tuple(obj.type_id).cloned() {
             // Tuple indexing - must be constant index (checked in sema)
-            if let ExprKind::IntLiteral(i) = &index.kind {
+            if let ExprKind::IntLiteral(i, _) = &index.kind {
                 let i = *i as usize;
                 let (_, offsets) = tuple_layout_id(
                     &elem_type_ids,
@@ -540,7 +540,7 @@ impl Cg<'_, '_, '_> {
             let elem_cr_type = type_id_to_cranelift(element_id, self.arena(), self.ptr_type());
 
             // Calculate offset: base + (index * elem_size)
-            let offset = if let ExprKind::IntLiteral(i) = &index.kind {
+            let offset = if let ExprKind::IntLiteral(i, _) = &index.kind {
                 // Constant index - bounds check at compile time already done in sema
                 let i = *i as usize;
                 if i >= size {
@@ -617,7 +617,7 @@ impl Cg<'_, '_, '_> {
             let elem_size = 8i32; // All elements aligned to 8 bytes
 
             // Calculate offset
-            let offset = if let ExprKind::IntLiteral(i) = &index.kind {
+            let offset = if let ExprKind::IntLiteral(i, _) = &index.kind {
                 let i = *i as usize;
                 if i >= size {
                     return Err(format!(

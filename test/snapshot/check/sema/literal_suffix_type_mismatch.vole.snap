@@ -1,0 +1,10 @@
+[stdout]
+
+[stderr]
+  x [E2001]: expected i64, found f32
+   ,-[<path>/literal_suffix_type_mismatch.vole:2:14]
+ 1 | // Error: suffix type mismatches annotation type
+ 2 | let x: i64 = 1000_f32
+   :              ^^^^|^^^
+   :                  `-- type mismatch
+   `----

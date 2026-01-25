@@ -316,4 +316,36 @@ impl Analyzer {
             None
         }
     }
+
+    /// Convert a NumericSuffix to the corresponding ArenaTypeId.
+    pub(crate) fn suffix_to_type_id(&self, suffix: NumericSuffix) -> ArenaTypeId {
+        match suffix {
+            NumericSuffix::U8 => ArenaTypeId::U8,
+            NumericSuffix::U16 => ArenaTypeId::U16,
+            NumericSuffix::U32 => ArenaTypeId::U32,
+            NumericSuffix::U64 => ArenaTypeId::U64,
+            NumericSuffix::I8 => ArenaTypeId::I8,
+            NumericSuffix::I16 => ArenaTypeId::I16,
+            NumericSuffix::I32 => ArenaTypeId::I32,
+            NumericSuffix::I64 => ArenaTypeId::I64,
+            NumericSuffix::F32 => ArenaTypeId::F32,
+            NumericSuffix::F64 => ArenaTypeId::F64,
+        }
+    }
+
+    /// Get a human-readable range string for a numeric suffix type.
+    pub(crate) fn type_range_str(suffix: NumericSuffix) -> String {
+        match suffix {
+            NumericSuffix::U8 => "0..255".to_string(),
+            NumericSuffix::U16 => "0..65535".to_string(),
+            NumericSuffix::U32 => "0..4294967295".to_string(),
+            NumericSuffix::U64 => "0..18446744073709551615".to_string(),
+            NumericSuffix::I8 => "-128..127".to_string(),
+            NumericSuffix::I16 => "-32768..32767".to_string(),
+            NumericSuffix::I32 => "-2147483648..2147483647".to_string(),
+            NumericSuffix::I64 => "-9223372036854775808..9223372036854775807".to_string(),
+            NumericSuffix::F32 => "f32 range".to_string(),
+            NumericSuffix::F64 => "f64 range".to_string(),
+        }
+    }
 }

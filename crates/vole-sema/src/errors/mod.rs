@@ -594,6 +594,27 @@ pub enum SemanticError {
         #[label("type mismatch")]
         span: SourceSpan,
     },
+
+    #[error("invalid literal suffix")]
+    #[diagnostic(code(E2094), help("{hint}"))]
+    InvalidLiteralSuffix {
+        suffix: String,
+        suffix_kind: String,
+        literal_kind: String,
+        hint: String,
+        #[label("cannot apply {suffix_kind} suffix `_{suffix}` to {literal_kind} literal")]
+        span: SourceSpan,
+    },
+
+    #[error("literal out of range for `{suffix}`")]
+    #[diagnostic(code(E2095), help("use a larger type suffix"))]
+    LiteralOutOfRange {
+        suffix: String,
+        value: String,
+        range: String,
+        #[label("value {value} does not fit in `{suffix}` ({range})")]
+        span: SourceSpan,
+    },
 }
 
 /// Semantic warnings (W3xxx) - these don't prevent compilation but indicate potential issues

@@ -22,7 +22,63 @@ impl Analyzer {
         interner: &Interner,
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
         match &expr.kind {
-            ExprKind::IntLiteral(value) => {
+            ExprKind::IntLiteral(value, suffix) => {
+                // If the literal has a suffix, resolve its type from the suffix
+                if let Some(s) = suffix {
+                    let suffix_type_id = self.suffix_to_type_id(*s);
+
+                    // Validate: integer suffix on integer literal only
+                    if s.is_float() {
+                        self.add_error(
+                            SemanticError::InvalidLiteralSuffix {
+                                suffix: s.as_str().to_string(),
+                                suffix_kind: "float".to_string(),
+                                literal_kind: "integer".to_string(),
+                                hint: "use `_f32` or `_f64` only on decimal or float literals"
+                                    .to_string(),
+                                span: expr.span.into(),
+                            },
+                            expr.span,
+                        );
+                        return Ok(suffix_type_id);
+                    }
+
+                    // Validate: value fits in the suffix type
+                    if !suffix_type_id.fits_literal(*value) {
+                        self.add_error(
+                            SemanticError::LiteralOutOfRange {
+                                suffix: s.as_str().to_string(),
+                                value: value.to_string(),
+                                range: Self::type_range_str(*s),
+                                span: expr.span.into(),
+                            },
+                            expr.span,
+                        );
+                        return Ok(suffix_type_id);
+                    }
+
+                    // Validate: suffix type matches expected type (if any)
+                    if let Some(exp_id) = expected
+                        && exp_id != suffix_type_id
+                        && !self
+                            .type_arena()
+                            .unwrap_union(exp_id)
+                            .is_some_and(|variants| variants.contains(&suffix_type_id))
+                    {
+                        let expected_str = self.type_display_id(exp_id);
+                        self.add_error(
+                            SemanticError::TypeMismatch {
+                                expected: expected_str,
+                                found: s.as_str().to_string(),
+                                span: expr.span.into(),
+                            },
+                            expr.span,
+                        );
+                    }
+                    return Ok(suffix_type_id);
+                }
+
+                // No suffix - original logic
                 // Check if expected is a union type
                 let union_variants =
                     expected.and_then(|id| self.type_arena().unwrap_union(id).map(|v| v.to_vec()));
@@ -97,7 +153,48 @@ impl Analyzer {
                 }
                 Ok(ArenaTypeId::METATYPE)
             }
-            ExprKind::FloatLiteral(_) => {
+            ExprKind::FloatLiteral(_, suffix) => {
+                // If the literal has a suffix, resolve its type from the suffix
+                if let Some(s) = suffix {
+                    let suffix_type_id = self.suffix_to_type_id(*s);
+
+                    // Validate: float suffix on float literal only
+                    if s.is_integer() {
+                        self.add_error(
+                            SemanticError::InvalidLiteralSuffix {
+                                suffix: s.as_str().to_string(),
+                                suffix_kind: "integer".to_string(),
+                                literal_kind: "float".to_string(),
+                                hint: "use `_f32` or `_f64` for float literals".to_string(),
+                                span: expr.span.into(),
+                            },
+                            expr.span,
+                        );
+                        return Ok(suffix_type_id);
+                    }
+
+                    // Validate: suffix type matches expected type (if any)
+                    if let Some(exp_id) = expected
+                        && exp_id != suffix_type_id
+                        && !self
+                            .type_arena()
+                            .unwrap_union(exp_id)
+                            .is_some_and(|variants| variants.contains(&suffix_type_id))
+                    {
+                        let expected_str = self.type_display_id(exp_id);
+                        self.add_error(
+                            SemanticError::TypeMismatch {
+                                expected: expected_str,
+                                found: s.as_str().to_string(),
+                                span: expr.span.into(),
+                            },
+                            expr.span,
+                        );
+                    }
+                    return Ok(suffix_type_id);
+                }
+
+                // No suffix - original logic
                 if let Some(exp_id) = expected {
                     if exp_id == ArenaTypeId::F64 {
                         return Ok(ArenaTypeId::F64);
@@ -328,7 +425,13 @@ impl Analyzer {
         match un.op {
             UnaryOp::Neg => {
                 // Special case: -INT_LITERAL
-                if let ExprKind::IntLiteral(value) = &un.operand.kind {
+                if let ExprKind::IntLiteral(value, suffix) = &un.operand.kind {
+                    // If there's a suffix, use its type
+                    if let Some(s) = suffix {
+                        let suffix_type_id = self.suffix_to_type_id(*s);
+                        self.record_expr_type_id(&un.operand, suffix_type_id);
+                        return Ok(suffix_type_id);
+                    }
                     let negated = value.wrapping_neg();
                     if let Some(target) = expected
                         && self.type_arena().literal_fits_id(negated, target)

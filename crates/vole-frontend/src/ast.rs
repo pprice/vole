@@ -432,8 +432,8 @@ impl Expr {
     pub fn is_literal(&self) -> bool {
         matches!(
             self.kind,
-            ExprKind::IntLiteral(_)
-                | ExprKind::FloatLiteral(_)
+            ExprKind::IntLiteral(..)
+                | ExprKind::FloatLiteral(..)
                 | ExprKind::BoolLiteral(_)
                 | ExprKind::StringLiteral(_)
                 | ExprKind::Nil
@@ -441,11 +441,87 @@ impl Expr {
     }
 }
 
+/// Typed numeric literal suffix (e.g., `_u8`, `_f32`)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NumericSuffix {
+    U8,
+    U16,
+    U32,
+    U64,
+    I8,
+    I16,
+    I32,
+    I64,
+    F32,
+    F64,
+}
+
+impl NumericSuffix {
+    /// Parse a suffix string (without the leading underscore) into a NumericSuffix.
+    pub fn parse(s: &str) -> Option<NumericSuffix> {
+        match s {
+            "u8" => Some(NumericSuffix::U8),
+            "u16" => Some(NumericSuffix::U16),
+            "u32" => Some(NumericSuffix::U32),
+            "u64" => Some(NumericSuffix::U64),
+            "i8" => Some(NumericSuffix::I8),
+            "i16" => Some(NumericSuffix::I16),
+            "i32" => Some(NumericSuffix::I32),
+            "i64" => Some(NumericSuffix::I64),
+            "f32" => Some(NumericSuffix::F32),
+            "f64" => Some(NumericSuffix::F64),
+            _ => None,
+        }
+    }
+
+    /// Whether this is a float suffix (f32, f64).
+    pub fn is_float(self) -> bool {
+        matches!(self, NumericSuffix::F32 | NumericSuffix::F64)
+    }
+
+    /// Whether this is an integer suffix (u8..u64, i8..i64).
+    pub fn is_integer(self) -> bool {
+        !self.is_float()
+    }
+
+    /// The suffix as a string (e.g., "u8", "f32").
+    pub fn as_str(self) -> &'static str {
+        match self {
+            NumericSuffix::U8 => "u8",
+            NumericSuffix::U16 => "u16",
+            NumericSuffix::U32 => "u32",
+            NumericSuffix::U64 => "u64",
+            NumericSuffix::I8 => "i8",
+            NumericSuffix::I16 => "i16",
+            NumericSuffix::I32 => "i32",
+            NumericSuffix::I64 => "i64",
+            NumericSuffix::F32 => "f32",
+            NumericSuffix::F64 => "f64",
+        }
+    }
+
+    /// Convert to the corresponding PrimitiveType.
+    pub fn to_primitive_type(self) -> PrimitiveType {
+        match self {
+            NumericSuffix::U8 => PrimitiveType::U8,
+            NumericSuffix::U16 => PrimitiveType::U16,
+            NumericSuffix::U32 => PrimitiveType::U32,
+            NumericSuffix::U64 => PrimitiveType::U64,
+            NumericSuffix::I8 => PrimitiveType::I8,
+            NumericSuffix::I16 => PrimitiveType::I16,
+            NumericSuffix::I32 => PrimitiveType::I32,
+            NumericSuffix::I64 => PrimitiveType::I64,
+            NumericSuffix::F32 => PrimitiveType::F32,
+            NumericSuffix::F64 => PrimitiveType::F64,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum ExprKind {
     // Literals
-    IntLiteral(i64),
-    FloatLiteral(f64),
+    IntLiteral(i64, Option<NumericSuffix>),
+    FloatLiteral(f64, Option<NumericSuffix>),
     BoolLiteral(bool),
     StringLiteral(String),
     InterpolatedString(Vec<StringPart>),

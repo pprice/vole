@@ -473,6 +473,7 @@ impl<'src> Lexer<'src> {
     /// - Float: `3.14`, `1_000.5`
     /// - Scientific: `1e10`, `1.5e-3`, `2E+6`
     /// - Underscores as separators in all formats
+    /// - Type suffixes: `100_u8`, `3.14_f32`, `0xFF_i32`
     fn number(&mut self) -> Token {
         // The first digit has already been consumed by next_token().
         // Check if it was '0' to detect hex/binary prefix.
@@ -490,6 +491,12 @@ impl<'src> Lexer<'src> {
                         has_digits = true;
                         self.advance();
                     } else if c == '_' {
+                        // Check if this underscore starts a type suffix
+                        if self.is_type_suffix_ahead() {
+                            self.advance(); // consume '_'
+                            self.consume_suffix_name();
+                            break;
+                        }
                         self.advance();
                     } else {
                         break;
@@ -508,6 +515,12 @@ impl<'src> Lexer<'src> {
                         has_digits = true;
                         self.advance();
                     } else if c == '_' {
+                        // Check if this underscore starts a type suffix
+                        if self.is_type_suffix_ahead() {
+                            self.advance(); // consume '_'
+                            self.consume_suffix_name();
+                            break;
+                        }
                         self.advance();
                     } else {
                         break;
@@ -522,7 +535,17 @@ impl<'src> Lexer<'src> {
 
         // Decimal integer part (continue consuming digits and underscores)
         while let Some(c) = self.peek() {
-            if c.is_ascii_digit() || c == '_' {
+            if c.is_ascii_digit() {
+                self.advance();
+            } else if c == '_' {
+                // Check if this underscore starts a type suffix
+                if self.is_type_suffix_ahead() {
+                    self.advance(); // consume '_'
+                    self.consume_suffix_name();
+                    // After consuming suffix, check if this is a float suffix on a decimal
+                    // (we haven't seen a dot yet, so we're still in integer parsing)
+                    return self.make_token(TokenType::IntLiteral);
+                }
                 self.advance();
             } else {
                 break;
@@ -538,7 +561,15 @@ impl<'src> Lexer<'src> {
             self.advance();
             // Consume the fractional part
             while let Some(c) = self.peek() {
-                if c.is_ascii_digit() || c == '_' {
+                if c.is_ascii_digit() {
+                    self.advance();
+                } else if c == '_' {
+                    // Check if this underscore starts a type suffix
+                    if self.is_type_suffix_ahead() {
+                        self.advance(); // consume '_'
+                        self.consume_suffix_name();
+                        return self.make_token(TokenType::FloatLiteral);
+                    }
                     self.advance();
                 } else {
                     break;
@@ -558,7 +589,15 @@ impl<'src> Lexer<'src> {
                 }
                 // Consume exponent digits
                 while let Some(c) = self.peek() {
-                    if c.is_ascii_digit() || c == '_' {
+                    if c.is_ascii_digit() {
+                        self.advance();
+                    } else if c == '_' {
+                        // Check if this underscore starts a type suffix
+                        if self.is_type_suffix_ahead() {
+                            self.advance(); // consume '_'
+                            self.consume_suffix_name();
+                            return self.make_token(TokenType::FloatLiteral);
+                        }
                         self.advance();
                     } else {
                         break;
@@ -582,7 +621,15 @@ impl<'src> Lexer<'src> {
             }
             // Consume exponent digits
             while let Some(c) = self.peek() {
-                if c.is_ascii_digit() || c == '_' {
+                if c.is_ascii_digit() {
+                    self.advance();
+                } else if c == '_' {
+                    // Check if this underscore starts a type suffix
+                    if self.is_type_suffix_ahead() {
+                        self.advance(); // consume '_'
+                        self.consume_suffix_name();
+                        return self.make_token(TokenType::FloatLiteral);
+                    }
                     self.advance();
                 } else {
                     break;
@@ -592,6 +639,52 @@ impl<'src> Lexer<'src> {
         }
 
         self.make_token(TokenType::IntLiteral)
+    }
+
+    /// Check if the characters after the current `_` position form a known type suffix.
+    /// This peeks at the chars after the underscore (which is at peek position).
+    /// We look for patterns like `_u8`, `_i32`, `_f64` etc.
+    fn is_type_suffix_ahead(&self) -> bool {
+        // We're at a '_' which is at peek position.
+        // We need to look at what follows the underscore.
+        // peek() returns '_', peek_next() returns the char after that.
+        let remaining = &self.source[self.current..];
+        // remaining starts at the '_'
+        if remaining.len() < 2 {
+            return false;
+        }
+        // Skip the underscore itself
+        let after_underscore = &remaining[1..];
+        // Check if it starts with a known suffix that is NOT followed by an alphanumeric or underscore
+        for suffix in &[
+            "u8", "u16", "u32", "u64", "i8", "i16", "i32", "i64", "f32", "f64",
+        ] {
+            if after_underscore.starts_with(suffix) {
+                let suffix_end = suffix.len();
+                // Make sure the suffix is not followed by alphanumeric or underscore
+                // (to avoid matching _u8foo as a suffix)
+                if suffix_end >= after_underscore.len() {
+                    return true;
+                }
+                let next_char = after_underscore.as_bytes()[suffix_end];
+                if !next_char.is_ascii_alphanumeric() && next_char != b'_' {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Consume the alphabetic/numeric suffix name after the underscore has been consumed.
+    /// Expects to be called after the `_` has been consumed.
+    fn consume_suffix_name(&mut self) {
+        while let Some(c) = self.peek() {
+            if c.is_ascii_alphanumeric() {
+                self.advance();
+            } else {
+                break;
+            }
+        }
     }
 
     /// Scan a string literal (basic, with interpolation start support)

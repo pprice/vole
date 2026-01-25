@@ -1,0 +1,2 @@
+// Error: integer suffix on float literal
+let x = 3.14_u8

@@ -26,8 +26,20 @@ impl Analyzer {
         interner: &Interner,
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
         match &expr.kind {
-            ExprKind::IntLiteral(_) => Ok(ArenaTypeId::I64), // Default to i64 for now
-            ExprKind::FloatLiteral(_) => Ok(ArenaTypeId::F64),
+            ExprKind::IntLiteral(_, suffix) => {
+                if let Some(s) = suffix {
+                    Ok(self.suffix_to_type_id(*s))
+                } else {
+                    Ok(ArenaTypeId::I64) // Default to i64
+                }
+            }
+            ExprKind::FloatLiteral(_, suffix) => {
+                if let Some(s) = suffix {
+                    Ok(self.suffix_to_type_id(*s))
+                } else {
+                    Ok(ArenaTypeId::F64) // Default to f64
+                }
+            }
             ExprKind::BoolLiteral(_) => Ok(ArenaTypeId::BOOL),
             ExprKind::StringLiteral(_) => Ok(ArenaTypeId::STRING),
             ExprKind::InterpolatedString(_) => Ok(ArenaTypeId::STRING),
@@ -266,7 +278,7 @@ impl Analyzer {
                     Ok(elem_id)
                 } else if let Some(elem_ids) = self.unwrap_tuple_id(obj_ty_id) {
                     // For tuples, try to get element type from constant index
-                    if let ExprKind::IntLiteral(i) = &idx.index.kind {
+                    if let ExprKind::IntLiteral(i, _) = &idx.index.kind {
                         let i = *i as usize;
                         if i < elem_ids.len() {
                             Ok(elem_ids[i])
@@ -635,7 +647,11 @@ impl Analyzer {
         _interner: &Interner,
     ) -> ArenaTypeId {
         match &expr.kind {
-            ExprKind::IntLiteral(value) => {
+            ExprKind::IntLiteral(value, suffix) => {
+                // If suffix is present, it overrides the hint
+                if let Some(s) = suffix {
+                    return self.suffix_to_type_id(*s);
+                }
                 // Use TypeArena's literal_fits_id which handles primitives and unions
                 if self.type_arena().literal_fits_id(*value, hint) {
                     hint
@@ -643,7 +659,11 @@ impl Analyzer {
                     self.ty_i64_id() // Default
                 }
             }
-            ExprKind::FloatLiteral(_) => {
+            ExprKind::FloatLiteral(_, suffix) => {
+                // If suffix is present, it overrides the hint
+                if let Some(s) = suffix {
+                    return self.suffix_to_type_id(*s);
+                }
                 if hint == ArenaTypeId::F32 || hint == ArenaTypeId::F64 {
                     hint
                 } else {

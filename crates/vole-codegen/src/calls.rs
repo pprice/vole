@@ -1269,8 +1269,8 @@ fn find_lambda_in_expr(expr: &Expr, node_id: NodeId) -> Option<&LambdaExpr> {
             None
         }
         // Leaf nodes with no sub-expressions
-        ExprKind::IntLiteral(_)
-        | ExprKind::FloatLiteral(_)
+        ExprKind::IntLiteral(..)
+        | ExprKind::FloatLiteral(..)
         | ExprKind::BoolLiteral(_)
         | ExprKind::StringLiteral(_)
         | ExprKind::InterpolatedString(_)

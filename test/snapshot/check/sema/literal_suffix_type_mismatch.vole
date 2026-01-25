@@ -1,0 +1,2 @@
+// Error: suffix type mismatches annotation type
+let x: i64 = 1000_f32

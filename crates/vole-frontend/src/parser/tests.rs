@@ -5,7 +5,7 @@ fn parse_int_literal() {
     let mut parser = Parser::new("42");
     let expr = parser.parse_expression().unwrap();
     match expr.kind {
-        ExprKind::IntLiteral(n) => assert_eq!(n, 42),
+        ExprKind::IntLiteral(n, _) => assert_eq!(n, 42),
         _ => panic!("expected int literal"),
     }
 }
@@ -15,7 +15,7 @@ fn parse_float_literal() {
     let mut parser = Parser::new("3.25");
     let expr = parser.parse_expression().unwrap();
     match expr.kind {
-        ExprKind::FloatLiteral(n) => assert!((n - 3.25).abs() < 0.001),
+        ExprKind::FloatLiteral(n, _) => assert!((n - 3.25).abs() < 0.001),
         _ => panic!("expected float literal"),
     }
 }
@@ -119,7 +119,7 @@ fn parse_unary_neg() {
         ExprKind::Unary(unary) => {
             assert_eq!(unary.op, UnaryOp::Neg);
             match unary.operand.kind {
-                ExprKind::IntLiteral(n) => assert_eq!(n, 42),
+                ExprKind::IntLiteral(n, _) => assert_eq!(n, 42),
                 _ => panic!("expected int literal"),
             }
         }
@@ -133,7 +133,7 @@ fn parse_assignment() {
     let expr = parser.parse_expression().unwrap();
     match expr.kind {
         ExprKind::Assign(assign) => match assign.value.kind {
-            ExprKind::IntLiteral(n) => assert_eq!(n, 42),
+            ExprKind::IntLiteral(n, _) => assert_eq!(n, 42),
             _ => panic!("expected int literal"),
         },
         _ => panic!("expected assignment"),
@@ -259,7 +259,7 @@ fn parse_left_associativity() {
             assert_eq!(outer.op, BinaryOp::Sub);
             // Right should be just 3, not (2 - 3)
             match &outer.right.kind {
-                ExprKind::IntLiteral(3) => {} // correct
+                ExprKind::IntLiteral(3, _) => {} // correct
                 _ => panic!("expected right to be 3, got {:?}", outer.right.kind),
             }
             // Left should be (1 - 2)
@@ -267,11 +267,11 @@ fn parse_left_associativity() {
                 ExprKind::Binary(inner) => {
                     assert_eq!(inner.op, BinaryOp::Sub);
                     match &inner.left.kind {
-                        ExprKind::IntLiteral(1) => {}
+                        ExprKind::IntLiteral(1, _) => {}
                         _ => panic!("expected inner left to be 1"),
                     }
                     match &inner.right.kind {
-                        ExprKind::IntLiteral(2) => {}
+                        ExprKind::IntLiteral(2, _) => {}
                         _ => panic!("expected inner right to be 2"),
                     }
                 }
@@ -1254,7 +1254,7 @@ fn test_parse_repeat_literal() {
     if let Decl::Let(l) = &program.declarations[0] {
         if let ExprKind::RepeatLiteral { element, count } = &l.init.as_expr().unwrap().kind {
             assert_eq!(*count, 10);
-            if let ExprKind::IntLiteral(n) = &element.kind {
+            if let ExprKind::IntLiteral(n, _) = &element.kind {
                 assert_eq!(*n, 0);
             } else {
                 panic!("expected int literal as element");
@@ -1327,7 +1327,7 @@ fn test_parse_param_default_value() {
         assert!(f.params[0].default_value.is_none());
         // Second param should have default value of 10
         if let Some(default) = &f.params[1].default_value {
-            assert!(matches!(default.kind, ExprKind::IntLiteral(10)));
+            assert!(matches!(default.kind, ExprKind::IntLiteral(10, _)));
         } else {
             panic!("expected default value for second parameter");
         }

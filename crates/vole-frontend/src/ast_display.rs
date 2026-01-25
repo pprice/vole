@@ -432,13 +432,21 @@ impl<'a> AstPrinter<'a> {
 
     fn write_expr(&self, out: &mut String, expr: &Expr) {
         match &expr.kind {
-            ExprKind::IntLiteral(n) => {
+            ExprKind::IntLiteral(n, suffix) => {
                 self.write_indent(out);
-                writeln!(out, "Int {}", n).unwrap();
+                if let Some(s) = suffix {
+                    writeln!(out, "Int {}_{}", n, s.as_str()).unwrap();
+                } else {
+                    writeln!(out, "Int {}", n).unwrap();
+                }
             }
-            ExprKind::FloatLiteral(n) => {
+            ExprKind::FloatLiteral(n, suffix) => {
                 self.write_indent(out);
-                writeln!(out, "Float {}", n).unwrap();
+                if let Some(s) = suffix {
+                    writeln!(out, "Float {}_{}", n, s.as_str()).unwrap();
+                } else {
+                    writeln!(out, "Float {}", n).unwrap();
+                }
             }
             ExprKind::BoolLiteral(b) => {
                 self.write_indent(out);
@@ -805,15 +813,15 @@ impl<'a> AstPrinter<'a> {
         match &pattern.kind {
             PatternKind::Wildcard => out.push('_'),
             PatternKind::Literal(expr) => match &expr.kind {
-                ExprKind::IntLiteral(n) => write!(out, "{}", n).unwrap(),
-                ExprKind::FloatLiteral(n) => write!(out, "{}", n).unwrap(),
+                ExprKind::IntLiteral(n, _) => write!(out, "{}", n).unwrap(),
+                ExprKind::FloatLiteral(n, _) => write!(out, "{}", n).unwrap(),
                 ExprKind::BoolLiteral(b) => write!(out, "{}", b).unwrap(),
                 ExprKind::StringLiteral(s) => write!(out, "{:?}", s).unwrap(),
                 ExprKind::Unary(u) => {
                     out.push('-');
-                    if let ExprKind::IntLiteral(n) = &u.operand.kind {
+                    if let ExprKind::IntLiteral(n, _) = &u.operand.kind {
                         write!(out, "{}", n).unwrap();
-                    } else if let ExprKind::FloatLiteral(n) = &u.operand.kind {
+                    } else if let ExprKind::FloatLiteral(n, _) = &u.operand.kind {
                         write!(out, "{}", n).unwrap();
                     }
                 }

@@ -1,0 +1,2 @@
+// Error: value does not fit in suffix type
+let x = 1000_u8

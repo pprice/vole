@@ -1,0 +1,11 @@
+[stdout]
+
+[stderr]
+  x [E2094]: invalid literal suffix
+   ,-[<path>/literal_suffix_invalid_int_on_float.vole:2:9]
+ 1 | // Error: integer suffix on float literal
+ 2 | let x = 3.14_u8
+   :         ^^^|^^^
+   :            `-- cannot apply integer suffix `_u8` to float literal
+   `----
+  help: use `_f32` or `_f64` for float literals

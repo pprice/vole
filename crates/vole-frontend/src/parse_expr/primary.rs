@@ -62,7 +62,31 @@ impl<'src> Parser<'src> {
         match token.ty {
             TokenType::IntLiteral => {
                 self.advance();
-                let value: i64 = Self::parse_int_literal(&token.lexeme).map_err(|_| {
+                let (num_part, suffix) = Self::split_numeric_suffix(&token.lexeme);
+
+                // If a float suffix on a decimal int literal, produce FloatLiteral
+                if let Some(s) = suffix
+                    && s.is_float()
+                    && !Self::is_hex_or_binary(num_part)
+                {
+                    let cleaned = num_part.replace('_', "");
+                    let value: f64 = cleaned.parse().map_err(|_| {
+                        ParseError::new(
+                            ParserError::UnexpectedToken {
+                                token: "invalid float literal".to_string(),
+                                span: token.span.into(),
+                            },
+                            token.span,
+                        )
+                    })?;
+                    return Ok(Expr {
+                        id: self.next_id(),
+                        kind: ExprKind::FloatLiteral(value, suffix),
+                        span: token.span,
+                    });
+                }
+
+                let value: i64 = Self::parse_int_literal(num_part).map_err(|_| {
                     ParseError::new(
                         ParserError::UnexpectedToken {
                             token: "invalid integer literal".to_string(),
@@ -73,13 +97,14 @@ impl<'src> Parser<'src> {
                 })?;
                 Ok(Expr {
                     id: self.next_id(),
-                    kind: ExprKind::IntLiteral(value),
+                    kind: ExprKind::IntLiteral(value, suffix),
                     span: token.span,
                 })
             }
             TokenType::FloatLiteral => {
                 self.advance();
-                let cleaned = token.lexeme.replace('_', "");
+                let (num_part, suffix) = Self::split_numeric_suffix(&token.lexeme);
+                let cleaned = num_part.replace('_', "");
                 let value: f64 = cleaned.parse().map_err(|_| {
                     ParseError::new(
                         ParserError::UnexpectedToken {
@@ -91,7 +116,7 @@ impl<'src> Parser<'src> {
                 })?;
                 Ok(Expr {
                     id: self.next_id(),
-                    kind: ExprKind::FloatLiteral(value),
+                    kind: ExprKind::FloatLiteral(value, suffix),
                     span: token.span,
                 })
             }
@@ -678,5 +703,35 @@ impl<'src> Parser<'src> {
         } else {
             cleaned.parse::<i64>()
         }
+    }
+
+    /// Split a numeric literal lexeme into (number_part, optional_suffix).
+    /// Recognizes suffixes like `_u8`, `_i32`, `_f64` etc.
+    /// The suffix is the last `_` followed by a known type name.
+    pub(super) fn split_numeric_suffix(lexeme: &str) -> (&str, Option<NumericSuffix>) {
+        // Look for the last underscore that starts a valid suffix
+        // We try the known suffix lengths: 2 chars (u8, i8), 3 chars (u16, i16, u32, i32, u64, i64, f32, f64)
+        for suffix_len in [3, 2] {
+            // Need at least underscore + suffix_len chars, plus at least 1 digit
+            if lexeme.len() > suffix_len + 1 {
+                let split_pos = lexeme.len() - suffix_len - 1;
+                if lexeme.as_bytes()[split_pos] == b'_' {
+                    let suffix_str = &lexeme[split_pos + 1..];
+                    if let Some(suffix) = NumericSuffix::parse(suffix_str) {
+                        let num_part = &lexeme[..split_pos];
+                        return (num_part, Some(suffix));
+                    }
+                }
+            }
+        }
+        (lexeme, None)
+    }
+
+    /// Check if a numeric literal string is hex (0x) or binary (0b).
+    fn is_hex_or_binary(num_part: &str) -> bool {
+        num_part.starts_with("0x")
+            || num_part.starts_with("0X")
+            || num_part.starts_with("0b")
+            || num_part.starts_with("0B")
     }
 }

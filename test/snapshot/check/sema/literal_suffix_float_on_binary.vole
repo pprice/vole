@@ -1,0 +1,2 @@
+// Error: float suffix on binary literal
+let x = 0b1010_f32
