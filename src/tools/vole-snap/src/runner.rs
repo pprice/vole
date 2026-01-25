@@ -1,4 +1,4 @@
-// src/snap/runner.rs
+// src/runner.rs
 //! Test discovery and execution for snapshot tests.
 
 use std::collections::HashSet;
@@ -9,11 +9,10 @@ use std::sync::{Arc, Mutex};
 
 use glob::glob;
 
-use super::ReportMode;
-use super::diff::{unified_diff, unified_diff_colored};
-use super::snapshot::Snapshot;
-use crate::cli::should_skip_path;
-use crate::commands::common::{check_captured, inspect_ast_captured, run_captured};
+use crate::ReportMode;
+use crate::diff::{unified_diff, unified_diff_colored};
+use crate::snapshot::Snapshot;
+use vole::commands::common::{check_captured, inspect_ast_captured, run_captured};
 
 /// Result of running a single test
 #[derive(Debug)]
@@ -31,6 +30,26 @@ pub struct TestSummary {
     pub new: usize,
     pub failed_tests: Vec<String>,
     pub new_tests: Vec<String>,
+}
+
+/// Check if a path should be skipped due to underscore prefix.
+///
+/// Returns true if any path component starts with '_'.
+/// Examples:
+/// - `_wip.vole` -> skipped
+/// - `_imports/foo.vole` -> skipped
+/// - `test/_fixtures/helper.vole` -> skipped
+/// - `test/valid.vole` -> not skipped
+fn should_skip_path(path: &Path) -> bool {
+    for component in path.components() {
+        if let std::path::Component::Normal(name) = component
+            && let Some(s) = name.to_str()
+            && s.starts_with('_')
+        {
+            return true;
+        }
+    }
+    false
 }
 
 /// Discover test files matching patterns.
@@ -345,13 +364,18 @@ pub fn run_tests(
             TestResult::Pass => {
                 summary.passed += 1;
                 if show_all {
-                    println!("{}✓{} {}", colors.green(), colors.reset(), path_display);
+                    println!("{}PASS{} {}", colors.green(), colors.reset(), path_display);
                 }
             }
             TestResult::Fail(diff) => {
                 summary.failed += 1;
                 summary.failed_tests.push(path_display.clone());
-                println!("\n{}✗{} {}\n", colors.red(), colors.reset(), path_display);
+                println!(
+                    "\n{}FAIL{} {}\n",
+                    colors.red(),
+                    colors.reset(),
+                    path_display
+                );
                 println!(
                     "{}--- expected{} (.snap)\n{}+++ actual{}\n",
                     colors.red(),
@@ -366,7 +390,7 @@ pub fn run_tests(
                 summary.new_tests.push(path_display.clone());
                 if show_all {
                     println!(
-                        "{}○{} {} {}(new){}",
+                        "{}NEW{} {} {}(new){}",
                         colors.yellow(),
                         colors.reset(),
                         path_display,
@@ -412,7 +436,7 @@ pub fn bless_tests(patterns: &[String], include_skipped: bool, use_color: bool) 
                 blessed += 1;
                 let status = if updated { "(updated)" } else { "(created)" };
                 println!(
-                    "{}✓{} {} {}{}{}",
+                    "{}BLESS{} {} {}{}{}",
                     colors.green(),
                     colors.reset(),
                     test_path.display(),
@@ -423,7 +447,7 @@ pub fn bless_tests(patterns: &[String], include_skipped: bool, use_color: bool) 
             }
             Err(e) => {
                 eprintln!(
-                    "{}✗{} {}: {}",
+                    "{}ERROR{} {}: {}",
                     colors.red(),
                     colors.reset(),
                     test_path.display(),

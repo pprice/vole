@@ -1,4 +1,4 @@
-// src/snap/diff.rs
+// src/diff.rs
 //! Unified diff formatting using the `similar` crate.
 
 use similar::{ChangeTag, TextDiff};

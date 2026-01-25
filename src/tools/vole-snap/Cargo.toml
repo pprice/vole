@@ -1,0 +1,19 @@
+[package]
+name = "vole-snap"
+version = "0.1.0"
+edition = "2024"
+description = "Snapshot testing for Vole"
+
+[dependencies]
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Vole library crate (for command execution: check, run, inspect)
+vole = { path = "../../vole" }
+
+# Snap-specific deps
+similar = "2.6"
+glob = "0.3"
+
+[lints]
+workspace = true

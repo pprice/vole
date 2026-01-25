@@ -1,4 +1,9 @@
-// src/snap/mod.rs
+// lib.rs
+//! Snapshot testing library for Vole.
+//!
+//! This crate provides snapshot testing functionality for the Vole compiler.
+//! It discovers test files, runs them through the compiler, and compares
+//! output against stored snapshots.
 
 use clap::ValueEnum;
 

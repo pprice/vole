@@ -24,7 +24,7 @@ test-release:
 
 # Run snapshot tests in debug mode
 snap:
-    cargo run --bin vole-snap -- test test/snapshot/
+    cargo run -p vole-snap -- test test/snapshot/
 
 # Run snapshot tests in release mode
 snap-release:
@@ -66,7 +66,7 @@ pre-commit: fmt clippy-fix clippy build test snap-ci unit-ci
 
 # Snapshot tests for CI (failures only)
 snap-ci:
-    cargo run --bin vole-snap -- test test/snapshot/ --report=failures
+    cargo run -p vole-snap -- test test/snapshot/ --report=failures
 
 # Vole unit tests for CI (failures only)
 unit-ci:

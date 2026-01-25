@@ -1,4 +1,4 @@
-// src/snap/snapshot.rs
+// src/snapshot.rs
 //! Snapshot file format: [stdout] and [stderr] sections.
 
 /// Parsed snapshot with stdout and stderr content

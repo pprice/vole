@@ -1,4 +1,4 @@
-// src/bin/vole_snap.rs
+// main.rs
 //! Snapshot testing CLI for Vole.
 
 use std::io::IsTerminal;
@@ -6,7 +6,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 
-use vole::snap::{ReportMode, bless_tests, run_tests};
+use vole_snap::{ReportMode, bless_tests, run_tests};
 
 #[derive(Parser)]
 #[command(name = "vole-snap")]
@@ -61,7 +61,7 @@ fn main() -> ExitCode {
             let summary = run_tests(&patterns, include_skipped, use_color, report);
 
             // Print summary
-            println!("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            println!("\n----------------------------------------------------");
 
             if use_color {
                 print!("\x1b[32m{} passed\x1b[0m", summary.passed);
@@ -111,7 +111,7 @@ fn main() -> ExitCode {
         } => {
             let blessed = bless_tests(&patterns, include_skipped, use_color);
 
-            println!("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            println!("\n----------------------------------------------------");
             if use_color {
                 println!("\x1b[32m{} blessed\x1b[0m", blessed);
             } else {

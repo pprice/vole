@@ -10,6 +10,5 @@ pub use vole_identity as identity;
 pub use vole_runtime as runtime;
 pub use vole_sema as sema;
 pub use vole_sema::module;
-pub mod snap;
 pub mod transforms;
 pub mod util;

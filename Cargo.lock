@@ -1448,7 +1448,6 @@ dependencies = [
  "pretty",
  "serde",
  "serde_json",
- "similar",
  "sysinfo",
  "tempfile",
  "tracing",
@@ -1519,6 +1518,16 @@ dependencies = [
  "tracing",
  "vole-frontend",
  "vole-identity",
+]
+
+[[package]]
+name = "vole-snap"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "glob",
+ "similar",
+ "vole",
 ]
 
 [[package]]

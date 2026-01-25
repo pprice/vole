@@ -1,6 +1,6 @@
 [workspace]
 members = ["src/vole", "src/crates/*", "src/tools/*"]
-default-members = ["src/vole", "src/crates/*"]
+default-members = ["src/vole", "src/crates/*", "src/tools/vole-snap"]
 resolver = "2"
 
 [workspace.lints.clippy]
