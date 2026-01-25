@@ -50,23 +50,6 @@ trace-keyword keyword:
     echo "=== Codegen ==="
     grep -rn -i "{{keyword}}" src/crates/vole-codegen/src/ 2>/dev/null || echo "(not found)"
 
-# Show equivalent Void (Zig) reference file
-void-ref path:
-    #!/usr/bin/env bash
-    void_base="$HOME/code/personal/void"
-    # Convert .rs to .zig and adjust path
-    void_path=$(echo "{{path}}" | sed 's/\.rs$/.zig/')
-    full_path="$void_base/$void_path"
-    if [ -f "$full_path" ]; then
-        echo "=== $full_path ==="
-        cat "$full_path"
-    else
-        echo "File not found: $full_path"
-        echo "Searching for similar files..."
-        basename=$(basename "$void_path" .zig)
-        find "$void_base/src" -name "*${basename}*" -type f 2>/dev/null | head -5
-    fi
-
 # List all error codes with messages
 list-errors category="all":
     #!/usr/bin/env bash
