@@ -131,7 +131,6 @@ impl Analyzer {
             type_param_stack: TypeParamScopeStack::new(),
             module_cache: None,      // Sub-analyzers don't need the cache
             db: Rc::clone(&self.db), // Share the compilation db
-            found_return: false,
         };
 
         // Analyze the prelude file

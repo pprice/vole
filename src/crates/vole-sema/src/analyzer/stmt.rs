@@ -310,9 +310,6 @@ impl Analyzer {
                 // Could validate we're in a loop, skip for now
             }
             Stmt::Return(ret) => {
-                // Mark that we found a return statement (backward compat until v-22bf)
-                self.found_return = true;
-
                 // Determine expected type for bidirectional type checking (TypeId-based)
                 let expected_value_type_id = self.current_function_return.map(|expected| {
                     // If expected is fallible, extract success type for comparison
@@ -354,8 +351,6 @@ impl Analyzer {
                 });
             }
             Stmt::Raise(raise_stmt) => {
-                // Mark that we found a terminating statement (backward compat until v-22bf)
-                self.found_return = true;
                 self.analyze_raise_stmt(raise_stmt, interner);
 
                 return Ok(ReturnInfo {

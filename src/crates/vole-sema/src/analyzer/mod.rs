@@ -223,8 +223,6 @@ struct FunctionCheckContext {
     static_method: Option<String>,
     /// How many scopes were on the stack when we entered this context
     type_param_stack_depth: usize,
-    /// Whether a return/raise statement was found (simple check, not control flow analysis)
-    found_return: bool,
 }
 
 pub struct Analyzer {
@@ -236,8 +234,6 @@ pub struct Analyzer {
     /// Globals with constant initializers (for constant expression checking)
     constant_globals: HashSet<Symbol>,
     current_function_return: Option<ArenaTypeId>,
-    /// Whether a return/raise was found (simple check, not full control flow analysis)
-    found_return: bool,
     /// Current function's error type (if fallible)
     current_function_error_type: Option<ArenaTypeId>,
     /// Generator context: if inside a generator function, this holds the Iterator element type.
@@ -334,7 +330,6 @@ impl Analyzer {
             globals: FxHashMap::default(),
             constant_globals: HashSet::new(),
             current_function_return: None,
-            found_return: false,
             current_function_error_type: None,
             current_generator_element_type: None,
             current_static_method: None,
@@ -390,7 +385,6 @@ impl Analyzer {
             globals: FxHashMap::default(),
             constant_globals: HashSet::new(),
             current_function_return: None,
-            found_return: false,
             current_function_error_type: None,
             current_generator_element_type: None,
             current_static_method: None,
@@ -1778,11 +1772,9 @@ impl Analyzer {
             generator_element_type: self.current_generator_element_type.take(),
             static_method: self.current_static_method.take(),
             type_param_stack_depth: self.type_param_stack.depth(),
-            found_return: self.found_return,
         };
 
         self.current_function_return = Some(return_type_id);
-        self.found_return = false; // Reset for new function
 
         // Set error type context if this is a fallible function
         let error_type = self
@@ -1804,25 +1796,19 @@ impl Analyzer {
     /// Enter a function context for return type inference (no known return type).
     /// The first return statement will set current_function_return; subsequent returns check against it.
     fn enter_function_context_inferring(&mut self) -> FunctionCheckContext {
-        let saved = FunctionCheckContext {
+        // current_function_return stays None to signal inference mode
+        FunctionCheckContext {
             return_type: self.current_function_return.take(),
             error_type: self.current_function_error_type.take(),
             generator_element_type: self.current_generator_element_type.take(),
             static_method: self.current_static_method.take(),
             type_param_stack_depth: self.type_param_stack.depth(),
-            found_return: self.found_return,
-        };
-
-        // current_function_return stays None to signal inference mode
-        self.found_return = false; // Reset for new function
-
-        saved
+        }
     }
 
     /// Exit function/method check context, restoring saved state.
     fn exit_function_context(&mut self, saved: FunctionCheckContext) {
         self.current_function_return = saved.return_type;
-        self.found_return = saved.found_return;
         self.current_function_error_type = saved.error_type;
         self.current_generator_element_type = saved.generator_element_type;
         self.current_static_method = saved.static_method;
@@ -1897,7 +1883,7 @@ impl Analyzer {
         self.check_param_defaults(&func.params, &func_type.params_id, interner)?;
 
         // Check body
-        let _body_info = self.check_func_body(&func.body, interner)?;
+        let body_info = self.check_func_body(&func.body, interner)?;
 
         // If we were inferring the return type, update the function signature
         if needs_inference {
@@ -1923,7 +1909,7 @@ impl Analyzer {
         } else {
             // Check for missing return statement when return type is explicit and non-void
             let is_void = func_type.return_type_id.is_void();
-            if !is_void && !self.found_return {
+            if !is_void && !body_info.definitely_returns {
                 let func_name = interner.resolve(func.name).to_string();
                 let expected = self.type_display_id(func_type.return_type_id);
                 let hint = self.compute_missing_return_hint(
@@ -2348,7 +2334,7 @@ impl Analyzer {
         self.check_param_defaults(&method.params, &params_id, interner)?;
 
         // Check body
-        let _body_info = self.check_func_body(&method.body, interner)?;
+        let body_info = self.check_func_body(&method.body, interner)?;
 
         // If we were inferring the return type, update the method signature
         if needs_inference {
@@ -2373,7 +2359,7 @@ impl Analyzer {
         } else {
             // Check for missing return statement when return type is explicit and non-void
             let is_void = return_type_id.is_void();
-            if !is_void && !self.found_return {
+            if !is_void && !body_info.definitely_returns {
                 let method_name = interner.resolve(method.name).to_string();
                 let expected = self.type_display_id(return_type_id);
                 let hint = self.compute_missing_return_hint(&method.body, return_type_id, interner);
@@ -2409,7 +2395,6 @@ impl Analyzer {
             FuncBody::Expr(expr) => {
                 // Expression body is implicitly a return
                 let expr_type = self.check_expr(expr, interner)?;
-                self.found_return = true;
 
                 // Handle return type inference or checking
                 if let Some(expected_return) = self.current_function_return {
@@ -2954,7 +2939,6 @@ impl Analyzer {
             globals: FxHashMap::default(),
             constant_globals: HashSet::new(),
             current_function_return: None,
-            found_return: false,
             current_function_error_type: None,
             current_generator_element_type: None,
             current_static_method: None,
