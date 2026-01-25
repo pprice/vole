@@ -102,6 +102,7 @@ runtime_fns! {
 enum FunctionName {
     Qualified(NameId),
     Runtime(RuntimeFn),
+    Lambda(usize),
 }
 
 use vole_sema::type_arena::TypeId;
@@ -217,6 +218,10 @@ impl FunctionRegistry {
         (name_id, key)
     }
 
+    pub fn intern_lambda(&mut self, index: usize) -> FunctionKey {
+        self.insert(FunctionName::Lambda(index))
+    }
+
     pub fn set_func_id(&mut self, key: FunctionKey, func_id: FuncId) {
         if let Some(entry) = self.entries.get_mut(key.0 as usize) {
             entry.func_id = Some(func_id);
@@ -241,13 +246,14 @@ impl FunctionRegistry {
         match &self.entries[key.0 as usize].name {
             FunctionName::Qualified(name_id) => self.names.borrow().display(*name_id),
             FunctionName::Runtime(runtime) => runtime.name().to_string(),
+            FunctionName::Lambda(idx) => format!("__lambda_{idx}"),
         }
     }
 
     pub fn name_for_qualified(&self, key: FunctionKey) -> Option<NameId> {
         match &self.entries[key.0 as usize].name {
             FunctionName::Qualified(name_id) => Some(*name_id),
-            FunctionName::Runtime(_) => None,
+            FunctionName::Runtime(_) | FunctionName::Lambda(_) => None,
         }
     }
 
