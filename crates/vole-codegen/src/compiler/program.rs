@@ -201,9 +201,31 @@ impl Compiler<'_> {
             match decl {
                 Decl::Function(func) => {
                     // Skip generic functions - they're compiled via monomorphized instances
+                    // This includes both explicit generics (type_params in AST) and implicit
+                    // generics (structural type params that create generic_info in entity registry)
                     if !func.type_params.is_empty() {
                         continue;
                     }
+
+                    // Check for implicit generics (structural type params)
+                    let query = self.query();
+                    let name_id = query.function_name_id(query.main_module(), func.name);
+                    let has_implicit_generic_info = self
+                        .analyzed
+                        .entity_registry()
+                        .function_by_name(name_id)
+                        .map(|func_id| {
+                            self.analyzed
+                                .entity_registry()
+                                .get_function(func_id)
+                                .generic_info
+                                .is_some()
+                        })
+                        .unwrap_or(false);
+                    if has_implicit_generic_info {
+                        continue;
+                    }
+
                     self.compile_function(func)?;
                 }
                 Decl::Tests(tests_decl) => {
@@ -1095,16 +1117,34 @@ impl Compiler<'_> {
     /// Compile all monomorphized function instances
     fn compile_monomorphized_instances(&mut self, program: &Program) -> Result<(), String> {
         // Build a map of generic function names to their ASTs
+        // Include both explicit generics (type_params in AST) and implicit generics
+        // (structural type params that create generic_info in entity registry)
         let generic_func_asts: FxHashMap<NameId, &FuncDecl> = program
             .declarations
             .iter()
             .filter_map(|decl| {
-                if let Decl::Function(func) = decl
-                    && !func.type_params.is_empty()
-                {
+                if let Decl::Function(func) = decl {
                     let query = self.query();
                     let name_id = query.function_name_id(query.main_module(), func.name);
-                    return Some((name_id, func));
+
+                    // Check if function has explicit type params OR implicit generic_info
+                    let has_explicit_type_params = !func.type_params.is_empty();
+                    let has_implicit_generic_info = self
+                        .analyzed
+                        .entity_registry()
+                        .function_by_name(name_id)
+                        .map(|func_id| {
+                            self.analyzed
+                                .entity_registry()
+                                .get_function(func_id)
+                                .generic_info
+                                .is_some()
+                        })
+                        .unwrap_or(false);
+
+                    if has_explicit_type_params || has_implicit_generic_info {
+                        return Some((name_id, func));
+                    }
                 }
                 None
             })

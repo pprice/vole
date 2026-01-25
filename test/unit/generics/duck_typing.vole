@@ -1,0 +1,70 @@
+// Duck typing with structural types
+// Tests that functions with structural type parameters work with duck typing
+
+// Inline structural type parameter
+func greet(x: { name: string }) -> string {
+    return x.name
+}
+
+// Type alias to structural type
+let Named: type = { name: string }
+
+func get_name(x: Named) -> string {
+    return x.name
+}
+
+// Structural type with multiple fields
+let HasCoordinates: type = { x: i64, y: i64 }
+
+func manhattan_distance(p: HasCoordinates) -> i64 {
+    // Can access fields through the type param
+    let a = p.x
+    let b = p.y
+    return (if a < 0 { -a } else { a }) + (if b < 0 { -b } else { b })
+}
+
+// Inline multi-field structural
+func add_coords(p: { x: i64, y: i64 }) -> i64 {
+    return p.x + p.y
+}
+
+// Compatible record type
+record Person { name: string }
+
+// Another compatible record with extra fields
+record Employee { name: string, id: i64 }
+
+// Record with coordinates
+record Point { x: i64, y: i64, label: string }
+
+tests {
+    test "inline structural type accepts compatible record" {
+        let p = Person { name: "Alice" }
+        assert(greet(p) == "Alice")
+    }
+
+    test "inline structural type accepts record with extra fields" {
+        let e = Employee { name: "Bob", id: 42 }
+        assert(greet(e) == "Bob")
+    }
+
+    test "type alias structural accepts compatible record" {
+        let p = Person { name: "Charlie" }
+        assert(get_name(p) == "Charlie")
+    }
+
+    test "type alias structural accepts record with extra fields" {
+        let e = Employee { name: "Diana", id: 99 }
+        assert(get_name(e) == "Diana")
+    }
+
+    test "multi-field structural with type alias" {
+        let p = Point { x: 3, y: -4, label: "origin" }
+        assert(manhattan_distance(p) == 7)
+    }
+
+    test "multi-field inline structural" {
+        let p = Point { x: 10, y: 20, label: "test" }
+        assert(add_coords(p) == 30)
+    }
+}

@@ -481,6 +481,23 @@ impl Analyzer {
         self.is_check_results.insert(node_id, result);
     }
 
+    /// Get the display name for a type parameter.
+    /// For synthetic type params (created for implicit generification), we use the name_id
+    /// since the Symbol is not a real interned string.
+    fn get_type_param_display_name(&self, param: &TypeParamInfo, interner: &Interner) -> String {
+        // Synthetic type params have Symbol values >= 0x80000000
+        // (we use Symbol(0x8000_0000 + i) for them)
+        if param.name.0 >= 0x8000_0000 {
+            // Use name_id for synthetic type params
+            self.name_table()
+                .last_segment_str(param.name_id)
+                .unwrap_or_else(|| format!("__T{}", param.name.0 - 0x8000_0000))
+        } else {
+            // Use normal interner resolution
+            interner.resolve(param.name).to_string()
+        }
+    }
+
     /// If the given type is Iterator<T>, ensure RuntimeIterator(T) exists in the arena.
     /// This allows codegen to convert Iterator return types to RuntimeIterator without
     /// needing mutable arena access.
@@ -1513,7 +1530,7 @@ impl Analyzer {
                             let found_display = self.type_display_id(found_id);
                             self.add_error(
                                 SemanticError::TypeParamConstraintMismatch {
-                                    type_param: interner.resolve(param.name).to_string(),
+                                    type_param: self.get_type_param_display_name(param, interner),
                                     expected: interner.resolve(*interface_name).to_string(),
                                     found: found_display,
                                     span: span.into(),
@@ -1535,7 +1552,7 @@ impl Analyzer {
                         let found_display = self.type_display_id(found_id);
                         self.add_error(
                             SemanticError::TypeParamConstraintMismatch {
-                                type_param: interner.resolve(param.name).to_string(),
+                                type_param: self.get_type_param_display_name(param, interner),
                                 expected: expected_display,
                                 found: found_display,
                                 span: span.into(),
@@ -1552,7 +1569,7 @@ impl Analyzer {
                         let found_display = self.type_display_id(found_id);
                         self.add_error(
                             SemanticError::StructuralConstraintMismatch {
-                                type_param: interner.resolve(param.name).to_string(),
+                                type_param: self.get_type_param_display_name(param, interner),
                                 found: found_display,
                                 mismatch,
                                 span: span.into(),
@@ -1734,8 +1751,29 @@ impl Analyzer {
         interner: &Interner,
     ) -> Result<(), Vec<TypeError>> {
         // Skip generic functions - they will be type-checked when monomorphized
+        // This includes both explicitly generic functions (with type params in the AST)
+        // and implicitly generified functions (with structural type parameters)
         // TODO: In M4+, we could type-check with abstract type params
         if !func.type_params.is_empty() {
+            return Ok(());
+        }
+
+        // Also skip implicitly generified functions (structural types in parameters)
+        // These have generic_info but no AST-level type_params
+        let name_id = self
+            .name_table_mut()
+            .intern(self.current_module, &[func.name], interner);
+        let has_generic_info = self
+            .entity_registry()
+            .function_by_name(name_id)
+            .map(|func_id| {
+                self.entity_registry()
+                    .get_function(func_id)
+                    .generic_info
+                    .is_some()
+            })
+            .unwrap_or(false);
+        if has_generic_info {
             return Ok(());
         }
 
@@ -1904,17 +1942,33 @@ impl Analyzer {
     /// Iterates until no new MonomorphInstances are created (fixpoint).
     fn analyze_monomorph_bodies(&mut self, program: &Program, interner: &Interner) {
         // Build map of generic function names to their ASTs
+        // Include both explicit generics (type_params in AST) and implicit generics
+        // (structural type params that create generic_info in entity registry)
         let generic_func_asts: FxHashMap<NameId, &FuncDecl> = program
             .declarations
             .iter()
             .filter_map(|decl| {
-                if let Decl::Function(func) = decl
-                    && !func.type_params.is_empty()
-                {
+                if let Decl::Function(func) = decl {
                     let name_id =
                         self.name_table_mut()
                             .intern(self.current_module, &[func.name], interner);
-                    return Some((name_id, func));
+
+                    // Check for explicit type params OR implicit generic_info
+                    let has_explicit_type_params = !func.type_params.is_empty();
+                    let has_implicit_generic_info = self
+                        .entity_registry()
+                        .function_by_name(name_id)
+                        .map(|func_id| {
+                            self.entity_registry()
+                                .get_function(func_id)
+                                .generic_info
+                                .is_some()
+                        })
+                        .unwrap_or(false);
+
+                    if has_explicit_type_params || has_implicit_generic_info {
+                        return Some((name_id, func));
+                    }
                 }
                 None
             })

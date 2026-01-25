@@ -18,10 +18,19 @@ pub(crate) fn get_field_slot_and_type_id(
 ) -> Result<(usize, TypeId), String> {
     let arena = type_ctx.arena();
 
+    // Apply function-level substitutions first (for monomorphized generics)
+    // This handles the case where type_id is a TypeParam that needs to be
+    // substituted with a concrete type (e.g., in duck typing with structural constraints)
+    let resolved_type_id = if let Some(func_subs) = func_ctx.substitutions {
+        arena.expect_substitute(type_id, func_subs, "field access type substitution")
+    } else {
+        type_id
+    };
+
     // Try class first, then record
     let (type_def_id, type_args) = arena
-        .unwrap_class(type_id)
-        .or_else(|| arena.unwrap_record(type_id))
+        .unwrap_class(resolved_type_id)
+        .or_else(|| arena.unwrap_record(resolved_type_id))
         .ok_or_else(|| {
             CodegenError::type_mismatch("field access", "class or record", "other type").to_string()
         })?;
@@ -75,10 +84,36 @@ pub(crate) fn get_field_slot_and_type_id_cg(
     let type_ctx = cg.type_ctx();
     let arena = type_ctx.arena();
 
+    // Apply function-level substitutions first (for monomorphized generics)
+    // This handles the case where type_id is a TypeParam that needs to be
+    // substituted with a concrete type (e.g., in duck typing with structural constraints)
+    let resolved_type_id = if let Some(func_subs) = cg.substitutions {
+        tracing::debug!(
+            ?type_id,
+            type_display = %arena.display_basic(type_id),
+            ?func_subs,
+            "field access: applying substitutions"
+        );
+        arena.expect_substitute(type_id, func_subs, "field access type substitution")
+    } else {
+        tracing::debug!(
+            ?type_id,
+            type_display = %arena.display_basic(type_id),
+            "field access: no substitutions available"
+        );
+        type_id
+    };
+
+    tracing::debug!(
+        ?resolved_type_id,
+        resolved_display = %arena.display_basic(resolved_type_id),
+        "field access: resolved type"
+    );
+
     // Try class first, then record
     let (type_def_id, type_args) = arena
-        .unwrap_class(type_id)
-        .or_else(|| arena.unwrap_record(type_id))
+        .unwrap_class(resolved_type_id)
+        .or_else(|| arena.unwrap_record(resolved_type_id))
         .ok_or_else(|| {
             CodegenError::type_mismatch("field access", "class or record", "other type").to_string()
         })?;

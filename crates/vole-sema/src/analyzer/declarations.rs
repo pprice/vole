@@ -3,7 +3,8 @@
 
 use super::*;
 use crate::entity_defs::{GenericFuncInfo, GenericTypeInfo, TypeDefKind};
-use crate::type_arena::{TypeId as ArenaTypeId, TypeIdVec};
+use crate::generic::TypeConstraint;
+use crate::type_arena::{InternedStructural, TypeId as ArenaTypeId, TypeIdVec};
 use vole_frontend::ast::{ExprKind, FieldDef as AstFieldDef, LetInit, TypeExpr};
 
 /// Extract the base interface name from a TypeExpr.
@@ -112,6 +113,51 @@ impl Analyzer {
         }
     }
 
+    /// Check if a TypeExpr resolves to a structural type (either directly or via a type alias).
+    /// Returns the InternedStructural if so, enabling implicit generification.
+    fn extract_structural_from_type_expr(
+        &self,
+        ty: &TypeExpr,
+        interner: &Interner,
+    ) -> Option<InternedStructural> {
+        match ty {
+            TypeExpr::Structural {
+                fields: _,
+                methods: _,
+            } => {
+                // Direct structural type - resolve it to an InternedStructural
+                let module_id = self.current_module;
+                let mut ctx = TypeResolutionContext::new(&self.db, interner, module_id);
+                let type_id = resolve_type_to_id(ty, &mut ctx);
+                self.type_arena().unwrap_structural(type_id).cloned()
+            }
+            TypeExpr::Named(sym) => {
+                // Check if this named type is a type alias that resolves to a structural type
+                let _name_str = interner.resolve(*sym);
+                if let Some(type_def_id) = self
+                    .resolver(interner)
+                    .resolve_type(*sym, &self.entity_registry())
+                {
+                    let (kind, aliased_type) = {
+                        let registry = self.entity_registry();
+                        let type_def = registry.get_type(type_def_id);
+                        (type_def.kind, type_def.aliased_type)
+                    };
+                    if kind == TypeDefKind::Alias
+                        && let Some(aliased_type_id) = aliased_type
+                    {
+                        return self
+                            .type_arena()
+                            .unwrap_structural(aliased_type_id)
+                            .cloned();
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
     fn collect_function_signature(&mut self, func: &FuncDecl, interner: &Interner) {
         let name_id = self
             .name_table_mut()
@@ -127,7 +173,26 @@ impl Analyzer {
             .map(|p| p.default_value.clone())
             .collect();
 
-        if func.type_params.is_empty() {
+        // Check for parameters with structural types (duck typing)
+        // These need implicit generification: func f(x: { name: string }) -> func f<__T0: { name: string }>(x: __T0)
+        let mut synthetic_type_params: Vec<(usize, InternedStructural)> = Vec::new();
+        for (i, param) in func.params.iter().enumerate() {
+            if let Some(structural) = self.extract_structural_from_type_expr(&param.ty, interner) {
+                let func_name = interner.resolve(func.name);
+                tracing::debug!(
+                    ?func_name,
+                    param_idx = i,
+                    ?structural,
+                    "implicit generification: found structural type param"
+                );
+                synthetic_type_params.push((i, structural));
+            }
+        }
+
+        let has_explicit_type_params = !func.type_params.is_empty();
+        let has_synthetic_type_params = !synthetic_type_params.is_empty();
+
+        if !has_explicit_type_params && !has_synthetic_type_params {
             // Non-generic function: resolve types directly to TypeId
             let params_id: Vec<_> = func
                 .params
@@ -154,9 +219,11 @@ impl Analyzer {
                 param_defaults,
             );
         } else {
-            // Generic function: resolve with type params in scope
+            // Generic function (explicit or via implicit generification)
             let builtin_mod = self.name_table_mut().builtin_module();
             let mut name_scope = TypeParamScope::new();
+
+            // First add explicit type params to name scope
             for tp in &func.type_params {
                 let tp_name_str = interner.resolve(tp.name);
                 let tp_name_id = self
@@ -171,7 +238,8 @@ impl Analyzer {
                 });
             }
 
-            let type_params: Vec<TypeParamInfo> = func
+            // Build explicit type params with their constraints
+            let mut type_params: Vec<TypeParamInfo> = func
                 .type_params
                 .iter()
                 .map(|tp| {
@@ -192,12 +260,49 @@ impl Analyzer {
                 })
                 .collect();
 
+            // Create synthetic type parameters for structural types in parameters
+            // Map: param index -> synthetic type param name_id
+            let mut synthetic_param_map: FxHashMap<usize, NameId> = FxHashMap::default();
+            for (i, (param_idx, structural)) in synthetic_type_params.into_iter().enumerate() {
+                // Generate synthetic type param name like __T0, __T1, etc.
+                let synthetic_name = format!("__T{}", i);
+                let synthetic_name_id = self
+                    .name_table_mut()
+                    .intern_raw(builtin_mod, &[&synthetic_name]);
+
+                // Create a synthetic Symbol for the type param
+                // Use a high value that won't collide with user symbols.
+                // This is safe because synthetic type params are never looked up by Symbol,
+                // only by name_id during monomorphization/codegen.
+                let synthetic_symbol = Symbol(0x8000_0000 + i as u32);
+
+                tracing::debug!(
+                    ?synthetic_name,
+                    ?synthetic_name_id,
+                    ?param_idx,
+                    "created synthetic type param for structural constraint"
+                );
+
+                let type_param_info = TypeParamInfo {
+                    name: synthetic_symbol,
+                    name_id: synthetic_name_id,
+                    constraint: Some(TypeConstraint::Structural(structural)),
+                    type_param_id: None,
+                    variance: TypeParamVariance::default(),
+                };
+
+                type_params.push(type_param_info.clone());
+                name_scope.add(type_param_info);
+                synthetic_param_map.insert(param_idx, synthetic_name_id);
+            }
+
             let mut type_param_scope = TypeParamScope::new();
             for info in &type_params {
                 type_param_scope.add(info.clone());
             }
 
             // Resolve param types with type params in scope
+            // For synthetic type params, use the type param instead of the structural type
             let module_id = self.current_module;
             let mut ctx = TypeResolutionContext::with_type_params(
                 &self.db,
@@ -205,12 +310,21 @@ impl Analyzer {
                 module_id,
                 &type_param_scope,
             );
-            // Resolve directly to TypeId
+
             let param_type_ids: Vec<ArenaTypeId> = func
                 .params
                 .iter()
-                .map(|p| resolve_type_to_id(&p.ty, &mut ctx))
+                .enumerate()
+                .map(|(i, p)| {
+                    if let Some(&synthetic_name_id) = synthetic_param_map.get(&i) {
+                        // Use the synthetic type parameter instead of the structural type
+                        ctx.type_arena_mut().type_param(synthetic_name_id)
+                    } else {
+                        resolve_type_to_id(&p.ty, &mut ctx)
+                    }
+                })
                 .collect();
+
             let return_type_id = func
                 .return_type
                 .as_ref()

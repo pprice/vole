@@ -80,6 +80,75 @@ impl Analyzer {
                 );
             }
 
+            // Check if it's a variable with a function type (using TypeId path)
+            // This must come BEFORE checking the entity registry for generic functions
+            // to ensure local scope variables shadow global generics
+            if let Some(var_type_id) = self.get_variable_type_id(*sym) {
+                let arena = self.type_arena();
+                if let Some((params, ret, _is_closure)) = arena.unwrap_function(var_type_id) {
+                    let params = params.clone();
+                    drop(arena);
+                    // Calling a function-typed variable - conservatively mark side effects
+                    if self.in_lambda() {
+                        self.mark_lambda_has_side_effects();
+                        // Record capture if the callee is from outer scope
+                        if !self.is_lambda_local(*sym)
+                            && let Some(var) = self.scope.get(*sym)
+                        {
+                            self.record_capture(*sym, var.mutable);
+                        }
+                    }
+
+                    // Check if this is a lambda with default parameters
+                    if let Some(&(lambda_node_id, required_params)) = self.lambda_variables.get(sym)
+                    {
+                        // Store lambda defaults info for codegen
+                        self.lambda_defaults.insert(
+                            expr.id,
+                            LambdaDefaults {
+                                required_params,
+                                lambda_node_id,
+                            },
+                        );
+                        return self.check_call_args_with_defaults_id(
+                            &call.args,
+                            &params,
+                            required_params,
+                            ret,
+                            expr.span,
+                            interner,
+                        );
+                    }
+
+                    return self.check_call_args_id(&call.args, &params, ret, expr.span, interner);
+                }
+                // Check if it's a variable with a functional interface type
+                if let Some((type_def_id, _type_args)) = arena.unwrap_interface(var_type_id) {
+                    drop(arena);
+                    if let Some(func_type) =
+                        self.get_functional_interface_type_by_type_def_id(type_def_id)
+                    {
+                        // Calling a functional interface - treat like a closure call
+                        if self.in_lambda() {
+                            self.mark_lambda_has_side_effects();
+                            // Record capture if the callee is from outer scope
+                            if !self.is_lambda_local(*sym)
+                                && let Some(var) = self.scope.get(*sym)
+                            {
+                                self.record_capture(*sym, var.mutable);
+                            }
+                        }
+                        return self.check_call_args_id(
+                            &call.args,
+                            &func_type.params_id,
+                            func_type.return_type_id,
+                            expr.span,
+                            interner,
+                        );
+                    }
+                }
+            }
+
             // Check if it's a generic function via EntityRegistry
             // Split into separate borrows to avoid borrow conflicts
             let (generic_info, generic_required_params) = {
@@ -212,73 +281,6 @@ impl Analyzer {
                 self.generic_calls.insert(expr.id, key);
 
                 return Ok(concrete_return_id);
-            }
-
-            // Check if it's a variable with a function type (using TypeId path)
-            if let Some(var_type_id) = self.get_variable_type_id(*sym) {
-                let arena = self.type_arena();
-                if let Some((params, ret, _is_closure)) = arena.unwrap_function(var_type_id) {
-                    let params = params.clone();
-                    drop(arena);
-                    // Calling a function-typed variable - conservatively mark side effects
-                    if self.in_lambda() {
-                        self.mark_lambda_has_side_effects();
-                        // Record capture if the callee is from outer scope
-                        if !self.is_lambda_local(*sym)
-                            && let Some(var) = self.scope.get(*sym)
-                        {
-                            self.record_capture(*sym, var.mutable);
-                        }
-                    }
-
-                    // Check if this is a lambda with default parameters
-                    if let Some(&(lambda_node_id, required_params)) = self.lambda_variables.get(sym)
-                    {
-                        // Store lambda defaults info for codegen
-                        self.lambda_defaults.insert(
-                            expr.id,
-                            LambdaDefaults {
-                                required_params,
-                                lambda_node_id,
-                            },
-                        );
-                        return self.check_call_args_with_defaults_id(
-                            &call.args,
-                            &params,
-                            required_params,
-                            ret,
-                            expr.span,
-                            interner,
-                        );
-                    }
-
-                    return self.check_call_args_id(&call.args, &params, ret, expr.span, interner);
-                }
-                // Check if it's a variable with a functional interface type
-                if let Some((type_def_id, _type_args)) = arena.unwrap_interface(var_type_id) {
-                    drop(arena);
-                    if let Some(func_type) =
-                        self.get_functional_interface_type_by_type_def_id(type_def_id)
-                    {
-                        // Calling a functional interface - treat like a closure call
-                        if self.in_lambda() {
-                            self.mark_lambda_has_side_effects();
-                            // Record capture if the callee is from outer scope
-                            if !self.is_lambda_local(*sym)
-                                && let Some(var) = self.scope.get(*sym)
-                            {
-                                self.record_capture(*sym, var.mutable);
-                            }
-                        }
-                        return self.check_call_args_id(
-                            &call.args,
-                            &func_type.params_id,
-                            func_type.return_type_id,
-                            expr.span,
-                            interner,
-                        );
-                    }
-                }
             }
 
             // Check if it's a known builtin function
