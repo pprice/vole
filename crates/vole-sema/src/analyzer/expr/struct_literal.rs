@@ -306,13 +306,13 @@ impl Analyzer {
         );
 
         // Substitute inferred types into field types to get concrete field types via arena
-        let subs_hashbrown: FxHashMap<_, _> = inferred_id.iter().map(|(&k, &v)| (k, v)).collect();
+        let subs: FxHashMap<_, _> = inferred_id.iter().map(|(&k, &v)| (k, v)).collect();
         let concrete_field_type_ids: Vec<ArenaTypeId> = {
             let mut arena = self.type_arena_mut();
             generic_info
                 .field_types
                 .iter()
-                .map(|&t| arena.substitute(t, &subs_hashbrown))
+                .map(|&t| arena.substitute(t, &subs))
                 .collect()
         };
 
@@ -451,13 +451,13 @@ impl Analyzer {
         );
 
         // Substitute inferred types into field types to get concrete field types via arena
-        let subs_hashbrown: FxHashMap<_, _> = inferred_id.iter().map(|(&k, &v)| (k, v)).collect();
+        let subs: FxHashMap<_, _> = inferred_id.iter().map(|(&k, &v)| (k, v)).collect();
         let concrete_field_type_ids: Vec<ArenaTypeId> = {
             let mut arena = self.type_arena_mut();
             generic_info
                 .field_types
                 .iter()
-                .map(|&t| arena.substitute(t, &subs_hashbrown))
+                .map(|&t| arena.substitute(t, &subs))
                 .collect()
         };
 

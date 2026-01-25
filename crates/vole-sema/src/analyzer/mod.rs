@@ -1829,9 +1829,6 @@ impl Analyzer {
         substitutions: &FxHashMap<NameId, ArenaTypeId>,
         interner: &Interner,
     ) {
-        // Build concrete parameter types by applying substitutions
-        let subs_hashbrown = substitutions;
-
         // Get the generic function info to resolve parameter and return types
         let name_id = self
             .name_table_mut()
@@ -1853,9 +1850,9 @@ impl Analyzer {
             let param_ids: Vec<_> = generic_info
                 .param_types
                 .iter()
-                .map(|&t| arena.substitute(t, subs_hashbrown))
+                .map(|&t| arena.substitute(t, substitutions))
                 .collect();
-            let return_id = arena.substitute(generic_info.return_type, subs_hashbrown);
+            let return_id = arena.substitute(generic_info.return_type, substitutions);
             (param_ids, return_id)
         };
 

@@ -123,8 +123,8 @@ impl Analyzer {
                 );
 
                 // Create the concrete function type by substituting via arena
-                // Convert std HashMap to hashbrown HashMap for arena.substitute
-                let subs_hashbrown: FxHashMap<_, _> =
+                // Collect substitutions into an owned map for arena.substitute
+                let subs: FxHashMap<_, _> =
                     inferred_id.iter().map(|(&k, &v)| (k, v)).collect();
                 let (concrete_param_ids, concrete_return_id) = {
                     let mut arena = self.type_arena_mut();
@@ -132,9 +132,9 @@ impl Analyzer {
                     let param_ids: Vec<_> = generic_def
                         .param_types
                         .iter()
-                        .map(|&t| arena.substitute(t, &subs_hashbrown))
+                        .map(|&t| arena.substitute(t, &subs))
                         .collect();
-                    let return_id = arena.substitute(generic_def.return_type, &subs_hashbrown);
+                    let return_id = arena.substitute(generic_def.return_type, &subs);
                     (param_ids, return_id)
                 };
 
