@@ -1818,6 +1818,26 @@ impl Analyzer {
         }
     }
 
+    /// Infer the return type from collected return_types in ReturnInfo.
+    ///
+    /// This enables multi-branch return type inference:
+    /// - If no return types collected, returns void
+    /// - If one return type, returns that type
+    /// - If multiple different return types, creates a union type
+    ///
+    /// Example: `func foo(x: bool) { if x { return 1 } else { return "hi" } }`
+    /// will infer return type `i64 | string`.
+    fn infer_return_type_from_info(&mut self, info: &ReturnInfo) -> ArenaTypeId {
+        if info.return_types.is_empty() {
+            ArenaTypeId::VOID
+        } else if info.return_types.len() == 1 {
+            info.return_types[0]
+        } else {
+            // Create union of all return types (the union method handles deduplication)
+            self.type_arena_mut().union(info.return_types.clone())
+        }
+    }
+
     fn check_function(
         &mut self,
         func: &FuncDecl,
@@ -1887,9 +1907,8 @@ impl Analyzer {
 
         // If we were inferring the return type, update the function signature
         if needs_inference {
-            let inferred_return_type = self
-                .current_function_return
-                .unwrap_or_else(|| self.type_arena().void());
+            // Use ReturnInfo to infer type from all return statements (creates union if needed)
+            let inferred_return_type = self.infer_return_type_from_info(&body_info);
 
             // Update the function signature with the inferred return type
             if let Some(existing) = self.functions.get_mut(&func.name) {
@@ -2338,9 +2357,8 @@ impl Analyzer {
 
         // If we were inferring the return type, update the method signature
         if needs_inference {
-            let inferred_return_type = self
-                .current_function_return
-                .unwrap_or_else(|| self.type_arena().void());
+            // Use ReturnInfo to infer type from all return statements (creates union if needed)
+            let inferred_return_type = self.infer_return_type_from_info(&body_info);
 
             // Update the method's return type in EntityRegistry
             {
@@ -2532,15 +2550,12 @@ impl Analyzer {
         }
 
         // Check body
-        let _body_info = self.check_func_body(body, interner)?;
+        let body_info = self.check_func_body(body, interner)?;
 
         // If we were inferring the return type, update the method signature
         if needs_inference {
-            // Get inferred type, defaulting to void if no return was found
-            let inferred_return_type = match self.current_function_return {
-                Some(ty) => ty,
-                None => self.type_arena().void(),
-            };
+            // Use ReturnInfo to infer type from all return statements (creates union if needed)
+            let inferred_return_type = self.infer_return_type_from_info(&body_info);
 
             // Update the method signature with the inferred return type
             // Destructure db to get both entities and types to avoid RefCell conflict
@@ -2688,12 +2703,12 @@ impl Analyzer {
         self.check_param_defaults(&func.params, &param_type_vec, interner)?;
 
         // Check body
-        let _body_info = self.check_func_body(&func.body, interner)?;
+        let body_info = self.check_func_body(&func.body, interner)?;
 
         // Get inferred return type if needed
         let final_return_type = if needs_inference {
-            self.current_function_return
-                .unwrap_or_else(|| self.type_arena().void())
+            // Use ReturnInfo to infer type from all return statements (creates union if needed)
+            self.infer_return_type_from_info(&body_info)
         } else {
             return_type_id
         };

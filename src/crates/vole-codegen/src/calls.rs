@@ -993,7 +993,35 @@ impl Cg<'_, '_, '_> {
         if results.is_empty() {
             Ok(self.void_value())
         } else {
-            Ok(self.compiled(results[0], ret))
+            // If the return type is a union, the returned value is a pointer to callee's stack.
+            // We need to copy the union data to our own stack to prevent it from being
+            // overwritten on subsequent calls to the same closure.
+            if self.arena().is_union(ret) {
+                let src_ptr = results[0];
+                let union_size = self.type_size(ret);
+                let slot = self.alloc_stack(union_size);
+
+                // Copy the union data (tag + payload)
+                // Tag is at offset 0 (1 byte)
+                let tag = self
+                    .builder
+                    .ins()
+                    .load(types::I8, MemFlags::new(), src_ptr, 0);
+                self.builder.ins().stack_store(tag, slot, 0);
+
+                // Payload is at offset 8 (8 bytes)
+                let payload = self
+                    .builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), src_ptr, 8);
+                self.builder.ins().stack_store(payload, slot, 8);
+
+                let ptr_type = self.ptr_type();
+                let new_ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+                Ok(self.compiled(new_ptr, ret))
+            } else {
+                Ok(self.compiled(results[0], ret))
+            }
         }
     }
 

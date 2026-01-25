@@ -141,10 +141,14 @@ impl Analyzer {
                     (self.enter_function_context_inferring(), true)
                 };
 
-                let _block_info = self.check_block(block, interner);
+                let block_info = self.check_block(block, interner);
 
                 let ret = if inferring {
-                    self.current_function_return.unwrap_or(ArenaTypeId::VOID)
+                    // Use ReturnInfo to infer type from all return statements (creates union if needed)
+                    match block_info {
+                        Ok(info) => self.infer_return_type_from_info(&info),
+                        Err(_) => ArenaTypeId::VOID,
+                    }
                 } else {
                     return_type_for_context.unwrap_or(ArenaTypeId::VOID)
                 };

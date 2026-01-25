@@ -311,6 +311,7 @@ impl Analyzer {
             }
             Stmt::Return(ret) => {
                 // Determine expected type for bidirectional type checking (TypeId-based)
+                // Only use expected type if we're NOT in inference mode (current_function_return is set)
                 let expected_value_type_id = self.current_function_return.map(|expected| {
                     // If expected is fallible, extract success type for comparison
                     // A `return value` statement returns the success type, not the full fallible type
@@ -327,10 +328,10 @@ impl Analyzer {
                     self.ty_void_id()
                 };
 
-                // If in inference mode (current_function_return is None), set it from this return
-                if self.current_function_return.is_none() {
-                    self.current_function_return = Some(ret_type_id);
-                } else if let Some(expected_id) = expected_value_type_id
+                // In inference mode (current_function_return is None), we collect all return types
+                // via ReturnInfo and compute the union at the end.
+                // When NOT in inference mode, check that return type matches expected.
+                if let Some(expected_id) = expected_value_type_id
                     && !self.types_compatible_id(ret_type_id, expected_id, interner)
                 {
                     let expected_str = self.type_display_id(expected_id);

@@ -224,3 +224,78 @@ tests "nested functions" {
         assert(greet("World") == "Hello, World")
     }
 }
+
+// Union return type inference - when branches return different types
+func returnIntOrString(x: bool) {
+    if x {
+        return 42
+    }
+    return "hello"
+}
+
+// Union return type inference with three types
+func returnThreeTypes(x: i64) {
+    if x == 0 { return nil }
+    if x > 0 { return "positive" }
+    return x
+}
+
+tests "union return type inference" {
+    test "inferred union return type i64 | string - returns i64" {
+        let result = returnIntOrString(true)
+        assert(result is i64)
+    }
+
+    test "inferred union return type i64 | string - returns string" {
+        let result = returnIntOrString(false)
+        assert(result is string)
+    }
+
+    test "inferred union return with three types - nil case" {
+        let result = returnThreeTypes(0)
+        assert(result is nil)
+    }
+
+    test "inferred union return with three types - string case" {
+        let result = returnThreeTypes(1)
+        assert(result is string)
+    }
+
+    test "inferred union return with three types - i64 case" {
+        let result = returnThreeTypes(-5)
+        assert(result is i64)
+    }
+
+    test "lambda with union return type" {
+        let getVal = (flag: bool) => {
+            if flag { return 123 }
+            return "abc"
+        }
+        let a = getVal(true)
+        let b = getVal(false)
+        assert(a is i64)
+        assert(b is string)
+    }
+
+    test "nested function with union return" {
+        func maybeNil(x: i64) {
+            if x < 0 { return nil }
+            return x * 2
+        }
+        let r1 = maybeNil(5)
+        let r2 = maybeNil(-1)
+        assert(r1 == 10)
+        assert(r2 == nil)
+    }
+
+    test "union return with multiple branches using if statements" {
+        func classify(x: i64) {
+            if x < 0 { return "negative" }
+            if x == 0 { return 0 }
+            return x
+        }
+        assert(classify(-1) is string)
+        assert(classify(0) is i64)
+        assert(classify(5) is i64)
+    }
+}
