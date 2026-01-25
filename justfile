@@ -68,3 +68,7 @@ clippy:
 update:
     cargo update
 
+# Pre-commit checks with auto-fixes
+pre-commit:
+    @just ci pre-commit
+
