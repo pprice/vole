@@ -104,17 +104,21 @@ impl Analyzer {
         }
 
         // Load source via module_loader
-        let module_info = match self.module_loader.load(import_path) {
-            Ok(info) => info,
-            Err(_) => return, // Silently ignore missing prelude files
-        };
+        let module_info = self.module_loader.load(import_path).unwrap_or_else(|err| {
+            panic!(
+                "Failed to load prelude file '{import_path}': {err}\n\
+                     This is a bug in the standard library or installation."
+            )
+        });
 
         // Parse the module
         let mut parser = Parser::new(&module_info.source);
-        let program = match parser.parse_program() {
-            Ok(p) => p,
-            Err(_) => return, // Silently ignore parse errors in prelude
-        };
+        let program = parser.parse_program().unwrap_or_else(|err| {
+            panic!(
+                "Failed to parse prelude file '{import_path}': {err:?}\n\
+                 This is a bug in the standard library."
+            )
+        });
 
         let mut prelude_interner = parser.into_interner();
         prelude_interner.seed_builtin_symbols();
