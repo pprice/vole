@@ -616,6 +616,36 @@ pub fn module() -> NativeModule {
         },
     );
 
+    // String split iterator: string_split_iter(string, delimiter) -> Iterator<string>
+    m.register(
+        "string_split_iter",
+        iterator::vole_string_split_iter as *const u8,
+        NativeSignature {
+            params: vec![NativeType::String, NativeType::String],
+            return_type: NativeType::I64,
+        },
+    );
+
+    // String lines iterator: string_lines_iter(string) -> Iterator<string>
+    m.register(
+        "string_lines_iter",
+        iterator::vole_string_lines_iter as *const u8,
+        NativeSignature {
+            params: vec![NativeType::String],
+            return_type: NativeType::I64,
+        },
+    );
+
+    // String codepoints iterator: string_codepoints_iter(string) -> Iterator<i32>
+    m.register(
+        "string_codepoints_iter",
+        iterator::vole_string_codepoints_iter as *const u8,
+        NativeSignature {
+            params: vec![NativeType::String],
+            return_type: NativeType::I64,
+        },
+    );
+
     m
 }
 

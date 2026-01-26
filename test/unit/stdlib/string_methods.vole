@@ -1,0 +1,271 @@
+// String method tests
+
+tests "string split" {
+    test "split by comma" {
+        let s = "a,b,c"
+        let parts = s.split(",").collect()
+        assert(parts.length() == 3)
+        assert(parts[0] == "a")
+        assert(parts[1] == "b")
+        assert(parts[2] == "c")
+    }
+
+    test "split empty string" {
+        let s = ""
+        let parts = s.split(",").collect()
+        assert(parts.length() == 1)
+        assert(parts[0] == "")
+    }
+
+    test "split no delimiter found" {
+        let s = "hello"
+        let parts = s.split(",").collect()
+        assert(parts.length() == 1)
+        assert(parts[0] == "hello")
+    }
+
+    test "split multi-char delimiter" {
+        let s = "a::b::c"
+        let parts = s.split("::").collect()
+        assert(parts.length() == 3)
+        assert(parts[0] == "a")
+        assert(parts[1] == "b")
+        assert(parts[2] == "c")
+    }
+
+    test "split with empty parts" {
+        let s = "a,,b"
+        let parts = s.split(",").collect()
+        assert(parts.length() == 3)
+        assert(parts[0] == "a")
+        assert(parts[1] == "")
+        assert(parts[2] == "b")
+    }
+
+    test "split iterator count" {
+        let s = "one,two,three,four"
+        assert(s.split(",").count() == 4)
+    }
+
+    test "split iterator take" {
+        let s = "a,b,c,d,e"
+        let parts = s.split(",").take(3).collect()
+        assert(parts.length() == 3)
+        assert(parts[0] == "a")
+        assert(parts[1] == "b")
+        assert(parts[2] == "c")
+    }
+}
+
+tests "string lines" {
+    test "lines with newlines" {
+        let s = "line1\nline2\nline3"
+        let lines = s.lines().collect()
+        assert(lines.length() == 3)
+        assert(lines[0] == "line1")
+        assert(lines[1] == "line2")
+        assert(lines[2] == "line3")
+    }
+
+    test "lines empty string" {
+        let s = ""
+        let lines = s.lines().collect()
+        assert(lines.length() == 0)
+    }
+
+    test "lines single line no newline" {
+        let s = "hello"
+        let lines = s.lines().collect()
+        assert(lines.length() == 1)
+        assert(lines[0] == "hello")
+    }
+
+    test "lines with windows line endings" {
+        let s = "line1\r\nline2\r\nline3"
+        let lines = s.lines().collect()
+        assert(lines.length() == 3)
+        assert(lines[0] == "line1")
+        assert(lines[1] == "line2")
+        assert(lines[2] == "line3")
+    }
+
+    test "lines iterator count" {
+        let s = "a\nb\nc\nd"
+        assert(s.lines().count() == 4)
+    }
+
+    test "lines with trailing newline" {
+        let s = "line1\nline2\n"
+        let lines = s.lines().collect()
+        assert(lines.length() == 2)
+        assert(lines[0] == "line1")
+        assert(lines[1] == "line2")
+    }
+}
+
+tests "string chars (codepoints)" {
+    test "chars ascii" {
+        let s = "abc"
+        let cps = s.chars().collect()
+        assert(cps.length() == 3)
+        assert(cps[0] == 97)  // 'a'
+        assert(cps[1] == 98)  // 'b'
+        assert(cps[2] == 99)  // 'c'
+    }
+
+    test "chars empty string" {
+        let s = ""
+        let cps = s.chars().collect()
+        assert(cps.length() == 0)
+    }
+
+    test "chars unicode" {
+        let s = "cafe"
+        let cps = s.chars().collect()
+        assert(cps.length() == 4)
+        assert(cps[0] == 99)   // 'c'
+        assert(cps[1] == 97)   // 'a'
+        assert(cps[2] == 102)  // 'f'
+        assert(cps[3] == 101)  // 'e'
+    }
+
+    test "chars count" {
+        let s = "hello"
+        assert(s.chars().count() == 5)
+    }
+
+    test "chars take" {
+        let s = "hello world"
+        let first_five = s.chars().take(5).collect()
+        assert(first_five.length() == 5)
+        assert(first_five[0] == 104) // 'h'
+        assert(first_five[4] == 111) // 'o'
+    }
+}
+
+tests "string replace_all" {
+    test "replace_all single occurrence" {
+        let s = "hello world"
+        let result = s.replace_all("world", "there")
+        assert(result == "hello there")
+    }
+
+    test "replace_all multiple occurrences" {
+        let s = "hello hello hello"
+        let result = s.replace_all("hello", "hi")
+        assert(result == "hi hi hi")
+    }
+
+    test "replace_all not found" {
+        let s = "hello world"
+        let result = s.replace_all("xyz", "abc")
+        assert(result == "hello world")
+    }
+
+    test "replace_all empty old" {
+        let s = "abc"
+        let result = s.replace_all("", "X")
+        assert(result == "XaXbXcX")
+    }
+
+    test "replace_all empty new" {
+        let s = "a-b-c"
+        let result = s.replace_all("-", "")
+        assert(result == "abc")
+    }
+}
+
+tests "string substring" {
+    test "substring basic" {
+        let s = "hello world"
+        let result = s.substring(0, 5)
+        assert(result == "hello")
+    }
+
+    test "substring to end" {
+        let s = "hello world"
+        // -1 means to end of string
+        let result = s.substring(6, -1)
+        assert(result == "world")
+    }
+
+    test "substring middle" {
+        let s = "hello world"
+        let result = s.substring(3, 8)
+        assert(result == "lo wo")
+    }
+
+    test "substring empty result" {
+        let s = "hello"
+        let result = s.substring(2, 2)
+        assert(result == "")
+    }
+}
+
+tests "string char_at_raw" {
+    test "char_at_raw valid index" {
+        let s = "hello"
+        let ch = s.char_at_raw(0)
+        assert(ch == 104) // 'h'
+    }
+
+    test "char_at_raw middle" {
+        let s = "hello"
+        let ch = s.char_at_raw(2)
+        assert(ch == 108) // 'l'
+    }
+
+    test "char_at_raw out of bounds returns -1" {
+        let s = "hello"
+        let ch = s.char_at_raw(10)
+        assert(ch == -1)
+    }
+
+    test "char_at_raw negative returns -1" {
+        let s = "hello"
+        let ch = s.char_at_raw(-1)
+        assert(ch == -1)
+    }
+}
+
+tests "existing string methods" {
+    test "trim" {
+        assert("  hello  ".trim() == "hello")
+        assert("hello".trim() == "hello")
+        assert("   ".trim() == "")
+    }
+
+    test "starts_with" {
+        assert("hello world".starts_with("hello"))
+        assert(!("hello world".starts_with("world")))
+        assert("".starts_with(""))
+    }
+
+    test "ends_with" {
+        assert("hello world".ends_with("world"))
+        assert(!("hello world".ends_with("hello")))
+    }
+
+    test "contains" {
+        assert("hello world".contains("llo"))
+        assert(!("hello world".contains("xyz")))
+    }
+
+    test "replace first only" {
+        let s = "hello hello"
+        let result = s.replace("hello", "hi")
+        assert(result == "hi hello")
+    }
+
+    test "index_of_raw found" {
+        let s = "hello world"
+        let idx = s.index_of_raw("world")
+        assert(idx == 6)
+    }
+
+    test "index_of_raw not found" {
+        let s = "hello world"
+        let idx = s.index_of_raw("xyz")
+        assert(idx == -1)
+    }
+}

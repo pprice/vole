@@ -1,6 +1,6 @@
 // stdlib/prelude/string.vole
 
-let { Equatable, Comparable, Hashable, Stringable, Default } = import "./traits"
+let { Equatable, Comparable, Hashable, Stringable, Default, Iterator } = import "./traits"
 
 implement Equatable for string {
     external("std:string") {
@@ -32,6 +32,7 @@ implement Default for string {
     }
 }
 
+// Basic string methods (std:string native module)
 implement string {
     external("std:string") {
         func "str_len" as length() -> i64
@@ -44,14 +45,22 @@ implement string {
         func "str_trim" as trim() -> string
         func "str_trim_start" as trim_start() -> string
         func "str_trim_end" as trim_end() -> string
-        func "str_index_of" as _index_of_raw(needle: string) -> i32
+        // index_of returns character index or -1 if not found
+        func "str_index_of" as index_of_raw(needle: string) -> i32
+        // substring(start, end) - end is -1 to go to end of string
         func "str_substring" as substring(start: i32, end: i32) -> string
         func "str_replace" as replace(old: string, new: string) -> string
+        func "str_replace_all" as replace_all(old: string, new: string) -> string
+        // char_at_raw returns -1 for out of bounds
+        func "str_char_at" as char_at_raw(index: i32) -> i32
     }
+}
 
-    func index_of(needle: string) -> i32? {
-        let r = self._index_of_raw(needle)
-        if r < 0 { return nil }
-        return r
+// String iterator methods (vole:std:runtime native module)
+implement string {
+    external("vole:std:runtime") {
+        func "string_split_iter" as split(delimiter: string) -> Iterator<string>
+        func "string_lines_iter" as lines() -> Iterator<string>
+        func "string_codepoints_iter" as chars() -> Iterator<i32>
     }
 }

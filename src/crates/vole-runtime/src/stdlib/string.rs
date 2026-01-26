@@ -193,6 +193,26 @@ pub fn module() -> NativeModule {
         },
     );
 
+    // str_replace_all: (string, string old, string new) -> string (all occurrences)
+    m.register(
+        "str_replace_all",
+        str_replace_all as *const u8,
+        NativeSignature {
+            params: vec![NativeType::String, NativeType::String, NativeType::String],
+            return_type: NativeType::String,
+        },
+    );
+
+    // str_char_at: (string, i32 index) -> i32 (unicode codepoint, -1 if out of bounds)
+    m.register(
+        "str_char_at",
+        str_char_at as *const u8,
+        NativeSignature {
+            params: vec![NativeType::String, NativeType::I32],
+            return_type: NativeType::I32,
+        },
+    );
+
     m
 }
 
@@ -479,6 +499,44 @@ pub extern "C" fn str_replace(
         // Replace first occurrence only
         let result = s_str.replacen(old_str, new_str, 1);
         RcString::new(&result)
+    }
+}
+
+/// Replace all occurrences of old with new
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn str_replace_all(
+    s: *const RcString,
+    old: *const RcString,
+    new: *const RcString,
+) -> *const RcString {
+    if s.is_null() {
+        return RcString::new("");
+    }
+    unsafe {
+        let s_str = (*s).as_str();
+        let old_str = if old.is_null() { "" } else { (*old).as_str() };
+        let new_str = if new.is_null() { "" } else { (*new).as_str() };
+
+        let result = s_str.replace(old_str, new_str);
+        RcString::new(&result)
+    }
+}
+
+/// Get the character (unicode codepoint) at a given index
+/// Returns -1 if index is out of bounds
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn str_char_at(s: *const RcString, index: i32) -> i32 {
+    if s.is_null() || index < 0 {
+        return -1;
+    }
+    unsafe {
+        let s_str = (*s).as_str();
+        match s_str.chars().nth(index as usize) {
+            Some(ch) => ch as i32,
+            None => -1,
+        }
     }
 }
 

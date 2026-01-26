@@ -35,6 +35,12 @@ pub enum IteratorKind {
     Enumerate = 18,
     /// Zip iterator - combines two iterators into pairs
     Zip = 19,
+    /// String split iterator - splits string by delimiter
+    StringSplit = 20,
+    /// String lines iterator - splits string by newlines
+    StringLines = 21,
+    /// String codepoints iterator - yields unicode codepoints as i32
+    StringCodepoints = 22,
 }
 
 /// Unified iterator source - can be either an array, map, filter, take, skip, chain, flatten, flat_map, unique, chunks, windows, repeat, once, empty, from_fn, range, string_chars, or interface iterator
@@ -61,6 +67,9 @@ pub union IteratorSource {
     pub interface: InterfaceSource,
     pub enumerate: EnumerateSource,
     pub zip: ZipSource,
+    pub string_split: StringSplitSource,
+    pub string_lines: StringLinesSource,
+    pub string_codepoints: StringCodepointsSource,
 }
 
 /// Source data for array iteration
@@ -266,6 +275,42 @@ pub struct ZipSource {
     pub second: *mut UnifiedIterator,
 }
 
+/// Source data for string split iteration (splits string by delimiter)
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct StringSplitSource {
+    /// Pointer to the source string
+    pub string: *const RcString,
+    /// Pointer to the delimiter string
+    pub delimiter: *const RcString,
+    /// Current byte position in the string (not character position)
+    pub byte_pos: i64,
+    /// Whether the iterator is exhausted (0 = no, 1 = yes)
+    pub exhausted: i64,
+}
+
+/// Source data for string lines iteration (splits string by newlines)
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct StringLinesSource {
+    /// Pointer to the source string
+    pub string: *const RcString,
+    /// Current byte position in the string (not character position)
+    pub byte_pos: i64,
+    /// Whether the iterator is exhausted (0 = no, 1 = yes)
+    pub exhausted: i64,
+}
+
+/// Source data for string codepoints iteration (yields unicode codepoints as i32)
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct StringCodepointsSource {
+    /// Pointer to the source string
+    pub string: *const RcString,
+    /// Current byte position in the string (not character position)
+    pub byte_pos: i64,
+}
+
 /// Unified iterator structure
 /// The kind field tells us which variant is active
 #[repr(C)]
@@ -454,6 +499,31 @@ pub extern "C" fn vole_array_iter_free(iter: *mut UnifiedIterator) {
                 vole_array_iter_free(first);
                 vole_array_iter_free(second);
             }
+            IteratorKind::StringSplit => {
+                // Decrement ref count on string and delimiter
+                let string = iter_ref.source.string_split.string;
+                let delimiter = iter_ref.source.string_split.delimiter;
+                if !string.is_null() {
+                    RcString::dec_ref(string as *mut RcString);
+                }
+                if !delimiter.is_null() {
+                    RcString::dec_ref(delimiter as *mut RcString);
+                }
+            }
+            IteratorKind::StringLines => {
+                // Decrement ref count on string
+                let string = iter_ref.source.string_lines.string;
+                if !string.is_null() {
+                    RcString::dec_ref(string as *mut RcString);
+                }
+            }
+            IteratorKind::StringCodepoints => {
+                // Decrement ref count on string
+                let string = iter_ref.source.string_codepoints.string;
+                if !string.is_null() {
+                    RcString::dec_ref(string as *mut RcString);
+                }
+            }
         }
 
         // Free this iterator
@@ -563,6 +633,18 @@ pub extern "C" fn vole_array_iter_next(iter: *mut UnifiedIterator, out_value: *m
         IteratorKind::Zip => {
             // For zip iterators, delegate to zip_next logic
             vole_zip_iter_next(iter, out_value)
+        }
+        IteratorKind::StringSplit => {
+            // For string split iterators, delegate to string_split_next logic
+            vole_string_split_iter_next(iter, out_value)
+        }
+        IteratorKind::StringLines => {
+            // For string lines iterators, delegate to string_lines_next logic
+            vole_string_lines_iter_next(iter, out_value)
+        }
+        IteratorKind::StringCodepoints => {
+            // For string codepoints iterators, delegate to string_codepoints_next logic
+            vole_string_codepoints_iter_next(iter, out_value)
         }
     }
 }
@@ -2773,4 +2855,303 @@ pub extern "C" fn vole_zip_iter_next(iter: *mut UnifiedIterator, out_value: *mut
     // Return tuple pointer
     unsafe { *out_value = tuple_ptr as i64 };
     1 // Has value
+}
+
+// =============================================================================
+// StringSplitIterator - splits string by delimiter
+// =============================================================================
+
+/// Create a new string split iterator that yields substrings split by delimiter
+/// Returns pointer to heap-allocated iterator
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_string_split_iter(
+    string: *const RcString,
+    delimiter: *const RcString,
+) -> *mut UnifiedIterator {
+    // Increment ref count on strings so they stay alive while iterator exists
+    unsafe {
+        if !string.is_null() {
+            RcString::inc_ref(string as *mut RcString);
+        }
+        if !delimiter.is_null() {
+            RcString::inc_ref(delimiter as *mut RcString);
+        }
+    }
+
+    let iter = Box::new(UnifiedIterator {
+        kind: IteratorKind::StringSplit,
+        source: IteratorSource {
+            string_split: StringSplitSource {
+                string,
+                delimiter,
+                byte_pos: 0,
+                exhausted: 0,
+            },
+        },
+    });
+    Box::into_raw(iter)
+}
+
+/// Get next substring from string split iterator
+/// Returns 1 and stores the substring pointer in out_value if available
+/// Returns 0 if iterator exhausted (Done)
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_string_split_iter_next(
+    iter: *mut UnifiedIterator,
+    out_value: *mut i64,
+) -> i64 {
+    if iter.is_null() {
+        return 0;
+    }
+
+    let iter_ref = unsafe { &mut *iter };
+
+    if iter_ref.kind != IteratorKind::StringSplit {
+        return 0;
+    }
+
+    let split_src = unsafe { &mut iter_ref.source.string_split };
+
+    if split_src.string.is_null() || split_src.exhausted != 0 {
+        return 0;
+    }
+
+    unsafe {
+        let string_ref = &*split_src.string;
+        let delim_ref = if split_src.delimiter.is_null() {
+            ""
+        } else {
+            (*split_src.delimiter).as_str()
+        };
+
+        let byte_len = string_ref.len as i64;
+
+        // Check if we've exhausted the string
+        if split_src.byte_pos > byte_len {
+            return 0;
+        }
+
+        // Get the string data starting at current byte position
+        let data = string_ref.data();
+        let remaining = &data[split_src.byte_pos as usize..];
+
+        // Safety: RcString stores valid UTF-8
+        let remaining_str = std::str::from_utf8_unchecked(remaining);
+
+        // Find the next delimiter
+        if let Some(delim_pos) = remaining_str.find(delim_ref) {
+            // Found delimiter - yield substring before it
+            let substring = &remaining_str[..delim_pos];
+            let new_string = RcString::new(substring);
+
+            // Update byte position to after the delimiter
+            split_src.byte_pos += delim_pos as i64 + delim_ref.len() as i64;
+
+            *out_value = new_string as i64;
+            1 // Has value
+        } else {
+            // No more delimiters - yield remaining string and mark exhausted
+            let new_string = RcString::new(remaining_str);
+            split_src.exhausted = 1;
+
+            *out_value = new_string as i64;
+            1 // Has value
+        }
+    }
+}
+
+// =============================================================================
+// StringLinesIterator - splits string by newlines
+// =============================================================================
+
+/// Create a new string lines iterator that yields lines (split by \n or \r\n)
+/// Returns pointer to heap-allocated iterator
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_string_lines_iter(string: *const RcString) -> *mut UnifiedIterator {
+    // Increment ref count on string so it stays alive while iterator exists
+    unsafe {
+        if !string.is_null() {
+            RcString::inc_ref(string as *mut RcString);
+        }
+    }
+
+    let iter = Box::new(UnifiedIterator {
+        kind: IteratorKind::StringLines,
+        source: IteratorSource {
+            string_lines: StringLinesSource {
+                string,
+                byte_pos: 0,
+                exhausted: 0,
+            },
+        },
+    });
+    Box::into_raw(iter)
+}
+
+/// Get next line from string lines iterator
+/// Returns 1 and stores the line pointer in out_value if available
+/// Returns 0 if iterator exhausted (Done)
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_string_lines_iter_next(
+    iter: *mut UnifiedIterator,
+    out_value: *mut i64,
+) -> i64 {
+    if iter.is_null() {
+        return 0;
+    }
+
+    let iter_ref = unsafe { &mut *iter };
+
+    if iter_ref.kind != IteratorKind::StringLines {
+        return 0;
+    }
+
+    let lines_src = unsafe { &mut iter_ref.source.string_lines };
+
+    if lines_src.string.is_null() || lines_src.exhausted != 0 {
+        return 0;
+    }
+
+    unsafe {
+        let string_ref = &*lines_src.string;
+        let byte_len = string_ref.len as i64;
+
+        // Check if we've exhausted the string
+        if lines_src.byte_pos > byte_len {
+            return 0;
+        }
+
+        // Get the string data starting at current byte position
+        let data = string_ref.data();
+        let remaining = &data[lines_src.byte_pos as usize..];
+
+        // Safety: RcString stores valid UTF-8
+        let remaining_str = std::str::from_utf8_unchecked(remaining);
+
+        // Find the next newline
+        if let Some(newline_pos) = remaining_str.find('\n') {
+            // Check for \r\n (Windows line endings)
+            let line_end = if newline_pos > 0
+                && remaining_str.as_bytes().get(newline_pos - 1) == Some(&b'\r')
+            {
+                newline_pos - 1
+            } else {
+                newline_pos
+            };
+
+            let line = &remaining_str[..line_end];
+            let new_string = RcString::new(line);
+
+            // Update byte position to after the newline
+            lines_src.byte_pos += newline_pos as i64 + 1;
+
+            *out_value = new_string as i64;
+            1 // Has value
+        } else {
+            // No more newlines - yield remaining string and mark exhausted
+            // But only if there's content (don't yield empty string at end)
+            if remaining_str.is_empty() {
+                return 0;
+            }
+
+            // Strip trailing \r if present
+            let line = remaining_str.strip_suffix('\r').unwrap_or(remaining_str);
+            let new_string = RcString::new(line);
+            lines_src.exhausted = 1;
+
+            *out_value = new_string as i64;
+            1 // Has value
+        }
+    }
+}
+
+// =============================================================================
+// StringCodepointsIterator - yields unicode codepoints as i32
+// =============================================================================
+
+/// Create a new string codepoints iterator that yields unicode codepoints as i32
+/// Returns pointer to heap-allocated iterator
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_string_codepoints_iter(string: *const RcString) -> *mut UnifiedIterator {
+    // Increment ref count on string so it stays alive while iterator exists
+    unsafe {
+        if !string.is_null() {
+            RcString::inc_ref(string as *mut RcString);
+        }
+    }
+
+    let iter = Box::new(UnifiedIterator {
+        kind: IteratorKind::StringCodepoints,
+        source: IteratorSource {
+            string_codepoints: StringCodepointsSource {
+                string,
+                byte_pos: 0,
+            },
+        },
+    });
+    Box::into_raw(iter)
+}
+
+/// Get next codepoint from string codepoints iterator
+/// Returns 1 and stores the codepoint (as i32) in out_value if available
+/// Returns 0 if iterator exhausted (Done)
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_string_codepoints_iter_next(
+    iter: *mut UnifiedIterator,
+    out_value: *mut i64,
+) -> i64 {
+    if iter.is_null() {
+        return 0;
+    }
+
+    let iter_ref = unsafe { &mut *iter };
+
+    if iter_ref.kind != IteratorKind::StringCodepoints {
+        return 0;
+    }
+
+    let codepoints_src = unsafe { &mut iter_ref.source.string_codepoints };
+
+    if codepoints_src.string.is_null() {
+        return 0;
+    }
+
+    unsafe {
+        let string_ref = &*codepoints_src.string;
+        let byte_len = string_ref.len as i64;
+
+        // Check if we've exhausted the string
+        if codepoints_src.byte_pos >= byte_len {
+            return 0; // Done
+        }
+
+        // Get the string data starting at current byte position
+        let data = string_ref.data();
+        let remaining = &data[codepoints_src.byte_pos as usize..];
+
+        // Get the next UTF-8 character
+        // Safety: RcString stores valid UTF-8
+        let remaining_str = std::str::from_utf8_unchecked(remaining);
+        let next_char = remaining_str.chars().next();
+
+        if let Some(ch) = next_char {
+            // Get the byte length of this character
+            let char_len = ch.len_utf8();
+
+            // Update byte position
+            codepoints_src.byte_pos += char_len as i64;
+
+            // Return the codepoint as i32 (cast to i64 for storage)
+            *out_value = ch as i32 as i64;
+            1 // Has value
+        } else {
+            0 // Done - should not happen if byte_pos < byte_len
+        }
+    }
 }
