@@ -2155,15 +2155,17 @@ impl Analyzer {
             });
 
             for method in &impl_block.methods {
+                // Use target_type_id as Self when resolving method signatures
+                // This ensures `Self` in method params/return types resolves to the implementing type
                 let params_id: Vec<ArenaTypeId> = method
                     .params
                     .iter()
-                    .map(|p| self.resolve_type_id(&p.ty, interner))
+                    .map(|p| self.resolve_type_id_with_self(&p.ty, interner, Some(target_type_id)))
                     .collect();
                 let return_type_id = method
                     .return_type
                     .as_ref()
-                    .map(|t| self.resolve_type_id(t, interner))
+                    .map(|t| self.resolve_type_id_with_self(t, interner, Some(target_type_id)))
                     .unwrap_or_else(|| self.type_arena().void());
                 let func_type = FunctionType::from_ids(&params_id, return_type_id, false);
 

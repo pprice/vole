@@ -1,11 +1,11 @@
 //! Prelude file loading for standard library definitions.
 //!
 //! The prelude loader auto-discovers files from `stdlib/prelude/*.vole` and
-//! loads them. traits.vole is always loaded first as the foundation for all
-//! other prelude files.
+//! loads them as proper modules. traits.vole is always loaded first as the
+//! foundation for all other prelude files.
 //!
-//! Note: Prelude files don't need imports between themselves because all symbols
-//! from traits.vole are globally available after it's loaded.
+//! Prelude files can use relative imports to import from sibling files
+//! (e.g., `let { Equatable } = import "./traits"`).
 
 use super::Analyzer;
 use crate::analysis_cache::CachedModule;
@@ -13,10 +13,14 @@ use crate::generic::TypeParamScopeStack;
 use crate::module::ModuleLoader;
 use crate::resolution::MethodResolutions;
 use crate::scope::Scope;
+use crate::type_arena::TypeId as ArenaTypeId;
 use rustc_hash::FxHashMap;
+use smallvec::smallvec;
 use std::collections::HashSet;
 use std::rc::Rc;
+use vole_frontend::ast::Decl;
 use vole_frontend::{Interner, Parser};
+use vole_identity::NameId;
 
 impl Analyzer {
     /// Load prelude files (trait definitions and primitive type implementations)
@@ -78,15 +82,13 @@ impl Analyzer {
         files
     }
 
-    /// Load a single prelude file and merge its registries
+    /// Load a single prelude file as a proper module
     pub(super) fn load_prelude_file(&mut self, import_path: &str, _interner: &Interner) {
         // Check cache first
         if let Some(ref cache) = self.module_cache
             && let Some(cached) = cache.borrow().get(import_path)
         {
             // Use cached analysis results.
-            // Note: Registry data (types, methods, fields) is already in the shared
-            // CompilationDb - we only need to restore per-module metadata.
             for (name, func_type) in &cached.functions_by_name {
                 self.functions_by_name
                     .insert(name.clone(), func_type.clone());
@@ -95,7 +97,6 @@ impl Analyzer {
                 import_path.to_string(),
                 (cached.program.clone(), cached.interner.clone()),
             );
-            // TypeIds are valid because cache was created with same shared arena
             self.module_expr_types
                 .insert(import_path.to_string(), cached.expr_types.clone());
             self.module_method_resolutions
@@ -123,7 +124,6 @@ impl Analyzer {
         let prelude_module = self.name_table_mut().module_id(import_path);
 
         // Create a sub-analyzer that shares the same db
-        // Note: We don't call new() because that would try to load prelude again
         let mut sub_analyzer = Analyzer {
             scope: Scope::new(),
             functions: FxHashMap::default(),
@@ -144,10 +144,12 @@ impl Analyzer {
             is_check_results: FxHashMap::default(),
             method_resolutions: MethodResolutions::new(),
             module_loader: ModuleLoader::new(),
-            module_type_ids: FxHashMap::default(),
-            module_programs: FxHashMap::default(),
-            module_expr_types: FxHashMap::default(),
-            module_method_resolutions: FxHashMap::default(),
+            // Share module_type_ids so imports to already-loaded prelude files hit the cache
+            module_type_ids: self.module_type_ids.clone(),
+            // Share module_programs so codegen can find already-loaded prelude modules
+            module_programs: self.module_programs.clone(),
+            module_expr_types: self.module_expr_types.clone(),
+            module_method_resolutions: self.module_method_resolutions.clone(),
             loading_prelude: true, // Prevent sub-analyzer from loading prelude
             generic_calls: FxHashMap::default(),
             class_method_calls: FxHashMap::default(),
@@ -157,11 +159,11 @@ impl Analyzer {
             lambda_variables: FxHashMap::default(),
             scoped_function_types: FxHashMap::default(),
             declared_var_types: FxHashMap::default(),
-            current_module: prelude_module, // Use the prelude module path!
+            current_module: prelude_module,
             type_param_stack: TypeParamScopeStack::new(),
-            module_cache: None,      // Sub-analyzers don't need the cache
-            db: Rc::clone(&self.db), // Share the compilation db
-            current_file_path: None, // Prelude doesn't need relative imports
+            module_cache: None,
+            db: Rc::clone(&self.db),
+            current_file_path: Some(module_info.path.clone()),
         };
 
         // Analyze the prelude file
@@ -170,9 +172,7 @@ impl Analyzer {
             tracing::warn!(import_path, ?errors, "prelude analysis errors");
         }
         if analyze_result.is_ok() {
-            // Cache the analysis results.
-            // Note: Registry data is already in the shared CompilationDb - we only
-            // cache per-module metadata (expr_types, method_resolutions, etc.)
+            // Cache the analysis results
             if let Some(ref cache) = self.module_cache {
                 cache.borrow_mut().insert(
                     import_path.to_string(),
@@ -187,25 +187,54 @@ impl Analyzer {
                 );
             }
 
-            // Merge functions by name (for standalone external function declarations)
-            // We use by_name because the Symbol lookup won't work across interners
+            // Merge functions by name
             for (name, func_type) in sub_analyzer.functions_by_name {
                 self.functions_by_name.insert(name, func_type);
             }
 
-            // Store prelude program for codegen (needed for implement block compilation)
+            // Create module type with exports so other prelude files can import this one.
+            // Only export interfaces - that's what prelude files need to import from each other.
+            let mut exports: smallvec::SmallVec<[(NameId, ArenaTypeId); 8]> = smallvec![];
+            for decl in &program.declarations {
+                if let Decl::Interface(iface) = decl {
+                    let iface_str = prelude_interner.resolve(iface.name);
+                    // Resolve type_def_id first, then drop the borrow before getting name_id
+                    let type_def_id = self
+                        .resolver(&prelude_interner)
+                        .resolve_type_str_or_interface(iface_str, &self.entity_registry());
+                    if let Some(type_def_id) = type_def_id {
+                        let name_id = self
+                            .name_table_mut()
+                            .intern(prelude_module, &[iface.name], &prelude_interner);
+                        let iface_type_id =
+                            self.type_arena_mut().interface(type_def_id, smallvec![]);
+                        exports.push((name_id, iface_type_id));
+                    }
+                }
+            }
+
+            // Create module type and cache it
+            let module_type_id = self.type_arena_mut().module(prelude_module, exports);
+            // Use canonicalized path as cache key to ensure consistent lookups
+            let canonical_path = module_info
+                .path
+                .canonicalize()
+                .unwrap_or_else(|_| module_info.path.clone())
+                .to_string_lossy()
+                .to_string();
+            self.module_type_ids.insert(canonical_path, module_type_id);
+            self.module_type_ids
+                .insert(import_path.to_string(), module_type_id);
+
+            // Store prelude program for codegen
             self.module_programs
                 .insert(import_path.to_string(), (program, prelude_interner));
-            // Store module-specific expr_types separately (NodeIds are per-program)
-            // TypeIds are valid because arena is shared between parent and sub-analyzer
             self.module_expr_types
                 .insert(import_path.to_string(), sub_analyzer.expr_types.clone());
-            // Store module-specific method_resolutions separately (NodeIds are per-program)
             self.module_method_resolutions.insert(
                 import_path.to_string(),
                 sub_analyzer.method_resolutions.into_inner(),
             );
         }
-        // Silently ignore analysis errors in prelude
     }
 }

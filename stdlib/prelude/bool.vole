@@ -1,5 +1,7 @@
 // stdlib/prelude/bool.vole
 
+let { Equatable, Stringable, Default } = import "./traits"
+
 implement Equatable for bool {
     external("std:intrinsics") {
         func "bool_equals" as equals(other: Self) -> bool

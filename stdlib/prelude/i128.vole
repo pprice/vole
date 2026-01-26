@@ -1,5 +1,7 @@
 // stdlib/prelude/i128.vole
 
+let { Equatable, Comparable, Hashable, Stringable, Default, Bounded } = import "./traits"
+
 implement Equatable for i128 {
     external("std:intrinsics") {
         func "i128_equals" as equals(other: Self) -> bool

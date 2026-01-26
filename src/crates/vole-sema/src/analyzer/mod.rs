@@ -1804,15 +1804,16 @@ impl Analyzer {
 
         for func in &external.functions {
             // Resolve parameter types directly to TypeId
+            // Use target_type_id as Self when resolving external method signatures
             let param_type_ids: Vec<ArenaTypeId> = func
                 .params
                 .iter()
-                .map(|p| self.resolve_type_id(&p.ty, interner))
+                .map(|p| self.resolve_type_id_with_self(&p.ty, interner, Some(target_type_id)))
                 .collect();
 
             // Resolve return type directly to TypeId
             let return_type_id = match &func.return_type {
-                Some(te) => self.resolve_type_id(te, interner),
+                Some(te) => self.resolve_type_id_with_self(te, interner, Some(target_type_id)),
                 None => self.type_arena().void(),
             };
 
@@ -2926,7 +2927,13 @@ impl Analyzer {
 
         // Use canonical path as the cache key to handle different import paths
         // pointing to the same file (e.g., "std:prelude/traits" vs "./traits")
-        let canonical_path = module_info.path.to_string_lossy().to_string();
+        // Canonicalize to ensure consistent path representation
+        let canonical_path = module_info
+            .path
+            .canonicalize()
+            .unwrap_or_else(|_| module_info.path.clone())
+            .to_string_lossy()
+            .to_string();
 
         // Check cache again with canonical path
         if let Some(&type_id) = self.module_type_ids.get(&canonical_path) {

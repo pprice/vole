@@ -1,5 +1,7 @@
 // stdlib/prelude/f32.vole
 
+let { Equatable, Comparable, Hashable, Default, FloatConstants } = import "./traits"
+
 implement Equatable for f32 {
     external("std:intrinsics") {
         func "f32_equals" as equals(other: Self) -> bool

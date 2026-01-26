@@ -1,5 +1,7 @@
 // stdlib/prelude/i32.vole
 
+let { Equatable, Comparable, Hashable, Stringable, Default, Bounded } = import "./traits"
+
 implement Equatable for i32 {
     external("std:intrinsics") {
         func "i32_equals" as equals(other: Self) -> bool

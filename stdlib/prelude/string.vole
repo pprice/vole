@@ -1,5 +1,7 @@
 // stdlib/prelude/string.vole
 
+let { Equatable, Comparable, Hashable, Stringable, Default } = import "./traits"
+
 implement Equatable for string {
     external("std:string") {
         func "str_equals" as equals(other: Self) -> bool

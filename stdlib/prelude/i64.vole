@@ -1,5 +1,7 @@
 // stdlib/prelude/i64.vole
 
+let { Equatable, Comparable, Hashable, Stringable, Default, Bounded } = import "./traits"
+
 implement Equatable for i64 {
     external("std:intrinsics") {
         func "i64_equals" as equals(other: Self) -> bool

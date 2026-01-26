@@ -5,6 +5,8 @@
 // Note: Generic Set<T> requires fixing constraint resolution for lambdas
 // inside generic class methods. See vole-9x0.4 for tracking.
 
+let { SetLike, Iterator } = import "./traits"
+
 class Set implements SetLike<i64> {
     _ptr: i64,  // Pointer to native VoleSet
 

@@ -1,5 +1,7 @@
 // stdlib/prelude/u16.vole
 
+let { Equatable, Comparable, Hashable, Default, Bounded } = import "./traits"
+
 implement Equatable for u16 {
     external("std:intrinsics") {
         func "u16_equals" as equals(other: Self) -> bool

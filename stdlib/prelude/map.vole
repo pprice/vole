@@ -5,6 +5,8 @@
 // Note: Generic Map<K, V> requires fixing constraint resolution for lambdas
 // inside generic class methods. See vole-9x0.4 for tracking.
 
+let { MapLike, Iterator } = import "./traits"
+
 class Map implements MapLike<i64, i64> {
     _ptr: i64,  // Pointer to native VoleMap
 

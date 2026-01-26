@@ -2,6 +2,8 @@
 //
 // Iterator factory functions
 
+let { Iterator } = import "./traits"
+
 // repeat(value) - creates an infinite iterator yielding the same value
 // WARNING: Must use with take() or similar to avoid infinite loops
 // Example: repeat(42).take(3).collect() => [42, 42, 42]

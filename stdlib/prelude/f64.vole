@@ -1,5 +1,7 @@
 // stdlib/prelude/f64.vole
 
+let { Equatable, Comparable, Stringable, Default, FloatConstants } = import "./traits"
+
 implement Equatable for f64 {
     external("std:intrinsics") {
         func "f64_equals" as equals(other: Self) -> bool

@@ -1,5 +1,7 @@
 // stdlib/prelude/i8.vole
 
+let { Equatable, Comparable, Hashable, Default, Bounded } = import "./traits"
+
 implement Equatable for i8 {
     external("std:intrinsics") {
         func "i8_equals" as equals(other: Self) -> bool

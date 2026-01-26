@@ -1004,7 +1004,10 @@ impl Cg<'_, '_, '_> {
         let method_name_id = method_def.name_id;
 
         // Check for monomorphized static method (for generic classes)
-        if let Some(mono_key) = self.query().static_method_generic_at(expr_id) {
+        // Only check in main program context to avoid NodeId collisions with module code
+        if self.current_module.is_none()
+            && let Some(mono_key) = self.query().static_method_generic_at(expr_id)
+        {
             // Look up the monomorphized instance
             if let Some(instance) = self.registry().static_method_monomorph_cache.get(mono_key) {
                 // Compile arguments with substituted param types (TypeId-based)

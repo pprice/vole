@@ -344,7 +344,14 @@ impl Cg<'_, '_, '_> {
         }
 
         // Check if this is a call to a generic function (via monomorphization)
-        let monomorph_key = self.query().monomorph_for(call_expr_id);
+        // IMPORTANT: Only check monomorph_for in main program context, not module context.
+        // Module code doesn't have generic function calls that need monomorphization,
+        // and NodeIds can collide between module code and main program code.
+        let monomorph_key = if self.current_module.is_none() {
+            self.query().monomorph_for(call_expr_id)
+        } else {
+            None
+        };
         tracing::trace!(
             call_expr_id = ?call_expr_id,
             callee = callee_name,
