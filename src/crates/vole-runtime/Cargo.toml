@@ -14,5 +14,8 @@ hashbrown = "0.16"
 # High-performance hash map for internal registries
 rustc-hash = "2.1"
 
+# Random number generation for std:random module
+rand = "0.8"
+
 [lints]
 workspace = true
