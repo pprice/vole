@@ -239,6 +239,50 @@ impl Cg<'_, '_, '_> {
         if let Some(&(module_id, export_name, export_type_id)) =
             self.module_bindings.get(&callee_sym)
         {
+            // Check if this is a generic external function that needs monomorphization
+            if let Some(monomorph_key) = self.query().monomorph_for(call_expr_id) {
+                let instance_data = self.monomorph_cache().get(monomorph_key).map(|inst| {
+                    (
+                        inst.original_name,
+                        inst.func_type.return_type_id,
+                        inst.substitutions.clone(),
+                    )
+                });
+
+                if let Some((original_name, return_type_id, substitutions)) = instance_data {
+                    let original_name_str = self.name_table().last_segment_str(original_name);
+                    if let Some(callee_name) = original_name_str {
+                        // Check for generic external function with type mappings
+                        if let Some(generic_ext_info) = self
+                            .analyzed()
+                            .implement_registry()
+                            .get_generic_external(&callee_name)
+                        {
+                            let intrinsic_key = self.find_intrinsic_key_for_monomorph(
+                                &generic_ext_info.type_mappings,
+                                &substitutions,
+                            );
+
+                            if let Some(key) = intrinsic_key {
+                                let module_path = self
+                                    .name_table()
+                                    .last_segment_str(generic_ext_info.module_path)
+                                    .unwrap_or_default();
+
+                                let return_type_id = self.substitute_type(return_type_id);
+
+                                return self.call_generic_external_intrinsic(
+                                    &module_path,
+                                    &key,
+                                    call,
+                                    return_type_id,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
             return self.call_module_binding(
                 module_id,
                 export_name,
@@ -1224,7 +1268,7 @@ impl Cg<'_, '_, '_> {
 
     /// Find the intrinsic key for a generic external function call based on type mappings.
     /// Looks at the monomorphization substitutions and finds a matching type in the mappings.
-    fn find_intrinsic_key_for_monomorph(
+    pub(crate) fn find_intrinsic_key_for_monomorph(
         &self,
         type_mappings: &[vole_sema::implement_registry::TypeMappingEntry],
         substitutions: &rustc_hash::FxHashMap<vole_identity::NameId, TypeId>,
@@ -1250,20 +1294,33 @@ impl Cg<'_, '_, '_> {
         call: &CallExpr,
         return_type_id: TypeId,
     ) -> Result<CompiledValue, String> {
+        self.call_generic_external_intrinsic_args(
+            module_path,
+            intrinsic_key,
+            &call.args,
+            return_type_id,
+        )
+    }
+
+    /// Call a generic external function as a compiler intrinsic (takes args directly).
+    /// Used by both direct calls and module method calls.
+    pub(crate) fn call_generic_external_intrinsic_args(
+        &mut self,
+        module_path: &str,
+        intrinsic_key: &str,
+        args_exprs: &[Expr],
+        return_type_id: TypeId,
+    ) -> Result<CompiledValue, String> {
         // Check if this is a compiler intrinsic module
         if module_path == Self::COMPILER_INTRINSIC_MODULE {
             // Compile arguments (for intrinsics that take args)
-            let args = self.compile_call_args(&call.args)?;
+            let args = self.compile_call_args(args_exprs)?;
             return self.call_compiler_intrinsic(intrinsic_key, &args, return_type_id);
         }
 
-        // Otherwise, look up in native registry
-        if let Some(native_func) = self.native_funcs().lookup(module_path, intrinsic_key) {
-            return self.compile_native_call_with_types(native_func, call, return_type_id);
-        }
-
+        // Otherwise, look up in native registry (not supported for args-only version)
         Err(format!(
-            "generic external intrinsic \"{}::{}\" not found",
+            "generic external intrinsic \"{}::{}\" not found (non-intrinsic native calls not supported via method syntax)",
             module_path, intrinsic_key
         ))
     }

@@ -1,0 +1,265 @@
+// Test integer intrinsics (abs, min, max from math; clz, ctz, popcnt, bitrev, rotl, rotr from lowlevel)
+
+let { abs, min, max } = import "std:math"
+let { clz, ctz, popcnt, bitrev, rotl, rotr } = import "std:lowlevel"
+
+tests "integer math intrinsics" {
+    test "abs i32 positive" {
+        let x: i32 = 42
+        let result = abs(x)
+        assert(result == 42)
+    }
+
+    test "abs i32 negative" {
+        let x: i32 = -42
+        let result = abs(x)
+        assert(result == 42)
+    }
+
+    test "abs i64" {
+        let x: i64 = -100
+        let result = abs(x)
+        assert(result == 100)
+    }
+
+    test "abs i8" {
+        let x: i8 = -5
+        let result = abs(x)
+        assert(result == 5)
+    }
+
+    test "clz i32" {
+        // 0x00000001 has 31 leading zeros
+        let x: i32 = 1
+        let result = clz(x)
+        assert(result == 31)
+    }
+
+    test "clz i32 high bit" {
+        // Negative number has 0 leading zeros (sign bit is 1)
+        let x: i32 = -1
+        let result = clz(x)
+        assert(result == 0)
+    }
+
+    test "clz u32" {
+        let x: u32 = 256  // 0x100 = 9 bits, so 32-9=23 leading zeros
+        let result = clz(x)
+        assert(result == 23)
+    }
+
+    test "clz i64" {
+        let x: i64 = 1
+        let result = clz(x)
+        assert(result == 63)
+    }
+
+    test "ctz i32" {
+        // 0x80000000 has 31 trailing zeros
+        let x: i32 = -2147483648  // 0x80000000
+        let result = ctz(x)
+        assert(result == 31)
+    }
+
+    test "ctz i32 low bit" {
+        let x: i32 = 1
+        let result = ctz(x)
+        assert(result == 0)
+    }
+
+    test "ctz u32" {
+        let x: u32 = 8  // 0b1000 has 3 trailing zeros
+        let result = ctz(x)
+        assert(result == 3)
+    }
+
+    test "ctz i64" {
+        let x: i64 = 16  // 0b10000 has 4 trailing zeros
+        let result = ctz(x)
+        assert(result == 4)
+    }
+
+    test "popcnt i32" {
+        let x: i32 = 7  // 0b111 has 3 ones
+        let result = popcnt(x)
+        assert(result == 3)
+    }
+
+    test "popcnt i32 all ones" {
+        let x: i32 = -1  // all 32 bits are 1
+        let result = popcnt(x)
+        assert(result == 32)
+    }
+
+    test "popcnt u32" {
+        let x: u32 = 255  // 0xFF = 8 ones
+        let result = popcnt(x)
+        assert(result == 8)
+    }
+
+    test "popcnt i64" {
+        let x: i64 = 0xF0F0F0F0  // 16 ones
+        let result = popcnt(x)
+        assert(result == 16)
+    }
+
+    test "min i32" {
+        let a: i32 = 5
+        let b: i32 = 3
+        let result = min(a, b)
+        assert(result == 3)
+    }
+
+    test "min i32 negative" {
+        let a: i32 = -5
+        let b: i32 = 3
+        let result = min(a, b)
+        assert(result == -5)
+    }
+
+    test "min i64" {
+        let a: i64 = 100
+        let b: i64 = 200
+        let result = min(a, b)
+        assert(result == 100)
+    }
+
+    test "min u32" {
+        let a: u32 = 5
+        let b: u32 = 3
+        let result = min(a, b)
+        assert(result == 3)
+    }
+
+    test "min u64" {
+        let a: u64 = 1000
+        let b: u64 = 500
+        let result = min(a, b)
+        assert(result == 500)
+    }
+
+    test "max i32" {
+        let a: i32 = 5
+        let b: i32 = 3
+        let result = max(a, b)
+        assert(result == 5)
+    }
+
+    test "max i32 negative" {
+        let a: i32 = -5
+        let b: i32 = 3
+        let result = max(a, b)
+        assert(result == 3)
+    }
+
+    test "max i64" {
+        let a: i64 = 100
+        let b: i64 = 200
+        let result = max(a, b)
+        assert(result == 200)
+    }
+
+    test "max u32" {
+        let a: u32 = 5
+        let b: u32 = 3
+        let result = max(a, b)
+        assert(result == 5)
+    }
+
+    test "max u64" {
+        let a: u64 = 1000
+        let b: u64 = 500
+        let result = max(a, b)
+        assert(result == 1000)
+    }
+
+    test "bitrev u8" {
+        // 0b00000001 reversed = 0b10000000 = 128
+        let x: u8 = 1
+        let result = bitrev(x)
+        assert(result == 128)
+    }
+
+    test "bitrev u8 pattern" {
+        // 0b11110000 reversed = 0b00001111 = 15
+        let x: u8 = 240
+        let result = bitrev(x)
+        assert(result == 15)
+    }
+
+    test "bitrev u32" {
+        // 0x80000000 reversed = 0x00000001
+        let x: u32 = 0x80000000
+        let result = bitrev(x)
+        assert(result == 1)
+    }
+
+    test "bitrev i32" {
+        // 1 reversed = 0x80000000 (which is negative in i32)
+        let x: i32 = 1
+        let result = bitrev(x)
+        assert(result == -2147483648)
+    }
+
+    test "rotl u32" {
+        // Rotate 1 left by 4 = 16
+        let x: u32 = 1
+        let amt: u8 = 4
+        let result = rotl(x, amt)
+        assert(result == 16)
+    }
+
+    test "rotl u32 wrap" {
+        // 0x80000000 rotated left by 1 = 1
+        let x: u32 = 0x80000000
+        let amt: u8 = 1
+        let result = rotl(x, amt)
+        assert(result == 1)
+    }
+
+    test "rotl i32" {
+        let x: i32 = 1
+        let amt: u8 = 4
+        let result = rotl(x, amt)
+        assert(result == 16)
+    }
+
+    test "rotl u8" {
+        // 0b10000000 rotated left by 1 = 0b00000001
+        let x: u8 = 128
+        let amt: u8 = 1
+        let result = rotl(x, amt)
+        assert(result == 1)
+    }
+
+    test "rotr u32" {
+        // 16 rotated right by 4 = 1
+        let x: u32 = 16
+        let amt: u8 = 4
+        let result = rotr(x, amt)
+        assert(result == 1)
+    }
+
+    test "rotr u32 wrap" {
+        // 1 rotated right by 1 = 0x80000000
+        let x: u32 = 1
+        let amt: u8 = 1
+        let result = rotr(x, amt)
+        assert(result == 0x80000000)
+    }
+
+    test "rotr i32" {
+        let x: i32 = 16
+        let amt: u8 = 4
+        let result = rotr(x, amt)
+        assert(result == 1)
+    }
+
+    test "rotr u8" {
+        // 1 rotated right by 1 = 0b10000000 = 128
+        let x: u8 = 1
+        let amt: u8 = 1
+        let result = rotr(x, amt)
+        assert(result == 128)
+    }
+}

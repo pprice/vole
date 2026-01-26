@@ -979,6 +979,296 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                         let v = self.builder.ins().sqrt(arg);
                         (v, types::F64, TypeId::F64)
                     }
+                    UnaryFloatOp::F32Abs => {
+                        let v = self.builder.ins().fabs(arg);
+                        (v, types::F32, TypeId::F32)
+                    }
+                    UnaryFloatOp::F64Abs => {
+                        let v = self.builder.ins().fabs(arg);
+                        (v, types::F64, TypeId::F64)
+                    }
+                    UnaryFloatOp::F32Ceil => {
+                        let v = self.builder.ins().ceil(arg);
+                        (v, types::F32, TypeId::F32)
+                    }
+                    UnaryFloatOp::F64Ceil => {
+                        let v = self.builder.ins().ceil(arg);
+                        (v, types::F64, TypeId::F64)
+                    }
+                    UnaryFloatOp::F32Floor => {
+                        let v = self.builder.ins().floor(arg);
+                        (v, types::F32, TypeId::F32)
+                    }
+                    UnaryFloatOp::F64Floor => {
+                        let v = self.builder.ins().floor(arg);
+                        (v, types::F64, TypeId::F64)
+                    }
+                    UnaryFloatOp::F32Trunc => {
+                        let v = self.builder.ins().trunc(arg);
+                        (v, types::F32, TypeId::F32)
+                    }
+                    UnaryFloatOp::F64Trunc => {
+                        let v = self.builder.ins().trunc(arg);
+                        (v, types::F64, TypeId::F64)
+                    }
+                    UnaryFloatOp::F32Round => {
+                        let v = self.builder.ins().nearest(arg);
+                        (v, types::F32, TypeId::F32)
+                    }
+                    UnaryFloatOp::F64Round => {
+                        let v = self.builder.ins().nearest(arg);
+                        (v, types::F64, TypeId::F64)
+                    }
+                };
+                Ok(CompiledValue { value, ty, type_id })
+            }
+            IntrinsicHandler::BinaryFloatOp(op) => {
+                use crate::intrinsics::BinaryFloatOp;
+                if args.len() < 2 {
+                    return Err(format!(
+                        "binary float intrinsic \"{}\" requires 2 arguments",
+                        intrinsic_key
+                    ));
+                }
+                let arg1 = args[0];
+                let arg2 = args[1];
+                let (value, ty, type_id) = match op {
+                    BinaryFloatOp::F32Min => {
+                        let v = self.builder.ins().fmin(arg1, arg2);
+                        (v, types::F32, TypeId::F32)
+                    }
+                    BinaryFloatOp::F64Min => {
+                        let v = self.builder.ins().fmin(arg1, arg2);
+                        (v, types::F64, TypeId::F64)
+                    }
+                    BinaryFloatOp::F32Max => {
+                        let v = self.builder.ins().fmax(arg1, arg2);
+                        (v, types::F32, TypeId::F32)
+                    }
+                    BinaryFloatOp::F64Max => {
+                        let v = self.builder.ins().fmax(arg1, arg2);
+                        (v, types::F64, TypeId::F64)
+                    }
+                };
+                Ok(CompiledValue { value, ty, type_id })
+            }
+            IntrinsicHandler::UnaryIntOp(op) => {
+                use crate::intrinsics::UnaryIntOp;
+                if args.is_empty() {
+                    return Err(format!(
+                        "unary int intrinsic \"{}\" requires 1 argument",
+                        intrinsic_key
+                    ));
+                }
+                let arg = args[0];
+                let (value, ty, type_id) = match op {
+                    // abs (signed only)
+                    UnaryIntOp::I8Abs => {
+                        let v = self.builder.ins().iabs(arg);
+                        (v, types::I8, TypeId::I8)
+                    }
+                    UnaryIntOp::I16Abs => {
+                        let v = self.builder.ins().iabs(arg);
+                        (v, types::I16, TypeId::I16)
+                    }
+                    UnaryIntOp::I32Abs => {
+                        let v = self.builder.ins().iabs(arg);
+                        (v, types::I32, TypeId::I32)
+                    }
+                    UnaryIntOp::I64Abs => {
+                        let v = self.builder.ins().iabs(arg);
+                        (v, types::I64, TypeId::I64)
+                    }
+                    // clz
+                    UnaryIntOp::I8Clz | UnaryIntOp::U8Clz => {
+                        let v = self.builder.ins().clz(arg);
+                        (v, types::I8, TypeId::I8)
+                    }
+                    UnaryIntOp::I16Clz | UnaryIntOp::U16Clz => {
+                        let v = self.builder.ins().clz(arg);
+                        (v, types::I16, TypeId::I16)
+                    }
+                    UnaryIntOp::I32Clz | UnaryIntOp::U32Clz => {
+                        let v = self.builder.ins().clz(arg);
+                        (v, types::I32, TypeId::I32)
+                    }
+                    UnaryIntOp::I64Clz | UnaryIntOp::U64Clz => {
+                        let v = self.builder.ins().clz(arg);
+                        (v, types::I64, TypeId::I64)
+                    }
+                    // ctz
+                    UnaryIntOp::I8Ctz | UnaryIntOp::U8Ctz => {
+                        let v = self.builder.ins().ctz(arg);
+                        (v, types::I8, TypeId::I8)
+                    }
+                    UnaryIntOp::I16Ctz | UnaryIntOp::U16Ctz => {
+                        let v = self.builder.ins().ctz(arg);
+                        (v, types::I16, TypeId::I16)
+                    }
+                    UnaryIntOp::I32Ctz | UnaryIntOp::U32Ctz => {
+                        let v = self.builder.ins().ctz(arg);
+                        (v, types::I32, TypeId::I32)
+                    }
+                    UnaryIntOp::I64Ctz | UnaryIntOp::U64Ctz => {
+                        let v = self.builder.ins().ctz(arg);
+                        (v, types::I64, TypeId::I64)
+                    }
+                    // popcnt
+                    UnaryIntOp::I8Popcnt | UnaryIntOp::U8Popcnt => {
+                        let v = self.builder.ins().popcnt(arg);
+                        (v, types::I8, TypeId::I8)
+                    }
+                    UnaryIntOp::I16Popcnt | UnaryIntOp::U16Popcnt => {
+                        let v = self.builder.ins().popcnt(arg);
+                        (v, types::I16, TypeId::I16)
+                    }
+                    UnaryIntOp::I32Popcnt | UnaryIntOp::U32Popcnt => {
+                        let v = self.builder.ins().popcnt(arg);
+                        (v, types::I32, TypeId::I32)
+                    }
+                    UnaryIntOp::I64Popcnt | UnaryIntOp::U64Popcnt => {
+                        let v = self.builder.ins().popcnt(arg);
+                        (v, types::I64, TypeId::I64)
+                    }
+                    // bitrev
+                    UnaryIntOp::I8Bitrev | UnaryIntOp::U8Bitrev => {
+                        let v = self.builder.ins().bitrev(arg);
+                        (v, types::I8, TypeId::I8)
+                    }
+                    UnaryIntOp::I16Bitrev | UnaryIntOp::U16Bitrev => {
+                        let v = self.builder.ins().bitrev(arg);
+                        (v, types::I16, TypeId::I16)
+                    }
+                    UnaryIntOp::I32Bitrev | UnaryIntOp::U32Bitrev => {
+                        let v = self.builder.ins().bitrev(arg);
+                        (v, types::I32, TypeId::I32)
+                    }
+                    UnaryIntOp::I64Bitrev | UnaryIntOp::U64Bitrev => {
+                        let v = self.builder.ins().bitrev(arg);
+                        (v, types::I64, TypeId::I64)
+                    }
+                };
+                Ok(CompiledValue { value, ty, type_id })
+            }
+            IntrinsicHandler::BinaryIntOp(op) => {
+                use crate::intrinsics::BinaryIntOp;
+                if args.len() < 2 {
+                    return Err(format!(
+                        "binary int intrinsic \"{}\" requires 2 arguments",
+                        intrinsic_key
+                    ));
+                }
+                let arg1 = args[0];
+                let arg2 = args[1];
+                let (value, ty, type_id) = match op {
+                    // min signed
+                    BinaryIntOp::I8Min => {
+                        let v = self.builder.ins().smin(arg1, arg2);
+                        (v, types::I8, TypeId::I8)
+                    }
+                    BinaryIntOp::I16Min => {
+                        let v = self.builder.ins().smin(arg1, arg2);
+                        (v, types::I16, TypeId::I16)
+                    }
+                    BinaryIntOp::I32Min => {
+                        let v = self.builder.ins().smin(arg1, arg2);
+                        (v, types::I32, TypeId::I32)
+                    }
+                    BinaryIntOp::I64Min => {
+                        let v = self.builder.ins().smin(arg1, arg2);
+                        (v, types::I64, TypeId::I64)
+                    }
+                    // min unsigned
+                    BinaryIntOp::U8Min => {
+                        let v = self.builder.ins().umin(arg1, arg2);
+                        (v, types::I8, TypeId::U8)
+                    }
+                    BinaryIntOp::U16Min => {
+                        let v = self.builder.ins().umin(arg1, arg2);
+                        (v, types::I16, TypeId::U16)
+                    }
+                    BinaryIntOp::U32Min => {
+                        let v = self.builder.ins().umin(arg1, arg2);
+                        (v, types::I32, TypeId::U32)
+                    }
+                    BinaryIntOp::U64Min => {
+                        let v = self.builder.ins().umin(arg1, arg2);
+                        (v, types::I64, TypeId::U64)
+                    }
+                    // max signed
+                    BinaryIntOp::I8Max => {
+                        let v = self.builder.ins().smax(arg1, arg2);
+                        (v, types::I8, TypeId::I8)
+                    }
+                    BinaryIntOp::I16Max => {
+                        let v = self.builder.ins().smax(arg1, arg2);
+                        (v, types::I16, TypeId::I16)
+                    }
+                    BinaryIntOp::I32Max => {
+                        let v = self.builder.ins().smax(arg1, arg2);
+                        (v, types::I32, TypeId::I32)
+                    }
+                    BinaryIntOp::I64Max => {
+                        let v = self.builder.ins().smax(arg1, arg2);
+                        (v, types::I64, TypeId::I64)
+                    }
+                    // max unsigned
+                    BinaryIntOp::U8Max => {
+                        let v = self.builder.ins().umax(arg1, arg2);
+                        (v, types::I8, TypeId::U8)
+                    }
+                    BinaryIntOp::U16Max => {
+                        let v = self.builder.ins().umax(arg1, arg2);
+                        (v, types::I16, TypeId::U16)
+                    }
+                    BinaryIntOp::U32Max => {
+                        let v = self.builder.ins().umax(arg1, arg2);
+                        (v, types::I32, TypeId::U32)
+                    }
+                    BinaryIntOp::U64Max => {
+                        let v = self.builder.ins().umax(arg1, arg2);
+                        (v, types::I64, TypeId::U64)
+                    }
+                    // rotl (arg2 is u8, needs extension to target type)
+                    BinaryIntOp::I8Rotl | BinaryIntOp::U8Rotl => {
+                        let v = self.builder.ins().rotl(arg1, arg2);
+                        (v, types::I8, TypeId::I8)
+                    }
+                    BinaryIntOp::I16Rotl | BinaryIntOp::U16Rotl => {
+                        let amt = self.builder.ins().uextend(types::I16, arg2);
+                        let v = self.builder.ins().rotl(arg1, amt);
+                        (v, types::I16, TypeId::I16)
+                    }
+                    BinaryIntOp::I32Rotl | BinaryIntOp::U32Rotl => {
+                        let amt = self.builder.ins().uextend(types::I32, arg2);
+                        let v = self.builder.ins().rotl(arg1, amt);
+                        (v, types::I32, TypeId::I32)
+                    }
+                    BinaryIntOp::I64Rotl | BinaryIntOp::U64Rotl => {
+                        let amt = self.builder.ins().uextend(types::I64, arg2);
+                        let v = self.builder.ins().rotl(arg1, amt);
+                        (v, types::I64, TypeId::I64)
+                    }
+                    // rotr (arg2 is u8, needs extension to target type)
+                    BinaryIntOp::I8Rotr | BinaryIntOp::U8Rotr => {
+                        let v = self.builder.ins().rotr(arg1, arg2);
+                        (v, types::I8, TypeId::I8)
+                    }
+                    BinaryIntOp::I16Rotr | BinaryIntOp::U16Rotr => {
+                        let amt = self.builder.ins().uextend(types::I16, arg2);
+                        let v = self.builder.ins().rotr(arg1, amt);
+                        (v, types::I16, TypeId::I16)
+                    }
+                    BinaryIntOp::I32Rotr | BinaryIntOp::U32Rotr => {
+                        let amt = self.builder.ins().uextend(types::I32, arg2);
+                        let v = self.builder.ins().rotr(arg1, amt);
+                        (v, types::I32, TypeId::I32)
+                    }
+                    BinaryIntOp::I64Rotr | BinaryIntOp::U64Rotr => {
+                        let amt = self.builder.ins().uextend(types::I64, arg2);
+                        let v = self.builder.ins().rotr(arg1, amt);
+                        (v, types::I64, TypeId::I64)
+                    }
                 };
                 Ok(CompiledValue { value, ty, type_id })
             }

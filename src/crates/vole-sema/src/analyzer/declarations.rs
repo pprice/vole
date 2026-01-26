@@ -2365,9 +2365,17 @@ impl Analyzer {
         let builtin_mod = self.name_table_mut().builtin_module();
 
         for func in &ext_block.functions {
-            let name_id =
-                self.name_table_mut()
-                    .intern(self.current_module, &[func.vole_name], interner);
+            // For generic external functions in prelude, use builtin_mod so they're globally accessible
+            // (can be called from any module without import). For non-prelude modules, use the
+            // current module so explicit import is required.
+            let name_module = if !func.type_params.is_empty() && self.loading_prelude {
+                builtin_mod
+            } else {
+                self.current_module
+            };
+            let name_id = self
+                .name_table_mut()
+                .intern(name_module, &[func.vole_name], interner);
 
             // Validate parameter default ordering and count required params
             let required_params = self.validate_param_defaults(&func.params, interner);
@@ -2381,7 +2389,23 @@ impl Analyzer {
 
             // For generic external functions, set up type param scope and register with GenericFuncInfo
             if !func.type_params.is_empty() {
-                // Build TypeParamInfo list (like regular generic functions)
+                // Build initial name scope (for resolving constraints that reference other type params)
+                let mut name_scope = TypeParamScope::new();
+                for tp in &func.type_params {
+                    let tp_name_str = interner.resolve(tp.name);
+                    let tp_name_id = self
+                        .name_table_mut()
+                        .intern_raw(builtin_mod, &[tp_name_str]);
+                    name_scope.add(TypeParamInfo {
+                        name: tp.name,
+                        name_id: tp_name_id,
+                        constraint: None,
+                        type_param_id: None,
+                        variance: TypeParamVariance::default(),
+                    });
+                }
+
+                // Build TypeParamInfo list with resolved constraints
                 let type_params: Vec<TypeParamInfo> = func
                     .type_params
                     .iter()
@@ -2390,10 +2414,13 @@ impl Analyzer {
                         let tp_name_id = self
                             .name_table_mut()
                             .intern_raw(builtin_mod, &[tp_name_str]);
+                        let resolved_constraint = tp.constraint.as_ref().and_then(|c| {
+                            self.resolve_type_param_constraint(c, &name_scope, interner, tp.span)
+                        });
                         TypeParamInfo {
                             name: tp.name,
                             name_id: tp_name_id,
-                            constraint: None, // External functions don't have constraints for now
+                            constraint: resolved_constraint,
                             type_param_id: None,
                             variance: TypeParamVariance::default(),
                         }

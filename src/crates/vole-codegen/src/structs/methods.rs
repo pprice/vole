@@ -119,28 +119,65 @@ impl Cg<'_, '_, '_> {
                 if let Some(ext_info) = external_info {
                     // External FFI function
                     return self.call_external_id(ext_info, &args, return_type_id);
-                } else {
-                    // Pure Vole function - call by mangled name
-                    let name_id = name_id.ok_or_else(|| {
-                        format!(
-                            "Module method {}::{} not interned",
-                            module_path, method_name_str
-                        )
-                    })?;
-                    let func_key = self.funcs().intern_name_id(name_id);
-                    let func_id = self.funcs().func_id(func_key).ok_or_else(|| {
-                        format!(
-                            "Module function {}::{} not found",
-                            module_path, method_name_str
-                        )
-                    })?;
-                    let func_ref = self
-                        .codegen_ctx
-                        .jit_module()
-                        .declare_func_in_func(func_id, self.builder.func);
-                    let call_inst = self.builder.ins().call(func_ref, &args);
-                    return Ok(self.call_result(call_inst, return_type_id));
                 }
+
+                // Check if this is a generic external intrinsic (e.g., math.sqrt<f64>)
+                if let Some(monomorph_key) = self.query().monomorph_for(expr_id) {
+                    let instance_data = self.monomorph_cache().get(monomorph_key).map(|inst| {
+                        (
+                            inst.original_name,
+                            inst.func_type.return_type_id,
+                            inst.substitutions.clone(),
+                        )
+                    });
+
+                    if let Some((original_name, mono_return_type_id, substitutions)) = instance_data
+                        && let Some(callee_name) = self.name_table().last_segment_str(original_name)
+                        && let Some(generic_ext_info) = self
+                            .analyzed()
+                            .implement_registry()
+                            .get_generic_external(&callee_name)
+                        && let Some(key) = self.find_intrinsic_key_for_monomorph(
+                            &generic_ext_info.type_mappings,
+                            &substitutions,
+                        )
+                    {
+                        let ext_module_path = self
+                            .name_table()
+                            .last_segment_str(generic_ext_info.module_path)
+                            .unwrap_or_default();
+
+                        let return_type_id = self.substitute_type(mono_return_type_id);
+
+                        return self.call_generic_external_intrinsic_args(
+                            &ext_module_path,
+                            &key,
+                            &mc.args,
+                            return_type_id,
+                        );
+                    }
+                }
+
+                // Pure Vole function - call by mangled name
+                let name_id = name_id.ok_or_else(|| {
+                    format!(
+                        "Module method {}::{} not interned",
+                        module_path, method_name_str
+                    )
+                })?;
+                let func_key = self.funcs().intern_name_id(name_id);
+                let func_id = self.funcs().func_id(func_key).ok_or_else(|| {
+                    format!(
+                        "Module function {}::{} not found",
+                        module_path, method_name_str
+                    )
+                })?;
+                let func_ref = self
+                    .codegen_ctx
+                    .jit_module()
+                    .declare_func_in_func(func_id, self.builder.func);
+                let call_inst = self.builder.ins().call(func_ref, &args);
+                return Ok(self.call_result(call_inst, return_type_id));
             } else {
                 return Err(CodegenError::not_found(
                     "module method",

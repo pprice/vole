@@ -84,49 +84,96 @@ impl Analyzer {
             // This must come BEFORE checking the entity registry for generic functions
             // to ensure local scope variables shadow global generics
             if let Some(var_type_id) = self.get_variable_type_id(*sym) {
-                let arena = self.type_arena();
-                if let Some((params, ret, _is_closure)) = arena.unwrap_function(var_type_id) {
-                    let params = params.clone();
+                // Check if this is a generic function that should fall through to generic
+                // function lookup. Only skip for variables that:
+                // 1. Have TypeParams in their signature AND
+                // 2. Have a corresponding generic function registered in EntityRegistry
+                // (Lambda parameters like `f: (T) -> U` have TypeParams but shouldn't skip)
+                let skip_for_generic = {
+                    let arena = self.type_arena();
+                    let has_type_params =
+                        if let Some((params, ret, _)) = arena.unwrap_function(var_type_id) {
+                            params.iter().any(|&p| arena.unwrap_type_param(p).is_some())
+                                || arena.unwrap_type_param(ret).is_some()
+                        } else {
+                            false
+                        };
                     drop(arena);
-                    // Calling a function-typed variable - conservatively mark side effects
-                    if self.in_lambda() {
-                        self.mark_lambda_has_side_effects();
-                        // Record capture if the callee is from outer scope
-                        if !self.is_lambda_local(*sym)
-                            && let Some(var) = self.scope.get(*sym)
-                        {
-                            self.record_capture(*sym, var.mutable);
+
+                    // Only skip if there's a registered generic function with this name
+                    if has_type_params {
+                        let name_id =
+                            self.name_table_mut()
+                                .intern(self.current_module, &[*sym], interner);
+                        self.entity_registry()
+                            .function_by_name(name_id)
+                            .is_some_and(|fid| {
+                                self.entity_registry()
+                                    .get_function(fid)
+                                    .generic_info
+                                    .is_some()
+                            })
+                    } else {
+                        false
+                    }
+                };
+
+                if !skip_for_generic {
+                    // Extract function info and drop arena before any mutable operations
+                    let func_info = {
+                        let arena = self.type_arena();
+                        arena
+                            .unwrap_function(var_type_id)
+                            .map(|(params, ret, _)| (params.clone(), ret))
+                    };
+
+                    if let Some((params, ret)) = func_info {
+                        // Calling a function-typed variable - conservatively mark side effects
+                        if self.in_lambda() {
+                            self.mark_lambda_has_side_effects();
+                            // Record capture if the callee is from outer scope
+                            if !self.is_lambda_local(*sym)
+                                && let Some(var) = self.scope.get(*sym)
+                            {
+                                self.record_capture(*sym, var.mutable);
+                            }
                         }
-                    }
 
-                    // Check if this is a lambda with default parameters
-                    if let Some(&(lambda_node_id, required_params)) = self.lambda_variables.get(sym)
-                    {
-                        // Store lambda defaults info for codegen
-                        self.lambda_defaults.insert(
-                            expr.id,
-                            LambdaDefaults {
+                        // Check if this is a lambda with default parameters
+                        if let Some(&(lambda_node_id, required_params)) =
+                            self.lambda_variables.get(sym)
+                        {
+                            // Store lambda defaults info for codegen
+                            self.lambda_defaults.insert(
+                                expr.id,
+                                LambdaDefaults {
+                                    required_params,
+                                    lambda_node_id,
+                                },
+                            );
+                            return self.check_call_args_with_defaults_id(
+                                &call.args,
+                                &params,
                                 required_params,
-                                lambda_node_id,
-                            },
-                        );
-                        return self.check_call_args_with_defaults_id(
-                            &call.args,
-                            &params,
-                            required_params,
-                            ret,
-                            expr.span,
-                            interner,
-                        );
+                                ret,
+                                expr.span,
+                                interner,
+                            );
+                        }
+
+                        return self
+                            .check_call_args_id(&call.args, &params, ret, expr.span, interner);
                     }
 
-                    return self.check_call_args_id(&call.args, &params, ret, expr.span, interner);
-                }
-                // Check if it's a variable with a functional interface type
-                if let Some((type_def_id, _type_args)) = arena.unwrap_interface(var_type_id) {
-                    drop(arena);
-                    if let Some(func_type) =
-                        self.get_functional_interface_type_by_type_def_id(type_def_id)
+                    // Check if it's a variable with a functional interface type
+                    let interface_info = {
+                        let arena = self.type_arena();
+                        arena.unwrap_interface(var_type_id).map(|(id, _)| id)
+                    };
+
+                    if let Some(type_def_id) = interface_info
+                        && let Some(func_type) =
+                            self.get_functional_interface_type_by_type_def_id(type_def_id)
                     {
                         // Calling a functional interface - treat like a closure call
                         if self.in_lambda() {
@@ -147,22 +194,50 @@ impl Analyzer {
                         );
                     }
                 }
+                // If skip_for_generic is true, fall through to generic function lookup below
             }
 
             // Check if it's a generic function via EntityRegistry
             // Split into separate borrows to avoid borrow conflicts
-            let (generic_info, generic_required_params) = {
+            // Also get full_name_id for the original function name (for imports with renaming)
+            let (generic_info, generic_required_params, original_name_id) = {
+                // First try current module
                 let name_id = self
                     .name_table_mut()
                     .intern(self.current_module, &[*sym], interner);
                 let registry = self.entity_registry();
                 let func_id = registry.function_by_name(name_id);
-                func_id
-                    .map(|fid| {
-                        let func_def = registry.get_function(fid);
-                        (func_def.generic_info.clone(), func_def.required_params)
-                    })
-                    .unwrap_or((None, 0))
+                let result = func_id.map(|fid| {
+                    let func_def = registry.get_function(fid);
+                    (
+                        func_def.generic_info.clone(),
+                        func_def.required_params,
+                        func_def.full_name_id,
+                    )
+                });
+
+                // If not found in current module, try builtin module
+                // (for generic external functions registered globally)
+                if result.is_none() || result.as_ref().is_some_and(|(gi, _, _)| gi.is_none()) {
+                    drop(registry);
+                    let builtin_mod = self.name_table_mut().builtin_module();
+                    let builtin_name_id =
+                        self.name_table_mut().intern(builtin_mod, &[*sym], interner);
+                    let registry = self.entity_registry();
+                    registry
+                        .function_by_name(builtin_name_id)
+                        .map(|fid| {
+                            let func_def = registry.get_function(fid);
+                            (
+                                func_def.generic_info.clone(),
+                                func_def.required_params,
+                                func_def.full_name_id,
+                            )
+                        })
+                        .unwrap_or((None, 0, builtin_name_id))
+                } else {
+                    result.unwrap_or((None, 0, name_id))
+                }
             };
             if let Some(generic_def) = generic_info {
                 let required_params = generic_required_params;
@@ -268,7 +343,7 @@ impl Analyzer {
                     self.entity_registry_mut().monomorph_cache.insert(
                         key.clone(),
                         MonomorphInstance {
-                            original_name: name_id,
+                            original_name: original_name_id, // Use original export name for codegen
                             mangled_name,
                             instance_id: id,
                             func_type,

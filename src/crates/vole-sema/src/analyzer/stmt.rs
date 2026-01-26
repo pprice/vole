@@ -843,7 +843,46 @@ impl Analyzer {
                 self.name_table().last_segment_str(*name_id).as_deref() == Some(export_name_str)
             });
 
-            if let Some((_, export_type_id)) = found {
+            if let Some((export_name_id, export_type_id)) = found {
+                // Check if this is a generic function that needs special registration
+                // Look up the function in the source module's EntityRegistry
+                let source_func_id = self.entity_registry().function_by_name(*export_name_id);
+                let generic_func_data = source_func_id.and_then(|func_id| {
+                    let registry = self.entity_registry();
+                    let func_def = registry.get_function(func_id);
+                    func_def.generic_info.clone().map(|gi| {
+                        (
+                            gi,
+                            func_def.signature.clone(),
+                            func_def.required_params,
+                            func_def.param_defaults.clone(),
+                        )
+                    })
+                });
+                if let Some((generic_info, signature, required_params, param_defaults)) =
+                    generic_func_data
+                {
+                    // This is a generic function - register it in the current module
+                    // under the binding name so call analysis can find it
+                    let binding_name_id = self.name_table_mut().intern(
+                        self.current_module,
+                        &[field_pattern.binding],
+                        interner,
+                    );
+
+                    // Register a copy of the function in the current module's namespace
+                    let new_func_id = self.entity_registry_mut().register_function_full(
+                        binding_name_id,
+                        *export_name_id, // Keep original name for codegen lookup
+                        self.current_module,
+                        signature,
+                        required_params,
+                        param_defaults,
+                    );
+                    self.entity_registry_mut()
+                        .set_function_generic_info(new_func_id, generic_info);
+                }
+
                 // Bind the export to the binding name
                 self.scope.define(
                     field_pattern.binding,

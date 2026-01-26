@@ -1,0 +1,86 @@
+// stdlib/lowlevel.vole
+// Low-level operations for integers (bit manipulation)
+
+// Count leading zeros
+external("vole:compiler_intrinsic") {
+    func clz<T>(x: T) -> T where {
+        i8 => "i8_clz"
+        i16 => "i16_clz"
+        i32 => "i32_clz"
+        i64 => "i64_clz"
+        u8 => "u8_clz"
+        u16 => "u16_clz"
+        u32 => "u32_clz"
+        u64 => "u64_clz"
+    }
+}
+
+// Count trailing zeros
+external("vole:compiler_intrinsic") {
+    func ctz<T>(x: T) -> T where {
+        i8 => "i8_ctz"
+        i16 => "i16_ctz"
+        i32 => "i32_ctz"
+        i64 => "i64_ctz"
+        u8 => "u8_ctz"
+        u16 => "u16_ctz"
+        u32 => "u32_ctz"
+        u64 => "u64_ctz"
+    }
+}
+
+// Population count - count of 1 bits
+external("vole:compiler_intrinsic") {
+    func popcnt<T>(x: T) -> T where {
+        i8 => "i8_popcnt"
+        i16 => "i16_popcnt"
+        i32 => "i32_popcnt"
+        i64 => "i64_popcnt"
+        u8 => "u8_popcnt"
+        u16 => "u16_popcnt"
+        u32 => "u32_popcnt"
+        u64 => "u64_popcnt"
+    }
+}
+
+// Bit reverse - reverse order of bits
+external("vole:compiler_intrinsic") {
+    func bitrev<T>(x: T) -> T where {
+        i8 => "i8_bitrev"
+        i16 => "i16_bitrev"
+        i32 => "i32_bitrev"
+        i64 => "i64_bitrev"
+        u8 => "u8_bitrev"
+        u16 => "u16_bitrev"
+        u32 => "u32_bitrev"
+        u64 => "u64_bitrev"
+    }
+}
+
+// Rotate left
+external("vole:compiler_intrinsic") {
+    func rotl<T>(x: T, amount: u8) -> T where {
+        i8 => "i8_rotl"
+        i16 => "i16_rotl"
+        i32 => "i32_rotl"
+        i64 => "i64_rotl"
+        u8 => "u8_rotl"
+        u16 => "u16_rotl"
+        u32 => "u32_rotl"
+        u64 => "u64_rotl"
+    }
+}
+
+// Rotate right
+external("vole:compiler_intrinsic") {
+    func rotr<T>(x: T, amount: u8) -> T where {
+        i8 => "i8_rotr"
+        i16 => "i16_rotr"
+        i32 => "i32_rotr"
+        i64 => "i64_rotr"
+        u8 => "u8_rotr"
+        u16 => "u16_rotr"
+        u32 => "u32_rotr"
+        u64 => "u64_rotr"
+    }
+}

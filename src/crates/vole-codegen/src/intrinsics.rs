@@ -37,6 +37,12 @@ pub enum IntrinsicHandler {
     FloatConstant(FloatConstant),
     /// Unary float operation (sqrt, abs, floor, ceil, etc.).
     UnaryFloatOp(UnaryFloatOp),
+    /// Binary float operation (min, max).
+    BinaryFloatOp(BinaryFloatOp),
+    /// Unary integer operation (abs, clz, ctz, popcnt).
+    UnaryIntOp(UnaryIntOp),
+    /// Binary integer operation (min, max).
+    BinaryIntOp(BinaryIntOp),
 }
 
 /// Unary float operations that take one argument and return a float.
@@ -46,6 +52,128 @@ pub enum UnaryFloatOp {
     F32Sqrt,
     /// Square root (f64)
     F64Sqrt,
+    /// Absolute value (f32)
+    F32Abs,
+    /// Absolute value (f64)
+    F64Abs,
+    /// Ceiling - round up (f32)
+    F32Ceil,
+    /// Ceiling - round up (f64)
+    F64Ceil,
+    /// Floor - round down (f32)
+    F32Floor,
+    /// Floor - round down (f64)
+    F64Floor,
+    /// Truncate - round toward zero (f32)
+    F32Trunc,
+    /// Truncate - round toward zero (f64)
+    F64Trunc,
+    /// Round to nearest (f32)
+    F32Round,
+    /// Round to nearest (f64)
+    F64Round,
+}
+
+/// Binary float operations that take two arguments and return a float.
+#[derive(Debug, Clone, Copy)]
+pub enum BinaryFloatOp {
+    /// Minimum of two values (f32)
+    F32Min,
+    /// Minimum of two values (f64)
+    F64Min,
+    /// Maximum of two values (f32)
+    F32Max,
+    /// Maximum of two values (f64)
+    F64Max,
+}
+
+/// Unary integer operations.
+#[derive(Debug, Clone, Copy)]
+pub enum UnaryIntOp {
+    // Absolute value (signed types only)
+    I8Abs,
+    I16Abs,
+    I32Abs,
+    I64Abs,
+    // Count leading zeros
+    I8Clz,
+    I16Clz,
+    I32Clz,
+    I64Clz,
+    U8Clz,
+    U16Clz,
+    U32Clz,
+    U64Clz,
+    // Count trailing zeros
+    I8Ctz,
+    I16Ctz,
+    I32Ctz,
+    I64Ctz,
+    U8Ctz,
+    U16Ctz,
+    U32Ctz,
+    U64Ctz,
+    // Population count (count 1 bits)
+    I8Popcnt,
+    I16Popcnt,
+    I32Popcnt,
+    I64Popcnt,
+    U8Popcnt,
+    U16Popcnt,
+    U32Popcnt,
+    U64Popcnt,
+    // Bit reverse
+    I8Bitrev,
+    I16Bitrev,
+    I32Bitrev,
+    I64Bitrev,
+    U8Bitrev,
+    U16Bitrev,
+    U32Bitrev,
+    U64Bitrev,
+}
+
+/// Binary integer operations.
+#[derive(Debug, Clone, Copy)]
+pub enum BinaryIntOp {
+    // Signed minimum
+    I8Min,
+    I16Min,
+    I32Min,
+    I64Min,
+    // Unsigned minimum
+    U8Min,
+    U16Min,
+    U32Min,
+    U64Min,
+    // Signed maximum
+    I8Max,
+    I16Max,
+    I32Max,
+    I64Max,
+    // Unsigned maximum
+    U8Max,
+    U16Max,
+    U32Max,
+    U64Max,
+    // Rotate left
+    I8Rotl,
+    I16Rotl,
+    I32Rotl,
+    I64Rotl,
+    U8Rotl,
+    U16Rotl,
+    U32Rotl,
+    U64Rotl,
+    // Rotate right
+    I8Rotr,
+    I16Rotr,
+    I32Rotr,
+    I64Rotr,
+    U8Rotr,
+    U16Rotr,
+    U32Rotr,
+    U64Rotr,
 }
 
 /// Float constant intrinsic values.
@@ -134,6 +262,9 @@ impl IntrinsicsRegistry {
         };
         registry.register_float_intrinsics();
         registry.register_float_operations();
+        registry.register_binary_float_operations();
+        registry.register_int_operations();
+        registry.register_binary_int_operations();
         registry
     }
 
@@ -186,7 +317,7 @@ impl IntrinsicsRegistry {
         self.register(IntrinsicKey::new("f64", "epsilon"), FC(F64Epsilon));
     }
 
-    /// Register float operation intrinsics (sqrt, etc.).
+    /// Register float operation intrinsics (sqrt, abs, ceil, floor, trunc, round).
     fn register_float_operations(&mut self) {
         use IntrinsicHandler::UnaryFloatOp as UF;
         use UnaryFloatOp::*;
@@ -194,6 +325,142 @@ impl IntrinsicsRegistry {
         // sqrt
         self.register(IntrinsicKey::from("f32_sqrt"), UF(F32Sqrt));
         self.register(IntrinsicKey::from("f64_sqrt"), UF(F64Sqrt));
+
+        // abs
+        self.register(IntrinsicKey::from("f32_abs"), UF(F32Abs));
+        self.register(IntrinsicKey::from("f64_abs"), UF(F64Abs));
+
+        // ceil
+        self.register(IntrinsicKey::from("f32_ceil"), UF(F32Ceil));
+        self.register(IntrinsicKey::from("f64_ceil"), UF(F64Ceil));
+
+        // floor
+        self.register(IntrinsicKey::from("f32_floor"), UF(F32Floor));
+        self.register(IntrinsicKey::from("f64_floor"), UF(F64Floor));
+
+        // trunc
+        self.register(IntrinsicKey::from("f32_trunc"), UF(F32Trunc));
+        self.register(IntrinsicKey::from("f64_trunc"), UF(F64Trunc));
+
+        // round (nearest)
+        self.register(IntrinsicKey::from("f32_round"), UF(F32Round));
+        self.register(IntrinsicKey::from("f64_round"), UF(F64Round));
+    }
+
+    /// Register binary float operation intrinsics (min, max).
+    fn register_binary_float_operations(&mut self) {
+        use BinaryFloatOp::*;
+        use IntrinsicHandler::BinaryFloatOp as BF;
+
+        // min
+        self.register(IntrinsicKey::from("f32_min"), BF(F32Min));
+        self.register(IntrinsicKey::from("f64_min"), BF(F64Min));
+
+        // max
+        self.register(IntrinsicKey::from("f32_max"), BF(F32Max));
+        self.register(IntrinsicKey::from("f64_max"), BF(F64Max));
+    }
+
+    /// Register unary integer operation intrinsics (abs, clz, ctz, popcnt).
+    fn register_int_operations(&mut self) {
+        use IntrinsicHandler::UnaryIntOp as UI;
+        use UnaryIntOp::*;
+
+        // abs (signed only)
+        self.register(IntrinsicKey::from("i8_abs"), UI(I8Abs));
+        self.register(IntrinsicKey::from("i16_abs"), UI(I16Abs));
+        self.register(IntrinsicKey::from("i32_abs"), UI(I32Abs));
+        self.register(IntrinsicKey::from("i64_abs"), UI(I64Abs));
+
+        // clz (all int types)
+        self.register(IntrinsicKey::from("i8_clz"), UI(I8Clz));
+        self.register(IntrinsicKey::from("i16_clz"), UI(I16Clz));
+        self.register(IntrinsicKey::from("i32_clz"), UI(I32Clz));
+        self.register(IntrinsicKey::from("i64_clz"), UI(I64Clz));
+        self.register(IntrinsicKey::from("u8_clz"), UI(U8Clz));
+        self.register(IntrinsicKey::from("u16_clz"), UI(U16Clz));
+        self.register(IntrinsicKey::from("u32_clz"), UI(U32Clz));
+        self.register(IntrinsicKey::from("u64_clz"), UI(U64Clz));
+
+        // ctz (all int types)
+        self.register(IntrinsicKey::from("i8_ctz"), UI(I8Ctz));
+        self.register(IntrinsicKey::from("i16_ctz"), UI(I16Ctz));
+        self.register(IntrinsicKey::from("i32_ctz"), UI(I32Ctz));
+        self.register(IntrinsicKey::from("i64_ctz"), UI(I64Ctz));
+        self.register(IntrinsicKey::from("u8_ctz"), UI(U8Ctz));
+        self.register(IntrinsicKey::from("u16_ctz"), UI(U16Ctz));
+        self.register(IntrinsicKey::from("u32_ctz"), UI(U32Ctz));
+        self.register(IntrinsicKey::from("u64_ctz"), UI(U64Ctz));
+
+        // popcnt (all int types)
+        self.register(IntrinsicKey::from("i8_popcnt"), UI(I8Popcnt));
+        self.register(IntrinsicKey::from("i16_popcnt"), UI(I16Popcnt));
+        self.register(IntrinsicKey::from("i32_popcnt"), UI(I32Popcnt));
+        self.register(IntrinsicKey::from("i64_popcnt"), UI(I64Popcnt));
+        self.register(IntrinsicKey::from("u8_popcnt"), UI(U8Popcnt));
+        self.register(IntrinsicKey::from("u16_popcnt"), UI(U16Popcnt));
+        self.register(IntrinsicKey::from("u32_popcnt"), UI(U32Popcnt));
+        self.register(IntrinsicKey::from("u64_popcnt"), UI(U64Popcnt));
+
+        // bitrev (all int types)
+        self.register(IntrinsicKey::from("i8_bitrev"), UI(I8Bitrev));
+        self.register(IntrinsicKey::from("i16_bitrev"), UI(I16Bitrev));
+        self.register(IntrinsicKey::from("i32_bitrev"), UI(I32Bitrev));
+        self.register(IntrinsicKey::from("i64_bitrev"), UI(I64Bitrev));
+        self.register(IntrinsicKey::from("u8_bitrev"), UI(U8Bitrev));
+        self.register(IntrinsicKey::from("u16_bitrev"), UI(U16Bitrev));
+        self.register(IntrinsicKey::from("u32_bitrev"), UI(U32Bitrev));
+        self.register(IntrinsicKey::from("u64_bitrev"), UI(U64Bitrev));
+    }
+
+    /// Register binary integer operation intrinsics (min, max).
+    fn register_binary_int_operations(&mut self) {
+        use BinaryIntOp::*;
+        use IntrinsicHandler::BinaryIntOp as BI;
+
+        // min (signed)
+        self.register(IntrinsicKey::from("i8_min"), BI(I8Min));
+        self.register(IntrinsicKey::from("i16_min"), BI(I16Min));
+        self.register(IntrinsicKey::from("i32_min"), BI(I32Min));
+        self.register(IntrinsicKey::from("i64_min"), BI(I64Min));
+
+        // min (unsigned)
+        self.register(IntrinsicKey::from("u8_min"), BI(U8Min));
+        self.register(IntrinsicKey::from("u16_min"), BI(U16Min));
+        self.register(IntrinsicKey::from("u32_min"), BI(U32Min));
+        self.register(IntrinsicKey::from("u64_min"), BI(U64Min));
+
+        // max (signed)
+        self.register(IntrinsicKey::from("i8_max"), BI(I8Max));
+        self.register(IntrinsicKey::from("i16_max"), BI(I16Max));
+        self.register(IntrinsicKey::from("i32_max"), BI(I32Max));
+        self.register(IntrinsicKey::from("i64_max"), BI(I64Max));
+
+        // max (unsigned)
+        self.register(IntrinsicKey::from("u8_max"), BI(U8Max));
+        self.register(IntrinsicKey::from("u16_max"), BI(U16Max));
+        self.register(IntrinsicKey::from("u32_max"), BI(U32Max));
+        self.register(IntrinsicKey::from("u64_max"), BI(U64Max));
+
+        // rotl (all int types)
+        self.register(IntrinsicKey::from("i8_rotl"), BI(I8Rotl));
+        self.register(IntrinsicKey::from("i16_rotl"), BI(I16Rotl));
+        self.register(IntrinsicKey::from("i32_rotl"), BI(I32Rotl));
+        self.register(IntrinsicKey::from("i64_rotl"), BI(I64Rotl));
+        self.register(IntrinsicKey::from("u8_rotl"), BI(U8Rotl));
+        self.register(IntrinsicKey::from("u16_rotl"), BI(U16Rotl));
+        self.register(IntrinsicKey::from("u32_rotl"), BI(U32Rotl));
+        self.register(IntrinsicKey::from("u64_rotl"), BI(U64Rotl));
+
+        // rotr (all int types)
+        self.register(IntrinsicKey::from("i8_rotr"), BI(I8Rotr));
+        self.register(IntrinsicKey::from("i16_rotr"), BI(I16Rotr));
+        self.register(IntrinsicKey::from("i32_rotr"), BI(I32Rotr));
+        self.register(IntrinsicKey::from("i64_rotr"), BI(I64Rotr));
+        self.register(IntrinsicKey::from("u8_rotr"), BI(U8Rotr));
+        self.register(IntrinsicKey::from("u16_rotr"), BI(U16Rotr));
+        self.register(IntrinsicKey::from("u32_rotr"), BI(U32Rotr));
+        self.register(IntrinsicKey::from("u64_rotr"), BI(U64Rotr));
     }
 }
 
@@ -220,9 +487,41 @@ mod tests {
         // Verify float operations are registered
         assert!(registry.contains(&IntrinsicKey::from("f32_sqrt")));
         assert!(registry.contains(&IntrinsicKey::from("f64_sqrt")));
+        assert!(registry.contains(&IntrinsicKey::from("f32_abs")));
+        assert!(registry.contains(&IntrinsicKey::from("f64_abs")));
+        assert!(registry.contains(&IntrinsicKey::from("f32_ceil")));
+        assert!(registry.contains(&IntrinsicKey::from("f64_ceil")));
+        assert!(registry.contains(&IntrinsicKey::from("f32_floor")));
+        assert!(registry.contains(&IntrinsicKey::from("f64_floor")));
+        assert!(registry.contains(&IntrinsicKey::from("f32_trunc")));
+        assert!(registry.contains(&IntrinsicKey::from("f64_trunc")));
+        assert!(registry.contains(&IntrinsicKey::from("f32_round")));
+        assert!(registry.contains(&IntrinsicKey::from("f64_round")));
 
-        // Verify count: 8 constant intrinsics + 2 sqrt operations = 10
-        assert_eq!(registry.len(), 10);
+        // Binary float operations
+        assert!(registry.contains(&IntrinsicKey::from("f32_min")));
+        assert!(registry.contains(&IntrinsicKey::from("f64_min")));
+        assert!(registry.contains(&IntrinsicKey::from("f32_max")));
+        assert!(registry.contains(&IntrinsicKey::from("f64_max")));
+
+        // Unary integer operations (spot check)
+        assert!(registry.contains(&IntrinsicKey::from("i32_abs")));
+        assert!(registry.contains(&IntrinsicKey::from("i64_clz")));
+        assert!(registry.contains(&IntrinsicKey::from("u32_ctz")));
+        assert!(registry.contains(&IntrinsicKey::from("i64_popcnt")));
+
+        // Binary integer operations (spot check)
+        assert!(registry.contains(&IntrinsicKey::from("i32_min")));
+        assert!(registry.contains(&IntrinsicKey::from("u64_max")));
+
+        // Verify count:
+        // 8 float constants
+        // 12 unary float ops
+        // 4 binary float ops (min, max)
+        // 36 unary int ops (4 abs + 8 clz + 8 ctz + 8 popcnt + 8 bitrev)
+        // 32 binary int ops (8 min + 8 max + 8 rotl + 8 rotr)
+        // Total: 92
+        assert_eq!(registry.len(), 92);
     }
 
     #[test]

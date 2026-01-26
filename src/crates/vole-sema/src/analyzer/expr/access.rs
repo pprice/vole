@@ -386,17 +386,139 @@ impl Analyzer {
                 return Ok(ArenaTypeId::INVALID);
             };
 
-            // Check arguments using TypeId-based checking
-            self.check_call_args_id(
-                &method_call.args,
-                &param_ids,
-                return_id,
-                expr.span,
-                interner,
-            )?;
+            // Check if this is a generic function (has TypeParams in signature)
+            let has_type_params = {
+                let arena = self.type_arena();
+                param_ids
+                    .iter()
+                    .any(|&p| arena.unwrap_type_param(p).is_some())
+                    || arena.unwrap_type_param(return_id).is_some()
+            };
+
+            // For generic functions, infer type params and check arguments against concrete types
+            let (concrete_param_ids, concrete_return_id) = if has_type_params {
+                // Look up GenericFuncInfo from EntityRegistry
+                let generic_info =
+                    self.entity_registry()
+                        .function_by_name(name_id)
+                        .and_then(|fid| {
+                            self.entity_registry()
+                                .get_function(fid)
+                                .generic_info
+                                .clone()
+                        });
+
+                if let Some(generic_def) = generic_info {
+                    // Type-check arguments to get their types
+                    let arg_type_ids: Vec<ArenaTypeId> = method_call
+                        .args
+                        .iter()
+                        .map(|arg| self.check_expr(arg, interner))
+                        .collect::<Result<Vec<_>, _>>()?;
+
+                    // Infer type parameters
+                    let inferred_id = self.infer_type_params_id(
+                        &generic_def.type_params,
+                        &generic_def.param_types,
+                        &arg_type_ids,
+                    );
+                    self.check_type_param_constraints_id(
+                        &generic_def.type_params,
+                        &inferred_id,
+                        expr.span,
+                        interner,
+                    );
+
+                    // Create concrete types by substitution
+                    let subs: FxHashMap<_, _> = inferred_id.iter().map(|(&k, &v)| (k, v)).collect();
+                    let (concrete_params, concrete_ret) = {
+                        let mut arena = self.type_arena_mut();
+                        let params: Vec<_> = generic_def
+                            .param_types
+                            .iter()
+                            .map(|&t| arena.substitute(t, &subs))
+                            .collect();
+                        let ret = arena.substitute(generic_def.return_type, &subs);
+                        (params, ret)
+                    };
+
+                    // Check arguments against concrete params
+                    for (i, (arg, &expected_id)) in method_call
+                        .args
+                        .iter()
+                        .zip(concrete_params.iter())
+                        .enumerate()
+                    {
+                        let arg_ty_id = arg_type_ids[i];
+                        if !self.types_compatible_id(arg_ty_id, expected_id, interner) {
+                            self.add_type_mismatch_id(expected_id, arg_ty_id, arg.span);
+                        }
+                    }
+
+                    // Create monomorph instance for codegen
+                    let type_args_id: Vec<ArenaTypeId> = generic_def
+                        .type_params
+                        .iter()
+                        .filter_map(|tp| inferred_id.get(&tp.name_id).copied())
+                        .collect();
+                    let type_keys: Vec<_> = type_args_id.to_vec();
+                    let key = MonomorphKey::new(name_id, type_keys);
+
+                    if !self.entity_registry_mut().monomorph_cache.contains(&key) {
+                        let id = self.entity_registry_mut().monomorph_cache.next_unique_id();
+                        let base_str = self
+                            .name_table()
+                            .last_segment_str(name_id)
+                            .unwrap_or_else(|| method_name_str.clone());
+                        let mangled_name = {
+                            let mut table = self.name_table_mut();
+                            let mut namer = Namer::new(&mut table, interner);
+                            namer.monomorph_str(module_id, &base_str, id)
+                        };
+                        let substitutions: FxHashMap<NameId, ArenaTypeId> = inferred_id.clone();
+                        let func_type =
+                            FunctionType::from_ids(&concrete_params, concrete_ret, false);
+                        self.entity_registry_mut().monomorph_cache.insert(
+                            key.clone(),
+                            MonomorphInstance {
+                                original_name: name_id,
+                                mangled_name,
+                                instance_id: id,
+                                func_type,
+                                substitutions,
+                            },
+                        );
+                    }
+
+                    // Record the call -> monomorph key mapping for codegen
+                    self.generic_calls.insert(expr.id, key);
+
+                    (concrete_params, concrete_ret)
+                } else {
+                    // No generic info found - fall back to non-generic path
+                    self.check_call_args_id(
+                        &method_call.args,
+                        &param_ids,
+                        return_id,
+                        expr.span,
+                        interner,
+                    )?;
+                    (param_ids.to_vec(), return_id)
+                }
+            } else {
+                // Non-generic function - check arguments directly
+                self.check_call_args_id(
+                    &method_call.args,
+                    &param_ids,
+                    return_id,
+                    expr.span,
+                    interner,
+                )?;
+                (param_ids.to_vec(), return_id)
+            };
 
             // Build FunctionType for resolution storage (still needed for codegen)
-            let func_type = FunctionType::from_ids(&param_ids, return_id, false);
+            let func_type = FunctionType::from_ids(&concrete_param_ids, concrete_return_id, false);
             let func_type_id = func_type.intern(&mut self.type_arena_mut());
 
             // Get external_funcs from module metadata
@@ -431,14 +553,14 @@ impl Analyzer {
                     method_name_id: name_id,
                     trait_name: None,
                     func_type_id,
-                    return_type_id: return_id,
+                    return_type_id: concrete_return_id,
                     is_builtin: false,
                     external_info,
                     concrete_return_hint: None,
                 },
             );
 
-            return Ok(return_id);
+            return Ok(concrete_return_id);
         }
 
         // Handle structural type method calls (duck typing)

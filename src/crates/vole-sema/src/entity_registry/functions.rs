@@ -69,6 +69,10 @@ impl EntityRegistry {
             param_defaults,
         });
         self.function_by_name.insert(full_name_id, id);
+        // Also register under name_id if different (for renamed imports like `sqrt as squareRoot`)
+        if name_id != full_name_id {
+            self.function_by_name.insert(name_id, id);
+        }
         id
     }
 

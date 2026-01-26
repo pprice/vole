@@ -1,0 +1,209 @@
+// Test unary math intrinsics (sqrt, abs, ceil, floor, trunc, round)
+// These are implemented as generic external functions with type mappings
+
+let { sqrt, abs, ceil, floor, trunc, round, min, max } = import "std:math"
+
+tests "unary math intrinsics" {
+    test "sqrt f64" {
+        let x: f64 = 16.0
+        let result = sqrt(x)
+        assert(result == 4.0)
+    }
+
+    test "sqrt f32" {
+        let x: f32 = 25.0
+        let result = sqrt(x)
+        assert(result == 5.0)
+    }
+
+    test "sqrt of 0 returns 0" {
+        let result: f64 = sqrt(0.0)
+        assert(result == 0.0)
+    }
+
+    test "sqrt of 1 returns 1" {
+        let result: f64 = sqrt(1.0)
+        assert(result == 1.0)
+    }
+
+    test "abs f64 positive" {
+        let x: f64 = 3.5
+        let result = abs(x)
+        assert(result == 3.5)
+    }
+
+    test "abs f64 negative" {
+        let x: f64 = -3.5
+        let result = abs(x)
+        assert(result == 3.5)
+    }
+
+    test "abs f32" {
+        let x: f32 = -7.25
+        let result = abs(x)
+        assert(result == 7.25)
+    }
+
+    test "abs of 0 returns 0" {
+        let result: f64 = abs(0.0)
+        assert(result == 0.0)
+    }
+
+    test "ceil f64" {
+        let x: f64 = 3.2
+        let result = ceil(x)
+        assert(result == 4.0)
+    }
+
+    test "ceil f64 negative" {
+        let x: f64 = -3.2
+        let result = ceil(x)
+        assert(result == -3.0)
+    }
+
+    test "ceil f32" {
+        let x: f32 = 2.1
+        let result = ceil(x)
+        assert(result == 3.0)
+    }
+
+    test "ceil of integer returns same" {
+        let x: f64 = 5.0
+        let result = ceil(x)
+        assert(result == 5.0)
+    }
+
+    test "floor f64" {
+        let x: f64 = 3.9
+        let result = floor(x)
+        assert(result == 3.0)
+    }
+
+    test "floor f64 negative" {
+        let x: f64 = -3.2
+        let result = floor(x)
+        assert(result == -4.0)
+    }
+
+    test "floor f32" {
+        let x: f32 = 7.9
+        let result = floor(x)
+        assert(result == 7.0)
+    }
+
+    test "floor of integer returns same" {
+        let x: f64 = 5.0
+        let result = floor(x)
+        assert(result == 5.0)
+    }
+
+    test "trunc f64 positive" {
+        let x: f64 = 3.9
+        let result = trunc(x)
+        assert(result == 3.0)
+    }
+
+    test "trunc f64 negative" {
+        // trunc rounds toward zero, so -3.9 -> -3.0
+        let x: f64 = -3.9
+        let result = trunc(x)
+        assert(result == -3.0)
+    }
+
+    test "trunc f32" {
+        let x: f32 = 5.7
+        let result = trunc(x)
+        assert(result == 5.0)
+    }
+
+    test "round f64 down" {
+        let x: f64 = 3.4
+        let result = round(x)
+        assert(result == 3.0)
+    }
+
+    test "round f64 up" {
+        let x: f64 = 3.6
+        let result = round(x)
+        assert(result == 4.0)
+    }
+
+    test "round f64 half to even" {
+        // IEEE 754 rounds ties to even (banker's rounding)
+        let x1: f64 = 2.5
+        let result1 = round(x1)
+        assert(result1 == 2.0) // 2.5 rounds to 2 (even)
+
+        let x2: f64 = 3.5
+        let result2 = round(x2)
+        assert(result2 == 4.0) // 3.5 rounds to 4 (even)
+    }
+
+    test "round f32" {
+        let x: f32 = 7.8
+        let result = round(x)
+        assert(result == 8.0)
+    }
+
+    test "round negative" {
+        let x: f64 = -3.6
+        let result = round(x)
+        assert(result == -4.0)
+    }
+
+    test "min f64" {
+        let a: f64 = 3.0
+        let b: f64 = 5.0
+        let result = min(a, b)
+        assert(result == 3.0)
+    }
+
+    test "min f64 reversed" {
+        let a: f64 = 7.0
+        let b: f64 = 2.0
+        let result = min(a, b)
+        assert(result == 2.0)
+    }
+
+    test "min f32" {
+        let a: f32 = 1.5
+        let b: f32 = 2.5
+        let result = min(a, b)
+        assert(result == 1.5)
+    }
+
+    test "min negative" {
+        let a: f64 = -3.0
+        let b: f64 = -5.0
+        let result = min(a, b)
+        assert(result == -5.0)
+    }
+
+    test "max f64" {
+        let a: f64 = 3.0
+        let b: f64 = 5.0
+        let result = max(a, b)
+        assert(result == 5.0)
+    }
+
+    test "max f64 reversed" {
+        let a: f64 = 7.0
+        let b: f64 = 2.0
+        let result = max(a, b)
+        assert(result == 7.0)
+    }
+
+    test "max f32" {
+        let a: f32 = 1.5
+        let b: f32 = 2.5
+        let result = max(a, b)
+        assert(result == 2.5)
+    }
+
+    test "max negative" {
+        let a: f64 = -3.0
+        let b: f64 = -5.0
+        let result = max(a, b)
+        assert(result == -3.0)
+    }
+}
