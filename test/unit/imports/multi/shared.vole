@@ -1,0 +1,7 @@
+// Shared module imported by multiple files
+
+let SHARED_VALUE: i64 = 999
+
+func shared_func(x: i64) -> i64 {
+    return x * 2
+}

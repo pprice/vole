@@ -1,0 +1,25 @@
+// Tests importing the same module through different paths
+// Both this file and inner/uses_shared.vole import multi/shared.vole
+// This tests that the canonical path caching works correctly
+
+let shared = import "./multi/shared"
+let inner = import "./multi/inner/uses_shared"
+
+tests {
+    test "direct import of shared module" {
+        assert(shared.SHARED_VALUE == 999)
+        assert(shared.shared_func(5) == 10)
+    }
+
+    test "indirect use of shared through inner module" {
+        // inner_with_shared calls shared.shared_func(x) + 50
+        // so inner_with_shared(5) = 10 + 50 = 60
+        assert(inner.inner_with_shared(5) == 60)
+    }
+
+    test "both paths see same shared value" {
+        // If caching works, both should see SHARED_VALUE = 999
+        assert(shared.SHARED_VALUE == 999)
+        assert(inner.INNER_VALUE == 50)
+    }
+}

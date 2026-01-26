@@ -1,0 +1,9 @@
+// Imports shared from parent directory
+
+let shared = import "../shared"
+
+let INNER_VALUE: i64 = 50
+
+func inner_with_shared(x: i64) -> i64 {
+    return shared.shared_func(x) + INNER_VALUE
+}

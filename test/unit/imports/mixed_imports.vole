@@ -1,0 +1,30 @@
+// Tests for mixing relative and stdlib imports
+
+let utils = import "./utils"
+let math = import "std:math"
+let { min, max } = import "std:math"
+
+tests {
+    test "relative import works alongside stdlib" {
+        assert(utils.VERSION == 42)
+        assert(utils.add(1, 2) == 3)
+    }
+
+    test "stdlib module import works alongside relative" {
+        assert(math.PI > 3.14)
+        assert(math.sqrt(4.0) == 2.0)
+    }
+
+    test "destructured stdlib works alongside others" {
+        assert(min(3.0, 5.0) == 3.0)
+        assert(max(3.0, 5.0) == 5.0)
+    }
+
+    test "combine relative and stdlib in expression" {
+        // utils.add(2, 3) = 5, math.sqrt(25) = 5
+        let a = utils.add(2, 3)
+        let b = math.sqrt(25.0)
+        assert(a == 5)
+        assert(b == 5.0)
+    }
+}

@@ -1,0 +1,30 @@
+// Tests for chained imports (A -> B -> C)
+
+let mod_a = import "./chain/mod_a"
+let mod_b = import "./chain/mod_b"
+let mod_c = import "./chain/mod_c"
+
+tests {
+    test "leaf module direct access" {
+        assert(mod_c.C_VALUE == 100)
+        assert(mod_c.from_c() == 100)
+    }
+
+    test "middle module direct access" {
+        assert(mod_b.B_VALUE == 10)
+    }
+
+    test "middle module chains to leaf" {
+        // from_b returns B_VALUE + from_c() = 10 + 100 = 110
+        assert(mod_b.from_b() == 110)
+    }
+
+    test "top module direct access" {
+        assert(mod_a.A_VALUE == 1)
+    }
+
+    test "full chain A -> B -> C" {
+        // from_a returns A_VALUE + from_b() = 1 + 110 = 111
+        assert(mod_a.from_a() == 111)
+    }
+}

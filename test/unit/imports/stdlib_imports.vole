@@ -1,0 +1,22 @@
+// Tests for stdlib imports
+
+// Full module import
+let math = import "std:math"
+
+tests {
+    test "stdlib module constant" {
+        assert(math.PI > 3.14)
+        assert(math.PI < 3.15)
+    }
+
+    test "stdlib module functions" {
+        assert(math.sqrt(16.0) == 4.0)
+        assert(math.min(3.0, 5.0) == 3.0)
+        assert(math.max(3.0, 5.0) == 5.0)
+    }
+
+    test "stdlib pure vole functions" {
+        assert(math.abs(-5.0) == 5.0)
+        assert(math.lerp(0.0, 10.0, 0.5) == 5.0)
+    }
+}

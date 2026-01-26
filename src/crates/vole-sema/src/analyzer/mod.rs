@@ -272,8 +272,9 @@ pub struct Analyzer {
     /// Cached module TypeIds by import path (avoids re-parsing).
     /// Shared via Rc<RefCell> so sub-analyzers can see and update the same cache.
     module_type_ids: Rc<RefCell<FxHashMap<String, ArenaTypeId>>>,
-    /// Parsed module programs and their interners (for compiling pure Vole functions)
-    module_programs: FxHashMap<String, (Program, Interner)>,
+    /// Parsed module programs and their interners (for compiling pure Vole functions).
+    /// Shared via Rc<RefCell> so sub-analyzers can see and update the same cache.
+    module_programs: Rc<RefCell<FxHashMap<String, (Program, Interner)>>>,
     /// Expression types for module programs (keyed by module path -> NodeId -> ArenaTypeId)
     /// Stored separately since NodeIds are per-program and can't be merged into main expr_types.
     /// Uses interned ArenaTypeId handles for O(1) equality during analysis.
@@ -366,7 +367,7 @@ impl Analyzer {
             method_resolutions: MethodResolutions::new(),
             module_loader,
             module_type_ids: Rc::new(RefCell::new(FxHashMap::default())),
-            module_programs: FxHashMap::default(),
+            module_programs: Rc::new(RefCell::new(FxHashMap::default())),
             module_expr_types: FxHashMap::default(),
             module_method_resolutions: FxHashMap::default(),
             loading_prelude: false,
@@ -434,7 +435,7 @@ impl Analyzer {
             method_resolutions: MethodResolutions::new(),
             module_loader,
             module_type_ids: Rc::new(RefCell::new(FxHashMap::default())),
-            module_programs: FxHashMap::default(),
+            module_programs: Rc::new(RefCell::new(FxHashMap::default())),
             module_expr_types: FxHashMap::default(),
             module_method_resolutions: FxHashMap::default(),
             loading_prelude: false,
@@ -510,7 +511,7 @@ impl Analyzer {
             method_resolutions: MethodResolutions::new(),
             module_loader,
             module_type_ids: Rc::new(RefCell::new(FxHashMap::default())),
-            module_programs: FxHashMap::default(),
+            module_programs: Rc::new(RefCell::new(FxHashMap::default())),
             module_expr_types: FxHashMap::default(),
             module_method_resolutions: FxHashMap::default(),
             loading_prelude: false,
@@ -586,7 +587,7 @@ impl Analyzer {
             method_resolutions: MethodResolutions::new(),
             module_loader,
             module_type_ids: Rc::new(RefCell::new(FxHashMap::default())),
-            module_programs: FxHashMap::default(),
+            module_programs: Rc::new(RefCell::new(FxHashMap::default())),
             module_expr_types: FxHashMap::default(),
             module_method_resolutions: FxHashMap::default(),
             loading_prelude: false,
@@ -674,7 +675,9 @@ impl Analyzer {
         );
         AnalysisOutput {
             expression_data,
-            module_programs: self.module_programs,
+            module_programs: Rc::try_unwrap(self.module_programs)
+                .map(|cell| cell.into_inner())
+                .unwrap_or_else(|rc| rc.borrow().clone()),
             db: self.db,
         }
     }
@@ -937,7 +940,8 @@ impl Analyzer {
             let table = self.name_table();
             table.module_path(module_id).to_string()
         };
-        let (_, module_interner) = self.module_programs.get(&module_path)?;
+        let programs = self.module_programs.borrow();
+        let (_, module_interner) = programs.get(&module_path)?;
         let sym = module_interner.lookup(name)?;
         self.name_table()
             .name_id(module_id, &[sym], module_interner)
@@ -3028,7 +3032,13 @@ impl Analyzer {
             .module_loader
             .resolve_path(import_path, self.current_file_path.as_deref())
         {
-            Ok(path) => path.to_string_lossy().to_string(),
+            Ok(path) => {
+                // Canonicalize to ensure consistent cache keys (resolves `..` components)
+                path.canonicalize()
+                    .unwrap_or(path)
+                    .to_string_lossy()
+                    .to_string()
+            }
             Err(e) => {
                 self.add_error(
                     SemanticError::ModuleNotFound {
@@ -3045,8 +3055,10 @@ impl Analyzer {
         // Check cache with canonical path
         let cached_type_id = self.module_type_ids.borrow().get(&canonical_path).copied();
         if let Some(type_id) = cached_type_id {
+            tracing::debug!(import_path, %canonical_path, "analyze_module: cache HIT");
             return Ok(type_id);
         }
+        tracing::debug!(import_path, %canonical_path, "analyze_module: cache MISS");
 
         // Cache miss - now load the file content
         let is_relative = import_path.starts_with("./") || import_path.starts_with("../");
@@ -3097,6 +3109,9 @@ impl Analyzer {
             }
         };
 
+        // Save the module's file path for sub-analyzer (for nested relative imports)
+        let module_file_path = module_info.path.clone();
+
         // Parse the module
         let mut parser = Parser::new(&module_info.source);
         let program = match parser.parse_program() {
@@ -3122,8 +3137,15 @@ impl Analyzer {
         let mut interface_names: Vec<(NameId, Symbol)> = Vec::new();
         let module_interner = parser.into_interner();
 
-        // Use import_path for module_id (not canonical path) to match codegen expectations
-        let module_id = self.name_table_mut().module_id(import_path);
+        // For stdlib modules, use symbolic paths like "std:math" for native registry lookups.
+        // For user modules, use canonical file path for consistent deduplication.
+        let module_key = if import_path.starts_with("std:") {
+            import_path.to_string()
+        } else {
+            canonical_path.clone()
+        };
+        tracing::debug!(import_path, %module_key, "analyze_module: creating module_id");
+        let module_id = self.name_table_mut().module_id(&module_key);
 
         for decl in &program.declarations {
             match decl {
@@ -3304,27 +3326,40 @@ impl Analyzer {
         }
 
         // Store the program and interner for compiling pure Vole functions
-        self.module_programs.insert(
-            import_path.to_string(),
+        // Use module_key for consistent lookup with module_id
+        self.module_programs.borrow_mut().insert(
+            module_key.clone(),
             (program.clone(), module_interner.clone()),
         );
 
         // Run semantic analysis on the module to populate expr_types for function bodies.
         // This is needed for codegen to resolve return types of calls to external functions
         // inside the module (e.g., min(max(x, lo), hi) in math.clamp).
-        let mut sub_analyzer = self.create_module_sub_analyzer(module_id);
+        let mut sub_analyzer = self.create_module_sub_analyzer(module_id, Some(module_file_path));
         let analyze_result = sub_analyzer.analyze(&program, &module_interner);
         if let Err(ref errors) = analyze_result {
             tracing::warn!(import_path, ?errors, "module analysis errors");
         }
         // Store module-specific expr_types (NodeIds are per-program)
         self.module_expr_types
-            .insert(import_path.to_string(), sub_analyzer.expr_types);
+            .insert(module_key.clone(), sub_analyzer.expr_types.clone());
+        // Merge nested module expr_types from sub-analyzer (for chained imports)
+        for (nested_key, nested_types) in sub_analyzer.module_expr_types {
+            self.module_expr_types
+                .entry(nested_key)
+                .or_insert(nested_types);
+        }
         // Store module-specific method_resolutions (NodeIds are per-program)
         self.module_method_resolutions.insert(
-            import_path.to_string(),
+            module_key.clone(),
             sub_analyzer.method_resolutions.into_inner(),
         );
+        // Merge nested module method_resolutions from sub-analyzer (for chained imports)
+        for (nested_key, nested_methods) in sub_analyzer.module_method_resolutions {
+            self.module_method_resolutions
+                .entry(nested_key)
+                .or_insert(nested_methods);
+        }
 
         // Now populate interface exports after sub-analysis has registered them
         for (name_id, iface_sym) in interface_names {
@@ -3359,6 +3394,16 @@ impl Analyzer {
         let type_id = arena.module(module_id, exports_vec);
         drop(arena);
 
+        // Debug: trace what module_id and module_path are being used
+        let module_path_check = self.name_table().module_path(module_id).to_string();
+        tracing::debug!(
+            import_path,
+            %module_key,
+            ?module_id,
+            %module_path_check,
+            "analyze_module: created module type"
+        );
+
         // Cache the TypeId with canonical path for consistent lookups
         self.module_type_ids
             .borrow_mut()
@@ -3369,7 +3414,13 @@ impl Analyzer {
 
     /// Create a sub-analyzer for analyzing a module's function bodies.
     /// This shares the CompilationDb so TypeIds remain valid across analyzers.
-    fn create_module_sub_analyzer(&self, module_id: ModuleId) -> Analyzer {
+    /// The module_file_path is the actual file path of the module being analyzed,
+    /// used to resolve relative imports within that module.
+    fn create_module_sub_analyzer(
+        &self,
+        module_id: ModuleId,
+        module_file_path: Option<PathBuf>,
+    ) -> Analyzer {
         Analyzer {
             scope: Scope::new(),
             functions: FxHashMap::default(),
@@ -3391,8 +3442,10 @@ impl Analyzer {
             method_resolutions: MethodResolutions::new(),
             // Use child loader to inherit sandbox settings (stdlib_root, project_root)
             module_loader: self.module_loader.new_child(),
-            module_type_ids: Rc::new(RefCell::new(FxHashMap::default())),
-            module_programs: FxHashMap::default(),
+            // Share module_type_ids so nested imports reuse cached modules
+            module_type_ids: Rc::clone(&self.module_type_ids),
+            // Share module_programs so nested imports are visible to parent
+            module_programs: Rc::clone(&self.module_programs),
             module_expr_types: FxHashMap::default(),
             module_method_resolutions: FxHashMap::default(),
             loading_prelude: true, // Prevent sub-analyzer from loading prelude
@@ -3408,7 +3461,8 @@ impl Analyzer {
             type_param_stack: TypeParamScopeStack::new(),
             module_cache: None,
             db: Rc::clone(&self.db), // Share the compilation db
-            current_file_path: self.current_file_path.clone(), // Inherit file context
+            // Use module's file path so relative imports resolve correctly
+            current_file_path: module_file_path,
         }
     }
 }

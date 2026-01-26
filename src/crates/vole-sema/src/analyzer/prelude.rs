@@ -83,7 +83,23 @@ impl Analyzer {
 
     /// Load a single prelude file as a proper module
     pub(super) fn load_prelude_file(&mut self, import_path: &str, _interner: &Interner) {
-        // Check cache first
+        // Resolve path first, then canonicalize for consistent cache keys
+        let resolved_path = self
+            .module_loader
+            .resolve_path(import_path, None)
+            .unwrap_or_else(|err| {
+                panic!(
+                    "Failed to resolve prelude path '{import_path}': {err}\n\
+                     This is a bug in the standard library or installation."
+                )
+            });
+        let canonical_path = resolved_path
+            .canonicalize()
+            .unwrap_or(resolved_path)
+            .to_string_lossy()
+            .to_string();
+
+        // Check cache first using canonical_path for consistent lookup
         if let Some(ref cache) = self.module_cache
             && let Some(cached) = cache.borrow().get(import_path)
         {
@@ -92,7 +108,8 @@ impl Analyzer {
                 self.functions_by_name
                     .insert(name.clone(), func_type.clone());
             }
-            self.module_programs.insert(
+            // Use import_path for prelude files (consistent with module_id)
+            self.module_programs.borrow_mut().insert(
                 import_path.to_string(),
                 (cached.program.clone(), cached.interner.clone()),
             );
@@ -123,7 +140,9 @@ impl Analyzer {
         let mut prelude_interner = parser.into_interner();
         prelude_interner.seed_builtin_symbols();
 
-        // Get the module ID for this prelude file path
+        // For prelude files, use the symbolic import_path (like "std:prelude/traits")
+        // for module_id to maintain consistent type identity for interfaces.
+        // This ensures Iterator<T> comparisons work correctly across modules.
         let prelude_module = self.name_table_mut().module_id(import_path);
 
         // Create a sub-analyzer that shares the same db
@@ -220,20 +239,15 @@ impl Analyzer {
             }
 
             // Create module type and cache it
+            // Use canonical_path for module_type_ids cache (for deduplication)
             let module_type_id = self.type_arena_mut().module(prelude_module, exports);
-            // Use canonicalized path as cache key to ensure consistent lookups
-            let canonical_path = module_info
-                .path
-                .canonicalize()
-                .unwrap_or_else(|_| module_info.path.clone())
-                .to_string_lossy()
-                .to_string();
             self.module_type_ids
                 .borrow_mut()
                 .insert(canonical_path, module_type_id);
 
-            // Store prelude program for codegen
+            // Use import_path for program/expr/method maps (consistent with module_id)
             self.module_programs
+                .borrow_mut()
                 .insert(import_path.to_string(), (program, prelude_interner));
             self.module_expr_types
                 .insert(import_path.to_string(), sub_analyzer.expr_types.clone());

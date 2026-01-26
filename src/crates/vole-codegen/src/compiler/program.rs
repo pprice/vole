@@ -330,26 +330,15 @@ impl Compiler<'_> {
             "compile_module_functions: processing module paths"
         );
 
+        // ============================================
+        // PASS 1: Declare ALL functions across ALL modules
+        // This ensures cross-module calls can be resolved
+        // ============================================
         for module_path in &module_paths {
-            tracing::debug!(module_path, "compile_module_functions: processing module");
-            // Access module_programs directly to avoid borrow conflict with mutable self operations
+            tracing::debug!(module_path, "compile_module_functions: declaring functions");
             let (program, module_interner) = &self.analyzed.module_programs[module_path];
-            // Extract module global initializer expressions
-            let module_global_inits: FxHashMap<Symbol, Expr> = program
-                .declarations
-                .iter()
-                .filter_map(|decl| {
-                    if let Decl::Let(let_stmt) = decl
-                        && let LetInit::Expr(expr) = &let_stmt.init
-                    {
-                        Some((let_stmt.name, expr.clone()))
-                    } else {
-                        None
-                    }
-                })
-                .collect();
 
-            // First pass: declare pure Vole functions
+            // Declare pure Vole functions
             for decl in &program.declarations {
                 if let Decl::Function(func) = decl {
                     let module_id = self.query().module_id_or_main(module_path);
@@ -383,9 +372,7 @@ impl Compiler<'_> {
                 }
             }
 
-            // Register static methods from implement blocks (first pass - declarations only)
-            // Instance methods are skipped - they're handled through the main program path.
-            // External methods are resolved via the native registry.
+            // Register static methods from implement blocks (declarations only)
             for decl in &program.declarations {
                 if let Decl::Implement(impl_block) = decl
                     && impl_block.statics.is_some()
@@ -400,8 +387,32 @@ impl Compiler<'_> {
                     self.finalize_module_class(class, module_interner);
                 }
             }
+        }
 
-            // Second pass: compile pure Vole function bodies
+        // ============================================
+        // PASS 2: Compile ALL function bodies across ALL modules
+        // Now all functions are declared, so cross-module calls work
+        // ============================================
+        for module_path in &module_paths {
+            tracing::debug!(module_path, "compile_module_functions: compiling bodies");
+            let (program, module_interner) = &self.analyzed.module_programs[module_path];
+
+            // Extract module global initializer expressions
+            let module_global_inits: FxHashMap<Symbol, Expr> = program
+                .declarations
+                .iter()
+                .filter_map(|decl| {
+                    if let Decl::Let(let_stmt) = decl
+                        && let LetInit::Expr(expr) = &let_stmt.init
+                    {
+                        Some((let_stmt.name, expr.clone()))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            // Compile pure Vole function bodies
             for decl in &program.declarations {
                 if let Decl::Function(func) = decl {
                     let module_id = self.query().module_id_or_main(module_path);
@@ -422,19 +433,16 @@ impl Compiler<'_> {
                 }
             }
 
-            // Compile implement block static methods from module programs
-            // Note: Instance methods for primitives (like to_string, index_of) are compiled
-            // through the main program path, not here. This avoids cross-interner issues.
+            // Compile implement block static methods
             for decl in &program.declarations {
-                if let Decl::Implement(impl_block) = decl {
-                    // Compile static methods only
-                    if impl_block.statics.is_some() {
-                        self.compile_implement_statics_only(
-                            impl_block,
-                            Some(module_path),
-                            module_interner,
-                        )?;
-                    }
+                if let Decl::Implement(impl_block) = decl
+                    && impl_block.statics.is_some()
+                {
+                    self.compile_implement_statics_only(
+                        impl_block,
+                        Some(module_path),
+                        module_interner,
+                    )?;
                 }
             }
 

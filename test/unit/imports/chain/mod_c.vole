@@ -1,0 +1,7 @@
+// Module C - leaf module
+
+let C_VALUE: i64 = 100
+
+func from_c() -> i64 {
+    return C_VALUE
+}

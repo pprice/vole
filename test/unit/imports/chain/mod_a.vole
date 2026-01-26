@@ -1,0 +1,9 @@
+// Module A - imports Module B
+
+let mod_b = import "./mod_b"
+
+let A_VALUE: i64 = 1
+
+func from_a() -> i64 {
+    return A_VALUE + mod_b.from_b()
+}
