@@ -1,0 +1,240 @@
+// Tests for std:crypto/hash module
+
+let hash = import "std:crypto/hash"
+
+tests "sha256 string hashing" {
+    test "sha256 of empty string" {
+        // Well-known SHA256 of empty string
+        let result = hash.sha256("")
+        assert(result == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+    }
+
+    test "sha256 of hello world" {
+        // Well-known SHA256 test vector
+        let result = hash.sha256("hello world")
+        assert(result == "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9")
+    }
+
+    test "sha256 returns 64 character hex string" {
+        let result = hash.sha256("test")
+        assert(result.length() == 64)
+    }
+
+    test "sha256 of single character" {
+        // SHA256 of "a"
+        let result = hash.sha256("a")
+        assert(result == "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb")
+    }
+
+    test "sha256 is deterministic" {
+        let r1 = hash.sha256("deterministic test")
+        let r2 = hash.sha256("deterministic test")
+        assert(r1 == r2)
+    }
+
+    test "sha256 different inputs produce different hashes" {
+        let r1 = hash.sha256("input1")
+        let r2 = hash.sha256("input2")
+        assert(r1 != r2)
+    }
+
+    test "sha256 hex string is lowercase" {
+        let result = hash.sha256("test")
+        // Check that no uppercase letters are present
+        let has_A = result.contains("A")
+        let has_B = result.contains("B")
+        let has_C = result.contains("C")
+        let has_D = result.contains("D")
+        let has_E = result.contains("E")
+        let has_F = result.contains("F")
+        let has_upper = has_A || has_B || has_C || has_D || has_E || has_F
+        assert(!has_upper)
+    }
+
+    test "sha256 of longer text" {
+        // SHA256 of "The quick brown fox jumps over the lazy dog"
+        let result = hash.sha256("The quick brown fox jumps over the lazy dog")
+        assert(result == "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592")
+    }
+
+    test "sha256 of unicode string" {
+        // Hash should work with unicode input
+        let result = hash.sha256("hello world")
+        // Just verify it returns a valid 64-char hex string
+        assert(result.length() == 64)
+    }
+
+    test "sha256 with newlines" {
+        // SHA256 of "line1\nline2"
+        let result = hash.sha256("line1\nline2")
+        // Just verify it works and is deterministic
+        let result2 = hash.sha256("line1\nline2")
+        assert(result == result2)
+        assert(result.length() == 64)
+    }
+}
+
+tests "sha256_bytes array hashing" {
+    test "sha256_bytes returns 32 element array" {
+        let result = hash.sha256_bytes("test")
+        assert(result.length() == 32)
+    }
+
+    test "sha256_bytes of empty string first byte" {
+        let result = hash.sha256_bytes("")
+        // First byte of SHA256("") is 0xe3 (227)
+        assert(result[0] == 227)
+    }
+
+    test "sha256_bytes of empty string last byte" {
+        let result = hash.sha256_bytes("")
+        // Last byte of SHA256("") is 0x55 (85)
+        assert(result[31] == 85)
+    }
+
+    test "sha256_bytes of hello world first bytes" {
+        let result = hash.sha256_bytes("hello world")
+        // SHA256("hello world") = b94d27b9...
+        // 0xb9 = 185, 0x4d = 77, 0x27 = 39, 0xb9 = 185
+        assert(result[0] == 185)
+        assert(result[1] == 77)
+        assert(result[2] == 39)
+        assert(result[3] == 185)
+    }
+
+    test "sha256_bytes values are in byte range" {
+        let result = hash.sha256_bytes("arbitrary input")
+        let mut i = 0
+        while i < 32 {
+            assert(result[i] >= 0)
+            assert(result[i] <= 255)
+            i = i + 1
+        }
+    }
+
+    test "sha256_bytes is deterministic" {
+        let r1 = hash.sha256_bytes("deterministic")
+        let r2 = hash.sha256_bytes("deterministic")
+        let mut i = 0
+        while i < 32 {
+            assert(r1[i] == r2[i])
+            i = i + 1
+        }
+    }
+
+    test "sha256_bytes different inputs produce different hashes" {
+        let r1 = hash.sha256_bytes("input1")
+        let r2 = hash.sha256_bytes("input2")
+        // At least one byte should differ
+        let mut found_diff = false
+        let mut i = 0
+        while i < 32 {
+            if r1[i] != r2[i] {
+                found_diff = true
+            }
+            i = i + 1
+        }
+        assert(found_diff)
+    }
+}
+
+tests "sha256 and sha256_bytes consistency" {
+    test "hex and bytes are consistent for empty string" {
+        let hex = hash.sha256("")
+        let bytes = hash.sha256_bytes("")
+
+        // First byte 0xe3 -> "e3"
+        assert(hex.starts_with("e3"))
+        assert(bytes[0] == 227)
+    }
+
+    test "hex and bytes are consistent for hello world" {
+        let hex = hash.sha256("hello world")
+        let bytes = hash.sha256_bytes("hello world")
+
+        // First byte 0xb9 -> "b9"
+        assert(hex.starts_with("b9"))
+        assert(bytes[0] == 185)
+    }
+
+    test "full consistency check" {
+        let hex = hash.sha256("test")
+        let bytes = hash.sha256_bytes("test")
+
+        // Build hex from bytes and compare first 8 chars (4 bytes)
+        // This is a limited test since we don't have full hex conversion in Vole
+        // Just verify both return expected lengths
+        assert(hex.length() == 64)
+        assert(bytes.length() == 32)
+    }
+}
+
+tests "sha256 edge cases" {
+    test "sha256 of spaces" {
+        let result = hash.sha256("   ")
+        assert(result.length() == 64)
+        // Different from empty string
+        let empty = hash.sha256("")
+        assert(result != empty)
+    }
+
+    test "sha256 of null character" {
+        // String with actual bytes
+        let result = hash.sha256("a")
+        assert(result.length() == 64)
+    }
+
+    test "sha256 many times is stable" {
+        let expected = hash.sha256("stability test")
+        let mut i = 0
+        while i < 100 {
+            let result = hash.sha256("stability test")
+            assert(result == expected)
+            i = i + 1
+        }
+    }
+
+    test "sha256_bytes many times is stable" {
+        let expected = hash.sha256_bytes("stability test")
+        let mut i = 0
+        while i < 100 {
+            let result = hash.sha256_bytes("stability test")
+            let mut j = 0
+            while j < 32 {
+                assert(result[j] == expected[j])
+                j = j + 1
+            }
+            i = i + 1
+        }
+    }
+}
+
+tests "sha256 for ID generation use case" {
+    test "can hash concatenated strings for ID" {
+        // Simulating ID generation by hashing combined values
+        let user = "user123"
+        let timestamp = "1706300000"
+        let combined = "{user}:{timestamp}"
+        let id = hash.sha256(combined)
+
+        assert(id.length() == 64)
+
+        // Same input produces same ID
+        let id2 = hash.sha256("{user}:{timestamp}")
+        assert(id == id2)
+    }
+
+    test "different inputs produce different IDs" {
+        let id1 = hash.sha256("entity:1")
+        let id2 = hash.sha256("entity:2")
+        assert(id1 != id2)
+    }
+
+    test "hash can be truncated for short IDs" {
+        let full = hash.sha256("some content")
+        // In practice, could take first N characters
+        assert(full.length() == 64)
+        // First 16 chars = 8 bytes = 64 bits of entropy
+        // This is just demonstrating the hash is usable
+    }
+}

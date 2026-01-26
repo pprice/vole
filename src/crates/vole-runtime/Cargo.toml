@@ -17,6 +17,9 @@ rustc-hash = "2.1"
 # Random number generation for std:random module
 rand = "0.8"
 
+# Cryptographic hashing for std:crypto/hash module
+sha2 = "0.10"
+
 [dev-dependencies]
 # Temporary files and directories for tests
 tempfile = "3"
