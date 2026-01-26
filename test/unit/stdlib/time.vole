@@ -1,0 +1,376 @@
+// Test for std:time module
+
+let time = import "std:time"
+
+// =============================================================================
+// Duration tests
+// =============================================================================
+
+tests "Duration constructors" {
+    test "duration_nanos creates correct duration" {
+        let d = time.duration_nanos(1000)
+        assert(time.duration_as_nanos(d) == 1000)
+    }
+
+    test "duration_micros creates correct duration" {
+        let d = time.duration_micros(5)
+        assert(time.duration_as_nanos(d) == 5000)
+    }
+
+    test "duration_ms creates correct duration" {
+        let d = time.duration_ms(10)
+        assert(time.duration_as_nanos(d) == 10000000)
+        assert(time.duration_as_ms(d) == 10)
+    }
+
+    test "duration_seconds creates correct duration" {
+        let d = time.duration_seconds(3)
+        assert(time.duration_as_nanos(d) == 3000000000)
+        assert(time.duration_as_seconds(d) == 3)
+    }
+
+    test "duration_minutes creates correct duration" {
+        let d = time.duration_minutes(2)
+        assert(time.duration_as_seconds(d) == 120)
+        assert(time.duration_as_minutes(d) == 2)
+    }
+
+    test "duration_hours creates correct duration" {
+        let d = time.duration_hours(1)
+        assert(time.duration_as_seconds(d) == 3600)
+        assert(time.duration_as_hours(d) == 1)
+    }
+
+    test "duration_days creates correct duration" {
+        let d = time.duration_days(1)
+        assert(time.duration_as_hours(d) == 24)
+    }
+
+    test "duration_weeks creates correct duration" {
+        let d = time.duration_weeks(1)
+        assert(time.duration_as_days(d) == 7)
+    }
+
+    test "duration_zero creates zero duration" {
+        let d = time.duration_zero()
+        assert(time.duration_as_nanos(d) == 0)
+    }
+}
+
+tests "Duration getters" {
+    test "as_nanos returns nanoseconds" {
+        let d = time.duration_nanos(12345)
+        assert(time.duration_as_nanos(d) == 12345)
+    }
+
+    test "as_micros truncates correctly" {
+        let d = time.duration_nanos(5500)
+        assert(time.duration_as_micros(d) == 5)
+    }
+
+    test "as_ms truncates correctly" {
+        let d = time.duration_nanos(15500000)
+        assert(time.duration_as_ms(d) == 15)
+    }
+
+    test "as_seconds truncates correctly" {
+        let d = time.duration_ms(2500)
+        assert(time.duration_as_seconds(d) == 2)
+    }
+
+    test "as_minutes truncates correctly" {
+        let d = time.duration_seconds(150)
+        assert(time.duration_as_minutes(d) == 2)
+    }
+
+    test "as_hours truncates correctly" {
+        let d = time.duration_minutes(150)
+        assert(time.duration_as_hours(d) == 2)
+    }
+
+    test "as_days truncates correctly" {
+        let d = time.duration_hours(50)
+        assert(time.duration_as_days(d) == 2)
+    }
+}
+
+tests "Duration arithmetic" {
+    test "add combines durations" {
+        let d1 = time.duration_seconds(10)
+        let d2 = time.duration_seconds(5)
+        let result = time.duration_add(d1, d2)
+        assert(time.duration_as_seconds(result) == 15)
+    }
+
+    test "subtract removes duration" {
+        let d1 = time.duration_seconds(10)
+        let d2 = time.duration_seconds(3)
+        let result = time.duration_subtract(d1, d2)
+        assert(time.duration_as_seconds(result) == 7)
+    }
+
+    test "multiply scales duration" {
+        let d = time.duration_seconds(5)
+        let result = time.duration_multiply(d, 3)
+        assert(time.duration_as_seconds(result) == 15)
+    }
+
+    test "divide shrinks duration" {
+        let d = time.duration_seconds(15)
+        let result = time.duration_divide(d, 3)
+        assert(time.duration_as_seconds(result) == 5)
+    }
+}
+
+tests "Duration utilities" {
+    test "abs returns absolute value for negative" {
+        let d = time.duration_nanos(-1000)
+        let result = time.duration_abs(d)
+        assert(time.duration_as_nanos(result) == 1000)
+    }
+
+    test "abs returns same value for positive" {
+        let d = time.duration_nanos(1000)
+        let result = time.duration_abs(d)
+        assert(time.duration_as_nanos(result) == 1000)
+    }
+
+    test "is_negative returns true for negative duration" {
+        let d = time.duration_nanos(-1000)
+        assert(time.duration_is_negative(d) == true)
+    }
+
+    test "is_negative returns false for positive duration" {
+        let d = time.duration_nanos(1000)
+        assert(time.duration_is_negative(d) == false)
+    }
+
+    test "is_zero returns true for zero duration" {
+        let d = time.duration_zero()
+        assert(time.duration_is_zero(d) == true)
+    }
+
+    test "is_zero returns false for non-zero duration" {
+        let d = time.duration_nanos(1)
+        assert(time.duration_is_zero(d) == false)
+    }
+
+    test "is_positive returns true for positive duration" {
+        let d = time.duration_nanos(1000)
+        assert(time.duration_is_positive(d) == true)
+    }
+
+    test "negate reverses sign" {
+        let d = time.duration_seconds(5)
+        let result = time.duration_negate(d)
+        assert(time.duration_as_seconds(result) == -5)
+    }
+}
+
+// =============================================================================
+// Timestamp tests
+// =============================================================================
+
+tests "Timestamp constructors" {
+    test "timestamp_now returns reasonable value" {
+        let ts = time.timestamp_now()
+        // Should be after 2020 (in seconds since epoch)
+        assert(time.timestamp_unix(ts) > 1577836800)
+    }
+
+    test "timestamp_from_unix creates correct timestamp" {
+        let ts = time.timestamp_from_unix(1000)
+        assert(time.timestamp_unix(ts) == 1000)
+    }
+
+    test "timestamp_from_unix_ms creates correct timestamp" {
+        let ts = time.timestamp_from_unix_ms(1500000)
+        assert(time.timestamp_unix_ms(ts) == 1500000)
+        assert(time.timestamp_unix(ts) == 1500)
+    }
+
+    test "timestamp_epoch returns epoch" {
+        let ts = time.timestamp_epoch()
+        assert(time.timestamp_unix(ts) == 0)
+    }
+
+    test "timestamp_parse parses valid ISO 8601" {
+        let ts = time.timestamp_parse("2024-01-15T12:30:45Z")
+        // Check it parses (not nil) by comparing with expected unix time
+        // 2024-01-15T12:30:45Z = 1705321845 seconds since epoch
+        assert(ts != nil)
+    }
+
+    test "timestamp_parse returns nil for invalid" {
+        let ts = time.timestamp_parse("not-a-date")
+        assert(ts == nil)
+    }
+
+    test "timestamp_from_parts creates valid timestamp" {
+        let ts = time.timestamp_from_parts(2024, 6, 15, 10, 30, 0)
+        assert(ts != nil)
+    }
+}
+
+tests "Timestamp getters" {
+    test "unix returns seconds" {
+        let ts = time.timestamp_from_unix(12345)
+        assert(time.timestamp_unix(ts) == 12345)
+    }
+
+    test "unix_ms returns milliseconds" {
+        let ts = time.timestamp_from_unix_ms(12345678)
+        assert(time.timestamp_unix_ms(ts) == 12345678)
+    }
+
+    test "unix_nanos returns nanoseconds" {
+        let ts = time.timestamp_from_unix(1)
+        assert(time.timestamp_unix_nanos(ts) == 1000000000)
+    }
+
+    test "offset returns timezone offset" {
+        let ts = time.timestamp_from_unix(0)
+        assert(time.timestamp_offset(ts) == 0)
+    }
+
+    test "with_offset changes offset" {
+        let ts = time.timestamp_from_unix(0)
+        let ts2 = time.timestamp_with_offset(ts, 60)
+        assert(time.timestamp_offset(ts2) == 60)
+    }
+}
+
+tests "Timestamp date components" {
+    test "year returns correct year" {
+        // 2024-01-15T12:30:45Z = 1705321845 unix
+        let ts = time.timestamp_from_unix(1705321845)
+        assert(time.timestamp_year(ts) == 2024)
+    }
+
+    test "month returns correct month" {
+        let ts = time.timestamp_from_unix(1705321845)
+        assert(time.timestamp_month(ts) == 1)
+    }
+
+    test "day returns correct day" {
+        let ts = time.timestamp_from_unix(1705321845)
+        assert(time.timestamp_day(ts) == 15)
+    }
+}
+
+tests "Timestamp time components" {
+    test "hour returns correct hour" {
+        // 2024-01-15T12:30:45Z = 1705321845 unix
+        let ts = time.timestamp_from_unix(1705321845)
+        assert(time.timestamp_hour(ts) == 12)
+    }
+
+    test "minute returns correct minute" {
+        let ts = time.timestamp_from_unix(1705321845)
+        assert(time.timestamp_minute(ts) == 30)
+    }
+
+    test "second returns correct second" {
+        let ts = time.timestamp_from_unix(1705321845)
+        assert(time.timestamp_second(ts) == 45)
+    }
+}
+
+tests "Timestamp arithmetic" {
+    test "add increases timestamp" {
+        let ts = time.timestamp_from_unix(1000)
+        let d = time.duration_seconds(100)
+        let result = time.timestamp_add(ts, d)
+        assert(time.timestamp_unix(result) == 1100)
+    }
+
+    test "subtract decreases timestamp" {
+        let ts = time.timestamp_from_unix(1000)
+        let d = time.duration_seconds(100)
+        let result = time.timestamp_subtract(ts, d)
+        assert(time.timestamp_unix(result) == 900)
+    }
+
+    test "since returns duration between timestamps" {
+        let ts1 = time.timestamp_from_unix(1000)
+        let ts2 = time.timestamp_from_unix(800)
+        let diff = time.timestamp_since(ts1, ts2)
+        assert(time.duration_as_seconds(diff) == 200)
+    }
+
+    test "distance returns absolute duration" {
+        let ts1 = time.timestamp_from_unix(800)
+        let ts2 = time.timestamp_from_unix(1000)
+        let diff = time.timestamp_distance(ts1, ts2)
+        assert(time.duration_as_seconds(diff) == 200)
+    }
+}
+
+tests "Timestamp calendar arithmetic" {
+    test "add_days adds correct number of days" {
+        let ts = time.timestamp_from_unix(0)
+        let result = time.timestamp_add_days(ts, 1)
+        assert(time.timestamp_unix(result) == 86400)
+    }
+
+    // Note: add_months and add_years tests using from_parts would need
+    // type narrowing support. Testing with from_unix for now.
+    test "add_months advances by months" {
+        // January 1, 2024 00:00:00 UTC = 1704067200
+        let ts = time.timestamp_from_unix(1704067200)
+        let result = time.timestamp_add_months(ts, 1)
+        // After adding 1 month, should be February
+        assert(time.timestamp_month(result) == 2)
+    }
+
+    test "add_years advances by years" {
+        // January 1, 2024 00:00:00 UTC = 1704067200
+        let ts = time.timestamp_from_unix(1704067200)
+        let result = time.timestamp_add_years(ts, 1)
+        // After adding 1 year, should be 2025
+        assert(time.timestamp_year(result) == 2025)
+    }
+}
+
+tests "Timestamp formatting" {
+    test "to_iso formats correctly" {
+        // January 1, 2024 10:30:45 UTC
+        // Calculate: 1704067200 (Jan 1) + 10*3600 + 30*60 + 45 = 1704105045
+        let ts = time.timestamp_from_unix(1704105045)
+        let iso = time.timestamp_to_iso(ts)
+        // UTC uses "Z" suffix
+        assert(iso == "2024-01-01T10:30:45Z")
+    }
+}
+
+tests "Timestamp comparisons" {
+    test "is_before returns true when earlier" {
+        let ts1 = time.timestamp_from_unix(100)
+        let ts2 = time.timestamp_from_unix(200)
+        assert(time.timestamp_is_before(ts1, ts2) == true)
+    }
+
+    test "is_before returns false when later" {
+        let ts1 = time.timestamp_from_unix(200)
+        let ts2 = time.timestamp_from_unix(100)
+        assert(time.timestamp_is_before(ts1, ts2) == false)
+    }
+
+    test "is_after returns true when later" {
+        let ts1 = time.timestamp_from_unix(200)
+        let ts2 = time.timestamp_from_unix(100)
+        assert(time.timestamp_is_after(ts1, ts2) == true)
+    }
+
+    test "equals returns true for same instant" {
+        let ts1 = time.timestamp_from_unix(1000)
+        let ts2 = time.timestamp_from_unix(1000)
+        assert(time.timestamp_equals(ts1, ts2) == true)
+    }
+
+    test "equals returns false for different instants" {
+        let ts1 = time.timestamp_from_unix(1000)
+        let ts2 = time.timestamp_from_unix(2000)
+        assert(time.timestamp_equals(ts1, ts2) == false)
+    }
+}

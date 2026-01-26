@@ -10,6 +10,7 @@ pub mod io;
 pub mod math;
 pub mod random;
 pub mod string;
+pub mod time;
 
 use super::native_registry::NativeRegistry;
 
@@ -24,4 +25,5 @@ pub fn register_stdlib(registry: &mut NativeRegistry) {
     registry.register_module("std:math", math::module());
     registry.register_module("std:random", random::module());
     registry.register_module("std:string", string::module());
+    registry.register_module("std:time", time::module());
 }

@@ -20,6 +20,9 @@ rand = "0.8"
 # Cryptographic hashing for std:crypto/hash module
 sha2 = "0.10"
 
+# Date/time handling for std:time module
+chrono = "0.4"
+
 [dev-dependencies]
 # Temporary files and directories for tests
 tempfile = "3"

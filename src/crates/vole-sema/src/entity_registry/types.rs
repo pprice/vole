@@ -141,6 +141,29 @@ impl EntityRegistry {
         None
     }
 
+    /// Look up a record by its short name (string-based, cross-module)
+    /// This searches through all registered types to find one matching the short name
+    /// and of kind Record. Used for module records like Duration and Timestamp.
+    pub fn record_by_short_name(
+        &self,
+        short_name: &str,
+        name_table: &vole_identity::NameTable,
+    ) -> Option<TypeDefId> {
+        tracing::trace!(short_name, "record_by_short_name searching");
+        for type_def in &self.type_defs {
+            if type_def.kind == TypeDefKind::Record {
+                let last_seg = name_table.last_segment_str(type_def.name_id);
+                tracing::trace!(?type_def.name_id, ?last_seg, "checking record");
+                if last_seg.is_some_and(|last_segment| last_segment == short_name) {
+                    tracing::trace!(?type_def.id, "found record by short name");
+                    return Some(type_def.id);
+                }
+            }
+        }
+        tracing::trace!("record not found by short name");
+        None
+    }
+
     /// Look up any type by its short name (string-based, cross-module)
     /// This searches through all registered types to find one matching the short name,
     /// regardless of kind. Useful for resolving error types and other types by name.

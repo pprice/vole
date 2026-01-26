@@ -3135,6 +3135,9 @@ impl Analyzer {
         let mut external_funcs = FxHashSet::default();
         // Interfaces are collected separately for post-analysis lookup
         let mut interface_names: Vec<(NameId, Symbol)> = Vec::new();
+        // Functions are collected for post-analysis type resolution (needed for functions
+        // that reference record/class types defined in the same module)
+        let mut deferred_functions: Vec<(NameId, &FuncDecl)> = Vec::new();
         let module_interner = parser.into_interner();
 
         // For stdlib modules, use symbolic paths like "std:math" for native registry lookups.
@@ -3150,33 +3153,12 @@ impl Analyzer {
         for decl in &program.declarations {
             match decl {
                 Decl::Function(f) => {
-                    // Build function type from signature - resolve directly to TypeId
-                    let func_type_id = {
-                        let mut ctx = TypeResolutionContext {
-                            db: &self.db,
-                            interner: &module_interner,
-                            module_id,
-                            type_params: None,
-                            self_type: None,
-                        };
-                        let param_ids: crate::type_arena::TypeIdVec = f
-                            .params
-                            .iter()
-                            .map(|p| resolve_type_to_id(&p.ty, &mut ctx))
-                            .collect();
-                        let return_id = f
-                            .return_type
-                            .as_ref()
-                            .map(|rt| resolve_type_to_id(rt, &mut ctx))
-                            .unwrap_or_else(|| self.type_arena().void());
-                        self.type_arena_mut().function(param_ids, return_id, false)
-                    };
-
-                    // Store export by name string
+                    // Defer function type resolution until after sub_analyzer.analyze() runs.
+                    // This allows functions to reference record/class types defined in the same module.
                     let name_id =
                         self.name_table_mut()
                             .intern(module_id, &[f.name], &module_interner);
-                    exports.insert(name_id, func_type_id);
+                    deferred_functions.push((name_id, f));
                 }
                 Decl::Let(l) if !l.mutable => {
                     // Only export immutable let bindings (skip type aliases for now)
@@ -3359,6 +3341,31 @@ impl Analyzer {
             self.module_method_resolutions
                 .entry(nested_key)
                 .or_insert(nested_methods);
+        }
+
+        // Now resolve deferred function types after sub-analysis has registered record/class types
+        for (name_id, f) in deferred_functions {
+            let func_type_id = {
+                let mut ctx = TypeResolutionContext {
+                    db: &self.db,
+                    interner: &module_interner,
+                    module_id,
+                    type_params: None,
+                    self_type: None,
+                };
+                let param_ids: crate::type_arena::TypeIdVec = f
+                    .params
+                    .iter()
+                    .map(|p| resolve_type_to_id(&p.ty, &mut ctx))
+                    .collect();
+                let return_id = f
+                    .return_type
+                    .as_ref()
+                    .map(|rt| resolve_type_to_id(rt, &mut ctx))
+                    .unwrap_or_else(|| self.type_arena().void());
+                self.type_arena_mut().function(param_ids, return_id, false)
+            };
+            exports.insert(name_id, func_type_id);
         }
 
         // Now populate interface exports after sub-analysis has registered them

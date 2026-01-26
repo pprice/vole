@@ -387,6 +387,13 @@ impl Compiler<'_> {
                     self.finalize_module_class(class, module_interner);
                 }
             }
+
+            // Finalize module records (register type metadata, declare methods)
+            for decl in &program.declarations {
+                if let Decl::Record(record) = decl {
+                    self.finalize_module_record(record, module_interner);
+                }
+            }
         }
 
         // ============================================
@@ -452,6 +459,19 @@ impl Compiler<'_> {
                     tracing::debug!(class_name = %module_interner.resolve(class.name), "Compiling module class methods");
                     self.compile_module_class_methods(
                         class,
+                        module_interner,
+                        module_path,
+                        &module_global_inits,
+                    )?;
+                }
+            }
+
+            // Compile module record methods (both instance and static)
+            for decl in &program.declarations {
+                if let Decl::Record(record) = decl {
+                    tracing::debug!(record_name = %module_interner.resolve(record.name), "Compiling module record methods");
+                    self.compile_module_record_methods(
+                        record,
                         module_interner,
                         module_path,
                         &module_global_inits,
