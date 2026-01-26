@@ -166,6 +166,26 @@ impl<'src> Parser<'src> {
 
     /// Parse a single type parameter: T or T: Constraint
     fn parse_type_param(&mut self) -> Result<TypeParam, ParseError> {
+        // Check for digit-starting type parameter (e.g., 1T)
+        if self.current.ty == TokenType::IntLiteral {
+            let digit_token = self.current.clone();
+            let next = self.peek_token();
+            // If next token is an identifier immediately adjacent, combine them
+            let param_name =
+                if next.ty == TokenType::Identifier && digit_token.span.end == next.span.start {
+                    format!("{}{}", digit_token.lexeme, next.lexeme)
+                } else {
+                    digit_token.lexeme.clone()
+                };
+            return Err(ParseError::new(
+                ParserError::TypeParamStartsWithDigit {
+                    name: param_name,
+                    span: digit_token.span.into(),
+                },
+                digit_token.span,
+            ));
+        }
+
         let name_token = self.current.clone();
         self.consume(TokenType::Identifier, "expected type parameter name")?;
         let name = self.interner.intern(&name_token.lexeme);

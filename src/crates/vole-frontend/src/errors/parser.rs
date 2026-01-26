@@ -133,4 +133,15 @@ pub enum ParserError {
         #[label("declaration not allowed after test cases")]
         span: SourceSpan,
     },
+
+    #[error("type parameter '{name}' starts with a digit")]
+    #[diagnostic(
+        code(E1028),
+        help("type parameters must start with a letter, not a digit")
+    )]
+    TypeParamStartsWithDigit {
+        name: String,
+        #[label("invalid type parameter name")]
+        span: SourceSpan,
+    },
 }

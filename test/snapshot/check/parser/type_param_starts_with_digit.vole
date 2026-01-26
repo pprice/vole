@@ -1,0 +1,4 @@
+// Test: E1028 - type parameter starts with a digit
+func foo<1T>(x: 1T) -> 1T {
+    return x
+}
