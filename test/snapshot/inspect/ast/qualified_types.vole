@@ -1,0 +1,13 @@
+// Test parsing of module-qualified types
+let mod = import "./dummy"
+
+func return_qualified() -> mod.Type { }
+func param_qualified(x: mod.Type) { }
+func generic_qualified() -> List<mod.Type> { }
+func deep_qualified() -> a.b.c.Type { }
+func generic_qualified_path() -> mod.Generic<i64> { }
+
+func test_let_annotation() {
+    let x: mod.Type = nil
+    let y: mod.Generic<string> = nil
+}

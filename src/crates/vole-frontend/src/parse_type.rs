@@ -254,7 +254,35 @@ impl<'src> Parser<'src> {
             }
             TokenType::Identifier => {
                 self.advance();
-                let sym = self.interner.intern(&token.lexeme);
+                let first_sym = self.interner.intern(&token.lexeme);
+
+                // Check for dotted path: mod.Type or mod.Type<T>
+                if self.check(TokenType::Dot) {
+                    let mut segments = vec![first_sym];
+                    while self.match_token(TokenType::Dot) {
+                        let seg_token = self.current.clone();
+                        self.consume(TokenType::Identifier, "expected identifier after '.'")?;
+                        segments.push(self.interner.intern(&seg_token.lexeme));
+                    }
+
+                    // Check for generic arguments: mod.Type<T>
+                    let args = if self.check(TokenType::Lt) {
+                        self.advance(); // consume '<'
+                        let mut type_args = Vec::new();
+                        if !self.check_gt_in_type_context() {
+                            type_args.push(self.parse_type()?);
+                            while self.match_token(TokenType::Comma) {
+                                type_args.push(self.parse_type()?);
+                            }
+                        }
+                        self.consume_gt_in_type_context()?;
+                        type_args
+                    } else {
+                        Vec::new()
+                    };
+
+                    return Ok(TypeExpr::QualifiedPath { segments, args });
+                }
 
                 // Check for generic arguments: Foo<T, U>
                 if self.check(TokenType::Lt) {
@@ -267,9 +295,12 @@ impl<'src> Parser<'src> {
                         }
                     }
                     self.consume_gt_in_type_context()?;
-                    Ok(TypeExpr::Generic { name: sym, args })
+                    Ok(TypeExpr::Generic {
+                        name: first_sym,
+                        args,
+                    })
                 } else {
-                    Ok(TypeExpr::Named(sym))
+                    Ok(TypeExpr::Named(first_sym))
                 }
             }
             _ => Err(ParseError::new(

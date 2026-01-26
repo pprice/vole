@@ -1,0 +1,33 @@
+[stdout]
+Program
+  Let "mod"
+    init:
+      Import "./dummy"
+  FunctionDecl "return_qualified"
+    return_type: mod.Type
+    body:
+  FunctionDecl "param_qualified"
+    params: [(x: mod.Type)]
+    body:
+  FunctionDecl "generic_qualified"
+    return_type: List<mod.Type>
+    body:
+  FunctionDecl "deep_qualified"
+    return_type: a.b.c.Type
+    body:
+  FunctionDecl "generic_qualified_path"
+    return_type: mod.Generic<i64>
+    body:
+  FunctionDecl "test_let_annotation"
+    body:
+      Let "x"
+        type: mod.Type
+        init:
+          Nil
+      Let "y"
+        type: mod.Generic<string>
+        init:
+          Nil
+
+[stderr]
+// <path>/qualified_types.vole
