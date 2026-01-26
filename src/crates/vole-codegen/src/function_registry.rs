@@ -119,6 +119,8 @@ pub struct FunctionRegistry {
     entries: Vec<FunctionEntry>,
     qualified_lookup: FxHashMap<NameId, FunctionKey>,
     runtime_lookup: FxHashMap<RuntimeFn, FunctionKey>,
+    /// Counter for unique string data names in JIT module
+    string_data_counter: u32,
 }
 
 impl FunctionRegistry {
@@ -128,6 +130,7 @@ impl FunctionRegistry {
             entries: Vec::new(),
             qualified_lookup: FxHashMap::default(),
             runtime_lookup: FxHashMap::default(),
+            string_data_counter: 0,
         }
     }
 
@@ -227,5 +230,12 @@ impl FunctionRegistry {
             return_type: None,
         });
         key
+    }
+
+    /// Generate a unique name for string data in the JIT module.
+    pub fn next_string_data_name(&mut self) -> String {
+        let id = self.string_data_counter;
+        self.string_data_counter += 1;
+        format!("__vole_string_data_{id}")
     }
 }

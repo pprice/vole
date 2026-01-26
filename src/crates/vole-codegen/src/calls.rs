@@ -4,7 +4,7 @@
 
 use cranelift::prelude::*;
 use cranelift_jit::JITModule;
-use cranelift_module::{FuncId, Module};
+use cranelift_module::{DataDescription, FuncId, Linkage, Module};
 use smallvec::{SmallVec, smallvec};
 
 use crate::errors::CodegenError;
@@ -24,12 +24,15 @@ use super::{FunctionKey, FunctionRegistry, RuntimeFn};
 
 /// Compile a string literal by calling vole_string_new.
 /// Returns the raw Cranelift Value - caller should wrap with string_value() for CompiledValue.
+///
+/// String data is allocated in the JIT module's data section to ensure it
+/// remains valid when JIT code runs (avoiding use-after-free in release builds).
 pub(crate) fn compile_string_literal(
     builder: &mut FunctionBuilder,
     s: &str,
     pointer_type: Type,
     module: &mut JITModule,
-    func_registry: &FunctionRegistry,
+    func_registry: &mut FunctionRegistry,
 ) -> Result<Value, String> {
     // Get the vole_string_new function
     let func_id = func_registry
@@ -40,12 +43,25 @@ pub(crate) fn compile_string_literal(
         })?;
     let func_ref = module.declare_func_in_func(func_id, builder.func);
 
-    // Pass the string data pointer and length as constants
-    // The string is a Rust &str, so we can get its pointer and length
-    let data_ptr = s.as_ptr() as i64;
-    let len = s.len() as i64;
+    // Allocate string data in JIT module's data section
+    let data_name = func_registry.next_string_data_name();
+    let data_id = module
+        .declare_data(&data_name, Linkage::Local, false, false)
+        .map_err(|e| e.to_string())?;
 
-    let data_val = builder.ins().iconst(pointer_type, data_ptr);
+    // Define the data with the string bytes
+    let mut data_desc = DataDescription::new();
+    data_desc.define(s.as_bytes().to_vec().into_boxed_slice());
+    module
+        .define_data(data_id, &data_desc)
+        .map_err(|e| e.to_string())?;
+
+    // Get data reference for use in current function
+    let data_gv = module.declare_data_in_func(data_id, builder.func);
+    let data_val = builder.ins().global_value(pointer_type, data_gv);
+
+    // Pass length as constant
+    let len = s.len() as i64;
     let len_val = builder.ins().iconst(pointer_type, len);
 
     // Call vole_string_new(data, len) -> *mut RcString
