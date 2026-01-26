@@ -35,6 +35,17 @@ impl From<&str> for IntrinsicKey {
 pub enum IntrinsicHandler {
     /// Constant float value (nan, infinity, epsilon).
     FloatConstant(FloatConstant),
+    /// Unary float operation (sqrt, abs, floor, ceil, etc.).
+    UnaryFloatOp(UnaryFloatOp),
+}
+
+/// Unary float operations that take one argument and return a float.
+#[derive(Debug, Clone, Copy)]
+pub enum UnaryFloatOp {
+    /// Square root (f32)
+    F32Sqrt,
+    /// Square root (f64)
+    F64Sqrt,
 }
 
 /// Float constant intrinsic values.
@@ -122,6 +133,7 @@ impl IntrinsicsRegistry {
             handlers: FxHashMap::default(),
         };
         registry.register_float_intrinsics();
+        registry.register_float_operations();
         registry
     }
 
@@ -173,6 +185,16 @@ impl IntrinsicsRegistry {
         self.register(IntrinsicKey::new("f64", "neg_infinity"), FC(F64NegInfinity));
         self.register(IntrinsicKey::new("f64", "epsilon"), FC(F64Epsilon));
     }
+
+    /// Register float operation intrinsics (sqrt, etc.).
+    fn register_float_operations(&mut self) {
+        use IntrinsicHandler::UnaryFloatOp as UF;
+        use UnaryFloatOp::*;
+
+        // sqrt
+        self.register(IntrinsicKey::from("f32_sqrt"), UF(F32Sqrt));
+        self.register(IntrinsicKey::from("f64_sqrt"), UF(F64Sqrt));
+    }
 }
 
 #[cfg(test)]
@@ -183,20 +205,24 @@ mod tests {
     fn test_registry_contains_float_intrinsics() {
         let registry = IntrinsicsRegistry::new();
 
-        // Verify all f32 intrinsics are registered
+        // Verify all f32 constant intrinsics are registered
         assert!(registry.contains(&IntrinsicKey::new("f32", "nan")));
         assert!(registry.contains(&IntrinsicKey::new("f32", "infinity")));
         assert!(registry.contains(&IntrinsicKey::new("f32", "neg_infinity")));
         assert!(registry.contains(&IntrinsicKey::new("f32", "epsilon")));
 
-        // Verify all f64 intrinsics are registered
+        // Verify all f64 constant intrinsics are registered
         assert!(registry.contains(&IntrinsicKey::new("f64", "nan")));
         assert!(registry.contains(&IntrinsicKey::new("f64", "infinity")));
         assert!(registry.contains(&IntrinsicKey::new("f64", "neg_infinity")));
         assert!(registry.contains(&IntrinsicKey::new("f64", "epsilon")));
 
-        // Verify count
-        assert_eq!(registry.len(), 8);
+        // Verify float operations are registered
+        assert!(registry.contains(&IntrinsicKey::from("f32_sqrt")));
+        assert!(registry.contains(&IntrinsicKey::from("f64_sqrt")));
+
+        // Verify count: 8 constant intrinsics + 2 sqrt operations = 10
+        assert_eq!(registry.len(), 10);
     }
 
     #[test]

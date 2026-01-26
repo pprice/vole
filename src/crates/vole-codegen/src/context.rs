@@ -905,13 +905,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ///
     /// Compiler intrinsics are declared with `external("vole:compiler_intrinsic")` and
     /// emit inline IR instead of FFI calls. The intrinsic key format is `{type}_{method}`.
-    fn call_compiler_intrinsic(
+    pub fn call_compiler_intrinsic(
         &mut self,
         intrinsic_key: &str,
-        _args: &[Value],
+        args: &[Value],
         _return_type_id: TypeId,
     ) -> Result<CompiledValue, String> {
-        use crate::intrinsics::{FloatConstant, IntrinsicHandler, IntrinsicKey};
+        use crate::intrinsics::{FloatConstant, IntrinsicHandler, IntrinsicKey, UnaryFloatOp};
 
         let key = IntrinsicKey::from(intrinsic_key);
         let handler = self
@@ -960,7 +960,26 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                         (v, types::F64, TypeId::F64)
                     }
                 };
-                // Use the expected return type from the intrinsic handler
+                Ok(CompiledValue { value, ty, type_id })
+            }
+            IntrinsicHandler::UnaryFloatOp(op) => {
+                if args.is_empty() {
+                    return Err(format!(
+                        "unary float intrinsic \"{}\" requires 1 argument",
+                        intrinsic_key
+                    ));
+                }
+                let arg = args[0];
+                let (value, ty, type_id) = match op {
+                    UnaryFloatOp::F32Sqrt => {
+                        let v = self.builder.ins().sqrt(arg);
+                        (v, types::F32, TypeId::F32)
+                    }
+                    UnaryFloatOp::F64Sqrt => {
+                        let v = self.builder.ins().sqrt(arg);
+                        (v, types::F64, TypeId::F64)
+                    }
+                };
                 Ok(CompiledValue { value, ty, type_id })
             }
         }

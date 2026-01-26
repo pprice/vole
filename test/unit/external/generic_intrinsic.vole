@@ -1,0 +1,60 @@
+// Test generic external functions with type-to-intrinsic mapping via where block.
+// This tests the new syntax: func sqrt<T>(x: T) -> T where { f32 => "f32_sqrt", f64 => "f64_sqrt" }
+
+// Declare a generic sqrt function that dispatches to type-specific intrinsics
+// Note: commas between mappings are optional
+external("vole:compiler_intrinsic") {
+    func sqrt<T>(x: T) -> T where {
+        f32 => "f32_sqrt"
+        f64 => "f64_sqrt"
+    }
+}
+
+// Also test that commas work (optional commas syntax)
+external("vole:compiler_intrinsic") {
+    func sqrt_with_commas<T>(x: T) -> T where {
+        f32 => "f32_sqrt",
+        f64 => "f64_sqrt",
+    }
+}
+
+tests "generic external functions with where block" {
+    test "sqrt<f64> dispatches to f64_sqrt intrinsic" {
+        let x: f64 = 4.0
+        let result = sqrt(x)
+        // sqrt(4.0) = 2.0
+        assert(result == 2.0)
+    }
+
+    test "sqrt<f32> dispatches to f32_sqrt intrinsic" {
+        let x: f32 = 9.0
+        let result = sqrt(x)
+        // sqrt(9.0) = 3.0
+        assert(result == 3.0)
+    }
+
+    test "sqrt of 1.0 returns 1.0" {
+        let f64_result: f64 = sqrt(1.0)
+        assert(f64_result == 1.0)
+    }
+
+    test "sqrt of 0.0 returns 0.0" {
+        let result: f64 = sqrt(0.0)
+        assert(result == 0.0)
+    }
+
+    test "sqrt with commas in where block" {
+        // Test that commas are optional but allowed
+        // This is already tested by parsing the func above, but we verify it works at runtime
+        let x: f64 = 16.0
+        let result = sqrt(x)
+        assert(result == 4.0)
+    }
+
+    test "sqrt_with_commas function with commas in where block" {
+        // Test that the function declared with commas works correctly
+        let x: f64 = 25.0
+        let result = sqrt_with_commas(x)
+        assert(result == 5.0)
+    }
+}

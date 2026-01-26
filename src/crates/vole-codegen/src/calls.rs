@@ -375,16 +375,20 @@ impl Cg<'_, '_, '_> {
             "checking for generic function call"
         );
         if let Some(monomorph_key) = monomorph_key {
-            // Extract what we need from the monomorph cache before any mutable borrows
+            // Extract what we need from the monomorph cache before any mutable borrows.
+            // We need original_name, mangled_name, return_type_id, and a clone of substitutions.
             let instance_data = self.monomorph_cache().get(monomorph_key).map(|inst| {
                 (
                     inst.original_name,
                     inst.mangled_name,
                     inst.func_type.return_type_id,
+                    inst.substitutions.clone(),
                 )
             });
 
-            if let Some((original_name, mangled_name, return_type_id)) = instance_data {
+            if let Some((original_name, mangled_name, return_type_id, substitutions)) =
+                instance_data
+            {
                 tracing::trace!(
                     instance_name = ?original_name,
                     mangled_name = ?mangled_name,
@@ -397,8 +401,42 @@ impl Cg<'_, '_, '_> {
                 }
                 tracing::trace!("no func_id, checking for external function");
 
-                // For generic external functions, call them directly with type erasure
-                // They don't have compiled func_id, but we can look them up in native_registry
+                // For generic external functions with type mappings, look up intrinsic by concrete type
+                if let Some(generic_ext_info) = self
+                    .analyzed()
+                    .implement_registry()
+                    .get_generic_external(callee_name)
+                {
+                    // Find the intrinsic key for the concrete type
+                    // For functions like sqrt<T>, we need to match the substituted T type
+                    let intrinsic_key = self.find_intrinsic_key_for_monomorph(
+                        &generic_ext_info.type_mappings,
+                        &substitutions,
+                    );
+
+                    if let Some(key) = intrinsic_key {
+                        // Get the module path
+                        let module_path = self
+                            .name_table()
+                            .last_segment_str(generic_ext_info.module_path)
+                            .unwrap_or_default();
+
+                        // The func_type from the monomorph instance may have TypeParams that weren't
+                        // inferred from arguments (like return type params). Apply class type
+                        // substitutions to fully resolve the type.
+                        let return_type_id = self.substitute_type(return_type_id);
+
+                        return self.call_generic_external_intrinsic(
+                            &module_path,
+                            &key,
+                            call,
+                            return_type_id,
+                        );
+                    }
+                }
+
+                // Fallback: For generic external functions without type mappings,
+                // call them directly with type erasure via native_registry
                 if let Some(ext_info) = self
                     .analyzed()
                     .implement_registry()
@@ -1182,6 +1220,52 @@ impl Cg<'_, '_, '_> {
                 type_id,
             })
         }
+    }
+
+    /// Find the intrinsic key for a generic external function call based on type mappings.
+    /// Looks at the monomorphization substitutions and finds a matching type in the mappings.
+    fn find_intrinsic_key_for_monomorph(
+        &self,
+        type_mappings: &[vole_sema::implement_registry::TypeMappingEntry],
+        substitutions: &rustc_hash::FxHashMap<vole_identity::NameId, TypeId>,
+    ) -> Option<String> {
+        // Check each mapping to see if it matches any of the substituted types
+        for mapping in type_mappings {
+            // For each type param substitution, check if it matches this mapping's type
+            for &concrete_type in substitutions.values() {
+                if concrete_type == mapping.type_id {
+                    return Some(mapping.intrinsic_key.clone());
+                }
+            }
+        }
+        None
+    }
+
+    /// Call a generic external function as a compiler intrinsic.
+    /// Uses the intrinsic key from type mappings to dispatch to the correct handler.
+    fn call_generic_external_intrinsic(
+        &mut self,
+        module_path: &str,
+        intrinsic_key: &str,
+        call: &CallExpr,
+        return_type_id: TypeId,
+    ) -> Result<CompiledValue, String> {
+        // Check if this is a compiler intrinsic module
+        if module_path == Self::COMPILER_INTRINSIC_MODULE {
+            // Compile arguments (for intrinsics that take args)
+            let args = self.compile_call_args(&call.args)?;
+            return self.call_compiler_intrinsic(intrinsic_key, &args, return_type_id);
+        }
+
+        // Otherwise, look up in native registry
+        if let Some(native_func) = self.native_funcs().lookup(module_path, intrinsic_key) {
+            return self.compile_native_call_with_types(native_func, call, return_type_id);
+        }
+
+        Err(format!(
+            "generic external intrinsic \"{}::{}\" not found",
+            module_path, intrinsic_key
+        ))
     }
 }
 

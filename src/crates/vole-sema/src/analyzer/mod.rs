@@ -24,7 +24,10 @@ use crate::generic::{
     ClassMethodMonomorphKey, MonomorphInstance, MonomorphKey, StaticMethodMonomorphKey,
     TypeParamInfo, TypeParamScope, TypeParamScopeStack, TypeParamVariance,
 };
-use crate::implement_registry::{ExternalMethodInfo, ImplTypeId, ImplementRegistry, MethodImpl};
+use crate::implement_registry::{
+    ExternalMethodInfo, GenericExternalInfo, ImplTypeId, ImplementRegistry, MethodImpl,
+    TypeMappingEntry,
+};
 use crate::module::ModuleLoader;
 use crate::resolution::{MethodResolutions, ResolvedMethod};
 use crate::resolve::resolve_type_to_id;

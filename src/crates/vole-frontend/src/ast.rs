@@ -201,6 +201,16 @@ pub struct StaticsBlock {
     pub span: Span,
 }
 
+/// Type mapping entry for generic external functions.
+/// Maps a concrete type to an intrinsic key.
+/// Example: `f32 => "f32_sqrt"` maps f32 to the "f32_sqrt" intrinsic.
+#[derive(Debug, Clone)]
+pub struct TypeMapping {
+    pub type_expr: TypeExpr,
+    pub intrinsic_key: String,
+    pub span: Span,
+}
+
 /// External function declaration
 #[derive(Debug, Clone)]
 pub struct ExternalFunc {
@@ -209,6 +219,10 @@ pub struct ExternalFunc {
     pub type_params: Vec<TypeParam>, // Generic type params for type-erased external functions
     pub params: Vec<Param>,
     pub return_type: Option<TypeExpr>,
+    /// Type-to-intrinsic mappings for generic external functions.
+    /// Each mapping specifies which intrinsic key to use for a concrete type.
+    /// Example: `where { f32 => "f32_sqrt", f64 => "f64_sqrt" }`
+    pub type_mappings: Option<Vec<TypeMapping>>,
     pub span: Span,
 }
 
@@ -992,6 +1006,7 @@ mod tests {
             type_params: vec![],
             params: vec![],
             return_type: None,
+            type_mappings: None,
             span: Span::default(),
         };
         assert_eq!(ef.native_name.as_deref(), Some("string_length"));
@@ -1005,6 +1020,7 @@ mod tests {
             type_params: vec![],
             params: vec![],
             return_type: None,
+            type_mappings: None,
             span: Span::default(),
         };
         assert!(ef.native_name.is_none());

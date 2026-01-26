@@ -65,6 +65,7 @@ impl<'src> Parser<'src> {
     /// Forms:
     ///   func name(params) -> type
     ///   func "native_name" as name(params) -> type
+    ///   func name<T: Float>(x: T) -> T where { f32 => "f32_sqrt", f64 => "f64_sqrt" }
     pub(super) fn parse_external_func(&mut self) -> Result<ExternalFunc, ParseError> {
         let start_span = self.current.span;
         self.consume(TokenType::KwFunc, "expected 'func' in external block")?;
@@ -118,6 +119,9 @@ impl<'src> Parser<'src> {
             None
         };
 
+        // Parse optional where block with type mappings
+        let type_mappings = self.parse_where_type_mappings()?;
+
         let span = start_span.merge(self.previous.span);
 
         Ok(ExternalFunc {
@@ -126,7 +130,75 @@ impl<'src> Parser<'src> {
             type_params,
             params,
             return_type,
+            type_mappings,
             span,
         })
+    }
+
+    /// Parse an optional `where { TypeExpr => "intrinsic_key", ... }` block.
+    /// Returns None if no where block is present.
+    /// Syntax:
+    ///   where {
+    ///     f32 => "f32_sqrt"
+    ///     f64 => "f64_sqrt"
+    ///   }
+    /// Commas between mappings are optional.
+    fn parse_where_type_mappings(&mut self) -> Result<Option<Vec<TypeMapping>>, ParseError> {
+        self.skip_newlines();
+
+        // Check for 'where' keyword
+        if !self.match_token(TokenType::KwWhere) {
+            return Ok(None);
+        }
+
+        self.skip_newlines();
+        self.consume(TokenType::LBrace, "expected '{' after 'where'")?;
+        self.skip_newlines();
+
+        let mut mappings = Vec::new();
+
+        while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
+            let mapping_start = self.current.span;
+
+            // Parse the type expression
+            let type_expr = self.parse_type()?;
+
+            // Expect '=>' for the mapping
+            self.consume(
+                TokenType::FatArrow,
+                "expected '=>' after type in where mapping",
+            )?;
+
+            // Expect a string literal for the intrinsic key
+            if !self.check(TokenType::StringLiteral) {
+                return Err(ParseError::new(
+                    ParserError::ExpectedToken {
+                        expected: "string literal".to_string(),
+                        found: self.current.ty.as_str().to_string(),
+                        span: self.current.span.into(),
+                    },
+                    self.current.span,
+                ));
+            }
+
+            let key_token = self.current.clone();
+            self.advance();
+            let intrinsic_key = self.process_string_content(&key_token.lexeme);
+
+            let mapping_span = mapping_start.merge(self.previous.span);
+            mappings.push(TypeMapping {
+                type_expr,
+                intrinsic_key,
+                span: mapping_span,
+            });
+
+            // Comma is optional between mappings
+            self.match_token(TokenType::Comma);
+            self.skip_newlines();
+        }
+
+        self.consume(TokenType::RBrace, "expected '}' to close where block")?;
+
+        Ok(Some(mappings))
     }
 }

@@ -5,7 +5,7 @@ use super::*;
 use crate::entity_defs::{GenericFuncInfo, GenericTypeInfo, TypeDefKind};
 use crate::generic::TypeConstraint;
 use crate::type_arena::{InternedStructural, TypeId as ArenaTypeId, TypeIdVec};
-use vole_frontend::ast::{ExprKind, FieldDef as AstFieldDef, LetInit, TypeExpr};
+use vole_frontend::ast::{ExprKind, FieldDef as AstFieldDef, LetInit, TypeExpr, TypeMapping};
 
 /// Extract the base interface name from a TypeExpr.
 /// For `Iterator` returns `Iterator`, for `Iterator<i64>` returns `Iterator`.
@@ -2452,18 +2452,39 @@ impl Analyzer {
 
                 // Store external info for codegen
                 let name_str = interner.resolve(func.vole_name).to_string();
-                let native_name_str = func.native_name.clone().unwrap_or_else(|| name_str.clone());
-                self.implement_registry_mut().register_external_func(
-                    name_str,
-                    ExternalMethodInfo {
-                        module_path: self
-                            .name_table_mut()
-                            .intern_raw(builtin_mod, &[&ext_block.module_path]),
-                        native_name: self
-                            .name_table_mut()
-                            .intern_raw(builtin_mod, &[&native_name_str]),
-                    },
-                );
+
+                // If the function has type_mappings, register as GenericExternalInfo
+                if let Some(ref mappings) = func.type_mappings {
+                    let module_path = self
+                        .name_table_mut()
+                        .intern_raw(builtin_mod, &[&ext_block.module_path]);
+
+                    // Resolve each type mapping to TypeId
+                    let type_mappings = self.resolve_type_mappings(mappings, interner);
+
+                    self.implement_registry_mut().register_generic_external(
+                        name_str,
+                        GenericExternalInfo {
+                            module_path,
+                            type_mappings,
+                        },
+                    );
+                } else {
+                    // No type mappings, use the native_name as before
+                    let native_name_str =
+                        func.native_name.clone().unwrap_or_else(|| name_str.clone());
+                    self.implement_registry_mut().register_external_func(
+                        name_str,
+                        ExternalMethodInfo {
+                            module_path: self
+                                .name_table_mut()
+                                .intern_raw(builtin_mod, &[&ext_block.module_path]),
+                            native_name: self
+                                .name_table_mut()
+                                .intern_raw(builtin_mod, &[&native_name_str]),
+                        },
+                    );
+                }
             } else {
                 // Non-generic external function
                 let params_id: Vec<ArenaTypeId> = func
@@ -2516,5 +2537,24 @@ impl Analyzer {
                 );
             }
         }
+    }
+
+    /// Resolve type mappings from a where block to TypeMappingEntry list.
+    /// Each TypeMapping (AST) is converted to TypeMappingEntry (resolved TypeId + key).
+    fn resolve_type_mappings(
+        &mut self,
+        mappings: &[TypeMapping],
+        interner: &Interner,
+    ) -> Vec<TypeMappingEntry> {
+        mappings
+            .iter()
+            .map(|mapping| {
+                let type_id = self.resolve_type_id(&mapping.type_expr, interner);
+                TypeMappingEntry {
+                    type_id,
+                    intrinsic_key: mapping.intrinsic_key.clone(),
+                }
+            })
+            .collect()
     }
 }

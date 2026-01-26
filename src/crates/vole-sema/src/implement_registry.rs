@@ -123,6 +123,27 @@ pub struct ExternalMethodInfo {
     pub native_name: NameId,
 }
 
+/// Type-to-intrinsic mapping for generic external functions.
+/// Used during codegen to dispatch to the correct intrinsic based on concrete type.
+#[derive(Debug, Clone)]
+pub struct TypeMappingEntry {
+    /// The concrete type that this mapping applies to
+    pub type_id: TypeId,
+    /// The intrinsic key to use when the function is called with this type
+    pub intrinsic_key: String,
+}
+
+/// Info for generic external functions with type mappings.
+/// Stored separately from ExternalMethodInfo because type mappings
+/// require heap allocation (Vec) while ExternalMethodInfo is Copy.
+#[derive(Debug, Clone)]
+pub struct GenericExternalInfo {
+    /// The module path for this external function
+    pub module_path: NameId,
+    /// Type-to-intrinsic mappings from the where block
+    pub type_mappings: Vec<TypeMappingEntry>,
+}
+
 /// Implementation of a method
 #[derive(Debug, Clone)]
 pub struct MethodImpl {
@@ -138,6 +159,8 @@ pub struct ImplementRegistry {
     methods: FxHashMap<MethodKey, MethodImpl>,
     /// External function info by string name (module path and native name) for prelude functions
     external_func_info: FxHashMap<String, ExternalMethodInfo>,
+    /// Generic external function info with type mappings (from where blocks)
+    generic_external_info: FxHashMap<String, GenericExternalInfo>,
 }
 
 impl ImplementRegistry {
@@ -153,6 +176,16 @@ impl ImplementRegistry {
     /// Look up external function info by name
     pub fn get_external_func(&self, name: &str) -> Option<&ExternalMethodInfo> {
         self.external_func_info.get(name)
+    }
+
+    /// Register generic external function info with type mappings
+    pub fn register_generic_external(&mut self, name: String, info: GenericExternalInfo) {
+        self.generic_external_info.insert(name, info);
+    }
+
+    /// Look up generic external function info by name
+    pub fn get_generic_external(&self, name: &str) -> Option<&GenericExternalInfo> {
+        self.generic_external_info.get(name)
     }
 
     /// Register a method for a type
@@ -189,6 +222,10 @@ impl ImplementRegistry {
         }
         for (name, info) in &other.external_func_info {
             self.external_func_info.insert(name.clone(), *info);
+        }
+        for (name, info) in &other.generic_external_info {
+            self.generic_external_info
+                .insert(name.clone(), info.clone());
         }
     }
 }

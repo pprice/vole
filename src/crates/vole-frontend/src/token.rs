@@ -54,6 +54,7 @@ pub enum TokenType {
     KwStatics,    // statics keyword (static method blocks)
     KwStatic,     // static keyword (static interface sugar)
     KwWhen,       // when keyword (conditional expressions)
+    KwWhere,      // where keyword (generic type mappings)
 
     // Type keywords
     KwI8,
@@ -177,6 +178,7 @@ impl TokenType {
             Self::KwStatics => "statics",
             Self::KwStatic => "static",
             Self::KwWhen => "when",
+            Self::KwWhere => "where",
             Self::KwI8 => "i8",
             Self::KwI16 => "i16",
             Self::KwI32 => "i32",
