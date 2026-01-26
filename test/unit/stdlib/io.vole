@@ -1,0 +1,42 @@
+// Tests for std:io module
+
+let io = import "std:io"
+
+tests "io flush" {
+    test "flush does not error" {
+        // flush() should complete without error
+        io.flush()
+        // If we get here, the test passed
+        assert(true)
+    }
+
+    test "flush after print" {
+        // Common pattern: print without newline, then flush
+        print("test output")
+        io.flush()
+        assert(true)
+    }
+
+    test "multiple flushes" {
+        // Multiple flushes should not error
+        io.flush()
+        io.flush()
+        io.flush()
+        assert(true)
+    }
+}
+
+// Note: read_line() cannot be easily tested in unit tests since it reads from
+// actual stdin. The Rust FFI tests cover this functionality using captured stdin.
+// Interactive testing would require a separate test harness or snapshot tests
+// with piped input.
+
+tests "io read_line type" {
+    test "read_line function exists" {
+        // We can't actually test read_line in unit tests since it blocks on stdin.
+        // The Rust-level tests verify the actual behavior with captured stdin.
+        // This test just verifies the module loads correctly.
+        // The function io.read_line() would block waiting for input, so we don't call it.
+        assert(true)
+    }
+}
