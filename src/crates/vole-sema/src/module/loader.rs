@@ -233,7 +233,8 @@ impl ModuleLoader {
 
     /// Resolve an import path to a canonical file path.
     /// `from_file` is required for relative imports.
-    fn resolve_path(
+    /// Returns the canonicalized path without loading the file content.
+    pub fn resolve_path(
         &self,
         import_path: &str,
         from_file: Option<&Path>,

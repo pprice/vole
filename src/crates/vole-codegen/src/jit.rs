@@ -3,7 +3,7 @@
 use cranelift::prelude::*;
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 /// Cache of compiled module functions that can be shared across JitContexts.
 /// The JitContext that compiled these functions must be kept alive.
@@ -13,6 +13,8 @@ pub struct CompiledModules {
     jit: JitContext,
     /// Function name -> function pointer for all compiled module functions
     pub functions: FxHashMap<String, *const u8>,
+    /// Module paths that have been processed (even if they only have external functions)
+    compiled_module_paths: FxHashSet<String>,
 }
 
 // Safety: Function pointers are valid for the lifetime of the CompiledModules
@@ -23,7 +25,8 @@ unsafe impl Sync for CompiledModules {}
 impl CompiledModules {
     /// Create a new CompiledModules from a finalized JitContext.
     /// Extracts function pointers for all declared functions.
-    pub fn new(mut jit: JitContext) -> Self {
+    /// `module_paths` is the list of module paths that were processed.
+    pub fn new(mut jit: JitContext, module_paths: Vec<String>) -> Self {
         // Finalize to get function pointers
         let _ = jit.finalize();
 
@@ -37,7 +40,11 @@ impl CompiledModules {
             })
             .collect();
 
-        Self { jit, functions }
+        Self {
+            jit,
+            functions,
+            compiled_module_paths: module_paths.into_iter().collect(),
+        }
     }
 
     /// Check if a function by name is present in the compiled modules
@@ -45,14 +52,9 @@ impl CompiledModules {
         self.functions.contains_key(name)
     }
 
-    /// Check if all functions with a given prefix are present
-    /// Used to check if a module (e.g., "std:math") has been compiled
-    pub fn has_module(&self, module_prefix: &str) -> bool {
-        // If no functions with this prefix exist, we assume the module wasn't compiled
-        // This is a heuristic - a module might have no pure Vole functions
-        self.functions
-            .keys()
-            .any(|name| name.starts_with(module_prefix))
+    /// Check if a module has been processed (compiled or registered external functions)
+    pub fn has_module(&self, module_path: &str) -> bool {
+        self.compiled_module_paths.contains(module_path)
     }
 }
 

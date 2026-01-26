@@ -228,9 +228,9 @@ impl Analyzer {
                 .unwrap_or_else(|_| module_info.path.clone())
                 .to_string_lossy()
                 .to_string();
-            self.module_type_ids.insert(canonical_path, module_type_id);
             self.module_type_ids
-                .insert(import_path.to_string(), module_type_id);
+                .borrow_mut()
+                .insert(canonical_path, module_type_id);
 
             // Store prelude program for codegen
             self.module_programs

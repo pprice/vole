@@ -417,12 +417,10 @@ fn run_source_tests_with_modules(
 
     // Check if cached modules contain all modules needed by this file
     let can_use_cache = compiled_modules.as_ref().is_some_and(|modules| {
-        // Check if all module paths in the current file are present in the cache
-        analyzed.module_programs.keys().all(|module_path| {
-            // Module path like "std:math" becomes prefix "std:math::"
-            let prefix = format!("{}::", module_path);
-            modules.has_module(&prefix) || modules.has_module(module_path)
-        })
+        analyzed
+            .module_programs
+            .keys()
+            .all(|module_path| modules.has_module(module_path))
     });
 
     let options = if release {
@@ -481,7 +479,9 @@ fn run_source_tests_with_modules(
             };
             match compile_result {
                 Ok(()) => {
-                    *compiled_modules = Some(CompiledModules::new(modules_jit));
+                    let module_paths: Vec<String> =
+                        analyzed.module_programs.keys().cloned().collect();
+                    *compiled_modules = Some(CompiledModules::new(modules_jit, module_paths));
                 }
                 Err(e) => {
                     tracing::warn!("Modules compilation failed: {}", e);

@@ -269,8 +269,9 @@ pub struct Analyzer {
     pub method_resolutions: MethodResolutions,
     /// Module loader for handling imports
     module_loader: ModuleLoader,
-    /// Cached module TypeIds by import path (avoids re-parsing)
-    module_type_ids: FxHashMap<String, ArenaTypeId>,
+    /// Cached module TypeIds by import path (avoids re-parsing).
+    /// Shared via Rc<RefCell> so sub-analyzers can see and update the same cache.
+    module_type_ids: Rc<RefCell<FxHashMap<String, ArenaTypeId>>>,
     /// Parsed module programs and their interners (for compiling pure Vole functions)
     module_programs: FxHashMap<String, (Program, Interner)>,
     /// Expression types for module programs (keyed by module path -> NodeId -> ArenaTypeId)
@@ -364,7 +365,7 @@ impl Analyzer {
             is_check_results: FxHashMap::default(),
             method_resolutions: MethodResolutions::new(),
             module_loader,
-            module_type_ids: FxHashMap::default(),
+            module_type_ids: Rc::new(RefCell::new(FxHashMap::default())),
             module_programs: FxHashMap::default(),
             module_expr_types: FxHashMap::default(),
             module_method_resolutions: FxHashMap::default(),
@@ -432,7 +433,7 @@ impl Analyzer {
             is_check_results: FxHashMap::default(),
             method_resolutions: MethodResolutions::new(),
             module_loader,
-            module_type_ids: FxHashMap::default(),
+            module_type_ids: Rc::new(RefCell::new(FxHashMap::default())),
             module_programs: FxHashMap::default(),
             module_expr_types: FxHashMap::default(),
             module_method_resolutions: FxHashMap::default(),
@@ -508,7 +509,7 @@ impl Analyzer {
             is_check_results: FxHashMap::default(),
             method_resolutions: MethodResolutions::new(),
             module_loader,
-            module_type_ids: FxHashMap::default(),
+            module_type_ids: Rc::new(RefCell::new(FxHashMap::default())),
             module_programs: FxHashMap::default(),
             module_expr_types: FxHashMap::default(),
             module_method_resolutions: FxHashMap::default(),
@@ -584,7 +585,7 @@ impl Analyzer {
             is_check_results: FxHashMap::default(),
             method_resolutions: MethodResolutions::new(),
             module_loader,
-            module_type_ids: FxHashMap::default(),
+            module_type_ids: Rc::new(RefCell::new(FxHashMap::default())),
             module_programs: FxHashMap::default(),
             module_expr_types: FxHashMap::default(),
             module_method_resolutions: FxHashMap::default(),
@@ -3022,16 +3023,34 @@ impl Analyzer {
         span: Span,
         _interner: &Interner,
     ) -> Result<ArenaTypeId, ()> {
-        // Check cache first - return cached TypeId directly
-        // Note: We check again after loading to handle path canonicalization
-        if let Some(&type_id) = self.module_type_ids.get(import_path) {
+        // Resolve path first (cheap - no file content read) to get canonical path for cache lookup
+        let canonical_path = match self
+            .module_loader
+            .resolve_path(import_path, self.current_file_path.as_deref())
+        {
+            Ok(path) => path.to_string_lossy().to_string(),
+            Err(e) => {
+                self.add_error(
+                    SemanticError::ModuleNotFound {
+                        path: import_path.to_string(),
+                        message: e.to_string(),
+                        span: span.into(),
+                    },
+                    span,
+                );
+                return Err(());
+            }
+        };
+
+        // Check cache with canonical path
+        let cached_type_id = self.module_type_ids.borrow().get(&canonical_path).copied();
+        if let Some(type_id) = cached_type_id {
             return Ok(type_id);
         }
 
-        // Load the module - use load_relative for relative imports
+        // Cache miss - now load the file content
         let is_relative = import_path.starts_with("./") || import_path.starts_with("../");
         let module_info = if is_relative {
-            // Relative import requires current file context
             match &self.current_file_path {
                 Some(current_path) => {
                     match self.module_loader.load_relative(import_path, current_path) {
@@ -3062,7 +3081,6 @@ impl Analyzer {
                 }
             }
         } else {
-            // Standard library or other non-relative import
             match self.module_loader.load(import_path) {
                 Ok(info) => info,
                 Err(e) => {
@@ -3078,24 +3096,6 @@ impl Analyzer {
                 }
             }
         };
-
-        // Use canonical path as the cache key to handle different import paths
-        // pointing to the same file (e.g., "std:prelude/traits" vs "./traits")
-        // Canonicalize to ensure consistent path representation
-        let canonical_path = module_info
-            .path
-            .canonicalize()
-            .unwrap_or_else(|_| module_info.path.clone())
-            .to_string_lossy()
-            .to_string();
-
-        // Check cache again with canonical path
-        if let Some(&type_id) = self.module_type_ids.get(&canonical_path) {
-            // Also cache with original import_path for faster subsequent lookups
-            self.module_type_ids
-                .insert(import_path.to_string(), type_id);
-            return Ok(type_id);
-        }
 
         // Parse the module
         let mut parser = Parser::new(&module_info.source);
@@ -3360,10 +3360,9 @@ impl Analyzer {
         drop(arena);
 
         // Cache the TypeId with canonical path for consistent lookups
-        self.module_type_ids.insert(canonical_path, type_id);
-        // Also cache with original import_path for faster subsequent lookups
         self.module_type_ids
-            .insert(import_path.to_string(), type_id);
+            .borrow_mut()
+            .insert(canonical_path, type_id);
 
         Ok(type_id)
     }
@@ -3392,7 +3391,7 @@ impl Analyzer {
             method_resolutions: MethodResolutions::new(),
             // Use child loader to inherit sandbox settings (stdlib_root, project_root)
             module_loader: self.module_loader.new_child(),
-            module_type_ids: FxHashMap::default(),
+            module_type_ids: Rc::new(RefCell::new(FxHashMap::default())),
             module_programs: FxHashMap::default(),
             module_expr_types: FxHashMap::default(),
             module_method_resolutions: FxHashMap::default(),
