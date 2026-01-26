@@ -3,25 +3,25 @@
 let { Equatable, Comparable, Hashable, Stringable, Default, Bounded } = import "./traits"
 
 implement Equatable for i64 {
-    external("std:intrinsics") {
+    external("vole:std:runtime") {
         func "i64_equals" as equals(other: Self) -> bool
     }
 }
 
 implement Comparable for i64 {
-    external("std:intrinsics") {
+    external("vole:std:runtime") {
         func "i64_compare" as compare(other: Self) -> i32
     }
 }
 
 implement Hashable for i64 {
-    external("std:intrinsics") {
+    external("vole:std:runtime") {
         func "i64_hash" as hash() -> i64
     }
 }
 
 implement Stringable for i64 {
-    external("std:intrinsics") {
+    external("vole:std:runtime") {
         func "i64_to_string" as to_string() -> string
     }
 }

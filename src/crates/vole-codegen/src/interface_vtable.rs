@@ -582,8 +582,10 @@ fn compile_external_wrapper<C: VtableCtx>(
         // Extract just the pointer value to end the borrow before jit_module() call
         let interface_iter_ptr = ctx
             .native_registry()
-            .lookup("std:intrinsics", "interface_iter")
-            .ok_or_else(|| "native function std:intrinsics::interface_iter not found".to_string())?
+            .lookup("vole:std:runtime", "interface_iter")
+            .ok_or_else(|| {
+                "native function vole:std:runtime::interface_iter not found".to_string()
+            })?
             .ptr;
         let mut iter_sig = ctx.jit_module().make_signature();
         iter_sig.params.push(AbiParam::new(ctx.ptr_type()));

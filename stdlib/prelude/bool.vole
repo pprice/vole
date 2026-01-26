@@ -3,13 +3,13 @@
 let { Equatable, Stringable, Default } = import "./traits"
 
 implement Equatable for bool {
-    external("std:intrinsics") {
+    external("vole:std:runtime") {
         func "bool_equals" as equals(other: Self) -> bool
     }
 }
 
 implement Stringable for bool {
-    external("std:intrinsics") {
+    external("vole:std:runtime") {
         func "bool_to_string" as to_string() -> string
     }
 }

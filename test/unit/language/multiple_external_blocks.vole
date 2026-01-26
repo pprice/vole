@@ -6,14 +6,14 @@ interface Converter {
     func convert(value: i64) -> string
 
     // Required external binding - built-in types must provide this
-    external("std:intrinsics") {
+    external("vole:std:runtime") {
         func "int_to_string" as convert(value: i64) -> string
     }
 
     // Default external binding - optional for implementors
     func format(value: i64) -> string
 
-    default external("std:intrinsics") {
+    default external("vole:std:runtime") {
         func "int_to_string" as format(value: i64) -> string
     }
 }

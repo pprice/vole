@@ -3,19 +3,19 @@
 let { Equatable, Comparable, Hashable, Default, Bounded } = import "./traits"
 
 implement Equatable for u16 {
-    external("std:intrinsics") {
+    external("vole:std:runtime") {
         func "u16_equals" as equals(other: Self) -> bool
     }
 }
 
 implement Comparable for u16 {
-    external("std:intrinsics") {
+    external("vole:std:runtime") {
         func "u16_compare" as compare(other: Self) -> i32
     }
 }
 
 implement Hashable for u16 {
-    external("std:intrinsics") {
+    external("vole:std:runtime") {
         func "u16_hash" as hash() -> i64
     }
 }

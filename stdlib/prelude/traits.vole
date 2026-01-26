@@ -80,7 +80,7 @@ interface Iterator<T> {
     func enumerate() -> Iterator<[i64, T]>
     func zip(other: Iterator<T>) -> Iterator<[T, T]>
 
-    default external("std:intrinsics") {
+    default external("vole:std:runtime") {
         func "iter_next" as next() -> T | Done
         func "iter_map" as map(f: (T) -> T) -> Iterator<T>
         func "iter_filter" as filter(pred: (T) -> bool) -> Iterator<T>

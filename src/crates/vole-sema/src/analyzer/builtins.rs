@@ -31,7 +31,7 @@ impl Analyzer {
             (
                 namer.intern_raw(builtin_module, &["length"]),
                 namer.intern_raw(builtin_module, &["iter"]),
-                namer.intern_raw(builtin_module, &["std:intrinsics"]),
+                namer.intern_raw(builtin_module, &["vole:std:runtime"]),
                 namer.intern_raw(builtin_module, &["array_iter"]),
                 namer.intern_raw(builtin_module, &["string_chars_iter"]),
                 namer.intern_raw(builtin_module, &["range_iter"]),

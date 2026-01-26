@@ -5,7 +5,7 @@ use crate::RcString;
 use crate::iterator;
 use crate::native_registry::{NativeModule, NativeSignature, NativeType};
 
-/// Create the std:intrinsics native module
+/// Create the vole:std:runtime native module
 pub fn module() -> NativeModule {
     let mut m = NativeModule::new();
 

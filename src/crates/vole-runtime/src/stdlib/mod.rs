@@ -11,7 +11,7 @@ use super::native_registry::NativeRegistry;
 /// Register all standard library modules
 pub fn register_stdlib(registry: &mut NativeRegistry) {
     registry.register_module("std:collections", collections::module());
-    registry.register_module("std:intrinsics", intrinsics::module());
+    registry.register_module("vole:std:runtime", intrinsics::module());
     registry.register_module("std:math", math::module());
     registry.register_module("std:string", string::module());
 }

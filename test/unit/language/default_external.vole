@@ -10,7 +10,7 @@ interface Greeter {
     func formal_greet() -> string
 
     // Mark external block as default - these are optional to implement
-    default external("std:intrinsics") {
+    default external("vole:std:runtime") {
         func "string_concat" as greet() -> string
         func "string_concat" as formal_greet() -> string
     }
