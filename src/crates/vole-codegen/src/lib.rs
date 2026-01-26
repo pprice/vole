@@ -8,6 +8,7 @@ pub mod errors;
 mod expr;
 mod function_registry;
 mod interface_vtable;
+mod intrinsics;
 pub mod jit;
 mod lambda;
 mod method_resolution;
@@ -19,6 +20,7 @@ mod vtable_ctx;
 
 pub use compiler::{Compiler, ControlFlowCtx, TestInfo};
 pub use function_registry::{FunctionKey, FunctionRegistry, RuntimeFn};
+pub use intrinsics::{FloatConstant, IntrinsicHandler, IntrinsicKey, IntrinsicsRegistry};
 pub use jit::{CompiledModules, JitContext, JitOptions};
 pub use types::CompiledValue;
 
