@@ -807,10 +807,11 @@ pub struct IsExpr {
     pub type_span: Span,
 }
 
-/// Struct literal expression: Name { field: value, ... }
+/// Struct literal expression: Name { field: value, ... } or mod.Name { field: value, ... }
 #[derive(Debug, Clone)]
 pub struct StructLiteralExpr {
-    pub name: Symbol,
+    /// Path segments for the type name: [Name] or [mod, Name]
+    pub path: Vec<Symbol>,
     pub type_args: Vec<TypeExpr>,
     pub fields: Vec<StructFieldInit>,
 }

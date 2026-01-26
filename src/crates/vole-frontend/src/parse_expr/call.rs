@@ -54,13 +54,14 @@ impl<'src> Parser<'src> {
                     span,
                 };
             } else if self.match_token(TokenType::Dot) {
-                // Field access or method call: expr.field or expr.method()
+                // Field access, method call, or module-qualified struct literal
                 let field_span = self.current.span;
                 let field_token = self.current.clone();
                 self.consume(TokenType::Identifier, "expected field name after '.'")?;
                 let field = self.interner.intern(&field_token.lexeme);
 
                 // Check for type args: expr.method<T, U>(...) or direct call: expr.method(...)
+                // or module.Type<T> { ... } for qualified generic struct literals
                 let type_args = if self.check(TokenType::Lt) {
                     // Try to parse type args with lookahead
                     self.try_parse_call_type_args()?
@@ -99,11 +100,43 @@ impl<'src> Parser<'src> {
                         })),
                         span,
                     };
+                } else if self.check(TokenType::LBrace) && self.looks_like_struct_literal() {
+                    // Check for module-qualified struct literal: mod.Type { field: value }
+                    // Try to extract a path of identifiers from the left-hand expression
+                    if let Some(mut path) = Self::expr_to_identifier_path(&expr) {
+                        path.push(field);
+                        let start_span = expr.span;
+                        // Parse the struct literal and continue the loop to handle
+                        // chained operations like `mod.Type { f: 1 }.field`
+                        expr = self.struct_literal(path, type_args, start_span)?;
+                    } else if !type_args.is_empty() {
+                        // Had type args but LHS wasn't an identifier path - syntax error
+                        return Err(ParseError::new(
+                            crate::errors::ParserError::ExpectedToken {
+                                expected: "'(' after type arguments".to_string(),
+                                found: self.current.ty.as_str().to_string(),
+                                span: self.current.span.into(),
+                            },
+                            self.current.span,
+                        ));
+                    } else {
+                        // Not an identifier path - fall through to field access
+                        let span = expr.span.merge(field_span);
+                        expr = Expr {
+                            id: self.next_id(),
+                            kind: ExprKind::FieldAccess(Box::new(FieldAccessExpr {
+                                object: expr,
+                                field,
+                                field_span,
+                            })),
+                            span,
+                        };
+                    }
                 } else if !type_args.is_empty() {
-                    // Had type args but no parens - syntax error
+                    // Had type args but no parens or struct literal - syntax error
                     return Err(ParseError::new(
                         crate::errors::ParserError::ExpectedToken {
-                            expected: "'(' after type arguments".to_string(),
+                            expected: "'(' or '{' after type arguments".to_string(),
                             found: self.current.ty.as_str().to_string(),
                             span: self.current.span.into(),
                         },
@@ -173,5 +206,20 @@ impl<'src> Parser<'src> {
             kind: ExprKind::Call(Box::new(CallExpr { callee, args })),
             span,
         })
+    }
+
+    /// Try to extract a path of identifiers from an expression.
+    /// For example, `mod.sub` -> Some([mod, sub]), `x` -> Some([x]), `foo()` -> None
+    /// This is used to check if a field access base could be a module path for qualified struct literals.
+    fn expr_to_identifier_path(expr: &Expr) -> Option<Vec<Symbol>> {
+        match &expr.kind {
+            ExprKind::Identifier(sym) => Some(vec![*sym]),
+            ExprKind::FieldAccess(fa) => {
+                let mut path = Self::expr_to_identifier_path(&fa.object)?;
+                path.push(fa.field);
+                Some(path)
+            }
+            _ => None,
+        }
     }
 }

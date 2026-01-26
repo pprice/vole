@@ -4,7 +4,9 @@ use crate::type_arena::TypeId as ArenaTypeId;
 use crate::type_arena::TypeIdVec;
 use crate::types::StructFieldId;
 use rustc_hash::FxHashMap;
+use vole_frontend::Symbol;
 use vole_frontend::ast::ExprKind;
+use vole_identity::TypeDefId;
 
 impl Analyzer {
     /// Check if a shorthand field value refers to an undefined variable.
@@ -41,16 +43,75 @@ impl Analyzer {
         false
     }
 
+    /// Format a struct literal path for error messages
+    fn format_struct_literal_path(path: &[Symbol], interner: &Interner) -> String {
+        path.iter()
+            .map(|s| interner.resolve(*s))
+            .collect::<Vec<_>>()
+            .join(".")
+    }
+
+    /// Resolve a struct literal path to a TypeDefId.
+    /// For single-segment paths (e.g., `Point`), uses the normal resolver.
+    /// For multi-segment paths (e.g., `time.Duration`), resolves via module exports.
+    fn resolve_struct_literal_path(
+        &mut self,
+        path: &[Symbol],
+        interner: &Interner,
+    ) -> Option<TypeDefId> {
+        if path.is_empty() {
+            return None;
+        }
+
+        if path.len() == 1 {
+            // Simple unqualified type name
+            self.resolver(interner)
+                .resolve_type(path[0], &self.entity_registry())
+        } else {
+            // Module-qualified type name (e.g., time.Duration)
+            // Look up the module binding first
+            let module_sym = path[0];
+            let module_var = self.scope.get(module_sym)?;
+            let module_type_id = module_var.ty;
+
+            // Check if it's a module type
+            let module_info = self.type_arena().unwrap_module(module_type_id).cloned()?;
+
+            // Look up the type in the module's exports
+            let type_sym = path[1];
+            let type_name = interner.resolve(type_sym);
+
+            self.module_name_id(module_info.module_id, type_name)
+                .and_then(|name_id| {
+                    module_info
+                        .exports
+                        .iter()
+                        .find(|(n, _)| *n == name_id)
+                        .and_then(|&(_, export_type_id)| {
+                            // The export_type_id is an ArenaTypeId, we need to extract the TypeDefId
+                            let arena = self.type_arena();
+                            if let Some((type_def_id, _)) = arena.unwrap_record(export_type_id) {
+                                Some(type_def_id)
+                            } else if let Some((type_def_id, _)) =
+                                arena.unwrap_class(export_type_id)
+                            {
+                                Some(type_def_id)
+                            } else {
+                                None
+                            }
+                        })
+                })
+        }
+    }
+
     pub(super) fn check_struct_literal_expr(
         &mut self,
         expr: &Expr,
         struct_lit: &StructLiteralExpr,
         interner: &Interner,
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
-        // Look up the type (class or record) via Resolver
-        let type_id_opt = self
-            .resolver(interner)
-            .resolve_type(struct_lit.name, &self.entity_registry());
+        // Look up the type (class or record) via path resolution
+        let type_id_opt = self.resolve_struct_literal_path(&struct_lit.path, interner);
 
         // Check if this is a generic type (record or class with type parameters)
         // Non-generic types have generic_info for field storage but empty type_params
@@ -98,72 +159,42 @@ impl Analyzer {
                 .collect()
         };
 
-        let (type_name, fields, field_has_default, result_type_id) =
-            if let Some(type_id) = type_id_opt {
-                // Extract type info before doing mutable operations
-                let (kind, generic_info, is_class_valid, is_record_valid) = {
-                    let registry = self.entity_registry();
-                    let type_def = registry.get_type(type_id);
-                    (
-                        type_def.kind,
-                        type_def.generic_info.clone(),
-                        registry.build_class_type(type_id).is_some(),
-                        registry.build_record_type(type_id).is_some(),
-                    )
-                };
-                let fields = generic_info
-                    .as_ref()
-                    .map(get_fields_from_generic_info)
-                    .unwrap_or_default();
-                let field_defaults = generic_info
-                    .as_ref()
-                    .map(|gi| gi.field_has_default.clone())
-                    .unwrap_or_default();
-                match kind {
-                    TypeDefKind::Class => {
-                        if is_class_valid {
-                            let result_id = self.type_arena_mut().class(type_id, vec![]);
-                            (
-                                interner.resolve(struct_lit.name).to_string(),
-                                fields,
-                                field_defaults,
-                                result_id,
-                            )
-                        } else {
-                            self.add_error(
-                                SemanticError::UnknownType {
-                                    name: interner.resolve(struct_lit.name).to_string(),
-                                    span: expr.span.into(),
-                                },
-                                expr.span,
-                            );
-                            return Ok(self.ty_invalid_id());
-                        }
-                    }
-                    TypeDefKind::Record => {
-                        if is_record_valid {
-                            let result_id = self.type_arena_mut().record(type_id, vec![]);
-                            (
-                                interner.resolve(struct_lit.name).to_string(),
-                                fields,
-                                field_defaults,
-                                result_id,
-                            )
-                        } else {
-                            self.add_error(
-                                SemanticError::UnknownType {
-                                    name: interner.resolve(struct_lit.name).to_string(),
-                                    span: expr.span.into(),
-                                },
-                                expr.span,
-                            );
-                            return Ok(self.ty_invalid_id());
-                        }
-                    }
-                    _ => {
+        let (type_name, fields, field_has_default, result_type_id) = if let Some(type_id) =
+            type_id_opt
+        {
+            // Extract type info before doing mutable operations
+            let (kind, generic_info, is_class_valid, is_record_valid) = {
+                let registry = self.entity_registry();
+                let type_def = registry.get_type(type_id);
+                (
+                    type_def.kind,
+                    type_def.generic_info.clone(),
+                    registry.build_class_type(type_id).is_some(),
+                    registry.build_record_type(type_id).is_some(),
+                )
+            };
+            let fields = generic_info
+                .as_ref()
+                .map(get_fields_from_generic_info)
+                .unwrap_or_default();
+            let field_defaults = generic_info
+                .as_ref()
+                .map(|gi| gi.field_has_default.clone())
+                .unwrap_or_default();
+            match kind {
+                TypeDefKind::Class => {
+                    if is_class_valid {
+                        let result_id = self.type_arena_mut().class(type_id, vec![]);
+                        (
+                            Self::format_struct_literal_path(&struct_lit.path, interner),
+                            fields,
+                            field_defaults,
+                            result_id,
+                        )
+                    } else {
                         self.add_error(
                             SemanticError::UnknownType {
-                                name: interner.resolve(struct_lit.name).to_string(),
+                                name: Self::format_struct_literal_path(&struct_lit.path, interner),
                                 span: expr.span.into(),
                             },
                             expr.span,
@@ -171,16 +202,47 @@ impl Analyzer {
                         return Ok(self.ty_invalid_id());
                     }
                 }
-            } else {
-                self.add_error(
-                    SemanticError::UnknownType {
-                        name: interner.resolve(struct_lit.name).to_string(),
-                        span: expr.span.into(),
-                    },
-                    expr.span,
-                );
-                return Ok(self.ty_invalid_id());
-            };
+                TypeDefKind::Record => {
+                    if is_record_valid {
+                        let result_id = self.type_arena_mut().record(type_id, vec![]);
+                        (
+                            Self::format_struct_literal_path(&struct_lit.path, interner),
+                            fields,
+                            field_defaults,
+                            result_id,
+                        )
+                    } else {
+                        self.add_error(
+                            SemanticError::UnknownType {
+                                name: Self::format_struct_literal_path(&struct_lit.path, interner),
+                                span: expr.span.into(),
+                            },
+                            expr.span,
+                        );
+                        return Ok(self.ty_invalid_id());
+                    }
+                }
+                _ => {
+                    self.add_error(
+                        SemanticError::UnknownType {
+                            name: Self::format_struct_literal_path(&struct_lit.path, interner),
+                            span: expr.span.into(),
+                        },
+                        expr.span,
+                    );
+                    return Ok(self.ty_invalid_id());
+                }
+            }
+        } else {
+            self.add_error(
+                SemanticError::UnknownType {
+                    name: Self::format_struct_literal_path(&struct_lit.path, interner),
+                    span: expr.span.into(),
+                },
+                expr.span,
+            );
+            return Ok(self.ty_invalid_id());
+        };
 
         // Check that all required fields are present (fields without defaults)
         let provided_fields: HashSet<String> = struct_lit
@@ -257,7 +319,7 @@ impl Analyzer {
         generic_info: &GenericTypeInfo,
         interner: &Interner,
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
-        let type_name = interner.resolve(struct_lit.name).to_string();
+        let type_name = Self::format_struct_literal_path(&struct_lit.path, interner);
 
         // First, type-check all field values to get their actual types (as TypeId)
         // Use string keys since Symbols may be from different interners
@@ -402,7 +464,7 @@ impl Analyzer {
         generic_info: &GenericTypeInfo,
         interner: &Interner,
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
-        let type_name = interner.resolve(struct_lit.name).to_string();
+        let type_name = Self::format_struct_literal_path(&struct_lit.path, interner);
 
         // First, type-check all field values to get their actual types (as TypeId)
         // Use string keys since Symbols may be from different interners

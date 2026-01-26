@@ -11,7 +11,8 @@ use cranelift::prelude::*;
 use vole_frontend::{Decl, Expr, FieldDef, Program, StructLiteralExpr, Symbol};
 use vole_sema::type_arena::TypeId;
 
-/// Find the field definitions for a type by looking up the class/record declaration in the program
+/// Find the field definitions for a type by looking up the class/record declaration in the program.
+/// For qualified paths, only the last segment (the type name) is used to find the declaration.
 fn find_type_fields(program: &Program, type_name: Symbol) -> Option<&[FieldDef]> {
     for decl in &program.declarations {
         match decl {
@@ -23,29 +24,58 @@ fn find_type_fields(program: &Program, type_name: Symbol) -> Option<&[FieldDef]>
     None
 }
 
+/// Format a struct literal path as a dot-separated string for error messages
+fn format_path(path: &[Symbol], interner: &vole_frontend::Interner) -> String {
+    path.iter()
+        .map(|s| interner.resolve(*s))
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
 impl Cg<'_, '_, '_> {
     pub fn struct_literal(
         &mut self,
         sl: &StructLiteralExpr,
         expr: &Expr,
     ) -> Result<CompiledValue, String> {
-        // Look up TypeDefId from type name using the full resolution chain.
-        // This handles prelude types like Set, Map that are registered in separate modules.
-        // Note: We use the string name rather than Symbol because the current interner
-        // may be module-specific while the query uses the main program's interner.
-        let type_name = self.interner().resolve(sl.name);
-        let query = self.query();
-        let module_id = self
-            .current_module_id()
-            .unwrap_or_else(|| query.main_module());
+        // Get the resolved type from semantic analysis, which handles:
+        // - Simple types like `Point`
+        // - Module-qualified types like `time.Duration`
+        // - Generic instantiation
+        let path_str = format_path(&sl.path, self.interner());
 
-        let type_def_id = query
-            .resolve_type_def_by_str(module_id, type_name)
-            .ok_or_else(|| format!("Unknown type: {} (not in entity registry)", type_name))?;
+        // Resolve the TypeDefId based on path length:
+        // - Single-segment paths (e.g., `Duration`): Use string-based resolution like the original code
+        //   to maintain consistency across multiple file compilations
+        // - Multi-segment paths (e.g., `time.Duration`): Use semantic analysis types which have
+        //   already resolved the module-qualified path
+        let type_def_id = if sl.path.len() == 1 {
+            // Simple type name - use string-based resolution for consistency
+            let type_name = self.interner().resolve(sl.path[0]);
+            let query = self.query();
+            let module_id = self
+                .current_module_id()
+                .unwrap_or_else(|| query.main_module());
+            query.resolve_type_def_by_str(module_id, type_name)
+        } else {
+            // Qualified path - extract TypeDefId from semantic analysis
+            self.get_expr_type(&expr.id).and_then(|expr_type_id| {
+                let arena = self.arena();
+                if let Some((id, _)) = arena.unwrap_record(expr_type_id) {
+                    Some(id)
+                } else if let Some((id, _)) = arena.unwrap_class(expr_type_id) {
+                    Some(id)
+                } else {
+                    None
+                }
+            })
+        }
+        .ok_or_else(|| format!("Unknown type: {} (not in entity registry)", path_str))?;
+
         let metadata = self
             .type_metadata()
             .get(&type_def_id)
-            .ok_or_else(|| format!("Unknown type: {} (not in type_metadata)", type_name))?;
+            .ok_or_else(|| format!("Unknown type: {} (not in type_metadata)", path_str))?;
 
         let type_id = metadata.type_id;
         let field_count = metadata.field_slots.len() as u32;
@@ -106,13 +136,9 @@ impl Cg<'_, '_, '_> {
         // Compile explicitly provided fields
         for init in &sl.fields {
             let init_name = self.interner().resolve(init.name);
-            let slot = *field_slots.get(init_name).ok_or_else(|| {
-                format!(
-                    "Unknown field: {} in type {}",
-                    init_name,
-                    self.interner().resolve(sl.name)
-                )
-            })?;
+            let slot = *field_slots
+                .get(init_name)
+                .ok_or_else(|| format!("Unknown field: {} in type {}", init_name, path_str))?;
 
             let value = self.expr(&init.value)?;
 
@@ -148,15 +174,19 @@ impl Cg<'_, '_, '_> {
         // Look up the original type declaration to get default expressions
         // We use raw pointers to the original AST to avoid cloning, which would
         // invalidate string literal pointers during JIT execution.
-        let field_default_ptrs =
-            self.collect_field_default_ptrs(sl.name, &provided_fields, type_def_id);
+        // For qualified paths, we need the type name (last segment) for looking up field declarations
+        let type_name = sl.path.last().copied();
+        let field_default_ptrs = if let Some(type_name) = type_name {
+            self.collect_field_default_ptrs(type_name, &provided_fields, type_def_id)
+        } else {
+            Vec::new()
+        };
 
         for (field_name, default_expr_ptr) in field_default_ptrs {
             let slot = *field_slots.get(&field_name).ok_or_else(|| {
                 format!(
                     "Unknown field: {} in type {} (default)",
-                    field_name,
-                    self.interner().resolve(sl.name)
+                    field_name, path_str
                 )
             })?;
 

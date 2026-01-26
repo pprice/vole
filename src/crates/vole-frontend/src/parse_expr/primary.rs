@@ -223,7 +223,7 @@ impl<'src> Parser<'src> {
                 // A struct literal looks like `Name { identifier: value }` or `Name { }`
                 // A block starts with statements, keywords, or expressions without `:` after ident
                 if self.check(TokenType::LBrace) && self.looks_like_struct_literal() {
-                    return self.struct_literal(sym, type_args, token.span);
+                    return self.struct_literal(vec![sym], type_args, token.span);
                 }
 
                 // If we parsed type args but no struct literal follows, that's an error
@@ -524,9 +524,10 @@ impl<'src> Parser<'src> {
     }
 
     /// Parse a struct literal: Name { field: value, ... } or Name<T> { field: value, ... }
-    fn struct_literal(
+    /// or mod.Name { field: value, ... }
+    pub(super) fn struct_literal(
         &mut self,
-        name: Symbol,
+        path: Vec<Symbol>,
         type_args: Vec<TypeExpr>,
         start_span: Span,
     ) -> Result<Expr, ParseError> {
@@ -577,7 +578,7 @@ impl<'src> Parser<'src> {
         Ok(Expr {
             id: self.next_id(),
             kind: ExprKind::StructLiteral(Box::new(StructLiteralExpr {
-                name,
+                path,
                 type_args,
                 fields,
             })),

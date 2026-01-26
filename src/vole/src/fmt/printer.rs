@@ -944,7 +944,12 @@ fn print_struct_literal<'a>(
     struct_lit: &StructLiteralExpr,
     interner: &Interner,
 ) -> DocBuilder<'a, Arena<'a>> {
-    let name = interner.resolve(struct_lit.name).to_string();
+    let name = struct_lit
+        .path
+        .iter()
+        .map(|s| interner.resolve(*s))
+        .collect::<Vec<_>>()
+        .join(".");
 
     if struct_lit.fields.is_empty() {
         return arena.text(name).append(arena.text(" {}"));
