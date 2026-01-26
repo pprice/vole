@@ -84,7 +84,7 @@ fn main() -> ExitCode {
     set_color_mode(cli.color);
 
     match cli.command {
-        Commands::Run { file } => run_file(&file, cli.release),
+        Commands::Run { file, root } => run_file(&file, root.as_deref(), cli.release),
         Commands::Check { paths } => check_files(&paths),
         Commands::Test {
             paths,
@@ -92,12 +92,14 @@ fn main() -> ExitCode {
             report,
             max_failures,
             include_skipped,
+            root,
         } => run_tests(
             &paths,
             filter.as_deref(),
             report,
             max_failures,
             include_skipped,
+            root.as_deref(),
             cli.color,
             cli.release,
         ),

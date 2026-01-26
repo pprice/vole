@@ -54,7 +54,7 @@ fn check_stdin() -> ExitCode {
         }
     };
 
-    match parse_and_analyze(&source, "<stdin>") {
+    match parse_and_analyze(&source, "<stdin>", None) {
         Ok(_) => ExitCode::SUCCESS,
         Err(()) => ExitCode::FAILURE,
     }
@@ -72,6 +72,6 @@ fn check_single_file(path: &Path) -> Result<(), ()> {
 
     let file_path = path.to_string_lossy();
     push_context(&format!("checking {}", file_path));
-    parse_and_analyze(&source, &file_path)?;
+    parse_and_analyze(&source, &file_path, None)?;
     Ok(())
 }

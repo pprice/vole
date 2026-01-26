@@ -115,21 +115,35 @@ impl TestResults {
 
 /// Main entry point for the test command
 /// Use "-" alone to read from stdin.
+#[allow(clippy::too_many_arguments)]
 pub fn run_tests(
     paths: &[String],
     filter: Option<&str>,
     report: ReportMode,
     max_failures: u32,
     include_skipped: bool,
+    project_root: Option<&Path>,
     color: ColorMode,
     release: bool,
 ) -> ExitCode {
+    // Validate project root if provided
+    if let Some(root) = project_root {
+        if !root.exists() {
+            eprintln!("error: --root path does not exist: {}", root.display());
+            return ExitCode::FAILURE;
+        }
+        if !root.is_dir() {
+            eprintln!("error: --root path is not a directory: {}", root.display());
+            return ExitCode::FAILURE;
+        }
+    }
+
     let start = Instant::now();
     let colors = TermColors::with_mode(color);
 
     // Handle stdin specially (must be alone)
     if paths.len() == 1 && paths[0] == "-" {
-        return run_stdin_tests(filter, &report, &colors, start, release);
+        return run_stdin_tests(filter, &report, &colors, start, project_root, release);
     }
 
     // Collect all test files from the given paths
@@ -222,6 +236,7 @@ pub fn run_tests(
             &report,
             cache.clone(),
             &mut compiled_modules,
+            project_root,
             release,
         ) {
             Ok(results) => {
@@ -260,6 +275,7 @@ fn run_stdin_tests(
     report: &ReportMode,
     colors: &TermColors,
     start: Instant,
+    project_root: Option<&Path>,
     release: bool,
 ) -> ExitCode {
     let source = match read_stdin() {
@@ -290,6 +306,7 @@ fn run_stdin_tests(
         colors,
         report,
         cache,
+        project_root,
         release,
     ) {
         Ok(results) => {
@@ -328,16 +345,26 @@ fn run_file_tests_with_progress(
     colors: &TermColors,
     report: &ReportMode,
     cache: Rc<RefCell<ModuleCache>>,
+    project_root: Option<&Path>,
     release: bool,
 ) -> Result<TestResults, String> {
     let source = fs::read_to_string(path).map_err(|e| format!("could not read file: {}", e))?;
     let file_path = path.to_string_lossy();
     run_source_tests_with_progress(
-        &source, &file_path, path, filter, colors, report, cache, release,
+        &source,
+        &file_path,
+        path,
+        filter,
+        colors,
+        report,
+        cache,
+        project_root,
+        release,
     )
 }
 
 /// Parse, type check, compile, and run tests with shared compiled modules
+#[allow(clippy::too_many_arguments)]
 fn run_file_tests_with_modules(
     path: &Path,
     filter: Option<&str>,
@@ -345,6 +372,7 @@ fn run_file_tests_with_modules(
     report: &ReportMode,
     cache: Rc<RefCell<ModuleCache>>,
     compiled_modules: &mut Option<CompiledModules>,
+    project_root: Option<&Path>,
     release: bool,
 ) -> Result<TestResults, String> {
     let source = fs::read_to_string(path).map_err(|e| format!("could not read file: {}", e))?;
@@ -358,6 +386,7 @@ fn run_file_tests_with_modules(
         report,
         cache,
         compiled_modules,
+        project_root,
         release,
     )
 }
@@ -373,13 +402,14 @@ fn run_source_tests_with_modules(
     report: &ReportMode,
     cache: Rc<RefCell<ModuleCache>>,
     compiled_modules: &mut Option<CompiledModules>,
+    project_root: Option<&Path>,
     release: bool,
 ) -> Result<TestResults, String> {
     let sema_start = Instant::now();
 
     // Parse and type check with shared cache
-    let analyzed =
-        parse_and_analyze_with_cache(source, file_path, cache).map_err(|()| String::new())?;
+    let analyzed = parse_and_analyze_with_cache(source, file_path, cache, project_root)
+        .map_err(|()| String::new())?;
     let sema_time = sema_start.elapsed();
 
     // Compile - either with pre-compiled modules or compiling them fresh
@@ -558,13 +588,14 @@ fn run_source_tests_with_progress(
     colors: &TermColors,
     report: &ReportMode,
     cache: Rc<RefCell<ModuleCache>>,
+    project_root: Option<&Path>,
     release: bool,
 ) -> Result<TestResults, String> {
     let sema_start = Instant::now();
 
     // Parse and type check with shared cache
-    let analyzed =
-        parse_and_analyze_with_cache(source, file_path, cache).map_err(|()| String::new())?;
+    let analyzed = parse_and_analyze_with_cache(source, file_path, cache, project_root)
+        .map_err(|()| String::new())?;
     let sema_time = sema_start.elapsed();
 
     // Compile

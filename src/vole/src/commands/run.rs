@@ -9,8 +9,20 @@ use crate::codegen::{Compiler, JitContext, JitOptions};
 use crate::runtime::{push_context, replace_context};
 
 /// Run a Vole source file (or stdin if path is "-")
-pub fn run_file(path: &Path, release: bool) -> ExitCode {
-    match execute(path, release) {
+pub fn run_file(path: &Path, project_root: Option<&Path>, release: bool) -> ExitCode {
+    // Validate project root if provided
+    if let Some(root) = project_root {
+        if !root.exists() {
+            eprintln!("error: --root path does not exist: {}", root.display());
+            return ExitCode::FAILURE;
+        }
+        if !root.is_dir() {
+            eprintln!("error: --root path is not a directory: {}", root.display());
+            return ExitCode::FAILURE;
+        }
+    }
+
+    match execute(path, project_root, release) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             // Empty error means diagnostics were already rendered
@@ -22,7 +34,7 @@ pub fn run_file(path: &Path, release: bool) -> ExitCode {
     }
 }
 
-fn execute(path: &Path, release: bool) -> Result<(), String> {
+fn execute(path: &Path, project_root: Option<&Path>, release: bool) -> Result<(), String> {
     // Read source from file or stdin
     let (source, file_path) = if path.as_os_str() == "-" {
         let source = read_stdin().map_err(|e| format!("could not read stdin: {}", e))?;
@@ -38,7 +50,8 @@ fn execute(path: &Path, release: bool) -> Result<(), String> {
 
     // Parse and type check
     replace_context(&format!("{} (parsing)", file_path));
-    let analyzed = parse_and_analyze(&source, &file_path).map_err(|()| String::new())?;
+    let analyzed =
+        parse_and_analyze(&source, &file_path, project_root).map_err(|()| String::new())?;
 
     // Codegen phase
     replace_context(&format!("{} (compiling)", file_path));

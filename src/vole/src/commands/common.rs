@@ -98,7 +98,11 @@ fn render_sema_warning_to<W: Write>(
 /// Returns `Ok(AnalyzedProgram)` on success, or `Err(())` if there were
 /// errors (diagnostics are rendered to stderr before returning).
 #[allow(clippy::result_unit_err)] // Error details are rendered internally
-pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgram, ()> {
+pub fn parse_and_analyze(
+    source: &str,
+    file_path: &str,
+    project_root: Option<&std::path::Path>,
+) -> Result<AnalyzedProgram, ()> {
     // Parse phase
     let (mut program, mut interner) = {
         let _span = tracing::info_span!("parse", file = %file_path).entered();
@@ -149,7 +153,7 @@ pub fn parse_and_analyze(source: &str, file_path: &str) -> Result<AnalyzedProgra
     // Sema phase (type checking)
     let mut analyzer = {
         let _span = tracing::info_span!("sema").entered();
-        let mut analyzer = Analyzer::new(file_path, source);
+        let mut analyzer = Analyzer::with_project_root(file_path, source, project_root);
         if let Err(errors) = analyzer.analyze(&program, &interner) {
             for err in &errors {
                 render_sema_error(err, file_path, source);
@@ -176,6 +180,7 @@ pub fn parse_and_analyze_with_cache(
     source: &str,
     file_path: &str,
     cache: Rc<RefCell<ModuleCache>>,
+    project_root: Option<&std::path::Path>,
 ) -> Result<AnalyzedProgram, ()> {
     // Parse phase
     let (mut program, mut interner) = {
@@ -225,7 +230,8 @@ pub fn parse_and_analyze_with_cache(
     // Sema phase with cache
     let mut analyzer = {
         let _span = tracing::info_span!("sema").entered();
-        let mut analyzer = Analyzer::with_cache(file_path, source, cache);
+        let mut analyzer =
+            Analyzer::with_cache_and_project_root(file_path, source, cache, project_root);
         if let Err(errors) = analyzer.analyze(&program, &interner) {
             for err in &errors {
                 render_sema_error(err, file_path, source);

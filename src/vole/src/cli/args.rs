@@ -55,6 +55,10 @@ pub enum Commands {
         /// Path to the .vole file to execute
         #[arg(value_name = "FILE")]
         file: PathBuf,
+
+        /// Project root directory (overrides auto-detection)
+        #[arg(long, value_name = "PATH")]
+        root: Option<PathBuf>,
     },
     /// Check Vole source files for errors without running them
     #[command(visible_alias = "c")]
@@ -85,6 +89,10 @@ pub enum Commands {
         /// Include underscore-prefixed files (normally skipped)
         #[arg(long)]
         include_skipped: bool,
+
+        /// Project root directory (overrides auto-detection)
+        #[arg(long, value_name = "PATH")]
+        root: Option<PathBuf>,
     },
     /// Inspect compilation output (AST, IR)
     #[command(visible_alias = "i")]

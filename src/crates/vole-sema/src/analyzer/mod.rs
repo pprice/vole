@@ -456,6 +456,157 @@ impl Analyzer {
         analyzer
     }
 
+    /// Create an analyzer with an explicit project root override.
+    /// If `project_root` is `None`, auto-detects from file path.
+    pub fn with_project_root(
+        file: &str,
+        _source: &str,
+        project_root: Option<&std::path::Path>,
+    ) -> Self {
+        // Create the shared CompilationDb
+        let db = Rc::new(RefCell::new(CompilationDb::new()));
+        let main_module = db.borrow().main_module();
+
+        // Determine current file path
+        let file_path = std::path::Path::new(file);
+        let current_file_path = file_path.canonicalize().ok();
+
+        // Use explicit project root or auto-detect
+        let effective_root = if let Some(root) = project_root {
+            Some(root.to_path_buf())
+        } else {
+            current_file_path
+                .as_ref()
+                .map(|p| ModuleLoader::detect_project_root(p))
+        };
+
+        let mut module_loader = ModuleLoader::new();
+        if let Some(root) = effective_root {
+            module_loader.set_project_root(root);
+        }
+
+        let mut analyzer = Self {
+            scope: Scope::new(),
+            functions: FxHashMap::default(),
+            functions_by_name: FxHashMap::default(),
+            globals: FxHashMap::default(),
+            constant_globals: HashSet::new(),
+            current_function_return: None,
+            current_function_error_type: None,
+            current_generator_element_type: None,
+            current_static_method: None,
+            errors: Vec::new(),
+            warnings: Vec::new(),
+            type_overrides: FxHashMap::default(),
+            lambda_captures: Vec::new(),
+            lambda_locals: Vec::new(),
+            lambda_side_effects: Vec::new(),
+            expr_types: FxHashMap::default(),
+            is_check_results: FxHashMap::default(),
+            method_resolutions: MethodResolutions::new(),
+            module_loader,
+            module_type_ids: FxHashMap::default(),
+            module_programs: FxHashMap::default(),
+            module_expr_types: FxHashMap::default(),
+            module_method_resolutions: FxHashMap::default(),
+            loading_prelude: false,
+            generic_calls: FxHashMap::default(),
+            class_method_calls: FxHashMap::default(),
+            static_method_calls: FxHashMap::default(),
+            substituted_return_types: FxHashMap::default(),
+            lambda_defaults: FxHashMap::default(),
+            lambda_variables: FxHashMap::default(),
+            scoped_function_types: FxHashMap::default(),
+            declared_var_types: FxHashMap::default(),
+            current_module: main_module,
+            type_param_stack: TypeParamScopeStack::new(),
+            module_cache: None,
+            db,
+            current_file_path,
+        };
+
+        // Register built-in interfaces and implementations
+        analyzer.register_builtins();
+
+        analyzer
+    }
+
+    /// Create an analyzer with a shared module cache and an explicit project root override.
+    /// If `project_root` is `None`, auto-detects from file path.
+    pub fn with_cache_and_project_root(
+        file: &str,
+        _source: &str,
+        cache: Rc<RefCell<ModuleCache>>,
+        project_root: Option<&std::path::Path>,
+    ) -> Self {
+        // Get the shared db from the cache BEFORE borrowing cache again
+        let shared_db = cache.borrow().db();
+        let main_module = shared_db.borrow().main_module();
+
+        // Determine current file path
+        let file_path = std::path::Path::new(file);
+        let current_file_path = file_path.canonicalize().ok();
+
+        // Use explicit project root or auto-detect
+        let effective_root = if let Some(root) = project_root {
+            Some(root.to_path_buf())
+        } else {
+            current_file_path
+                .as_ref()
+                .map(|p| ModuleLoader::detect_project_root(p))
+        };
+
+        let mut module_loader = ModuleLoader::new();
+        if let Some(root) = effective_root {
+            module_loader.set_project_root(root);
+        }
+
+        let mut analyzer = Self {
+            scope: Scope::new(),
+            functions: FxHashMap::default(),
+            functions_by_name: FxHashMap::default(),
+            globals: FxHashMap::default(),
+            constant_globals: HashSet::new(),
+            current_function_return: None,
+            current_function_error_type: None,
+            current_generator_element_type: None,
+            current_static_method: None,
+            errors: Vec::new(),
+            warnings: Vec::new(),
+            type_overrides: FxHashMap::default(),
+            lambda_captures: Vec::new(),
+            lambda_locals: Vec::new(),
+            lambda_side_effects: Vec::new(),
+            expr_types: FxHashMap::default(),
+            is_check_results: FxHashMap::default(),
+            method_resolutions: MethodResolutions::new(),
+            module_loader,
+            module_type_ids: FxHashMap::default(),
+            module_programs: FxHashMap::default(),
+            module_expr_types: FxHashMap::default(),
+            module_method_resolutions: FxHashMap::default(),
+            loading_prelude: false,
+            generic_calls: FxHashMap::default(),
+            class_method_calls: FxHashMap::default(),
+            static_method_calls: FxHashMap::default(),
+            substituted_return_types: FxHashMap::default(),
+            lambda_defaults: FxHashMap::default(),
+            lambda_variables: FxHashMap::default(),
+            scoped_function_types: FxHashMap::default(),
+            declared_var_types: FxHashMap::default(),
+            current_module: main_module,
+            type_param_stack: TypeParamScopeStack::new(),
+            module_cache: Some(cache),
+            db: shared_db,
+            current_file_path,
+        };
+
+        // Register built-in interfaces and implementations
+        analyzer.register_builtins();
+
+        analyzer
+    }
+
     // Builtin registration: builtins.rs
     // Prelude loading: prelude.rs
     // Error/display helpers: errors.rs
