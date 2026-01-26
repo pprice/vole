@@ -144,4 +144,15 @@ pub enum ParserError {
         #[label("invalid type parameter name")]
         span: SourceSpan,
     },
+
+    #[error("type parameter '{name}' starts with reserved prefix '__'")]
+    #[diagnostic(
+        code(E1029),
+        help("the '__' prefix is reserved for internal use; rename this type parameter")
+    )]
+    TypeParamReservedPrefix {
+        name: String,
+        #[label("reserved prefix")]
+        span: SourceSpan,
+    },
 }

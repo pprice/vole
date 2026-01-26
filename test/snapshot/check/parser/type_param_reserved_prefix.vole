@@ -1,0 +1,4 @@
+// Test: E1029 - type parameter starts with reserved __ prefix
+func foo<__T>(x: __T) -> __T {
+    return x
+}

@@ -188,6 +188,18 @@ impl<'src> Parser<'src> {
 
         let name_token = self.current.clone();
         self.consume(TokenType::Identifier, "expected type parameter name")?;
+
+        // Check for reserved __ prefix (used for synthetic types)
+        if name_token.lexeme.starts_with("__") {
+            return Err(ParseError::new(
+                ParserError::TypeParamReservedPrefix {
+                    name: name_token.lexeme.clone(),
+                    span: name_token.span.into(),
+                },
+                name_token.span,
+            ));
+        }
+
         let name = self.interner.intern(&name_token.lexeme);
 
         let constraint = if self.match_token(TokenType::Colon) {
