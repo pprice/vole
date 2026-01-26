@@ -1,0 +1,58 @@
+// stdlib/fs/sync.vole
+// Synchronous filesystem operations module
+
+// Error types for filesystem operations
+// IMPORTANT: The order here matches the error tags in the native implementation (fs.rs)
+// Do not reorder without updating fs.rs
+
+error NotFound { path: string }
+error PermissionDenied { path: string }
+error IsDirectory { path: string }
+error NotDirectory { path: string }
+error AlreadyExists { path: string }
+error Other { path: string }
+
+// Union type for all IO errors
+let IoError = NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other
+
+// =============================================================================
+// Non-fallible file system operations (always available via module)
+// =============================================================================
+
+external("std:fs/sync") {
+    // Check if path exists (file or directory)
+    func exists(path: string) -> bool
+
+    // Check if path is a directory
+    func is_dir(path: string) -> bool
+
+    // Check if path is a file
+    func is_file(path: string) -> bool
+}
+
+// =============================================================================
+// Fallible file system operations
+//
+// Due to a compiler limitation with module exports, fallible external functions
+// cannot be accessed via module prefix (e.g., fs.read_string).
+//
+// To use fallible operations, define error types locally and declare the external
+// functions directly in your code:
+//
+//   error NotFound { path: string }
+//   error PermissionDenied { path: string }
+//   error IsDirectory { path: string }
+//   error NotDirectory { path: string }
+//   error AlreadyExists { path: string }
+//   error Other { path: string }
+//
+//   external("std:fs/sync") {
+//       func read_string(path: string) -> fallible(string, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other)
+//       func write_string(path: string, content: string) -> fallible(Done, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other)
+//       func append_string(path: string, content: string) -> fallible(Done, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other)
+//       func list(path: string) -> fallible([string], NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other)
+//       func mkdir(path: string) -> fallible(Done, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other)
+//       func remove_file(path: string) -> fallible(Done, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other)
+//       func remove_dir(path: string) -> fallible(Done, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other)
+//   }
+// =============================================================================

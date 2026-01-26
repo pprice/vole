@@ -196,9 +196,10 @@ impl Cg<'_, '_, '_> {
 
         // Handle array.push(value) - needs to compile argument and call runtime
         if let Some(_elem_type_id) = self.arena().unwrap_array(obj.type_id)
-            && method_name_str == "push" {
-                return self.array_push_call(&obj, mc);
-            }
+            && method_name_str == "push"
+        {
+            return self.array_push_call(&obj, mc);
+        }
 
         // Handle RuntimeIterator methods - these call external functions directly
         // without interface boxing or vtable dispatch

@@ -1,0 +1,439 @@
+// Tests for std:fs/sync module
+
+let env = import "std:env"
+let fs = import "std:fs/sync"
+
+// Define error types locally for fallible operations
+// (Due to compiler limitation, these can't be accessed via module prefix)
+error NotFound { path: string }
+error PermissionDenied { path: string }
+error IsDirectory { path: string }
+error NotDirectory { path: string }
+error AlreadyExists { path: string }
+error Other { path: string }
+
+// Declare fallible external functions locally
+external("std:fs/sync") {
+    func read_string(path: string) -> fallible(string, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other)
+    func write_string(path: string, content: string) -> fallible(Done, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other)
+    func append_string(path: string, content: string) -> fallible(Done, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other)
+    func list(path: string) -> fallible([string], NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other)
+    func mkdir(path: string) -> fallible(Done, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other)
+    func remove_file(path: string) -> fallible(Done, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other)
+    func remove_dir(path: string) -> fallible(Done, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other)
+}
+
+// Helper to create a unique test file path in temp directory
+func test_file(name: string) -> string {
+    let temp = env.temp_dir()
+    return "{temp}/vole_test_{name}"
+}
+
+// Helper to create a unique test dir path in temp directory
+func test_dir(name: string) -> string {
+    let temp = env.temp_dir()
+    return "{temp}/vole_test_dir_{name}"
+}
+
+tests "fs exists (via module)" {
+    test "exists returns false for nonexistent path" {
+        let path = "/nonexistent/path/12345/abcdef"
+        assert(!fs.exists(path))
+    }
+
+    test "exists returns true for temp directory" {
+        let temp = env.temp_dir()
+        assert(fs.exists(temp))
+    }
+}
+
+tests "fs is_dir (via module)" {
+    test "is_dir returns true for temp directory" {
+        let temp = env.temp_dir()
+        assert(fs.is_dir(temp))
+    }
+
+    test "is_dir returns false for nonexistent path" {
+        let path = "/nonexistent/path/12345"
+        assert(!fs.is_dir(path))
+    }
+}
+
+tests "fs is_file (via module)" {
+    test "is_file returns false for directory" {
+        let temp = env.temp_dir()
+        assert(!fs.is_file(temp))
+    }
+
+    test "is_file returns false for nonexistent path" {
+        let path = "/nonexistent/file/12345.txt"
+        assert(!fs.is_file(path))
+    }
+}
+
+tests "fs write_string and read_string (local external)" {
+    test "write then read basic content" {
+        let path = test_file("write_read_1.txt")
+
+        // Write content
+        let write_result = match write_string(path, "hello world") {
+            success => true
+            error => false
+            _ => false
+        }
+        assert(write_result)
+
+        // Verify file exists
+        assert(fs.exists(path))
+        assert(fs.is_file(path))
+
+        // Read content back
+        let read_result = match read_string(path) {
+            success content => content
+            error => ""
+            _ => ""
+        }
+        assert(read_result == "hello world")
+
+        // Clean up
+        let _cleanup = match remove_file(path) {
+            success => 0
+            error => 1
+            _ => 2
+        }
+    }
+
+    test "write_string overwrites existing content" {
+        let path = test_file("write_overwrite.txt")
+
+        // Write initial content
+        let r1 = match write_string(path, "first") {
+            success => true
+            error => false
+            _ => false
+        }
+        assert(r1)
+
+        // Overwrite with new content
+        let r2 = match write_string(path, "second") {
+            success => true
+            error => false
+            _ => false
+        }
+        assert(r2)
+
+        // Read and verify
+        let content = match read_string(path) {
+            success c => c
+            error => ""
+            _ => ""
+        }
+        assert(content == "second")
+
+        // Clean up
+        let _cleanup = match remove_file(path) {
+            success => 0
+            error => 1
+            _ => 2
+        }
+    }
+
+    test "read_string returns error for nonexistent file" {
+        let path = "/nonexistent/file/xyz123.txt"
+
+        let result = match read_string(path) {
+            success => 0
+            error NotFound => 1
+            error => 2
+            _ => 3
+        }
+        // Should be NotFound error
+        assert(result == 1)
+    }
+}
+
+tests "fs append_string (local external)" {
+    test "append to new file creates file" {
+        let path = test_file("append_new.txt")
+
+        // Make sure file doesn't exist
+        let _pre = match remove_file(path) {
+            success => 0
+            error => 1
+            _ => 2
+        }
+
+        // Append creates file
+        let result = match append_string(path, "hello") {
+            success => true
+            error => false
+            _ => false
+        }
+        assert(result)
+
+        assert(fs.exists(path))
+
+        let content = match read_string(path) {
+            success c => c
+            error => ""
+            _ => ""
+        }
+        assert(content == "hello")
+
+        // Clean up
+        let _cleanup = match remove_file(path) {
+            success => 0
+            error => 1
+            _ => 2
+        }
+    }
+
+    test "append adds to existing content" {
+        let path = test_file("append_existing.txt")
+
+        // Write initial
+        let r1 = match write_string(path, "hello") {
+            success => true
+            error => false
+            _ => false
+        }
+        assert(r1)
+
+        // Append more
+        let r2 = match append_string(path, " world") {
+            success => true
+            error => false
+            _ => false
+        }
+        assert(r2)
+
+        // Read and verify
+        let content = match read_string(path) {
+            success c => c
+            error => ""
+            _ => ""
+        }
+        assert(content == "hello world")
+
+        // Clean up
+        let _cleanup = match remove_file(path) {
+            success => 0
+            error => 1
+            _ => 2
+        }
+    }
+}
+
+tests "fs mkdir (local external)" {
+    test "mkdir creates directory" {
+        let path = test_dir("mkdir_test")
+
+        // Make sure it doesn't exist
+        let _pre = match remove_dir(path) {
+            success => 0
+            error => 1
+            _ => 2
+        }
+
+        // Create directory
+        let result = match mkdir(path) {
+            success => true
+            error => false
+            _ => false
+        }
+        assert(result)
+
+        assert(fs.exists(path))
+        assert(fs.is_dir(path))
+
+        // Clean up
+        let _cleanup = match remove_dir(path) {
+            success => 0
+            error => 1
+            _ => 2
+        }
+    }
+
+    test "mkdir creates nested directories" {
+        let base = test_dir("mkdir_nested")
+        let nested = "{base}/a/b/c"
+
+        // Create nested directories
+        let result = match mkdir(nested) {
+            success => true
+            error => false
+            _ => false
+        }
+        assert(result)
+
+        assert(fs.exists(nested))
+        assert(fs.is_dir(nested))
+
+        // Clean up (need to remove in reverse order)
+        let _c1 = match remove_dir(nested) {
+            success => 0
+            error => 1
+            _ => 2
+        }
+        let _c2 = match remove_dir("{base}/a/b") {
+            success => 0
+            error => 1
+            _ => 2
+        }
+        let _c3 = match remove_dir("{base}/a") {
+            success => 0
+            error => 1
+            _ => 2
+        }
+        let _c4 = match remove_dir(base) {
+            success => 0
+            error => 1
+            _ => 2
+        }
+    }
+}
+
+tests "fs list (local external)" {
+    test "list returns directory contents" {
+        let base = test_dir("list_test")
+
+        // Create test directory with files
+        let r1 = match mkdir(base) {
+            success => true
+            error => false
+            _ => false
+        }
+        assert(r1)
+
+        let r2 = match write_string("{base}/a.txt", "a") {
+            success => true
+            error => false
+            _ => false
+        }
+        assert(r2)
+
+        let r3 = match write_string("{base}/b.txt", "b") {
+            success => true
+            error => false
+            _ => false
+        }
+        assert(r3)
+
+        // List directory
+        let entries = match list(base) {
+            success e => e
+            error => []
+            _ => []
+        }
+
+        assert(entries.length() == 2)
+
+        // Clean up
+        let _c1 = match remove_file("{base}/a.txt") {
+            success => 0
+            error => 1
+            _ => 2
+        }
+        let _c2 = match remove_file("{base}/b.txt") {
+            success => 0
+            error => 1
+            _ => 2
+        }
+        let _c3 = match remove_dir(base) {
+            success => 0
+            error => 1
+            _ => 2
+        }
+    }
+
+    test "list returns error for nonexistent directory" {
+        let path = "/nonexistent/dir/xyz123"
+
+        let result = match list(path) {
+            success => 0
+            error NotFound => 1
+            error => 2
+            _ => 3
+        }
+        assert(result == 1)
+    }
+}
+
+tests "fs remove_file (local external)" {
+    test "remove_file deletes file" {
+        let path = test_file("remove_test.txt")
+
+        // Create file
+        let r1 = match write_string(path, "test") {
+            success => true
+            error => false
+            _ => false
+        }
+        assert(r1)
+
+        assert(fs.exists(path))
+
+        // Remove it
+        let r2 = match remove_file(path) {
+            success => true
+            error => false
+            _ => false
+        }
+        assert(r2)
+
+        assert(!fs.exists(path))
+    }
+
+    test "remove_file returns NotFound for nonexistent" {
+        let path = "/nonexistent/file/xyz123.txt"
+
+        let result = match remove_file(path) {
+            success => 0
+            error NotFound => 1
+            error => 2
+            _ => 3
+        }
+        assert(result == 1)
+    }
+}
+
+tests "fs remove_dir (local external)" {
+    test "remove_dir deletes empty directory" {
+        let path = test_dir("remove_dir_test")
+
+        // Create directory
+        let r1 = match mkdir(path) {
+            success => true
+            error => false
+            _ => false
+        }
+        assert(r1)
+
+        assert(fs.exists(path))
+
+        // Remove it
+        let r2 = match remove_dir(path) {
+            success => true
+            error => false
+            _ => false
+        }
+        assert(r2)
+
+        assert(!fs.exists(path))
+    }
+}
+
+tests "fs error details" {
+    test "error contains path context" {
+        let path = "/nonexistent/path/test.txt"
+
+        let error_path = match read_string(path) {
+            success => ""
+            error NotFound { path: p } => p
+            error => ""
+            _ => ""
+        }
+
+        assert(error_path == path)
+    }
+}
