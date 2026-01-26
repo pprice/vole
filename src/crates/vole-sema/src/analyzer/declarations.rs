@@ -2011,14 +2011,35 @@ impl Analyzer {
                         // This should be an interface
                         let type_def_id = arena.type_def_id(export_type_id)?;
 
-                        // Verify it's an interface
-                        let kind = self.entity_registry().get_type(type_def_id).kind;
-                        if kind != TypeDefKind::Interface {
-                            return None;
-                        }
+                        // Verify it's an interface (resolve through aliases if needed)
+                        let registry = self.entity_registry();
+                        let type_def = registry.get_type(type_def_id);
+                        let kind = type_def.kind;
+                        let aliased_type = type_def.aliased_type;
+                        drop(registry);
+
+                        let final_type_def_id = if kind == TypeDefKind::Alias {
+                            // For aliases, check the underlying type
+                            if let Some(aliased_type_id) = aliased_type {
+                                let arena = self.type_arena();
+                                if let Some((underlying_def_id, _)) =
+                                    arena.unwrap_interface(aliased_type_id)
+                                {
+                                    underlying_def_id
+                                } else {
+                                    return None; // Alias doesn't point to an interface
+                                }
+                            } else {
+                                return None; // Alias has no underlying type
+                            }
+                        } else if kind == TypeDefKind::Interface {
+                            type_def_id
+                        } else {
+                            return None; // Not an interface
+                        };
 
                         // Return type args as references for caller to resolve
-                        return Some((type_def_id, args.as_slice()));
+                        return Some((final_type_def_id, args.as_slice()));
                     } else {
                         // Not the last segment - must be a module
                         current_type_id = export_type_id;
@@ -2033,11 +2054,32 @@ impl Analyzer {
                     .resolver(interner)
                     .resolve_type_str_or_interface(iface_str, &self.entity_registry())?;
 
-                // Verify it's an interface
-                let kind = self.entity_registry().get_type(type_def_id).kind;
-                if kind != TypeDefKind::Interface {
-                    return None;
-                }
+                // Verify it's an interface (resolve through aliases if needed)
+                let registry = self.entity_registry();
+                let type_def = registry.get_type(type_def_id);
+                let kind = type_def.kind;
+                let aliased_type = type_def.aliased_type;
+                drop(registry);
+                let final_type_def_id = if kind == TypeDefKind::Alias {
+                    // For aliases, check the underlying type
+                    if let Some(aliased_type_id) = aliased_type {
+                        let arena = self.type_arena();
+                        if let Some((underlying_def_id, _)) =
+                            arena.unwrap_interface(aliased_type_id)
+                        {
+                            underlying_def_id
+                        } else {
+                            return None; // Alias doesn't point to an interface
+                        }
+                    } else {
+                        return None; // Alias has no underlying type
+                    }
+                } else if kind == TypeDefKind::Interface {
+                    type_def_id
+                } else {
+                    return None; // Not an interface
+                };
+                let type_def_id = final_type_def_id;
 
                 // Return type args as references for caller to resolve
                 let type_args: &[TypeExpr] = match trait_type {

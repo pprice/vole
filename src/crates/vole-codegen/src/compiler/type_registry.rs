@@ -5,6 +5,7 @@ use crate::types::{MethodInfo, TypeMetadata, method_name_id_with_interner};
 use vole_frontend::{
     ClassDecl, Decl, InterfaceDecl, Interner, Program, RecordDecl, StaticsBlock, Symbol,
 };
+use vole_identity::ModuleId;
 use vole_runtime::type_registry::{FieldTypeTag, register_instance_type};
 use vole_sema::type_arena::TypeId;
 
@@ -499,14 +500,19 @@ impl Compiler<'_> {
     /// 1. Pre-registration (type_id allocation)
     /// 2. Type metadata registration (fields, methods)
     /// 3. Static method registration
-    pub(super) fn finalize_module_class(&mut self, class: &ClassDecl, module_interner: &Interner) {
+    pub(super) fn finalize_module_class(
+        &mut self,
+        class: &ClassDecl,
+        module_interner: &Interner,
+        module_id: ModuleId,
+    ) {
         let type_name_str = module_interner.resolve(class.name);
         tracing::debug!(type_name = %type_name_str, "finalize_module_class called");
 
         // Look up the TypeDefId using the class name via full resolution chain
+        // Use the passed-in module_id to resolve in the correct module context
         tracing::debug!(type_name = %type_name_str, "Looking up TypeDefId for module class");
         let query = self.query();
-        let module_id = query.main_module();
         let Some(type_def_id) = query.resolve_type_def_by_str(module_id, type_name_str) else {
             tracing::warn!(type_name = %type_name_str, "Could not find TypeDefId for module class");
             return;
@@ -679,14 +685,15 @@ impl Compiler<'_> {
         &mut self,
         record: &RecordDecl,
         module_interner: &Interner,
+        module_id: ModuleId,
     ) {
         let type_name_str = module_interner.resolve(record.name);
         tracing::debug!(type_name = %type_name_str, "finalize_module_record called");
 
         // Look up the TypeDefId using the record name via full resolution chain
+        // Use the passed-in module_id to resolve in the correct module context
         tracing::debug!(type_name = %type_name_str, "Looking up TypeDefId for module record");
         let query = self.query();
-        let module_id = query.main_module();
         let Some(type_def_id) = query.resolve_type_def_by_str(module_id, type_name_str) else {
             tracing::warn!(type_name = %type_name_str, "Could not find TypeDefId for module record");
             return;

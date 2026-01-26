@@ -163,15 +163,64 @@ impl Analyzer {
             type_id_opt
         {
             // Extract type info before doing mutable operations
-            let (kind, generic_info, is_class_valid, is_record_valid) = {
+            // If this is an alias, resolve through to the underlying type
+            let (resolved_type_id, kind, generic_info, is_class_valid, is_record_valid) = {
                 let registry = self.entity_registry();
                 let type_def = registry.get_type(type_id);
-                (
-                    type_def.kind,
-                    type_def.generic_info.clone(),
-                    registry.build_class_type(type_id).is_some(),
-                    registry.build_record_type(type_id).is_some(),
-                )
+
+                if type_def.kind == TypeDefKind::Alias {
+                    // Follow alias to get underlying type
+                    if let Some(aliased_type_id) = type_def.aliased_type {
+                        let arena = self.type_arena();
+                        // Get the underlying TypeDefId from the aliased type
+                        let underlying =
+                            if let Some((def_id, _)) = arena.unwrap_record(aliased_type_id) {
+                                Some((def_id, TypeDefKind::Record))
+                            } else if let Some((def_id, _)) = arena.unwrap_class(aliased_type_id) {
+                                Some((def_id, TypeDefKind::Class))
+                            } else {
+                                None
+                            };
+
+                        if let Some((underlying_def_id, underlying_kind)) = underlying {
+                            let registry = self.entity_registry();
+                            let underlying_def = registry.get_type(underlying_def_id);
+                            (
+                                underlying_def_id,
+                                underlying_kind,
+                                underlying_def.generic_info.clone(),
+                                registry.build_class_type(underlying_def_id).is_some(),
+                                registry.build_record_type(underlying_def_id).is_some(),
+                            )
+                        } else {
+                            // Alias points to something that's not a class/record
+                            (
+                                type_id,
+                                type_def.kind,
+                                type_def.generic_info.clone(),
+                                false,
+                                false,
+                            )
+                        }
+                    } else {
+                        // Alias with no aliased_type
+                        (
+                            type_id,
+                            type_def.kind,
+                            type_def.generic_info.clone(),
+                            false,
+                            false,
+                        )
+                    }
+                } else {
+                    (
+                        type_id,
+                        type_def.kind,
+                        type_def.generic_info.clone(),
+                        registry.build_class_type(type_id).is_some(),
+                        registry.build_record_type(type_id).is_some(),
+                    )
+                }
             };
             let fields = generic_info
                 .as_ref()
@@ -184,7 +233,7 @@ impl Analyzer {
             match kind {
                 TypeDefKind::Class => {
                     if is_class_valid {
-                        let result_id = self.type_arena_mut().class(type_id, vec![]);
+                        let result_id = self.type_arena_mut().class(resolved_type_id, vec![]);
                         (
                             Self::format_struct_literal_path(&struct_lit.path, interner),
                             fields,
@@ -204,7 +253,7 @@ impl Analyzer {
                 }
                 TypeDefKind::Record => {
                     if is_record_valid {
-                        let result_id = self.type_arena_mut().record(type_id, vec![]);
+                        let result_id = self.type_arena_mut().record(resolved_type_id, vec![]);
                         (
                             Self::format_struct_literal_path(&struct_lit.path, interner),
                             fields,

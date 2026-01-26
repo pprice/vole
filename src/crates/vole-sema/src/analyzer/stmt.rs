@@ -883,6 +883,10 @@ impl Analyzer {
                         .set_function_generic_info(new_func_id, generic_info);
                 }
 
+                // Check if the export type is a record, class, or interface type
+                // If so, register a type alias so it's usable as a type name
+                self.maybe_register_type_binding(field_pattern.binding, *export_type_id, interner);
+
                 // Bind the export to the binding name
                 self.scope.define(
                     field_pattern.binding,
@@ -914,5 +918,81 @@ impl Analyzer {
                 init_span,
             );
         }
+    }
+
+    /// Check if a type is a record, class, or interface type and if so,
+    /// register a type alias so it's usable as a type name in the current module.
+    ///
+    /// This enables patterns like:
+    /// ```vole
+    /// let { Duration } = import "std:time"
+    /// let d = Duration { nanos: 1000 }  // Works as type name
+    /// func foo(d: Duration) -> Duration { d }  // Works in type annotations
+    /// ```
+    fn maybe_register_type_binding(
+        &mut self,
+        binding_name: Symbol,
+        type_id: ArenaTypeId,
+        interner: &Interner,
+    ) {
+        use crate::entity_defs::TypeDefKind;
+
+        // Check if the type is a record, class, or interface
+        let type_def_id = {
+            let arena = self.type_arena();
+            if let Some((def_id, _)) = arena.unwrap_record(type_id) {
+                Some(def_id)
+            } else if let Some((def_id, _)) = arena.unwrap_class(type_id) {
+                Some(def_id)
+            } else if let Some((def_id, _)) = arena.unwrap_interface(type_id) {
+                Some(def_id)
+            } else {
+                None
+            }
+        };
+
+        let Some(original_type_def_id) = type_def_id else {
+            return; // Not a record/class/interface type, nothing to register
+        };
+
+        // Don't create type aliases for generic types - they need proper handling
+        // Generic types like Iterator<T> or MapLike<K, V> can't be aliased simply
+        // because the alias wouldn't carry the type parameters
+        let is_generic = !self
+            .entity_registry()
+            .get_type(original_type_def_id)
+            .type_params
+            .is_empty();
+        if is_generic {
+            return; // Skip generic types
+        }
+
+        // Create a type alias in the current module pointing to the original type
+        // First, intern the binding name in the current module's namespace
+        let binding_name_id =
+            self.name_table_mut()
+                .intern(self.current_module, &[binding_name], interner);
+
+        // Check if a type with this name already exists in the current module
+        if self
+            .entity_registry()
+            .type_by_name(binding_name_id)
+            .is_some()
+        {
+            // Type already exists (possibly from a previous import or local definition)
+            // Don't create a duplicate
+            return;
+        }
+
+        // Register a new type alias that points to the original type
+        let alias_type_def_id = self.entity_registry_mut().register_type(
+            binding_name_id,
+            TypeDefKind::Alias,
+            self.current_module,
+        );
+
+        // Set the aliased type to the original record/class/interface type
+        self.entity_registry_mut()
+            .set_aliased_type(alias_type_def_id, type_id);
     }
 }

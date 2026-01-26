@@ -18,7 +18,7 @@ use vole_frontend::{
     Block, Decl, Expr, ExprKind, FuncDecl, InterfaceMethod, Interner, LetInit, LetStmt,
     LetTupleStmt, PatternKind, Program, Span, Stmt, Symbol, TestCase, TestsDecl,
 };
-use vole_identity::NameId;
+use vole_identity::{ModuleId, NameId};
 use vole_sema::generic::{
     ClassMethodMonomorphInstance, MonomorphInstance, MonomorphInstanceTrait,
     StaticMethodMonomorphInstance,
@@ -381,17 +381,20 @@ impl Compiler<'_> {
                 }
             }
 
+            // Get module ID for type resolution
+            let module_id = self.query().module_id_or_main(module_path);
+
             // Finalize module classes (register type metadata, declare methods)
             for decl in &program.declarations {
                 if let Decl::Class(class) = decl {
-                    self.finalize_module_class(class, module_interner);
+                    self.finalize_module_class(class, module_interner, module_id);
                 }
             }
 
             // Finalize module records (register type metadata, declare methods)
             for decl in &program.declarations {
                 if let Decl::Record(record) = decl {
-                    self.finalize_module_record(record, module_interner);
+                    self.finalize_module_record(record, module_interner, module_id);
                 }
             }
         }
@@ -539,9 +542,10 @@ impl Compiler<'_> {
             }
 
             // Finalize module classes (register type metadata, import methods)
+            let module_id = self.query().module_id_or_main(module_path);
             for decl in &program.declarations {
                 if let Decl::Class(class) = decl {
-                    self.import_module_class(class, module_interner);
+                    self.import_module_class(class, module_interner, module_id);
                 }
             }
         }
@@ -555,9 +559,10 @@ impl Compiler<'_> {
         &mut self,
         class: &vole_frontend::ClassDecl,
         module_interner: &Interner,
+        module_id: ModuleId,
     ) {
         // First finalize to get type metadata registered
-        self.finalize_module_class(class, module_interner);
+        self.finalize_module_class(class, module_interner, module_id);
 
         // The methods are already compiled - they'll be linked via external symbols
         // No additional work needed here since method calls go through func_registry

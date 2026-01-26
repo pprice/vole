@@ -56,7 +56,25 @@ impl Cg<'_, '_, '_> {
             let module_id = self
                 .current_module_id()
                 .unwrap_or_else(|| query.main_module());
-            query.resolve_type_def_by_str(module_id, type_name)
+            let mut resolved_id = query.resolve_type_def_by_str(module_id, type_name);
+
+            // If this is a type alias, resolve through to the underlying type
+            if let Some(def_id) = resolved_id {
+                use vole_sema::entity_defs::TypeDefKind;
+                let type_def = query.registry().get_type(def_id);
+                if type_def.kind == TypeDefKind::Alias
+                    && let Some(aliased_type_id) = type_def.aliased_type
+                {
+                    let arena = self.arena();
+                    // Get the underlying TypeDefId from the aliased type
+                    if let Some((underlying_id, _)) = arena.unwrap_record(aliased_type_id) {
+                        resolved_id = Some(underlying_id);
+                    } else if let Some((underlying_id, _)) = arena.unwrap_class(aliased_type_id) {
+                        resolved_id = Some(underlying_id);
+                    }
+                }
+            }
+            resolved_id
         } else {
             // Qualified path - extract TypeDefId from semantic analysis
             self.get_expr_type(&expr.id).and_then(|expr_type_id| {

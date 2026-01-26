@@ -296,12 +296,68 @@ fn resolve_generic_type_to_id(
 
     // Look up the type first (borrows db), then get kind (borrows db again)
     let type_def_id = ctx.resolve_type_or_interface(name);
-    let lookup_result: Option<(TypeDefId, TypeDefKind)> = type_def_id.map(|id| {
-        let kind = ctx.entity_registry().get_type(id).kind;
-        (id, kind)
+    let lookup_result: Option<(TypeDefId, TypeDefKind, Option<TypeId>)> = type_def_id.map(|id| {
+        let registry = ctx.entity_registry();
+        let type_def = registry.get_type(id);
+        (id, type_def.kind, type_def.aliased_type)
     });
 
-    if let Some((type_def_id, kind)) = lookup_result {
+    if let Some((type_def_id, kind, aliased_type)) = lookup_result {
+        // If this is an alias, resolve through to the underlying type
+        // This handles cases like: let { Iterator } = import "..."
+        // where Iterator<T> is then used with type args
+        if kind == TypeDefKind::Alias {
+            if let Some(aliased_type_id) = aliased_type {
+                // Get the underlying type's TypeDefId from the aliased type
+                let underlying_info = {
+                    let arena = ctx.type_arena();
+                    if let Some((def_id, _)) = arena.unwrap_interface(aliased_type_id) {
+                        Some((def_id, TypeDefKind::Interface))
+                    } else if let Some((def_id, _)) = arena.unwrap_class(aliased_type_id) {
+                        Some((def_id, TypeDefKind::Class))
+                    } else if let Some((def_id, _)) = arena.unwrap_record(aliased_type_id) {
+                        Some((def_id, TypeDefKind::Record))
+                    } else {
+                        None
+                    }
+                };
+
+                if let Some((underlying_def_id, underlying_kind)) = underlying_info {
+                    // Apply type arguments to the underlying type
+                    return match underlying_kind {
+                        TypeDefKind::Class => {
+                            let result = ctx
+                                .type_arena_mut()
+                                .class(underlying_def_id, type_args_id.clone());
+                            precompute_field_substitutions(ctx, underlying_def_id, &type_args_id);
+                            result
+                        }
+                        TypeDefKind::Record => {
+                            let result = ctx
+                                .type_arena_mut()
+                                .record(underlying_def_id, type_args_id.clone());
+                            precompute_field_substitutions(ctx, underlying_def_id, &type_args_id);
+                            result
+                        }
+                        TypeDefKind::Interface => {
+                            let result = ctx
+                                .type_arena_mut()
+                                .interface(underlying_def_id, type_args_id.clone());
+                            precompute_interface_method_substitutions(
+                                ctx,
+                                underlying_def_id,
+                                &type_args_id,
+                            );
+                            result
+                        }
+                        _ => ctx.type_arena_mut().invalid(),
+                    };
+                }
+            }
+            // Alias doesn't point to a generic-capable type
+            return ctx.type_arena_mut().invalid();
+        }
+
         match kind {
             TypeDefKind::Class => {
                 let result = ctx
@@ -327,7 +383,11 @@ fn resolve_generic_type_to_id(
                 precompute_interface_method_substitutions(ctx, type_def_id, &type_args_id);
                 result
             }
-            TypeDefKind::Alias | TypeDefKind::ErrorType | TypeDefKind::Primitive => {
+            TypeDefKind::Alias => {
+                // Already handled above
+                ctx.type_arena_mut().invalid()
+            }
+            TypeDefKind::ErrorType | TypeDefKind::Primitive => {
                 // These types don't support type parameters
                 ctx.type_arena_mut().invalid()
             }
