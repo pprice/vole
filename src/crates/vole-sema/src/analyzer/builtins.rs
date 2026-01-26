@@ -20,6 +20,7 @@ impl Analyzer {
         let (
             method_len,
             method_iter,
+            method_push,
             std_intrinsics,
             array_iter_name,
             string_chars_iter_name,
@@ -31,6 +32,7 @@ impl Analyzer {
             (
                 namer.intern_raw(builtin_module, &["length"]),
                 namer.intern_raw(builtin_module, &["iter"]),
+                namer.intern_raw(builtin_module, &["push"]),
                 namer.intern_raw(builtin_module, &["vole:std:runtime"]),
                 namer.intern_raw(builtin_module, &["array_iter"]),
                 namer.intern_raw(builtin_module, &["string_chars_iter"]),
@@ -53,9 +55,13 @@ impl Analyzer {
             .map(ImplTypeId::from_name_id);
 
         // Step 3: Get type arena types
-        let (i64_type, unknown_type) = {
+        let (i64_type, void_type, unknown_type) = {
             let mut arena = self.type_arena_mut();
-            (arena.i64(), arena.placeholder(PlaceholderKind::Inference))
+            (
+                arena.i64(),
+                arena.void(),
+                arena.placeholder(PlaceholderKind::Inference),
+            )
         };
 
         // Step 4: Register methods via implement_registry
@@ -81,6 +87,17 @@ impl Analyzer {
                         module_path: std_intrinsics,
                         native_name: array_iter_name,
                     }),
+                },
+            );
+            // push(value) -> void - adds element to end of array
+            self.implement_registry_mut().register_method(
+                type_id,
+                method_push,
+                MethodImpl {
+                    trait_name: None,
+                    func_type: FunctionType::from_ids(&[unknown_type], void_type, false),
+                    is_builtin: true,
+                    external_info: None,
                 },
             );
         }

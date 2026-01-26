@@ -8,11 +8,13 @@ use crate::RuntimeFn;
 
 /// SmallVec for call arguments - most calls have <= 8 args
 type ArgVec = SmallVec<[Value; 8]>;
+use super::helpers::convert_to_i64_for_storage;
 use crate::context::Cg;
 use crate::errors::CodegenError;
 use crate::method_resolution::get_type_def_id_from_type_id;
 use crate::types::{
-    CompiledValue, module_name_id, type_id_to_cranelift, value_to_word, word_to_value_type_id,
+    CompiledValue, array_element_tag_id, module_name_id, type_id_to_cranelift, value_to_word,
+    word_to_value_type_id,
 };
 use vole_frontend::{Expr, ExprKind, MethodCallExpr, NodeId, Symbol};
 use vole_identity::NamerLookup;
@@ -191,6 +193,12 @@ impl Cg<'_, '_, '_> {
         if let Some(result) = self.builtin_method(&obj, method_name_str, concrete_return_hint)? {
             return Ok(result);
         }
+
+        // Handle array.push(value) - needs to compile argument and call runtime
+        if let Some(_elem_type_id) = self.arena().unwrap_array(obj.type_id)
+            && method_name_str == "push" {
+                return self.array_push_call(&obj, mc);
+            }
 
         // Handle RuntimeIterator methods - these call external functions directly
         // without interface boxing or vtable dispatch
@@ -701,6 +709,50 @@ impl Cg<'_, '_, '_> {
         }
 
         Ok(None)
+    }
+
+    /// Handle array.push(value) - appends value to end of array
+    fn array_push_call(
+        &mut self,
+        arr_obj: &CompiledValue,
+        mc: &MethodCallExpr,
+    ) -> Result<CompiledValue, String> {
+        // We expect exactly one argument
+        if mc.args.len() != 1 {
+            return Err(format!(
+                "array.push() expects 1 argument, got {}",
+                mc.args.len()
+            ));
+        }
+
+        // Compile the argument
+        let value = self.expr(&mc.args[0])?;
+
+        // Get the runtime function reference
+        let push_ref = self.runtime_func_ref(RuntimeFn::ArrayPush)?;
+
+        // Compute tag for the element type
+        let tag = {
+            let arena = self.arena();
+            array_element_tag_id(value.type_id, arena)
+        };
+        let tag_val = self.builder.ins().iconst(types::I64, tag);
+
+        // Convert value to i64 for storage
+        let value_bits = convert_to_i64_for_storage(self.builder, &value);
+
+        // Call vole_array_push(arr_ptr, tag, value)
+        self.builder
+            .ins()
+            .call(push_ref, &[arr_obj.value, tag_val, value_bits]);
+
+        // Return void
+        let void_type_id = self.arena().void();
+        Ok(CompiledValue {
+            value: self.builder.ins().iconst(types::I64, 0),
+            ty: types::I64,
+            type_id: void_type_id,
+        })
     }
 
     /// Handle method calls on RuntimeIterator - calls external Iterator functions directly

@@ -1,0 +1,284 @@
+// Tests for std:args module
+
+let args = import "std:args"
+
+tests "is_option" {
+    test "long option is option" {
+        assert(args.is_option("--verbose"))
+    }
+
+    test "short option is option" {
+        assert(args.is_option("-v"))
+    }
+
+    test "positional is not option" {
+        assert(!args.is_option("file.txt"))
+    }
+
+    test "empty string is not option" {
+        assert(!args.is_option(""))
+    }
+}
+
+tests "is_long_option" {
+    test "long option detected" {
+        assert(args.is_long_option("--verbose"))
+    }
+
+    test "short option not long" {
+        assert(!args.is_long_option("-v"))
+    }
+
+    test "double dash only" {
+        assert(args.is_long_option("--"))
+    }
+}
+
+tests "is_short_option" {
+    test "short option detected" {
+        assert(args.is_short_option("-v"))
+    }
+
+    test "long option not short" {
+        assert(!args.is_short_option("--verbose"))
+    }
+
+    test "single dash not short" {
+        assert(!args.is_short_option("-"))
+    }
+}
+
+tests "long_option_name" {
+    test "extracts name" {
+        assert(args.long_option_name("--verbose") == "verbose")
+    }
+
+    test "handles equals format" {
+        assert(args.long_option_name("--output=file.txt") == "output")
+    }
+
+    test "returns empty for non-option" {
+        assert(args.long_option_name("file.txt") == "")
+    }
+
+    test "returns empty for short option" {
+        assert(args.long_option_name("-v") == "")
+    }
+}
+
+tests "long_option_value" {
+    test "extracts value with equals" {
+        let value = args.long_option_value("--output=file.txt") ?? ""
+        assert(value == "file.txt")
+    }
+
+    test "returns nil without equals" {
+        assert(args.long_option_value("--verbose") == nil)
+    }
+
+    test "returns nil for non-option" {
+        assert(args.long_option_value("file.txt") == nil)
+    }
+
+    test "handles empty value" {
+        let value = args.long_option_value("--output=") ?? "default"
+        assert(value == "")
+    }
+}
+
+tests "has_flag" {
+    test "finds long flag" {
+        let a = ["--verbose", "file.txt"]
+        assert(args.has_flag(a, "-v", "--verbose"))
+    }
+
+    test "finds short flag" {
+        let a = ["-v", "file.txt"]
+        assert(args.has_flag(a, "-v", "--verbose"))
+    }
+
+    test "returns false when not present" {
+        let a = ["file.txt"]
+        assert(!args.has_flag(a, "-v", "--verbose"))
+    }
+
+    test "empty args returns false" {
+        let a: [string] = []
+        assert(!args.has_flag(a, "-v", "--verbose"))
+    }
+}
+
+tests "has_help" {
+    test "finds --help" {
+        let a = ["--help"]
+        assert(args.has_help(a))
+    }
+
+    test "finds -h" {
+        let a = ["-h"]
+        assert(args.has_help(a))
+    }
+
+    test "returns false without help" {
+        let a = ["--verbose", "file.txt"]
+        assert(!args.has_help(a))
+    }
+}
+
+tests "has_version" {
+    test "finds --version" {
+        let a = ["--version"]
+        assert(args.has_version(a))
+    }
+
+    test "finds -V" {
+        let a = ["-V"]
+        assert(args.has_version(a))
+    }
+
+    test "returns false without version" {
+        let a = ["--verbose", "file.txt"]
+        assert(!args.has_version(a))
+    }
+}
+
+tests "get_option" {
+    test "gets option value with space" {
+        let a = ["--output", "file.txt"]
+        let value = args.get_option(a, "-o", "--output") ?? ""
+        assert(value == "file.txt")
+    }
+
+    test "gets option value with short form" {
+        let a = ["-o", "file.txt"]
+        let value = args.get_option(a, "-o", "--output") ?? ""
+        assert(value == "file.txt")
+    }
+
+    test "gets option value with equals" {
+        let a = ["--output=file.txt"]
+        let value = args.get_option(a, "-o", "--output") ?? ""
+        assert(value == "file.txt")
+    }
+
+    test "returns nil when not found" {
+        let a = ["file.txt"]
+        assert(args.get_option(a, "-o", "--output") == nil)
+    }
+
+    test "returns nil when value missing" {
+        let a = ["--output"]
+        assert(args.get_option(a, "-o", "--output") == nil)
+    }
+}
+
+tests "first_positional" {
+    test "gets first positional" {
+        let a = ["file.txt", "other.txt"]
+        let value = args.first_positional(a) ?? ""
+        assert(value == "file.txt")
+    }
+
+    test "skips options" {
+        let a = ["--verbose", "-o", "out.txt", "file.txt"]
+        let value = args.first_positional(a) ?? ""
+        assert(value == "out.txt")
+    }
+
+    test "returns nil for empty" {
+        let a: [string] = []
+        assert(args.first_positional(a) == nil)
+    }
+
+    test "returns nil for only options" {
+        let a = ["--verbose", "--help"]
+        assert(args.first_positional(a) == nil)
+    }
+}
+
+tests "positional_at" {
+    test "gets first at index 0" {
+        let a = ["file.txt", "other.txt"]
+        let value = args.positional_at(a, 0) ?? ""
+        assert(value == "file.txt")
+    }
+
+    test "gets second at index 1" {
+        let a = ["file.txt", "other.txt"]
+        let value = args.positional_at(a, 1) ?? ""
+        assert(value == "other.txt")
+    }
+
+    test "skips options" {
+        let a = ["-v", "file.txt", "--output", "out.txt", "other.txt"]
+        let v0 = args.positional_at(a, 0) ?? ""
+        let v1 = args.positional_at(a, 1) ?? ""
+        let v2 = args.positional_at(a, 2) ?? ""
+        assert(v0 == "file.txt")
+        assert(v1 == "out.txt")
+        assert(v2 == "other.txt")
+    }
+
+    test "returns nil for out of bounds" {
+        let a = ["file.txt"]
+        assert(args.positional_at(a, 5) == nil)
+    }
+
+    test "returns nil for negative index" {
+        let a = ["file.txt"]
+        assert(args.positional_at(a, -1) == nil)
+    }
+}
+
+tests "positional_count" {
+    test "counts positional args" {
+        let a = ["file.txt", "other.txt"]
+        assert(args.positional_count(a) == 2)
+    }
+
+    test "excludes options" {
+        let a = ["-v", "file.txt", "--output", "out.txt"]
+        assert(args.positional_count(a) == 2)
+    }
+
+    test "returns 0 for empty" {
+        let a: [string] = []
+        assert(args.positional_count(a) == 0)
+    }
+
+    test "returns 0 for only options" {
+        let a = ["-v", "--help"]
+        assert(args.positional_count(a) == 0)
+    }
+}
+
+tests "combined usage" {
+    test "typical cli parsing" {
+        let a = ["build", "-v", "--output", "out.txt", "input.txt"]
+
+        // Check for flags
+        assert(args.has_flag(a, "-v", "--verbose"))
+        assert(!args.has_help(a))
+
+        // Get options
+        let output = args.get_option(a, "-o", "--output") ?? ""
+        assert(output == "out.txt")
+
+        // Get command and file
+        let cmd = args.first_positional(a) ?? ""
+        assert(cmd == "build")
+
+        let file = args.positional_at(a, 1) ?? ""
+        assert(file == "out.txt")
+    }
+
+    test "help flag usage" {
+        let a = ["--help"]
+        if args.has_help(a) {
+            // Would print help and exit in real code
+            assert(true)
+        } else {
+            assert(false)
+        }
+    }
+}

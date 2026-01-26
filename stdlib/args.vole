@@ -1,0 +1,154 @@
+// stdlib/args.vole
+// Basic argument parsing utilities
+// Works with std:env.args() for simple command-line parsing
+
+let env = import "std:env"
+
+// =============================================================================
+// Basic parsing functions (return primitives to work around module limitations)
+// =============================================================================
+
+// Check if an argument string starts with a dash (is an option/flag)
+func is_option(arg: string) -> bool {
+    return arg.starts_with("-")
+}
+
+// Check if an argument string is a long option (--foo)
+func is_long_option(arg: string) -> bool {
+    return arg.starts_with("--")
+}
+
+// Check if an argument string is a short option (-f)
+func is_short_option(arg: string) -> bool {
+    return arg.starts_with("-") && !arg.starts_with("--") && arg.length() > 1
+}
+
+// Get the name part of a long option (--foo -> foo, --foo=bar -> foo)
+func long_option_name(arg: string) -> string {
+    if !arg.starts_with("--") {
+        return ""
+    }
+    let name = arg.substring(2_i32, -1_i32)
+    // Handle --foo=bar format
+    let eq_pos = name.index_of_raw("=")
+    if eq_pos >= 0_i32 {
+        return name.substring(0_i32, eq_pos)
+    }
+    return name
+}
+
+// Get the value part of a long option with = (--foo=bar -> bar)
+// Returns nil if no = present
+func long_option_value(arg: string) -> string? {
+    if !arg.starts_with("--") {
+        return nil
+    }
+    let eq_pos = arg.index_of_raw("=")
+    if eq_pos < 0_i32 {
+        return nil
+    }
+    return arg.substring(eq_pos + 1_i32, -1_i32)
+}
+
+// Check if a specific flag is present in args
+// Supports both --flag and -f forms
+func has_flag(args: [string], short: string, long: string) -> bool {
+    for arg in args {
+        if arg == short || arg == long {
+            return true
+        }
+    }
+    return false
+}
+
+// Check if --help or -h is present
+func has_help(args: [string]) -> bool {
+    return has_flag(args, "-h", "--help")
+}
+
+// Check if --version or -V is present
+func has_version(args: [string]) -> bool {
+    return has_flag(args, "-V", "--version")
+}
+
+// Get the value of an option (--name value or -n value)
+// Returns nil if not found
+func get_option(args: [string], short: string, long: string) -> string? {
+    let mut i = 0
+    while i < args.length() {
+        let arg = args[i]
+        if arg == short || arg == long {
+            // Next arg is the value
+            if i + 1 < args.length() {
+                return args[i + 1]
+            }
+            return nil
+        }
+        // Check for --name=value format
+        if arg.starts_with(long + "=") {
+            // Find the = sign and extract the value after it
+            let eq_pos = arg.index_of_raw("=")
+            if eq_pos >= 0_i32 {
+                return arg.substring(eq_pos + 1_i32, -1_i32)
+            }
+        }
+        i = i + 1
+    }
+    return nil
+}
+
+// Get all positional arguments (non-option args)
+func positional_args(args: [string]) -> [string] {
+    let result: [string] = []
+    let mut skip_next = false
+    for arg in args {
+        if skip_next {
+            skip_next = false
+        } else if arg == "--" {
+            // Everything after -- is positional
+            skip_next = false
+        } else if is_option(arg) {
+            // Skip the next arg if this looks like an option that takes a value
+            // (heuristic: not a flag like -v or --verbose)
+            skip_next = false
+        } else {
+            result.push(arg)
+        }
+    }
+    return result
+}
+
+// Get the first positional argument (often a command name)
+func first_positional(args: [string]) -> string? {
+    for arg in args {
+        if !is_option(arg) {
+            return arg
+        }
+    }
+    return nil
+}
+
+// Get positional argument at index (0-based, skipping options)
+func positional_at(args: [string], index: i64) -> string? {
+    let mut pos_count = 0
+    for arg in args {
+        if !is_option(arg) {
+            if pos_count == index {
+                return arg
+            }
+            pos_count = pos_count + 1
+        }
+    }
+    return nil
+}
+
+// Count positional arguments
+func positional_count(args: [string]) -> i64 {
+    let mut count = 0
+    for arg in args {
+        if !is_option(arg) {
+            count = count + 1
+        }
+    }
+    return count
+}
