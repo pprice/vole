@@ -1,0 +1,16 @@
+// Test: error when intrinsic is declared but no handler exists in registry
+class Wrapper {
+    value: i64
+}
+
+implement Wrapper {
+    external("vole:compiler_intrinsic") {
+        func "wrapper_nonexistent_intrinsic" as bad() -> i64
+    }
+}
+
+func main() {
+    let w = Wrapper { value: 42 }
+    let x = w.bad()
+    println(x)
+}

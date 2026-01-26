@@ -917,7 +917,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let handler = self
             .intrinsics_registry()
             .lookup(&key)
-            .ok_or_else(|| format!("Unknown compiler intrinsic: {}", intrinsic_key))?;
+            .ok_or_else(|| {
+                format!(
+                    "intrinsic \"{}\" declared but no handler registered\n  note: add handler in codegen/intrinsics.rs",
+                    intrinsic_key
+                )
+            })?;
 
         match handler {
             IntrinsicHandler::FloatConstant(fc) => {

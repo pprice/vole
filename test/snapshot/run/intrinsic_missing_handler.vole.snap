@@ -1,0 +1,5 @@
+[stdout]
+
+[stderr]
+compilation error: intrinsic "wrapper_nonexistent_intrinsic" declared but no handler registered
+  note: add handler in codegen/intrinsics.rs
