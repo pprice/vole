@@ -1,0 +1,76 @@
+// Module that exports records with static methods for testing module-qualified access
+
+record TestDuration {
+    nanos: i64,
+
+    statics {
+        func seconds(n: i64) -> TestDuration {
+            return TestDuration { nanos: n * 1000000000 }
+        }
+
+        func milliseconds(n: i64) -> TestDuration {
+            return TestDuration { nanos: n * 1000000 }
+        }
+
+        func zero() -> TestDuration {
+            return TestDuration { nanos: 0 }
+        }
+    }
+}
+
+record TestPoint {
+    x: i64,
+    y: i64,
+
+    statics {
+        func origin() -> TestPoint {
+            return TestPoint { x: 0, y: 0 }
+        }
+
+        func create(x: i64, y: i64) -> TestPoint {
+            return TestPoint { x: x, y: y }
+        }
+    }
+
+    func distance_squared() -> i64 {
+        return self.x * self.x + self.y * self.y
+    }
+}
+
+// Generic record with static methods
+record TestBox<T> {
+    value: T,
+
+    statics {
+        func wrap(v: T) -> TestBox<T> {
+            return TestBox { value: v }
+        }
+    }
+
+    func unwrap() -> T {
+        return self.value
+    }
+}
+
+// Class with static methods
+class TestCounter {
+    count: i64,
+
+    statics {
+        func starting_at(n: i64) -> TestCounter {
+            return TestCounter { count: n }
+        }
+
+        func zero() -> TestCounter {
+            return TestCounter { count: 0 }
+        }
+    }
+
+    func increment() {
+        self.count = self.count + 1
+    }
+
+    func get() -> i64 {
+        return self.count
+    }
+}

@@ -892,7 +892,10 @@ impl Analyzer {
 
     /// Try to resolve a static method call target from an expression.
     /// Returns (TypeDefId, type_name) if this is a valid static call target.
-    /// Handles both identifier types (Point.create) and primitive keywords (i32.default_value)
+    /// Handles:
+    /// - Named types: Point.create(), MyClass.static_method()
+    /// - Primitive keywords: i32.default_value(), bool.default_value()
+    /// - Module-qualified types: time.Duration.seconds(), math.Vector.zero()
     fn resolve_static_call_target(
         &self,
         object: &Expr,
@@ -925,6 +928,50 @@ impl Analyzer {
                 } else {
                     None
                 }
+            }
+            // Module-qualified types: time.Duration.seconds(), module.Type.method()
+            // The object is a field access like `time.Duration` where `time` is a module
+            // and `Duration` is a type exported from that module.
+            ExprKind::FieldAccess(field_access) => {
+                // The object of the field access should be a module variable
+                let ExprKind::Identifier(module_sym) = &field_access.object.kind else {
+                    return None;
+                };
+
+                // Get the module type from the variable
+                let module_type_id = self.get_variable_type_id(*module_sym)?;
+
+                // Check if this is a module type
+                let module_info = self.type_arena().unwrap_module(module_type_id).cloned()?;
+
+                // Look up the type in the module's exports
+                let type_name_str = interner.resolve(field_access.field);
+                let type_name_id = self.module_name_id(module_info.module_id, type_name_str)?;
+
+                // Find the export and check if it's a Record or Class type
+                let export_type_id = module_info
+                    .exports
+                    .iter()
+                    .find(|(n, _)| *n == type_name_id)
+                    .map(|&(_, type_id)| type_id)?;
+
+                // Extract TypeDefId from the export type
+                let arena = self.type_arena();
+                let type_def_id = if let Some((id, _)) = arena.unwrap_record(export_type_id) {
+                    id
+                } else if let Some((id, _)) = arena.unwrap_class(export_type_id) {
+                    id
+                } else {
+                    return None;
+                };
+
+                tracing::trace!(
+                    module = %interner.resolve(*module_sym),
+                    type_name = %type_name_str,
+                    ?type_def_id,
+                    "resolved static call target (module-qualified)"
+                );
+                Some((type_def_id, type_name_str.to_string()))
             }
             _ => None,
         }
