@@ -10,6 +10,7 @@ use vole_runtime::NativeRegistry;
 
 use crate::FunctionKey;
 use crate::interface_vtable::InterfaceVtableRegistry;
+use crate::intrinsics::IntrinsicsRegistry;
 
 use super::TypeMetadata;
 
@@ -33,6 +34,8 @@ pub struct CodegenState {
     pub interface_vtables: RefCell<InterfaceVtableRegistry>,
     /// Registry of native functions for external method calls
     pub native_registry: NativeRegistry,
+    /// Registry of compiler intrinsics (e.g., f64.nan(), f32.infinity())
+    pub intrinsics_registry: IntrinsicsRegistry,
     /// Counter for generating unique lambda names (interior mutability)
     pub lambda_counter: Cell<usize>,
 }
@@ -45,6 +48,7 @@ impl CodegenState {
             method_func_keys: FxHashMap::default(),
             interface_vtables: RefCell::new(InterfaceVtableRegistry::new()),
             native_registry,
+            intrinsics_registry: IntrinsicsRegistry::new(),
             lambda_counter: Cell::new(0),
         }
     }

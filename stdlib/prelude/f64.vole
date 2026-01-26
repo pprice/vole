@@ -30,25 +30,14 @@ implement Default for f64 {
 
 
 
-// FloatConstants - these are compiled directly to constants by the codegen
-// The function bodies here are placeholders that will never be executed
+// FloatConstants - compiler intrinsics that emit constants directly (no FFI call)
 implement FloatConstants for f64 {
     statics {
-        func nan() -> f64 {
-            // Intrinsic: codegen emits f64const(NaN) directly
-            return 0.0
-        }
-        func infinity() -> f64 {
-            // Intrinsic: codegen emits f64const(INFINITY) directly
-            return 0.0
-        }
-        func neg_infinity() -> f64 {
-            // Intrinsic: codegen emits f64const(NEG_INFINITY) directly
-            return 0.0
-        }
-        func epsilon() -> f64 {
-            // Intrinsic: codegen emits f64const(EPSILON) directly
-            return 0.0
+        external("vole:compiler_intrinsic") {
+            func "f64_nan" as nan() -> f64
+            func "f64_infinity" as infinity() -> f64
+            func "f64_neg_infinity" as neg_infinity() -> f64
+            func "f64_epsilon" as epsilon() -> f64
         }
     }
 }

@@ -2330,7 +2330,14 @@ impl Analyzer {
                                 .native_name
                                 .clone()
                                 .unwrap_or_else(|| method_name_str.clone());
+                            // Compute NameIds before calling entity_registry_mut to avoid borrow conflicts
                             let builtin_mod = self.name_table_mut().builtin_module();
+                            let module_path_id = self
+                                .name_table_mut()
+                                .intern_raw(builtin_mod, &[&external.module_path]);
+                            let native_name_id = self
+                                .name_table_mut()
+                                .intern_raw(builtin_mod, &[&native_name_str]);
 
                             self.entity_registry_mut()
                                 .register_static_method_with_binding(
@@ -2340,12 +2347,8 @@ impl Analyzer {
                                     signature_id,
                                     false,
                                     Some(ExternalMethodInfo {
-                                        module_path: self
-                                            .name_table_mut()
-                                            .intern_raw(builtin_mod, &[&external.module_path]),
-                                        native_name: self
-                                            .name_table_mut()
-                                            .intern_raw(builtin_mod, &[&native_name_str]),
+                                        module_path: module_path_id,
+                                        native_name: native_name_id,
                                     }),
                                     Vec::new(), // External static methods, no method type params
                                 );

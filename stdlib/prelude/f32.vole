@@ -30,25 +30,14 @@ implement Default for f32 {
 
 
 
-// FloatConstants - these are compiled directly to constants by the codegen
-// The function bodies here are placeholders that will never be executed
+// FloatConstants - compiler intrinsics that emit constants directly (no FFI call)
 implement FloatConstants for f32 {
     statics {
-        func nan() -> f32 {
-            // Intrinsic: codegen emits f32const(NaN) directly
-            return 0.0
-        }
-        func infinity() -> f32 {
-            // Intrinsic: codegen emits f32const(INFINITY) directly
-            return 0.0
-        }
-        func neg_infinity() -> f32 {
-            // Intrinsic: codegen emits f32const(NEG_INFINITY) directly
-            return 0.0
-        }
-        func epsilon() -> f32 {
-            // Intrinsic: codegen emits f32const(EPSILON) directly
-            return 0.0
+        external("vole:compiler_intrinsic") {
+            func "f32_nan" as nan() -> f32
+            func "f32_infinity" as infinity() -> f32
+            func "f32_neg_infinity" as neg_infinity() -> f32
+            func "f32_epsilon" as epsilon() -> f32
         }
     }
 }

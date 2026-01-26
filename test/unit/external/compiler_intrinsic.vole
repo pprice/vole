@@ -1,0 +1,53 @@
+// Test external("vole:compiler_intrinsic") support
+// Compiler intrinsics are external methods that emit inline IR instead of FFI calls.
+// The intrinsic key format is "{type}_{method}", e.g., "f64_nan".
+
+// Note: The actual intrinsics are implemented in stdlib/prelude/f32.vole and f64.vole
+// using external("vole:compiler_intrinsic") syntax. This test verifies that the
+// intrinsics work correctly when called through the normal API.
+
+tests "compiler intrinsics via external block" {
+    test "f64 intrinsics through FloatConstants interface" {
+        // These are declared as: external("vole:compiler_intrinsic") { func "f64_nan" as nan() -> f64 }
+        let n = f64.nan()
+        assert(n != n) // NaN != NaN
+
+        let inf = f64.infinity()
+        assert(inf > 0.0)
+        assert(inf + 1.0 == inf)
+
+        let neg_inf = f64.neg_infinity()
+        assert(neg_inf < 0.0)
+
+        let eps = f64.epsilon()
+        assert(eps > 0.0)
+        assert(1.0 + eps != 1.0)
+    }
+
+    test "f32 intrinsics through FloatConstants interface" {
+        // These are declared as: external("vole:compiler_intrinsic") { func "f32_nan" as nan() -> f32 }
+        let n: f32 = f32.nan()
+        assert(n != n) // NaN != NaN
+
+        let inf: f32 = f32.infinity()
+        assert(inf > 0.0)
+
+        let neg_inf: f32 = f32.neg_infinity()
+        assert(neg_inf < 0.0)
+
+        let eps: f32 = f32.epsilon()
+        assert(eps > 0.0)
+    }
+
+    test "multiple intrinsic calls produce correct values" {
+        // Calling the same intrinsic multiple times should produce consistent results
+        let eps1 = f64.epsilon()
+        let eps2 = f64.epsilon()
+        assert(eps1 == eps2)
+
+        let nan1 = f64.nan()
+        let nan2 = f64.nan()
+        // NaN != NaN even for the same intrinsic call
+        assert(nan1 != nan2)
+    }
+}

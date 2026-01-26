@@ -369,6 +369,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &self.env.state.native_registry
     }
 
+    /// Get compiler intrinsics registry
+    #[inline]
+    pub fn intrinsics_registry(&self) -> &'ctx crate::intrinsics::IntrinsicsRegistry {
+        &self.env.state.intrinsics_registry
+    }
+
     /// Get the interner for symbol resolution
     #[inline]
     pub fn interner(&self) -> &'ctx vole_frontend::Interner {
@@ -813,31 +819,45 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     // ========== External native function calls ==========
 
+    /// The module path for compiler intrinsics (e.g., f64.nan(), f32.infinity())
+    pub const COMPILER_INTRINSIC_MODULE: &'static str = "vole:compiler_intrinsic";
+
     /// Call an external native function using TypeId for return type.
+    /// If the module path is "vole:compiler_intrinsic", the call is handled as a
+    /// compiler intrinsic (e.g., f64_nan emits a constant instead of an FFI call).
     pub fn call_external_id(
         &mut self,
         external_info: &ExternalMethodInfo,
         args: &[Value],
         return_type_id: TypeId,
     ) -> Result<CompiledValue, String> {
-        // Get string names from NameId and look up native function
-        let native_func = {
+        // Get string names from NameId
+        let (module_path, native_name) = {
             let name_table = self.name_table();
-            let module_path = name_table
+            let mp = name_table
                 .last_segment_str(external_info.module_path)
                 .ok_or_else(|| "module_path NameId has no segment".to_string())?;
-            let native_name = name_table
+            let nn = name_table
                 .last_segment_str(external_info.native_name)
                 .ok_or_else(|| "native_name NameId has no segment".to_string())?;
-            self.native_registry()
-                .lookup(&module_path, &native_name)
-                .ok_or_else(|| {
-                    format!(
-                        "Native function {}::{} not found in registry",
-                        module_path, native_name
-                    )
-                })?
+            (mp, nn)
         };
+
+        // Check if this is a compiler intrinsic
+        if module_path == Self::COMPILER_INTRINSIC_MODULE {
+            return self.call_compiler_intrinsic(&native_name, args, return_type_id);
+        }
+
+        // Look up native function for FFI call
+        let native_func = self
+            .native_registry()
+            .lookup(&module_path, &native_name)
+            .ok_or_else(|| {
+                format!(
+                    "Native function {}::{} not found in registry",
+                    module_path, native_name
+                )
+            })?;
 
         // Build the Cranelift signature from NativeSignature
         let ptr_type = self.ptr_type();
@@ -878,6 +898,66 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 ty: cranelift_ty,
                 type_id: return_type_id,
             })
+        }
+    }
+
+    /// Call a compiler intrinsic by key (e.g., "f64_nan", "f32_infinity").
+    ///
+    /// Compiler intrinsics are declared with `external("vole:compiler_intrinsic")` and
+    /// emit inline IR instead of FFI calls. The intrinsic key format is `{type}_{method}`.
+    fn call_compiler_intrinsic(
+        &mut self,
+        intrinsic_key: &str,
+        _args: &[Value],
+        _return_type_id: TypeId,
+    ) -> Result<CompiledValue, String> {
+        use crate::intrinsics::{FloatConstant, IntrinsicHandler, IntrinsicKey};
+
+        let key = IntrinsicKey::from(intrinsic_key);
+        let handler = self
+            .intrinsics_registry()
+            .lookup(&key)
+            .ok_or_else(|| format!("Unknown compiler intrinsic: {}", intrinsic_key))?;
+
+        match handler {
+            IntrinsicHandler::FloatConstant(fc) => {
+                let (value, ty, type_id) = match fc {
+                    FloatConstant::F32Nan => {
+                        let v = self.builder.ins().f32const(f32::NAN);
+                        (v, types::F32, TypeId::F32)
+                    }
+                    FloatConstant::F64Nan => {
+                        let v = self.builder.ins().f64const(f64::NAN);
+                        (v, types::F64, TypeId::F64)
+                    }
+                    FloatConstant::F32Infinity => {
+                        let v = self.builder.ins().f32const(f32::INFINITY);
+                        (v, types::F32, TypeId::F32)
+                    }
+                    FloatConstant::F64Infinity => {
+                        let v = self.builder.ins().f64const(f64::INFINITY);
+                        (v, types::F64, TypeId::F64)
+                    }
+                    FloatConstant::F32NegInfinity => {
+                        let v = self.builder.ins().f32const(f32::NEG_INFINITY);
+                        (v, types::F32, TypeId::F32)
+                    }
+                    FloatConstant::F64NegInfinity => {
+                        let v = self.builder.ins().f64const(f64::NEG_INFINITY);
+                        (v, types::F64, TypeId::F64)
+                    }
+                    FloatConstant::F32Epsilon => {
+                        let v = self.builder.ins().f32const(f32::EPSILON);
+                        (v, types::F32, TypeId::F32)
+                    }
+                    FloatConstant::F64Epsilon => {
+                        let v = self.builder.ins().f64const(f64::EPSILON);
+                        (v, types::F64, TypeId::F64)
+                    }
+                };
+                // Use the expected return type from the intrinsic handler
+                Ok(CompiledValue { value, ty, type_id })
+            }
         }
     }
 
