@@ -105,6 +105,17 @@ impl ModuleLoader {
         self.project_root = Some(root);
     }
 
+    /// Create a child loader with the same sandbox settings (stdlib_root, project_root)
+    /// but empty cache and loading stack. Used for sub-analyzers.
+    pub fn new_child(&self) -> Self {
+        Self {
+            stdlib_root: self.stdlib_root.clone(),
+            project_root: self.project_root.clone(),
+            cache: FxHashMap::default(),
+            loading_stack: HashSet::new(),
+        }
+    }
+
     /// Detect project root from a file path.
     /// Searches upward for .git, vole.toml, or uses the file's directory.
     pub fn detect_project_root(file_path: &Path) -> PathBuf {
@@ -307,13 +318,43 @@ impl ModuleLoader {
         };
 
         // Security: check sandbox boundary
-        self.check_sandbox(&resolved, import_path)?;
+        self.check_sandbox(&resolved, import_path, from_file)?;
 
         Ok(resolved)
     }
 
-    /// Check that a resolved path is within the project sandbox.
-    fn check_sandbox(&self, resolved: &Path, import_path: &str) -> Result<(), LoadError> {
+    /// Check that a resolved path is within the appropriate sandbox.
+    ///
+    /// - If importing from within stdlib, the resolved path must stay in stdlib
+    /// - Otherwise, if project_root is set, the resolved path must stay in project root
+    fn check_sandbox(
+        &self,
+        resolved: &Path,
+        import_path: &str,
+        from_file: &Path,
+    ) -> Result<(), LoadError> {
+        // Check if importing from within stdlib - if so, sandbox to stdlib
+        if let Some(ref stdlib_root) = self.stdlib_root {
+            let canonical_stdlib = stdlib_root
+                .canonicalize()
+                .unwrap_or_else(|_| stdlib_root.clone());
+            let canonical_from = from_file
+                .canonicalize()
+                .unwrap_or_else(|_| from_file.to_path_buf());
+
+            if canonical_from.starts_with(&canonical_stdlib) {
+                // Importing from stdlib - sandbox to stdlib
+                if !resolved.starts_with(&canonical_stdlib) {
+                    return Err(LoadError::EscapesSandbox {
+                        import_path: import_path.to_string(),
+                        resolved: resolved.to_path_buf(),
+                    });
+                }
+                return Ok(());
+            }
+        }
+
+        // Check project root sandbox for user code
         if let Some(ref root) = self.project_root {
             // Canonicalize the root for comparison
             let canonical_root = root.canonicalize().unwrap_or_else(|_| root.clone());
@@ -522,5 +563,74 @@ mod tests {
 
         let result = loader.load_relative("./nonexistent", &main_file);
         assert!(matches!(result, Err(LoadError::FileNotFound(_))));
+    }
+
+    #[test]
+    fn test_stdlib_sandbox_escape_rejected() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+
+        // Create a mock stdlib directory
+        let stdlib = root.join("stdlib");
+        fs::create_dir(&stdlib).unwrap();
+        let stdlib_file = create_test_file(&stdlib, "math.vole", "// math module");
+
+        // Create a file outside stdlib
+        create_test_file(root, "secret.vole", "// secret outside stdlib");
+
+        // Create loader with stdlib root
+        let mut loader = ModuleLoader::with_stdlib(stdlib);
+
+        // Try to escape stdlib via relative import from a stdlib file
+        let result = loader.load_relative("../secret", &stdlib_file);
+        assert!(
+            matches!(result, Err(LoadError::EscapesSandbox { .. })),
+            "Expected sandbox escape error, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_stdlib_relative_import_within_stdlib_allowed() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+
+        // Create a mock stdlib with nested files
+        let stdlib = root.join("stdlib");
+        let prelude = stdlib.join("prelude");
+        fs::create_dir_all(&prelude).unwrap();
+
+        let traits_file = create_test_file(&prelude, "traits.vole", "// traits module");
+        create_test_file(&prelude, "bool.vole", "// bool module");
+
+        // Create loader with stdlib root
+        let mut loader = ModuleLoader::with_stdlib(stdlib);
+
+        // Relative import within stdlib should be allowed
+        let result = loader.load_relative("./bool", &traits_file);
+        assert!(result.is_ok(), "Expected success, got {:?}", result);
+    }
+
+    #[test]
+    fn test_new_child_inherits_roots() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path();
+
+        // Create directories
+        let stdlib = root.join("stdlib");
+        let project = root.join("project");
+        fs::create_dir_all(&stdlib).unwrap();
+        fs::create_dir_all(&project).unwrap();
+
+        // Create parent loader with both roots
+        let mut parent = ModuleLoader::with_stdlib(stdlib.clone());
+        parent.set_project_root(project.clone());
+
+        // Create child
+        let child = parent.new_child();
+
+        // Child should inherit roots
+        assert_eq!(child.stdlib_root(), Some(stdlib.as_path()));
+        assert_eq!(child.project_root(), Some(project.as_path()));
     }
 }

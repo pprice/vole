@@ -1,0 +1,4 @@
+// Test that relative imports cannot escape the project root
+// This attempts to escape using many ../ to reach /etc/passwd
+
+let evil = import "../../../../../../../../../../etc/passwd"

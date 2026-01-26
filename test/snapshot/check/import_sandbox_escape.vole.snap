@@ -1,0 +1,11 @@
+[stdout]
+
+[stderr]
+  x [E2066]: module not found: ../../../../../../../../../../etc/passwd
+   ,-[<path>/import_sandbox_escape.vole:4:12]
+ 3 | 
+ 4 | let evil = import "../../../../../../../../../../etc/passwd"
+   :            ^^^^^^^^^^^^^^^^^^^^^^^^|^^^^^^^^^^^^^^^^^^^^^^^^
+   :                                    `-- import here
+   `----
+  help: import escapes project root: ../../../../../../../../../../etc/passwd (resolved to /etc/passwd)

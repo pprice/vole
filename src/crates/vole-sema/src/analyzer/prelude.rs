@@ -10,7 +10,6 @@
 use super::Analyzer;
 use crate::analysis_cache::CachedModule;
 use crate::generic::TypeParamScopeStack;
-use crate::module::ModuleLoader;
 use crate::resolution::MethodResolutions;
 use crate::scope::Scope;
 use crate::type_arena::TypeId as ArenaTypeId;
@@ -143,7 +142,8 @@ impl Analyzer {
             expr_types: FxHashMap::default(),
             is_check_results: FxHashMap::default(),
             method_resolutions: MethodResolutions::new(),
-            module_loader: ModuleLoader::new(),
+            // Use child loader to inherit sandbox settings (stdlib_root, project_root)
+            module_loader: self.module_loader.new_child(),
             // Share module_type_ids so imports to already-loaded prelude files hit the cache
             module_type_ids: self.module_type_ids.clone(),
             // Share module_programs so codegen can find already-loaded prelude modules
@@ -203,9 +203,11 @@ impl Analyzer {
                         .resolver(&prelude_interner)
                         .resolve_type_str_or_interface(iface_str, &self.entity_registry());
                     if let Some(type_def_id) = type_def_id {
-                        let name_id = self
-                            .name_table_mut()
-                            .intern(prelude_module, &[iface.name], &prelude_interner);
+                        let name_id = self.name_table_mut().intern(
+                            prelude_module,
+                            &[iface.name],
+                            &prelude_interner,
+                        );
                         let iface_type_id =
                             self.type_arena_mut().interface(type_def_id, smallvec![]);
                         exports.push((name_id, iface_type_id));

@@ -3163,7 +3163,8 @@ impl Analyzer {
             expr_types: FxHashMap::default(),
             is_check_results: FxHashMap::default(),
             method_resolutions: MethodResolutions::new(),
-            module_loader: ModuleLoader::new(),
+            // Use child loader to inherit sandbox settings (stdlib_root, project_root)
+            module_loader: self.module_loader.new_child(),
             module_type_ids: FxHashMap::default(),
             module_programs: FxHashMap::default(),
             module_expr_types: FxHashMap::default(),
