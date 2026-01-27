@@ -16,7 +16,7 @@ use crate::runtime::{
     JmpBuf, call_setjmp, clear_test_jmp_buf, set_capture_mode, set_stderr_capture,
     set_stdout_capture, set_test_jmp_buf,
 };
-use crate::sema::{Analyzer, ModuleCache, TypeError, TypeWarning};
+use crate::sema::{Analyzer, ModuleCache, TypeError, TypeWarning, optimize_all};
 use crate::transforms;
 
 // Re-export AnalyzedProgram from codegen
@@ -169,7 +169,20 @@ pub fn parse_and_analyze(
         render_sema_warning(warn, file_path, source);
     }
 
-    let output = analyzer.into_analysis_results();
+    let mut output = analyzer.into_analysis_results();
+
+    // Optimizer phase (constant folding, algebraic simplifications)
+    {
+        let _span = tracing::info_span!("optimize").entered();
+        let stats = optimize_all(&mut program, &interner, &mut output.expression_data);
+        tracing::debug!(
+            constants_folded = stats.constants_folded,
+            div_to_mul = stats.div_to_mul,
+            div_to_shift = stats.div_to_shift,
+            "optimization complete"
+        );
+    }
+
     Ok(AnalyzedProgram::from_analysis(program, interner, output))
 }
 
@@ -246,7 +259,20 @@ pub fn parse_and_analyze_with_cache(
         render_sema_warning(warn, file_path, source);
     }
 
-    let output = analyzer.into_analysis_results();
+    let mut output = analyzer.into_analysis_results();
+
+    // Optimizer phase (constant folding, algebraic simplifications)
+    {
+        let _span = tracing::info_span!("optimize").entered();
+        let stats = optimize_all(&mut program, &interner, &mut output.expression_data);
+        tracing::debug!(
+            constants_folded = stats.constants_folded,
+            div_to_mul = stats.div_to_mul,
+            div_to_shift = stats.div_to_shift,
+            "optimization complete"
+        );
+    }
+
     Ok(AnalyzedProgram::from_analysis(program, interner, output))
 }
 
@@ -424,7 +450,11 @@ pub fn run_captured<W: Write + Send + 'static>(
         }
         return Err(());
     }
-    let output = analyzer.into_analysis_results();
+    let mut output = analyzer.into_analysis_results();
+
+    // Optimizer phase (constant folding, algebraic simplifications)
+    let _stats = optimize_all(&mut program, &interner, &mut output.expression_data);
+
     let analyzed = AnalyzedProgram::from_analysis(program, interner, output);
 
     // Compile

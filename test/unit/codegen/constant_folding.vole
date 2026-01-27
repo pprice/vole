@@ -1,0 +1,283 @@
+// Test constant folding optimization pass
+// Verifies that constant expressions are evaluated at compile time
+
+tests {
+    // ============ Basic constant folding tests ============
+
+    test "fold integer addition" {
+        // 2 + 3 should be folded to 5 at compile time
+        let result = 2 + 3
+        assert(result == 5)
+    }
+
+    test "fold integer subtraction" {
+        let result = 10 - 3
+        assert(result == 7)
+    }
+
+    test "fold integer multiplication" {
+        let result = 4 * 5
+        assert(result == 20)
+    }
+
+    test "fold integer division" {
+        let result = 20 / 4
+        assert(result == 5)
+    }
+
+    test "fold integer modulo" {
+        let result = 17 % 5
+        assert(result == 2)
+    }
+
+    test "fold nested integer expression" {
+        // ((2 + 3) * 4 - 10) / 2 = (5 * 4 - 10) / 2 = (20 - 10) / 2 = 10 / 2 = 5
+        let result = ((2 + 3) * 4 - 10) / 2
+        assert(result == 5)
+    }
+
+    test "fold float addition" {
+        let result = 1.5 + 2.5
+        assert(result == 4.0)
+    }
+
+    test "fold float subtraction" {
+        let result = 5.0 - 2.5
+        assert(result == 2.5)
+    }
+
+    test "fold float multiplication" {
+        let result = 2.5 * 4.0
+        assert(result == 10.0)
+    }
+
+    test "fold float division" {
+        let result = 10.0 / 4.0
+        assert(result == 2.5)
+    }
+
+    test "fold nested float expression" {
+        // (1.0 + 2.0) * (3.0 - 1.0) = 3.0 * 2.0 = 6.0
+        let result = (1.0 + 2.0) * (3.0 - 1.0)
+        assert(result == 6.0)
+    }
+
+    test "fold mixed int/float promotes to float" {
+        // 2 + 3.0 should work and fold to 5.0
+        let result = 2 + 3.0
+        assert(result == 5.0)
+    }
+
+    // ============ Unary operator folding ============
+
+    test "fold unary negation int" {
+        let result = -5
+        assert(result == -5)
+    }
+
+    test "fold unary negation float" {
+        let result = -3.5
+        assert(result == -3.5)
+    }
+
+    test "fold double negation" {
+        let result = --5
+        assert(result == 5)
+    }
+
+    test "fold boolean not" {
+        let result = !false
+        assert(result == true)
+    }
+
+    test "fold double boolean not" {
+        let result = !!true
+        assert(result == true)
+    }
+
+    // ============ Comparison folding ============
+
+    test "fold integer equality true" {
+        let result = 5 == 5
+        assert(result == true)
+    }
+
+    test "fold integer equality false" {
+        let result = 5 == 6
+        assert(result == false)
+    }
+
+    test "fold integer less than true" {
+        let result = 3 < 5
+        assert(result == true)
+    }
+
+    test "fold integer less than false" {
+        let result = 5 < 3
+        assert(result == false)
+    }
+
+    test "fold float comparison" {
+        let result = 3.14 > 2.71
+        assert(result == true)
+    }
+
+    // ============ Boolean operation folding ============
+
+    test "fold boolean and true" {
+        let result = true && true
+        assert(result == true)
+    }
+
+    test "fold boolean and false" {
+        let result = true && false
+        assert(result == false)
+    }
+
+    test "fold boolean or true" {
+        let result = false || true
+        assert(result == true)
+    }
+
+    test "fold boolean or false" {
+        let result = false || false
+        assert(result == false)
+    }
+
+    // ============ Bitwise operation folding ============
+
+    test "fold bitwise and" {
+        let result = 0b1100 & 0b1010
+        assert(result == 0b1000)
+    }
+
+    test "fold bitwise or" {
+        let result = 0b1100 | 0b1010
+        assert(result == 0b1110)
+    }
+
+    test "fold bitwise xor" {
+        let result = 0b1100 ^ 0b1010
+        assert(result == 0b0110)
+    }
+
+    test "fold left shift" {
+        let result = 1 << 4
+        assert(result == 16)
+    }
+
+    test "fold right shift" {
+        let result = 16 >> 2
+        assert(result == 4)
+    }
+
+    // ============ Division by constant optimization ============
+
+    test "division by constant float" {
+        // x / 4.0 should become x * 0.25
+        let x = 20.0
+        let result = x / 4.0
+        assert(result == 5.0)
+    }
+
+    test "division by constant float in expression" {
+        // y / 1000.0 should become y * 0.001
+        let y = 5000.0
+        let result = y / 1000.0
+        assert(result == 5.0)
+    }
+
+    test "division by power of two unsigned" {
+        // x / 8 should become x >> 3 for unsigned
+        let x: u64 = 64
+        let result = x / 8
+        assert(result == 8)
+    }
+
+    test "division by power of two in mandelbrot pattern" {
+        // This is the pattern from the mandelbrot benchmark
+        let size = 4000.0
+        let x = 2000.0
+        // 2.0 * x / size - 1.5 = 2.0 * 2000 / 4000 - 1.5 = 4000/4000 - 1.5 = 1.0 - 1.5 = -0.5
+        let cr = 2.0 * x / size - 1.5
+        assert(cr == -0.5)
+    }
+
+    // ============ Complex expressions that should fold ============
+
+    test "multiple constant operations" {
+        // All of this should fold at compile time
+        let a = 10 + 20
+        let b = a * 2  // a is not constant, but if we inlined it...
+        // For now, just test the direct constant folding
+        assert(a == 30)
+    }
+
+    test "constant in loop bound (constant expression)" {
+        let limit = 5 + 5  // Should fold to 10
+        let mut sum = 0
+        let mut i = 0
+        while i < limit {
+            sum = sum + 1
+            i = i + 1
+        }
+        assert(sum == 10)
+    }
+
+    test "typed numeric suffix preserved" {
+        let x: i32 = 10_i32 + 20_i32
+        assert(x == 30_i32)
+    }
+
+    test "f32 constant folding" {
+        let x: f32 = 1.5_f32 + 2.5_f32
+        assert(x == 4.0_f32)
+    }
+
+    // ============ Edge cases ============
+
+    test "fold division by 1" {
+        let x = 42
+        let result = x / 1
+        assert(result == 42)
+    }
+
+    test "fold multiplication by 1" {
+        let x = 42
+        let result = x * 1
+        assert(result == 42)
+    }
+
+    test "fold multiplication by 0" {
+        let x = 42
+        let result = x * 0
+        assert(result == 0)
+    }
+
+    test "fold addition of 0" {
+        let x = 42
+        let result = x + 0
+        assert(result == 42)
+    }
+
+    test "fold subtraction of 0" {
+        let x = 42
+        let result = x - 0
+        assert(result == 42)
+    }
+
+    test "very large constant" {
+        let result = 1000000 * 1000000
+        assert(result == 1000000000000)
+    }
+
+    test "negative constant folding" {
+        let result = -10 + 20
+        assert(result == 10)
+    }
+
+    test "mixed sign constant folding" {
+        let result = 10 * -5 + 100
+        assert(result == 50)
+    }
+}

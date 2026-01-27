@@ -12,6 +12,7 @@ pub mod generic;
 pub mod implement_registry;
 pub mod infer;
 pub mod module;
+pub mod optimizer;
 pub mod query;
 pub mod resolution;
 pub mod resolve;
@@ -47,3 +48,6 @@ pub use errors::{SemanticError, SemanticWarning};
 
 // Module loading
 pub use module::{LoadError, ModuleInfo, ModuleLoader};
+
+// Optimizer
+pub use optimizer::{OptimizerConfig, OptimizerStats, optimize, optimize_all};
