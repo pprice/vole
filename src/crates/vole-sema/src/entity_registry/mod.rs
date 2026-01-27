@@ -8,7 +8,9 @@
 //! - `methods` - Method registration, lookup, and inheritance
 //! - `fields` - Field registration, lookup, and substitution helpers
 //! - `functions` - Free function registration and lookup
+//! - `accessors` - Convenience methods that return owned data to avoid borrow conflicts
 
+mod accessors;
 mod fields;
 mod functions;
 mod globals;

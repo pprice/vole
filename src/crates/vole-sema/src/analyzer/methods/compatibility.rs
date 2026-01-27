@@ -108,10 +108,7 @@ impl Analyzer {
             if !seen.insert(current) {
                 continue;
             }
-            let extends = {
-                let registry = self.entity_registry();
-                registry.get_type(current).extends.clone()
-            };
+            let extends = self.entity_registry().type_extends_list(current);
             for parent_id in extends {
                 if parent_id == base {
                     return true;

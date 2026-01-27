@@ -844,18 +844,11 @@ impl Analyzer {
         }
 
         // Get field types and type params from the type definition
-        let (field_types, type_params): (Vec<ArenaTypeId>, Vec<NameId>) = {
-            let registry = self.entity_registry();
-            let type_def = registry.get_type(type_def_id);
-            if let Some(generic_info) = &type_def.generic_info {
-                (
-                    generic_info.field_types.clone(),
-                    type_def.type_params.clone(),
-                )
-            } else {
-                return;
-            }
+        let Some(generic_info) = self.entity_registry().type_generic_info(type_def_id) else {
+            return;
         };
+        let field_types = generic_info.field_types;
+        let type_params = self.entity_registry().type_params(type_def_id);
 
         // Build substitution map: type param NameId -> concrete TypeId
         let subs: FxHashMap<NameId, ArenaTypeId> = type_params
@@ -889,16 +882,14 @@ impl Analyzer {
 
         // Get interface type params and method signature IDs upfront
         // to avoid borrow conflicts with the arena
-        let (type_params, signature_ids): (Vec<NameId>, Vec<ArenaTypeId>) = {
-            let registry = self.entity_registry();
-            let type_params = registry.get_type(interface_type_def_id).type_params.clone();
-            let method_ids = registry.interface_methods_ordered(interface_type_def_id);
-            let signature_ids: Vec<ArenaTypeId> = method_ids
-                .iter()
-                .map(|&mid| registry.get_method(mid).signature_id)
-                .collect();
-            (type_params, signature_ids)
-        };
+        let registry = self.entity_registry();
+        let type_params = registry.type_params(interface_type_def_id);
+        let method_ids = registry.interface_methods_ordered(interface_type_def_id);
+        let signature_ids: Vec<ArenaTypeId> = method_ids
+            .iter()
+            .map(|&mid| registry.method_signature(mid))
+            .collect();
+        drop(registry);
 
         // Skip if type params and args don't match (error case handled elsewhere)
         if type_params.len() != type_args.len() {
@@ -994,10 +985,7 @@ impl Analyzer {
         let type_def_id = self
             .resolver(interner)
             .resolve_type_str_or_interface(name, &self.entity_registry())?;
-        let type_params_len = {
-            let registry = self.entity_registry();
-            registry.get_type(type_def_id).type_params.len()
-        };
+        let type_params_len = self.entity_registry().type_params(type_def_id).len();
 
         // Check type params match
         if type_params_len != 0 && type_params_len != type_args_id.len() {
@@ -1034,10 +1022,7 @@ impl Analyzer {
         let method_id = self
             .entity_registry()
             .find_method_on_type(type_def_id, method_name_id)?;
-        let signature_id = {
-            let registry = self.entity_registry();
-            registry.get_method(method_id).signature_id
-        };
+        let signature_id = self.entity_registry().method_signature(method_id);
         Some(MethodLookup {
             method_id,
             signature_id,
@@ -1705,10 +1690,7 @@ impl Analyzer {
                 .get_implemented_interfaces(type_def_id);
 
             for interface_id in interface_ids {
-                let interface_name_id = {
-                    let registry = self.entity_registry();
-                    registry.get_type(interface_id).name_id
-                };
+                let interface_name_id = self.entity_registry().name_id(interface_id);
                 let iface_name_str = self.name_table().last_segment_str(interface_name_id);
                 if let Some(iface_name_str) = iface_name_str
                     && let Some(iface_name) = interner.lookup(&iface_name_str)
@@ -1799,11 +1781,8 @@ impl Analyzer {
                         .resolver(interner)
                         .resolve_type(sym, &self.entity_registry())
                     {
-                        let (kind, aliased_type) = {
-                            let registry = self.entity_registry();
-                            let type_def = registry.get_type(type_def_id);
-                            (type_def.kind, type_def.aliased_type)
-                        };
+                        let kind = self.entity_registry().type_kind(type_def_id);
+                        let aliased_type = self.entity_registry().type_aliased(type_def_id);
                         if kind == TypeDefKind::Alias
                             && let Some(aliased_type_id) = aliased_type
                         {

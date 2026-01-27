@@ -58,13 +58,13 @@ impl Analyzer {
     /// 1. First pass: Create a name scope with all type params (constraint=None) for constraint resolution
     /// 2. Second pass: Resolve constraints using that scope, building the final TypeParamInfo list
     ///
-    /// Returns a tuple of (Vec<TypeParamInfo>, TypeParamScope) where the scope contains
-    /// the fully resolved type parameters ready for use in type resolution contexts.
+    /// Returns a TypeParamScope containing the fully resolved type parameters.
+    /// Use `scope.to_params()` to get a cloned Vec, or `scope.into_params()` to consume and get owned Vec.
     fn build_type_params_with_constraints(
         &mut self,
         ast_type_params: &[TypeParam],
         interner: &Interner,
-    ) -> (Vec<TypeParamInfo>, TypeParamScope) {
+    ) -> TypeParamScope {
         let builtin_mod = self.name_table_mut().builtin_module();
 
         // First pass: create name_scope for constraint resolution
@@ -85,7 +85,7 @@ impl Analyzer {
             });
         }
 
-        // Second pass: resolve constraints with name_scope available
+        // Second pass: resolve constraints with name_scope available, building final scope
         let type_params: Vec<TypeParamInfo> = ast_type_params
             .iter()
             .map(|tp| {
@@ -106,10 +106,7 @@ impl Analyzer {
             })
             .collect();
 
-        // Build final scope from resolved type params
-        let type_param_scope = TypeParamScope::from_params(type_params.clone());
-
-        (type_params, type_param_scope)
+        TypeParamScope::from_params(type_params)
     }
 
     /// Register a type shell (name and kind only, no fields/methods yet).
@@ -234,11 +231,8 @@ impl Analyzer {
                     .resolver(interner)
                     .resolve_type(*sym, &self.entity_registry())
                 {
-                    let (kind, aliased_type) = {
-                        let registry = self.entity_registry();
-                        let type_def = registry.get_type(type_def_id);
-                        (type_def.kind, type_def.aliased_type)
-                    };
+                    let kind = self.entity_registry().type_kind(type_def_id);
+                    let aliased_type = self.entity_registry().type_aliased(type_def_id);
                     if kind == TypeDefKind::Alias
                         && let Some(aliased_type_id) = aliased_type
                     {
@@ -347,7 +341,7 @@ impl Analyzer {
             let builtin_mod = self.name_table_mut().builtin_module();
 
             // Build explicit type params with resolved constraints
-            let (mut type_params, mut type_param_scope) =
+            let mut type_param_scope =
                 self.build_type_params_with_constraints(&func.type_params, interner);
 
             // Create synthetic type parameters for structural types in parameters
@@ -373,16 +367,13 @@ impl Analyzer {
                     "created synthetic type param for structural constraint"
                 );
 
-                let type_param_info = TypeParamInfo {
+                type_param_scope.add(TypeParamInfo {
                     name: synthetic_symbol,
                     name_id: synthetic_name_id,
                     constraint: Some(TypeConstraint::Structural(structural)),
                     type_param_id: None,
                     variance: TypeParamVariance::default(),
-                };
-
-                type_params.push(type_param_info.clone());
-                type_param_scope.add(type_param_info);
+                });
                 synthetic_param_map.insert(param_idx, synthetic_name_id);
             }
 
@@ -428,6 +419,8 @@ impl Analyzer {
                 required_params,
                 param_defaults,
             );
+            // Extract type params from scope (consumes scope, avoids clone)
+            let type_params = type_param_scope.into_params();
             self.entity_registry_mut().set_function_generic_info(
                 func_id,
                 GenericFuncInfo {
@@ -756,278 +749,295 @@ impl Analyzer {
             .name_table_mut()
             .intern(self.current_module, &[class.name], interner);
 
-        // Handle generic classes vs non-generic classes
+        // Dispatch to appropriate handler based on whether class is generic
         if class.type_params.is_empty() {
-            // Non-generic class: lookup shell registered in pass 0.5
-            let entity_type_id = self
-                .entity_registry_mut()
-                .type_by_name(name_id)
-                .expect("class shell registered in register_all_type_shells");
-
-            // Skip if already processed (e.g., from a previous analysis of the same module
-            // in a shared cache scenario). Check if generic_info is already set.
-            if self
-                .entity_registry()
-                .get_type(entity_type_id)
-                .generic_info
-                .is_some()
-            {
-                return;
-            }
-
-            // Validate field default ordering and collect which fields have defaults
-            let field_has_default = self.validate_field_defaults(&class.fields, interner);
-
-            // Collect field info for generic_info (needed for struct literal checking)
-            // Convert Symbol field names to NameId at registration time
-            let builtin_mod = self.name_table_mut().builtin_module();
-            let field_names: Vec<NameId> = class
-                .fields
-                .iter()
-                .map(|f| {
-                    let name_str = interner.resolve(f.name);
-                    self.name_table_mut().intern_raw(builtin_mod, &[name_str])
-                })
-                .collect();
-            // Resolve field types directly to TypeId
-            let field_type_ids: Vec<ArenaTypeId> = class
-                .fields
-                .iter()
-                .map(|f| self.resolve_type_id(&f.ty, interner))
-                .collect();
-
-            // Set generic_info (with empty type_params for non-generic classes)
-            self.entity_registry_mut().set_generic_info(
-                entity_type_id,
-                GenericTypeInfo {
-                    type_params: vec![],
-                    field_names: field_names.clone(),
-                    field_types: field_type_ids.clone(),
-                    field_has_default,
-                },
-            );
-
-            // Register fields in EntityRegistry
-            for (i, field) in class.fields.iter().enumerate() {
-                let field_name_str = interner.resolve(field.name);
-                let full_field_name_id = self.name_table_mut().intern_raw(
-                    self.current_module,
-                    &[interner.resolve(class.name), field_name_str],
-                );
-                self.entity_registry_mut().register_field(
-                    entity_type_id,
-                    field_names[i],
-                    full_field_name_id,
-                    field_type_ids[i],
-                    i,
-                );
-            }
-
-            // Register and validate implements list
-            self.validate_and_register_implements(
-                entity_type_id,
-                &class.implements,
-                class.span,
-                interner,
-            );
-
-            // Register methods in EntityRegistry (single source of truth)
-            // Use class TypeId as Self for resolving method signatures
-            let self_type_id = self
-                .type_arena_mut()
-                .class(entity_type_id, TypeIdVec::new());
-            // Store base_type_id for codegen to look up without mutable arena access
-            self.entity_registry_mut()
-                .set_base_type_id(entity_type_id, self_type_id);
-            for method in &class.methods {
-                self.register_instance_method(
-                    entity_type_id,
-                    class.name,
-                    method,
-                    interner,
-                    None, // no type param scope for non-generic class
-                    Some(self_type_id),
-                );
-            }
-
-            // Register static methods in EntityRegistry
-            if let Some(ref statics) = class.statics {
-                for method in &statics.methods {
-                    self.register_static_method_helper(
-                        entity_type_id,
-                        class.name,
-                        method,
-                        interner,
-                        None,       // no type param scope for non-generic class
-                        Vec::new(), // no method type params (handled inside helper if needed)
-                    );
-                }
-            }
-
-            // Register external methods in EntityRegistry (non-generic class)
-            if let Some(ref external) = class.external {
-                for func in &external.functions {
-                    self.register_external_method(
-                        entity_type_id,
-                        class.name,
-                        func,
-                        &external.module_path,
-                        interner,
-                        None, // no type param scope for non-generic class
-                    );
-                }
-            }
+            self.collect_class_signature_non_generic(class, name_id, interner);
         } else {
-            // Generic class: store with type params as placeholders
-            let builtin_mod = self.name_table_mut().builtin_module();
+            self.collect_class_signature_generic(class, name_id, interner);
+        }
+    }
 
-            // Validate field default ordering and collect which fields have defaults
-            let field_has_default = self.validate_field_defaults(&class.fields, interner);
+    /// Collect signature for a non-generic class.
+    fn collect_class_signature_non_generic(
+        &mut self,
+        class: &ClassDecl,
+        name_id: NameId,
+        interner: &Interner,
+    ) {
+        // Lookup shell registered in pass 0.5
+        let entity_type_id = self
+            .entity_registry_mut()
+            .type_by_name(name_id)
+            .expect("class shell registered in register_all_type_shells");
 
-            // Build type params with resolved constraints
-            let (type_params, type_param_scope) =
-                self.build_type_params_with_constraints(&class.type_params, interner);
+        // Skip if already processed (shared cache scenario)
+        if self
+            .entity_registry()
+            .get_type(entity_type_id)
+            .generic_info
+            .is_some()
+        {
+            return;
+        }
 
-            // Convert Symbol field names to NameId at registration time
-            // (must be done before creating ctx which borrows name_table)
-            let field_names: Vec<NameId> = class
-                .fields
-                .iter()
-                .map(|f| {
-                    let name_str = interner.resolve(f.name);
-                    self.name_table_mut().intern_raw(builtin_mod, &[name_str])
-                })
-                .collect();
+        // Validate field defaults and collect field info
+        let field_has_default = self.validate_field_defaults(&class.fields, interner);
+        let (field_names, field_type_ids) = self.collect_field_info(&class.fields, interner, None);
 
-            // Resolve field types with type params in scope
+        // Set generic_info (with empty type_params for non-generic classes)
+        self.entity_registry_mut().set_generic_info(
+            entity_type_id,
+            GenericTypeInfo {
+                type_params: vec![],
+                field_names: field_names.clone(),
+                field_types: field_type_ids.clone(),
+                field_has_default,
+            },
+        );
+
+        // Register fields in EntityRegistry
+        self.register_class_fields(
+            entity_type_id,
+            class.name,
+            &class.fields,
+            &field_names,
+            &field_type_ids,
+            interner,
+        );
+
+        // Register and validate implements list
+        self.validate_and_register_implements(
+            entity_type_id,
+            &class.implements,
+            class.span,
+            interner,
+        );
+
+        // Build self_type_id for method signatures
+        let self_type_id = self
+            .type_arena_mut()
+            .class(entity_type_id, TypeIdVec::new());
+        self.entity_registry_mut()
+            .set_base_type_id(entity_type_id, self_type_id);
+
+        // Register all methods
+        self.register_class_methods(
+            entity_type_id,
+            class,
+            interner,
+            None, // no type param scope
+            self_type_id,
+        );
+    }
+
+    /// Collect signature for a generic class.
+    fn collect_class_signature_generic(
+        &mut self,
+        class: &ClassDecl,
+        name_id: NameId,
+        interner: &Interner,
+    ) {
+        // Validate field defaults
+        let field_has_default = self.validate_field_defaults(&class.fields, interner);
+
+        // Build type params with resolved constraints
+        let type_param_scope =
+            self.build_type_params_with_constraints(&class.type_params, interner);
+
+        // Collect field info with type params in scope
+        let (field_names, field_type_ids) =
+            self.collect_field_info(&class.fields, interner, Some(&type_param_scope));
+
+        // Lookup shell registered in pass 0.5
+        let entity_type_id = self
+            .entity_registry_mut()
+            .type_by_name(name_id)
+            .expect("class shell registered in register_all_type_shells");
+
+        // Skip if already processed (shared cache scenario)
+        if self
+            .entity_registry()
+            .get_type(entity_type_id)
+            .generic_info
+            .is_some()
+        {
+            return;
+        }
+
+        // Set type params on the type definition (needed for method substitutions)
+        let type_param_name_ids: Vec<NameId> = type_param_scope
+            .params()
+            .iter()
+            .map(|tp| tp.name_id)
+            .collect();
+        self.entity_registry_mut()
+            .set_type_params(entity_type_id, type_param_name_ids);
+
+        // Set generic info for type inference during struct literal checking
+        // Use to_params() since we still need type_param_scope below
+        self.entity_registry_mut().set_generic_info(
+            entity_type_id,
+            GenericTypeInfo {
+                type_params: type_param_scope.to_params(),
+                field_names: field_names.clone(),
+                field_types: field_type_ids.clone(),
+                field_has_default,
+            },
+        );
+
+        // Register fields with placeholder types
+        self.register_class_fields(
+            entity_type_id,
+            class.name,
+            &class.fields,
+            &field_names,
+            &field_type_ids,
+            interner,
+        );
+
+        // Register and validate implements list
+        self.validate_and_register_implements(
+            entity_type_id,
+            &class.implements,
+            class.span,
+            interner,
+        );
+
+        // Build self_type_id with type param placeholders
+        let type_arg_ids: Vec<ArenaTypeId> = type_param_scope
+            .params()
+            .iter()
+            .map(|tp| self.type_arena_mut().type_param(tp.name_id))
+            .collect();
+        let self_type_id = self.type_arena_mut().class(entity_type_id, type_arg_ids);
+        let base_type_id = self
+            .type_arena_mut()
+            .class(entity_type_id, TypeIdVec::new());
+        self.entity_registry_mut()
+            .set_base_type_id(entity_type_id, base_type_id);
+
+        // Register all methods with type params in scope
+        self.register_class_methods(
+            entity_type_id,
+            class,
+            interner,
+            Some(&type_param_scope),
+            self_type_id,
+        );
+    }
+
+    /// Collect field names and types for a class or record.
+    /// If type_param_scope is provided, resolves types with type params in scope.
+    fn collect_field_info(
+        &mut self,
+        fields: &[AstFieldDef],
+        interner: &Interner,
+        type_param_scope: Option<&TypeParamScope>,
+    ) -> (Vec<NameId>, Vec<ArenaTypeId>) {
+        let builtin_mod = self.name_table_mut().builtin_module();
+
+        // Convert Symbol field names to NameId
+        let field_names: Vec<NameId> = fields
+            .iter()
+            .map(|f| {
+                let name_str = interner.resolve(f.name);
+                self.name_table_mut().intern_raw(builtin_mod, &[name_str])
+            })
+            .collect();
+
+        // Resolve field types (with or without type params)
+        let field_type_ids: Vec<ArenaTypeId> = if let Some(scope) = type_param_scope {
             let module_id = self.current_module;
-            let mut ctx = TypeResolutionContext::with_type_params(
-                &self.db,
-                interner,
-                module_id,
-                &type_param_scope,
-            );
-
-            // Resolve field types directly to TypeId
-            let field_type_ids: Vec<ArenaTypeId> = class
-                .fields
+            let mut ctx =
+                TypeResolutionContext::with_type_params(&self.db, interner, module_id, scope);
+            fields
                 .iter()
                 .map(|f| resolve_type_to_id(&f.ty, &mut ctx))
-                .collect();
-
-            // Lookup shell registered in pass 0.5
-            let entity_type_id = self
-                .entity_registry_mut()
-                .type_by_name(name_id)
-                .expect("class shell registered in register_all_type_shells");
-
-            // Skip if already processed (e.g., from a previous analysis of the same module
-            // in a shared cache scenario). Check if generic_info is already set.
-            if self
-                .entity_registry()
-                .get_type(entity_type_id)
-                .generic_info
-                .is_some()
-            {
-                return;
-            }
-
-            // Set type params on the type definition (needed for method substitutions)
-            let type_param_name_ids: Vec<NameId> =
-                type_params.iter().map(|tp| tp.name_id).collect();
-            self.entity_registry_mut()
-                .set_type_params(entity_type_id, type_param_name_ids);
-
-            // Set generic info for type inference during struct literal checking
-            self.entity_registry_mut().set_generic_info(
-                entity_type_id,
-                GenericTypeInfo {
-                    type_params,
-                    field_names: field_names.clone(),
-                    field_types: field_type_ids.clone(),
-                    field_has_default,
-                },
-            );
-
-            // Register fields with placeholder types
-            for (i, field) in class.fields.iter().enumerate() {
-                let field_name_str = interner.resolve(field.name);
-                let full_field_name_id = self.name_table_mut().intern_raw(
-                    self.current_module,
-                    &[interner.resolve(class.name), field_name_str],
-                );
-                // Use field_type_ids already computed above
-                self.entity_registry_mut().register_field(
-                    entity_type_id,
-                    field_names[i],
-                    full_field_name_id,
-                    field_type_ids[i],
-                    i,
-                );
-            }
-
-            // Register and validate implements list (for generic classes)
-            self.validate_and_register_implements(
-                entity_type_id,
-                &class.implements,
-                class.span,
-                interner,
-            );
-
-            // Register methods in EntityRegistry with type params in scope
-            // Build self_type_id directly from entity_type_id with type param placeholders
-            let type_arg_ids: Vec<ArenaTypeId> = type_param_scope
-                .params()
+                .collect()
+        } else {
+            fields
                 .iter()
-                .map(|tp| self.type_arena_mut().type_param(tp.name_id))
-                .collect();
-            let self_type_id = self.type_arena_mut().class(entity_type_id, type_arg_ids);
-            // Store base_type_id (with empty type args) for codegen to look up
-            let base_type_id = self
-                .type_arena_mut()
-                .class(entity_type_id, TypeIdVec::new());
-            self.entity_registry_mut()
-                .set_base_type_id(entity_type_id, base_type_id);
-            for method in &class.methods {
-                self.register_instance_method(
+                .map(|f| self.resolve_type_id(&f.ty, interner))
+                .collect()
+        };
+
+        (field_names, field_type_ids)
+    }
+
+    /// Register fields in the EntityRegistry for a class.
+    fn register_class_fields(
+        &mut self,
+        entity_type_id: TypeDefId,
+        class_name: Symbol,
+        fields: &[AstFieldDef],
+        field_names: &[NameId],
+        field_type_ids: &[ArenaTypeId],
+        interner: &Interner,
+    ) {
+        for (i, field) in fields.iter().enumerate() {
+            let field_name_str = interner.resolve(field.name);
+            let full_field_name_id = self.name_table_mut().intern_raw(
+                self.current_module,
+                &[interner.resolve(class_name), field_name_str],
+            );
+            self.entity_registry_mut().register_field(
+                entity_type_id,
+                field_names[i],
+                full_field_name_id,
+                field_type_ids[i],
+                i,
+            );
+        }
+    }
+
+    /// Register all methods (instance, static, external) for a class.
+    fn register_class_methods(
+        &mut self,
+        entity_type_id: TypeDefId,
+        class: &ClassDecl,
+        interner: &Interner,
+        type_param_scope: Option<&TypeParamScope>,
+        self_type_id: ArenaTypeId,
+    ) {
+        // Register instance methods
+        for method in &class.methods {
+            self.register_instance_method(
+                entity_type_id,
+                class.name,
+                method,
+                interner,
+                type_param_scope,
+                Some(self_type_id),
+            );
+        }
+
+        // Register static methods
+        if let Some(ref statics) = class.statics {
+            for method in &statics.methods {
+                let method_type_params =
+                    self.build_method_type_params(method, type_param_scope, interner);
+                self.register_static_method_helper(
                     entity_type_id,
                     class.name,
                     method,
                     interner,
-                    Some(&type_param_scope),
-                    Some(self_type_id),
+                    type_param_scope,
+                    method_type_params,
                 );
             }
+        }
 
-            // Register static methods for generic classes
-            if let Some(ref statics) = class.statics {
-                for method in &statics.methods {
-                    let method_type_params =
-                        self.build_method_type_params(method, Some(&type_param_scope), interner);
-                    self.register_static_method_helper(
-                        entity_type_id,
-                        class.name,
-                        method,
-                        interner,
-                        Some(&type_param_scope),
-                        method_type_params,
-                    );
-                }
-            }
-
-            // Register external methods in EntityRegistry (generic class)
-            // Type params are in scope for resolving K, V, etc.
-            if let Some(ref external) = class.external {
-                for func in &external.functions {
-                    self.register_external_method(
-                        entity_type_id,
-                        class.name,
-                        func,
-                        &external.module_path,
-                        interner,
-                        Some(&type_param_scope),
-                    );
-                }
+        // Register external methods
+        if let Some(ref external) = class.external {
+            for func in &external.functions {
+                self.register_external_method(
+                    entity_type_id,
+                    class.name,
+                    func,
+                    &external.module_path,
+                    interner,
+                    type_param_scope,
+                );
             }
         }
     }
@@ -1157,7 +1167,7 @@ impl Analyzer {
             let field_has_default = self.validate_field_defaults(&record.fields, interner);
 
             // Build type params with resolved constraints
-            let (type_params, type_param_scope) =
+            let type_param_scope =
                 self.build_type_params_with_constraints(&record.type_params, interner);
 
             // Convert Symbol field names to NameId at registration time
@@ -1187,9 +1197,12 @@ impl Analyzer {
                 .map(|f| resolve_type_to_id(&f.ty, &mut ctx))
                 .collect();
 
-            // Extract type param name IDs before moving type_params
-            let type_param_name_ids: Vec<NameId> =
-                type_params.iter().map(|tp| tp.name_id).collect();
+            // Extract type param name IDs from scope
+            let type_param_name_ids: Vec<NameId> = type_param_scope
+                .params()
+                .iter()
+                .map(|tp| tp.name_id)
+                .collect();
 
             // Lookup shell registered in pass 0.5
             let entity_type_id = self
@@ -1238,10 +1251,11 @@ impl Analyzer {
                 .set_type_params(entity_type_id, type_param_name_ids);
 
             // Set generic info for type inference during struct literal checking
+            // Use to_params() since we still need type_param_scope for method registration below
             self.entity_registry_mut().set_generic_info(
                 entity_type_id,
                 GenericTypeInfo {
-                    type_params,
+                    type_params: type_param_scope.to_params(),
                     field_names,
                     field_types: field_type_ids,
                     field_has_default,
@@ -1337,10 +1351,7 @@ impl Analyzer {
             };
 
             // Validate that type args match interface's type params
-            let expected_count = {
-                let registry = self.entity_registry();
-                registry.get_type(interface_type_id).type_params.len()
-            };
+            let expected_count = self.entity_registry().type_params(interface_type_id).len();
             let found_count = type_arg_ids.len();
             if expected_count != found_count {
                 self.add_error(
@@ -1383,7 +1394,7 @@ impl Analyzer {
 
     fn collect_interface_def(&mut self, interface_decl: &InterfaceDecl, interner: &Interner) {
         // Build type params with resolved constraints
-        let (type_params, type_param_scope) =
+        let type_param_scope =
             self.build_type_params_with_constraints(&interface_decl.type_params, interner);
 
         // Use current_module for proper module-qualified NameIds
@@ -1538,7 +1549,11 @@ impl Analyzer {
         }
 
         // Set type parameters in EntityRegistry (using NameIds only)
-        let entity_type_params: Vec<_> = type_params.iter().map(|tp| tp.name_id).collect();
+        let entity_type_params: Vec<_> = type_param_scope
+            .params()
+            .iter()
+            .map(|tp| tp.name_id)
+            .collect();
         self.entity_registry_mut()
             .set_type_params(entity_type_id, entity_type_params);
 
@@ -1744,11 +1759,8 @@ impl Analyzer {
                         let type_def_id = arena.type_def_id(export_type_id)?;
 
                         // Verify it's an interface (resolve through aliases if needed)
-                        let registry = self.entity_registry();
-                        let type_def = registry.get_type(type_def_id);
-                        let kind = type_def.kind;
-                        let aliased_type = type_def.aliased_type;
-                        drop(registry);
+                        let kind = self.entity_registry().type_kind(type_def_id);
+                        let aliased_type = self.entity_registry().type_aliased(type_def_id);
 
                         let final_type_def_id = if kind == TypeDefKind::Alias {
                             // For aliases, check the underlying type
@@ -1787,11 +1799,8 @@ impl Analyzer {
                     .resolve_type_str_or_interface(iface_str, &self.entity_registry())?;
 
                 // Verify it's an interface (resolve through aliases if needed)
-                let registry = self.entity_registry();
-                let type_def = registry.get_type(type_def_id);
-                let kind = type_def.kind;
-                let aliased_type = type_def.aliased_type;
-                drop(registry);
+                let kind = self.entity_registry().type_kind(type_def_id);
+                let aliased_type = self.entity_registry().type_aliased(type_def_id);
                 let final_type_def_id = if kind == TypeDefKind::Alias {
                     // For aliases, check the underlying type
                     if let Some(aliased_type_id) = aliased_type {
@@ -2164,7 +2173,7 @@ impl Analyzer {
             // For generic external functions, set up type param scope and register with GenericFuncInfo
             if !func.type_params.is_empty() {
                 // Build type params with resolved constraints
-                let (type_params, type_param_scope) =
+                let type_param_scope =
                     self.build_type_params_with_constraints(&func.type_params, interner);
 
                 // Resolve with type params in scope
@@ -2199,6 +2208,8 @@ impl Analyzer {
                     required_params,
                     param_defaults,
                 );
+                // Extract type params from scope (consumes scope, avoids clone)
+                let type_params = type_param_scope.into_params();
                 self.entity_registry_mut().set_function_generic_info(
                     func_id,
                     GenericFuncInfo {

@@ -59,11 +59,8 @@ impl Analyzer {
                 };
 
                 if let Some((type_def_id, type_args_id, is_class)) = struct_info {
-                    let (name_id, generic_info) = {
-                        let registry = self.entity_registry();
-                        let type_def = registry.get_type(type_def_id);
-                        (type_def.name_id, type_def.generic_info.clone())
-                    };
+                    let name_id = self.entity_registry().name_id(type_def_id);
+                    let generic_info = self.entity_registry().type_generic_info(type_def_id);
                     let type_name = self
                         .name_table()
                         .last_segment_str(name_id)
@@ -332,11 +329,8 @@ impl Analyzer {
                 };
 
                 if let Some((type_def_id, type_args_id, is_class)) = struct_info {
-                    let (name_id, generic_info) = {
-                        let registry = self.entity_registry();
-                        let type_def = registry.get_type(type_def_id);
-                        (type_def.name_id, type_def.generic_info.clone())
-                    };
+                    let name_id = self.entity_registry().name_id(type_def_id);
+                    let generic_info = self.entity_registry().type_generic_info(type_def_id);
                     let type_name = self
                         .name_table()
                         .last_segment_str(name_id)

@@ -517,10 +517,11 @@ impl Analyzer {
             return self.ty_invalid_id();
         };
 
-        let has_error_info = {
-            let registry = self.entity_registry();
-            registry.get_type(type_id).error_info.is_some()
-        };
+        let has_error_info = self
+            .entity_registry()
+            .get_type(type_id)
+            .error_info
+            .is_some();
         if !has_error_info {
             // Type exists but is not an error type
             self.add_error(
@@ -542,15 +543,11 @@ impl Analyzer {
         };
 
         // Collect field IDs first to avoid borrow conflicts in the loop
-        let field_ids: Vec<_> = self.entity_registry().fields_on_type(type_id).collect();
+        let field_ids = self.entity_registry().type_fields(type_id);
         let error_fields: Vec<(String, ArenaTypeId)> = field_ids
             .into_iter()
             .filter_map(|field_id| {
-                let (name_id, ty) = {
-                    let registry = self.entity_registry();
-                    let field = registry.get_field(field_id);
-                    (field.name_id, field.ty)
-                };
+                let (name_id, ty) = self.entity_registry().field_name_and_type(field_id);
                 let name = self.name_table().last_segment_str(name_id)?;
                 Some((name, ty))
             })
@@ -763,17 +760,10 @@ impl Analyzer {
         };
 
         // Look up fields from entity_registry - clone to avoid borrow conflicts
-        let generic_info = {
-            let registry = self.entity_registry();
-            let type_def = registry.get_type(type_def_id);
-            match &type_def.generic_info {
-                Some(gi) => gi.clone(),
-                None => {
-                    drop(registry);
-                    self.type_error_id("record or class with fields", ty_id, init_span);
-                    return;
-                }
-            }
+        let generic_info_opt = self.entity_registry().type_generic_info(type_def_id);
+        let Some(generic_info) = generic_info_opt else {
+            self.type_error_id("record or class with fields", ty_id, init_span);
+            return;
         };
 
         // Check each destructured field

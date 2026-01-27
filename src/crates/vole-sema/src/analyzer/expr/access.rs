@@ -18,11 +18,7 @@ impl Analyzer {
         field_name: &str,
     ) -> Option<ArenaTypeId> {
         // Get generic info (cloning to avoid holding borrow)
-        let generic_info = {
-            let registry = self.entity_registry();
-            let type_def = registry.get_type(type_def_id);
-            type_def.generic_info.clone()?
-        };
+        let generic_info = self.entity_registry().type_generic_info(type_def_id)?;
 
         // Find the field by name and get substituted type
         for (i, field_name_id) in generic_info.field_names.iter().enumerate() {
@@ -239,10 +235,7 @@ impl Analyzer {
             }
         } else {
             // Get type name for error message using type_def_id
-            let name_id = {
-                let registry = self.entity_registry();
-                registry.get_type(type_def_id).name_id
-            };
+            let name_id = self.entity_registry().name_id(type_def_id);
             let type_name = self
                 .name_table()
                 .last_segment_str(name_id)
@@ -839,11 +832,8 @@ impl Analyzer {
                 if let Some((type_def_id, type_args)) = type_args_and_def
                     && !type_args.is_empty()
                 {
-                    let generic_info = {
-                        let registry = self.entity_registry();
-                        registry.get_type(type_def_id).generic_info.clone()
-                    };
-                    if let Some(ref generic_info) = generic_info {
+                    let generic_info = self.entity_registry().type_generic_info(type_def_id);
+                    if let Some(generic_info) = generic_info {
                         // Build substitution map: T -> i32, etc.
                         let subs: FxHashMap<_, _> = generic_info
                             .type_params
@@ -986,10 +976,9 @@ impl Analyzer {
         let method_name_id = self.method_name_id(method_sym, interner);
 
         // Look up the static method on this type
-        let maybe_method_id = {
-            let registry = self.entity_registry();
-            registry.find_static_method_on_type(type_def_id, method_name_id)
-        };
+        let maybe_method_id = self
+            .entity_registry()
+            .find_static_method_on_type(type_def_id, method_name_id);
         if let Some(method_id) = maybe_method_id {
             let (method_type_params, signature_id, required_params) = {
                 let registry = self.entity_registry();
@@ -1022,11 +1011,7 @@ impl Analyzer {
             }
 
             // Get type params from the generic class/record definition
-            let generic_info = {
-                let registry = self.entity_registry();
-                let type_def = registry.get_type(type_def_id);
-                type_def.generic_info.clone()
-            };
+            let generic_info = self.entity_registry().type_generic_info(type_def_id);
 
             // First pass: type-check arguments to get their types (as TypeId)
             let mut arg_type_ids = Vec::new();
@@ -1233,10 +1218,7 @@ impl Analyzer {
             .contains(&key)
         {
             // Get the generic type definition for substitution info
-            let generic_info = {
-                let registry = self.entity_registry();
-                registry.get_type(class_type_def_id).generic_info.clone()
-            };
+            let generic_info = self.entity_registry().type_generic_info(class_type_def_id);
             let substitutions = if let Some(generic_info) = &generic_info {
                 let mut subs = FxHashMap::default();
                 for (param, &arg_id) in generic_info.type_params.iter().zip(type_args_id.iter()) {
@@ -1305,10 +1287,7 @@ impl Analyzer {
         interner: &Interner,
     ) {
         // Get the type def to extract name and type args
-        let class_name_id = {
-            let registry = self.entity_registry();
-            registry.get_type(type_def_id).name_id
-        };
+        let class_name_id = self.entity_registry().name_id(type_def_id);
 
         // Get the method name_id
         let method_name_id = self.method_name_id(method_sym, interner);

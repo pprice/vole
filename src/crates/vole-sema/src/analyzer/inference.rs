@@ -174,11 +174,7 @@ impl Analyzer {
         };
 
         // Clone generic_info to avoid holding borrow during subsequent operations
-        let generic_info = {
-            let registry = self.entity_registry();
-            let type_def = registry.get_type(type_def_id);
-            type_def.generic_info.clone()?
-        };
+        let generic_info = self.entity_registry().type_generic_info(type_def_id)?;
 
         // Get the field name string for comparison
         let field_name_str = self.name_table().last_segment_str(field_name_id)?;

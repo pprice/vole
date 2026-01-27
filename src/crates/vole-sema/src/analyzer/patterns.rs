@@ -46,11 +46,8 @@ impl Analyzer {
                     .resolve_type(*name, &self.entity_registry());
 
                 if let Some(type_def_id) = type_id_opt {
-                    let kind = {
-                        let registry = self.entity_registry();
-                        registry.get_type(type_def_id).kind
-                    };
-                    match kind {
+                    let type_kind = self.entity_registry().type_kind(type_def_id);
+                    match type_kind {
                         TypeDefKind::Class => {
                             // Build class type as TypeId directly
                             let pattern_type_id = {
@@ -257,11 +254,8 @@ impl Analyzer {
 
                     if let Some(type_id) = type_id_opt {
                         // Extract kind and generic_info upfront to avoid holding borrow
-                        let (kind, generic_info) = {
-                            let registry = self.entity_registry();
-                            let type_def = registry.get_type(type_id);
-                            (type_def.kind, type_def.generic_info.clone())
-                        };
+                        let kind = self.entity_registry().type_kind(type_id);
+                        let generic_info = self.entity_registry().type_generic_info(type_id);
 
                         // Get fields from generic_info
                         let get_fields_from_info =
@@ -307,19 +301,15 @@ impl Analyzer {
                             }
                             TypeDefKind::ErrorType => {
                                 // Error type destructuring: error Overflow { value, max }
-                                // Get fields from EntityRegistry - collect field_ids first
-                                let field_ids: Vec<_> =
-                                    self.entity_registry().fields_on_type(type_id).collect();
+                                // Get fields from EntityRegistry
+                                let field_ids = self.entity_registry().type_fields(type_id);
                                 let fields_ref: Vec<StructFieldId> = field_ids
                                     .into_iter()
                                     .map(|field_id| {
-                                        let registry = self.entity_registry();
-                                        let field = registry.get_field(field_id);
-                                        StructFieldId {
-                                            name_id: field.name_id,
-                                            ty: field.ty,
-                                            slot: field.slot,
-                                        }
+                                        let (name_id, ty) =
+                                            self.entity_registry().field_name_and_type(field_id);
+                                        let slot = self.entity_registry().get_field(field_id).slot;
+                                        StructFieldId { name_id, ty, slot }
                                     })
                                     .collect();
                                 let error_type_id = self.type_arena_mut().error_type(type_id);
@@ -496,10 +486,7 @@ impl Analyzer {
 
         if let Some(type_def_id) = type_def_info {
             // Clone generic_info to avoid holding borrow
-            let generic_info = {
-                let registry = self.entity_registry();
-                registry.get_type(type_def_id).generic_info.clone()
-            };
+            let generic_info = self.entity_registry().type_generic_info(type_def_id);
             // Get fields from generic_info
             let type_fields: Vec<StructFieldId> = generic_info
                 .as_ref()

@@ -288,23 +288,16 @@ impl Analyzer {
         param_name_id: NameId,
         method_name_str: &str,
     ) -> Option<ResolvedMethod> {
-        let method_ids = {
-            let registry = self.entity_registry();
-            let interface_def = registry.get_type(interface_type_id);
-            tracing::trace!(
-                ?interface_type_id,
-                num_methods = interface_def.methods.len(),
-                "found interface def"
-            );
-            interface_def.methods.clone()
-        };
+        let method_ids = self.entity_registry().type_methods(interface_type_id);
+        tracing::trace!(
+            ?interface_type_id,
+            num_methods = method_ids.len(),
+            "found interface def"
+        );
 
         for method_id in method_ids {
-            let (def_method_name_id, method_signature_id) = {
-                let registry = self.entity_registry();
-                let method_def = registry.get_method(method_id);
-                (method_def.name_id, method_def.signature_id)
-            };
+            let (def_method_name_id, method_signature_id) =
+                self.entity_registry().method_name_and_sig(method_id);
             let method_def_name = self
                 .name_table()
                 .last_segment_str(def_method_name_id)
@@ -323,7 +316,7 @@ impl Analyzer {
 
             let interface_name_str = self
                 .name_table()
-                .last_segment_str(self.entity_registry().get_type(interface_type_id).name_id)
+                .last_segment_str(self.entity_registry().name_id(interface_type_id))
                 .unwrap_or_default();
             tracing::trace!(
                 ?method_id,
@@ -403,10 +396,7 @@ impl Analyzer {
         type_def_id: TypeDefId,
     ) -> Option<FunctionType> {
         let method_id = self.entity_registry().is_functional(type_def_id)?;
-        let signature_id = {
-            let registry = self.entity_registry();
-            registry.get_method(method_id).signature_id
-        };
+        let signature_id = self.entity_registry().method_signature(method_id);
         // Build from arena - get params and return type from signature_id
         let arena = self.type_arena();
         let (params, ret, _) = arena
@@ -423,10 +413,7 @@ impl Analyzer {
         interner: &Interner,
     ) -> Option<ResolvedMethod> {
         let primitive_name_id = self.name_id_for_primitive_type_id(object_type_id)?;
-        let tdef_id = {
-            let registry = self.entity_registry();
-            registry.type_by_name(primitive_name_id)?
-        };
+        let tdef_id = self.entity_registry().type_by_name(primitive_name_id)?;
 
         let method_name_id = self.method_name_id(method_name, interner);
         // Clone binding data to drop EntityRegistry borrow before using name_table
@@ -544,11 +531,9 @@ impl Analyzer {
                 method_def.external_binding,
             )
         };
-        let (defining_type_kind, defining_type_name_id) = {
-            let registry = self.entity_registry();
-            let defining_type = registry.get_type(method_defining_type_id);
-            (defining_type.kind, defining_type.name_id)
-        };
+        let (defining_type_kind, defining_type_name_id) = self
+            .entity_registry()
+            .type_kind_and_name(method_defining_type_id);
 
         // Build substitutions for generic types
         let substitutions = if !type_args_id.is_empty() {
@@ -698,10 +683,7 @@ impl Analyzer {
         method_external_binding: Option<ExternalMethodInfo>,
         interner: &Interner,
     ) -> Option<ResolvedMethod> {
-        let type_name_id = {
-            let registry = self.entity_registry();
-            registry.get_type(type_def_id).name_id
-        };
+        let type_name_id = self.entity_registry().name_id(type_def_id);
         let type_sym = self.get_type_symbol_by_name_id(type_name_id, interner)?;
         let interface_sym = self.get_type_symbol_by_name_id(defining_type_name_id, interner)?;
         Some(ResolvedMethod::DefaultMethod {
@@ -728,10 +710,7 @@ impl Analyzer {
         return_type_id: ArenaTypeId,
         interner: &Interner,
     ) -> Option<ResolvedMethod> {
-        let type_name_id = {
-            let registry = self.entity_registry();
-            registry.get_type(type_def_id).name_id
-        };
+        let type_name_id = self.entity_registry().name_id(type_def_id);
         let type_sym = self.get_type_symbol_by_name_id(type_name_id, interner)?;
         let interface_sym = self.get_type_symbol_by_name_id(defining_type_name_id, interner)?;
         Some(ResolvedMethod::DefaultMethod {
@@ -760,7 +739,7 @@ impl Analyzer {
             .map(|(interface_id, binding)| (interface_id, binding.clone()));
 
         let (interface_id, binding) = binding_result?;
-        let interface_name_id = self.entity_registry().get_type(interface_id).name_id;
+        let interface_name_id = self.entity_registry().name_id(interface_id);
         let trait_name = self
             .name_table()
             .last_segment_str(interface_name_id)
@@ -788,10 +767,7 @@ impl Analyzer {
         method_name_id: NameId,
         interner: &Interner,
     ) -> Option<ResolvedMethod> {
-        let type_name_id = {
-            let registry = self.entity_registry();
-            registry.get_type(type_def_id).name_id
-        };
+        let type_name_id = self.entity_registry().name_id(type_def_id);
         let type_sym = self.get_type_symbol_by_name_id(type_name_id, interner)?;
         let method_name_str = interner.resolve(method_name);
         let interface_ids = self
@@ -827,11 +803,8 @@ impl Analyzer {
         method_name_str: &str,
         interner: &Interner,
     ) -> Option<ResolvedMethod> {
-        let (interface_name_id, method_ids) = {
-            let registry = self.entity_registry();
-            let interface_def = registry.get_type(interface_id);
-            (interface_def.name_id, interface_def.methods.clone())
-        };
+        let interface_name_id = self.entity_registry().name_id(interface_id);
+        let method_ids = self.entity_registry().type_methods(interface_id);
 
         for method_id in method_ids {
             let (
