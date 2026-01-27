@@ -52,6 +52,66 @@ fn format_type_expr(type_expr: &TypeExpr, interner: &Interner) -> String {
 }
 
 impl Analyzer {
+    /// Build type parameters with resolved constraints.
+    ///
+    /// This performs the two-pass type parameter resolution pattern:
+    /// 1. First pass: Create a name scope with all type params (constraint=None) for constraint resolution
+    /// 2. Second pass: Resolve constraints using that scope, building the final TypeParamInfo list
+    ///
+    /// Returns a tuple of (Vec<TypeParamInfo>, TypeParamScope) where the scope contains
+    /// the fully resolved type parameters ready for use in type resolution contexts.
+    fn build_type_params_with_constraints(
+        &mut self,
+        ast_type_params: &[TypeParam],
+        interner: &Interner,
+    ) -> (Vec<TypeParamInfo>, TypeParamScope) {
+        let builtin_mod = self.name_table_mut().builtin_module();
+
+        // First pass: create name_scope for constraint resolution
+        // Type param constraints may reference other type params (e.g., T: Container<U>),
+        // so we need all type param names available before resolving constraints.
+        let mut name_scope = TypeParamScope::new();
+        for tp in ast_type_params {
+            let tp_name_str = interner.resolve(tp.name);
+            let tp_name_id = self
+                .name_table_mut()
+                .intern_raw(builtin_mod, &[tp_name_str]);
+            name_scope.add(TypeParamInfo {
+                name: tp.name,
+                name_id: tp_name_id,
+                constraint: None,
+                type_param_id: None,
+                variance: TypeParamVariance::default(),
+            });
+        }
+
+        // Second pass: resolve constraints with name_scope available
+        let type_params: Vec<TypeParamInfo> = ast_type_params
+            .iter()
+            .map(|tp| {
+                let tp_name_str = interner.resolve(tp.name);
+                let tp_name_id = self
+                    .name_table_mut()
+                    .intern_raw(builtin_mod, &[tp_name_str]);
+                let constraint = tp.constraint.as_ref().and_then(|c| {
+                    self.resolve_type_param_constraint(c, &name_scope, interner, tp.span)
+                });
+                TypeParamInfo {
+                    name: tp.name,
+                    name_id: tp_name_id,
+                    constraint,
+                    type_param_id: None,
+                    variance: TypeParamVariance::default(),
+                }
+            })
+            .collect();
+
+        // Build final scope from resolved type params
+        let type_param_scope = TypeParamScope::from_params(type_params.clone());
+
+        (type_params, type_param_scope)
+    }
+
     /// Register a type shell (name and kind only, no fields/methods yet).
     /// This enables forward references - types can reference each other regardless of declaration order.
     ///
@@ -285,44 +345,10 @@ impl Analyzer {
         } else {
             // Generic function (explicit or via implicit generification)
             let builtin_mod = self.name_table_mut().builtin_module();
-            let mut name_scope = TypeParamScope::new();
 
-            // First add explicit type params to name scope
-            for tp in &func.type_params {
-                let tp_name_str = interner.resolve(tp.name);
-                let tp_name_id = self
-                    .name_table_mut()
-                    .intern_raw(builtin_mod, &[tp_name_str]);
-                name_scope.add(TypeParamInfo {
-                    name: tp.name,
-                    name_id: tp_name_id,
-                    constraint: None,
-                    type_param_id: None,
-                    variance: TypeParamVariance::default(),
-                });
-            }
-
-            // Build explicit type params with their constraints
-            let mut type_params: Vec<TypeParamInfo> = func
-                .type_params
-                .iter()
-                .map(|tp| {
-                    let tp_name_str = interner.resolve(tp.name);
-                    let tp_name_id = self
-                        .name_table_mut()
-                        .intern_raw(builtin_mod, &[tp_name_str]);
-                    let constraint = tp.constraint.as_ref().and_then(|c| {
-                        self.resolve_type_param_constraint(c, &name_scope, interner, tp.span)
-                    });
-                    TypeParamInfo {
-                        name: tp.name,
-                        name_id: tp_name_id,
-                        constraint,
-                        type_param_id: None,
-                        variance: TypeParamVariance::default(),
-                    }
-                })
-                .collect();
+            // Build explicit type params with resolved constraints
+            let (mut type_params, mut type_param_scope) =
+                self.build_type_params_with_constraints(&func.type_params, interner);
 
             // Create synthetic type parameters for structural types in parameters
             // Map: param index -> synthetic type param name_id
@@ -356,13 +382,8 @@ impl Analyzer {
                 };
 
                 type_params.push(type_param_info.clone());
-                name_scope.add(type_param_info);
+                type_param_scope.add(type_param_info);
                 synthetic_param_map.insert(param_idx, synthetic_name_id);
-            }
-
-            let mut type_param_scope = TypeParamScope::new();
-            for info in &type_params {
-                type_param_scope.add(info.clone());
             }
 
             // Resolve param types with type params in scope
@@ -422,28 +443,16 @@ impl Analyzer {
     /// Returns the number of required (non-defaulted) parameters.
     /// Emits errors if non-defaulted params come after defaulted params.
     fn validate_param_defaults(&mut self, params: &[Param], interner: &Interner) -> usize {
-        let mut seen_default = false;
-        let mut required_params = 0;
-
-        for param in params {
-            if param.default_value.is_some() {
-                seen_default = true;
-            } else if seen_default {
-                // Non-default param after a default param - emit error
-                let name = interner.resolve(param.name).to_string();
-                self.add_error(
-                    SemanticError::DefaultParamNotLast {
-                        name,
-                        span: param.span.into(),
-                    },
-                    param.span,
-                );
-            } else {
-                required_params += 1;
-            }
-        }
-
-        required_params
+        let (required_count, _) = validate_defaults(params, interner, |name, span| {
+            self.add_error(
+                SemanticError::DefaultParamNotLast {
+                    name,
+                    span: span.into(),
+                },
+                span,
+            );
+        });
+        required_count
     }
 
     /// Validate field default ordering and collect which fields have defaults.
@@ -454,29 +463,292 @@ impl Analyzer {
         fields: &[AstFieldDef],
         interner: &Interner,
     ) -> Vec<bool> {
-        let mut seen_default = false;
-        let mut field_has_default = Vec::with_capacity(fields.len());
+        let (_, has_default_vec) = validate_defaults(fields, interner, |field, span| {
+            self.add_error(
+                SemanticError::RequiredFieldAfterDefaulted {
+                    field,
+                    span: span.into(),
+                },
+                span,
+            );
+        });
+        has_default_vec
+    }
 
-        for field in fields {
-            let has_default = field.default_value.is_some();
-            field_has_default.push(has_default);
+    /// Build method name IDs for registration.
+    /// Returns (method_name_id, full_method_name_id).
+    fn build_method_names(
+        &mut self,
+        type_name: Symbol,
+        method_name: Symbol,
+        interner: &Interner,
+    ) -> (NameId, NameId) {
+        let builtin_mod = self.name_table_mut().builtin_module();
+        let method_name_str = interner.resolve(method_name);
+        let method_name_id = self
+            .name_table_mut()
+            .intern_raw(builtin_mod, &[method_name_str]);
+        let type_name_str = interner.resolve(type_name);
+        let full_method_name_id = self
+            .name_table_mut()
+            .intern_raw(self.current_module, &[type_name_str, method_name_str]);
+        (method_name_id, full_method_name_id)
+    }
 
-            if has_default {
-                seen_default = true;
-            } else if seen_default {
-                // Required field after a field with default - emit error
-                let name = interner.resolve(field.name).to_string();
-                self.add_error(
-                    SemanticError::RequiredFieldAfterDefaulted {
-                        field: name,
-                        span: field.span.into(),
-                    },
-                    field.span,
-                );
+    /// Build a method signature by resolving params and return type.
+    /// Uses the provided type param scope and optional self_type for resolution.
+    fn build_method_signature(
+        &mut self,
+        params: &[Param],
+        return_type: &Option<TypeExpr>,
+        interner: &Interner,
+        type_param_scope: Option<&TypeParamScope>,
+        self_type: Option<ArenaTypeId>,
+    ) -> ArenaTypeId {
+        let module_id = self.current_module;
+        let params_id: Vec<ArenaTypeId> = params
+            .iter()
+            .map(|p| {
+                if let Some(scope) = type_param_scope {
+                    let mut ctx = TypeResolutionContext::with_type_params(
+                        &self.db, interner, module_id, scope,
+                    );
+                    ctx.self_type = self_type;
+                    resolve_type_to_id(&p.ty, &mut ctx)
+                } else if let Some(self_type_id) = self_type {
+                    self.resolve_type_id_with_self(&p.ty, interner, Some(self_type_id))
+                } else {
+                    self.resolve_type_id(&p.ty, interner)
+                }
+            })
+            .collect();
+
+        let return_type_id = return_type
+            .as_ref()
+            .map(|t| {
+                if let Some(scope) = type_param_scope {
+                    let mut ctx = TypeResolutionContext::with_type_params(
+                        &self.db, interner, module_id, scope,
+                    );
+                    ctx.self_type = self_type;
+                    resolve_type_to_id(t, &mut ctx)
+                } else if let Some(self_type_id) = self_type {
+                    self.resolve_type_id_with_self(t, interner, Some(self_type_id))
+                } else {
+                    self.resolve_type_id(t, interner)
+                }
+            })
+            .unwrap_or_else(|| self.type_arena().void());
+
+        FunctionType::from_ids(&params_id, return_type_id, false).intern(&mut self.type_arena_mut())
+    }
+
+    /// Register an instance method from a FuncDecl.
+    /// Used for class and record instance methods.
+    fn register_instance_method(
+        &mut self,
+        entity_type_id: TypeDefId,
+        type_name: Symbol,
+        method: &FuncDecl,
+        interner: &Interner,
+        type_param_scope: Option<&TypeParamScope>,
+        self_type: Option<ArenaTypeId>,
+    ) {
+        let (method_name_id, full_method_name_id) =
+            self.build_method_names(type_name, method.name, interner);
+        let signature_id = self.build_method_signature(
+            &method.params,
+            &method.return_type,
+            interner,
+            type_param_scope,
+            self_type,
+        );
+
+        let required_params = self.validate_param_defaults(&method.params, interner);
+        let param_defaults: Vec<Option<Box<Expr>>> = method
+            .params
+            .iter()
+            .map(|p| p.default_value.clone())
+            .collect();
+
+        self.entity_registry_mut().register_method_with_defaults(
+            entity_type_id,
+            method_name_id,
+            full_method_name_id,
+            signature_id,
+            false, // instance methods don't have defaults (implementation defaults)
+            None,  // no external binding
+            required_params,
+            param_defaults,
+        );
+    }
+
+    /// Register a static method from an InterfaceMethod.
+    /// Used for class and record static methods.
+    fn register_static_method_helper(
+        &mut self,
+        entity_type_id: TypeDefId,
+        type_name: Symbol,
+        method: &InterfaceMethod,
+        interner: &Interner,
+        type_param_scope: Option<&TypeParamScope>,
+        method_type_params: Vec<TypeParamInfo>,
+    ) {
+        let (method_name_id, full_method_name_id) =
+            self.build_method_names(type_name, method.name, interner);
+
+        // Build merged scope if method has its own type params
+        let merged_scope: Option<TypeParamScope>;
+        let scope_for_resolution = if !method.type_params.is_empty() {
+            let builtin_mod = self.name_table_mut().builtin_module();
+            let mut scope = type_param_scope
+                .cloned()
+                .unwrap_or_else(TypeParamScope::new);
+            for tp in &method.type_params {
+                let tp_name_str = interner.resolve(tp.name);
+                let tp_name_id = self
+                    .name_table_mut()
+                    .intern_raw(builtin_mod, &[tp_name_str]);
+                scope.add(TypeParamInfo {
+                    name: tp.name,
+                    name_id: tp_name_id,
+                    constraint: None,
+                    type_param_id: None,
+                    variance: TypeParamVariance::default(),
+                });
             }
+            merged_scope = Some(scope);
+            merged_scope.as_ref()
+        } else {
+            type_param_scope
+        };
+
+        let signature_id = self.build_method_signature(
+            &method.params,
+            &method.return_type,
+            interner,
+            scope_for_resolution,
+            None, // static methods don't have self
+        );
+
+        let has_default = method.is_default || method.body.is_some();
+        let required_params = self.validate_param_defaults(&method.params, interner);
+        let param_defaults: Vec<Option<Box<Expr>>> = method
+            .params
+            .iter()
+            .map(|p| p.default_value.clone())
+            .collect();
+
+        self.entity_registry_mut()
+            .register_static_method_with_defaults(
+                entity_type_id,
+                method_name_id,
+                full_method_name_id,
+                signature_id,
+                has_default,
+                None, // no external binding
+                method_type_params,
+                required_params,
+                param_defaults,
+            );
+    }
+
+    /// Build method type params with resolved constraints for a static method.
+    fn build_method_type_params(
+        &mut self,
+        method: &InterfaceMethod,
+        type_param_scope: Option<&TypeParamScope>,
+        interner: &Interner,
+    ) -> Vec<TypeParamInfo> {
+        if method.type_params.is_empty() {
+            return Vec::new();
         }
 
-        field_has_default
+        let builtin_mod = self.name_table_mut().builtin_module();
+
+        // Build merged scope for constraint resolution
+        let mut merged_scope = type_param_scope
+            .cloned()
+            .unwrap_or_else(TypeParamScope::new);
+        for tp in &method.type_params {
+            let tp_name_str = interner.resolve(tp.name);
+            let tp_name_id = self
+                .name_table_mut()
+                .intern_raw(builtin_mod, &[tp_name_str]);
+            merged_scope.add(TypeParamInfo {
+                name: tp.name,
+                name_id: tp_name_id,
+                constraint: None,
+                type_param_id: None,
+                variance: TypeParamVariance::default(),
+            });
+        }
+
+        method
+            .type_params
+            .iter()
+            .map(|tp| {
+                let tp_name_str = interner.resolve(tp.name);
+                let tp_name_id = self
+                    .name_table_mut()
+                    .intern_raw(builtin_mod, &[tp_name_str]);
+                let constraint = tp.constraint.as_ref().and_then(|c| {
+                    self.resolve_type_param_constraint(c, &merged_scope, interner, tp.span)
+                });
+                TypeParamInfo {
+                    name: tp.name,
+                    name_id: tp_name_id,
+                    constraint,
+                    type_param_id: None,
+                    variance: TypeParamVariance::default(),
+                }
+            })
+            .collect()
+    }
+
+    /// Register an external method from an ExternalFunc.
+    /// Used for class external methods.
+    fn register_external_method(
+        &mut self,
+        entity_type_id: TypeDefId,
+        type_name: Symbol,
+        func: &ExternalFunc,
+        module_path: &str,
+        interner: &Interner,
+        type_param_scope: Option<&TypeParamScope>,
+    ) {
+        let (method_name_id, full_method_name_id) =
+            self.build_method_names(type_name, func.vole_name, interner);
+        let signature_id = self.build_method_signature(
+            &func.params,
+            &func.return_type,
+            interner,
+            type_param_scope,
+            None, // external methods don't have self
+        );
+
+        let method_name_str = interner.resolve(func.vole_name);
+        let native_name_str = func
+            .native_name
+            .clone()
+            .unwrap_or_else(|| method_name_str.to_string());
+        let builtin_mod = self.name_table_mut().builtin_module();
+
+        self.entity_registry_mut().register_method_with_binding(
+            entity_type_id,
+            method_name_id,
+            full_method_name_id,
+            signature_id,
+            false, // external methods don't have defaults
+            Some(ExternalMethodInfo {
+                module_path: self
+                    .name_table_mut()
+                    .intern_raw(builtin_mod, &[module_path]),
+                native_name: self
+                    .name_table_mut()
+                    .intern_raw(builtin_mod, &[&native_name_str]),
+            }),
+        );
     }
 
     fn collect_class_signature(&mut self, class: &ClassDecl, interner: &Interner) {
@@ -567,137 +839,41 @@ impl Analyzer {
             // Store base_type_id for codegen to look up without mutable arena access
             self.entity_registry_mut()
                 .set_base_type_id(entity_type_id, self_type_id);
-            let builtin_mod = self.name_table_mut().builtin_module();
             for method in &class.methods {
-                let method_name_str = interner.resolve(method.name);
-                let method_name_id = self
-                    .name_table_mut()
-                    .intern_raw(builtin_mod, &[method_name_str]);
-                let full_method_name_id = self.name_table_mut().intern_raw(
-                    self.current_module,
-                    &[interner.resolve(class.name), method_name_str],
-                );
-                let params_id: Vec<_> = method
-                    .params
-                    .iter()
-                    .map(|p| self.resolve_type_id_with_self(&p.ty, interner, Some(self_type_id)))
-                    .collect();
-                let return_type_id = method
-                    .return_type
-                    .as_ref()
-                    .map(|t| self.resolve_type_id_with_self(t, interner, Some(self_type_id)))
-                    .unwrap_or_else(|| self.type_arena().void());
-                let signature_id = FunctionType::from_ids(&params_id, return_type_id, false)
-                    .intern(&mut self.type_arena_mut());
-
-                // Calculate required_params and param_defaults for instance methods
-                let required_params = self.validate_param_defaults(&method.params, interner);
-                let param_defaults: Vec<Option<Box<Expr>>> = method
-                    .params
-                    .iter()
-                    .map(|p| p.default_value.clone())
-                    .collect();
-
-                self.entity_registry_mut().register_method_with_defaults(
+                self.register_instance_method(
                     entity_type_id,
-                    method_name_id,
-                    full_method_name_id,
-                    signature_id,
-                    false, // class methods don't have defaults (implementation defaults)
-                    None,  // no external binding
-                    required_params,
-                    param_defaults,
+                    class.name,
+                    method,
+                    interner,
+                    None, // no type param scope for non-generic class
+                    Some(self_type_id),
                 );
             }
 
             // Register static methods in EntityRegistry
             if let Some(ref statics) = class.statics {
-                let builtin_mod = self.name_table_mut().builtin_module();
-                let class_name_str = interner.resolve(class.name);
                 for method in &statics.methods {
-                    let method_name_str = interner.resolve(method.name);
-                    let method_name_id = self
-                        .name_table_mut()
-                        .intern_raw(builtin_mod, &[method_name_str]);
-                    let full_method_name_id = self
-                        .name_table_mut()
-                        .intern_raw(self.current_module, &[class_name_str, method_name_str]);
-                    let params_id: Vec<_> = method
-                        .params
-                        .iter()
-                        .map(|p| self.resolve_type_id(&p.ty, interner))
-                        .collect();
-                    let return_type_id = method
-                        .return_type
-                        .as_ref()
-                        .map(|t| self.resolve_type_id(t, interner))
-                        .unwrap_or_else(|| self.type_arena().void());
-                    let signature_id = FunctionType::from_ids(&params_id, return_type_id, false)
-                        .intern(&mut self.type_arena_mut());
-                    let has_default = method.is_default || method.body.is_some();
-                    let required_params = self.validate_param_defaults(&method.params, interner);
-                    let param_defaults: Vec<Option<Box<Expr>>> = method
-                        .params
-                        .iter()
-                        .map(|p| p.default_value.clone())
-                        .collect();
-                    self.entity_registry_mut()
-                        .register_static_method_with_defaults(
-                            entity_type_id,
-                            method_name_id,
-                            full_method_name_id,
-                            signature_id,
-                            has_default,
-                            None,       // no external binding
-                            Vec::new(), // Non-generic class, no method type params
-                            required_params,
-                            param_defaults,
-                        );
+                    self.register_static_method_helper(
+                        entity_type_id,
+                        class.name,
+                        method,
+                        interner,
+                        None,       // no type param scope for non-generic class
+                        Vec::new(), // no method type params (handled inside helper if needed)
+                    );
                 }
             }
 
             // Register external methods in EntityRegistry (non-generic class)
             if let Some(ref external) = class.external {
-                let class_name_str = interner.resolve(class.name);
                 for func in &external.functions {
-                    let method_name_str = interner.resolve(func.vole_name);
-                    let method_name_id = self
-                        .name_table_mut()
-                        .intern_raw(builtin_mod, &[method_name_str]);
-                    let full_method_name_id = self
-                        .name_table_mut()
-                        .intern_raw(self.current_module, &[class_name_str, method_name_str]);
-                    let params_id: Vec<_> = func
-                        .params
-                        .iter()
-                        .map(|p| self.resolve_type_id(&p.ty, interner))
-                        .collect();
-                    let return_type_id = func
-                        .return_type
-                        .as_ref()
-                        .map(|t| self.resolve_type_id(t, interner))
-                        .unwrap_or_else(|| self.type_arena().void());
-                    let signature_id = FunctionType::from_ids(&params_id, return_type_id, false)
-                        .intern(&mut self.type_arena_mut());
-                    let native_name_str = func
-                        .native_name
-                        .clone()
-                        .unwrap_or_else(|| method_name_str.to_string());
-                    let builtin_mod = self.name_table_mut().builtin_module();
-                    self.entity_registry_mut().register_method_with_binding(
+                    self.register_external_method(
                         entity_type_id,
-                        method_name_id,
-                        full_method_name_id,
-                        signature_id,
-                        false, // external methods don't have defaults
-                        Some(ExternalMethodInfo {
-                            module_path: self
-                                .name_table_mut()
-                                .intern_raw(builtin_mod, &[&external.module_path]),
-                            native_name: self
-                                .name_table_mut()
-                                .intern_raw(builtin_mod, &[&native_name_str]),
-                        }),
+                        class.name,
+                        func,
+                        &external.module_path,
+                        interner,
+                        None, // no type param scope for non-generic class
                     );
                 }
             }
@@ -708,48 +884,9 @@ impl Analyzer {
             // Validate field default ordering and collect which fields have defaults
             let field_has_default = self.validate_field_defaults(&class.fields, interner);
 
-            // First pass: create name_scope for constraint resolution (same pattern as functions)
-            let mut name_scope = TypeParamScope::new();
-            for tp in &class.type_params {
-                let tp_name_str = interner.resolve(tp.name);
-                let tp_name_id = self
-                    .name_table_mut()
-                    .intern_raw(builtin_mod, &[tp_name_str]);
-                name_scope.add(TypeParamInfo {
-                    name: tp.name,
-                    name_id: tp_name_id,
-                    constraint: None,
-                    type_param_id: None,
-                    variance: TypeParamVariance::default(),
-                });
-            }
-
-            // Second pass: resolve constraints with name_scope available
-            let type_params: Vec<TypeParamInfo> = class
-                .type_params
-                .iter()
-                .map(|tp| {
-                    let tp_name_str = interner.resolve(tp.name);
-                    let tp_name_id = self
-                        .name_table_mut()
-                        .intern_raw(builtin_mod, &[tp_name_str]);
-                    let constraint = tp.constraint.as_ref().and_then(|c| {
-                        self.resolve_type_param_constraint(c, &name_scope, interner, tp.span)
-                    });
-                    TypeParamInfo {
-                        name: tp.name,
-                        name_id: tp_name_id,
-                        constraint,
-                        type_param_id: None,
-                        variance: TypeParamVariance::default(),
-                    }
-                })
-                .collect();
-
-            let mut type_param_scope = TypeParamScope::new();
-            for info in &type_params {
-                type_param_scope.add(info.clone());
-            }
+            // Build type params with resolved constraints
+            let (type_params, type_param_scope) =
+                self.build_type_params_with_constraints(&class.type_params, interner);
 
             // Convert Symbol field names to NameId at registration time
             // (must be done before creating ctx which borrows name_table)
@@ -852,232 +989,43 @@ impl Analyzer {
             self.entity_registry_mut()
                 .set_base_type_id(entity_type_id, base_type_id);
             for method in &class.methods {
-                let method_name_str = interner.resolve(method.name);
-                let method_name_id = self
-                    .name_table_mut()
-                    .intern_raw(builtin_mod, &[method_name_str]);
-                let full_method_name_id = self.name_table_mut().intern_raw(
-                    self.current_module,
-                    &[interner.resolve(class.name), method_name_str],
-                );
-
-                // Resolve parameter types with type params and self in scope
-                let mut ctx = TypeResolutionContext {
-                    db: &self.db,
-                    interner,
-                    module_id,
-                    type_params: Some(&type_param_scope),
-                    self_type: Some(self_type_id),
-                };
-                let params_id: Vec<ArenaTypeId> = method
-                    .params
-                    .iter()
-                    .map(|p| resolve_type_to_id(&p.ty, &mut ctx))
-                    .collect();
-
-                // Resolve return type with type params and self in scope
-                let return_type_id = method
-                    .return_type
-                    .as_ref()
-                    .map(|t| resolve_type_to_id(t, &mut ctx))
-                    .unwrap_or_else(|| self.type_arena().void());
-
-                let signature_id = FunctionType::from_ids(&params_id, return_type_id, false)
-                    .intern(&mut self.type_arena_mut());
-
-                // Calculate required_params and param_defaults for instance methods
-                let required_params = self.validate_param_defaults(&method.params, interner);
-                let param_defaults: Vec<Option<Box<Expr>>> = method
-                    .params
-                    .iter()
-                    .map(|p| p.default_value.clone())
-                    .collect();
-
-                self.entity_registry_mut().register_method_with_defaults(
+                self.register_instance_method(
                     entity_type_id,
-                    method_name_id,
-                    full_method_name_id,
-                    signature_id,
-                    false, // class methods don't have defaults (implementation defaults)
-                    None,  // no external binding
-                    required_params,
-                    param_defaults,
+                    class.name,
+                    method,
+                    interner,
+                    Some(&type_param_scope),
+                    Some(self_type_id),
                 );
             }
 
             // Register static methods for generic classes
             if let Some(ref statics) = class.statics {
-                let class_name_str = interner.resolve(class.name);
                 for method in &statics.methods {
-                    let method_name_str = interner.resolve(method.name);
-                    let method_name_id = self
-                        .name_table_mut()
-                        .intern_raw(builtin_mod, &[method_name_str]);
-                    let full_method_name_id = self
-                        .name_table_mut()
-                        .intern_raw(self.current_module, &[class_name_str, method_name_str]);
-
-                    // Build merged scope: class type params + method type params
-                    let mut merged_scope = type_param_scope.clone();
-                    for tp in &method.type_params {
-                        let tp_name_str = interner.resolve(tp.name);
-                        let tp_name_id = self
-                            .name_table_mut()
-                            .intern_raw(builtin_mod, &[tp_name_str]);
-                        merged_scope.add(TypeParamInfo {
-                            name: tp.name,
-                            name_id: tp_name_id,
-                            constraint: None,
-                            type_param_id: None,
-                            variance: TypeParamVariance::default(),
-                        });
-                    }
-
-                    // Build method type params with resolved constraints
-                    let method_type_params: Vec<TypeParamInfo> = method
-                        .type_params
-                        .iter()
-                        .map(|tp| {
-                            let tp_name_str = interner.resolve(tp.name);
-                            let tp_name_id = self
-                                .name_table_mut()
-                                .intern_raw(builtin_mod, &[tp_name_str]);
-                            let constraint = tp.constraint.as_ref().and_then(|c| {
-                                self.resolve_type_param_constraint(
-                                    c,
-                                    &merged_scope,
-                                    interner,
-                                    tp.span,
-                                )
-                            });
-                            TypeParamInfo {
-                                name: tp.name,
-                                name_id: tp_name_id,
-                                constraint,
-                                type_param_id: None,
-                                variance: TypeParamVariance::default(),
-                            }
-                        })
-                        .collect();
-
-                    // Resolve parameter types with merged type params in scope
-                    let params_id: Vec<ArenaTypeId> = method
-                        .params
-                        .iter()
-                        .map(|p| {
-                            let mut ctx = TypeResolutionContext::with_type_params(
-                                &self.db,
-                                interner,
-                                module_id,
-                                &merged_scope,
-                            );
-                            resolve_type_to_id(&p.ty, &mut ctx)
-                        })
-                        .collect();
-
-                    // Resolve return type with merged type params in scope
-                    let return_type_id = method
-                        .return_type
-                        .as_ref()
-                        .map(|t| {
-                            let mut ctx = TypeResolutionContext::with_type_params(
-                                &self.db,
-                                interner,
-                                module_id,
-                                &merged_scope,
-                            );
-                            resolve_type_to_id(t, &mut ctx)
-                        })
-                        .unwrap_or_else(|| self.type_arena().void());
-
-                    let signature_id = FunctionType::from_ids(&params_id, return_type_id, false)
-                        .intern(&mut self.type_arena_mut());
-                    let has_default = method.is_default || method.body.is_some();
-                    let required_params = self.validate_param_defaults(&method.params, interner);
-                    let param_defaults: Vec<Option<Box<Expr>>> = method
-                        .params
-                        .iter()
-                        .map(|p| p.default_value.clone())
-                        .collect();
-                    self.entity_registry_mut()
-                        .register_static_method_with_defaults(
-                            entity_type_id,
-                            method_name_id,
-                            full_method_name_id,
-                            signature_id,
-                            has_default,
-                            None, // no external binding
-                            method_type_params,
-                            required_params,
-                            param_defaults,
-                        );
+                    let method_type_params =
+                        self.build_method_type_params(method, Some(&type_param_scope), interner);
+                    self.register_static_method_helper(
+                        entity_type_id,
+                        class.name,
+                        method,
+                        interner,
+                        Some(&type_param_scope),
+                        method_type_params,
+                    );
                 }
             }
 
             // Register external methods in EntityRegistry (generic class)
             // Type params are in scope for resolving K, V, etc.
             if let Some(ref external) = class.external {
-                let class_name_str = interner.resolve(class.name);
                 for func in &external.functions {
-                    let method_name_str = interner.resolve(func.vole_name);
-                    let method_name_id = self
-                        .name_table_mut()
-                        .intern_raw(builtin_mod, &[method_name_str]);
-                    let full_method_name_id = self
-                        .name_table_mut()
-                        .intern_raw(self.current_module, &[class_name_str, method_name_str]);
-
-                    // Resolve parameter types with type params in scope
-                    let params_id: Vec<ArenaTypeId> = func
-                        .params
-                        .iter()
-                        .map(|p| {
-                            let mut ctx = TypeResolutionContext::with_type_params(
-                                &self.db,
-                                interner,
-                                module_id,
-                                &type_param_scope,
-                            );
-                            resolve_type_to_id(&p.ty, &mut ctx)
-                        })
-                        .collect();
-
-                    // Resolve return type with type params in scope
-                    let return_type_id = func
-                        .return_type
-                        .as_ref()
-                        .map(|t| {
-                            let mut ctx = TypeResolutionContext::with_type_params(
-                                &self.db,
-                                interner,
-                                module_id,
-                                &type_param_scope,
-                            );
-                            resolve_type_to_id(t, &mut ctx)
-                        })
-                        .unwrap_or_else(|| self.type_arena().void());
-
-                    let signature_id = FunctionType::from_ids(&params_id, return_type_id, false)
-                        .intern(&mut self.type_arena_mut());
-                    let native_name_str = func
-                        .native_name
-                        .clone()
-                        .unwrap_or_else(|| method_name_str.to_string());
-                    let builtin_mod = self.name_table_mut().builtin_module();
-                    self.entity_registry_mut().register_method_with_binding(
+                    self.register_external_method(
                         entity_type_id,
-                        method_name_id,
-                        full_method_name_id,
-                        signature_id,
-                        false, // external methods don't have defaults
-                        Some(ExternalMethodInfo {
-                            module_path: self
-                                .name_table_mut()
-                                .intern_raw(builtin_mod, &[&external.module_path]),
-                            native_name: self
-                                .name_table_mut()
-                                .intern_raw(builtin_mod, &[&native_name_str]),
-                        }),
+                        class.name,
+                        func,
+                        &external.module_path,
+                        interner,
+                        Some(&type_param_scope),
                     );
                 }
             }
@@ -1177,92 +1125,28 @@ impl Analyzer {
             // Store base_type_id for codegen to look up without mutable arena access
             self.entity_registry_mut()
                 .set_base_type_id(entity_type_id, self_type_id);
-            let builtin_mod = self.name_table_mut().builtin_module();
             for method in &record.methods {
-                let method_name_str = interner.resolve(method.name);
-                let method_name_id = self
-                    .name_table_mut()
-                    .intern_raw(builtin_mod, &[method_name_str]);
-                let full_method_name_id = self.name_table_mut().intern_raw(
-                    self.current_module,
-                    &[interner.resolve(record.name), method_name_str],
-                );
-                let params_id: Vec<_> = method
-                    .params
-                    .iter()
-                    .map(|p| self.resolve_type_id_with_self(&p.ty, interner, Some(self_type_id)))
-                    .collect();
-                let return_type_id = method
-                    .return_type
-                    .as_ref()
-                    .map(|t| self.resolve_type_id_with_self(t, interner, Some(self_type_id)))
-                    .unwrap_or_else(|| self.type_arena().void());
-                let signature_id = FunctionType::from_ids(&params_id, return_type_id, false)
-                    .intern(&mut self.type_arena_mut());
-
-                // Calculate required_params and param_defaults for instance methods
-                let required_params = self.validate_param_defaults(&method.params, interner);
-                let param_defaults: Vec<Option<Box<Expr>>> = method
-                    .params
-                    .iter()
-                    .map(|p| p.default_value.clone())
-                    .collect();
-
-                self.entity_registry_mut().register_method_with_defaults(
+                self.register_instance_method(
                     entity_type_id,
-                    method_name_id,
-                    full_method_name_id,
-                    signature_id,
-                    false, // record methods don't have defaults (implementation defaults)
-                    None,  // no external binding
-                    required_params,
-                    param_defaults,
+                    record.name,
+                    method,
+                    interner,
+                    None, // no type param scope for non-generic record
+                    Some(self_type_id),
                 );
             }
 
             // Register static methods in EntityRegistry
             if let Some(ref statics) = record.statics {
-                let builtin_mod = self.name_table_mut().builtin_module();
-                let record_name_str = interner.resolve(record.name);
                 for method in &statics.methods {
-                    let method_name_str = interner.resolve(method.name);
-                    let method_name_id = self
-                        .name_table_mut()
-                        .intern_raw(builtin_mod, &[method_name_str]);
-                    let full_method_name_id = self
-                        .name_table_mut()
-                        .intern_raw(self.current_module, &[record_name_str, method_name_str]);
-                    let params_id: Vec<_> = method
-                        .params
-                        .iter()
-                        .map(|p| self.resolve_type_id(&p.ty, interner))
-                        .collect();
-                    let return_type_id = method
-                        .return_type
-                        .as_ref()
-                        .map(|t| self.resolve_type_id(t, interner))
-                        .unwrap_or_else(|| self.type_arena().void());
-                    let signature_id = FunctionType::from_ids(&params_id, return_type_id, false)
-                        .intern(&mut self.type_arena_mut());
-                    let has_default = method.is_default || method.body.is_some();
-                    let required_params = self.validate_param_defaults(&method.params, interner);
-                    let param_defaults: Vec<Option<Box<Expr>>> = method
-                        .params
-                        .iter()
-                        .map(|p| p.default_value.clone())
-                        .collect();
-                    self.entity_registry_mut()
-                        .register_static_method_with_defaults(
-                            entity_type_id,
-                            method_name_id,
-                            full_method_name_id,
-                            signature_id,
-                            has_default,
-                            None,       // no external binding
-                            Vec::new(), // Non-generic record, no method type params
-                            required_params,
-                            param_defaults,
-                        );
+                    self.register_static_method_helper(
+                        entity_type_id,
+                        record.name,
+                        method,
+                        interner,
+                        None,       // no type param scope for non-generic record
+                        Vec::new(), // no method type params
+                    );
                 }
             }
         } else {
@@ -1272,48 +1156,9 @@ impl Analyzer {
             // Validate field default ordering and collect which fields have defaults
             let field_has_default = self.validate_field_defaults(&record.fields, interner);
 
-            // First pass: create name_scope for constraint resolution (same pattern as functions)
-            let mut name_scope = TypeParamScope::new();
-            for tp in &record.type_params {
-                let tp_name_str = interner.resolve(tp.name);
-                let tp_name_id = self
-                    .name_table_mut()
-                    .intern_raw(builtin_mod, &[tp_name_str]);
-                name_scope.add(TypeParamInfo {
-                    name: tp.name,
-                    name_id: tp_name_id,
-                    constraint: None,
-                    type_param_id: None,
-                    variance: TypeParamVariance::default(),
-                });
-            }
-
-            // Second pass: resolve constraints with name_scope available
-            let type_params: Vec<TypeParamInfo> = record
-                .type_params
-                .iter()
-                .map(|tp| {
-                    let tp_name_str = interner.resolve(tp.name);
-                    let tp_name_id = self
-                        .name_table_mut()
-                        .intern_raw(builtin_mod, &[tp_name_str]);
-                    let constraint = tp.constraint.as_ref().and_then(|c| {
-                        self.resolve_type_param_constraint(c, &name_scope, interner, tp.span)
-                    });
-                    TypeParamInfo {
-                        name: tp.name,
-                        name_id: tp_name_id,
-                        constraint,
-                        type_param_id: None,
-                        variance: TypeParamVariance::default(),
-                    }
-                })
-                .collect();
-
-            let mut type_param_scope = TypeParamScope::new();
-            for info in &type_params {
-                type_param_scope.add(info.clone());
-            }
+            // Build type params with resolved constraints
+            let (type_params, type_param_scope) =
+                self.build_type_params_with_constraints(&record.type_params, interner);
 
             // Convert Symbol field names to NameId at registration time
             // (must be done before creating ctx which borrows name_table)
@@ -1418,173 +1263,29 @@ impl Analyzer {
                 .set_base_type_id(entity_type_id, base_type_id);
 
             for method in &record.methods {
-                // Resolve types directly to TypeId
-                let params_id: Vec<ArenaTypeId> = {
-                    let mut ctx = TypeResolutionContext::with_type_params(
-                        &self.db,
-                        interner,
-                        module_id,
-                        &type_param_scope,
-                    );
-                    ctx.self_type = Some(self_type_id);
-                    method
-                        .params
-                        .iter()
-                        .map(|p| resolve_type_to_id(&p.ty, &mut ctx))
-                        .collect()
-                };
-                let return_type_id: ArenaTypeId = {
-                    let mut ctx = TypeResolutionContext::with_type_params(
-                        &self.db,
-                        interner,
-                        module_id,
-                        &type_param_scope,
-                    );
-                    ctx.self_type = Some(self_type_id);
-                    method
-                        .return_type
-                        .as_ref()
-                        .map(|t| resolve_type_to_id(t, &mut ctx))
-                        .unwrap_or_else(|| self.type_arena().void())
-                };
-
-                let method_name_str = interner.resolve(method.name);
-                let method_name_id = self
-                    .name_table_mut()
-                    .intern_raw(builtin_mod, &[method_name_str]);
-                let full_method_name_id = self.name_table_mut().intern_raw(
-                    self.current_module,
-                    &[interner.resolve(record.name), method_name_str],
-                );
-                let signature_id = FunctionType::from_ids(&params_id, return_type_id, false)
-                    .intern(&mut self.type_arena_mut());
-
-                // Calculate required_params and param_defaults for instance methods
-                let required_params = self.validate_param_defaults(&method.params, interner);
-                let param_defaults: Vec<Option<Box<Expr>>> = method
-                    .params
-                    .iter()
-                    .map(|p| p.default_value.clone())
-                    .collect();
-
-                self.entity_registry_mut().register_method_with_defaults(
+                self.register_instance_method(
                     entity_type_id,
-                    method_name_id,
-                    full_method_name_id,
-                    signature_id,
-                    false, // record methods don't have defaults (implementation defaults)
-                    None,  // no external binding
-                    required_params,
-                    param_defaults,
+                    record.name,
+                    method,
+                    interner,
+                    Some(&type_param_scope),
+                    Some(self_type_id),
                 );
             }
 
             // Register static methods for generic records
             if let Some(ref statics) = record.statics {
-                let record_name_str = interner.resolve(record.name);
                 for method in &statics.methods {
-                    let method_name_str = interner.resolve(method.name);
-                    let method_name_id = self
-                        .name_table_mut()
-                        .intern_raw(builtin_mod, &[method_name_str]);
-                    let full_method_name_id = self
-                        .name_table_mut()
-                        .intern_raw(self.current_module, &[record_name_str, method_name_str]);
-
-                    // Build merged scope: record type params + method type params
-                    let mut merged_scope = type_param_scope.clone();
-                    for tp in &method.type_params {
-                        let tp_name_str = interner.resolve(tp.name);
-                        let tp_name_id = self
-                            .name_table_mut()
-                            .intern_raw(builtin_mod, &[tp_name_str]);
-                        merged_scope.add(TypeParamInfo {
-                            name: tp.name,
-                            name_id: tp_name_id,
-                            constraint: None,
-                            type_param_id: None,
-                            variance: TypeParamVariance::default(),
-                        });
-                    }
-
-                    // Build method type params with resolved constraints
-                    let method_type_params: Vec<TypeParamInfo> = method
-                        .type_params
-                        .iter()
-                        .map(|tp| {
-                            let tp_name_str = interner.resolve(tp.name);
-                            let tp_name_id = self
-                                .name_table_mut()
-                                .intern_raw(builtin_mod, &[tp_name_str]);
-                            let constraint = tp.constraint.as_ref().and_then(|c| {
-                                self.resolve_type_param_constraint(
-                                    c,
-                                    &merged_scope,
-                                    interner,
-                                    tp.span,
-                                )
-                            });
-                            TypeParamInfo {
-                                name: tp.name,
-                                name_id: tp_name_id,
-                                constraint,
-                                type_param_id: None,
-                                variance: TypeParamVariance::default(),
-                            }
-                        })
-                        .collect();
-
-                    // Resolve parameter types with merged type params in scope
-                    let params_id: Vec<ArenaTypeId> = method
-                        .params
-                        .iter()
-                        .map(|p| {
-                            let mut ctx = TypeResolutionContext::with_type_params(
-                                &self.db,
-                                interner,
-                                module_id,
-                                &merged_scope,
-                            );
-                            resolve_type_to_id(&p.ty, &mut ctx)
-                        })
-                        .collect();
-
-                    // Resolve return type with merged type params in scope
-                    let return_type_id = method
-                        .return_type
-                        .as_ref()
-                        .map(|t| {
-                            let mut ctx = TypeResolutionContext::with_type_params(
-                                &self.db,
-                                interner,
-                                module_id,
-                                &merged_scope,
-                            );
-                            resolve_type_to_id(t, &mut ctx)
-                        })
-                        .unwrap_or_else(|| self.type_arena().void());
-
-                    let signature_id = FunctionType::from_ids(&params_id, return_type_id, false)
-                        .intern(&mut self.type_arena_mut());
-                    let has_default = method.is_default || method.body.is_some();
-                    let required_params = self.validate_param_defaults(&method.params, interner);
-                    let param_defaults: Vec<Option<Box<Expr>>> = method
-                        .params
-                        .iter()
-                        .map(|p| p.default_value.clone())
-                        .collect();
-                    self.entity_registry_mut()
-                        .register_static_method_with_defaults(
-                            entity_type_id,
-                            method_name_id,
-                            full_method_name_id,
-                            signature_id,
-                            has_default,
-                            None, // no external binding
-                            method_type_params,
-                            required_params,
-                            param_defaults,
-                        );
+                    let method_type_params =
+                        self.build_method_type_params(method, Some(&type_param_scope), interner);
+                    self.register_static_method_helper(
+                        entity_type_id,
+                        record.name,
+                        method,
+                        interner,
+                        Some(&type_param_scope),
+                        method_type_params,
+                    );
                 }
             }
         }
@@ -1681,47 +1382,9 @@ impl Analyzer {
     }
 
     fn collect_interface_def(&mut self, interface_decl: &InterfaceDecl, interner: &Interner) {
-        let builtin_mod = self.name_table_mut().builtin_module();
-        let mut name_scope = TypeParamScope::new();
-        for tp in &interface_decl.type_params {
-            let tp_name_str = interner.resolve(tp.name);
-            let tp_name_id = self
-                .name_table_mut()
-                .intern_raw(builtin_mod, &[tp_name_str]);
-            name_scope.add(TypeParamInfo {
-                name: tp.name,
-                name_id: tp_name_id,
-                constraint: None,
-                type_param_id: None,
-                variance: TypeParamVariance::default(),
-            });
-        }
-
-        let type_params: Vec<TypeParamInfo> = interface_decl
-            .type_params
-            .iter()
-            .map(|tp| {
-                let tp_name_str = interner.resolve(tp.name);
-                let tp_name_id = self
-                    .name_table_mut()
-                    .intern_raw(builtin_mod, &[tp_name_str]);
-                let constraint = tp.constraint.as_ref().and_then(|c| {
-                    self.resolve_type_param_constraint(c, &name_scope, interner, tp.span)
-                });
-                TypeParamInfo {
-                    name: tp.name,
-                    name_id: tp_name_id,
-                    constraint,
-                    type_param_id: None,
-                    variance: TypeParamVariance::default(),
-                }
-            })
-            .collect();
-
-        let mut type_param_scope = TypeParamScope::new();
-        for info in &type_params {
-            type_param_scope.add(info.clone());
-        }
+        // Build type params with resolved constraints
+        let (type_params, type_param_scope) =
+            self.build_type_params_with_constraints(&interface_decl.type_params, interner);
 
         // Use current_module for proper module-qualified NameIds
         let name_str = interner.resolve(interface_decl.name).to_string();
@@ -2500,48 +2163,9 @@ impl Analyzer {
 
             // For generic external functions, set up type param scope and register with GenericFuncInfo
             if !func.type_params.is_empty() {
-                // Build initial name scope (for resolving constraints that reference other type params)
-                let mut name_scope = TypeParamScope::new();
-                for tp in &func.type_params {
-                    let tp_name_str = interner.resolve(tp.name);
-                    let tp_name_id = self
-                        .name_table_mut()
-                        .intern_raw(builtin_mod, &[tp_name_str]);
-                    name_scope.add(TypeParamInfo {
-                        name: tp.name,
-                        name_id: tp_name_id,
-                        constraint: None,
-                        type_param_id: None,
-                        variance: TypeParamVariance::default(),
-                    });
-                }
-
-                // Build TypeParamInfo list with resolved constraints
-                let type_params: Vec<TypeParamInfo> = func
-                    .type_params
-                    .iter()
-                    .map(|tp| {
-                        let tp_name_str = interner.resolve(tp.name);
-                        let tp_name_id = self
-                            .name_table_mut()
-                            .intern_raw(builtin_mod, &[tp_name_str]);
-                        let resolved_constraint = tp.constraint.as_ref().and_then(|c| {
-                            self.resolve_type_param_constraint(c, &name_scope, interner, tp.span)
-                        });
-                        TypeParamInfo {
-                            name: tp.name,
-                            name_id: tp_name_id,
-                            constraint: resolved_constraint,
-                            type_param_id: None,
-                            variance: TypeParamVariance::default(),
-                        }
-                    })
-                    .collect();
-
-                let mut type_param_scope = TypeParamScope::new();
-                for info in &type_params {
-                    type_param_scope.add(info.clone());
-                }
+                // Build type params with resolved constraints
+                let (type_params, type_param_scope) =
+                    self.build_type_params_with_constraints(&func.type_params, interner);
 
                 // Resolve with type params in scope
                 let module_id = self.current_module;

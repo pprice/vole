@@ -233,28 +233,16 @@ impl Analyzer {
         params: &[LambdaParam],
         interner: &Interner,
     ) -> usize {
-        let mut seen_default = false;
-        let mut required_params = 0;
-
-        for param in params {
-            if param.default_value.is_some() {
-                seen_default = true;
-            } else if seen_default {
-                // Non-default param after a default param - emit error
-                let name = interner.resolve(param.name).to_string();
-                self.add_error(
-                    SemanticError::DefaultParamNotLast {
-                        name,
-                        span: param.span.into(),
-                    },
-                    param.span,
-                );
-            } else {
-                required_params += 1;
-            }
-        }
-
-        required_params
+        let (required_count, _) = validate_defaults(params, interner, |name, span| {
+            self.add_error(
+                SemanticError::DefaultParamNotLast {
+                    name,
+                    span: span.into(),
+                },
+                span,
+            );
+        });
+        required_count
     }
 
     /// Type-check default expressions for lambda parameters.
