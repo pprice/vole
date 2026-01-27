@@ -28,8 +28,9 @@ pub type TypeMetadataMap = FxHashMap<TypeDefId, TypeMetadata>;
 pub struct CodegenState {
     /// Class and record metadata for struct literals, field access, and method calls.
     pub type_metadata: TypeMetadataMap,
-    /// Unified method function key lookup: (TypeDefId, method_name) -> FunctionKey
-    pub method_func_keys: FxHashMap<(TypeDefId, NameId), FunctionKey>,
+    /// Unified method function key lookup: (type_name_id, method_name_id) -> FunctionKey
+    /// Uses NameId for both to ensure stable lookup across different analyzer instances.
+    pub method_func_keys: FxHashMap<(NameId, NameId), FunctionKey>,
     /// Interface vtable registry (uses interior mutability)
     pub interface_vtables: RefCell<InterfaceVtableRegistry>,
     /// Registry of native functions for external method calls

@@ -1,0 +1,24 @@
+// Error cases for module-qualified types
+
+let time = import "std:time"
+
+// Error: Unknown type in module
+func unknown_type(x: time.UnknownType) {
+    print(x)
+}
+
+// Error: Module doesn't have this type
+func unknown_type_return() -> time.Nonexistent {
+    return nil
+}
+
+// Error: Unknown type in generic position
+func unknown_generic() -> List<time.Unknown> {
+    return []
+}
+
+func main() {
+    unknown_type(42)
+    let x = unknown_type_return()
+    let y = unknown_generic()
+}

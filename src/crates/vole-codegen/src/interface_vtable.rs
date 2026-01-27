@@ -944,14 +944,11 @@ fn resolve_vtable_target<C: VtableCtx>(
                 target: VtableMethodTarget::External(external_info),
             });
         }
-        // Look up via unified method_func_keys using TypeDefId
-        let type_def_id = ctx
-            .query()
-            .try_type_def_id(impl_type_id.name_id())
-            .ok_or_else(|| "type_def_id not found for impl_type_id".to_string())?;
+        // Look up via unified method_func_keys using type's NameId for stable lookup
+        let type_name_id = impl_type_id.name_id();
         let func_key = *ctx
             .method_func_keys()
-            .get(&(type_def_id, method_name_id))
+            .get(&(type_name_id, method_name_id))
             .ok_or_else(|| "implement method info not found in method_func_keys".to_string())?;
         let method_info = MethodInfo { func_key };
         return Ok(VtableMethod {

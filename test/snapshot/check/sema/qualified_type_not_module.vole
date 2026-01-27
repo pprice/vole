@@ -1,0 +1,12 @@
+// Error: Trying to use qualified type syntax on non-module value
+
+let x = 42
+
+// Error: x is not a module - should error at call site
+func bad_qualified(v: x.Type) {
+    print(v)
+}
+
+func main() {
+    bad_qualified(42)
+}

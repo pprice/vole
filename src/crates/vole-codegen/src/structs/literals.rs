@@ -53,9 +53,10 @@ impl Cg<'_, '_, '_> {
             // Simple type name - use string-based resolution for consistency
             let type_name = self.interner().resolve(sl.path[0]);
             let query = self.query();
+            // Use current module (for imported modules) or program module (for main program)
             let module_id = self
                 .current_module_id()
-                .unwrap_or_else(|| query.main_module());
+                .unwrap_or(self.env.analyzed.module_id);
             let mut resolved_id = query.resolve_type_def_by_str(module_id, type_name);
 
             // If this is a type alias, resolve through to the underlying type
@@ -269,10 +270,12 @@ impl Cg<'_, '_, '_> {
         let type_def = self.query().get_type(type_def_id);
         let type_module = type_def.module;
 
-        // Get the main module to check if this type is in the main program
-        let main_module = self.query().main_module();
+        // Get the program module (the module of the file being compiled).
+        // Types defined in the main program are registered with program_module(),
+        // which may differ from main_module() when using shared caches.
+        let program_module = self.env.analyzed.module_id;
 
-        if type_module == main_module {
+        if type_module == program_module {
             // Type is in the main program - search there
             if let Some(fields) = find_type_fields(&self.analyzed().program, type_name) {
                 for field in fields {

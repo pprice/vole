@@ -1,0 +1,11 @@
+[stdout]
+
+[stderr]
+  x [E2001]: expected <invalid>, found integer literal
+    ,-[<path>/qualified_type_not_module.vole:11:19]
+ 10 | func main() {
+ 11 |     bad_qualified(42)
+    :                   ^|
+    :                    `-- type mismatch
+ 12 | }
+    `----

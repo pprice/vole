@@ -52,26 +52,26 @@ tests {
 
     // Test destructured record types are usable as type names
     test "destructured record type in variable annotation" {
-        let { Duration, duration_nanos, duration_as_nanos } = import "std:time"
+        let time = import "std:time"
+        let { Duration } = import "std:time"
         // Use Duration in a variable type annotation
-        let d: Duration = duration_nanos(4000)
-        assert(duration_as_nanos(d) == 4000)
+        // Note: static methods require module-qualified access (time.Duration.nanos)
+        let d: Duration = time.Duration.nanos(4000)
+        assert(d.as_nanos() == 4000)
     }
 
     test "destructured record type as type name in record literal" {
-        let time = import "std:time"
         let { Duration } = import "std:time"
         // Use Duration as a type name in a record literal
         let d = Duration { nanos: 1000 }
-        assert(time.duration_as_nanos(d) == 1000)
+        assert(d.as_nanos() == 1000)
     }
 
     test "destructured record type in function parameter annotation" {
-        let time = import "std:time"
         let { Duration } = import "std:time"
         // Use Duration as a type annotation for a function parameter
         func get_nanos(d: Duration) -> i64 {
-            return time.duration_as_nanos(d)
+            return d.as_nanos()
         }
         let d = Duration { nanos: 2000 }
         assert(get_nanos(d) == 2000)
@@ -81,29 +81,28 @@ tests {
         let time = import "std:time"
         let { Duration } = import "std:time"
         // Use Duration as a return type annotation
+        // Static methods require module-qualified access
         func make_duration(n: i64) -> Duration {
-            return time.duration_nanos(n)
+            return time.Duration.nanos(n)
         }
         let d = make_duration(3000)
         assert(d.nanos == 3000)
     }
 
     test "destructured record with renamed type binding" {
-        let time = import "std:time"
         let { Duration as Dur } = import "std:time"
         // Use the renamed type as a type name
         let d = Dur { nanos: 5000 }
-        assert(time.duration_as_nanos(d) == 5000)
+        assert(d.as_nanos() == 5000)
 
         // Also works in type annotations
         func get_nanos(d: Dur) -> i64 {
-            return time.duration_as_nanos(d)
+            return d.as_nanos()
         }
         assert(get_nanos(d) == 5000)
     }
 
     test "multiple destructured record types" {
-        let time = import "std:time"
         let { Duration, Timestamp } = import "std:time"
         // Both Duration and Timestamp are usable as type names
         let d = Duration { nanos: 1000 }

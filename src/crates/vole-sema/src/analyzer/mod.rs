@@ -190,6 +190,8 @@ pub struct AnalysisOutput {
     pub module_programs: FxHashMap<String, (Program, Interner)>,
     /// Shared compilation database containing all registries
     pub db: Rc<RefCell<CompilationDb>>,
+    /// The module ID for the main program (may differ from main_module when using shared cache)
+    pub module_id: ModuleId,
 }
 
 /// Tracks return analysis results for a code path.
@@ -552,11 +554,21 @@ impl Analyzer {
     ) -> Self {
         // Get the shared db from the cache BEFORE borrowing cache again
         let shared_db = cache.borrow().db();
-        let main_module = shared_db.borrow().main_module();
 
         // Determine current file path
         let file_path = std::path::Path::new(file);
         let current_file_path = file_path.canonicalize().ok();
+
+        // When using shared cache, each file gets its own module ID based on its path.
+        // This prevents type conflicts when different files define types with the same name.
+        let current_module = {
+            // Use canonical path for consistent module IDs, falling back to original path
+            let module_path = current_file_path
+                .as_ref()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| file.to_string());
+            shared_db.borrow_mut().names.module_id(&module_path)
+        };
 
         // Use explicit project root or auto-detect
         let effective_root = if let Some(root) = project_root {
@@ -605,7 +617,7 @@ impl Analyzer {
             lambda_variables: FxHashMap::default(),
             scoped_function_types: FxHashMap::default(),
             declared_var_types: FxHashMap::default(),
-            current_module: main_module,
+            current_module,
             type_param_stack: TypeParamScopeStack::new(),
             module_cache: Some(cache),
             db: shared_db,
@@ -653,6 +665,16 @@ impl Analyzer {
         ResolverGuard::new(&self.db, interner, self.current_module)
     }
 
+    /// Create a resolver for a specific module context.
+    /// Use this when resolving types in an imported module's context.
+    pub fn resolver_for_module<'a>(
+        &'a self,
+        interner: &'a Interner,
+        module_id: ModuleId,
+    ) -> ResolverGuard<'a> {
+        ResolverGuard::new(&self.db, interner, module_id)
+    }
+
     /// Take ownership of the expression types (consuming self)
     pub fn into_expr_types(self) -> FxHashMap<NodeId, ArenaTypeId> {
         self.expr_types
@@ -685,6 +707,7 @@ impl Analyzer {
                 .map(|cell| cell.into_inner())
                 .unwrap_or_else(|rc| rc.borrow().clone()),
             db: self.db,
+            module_id: self.current_module,
         }
     }
 
@@ -3563,9 +3586,10 @@ impl Analyzer {
         for (name_id, iface_sym) in interface_names {
             // Look up interface type from entity registry
             // Use block to ensure resolver guard is dropped before type_arena_mut
+            // Use resolver_for_module with the module's ID, not self.current_module
             let type_def_id = {
                 let iface_str = module_interner.resolve(iface_sym);
-                self.resolver(&module_interner)
+                self.resolver_for_module(&module_interner, module_id)
                     .resolve_type_str_or_interface(iface_str, &self.entity_registry())
             };
             if let Some(type_def_id) = type_def_id {
@@ -3582,7 +3606,8 @@ impl Analyzer {
             let type_def_id = {
                 let record_str = module_interner.resolve(record_sym);
                 // Use resolve_type_str_or_interface which has fallback to record_by_short_name
-                self.resolver(&module_interner)
+                // Use resolver_for_module with the module's ID, not self.current_module
+                self.resolver_for_module(&module_interner, module_id)
                     .resolve_type_str_or_interface(record_str, &self.entity_registry())
             };
             if let Some(type_def_id) = type_def_id {
@@ -3598,7 +3623,8 @@ impl Analyzer {
             let type_def_id = {
                 let class_str = module_interner.resolve(class_sym);
                 // Use resolve_type_str_or_interface which has fallback to class_by_short_name
-                self.resolver(&module_interner)
+                // Use resolver_for_module with the module's ID, not self.current_module
+                self.resolver_for_module(&module_interner, module_id)
                     .resolve_type_str_or_interface(class_str, &self.entity_registry())
             };
             if let Some(type_def_id) = type_def_id {

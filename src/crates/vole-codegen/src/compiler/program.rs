@@ -40,8 +40,9 @@ impl Compiler<'_> {
         // Collect info using query (immutable borrow)
         let (name_id, display_name) = {
             let query = self.query();
+            let module_id = self.program_module();
             (
-                query.try_function_name_id(query.main_module(), sym),
+                query.try_function_name_id(module_id, sym),
                 query.resolve_symbol(sym).to_string(),
             )
         };
@@ -181,8 +182,9 @@ impl Compiler<'_> {
                         continue;
                     }
                     // Get FunctionId and build signature from pre-resolved types
-                    let main_module = self.query().main_module();
-                    let Some(semantic_func_id) = self.query().function_id(main_module, func.name)
+                    let program_module = self.program_module();
+                    let Some(semantic_func_id) =
+                        self.query().function_id(program_module, func.name)
                     else {
                         continue; // Skip if function not registered (shouldn't happen)
                     };
@@ -267,7 +269,8 @@ impl Compiler<'_> {
 
                     // Check for implicit generics (structural type params)
                     let query = self.query();
-                    let name_id = query.function_name_id(query.main_module(), func.name);
+                    let program_module = self.program_module();
+                    let name_id = query.function_name_id(program_module, func.name);
                     let has_implicit_generic_info = self
                         .analyzed
                         .entity_registry()
@@ -548,6 +551,13 @@ impl Compiler<'_> {
                     self.import_module_class(class, module_interner, module_id);
                 }
             }
+
+            // Finalize module records (register type metadata, import methods)
+            for decl in &program.declarations {
+                if let Decl::Record(record) = decl {
+                    self.import_module_record(record, module_interner, module_id);
+                }
+            }
         }
 
         Ok(())
@@ -563,6 +573,22 @@ impl Compiler<'_> {
     ) {
         // First finalize to get type metadata registered
         self.finalize_module_class(class, module_interner, module_id);
+
+        // The methods are already compiled - they'll be linked via external symbols
+        // No additional work needed here since method calls go through func_registry
+        // which will find the imported function IDs
+    }
+
+    /// Import a module record - register metadata and import methods.
+    /// Used when modules are already compiled in a shared cache.
+    fn import_module_record(
+        &mut self,
+        record: &vole_frontend::RecordDecl,
+        module_interner: &Interner,
+        module_id: ModuleId,
+    ) {
+        // First finalize to get type metadata registered (including static methods in method_func_keys)
+        self.finalize_module_record(record, module_interner, module_id);
 
         // The methods are already compiled - they'll be linked via external symbols
         // No additional work needed here since method calls go through func_registry
@@ -656,7 +682,7 @@ impl Compiler<'_> {
     }
 
     fn compile_function(&mut self, func: &FuncDecl) -> Result<(), String> {
-        let main_module = self.query().main_module();
+        let program_module = self.program_module();
         let (func_key, display_name) = self.main_function_key_and_name(func.name);
         let jit_func_id = self
             .func_registry
@@ -666,7 +692,7 @@ impl Compiler<'_> {
         // Get FunctionId and extract pre-resolved signature data
         let semantic_func_id = self
             .query()
-            .function_id(main_module, func.name)
+            .function_id(program_module, func.name)
             .ok_or_else(|| format!("Function {} not found in registry", display_name))?;
         let (param_type_ids, return_type_id) = {
             let func_def = self.query().registry().get_function(semantic_func_id);
@@ -972,15 +998,15 @@ impl Compiler<'_> {
         writer: &mut W,
         include_tests: bool,
     ) -> Result<(), String> {
-        let _module_id = self.query().main_module();
+        let program_module = self.program_module();
         // First pass: declare all functions so they can reference each other
         let mut test_count = 0usize;
         for decl in &program.declarations {
             match decl {
                 Decl::Function(func) => {
                     // Get FunctionId and build signature from pre-resolved types
-                    let main_module = self.query().main_module();
-                    let Some(semantic_func_id) = self.query().function_id(main_module, func.name)
+                    let Some(semantic_func_id) =
+                        self.query().function_id(program_module, func.name)
                     else {
                         continue; // Skip if function not registered
                     };
@@ -1041,12 +1067,12 @@ impl Compiler<'_> {
     /// Build IR for a single function without defining it.
     /// Similar to compile_function but doesn't call define_function.
     fn build_function_ir(&mut self, func: &FuncDecl) -> Result<(), String> {
-        let main_module = self.query().main_module();
+        let program_module = self.program_module();
 
         // Get FunctionId and extract pre-resolved signature data
         let semantic_func_id = self
             .query()
-            .function_id(main_module, func.name)
+            .function_id(program_module, func.name)
             .ok_or_else(|| {
                 format!(
                     "Function '{}' not found in registry",
@@ -1219,7 +1245,8 @@ impl Compiler<'_> {
             .filter_map(|decl| {
                 if let Decl::Function(func) = decl {
                     let query = self.query();
-                    let name_id = query.function_name_id(query.main_module(), func.name);
+                    let program_module = self.program_module();
+                    let name_id = query.function_name_id(program_module, func.name);
 
                     // Check if function has explicit type params OR implicit generic_info
                     let has_explicit_type_params = !func.type_params.is_empty();
@@ -1669,7 +1696,8 @@ impl Compiler<'_> {
                     && !class.type_params.is_empty()
                 {
                     let query = self.query();
-                    let name_id = query.try_name_id(query.main_module(), &[class.name])?;
+                    let program_module = self.program_module();
+                    let name_id = query.try_name_id(program_module, &[class.name])?;
                     return Some((name_id, class));
                 }
                 None
@@ -1684,7 +1712,8 @@ impl Compiler<'_> {
                     && !record.type_params.is_empty()
                 {
                     let query = self.query();
-                    let name_id = query.try_name_id(query.main_module(), &[record.name])?;
+                    let program_module = self.program_module();
+                    let name_id = query.try_name_id(program_module, &[record.name])?;
                     return Some((name_id, record));
                 }
                 None

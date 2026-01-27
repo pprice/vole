@@ -62,7 +62,8 @@ pub trait VtableCtx {
     fn type_metadata(&self) -> &TypeMetadataMap;
 
     /// Get unified method function key map
-    fn method_func_keys(&self) -> &FxHashMap<(TypeDefId, NameId), FunctionKey>;
+    /// Keyed by (type_name_id, method_name_id) for stable lookup across analyzer instances
+    fn method_func_keys(&self) -> &FxHashMap<(NameId, NameId), FunctionKey>;
 }
 
 /// A view that combines CodegenCtx and CompileEnv to implement VtableCtx.
@@ -131,7 +132,7 @@ impl<'a, 'ctx> VtableCtx for VtableCtxView<'a, 'ctx> {
         &self.env.state.type_metadata
     }
 
-    fn method_func_keys(&self) -> &FxHashMap<(TypeDefId, NameId), FunctionKey> {
+    fn method_func_keys(&self) -> &FxHashMap<(NameId, NameId), FunctionKey> {
         &self.env.state.method_func_keys
     }
 }

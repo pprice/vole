@@ -97,7 +97,7 @@ impl Compiler<'_> {
     ) -> Result<(), String> {
         // Look up TypeDefId from name (needed as key for type_metadata)
         let query = self.query();
-        let module_id = query.main_module();
+        let module_id = self.program_module();
         let type_def_id = query
             .try_name_id(module_id, &[data.name])
             .and_then(|name_id| query.try_type_def_id(name_id))
@@ -133,8 +133,9 @@ impl Compiler<'_> {
         // Collect interface names using query (avoids borrow conflicts with compile_default_method)
         let interface_names: Vec<Symbol> = {
             let query = self.query();
+            let program_module = self.program_module();
             query
-                .try_name_id(query.main_module(), &[data.name])
+                .try_name_id(program_module, &[data.name])
                 .and_then(|type_name_id| query.try_type_def_id(type_name_id))
                 .map(|type_def_id| {
                     query
@@ -210,7 +211,7 @@ impl Compiler<'_> {
                     self.query().try_type_def_id(name_id)
                 }
                 TypeExpr::Named(sym) => {
-                    let name_id = name_table.name_id(self.query().main_module(), &[*sym], interner);
+                    let name_id = name_table.name_id(self.program_module(), &[*sym], interner);
                     name_id.and_then(|id| self.query().try_type_def_id(id))
                 }
                 _ => None,
@@ -266,10 +267,11 @@ impl Compiler<'_> {
             let jit_func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, jit_func_id);
 
-            // Register in method_func_keys for codegen lookup
+            // Register in method_func_keys for codegen lookup using type's NameId for stable lookup
+            let type_name_id = self.query().get_type(type_def_id.unwrap()).name_id;
             self.state
                 .method_func_keys
-                .insert((type_def_id.unwrap(), method_name_id.unwrap()), func_key);
+                .insert((type_name_id, method_name_id.unwrap()), func_key);
         }
     }
 
@@ -298,7 +300,7 @@ impl Compiler<'_> {
                     self.query().try_type_def_id(name_id)
                 }
                 TypeExpr::Named(sym) => {
-                    let name_id = name_table.name_id(self.query().main_module(), &[*sym], interner);
+                    let name_id = name_table.name_id(self.program_module(), &[*sym], interner);
                     name_id.and_then(|id| self.query().try_type_def_id(id))
                 }
                 _ => None,
@@ -355,10 +357,11 @@ impl Compiler<'_> {
             let jit_func_id = self.jit.import_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, jit_func_id);
 
-            // Register in method_func_keys for codegen lookup
+            // Register in method_func_keys for codegen lookup using type's NameId for stable lookup
+            let type_name_id = self.query().get_type(type_def_id.unwrap()).name_id;
             self.state
                 .method_func_keys
-                .insert((type_def_id.unwrap(), method_name_id.unwrap()), func_key);
+                .insert((type_name_id, method_name_id.unwrap()), func_key);
         }
     }
 
@@ -368,7 +371,7 @@ impl Compiler<'_> {
         impl_block: &ImplementBlock,
         interner: &Interner,
     ) {
-        let module_id = self.query().main_module();
+        let module_id = self.program_module();
         // Get type name string (works for primitives and named types)
         let Some(type_name) = self.get_type_name_from_expr(&impl_block.target_type) else {
             return; // Unsupported type for implement block
@@ -470,13 +473,14 @@ impl Compiler<'_> {
             let display_name = self.func_registry.display(func_key);
             let jit_func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, jit_func_id);
-            // Populate method_func_keys for method lookup
+            // Populate method_func_keys for method lookup using type's NameId for stable lookup
             if let Some(tdef_id) = type_def_id
                 && let Some(name_id) = method_name_id
             {
+                let type_name_id = self.query().get_type(tdef_id).name_id;
                 self.state
                     .method_func_keys
-                    .insert((tdef_id, name_id), func_key);
+                    .insert((type_name_id, name_id), func_key);
             }
         }
 
@@ -491,8 +495,7 @@ impl Compiler<'_> {
                         self.query().try_type_def_id(name_id)
                     }
                     TypeExpr::Named(sym) => {
-                        let name_id =
-                            name_table.name_id(self.query().main_module(), &[*sym], interner);
+                        let name_id = name_table.name_id(self.program_module(), &[*sym], interner);
                         name_id.and_then(|id| self.query().try_type_def_id(id))
                     }
                     _ => None,
@@ -552,10 +555,11 @@ impl Compiler<'_> {
                 let func_id = self.jit.declare_function(&display_name, &sig);
                 self.func_registry.set_func_id(func_key, func_id);
 
-                // Register in method_func_keys for codegen lookup
+                // Register in method_func_keys for codegen lookup using type's NameId for stable lookup
+                let type_name_id = self.query().get_type(type_def_id.unwrap()).name_id;
                 self.state
                     .method_func_keys
-                    .insert((type_def_id.unwrap(), method_name_id.unwrap()), func_key);
+                    .insert((type_name_id, method_name_id.unwrap()), func_key);
             }
         }
     }
@@ -578,7 +582,7 @@ impl Compiler<'_> {
                 self.analyzed.type_arena().primitive(prim_type)
             }
             TypeExpr::Named(sym) => {
-                let module_id = self.query().main_module();
+                let module_id = self.program_module();
                 let type_def_id = self
                     .query()
                     .try_name_id(module_id, &[*sym])
@@ -617,10 +621,12 @@ impl Compiler<'_> {
 
         for method in &impl_block.methods {
             let method_key = type_def_id.and_then(|type_def_id| {
+                // Use type's NameId for stable lookup across analyzer instances
+                let type_name_id = self.query().get_type(type_def_id).name_id;
                 let method_id = self.method_name_id(method.name);
                 self.state
                     .method_func_keys
-                    .get(&(type_def_id, method_id))
+                    .get(&(type_name_id, method_id))
                     .map(|&func_key| MethodInfo { func_key })
             });
             self.compile_implement_method(method, self_type_id, method_key)?;
@@ -660,7 +666,7 @@ impl Compiler<'_> {
         module_path: Option<&str>,
         interner: &Interner,
     ) -> Result<(), String> {
-        let module_id = self.query().main_module();
+        let module_id = self.program_module();
         // Try to get TypeDefId for looking up pre-resolved method signatures
         let type_def_id = self.query().resolve_type_def_by_str(module_id, type_name);
 
@@ -1080,7 +1086,7 @@ impl Compiler<'_> {
         statics: &StaticsBlock,
         type_name: Symbol,
     ) -> Result<(), String> {
-        let module_id = self.query().main_module();
+        let module_id = self.program_module();
 
         // Get the TypeDefId for looking up method info
         let type_name_id = self.query().name_id(module_id, &[type_name]);
@@ -1195,7 +1201,7 @@ impl Compiler<'_> {
             .analyzed
             .name_table()
             .module_id_if_known(module_path)
-            .unwrap_or_else(|| self.query().main_module());
+            .unwrap_or_else(|| self.program_module());
         // Find the type metadata by looking for the type name string
         let metadata = self
             .state
@@ -1434,7 +1440,7 @@ impl Compiler<'_> {
             .analyzed
             .name_table()
             .module_id_if_known(module_path)
-            .unwrap_or_else(|| self.query().main_module());
+            .unwrap_or_else(|| self.program_module());
         // Find the type metadata by looking for the type name string
         let metadata = self
             .state

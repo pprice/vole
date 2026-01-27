@@ -388,10 +388,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Get unified method function key map
+    /// Keyed by (type_name_id, method_name_id) for stable lookup across analyzer instances
     #[inline]
-    pub fn method_func_keys(
-        &self,
-    ) -> &'ctx FxHashMap<(vole_identity::TypeDefId, NameId), FunctionKey> {
+    pub fn method_func_keys(&self) -> &'ctx FxHashMap<(NameId, NameId), FunctionKey> {
         &self.env.state.method_func_keys
     }
 
@@ -487,7 +486,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let query = self.query();
         let module_id = self
             .current_module_id()
-            .unwrap_or_else(|| query.main_module());
+            .unwrap_or(self.env.analyzed.module_id);
         query.resolve_type_def_by_str(module_id, name)
     }
 
@@ -499,7 +498,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let query = self.query();
         let module_id = self
             .current_module_id()
-            .unwrap_or_else(|| query.main_module());
+            .unwrap_or(self.env.analyzed.module_id);
         query.resolve_type_def_by_str(module_id, name)
     }
 
@@ -1454,7 +1453,7 @@ impl<'a, 'b, 'ctx> crate::vtable_ctx::VtableCtx for Cg<'a, 'b, 'ctx> {
         let query = self.query();
         let module_id = self
             .current_module_id()
-            .unwrap_or_else(|| query.main_module());
+            .unwrap_or(self.env.analyzed.module_id);
         query.resolve_type_def_by_str(module_id, name)
     }
 
@@ -1470,7 +1469,7 @@ impl<'a, 'b, 'ctx> crate::vtable_ctx::VtableCtx for Cg<'a, 'b, 'ctx> {
         &self.env.state.type_metadata
     }
 
-    fn method_func_keys(&self) -> &FxHashMap<(vole_identity::TypeDefId, NameId), FunctionKey> {
+    fn method_func_keys(&self) -> &FxHashMap<(NameId, NameId), FunctionKey> {
         &self.env.state.method_func_keys
     }
 }

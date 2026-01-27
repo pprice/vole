@@ -1,0 +1,7 @@
+// Error: Destructured import of non-existent type
+
+let { Duration, NonexistentType } = import "std:time"
+
+func use_duration(d: Duration) -> i64 {
+    return d.nanos
+}

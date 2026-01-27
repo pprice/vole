@@ -340,9 +340,7 @@ impl Cg<'_, '_, '_> {
             // Scope the name_table borrow to avoid conflicts with later mutable borrows
             let global_type_id = {
                 let name_table = self.name_table();
-                let module_id = self
-                    .current_module()
-                    .unwrap_or_else(|| name_table.main_module());
+                let module_id = self.current_module().unwrap_or(self.env.analyzed.module_id);
                 name_table
                     .name_id(module_id, &[callee_sym], self.interner())
                     .and_then(|name_id| self.query().global(name_id))
@@ -511,10 +509,10 @@ impl Cg<'_, '_, '_> {
         // 1. Try direct function lookup
         // 2. If in module context, try mangled name
         // 3. If in module context, try FFI call
-        let main_module = self.funcs_ref().main_module();
+        let program_module = self.current_module().unwrap_or(self.env.analyzed.module_id);
         let direct_name_id = {
             let names = self.name_table();
-            names.name_id(main_module, &[callee_sym], self.interner())
+            names.name_id(program_module, &[callee_sym], self.interner())
         };
         if let Some(name_id) = direct_name_id {
             let func_key = self.funcs().intern_name_id(name_id);
@@ -761,9 +759,7 @@ impl Cg<'_, '_, '_> {
         start_index: usize,
         _expected_types: &[Type], // Kept for API compatibility, but we use TypeIds from FunctionDef
     ) -> Result<Vec<Value>, String> {
-        let module_id = self
-            .current_module()
-            .unwrap_or_else(|| self.query().main_module());
+        let module_id = self.current_module().unwrap_or(self.env.analyzed.module_id);
 
         // Get the function ID
         let func_id = {
@@ -816,9 +812,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Otherwise, we need to compile defaults for the missing parameters
-        let module_id = self
-            .current_module()
-            .unwrap_or_else(|| self.query().main_module());
+        let module_id = self.current_module().unwrap_or(self.env.analyzed.module_id);
 
         // Get the function ID from EntityRegistry
         let func_id = {

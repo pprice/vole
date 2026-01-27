@@ -4,9 +4,17 @@
 // Duration: Represents a span of time (can be positive or negative)
 // Timestamp: Represents a point in time with timezone offset
 //
-// NOTE: Due to module system limitations with record methods,
-// all operations are exported as top-level functions.
-// Duration and Timestamp are simple data records.
+// Example usage:
+//   let time = import "std:time"
+//   let d = time.Duration.seconds(5)
+//   let d2 = d.add(time.Duration.ms(100))
+//   let t = time.Timestamp.now()
+//   let iso = t.to_iso()
+//
+// Or with destructuring:
+//   let { Duration, Timestamp } = import "std:time"
+//   let d = Duration.seconds(5)
+//   let t = Timestamp.now()
 
 // Native functions for complex time operations
 external("std:time") {
@@ -36,268 +44,270 @@ external("std:time") {
 // Duration - represents a time span in nanoseconds
 // =============================================================================
 
-// Simple data record - use duration_* functions for operations
 record Duration {
-    nanos: i64
-}
+    nanos: i64,
 
-// Duration constructors
-func duration_nanos(n: i64) -> Duration {
-    return Duration { nanos: n }
-}
+    statics {
+        // Constructors
+        func nanos(n: i64) -> Duration {
+            return Duration { nanos: n }
+        }
 
-func duration_micros(n: i64) -> Duration {
-    return Duration { nanos: n * 1000 }
-}
+        func micros(n: i64) -> Duration {
+            return Duration { nanos: n * 1000 }
+        }
 
-func duration_ms(n: i64) -> Duration {
-    return Duration { nanos: n * 1000000 }
-}
+        func ms(n: i64) -> Duration {
+            return Duration { nanos: n * 1000000 }
+        }
 
-func duration_seconds(n: i64) -> Duration {
-    return Duration { nanos: n * 1000000000 }
-}
+        func seconds(n: i64) -> Duration {
+            return Duration { nanos: n * 1000000000 }
+        }
 
-func duration_minutes(n: i64) -> Duration {
-    return Duration { nanos: n * 60 * 1000000000 }
-}
+        func minutes(n: i64) -> Duration {
+            return Duration { nanos: n * 60 * 1000000000 }
+        }
 
-func duration_hours(n: i64) -> Duration {
-    return Duration { nanos: n * 3600 * 1000000000 }
-}
+        func hours(n: i64) -> Duration {
+            return Duration { nanos: n * 3600 * 1000000000 }
+        }
 
-func duration_days(n: i64) -> Duration {
-    return Duration { nanos: n * 86400 * 1000000000 }
-}
+        func days(n: i64) -> Duration {
+            return Duration { nanos: n * 86400 * 1000000000 }
+        }
 
-func duration_weeks(n: i64) -> Duration {
-    return Duration { nanos: n * 604800 * 1000000000 }
-}
+        func weeks(n: i64) -> Duration {
+            return Duration { nanos: n * 604800 * 1000000000 }
+        }
 
-func duration_zero() -> Duration {
-    return Duration { nanos: 0 }
-}
-
-// Duration getters
-func duration_as_nanos(d: Duration) -> i64 {
-    return d.nanos
-}
-
-func duration_as_micros(d: Duration) -> i64 {
-    return d.nanos / 1000
-}
-
-func duration_as_ms(d: Duration) -> i64 {
-    return d.nanos / 1000000
-}
-
-func duration_as_seconds(d: Duration) -> i64 {
-    return d.nanos / 1000000000
-}
-
-func duration_as_minutes(d: Duration) -> i64 {
-    return d.nanos / 60000000000
-}
-
-func duration_as_hours(d: Duration) -> i64 {
-    return d.nanos / 3600000000000
-}
-
-func duration_as_days(d: Duration) -> i64 {
-    return d.nanos / 86400000000000
-}
-
-// Duration arithmetic
-func duration_add(a: Duration, b: Duration) -> Duration {
-    return Duration { nanos: a.nanos + b.nanos }
-}
-
-func duration_subtract(a: Duration, b: Duration) -> Duration {
-    return Duration { nanos: a.nanos - b.nanos }
-}
-
-func duration_multiply(d: Duration, n: i64) -> Duration {
-    return Duration { nanos: d.nanos * n }
-}
-
-func duration_divide(d: Duration, n: i64) -> Duration {
-    return Duration { nanos: d.nanos / n }
-}
-
-// Duration utilities
-func duration_abs(d: Duration) -> Duration {
-    if d.nanos < 0 {
-        return Duration { nanos: -d.nanos }
+        func zero() -> Duration {
+            return Duration { nanos: 0 }
+        }
     }
-    return Duration { nanos: d.nanos }
-}
 
-func duration_is_negative(d: Duration) -> bool {
-    return d.nanos < 0
-}
+    // Getters (convert to different units)
+    func as_nanos() -> i64 {
+        return self.nanos
+    }
 
-func duration_is_zero(d: Duration) -> bool {
-    return d.nanos == 0
-}
+    func as_micros() -> i64 {
+        return self.nanos / 1000
+    }
 
-func duration_is_positive(d: Duration) -> bool {
-    return d.nanos > 0
-}
+    func as_ms() -> i64 {
+        return self.nanos / 1000000
+    }
 
-func duration_negate(d: Duration) -> Duration {
-    return Duration { nanos: -d.nanos }
+    func as_seconds() -> i64 {
+        return self.nanos / 1000000000
+    }
+
+    func as_minutes() -> i64 {
+        return self.nanos / 60000000000
+    }
+
+    func as_hours() -> i64 {
+        return self.nanos / 3600000000000
+    }
+
+    func as_days() -> i64 {
+        return self.nanos / 86400000000000
+    }
+
+    // Arithmetic
+    func add(other: Duration) -> Duration {
+        return Duration { nanos: self.nanos + other.nanos }
+    }
+
+    func subtract(other: Duration) -> Duration {
+        return Duration { nanos: self.nanos - other.nanos }
+    }
+
+    func multiply(n: i64) -> Duration {
+        return Duration { nanos: self.nanos * n }
+    }
+
+    func divide(n: i64) -> Duration {
+        return Duration { nanos: self.nanos / n }
+    }
+
+    // Utilities
+    func abs() -> Duration {
+        if self.nanos < 0 {
+            return Duration { nanos: -self.nanos }
+        }
+        return Duration { nanos: self.nanos }
+    }
+
+    func is_negative() -> bool {
+        return self.nanos < 0
+    }
+
+    func is_zero() -> bool {
+        return self.nanos == 0
+    }
+
+    func is_positive() -> bool {
+        return self.nanos > 0
+    }
+
+    func negate() -> Duration {
+        return Duration { nanos: -self.nanos }
+    }
 }
 
 // =============================================================================
 // Timestamp - represents a point in time
 // =============================================================================
 
-// Simple data record - use timestamp_* functions for operations
 record Timestamp {
     nanos: i64,
-    offset_mins: i64
-}
+    offset_mins: i64,
 
-// Timestamp constructors
-func timestamp_now() -> Timestamp {
-    return Timestamp { nanos: time_now(), offset_mins: 0 }
-}
+    statics {
+        // Constructors
+        func now() -> Timestamp {
+            return Timestamp { nanos: time_now(), offset_mins: 0 }
+        }
 
-func timestamp_from_unix(secs: i64) -> Timestamp {
-    return Timestamp { nanos: secs * 1000000000, offset_mins: 0 }
-}
+        func from_unix(secs: i64) -> Timestamp {
+            return Timestamp { nanos: secs * 1000000000, offset_mins: 0 }
+        }
 
-func timestamp_from_unix_ms(ms: i64) -> Timestamp {
-    return Timestamp { nanos: ms * 1000000, offset_mins: 0 }
-}
+        func from_unix_ms(ms: i64) -> Timestamp {
+            return Timestamp { nanos: ms * 1000000, offset_mins: 0 }
+        }
 
-func timestamp_parse(iso: string) -> Timestamp | nil {
-    let nanos = time_parse_iso(iso)
-    // i64.min_value() is used as sentinel for parse error
-    if nanos == -9223372036854775807 - 1 {
-        return nil
+        func parse(iso: string) -> Timestamp | nil {
+            let nanos = time_parse_iso(iso)
+            // i64.min_value() is used as sentinel for parse error
+            if nanos == -9223372036854775807 - 1 {
+                return nil
+            }
+            return Timestamp { nanos: nanos, offset_mins: 0 }
+        }
+
+        func from_parts(year: i64, month: i64, day: i64, hour: i64, minute: i64, second: i64) -> Timestamp | nil {
+            // Build an ISO string and parse it
+            let month_str = if month < 10 { "0{month}" } else { "{month}" }
+            let day_str = if day < 10 { "0{day}" } else { "{day}" }
+            let hour_str = if hour < 10 { "0{hour}" } else { "{hour}" }
+            let minute_str = if minute < 10 { "0{minute}" } else { "{minute}" }
+            let second_str = if second < 10 { "0{second}" } else { "{second}" }
+            let iso = "{year}-{month_str}-{day_str}T{hour_str}:{minute_str}:{second_str}Z"
+            return Timestamp.parse(iso)
+        }
+
+        func epoch() -> Timestamp {
+            return Timestamp { nanos: 0, offset_mins: 0 }
+        }
     }
-    return Timestamp { nanos: nanos, offset_mins: 0 }
-}
 
-func timestamp_from_parts(year: i64, month: i64, day: i64, hour: i64, minute: i64, second: i64) -> Timestamp | nil {
-    // Build an ISO string and parse it
-    let month_str = if month < 10 { "0{month}" } else { "{month}" }
-    let day_str = if day < 10 { "0{day}" } else { "{day}" }
-    let hour_str = if hour < 10 { "0{hour}" } else { "{hour}" }
-    let minute_str = if minute < 10 { "0{minute}" } else { "{minute}" }
-    let second_str = if second < 10 { "0{second}" } else { "{second}" }
-    let iso = "{year}-{month_str}-{day_str}T{hour_str}:{minute_str}:{second_str}Z"
-    return timestamp_parse(iso)
-}
-
-func timestamp_epoch() -> Timestamp {
-    return Timestamp { nanos: 0, offset_mins: 0 }
-}
-
-// Timestamp getters
-func timestamp_unix(t: Timestamp) -> i64 {
-    return t.nanos / 1000000000
-}
-
-func timestamp_unix_ms(t: Timestamp) -> i64 {
-    return t.nanos / 1000000
-}
-
-func timestamp_unix_nanos(t: Timestamp) -> i64 {
-    return t.nanos
-}
-
-func timestamp_offset(t: Timestamp) -> i64 {
-    return t.offset_mins
-}
-
-func timestamp_with_offset(t: Timestamp, offset_mins: i64) -> Timestamp {
-    return Timestamp { nanos: t.nanos, offset_mins: offset_mins }
-}
-
-// Date components
-func timestamp_year(t: Timestamp) -> i64 {
-    let packed = time_get_date(t.nanos, t.offset_mins)
-    return packed >> 32
-}
-
-func timestamp_month(t: Timestamp) -> i64 {
-    let packed = time_get_date(t.nanos, t.offset_mins)
-    return (packed >> 16) & 0xFFFF
-}
-
-func timestamp_day(t: Timestamp) -> i64 {
-    let packed = time_get_date(t.nanos, t.offset_mins)
-    return packed & 0xFFFF
-}
-
-// Time components
-func timestamp_hour(t: Timestamp) -> i64 {
-    let packed = time_get_time(t.nanos, t.offset_mins)
-    return packed >> 32
-}
-
-func timestamp_minute(t: Timestamp) -> i64 {
-    let packed = time_get_time(t.nanos, t.offset_mins)
-    return (packed >> 16) & 0xFFFF
-}
-
-func timestamp_second(t: Timestamp) -> i64 {
-    let packed = time_get_time(t.nanos, t.offset_mins)
-    return packed & 0xFFFF
-}
-
-// Timestamp arithmetic
-func timestamp_add(t: Timestamp, d: Duration) -> Timestamp {
-    return Timestamp { nanos: t.nanos + d.nanos, offset_mins: t.offset_mins }
-}
-
-func timestamp_subtract(t: Timestamp, d: Duration) -> Timestamp {
-    return Timestamp { nanos: t.nanos - d.nanos, offset_mins: t.offset_mins }
-}
-
-func timestamp_since(t: Timestamp, other: Timestamp) -> Duration {
-    return Duration { nanos: t.nanos - other.nanos }
-}
-
-func timestamp_distance(t: Timestamp, other: Timestamp) -> Duration {
-    let diff = t.nanos - other.nanos
-    if diff < 0 {
-        return Duration { nanos: -diff }
+    // Getters
+    func unix() -> i64 {
+        return self.nanos / 1000000000
     }
-    return Duration { nanos: diff }
-}
 
-// Calendar arithmetic
-func timestamp_add_days(t: Timestamp, n: i64) -> Timestamp {
-    return Timestamp { nanos: t.nanos + n * 86400000000000, offset_mins: t.offset_mins }
-}
+    func unix_ms() -> i64 {
+        return self.nanos / 1000000
+    }
 
-func timestamp_add_months(t: Timestamp, n: i64) -> Timestamp {
-    let new_nanos = time_add_months(t.nanos, n)
-    return Timestamp { nanos: new_nanos, offset_mins: t.offset_mins }
-}
+    func unix_nanos() -> i64 {
+        return self.nanos
+    }
 
-func timestamp_add_years(t: Timestamp, n: i64) -> Timestamp {
-    let new_nanos = time_add_years(t.nanos, n)
-    return Timestamp { nanos: new_nanos, offset_mins: t.offset_mins }
-}
+    func offset() -> i64 {
+        return self.offset_mins
+    }
 
-// Formatting
-func timestamp_to_iso(t: Timestamp) -> string {
-    return time_to_iso(t.nanos, t.offset_mins)
-}
+    func with_offset(offset_mins: i64) -> Timestamp {
+        return Timestamp { nanos: self.nanos, offset_mins: offset_mins }
+    }
 
-// Comparisons
-func timestamp_is_before(t: Timestamp, other: Timestamp) -> bool {
-    return t.nanos < other.nanos
-}
+    // Date components
+    func year() -> i64 {
+        let packed = time_get_date(self.nanos, self.offset_mins)
+        return packed >> 32
+    }
 
-func timestamp_is_after(t: Timestamp, other: Timestamp) -> bool {
-    return t.nanos > other.nanos
-}
+    func month() -> i64 {
+        let packed = time_get_date(self.nanos, self.offset_mins)
+        return (packed >> 16) & 0xFFFF
+    }
 
-func timestamp_equals(t: Timestamp, other: Timestamp) -> bool {
-    return t.nanos == other.nanos
+    func day() -> i64 {
+        let packed = time_get_date(self.nanos, self.offset_mins)
+        return packed & 0xFFFF
+    }
+
+    // Time components
+    func hour() -> i64 {
+        let packed = time_get_time(self.nanos, self.offset_mins)
+        return packed >> 32
+    }
+
+    func minute() -> i64 {
+        let packed = time_get_time(self.nanos, self.offset_mins)
+        return (packed >> 16) & 0xFFFF
+    }
+
+    func second() -> i64 {
+        let packed = time_get_time(self.nanos, self.offset_mins)
+        return packed & 0xFFFF
+    }
+
+    // Arithmetic
+    func add(d: Duration) -> Timestamp {
+        return Timestamp { nanos: self.nanos + d.nanos, offset_mins: self.offset_mins }
+    }
+
+    func subtract(d: Duration) -> Timestamp {
+        return Timestamp { nanos: self.nanos - d.nanos, offset_mins: self.offset_mins }
+    }
+
+    func since(other: Timestamp) -> Duration {
+        return Duration { nanos: self.nanos - other.nanos }
+    }
+
+    func distance(other: Timestamp) -> Duration {
+        let diff = self.nanos - other.nanos
+        if diff < 0 {
+            return Duration { nanos: -diff }
+        }
+        return Duration { nanos: diff }
+    }
+
+    // Calendar arithmetic
+    func add_days(n: i64) -> Timestamp {
+        return Timestamp { nanos: self.nanos + n * 86400000000000, offset_mins: self.offset_mins }
+    }
+
+    func add_months(n: i64) -> Timestamp {
+        let new_nanos = time_add_months(self.nanos, n)
+        return Timestamp { nanos: new_nanos, offset_mins: self.offset_mins }
+    }
+
+    func add_years(n: i64) -> Timestamp {
+        let new_nanos = time_add_years(self.nanos, n)
+        return Timestamp { nanos: new_nanos, offset_mins: self.offset_mins }
+    }
+
+    // Formatting
+    func to_iso() -> string {
+        return time_to_iso(self.nanos, self.offset_mins)
+    }
+
+    // Comparisons
+    func is_before(other: Timestamp) -> bool {
+        return self.nanos < other.nanos
+    }
+
+    func is_after(other: Timestamp) -> bool {
+        return self.nanos > other.nanos
+    }
+
+    func equals(other: Timestamp) -> bool {
+        return self.nanos == other.nanos
+    }
 }

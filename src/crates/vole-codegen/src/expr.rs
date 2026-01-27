@@ -143,9 +143,7 @@ impl Cg<'_, '_, '_> {
             // If the global has a declared interface type, box the value
             // Use GlobalDef.type_id instead of re-resolving TypeExpr
             let name_table = self.name_table();
-            let module_id = self
-                .current_module()
-                .unwrap_or_else(|| name_table.main_module());
+            let module_id = self.current_module().unwrap_or(self.env.analyzed.module_id);
             if let Some(name_id) = name_table.name_id(module_id, &[sym], self.interner())
                 && let Some(global_def) = self.query().global(name_id)
             {
@@ -245,7 +243,10 @@ impl Cg<'_, '_, '_> {
 
         // Look up the original function's FuncId using the name table
         let query = self.query();
-        let name_id = query.function_name_id(query.main_module(), sym);
+        let module_id = self
+            .current_module_id()
+            .unwrap_or(self.env.analyzed.module_id);
+        let name_id = query.function_name_id(module_id, sym);
 
         let orig_func_key = self.funcs().intern_name_id(name_id);
         let orig_func_id = self.funcs().func_id(orig_func_key).ok_or_else(|| {
@@ -1011,7 +1012,7 @@ impl Cg<'_, '_, '_> {
                     let query = self.query();
                     let module_id = self
                         .current_module_id()
-                        .unwrap_or_else(|| query.main_module());
+                        .unwrap_or(self.env.analyzed.module_id);
 
                     let type_def_id = query
                         .try_name_id(module_id, &[*name])
@@ -1142,7 +1143,7 @@ impl Cg<'_, '_, '_> {
                         let query = self.query();
                         let module_id = self
                             .current_module_id()
-                            .unwrap_or_else(|| query.main_module());
+                            .unwrap_or(self.env.analyzed.module_id);
 
                         let type_def_id = query
                             .try_name_id(module_id, &[*name])

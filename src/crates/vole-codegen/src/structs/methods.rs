@@ -328,13 +328,15 @@ impl Cg<'_, '_, '_> {
         // Get func_key and return_type_id from resolution or fallback
         let (func_key, return_type_id) = if let Some(resolved) = resolution {
             // Use ResolvedMethod's type_def_id and method_name_id for method_func_keys lookup
+            // Uses type's NameId for stable lookup across different analyzer instances
             let type_def_id = resolved.type_def_id().ok_or_else(|| {
                 format!("Method {} requires type_def_id for lookup", method_name_str)
             })?;
+            let type_name_id = self.query().get_type(type_def_id).name_id;
             let resolved_method_name_id = resolved.method_name_id();
             let func_key = *self
                 .method_func_keys()
-                .get(&(type_def_id, resolved_method_name_id))
+                .get(&(type_name_id, resolved_method_name_id))
                 .ok_or_else(|| {
                     format!("Method {} not found in method_func_keys", method_name_str)
                 })?;
@@ -372,10 +374,11 @@ impl Cg<'_, '_, '_> {
                 return self.call_external_id(&external_info, &args, return_type_id);
             }
 
-            // Try method_func_keys lookup
+            // Try method_func_keys lookup using type's NameId for stable lookup
+            let type_name_id = self.query().get_type(type_def_id).name_id;
             let func_key = self
                 .method_func_keys()
-                .get(&(type_def_id, method_name_id))
+                .get(&(type_name_id, method_name_id))
                 .copied();
 
             if let Some(func_key) = func_key {
@@ -1119,25 +1122,25 @@ impl Cg<'_, '_, '_> {
         }
 
         // Look up the static method info via unified method_func_keys map
+        // Uses type's NameId for stable lookup across different analyzer instances
+        let type_name_id = self.query().get_type(type_def_id).name_id;
         let func_key = *self.method_func_keys()
-            .get(&(type_def_id, method_name_id))
+            .get(&(type_name_id, method_name_id))
             .ok_or_else(|| {
-                let type_def = self.query().get_type(type_def_id);
                 let name_table = self.name_table();
-                let type_name = name_table.display(type_def.name_id);
+                let type_name = name_table.display(type_name_id);
                 let method_name = name_table.display(method_name_id);
                 let registered_keys: Vec<_> = self.method_func_keys()
                     .keys()
-                    .map(|(tid, mid)| {
-                        let t = self.query().get_type(*tid);
-                        let tn = name_table.display(t.name_id);
-                        let mn = name_table.display(*mid);
+                    .map(|(tn_id, mn_id)| {
+                        let tn = name_table.display(*tn_id);
+                        let mn = name_table.display(*mn_id);
                         format!("({}, {})", tn, mn)
                     })
                     .collect();
                 format!(
-                    "Static method not found: {}::{} (type_def_id={:?}, method_name_id={:?}). Registered: {:?}",
-                    type_name, method_name, type_def_id, method_name_id, registered_keys
+                    "Static method not found: {}::{} (type_name_id={:?}, method_name_id={:?}). Registered: {:?}",
+                    type_name, method_name, type_name_id, method_name_id, registered_keys
                 )
             })?;
 

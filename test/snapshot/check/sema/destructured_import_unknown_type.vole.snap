@@ -1,0 +1,11 @@
+[stdout]
+
+[stderr]
+  x [E2067]: module 'std:time' has no export 'NonexistentType'
+   ,-[<path>/destructured_import_unknown_type.vole:3:17]
+ 2 | 
+ 3 | let { Duration, NonexistentType } = import "std:time"
+   :                 ^^^^^^^|^^^^^^^
+   :                        `-- unknown export
+ 4 | 
+   `----

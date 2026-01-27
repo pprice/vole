@@ -90,13 +90,11 @@ impl Cg<'_, '_, '_> {
         }
 
         // Otherwise, it's a Vole method - look up via unified method_func_keys
-        let type_def_id = self
-            .query()
-            .try_type_def_id(impl_type_id.name_id())
-            .ok_or_else(|| "type_def_id not found for impl_type_id in to_string".to_string())?;
+        // Use type's NameId directly for stable lookup across analyzer instances
+        let type_name_id = impl_type_id.name_id();
         let func_key = *self
             .method_func_keys()
-            .get(&(type_def_id, method_id))
+            .get(&(type_name_id, method_id))
             .ok_or_else(|| "to_string method info not found in method_func_keys".to_string())?;
 
         let func_ref = self.func_ref(func_key)?;

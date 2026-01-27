@@ -51,7 +51,7 @@ use crate::types::CodegenState;
 use crate::AnalyzedProgram;
 use crate::{FunctionKey, FunctionRegistry, JitContext, RuntimeFn};
 use vole_frontend::{Expr, Symbol};
-use vole_identity::NameId;
+use vole_identity::{ModuleId, NameId};
 use vole_runtime::NativeRegistry;
 use vole_sema::{ImplTypeId, ProgramQuery, type_arena::TypeId};
 
@@ -113,6 +113,12 @@ impl<'a> Compiler<'a> {
     /// Get a query interface for the analyzed program
     fn query(&self) -> ProgramQuery<'_> {
         self.analyzed.query()
+    }
+
+    /// Get the module ID for the program being compiled.
+    /// This may differ from main_module() when using a shared cache with multiple programs.
+    fn program_module(&self) -> ModuleId {
+        self.analyzed.module_id
     }
 
     /// Resolve a Symbol to a string (owned, for use across mutable operations)

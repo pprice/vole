@@ -5,7 +5,7 @@ use rustc_hash::FxHashMap;
 use std::rc::Rc;
 
 use vole_frontend::{Interner, Program};
-use vole_identity::NameTable;
+use vole_identity::{ModuleId, NameTable};
 use vole_sema::{
     AnalysisOutput, CodegenDb, EntityRegistry, ExpressionData, ImplementRegistry, ProgramQuery,
     TypeArena,
@@ -21,6 +21,8 @@ pub struct AnalyzedProgram {
     pub module_programs: FxHashMap<String, (Program, Interner)>,
     /// Compilation database converted for codegen use (Rc-shared, immutable)
     pub db: CodegenDb,
+    /// The module ID for the main program (may differ from main_module when using shared cache)
+    pub module_id: ModuleId,
 }
 
 impl AnalyzedProgram {
@@ -43,6 +45,7 @@ impl AnalyzedProgram {
             expression_data: output.expression_data,
             module_programs: output.module_programs,
             db,
+            module_id: output.module_id,
         }
     }
 

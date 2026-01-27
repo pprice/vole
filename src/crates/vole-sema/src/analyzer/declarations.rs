@@ -54,6 +54,9 @@ fn format_type_expr(type_expr: &TypeExpr, interner: &Interner) -> String {
 impl Analyzer {
     /// Register a type shell (name and kind only, no fields/methods yet).
     /// This enables forward references - types can reference each other regardless of declaration order.
+    ///
+    /// If the type already exists in the registry (e.g., from a previous analysis of the same module
+    /// in a shared cache scenario), returns the existing TypeDefId instead of creating a duplicate.
     fn register_type_shell(
         &mut self,
         name: Symbol,
@@ -63,6 +66,12 @@ impl Analyzer {
         let name_id = self
             .name_table_mut()
             .intern(self.current_module, &[name], interner);
+
+        // Check if type already exists (important for shared cache across test files)
+        if let Some(existing_id) = self.entity_registry().type_by_name(name_id) {
+            return existing_id;
+        }
+
         self.entity_registry_mut()
             .register_type(name_id, kind, self.current_module)
     }
@@ -483,6 +492,17 @@ impl Analyzer {
                 .type_by_name(name_id)
                 .expect("class shell registered in register_all_type_shells");
 
+            // Skip if already processed (e.g., from a previous analysis of the same module
+            // in a shared cache scenario). Check if generic_info is already set.
+            if self
+                .entity_registry()
+                .get_type(entity_type_id)
+                .generic_info
+                .is_some()
+            {
+                return;
+            }
+
             // Validate field default ordering and collect which fields have defaults
             let field_has_default = self.validate_field_defaults(&class.fields, interner);
 
@@ -763,6 +783,17 @@ impl Analyzer {
                 .entity_registry_mut()
                 .type_by_name(name_id)
                 .expect("class shell registered in register_all_type_shells");
+
+            // Skip if already processed (e.g., from a previous analysis of the same module
+            // in a shared cache scenario). Check if generic_info is already set.
+            if self
+                .entity_registry()
+                .get_type(entity_type_id)
+                .generic_info
+                .is_some()
+            {
+                return;
+            }
 
             // Set type params on the type definition (needed for method substitutions)
             let type_param_name_ids: Vec<NameId> =
@@ -1066,6 +1097,22 @@ impl Analyzer {
                 .type_by_name(name_id)
                 .expect("record shell registered in register_all_type_shells");
 
+            // Skip if already processed (e.g., from a previous analysis of the same module
+            // in a shared cache scenario). Check if generic_info is already set.
+            let _has_static_methods = !self
+                .entity_registry()
+                .get_type(entity_type_id)
+                .static_methods
+                .is_empty();
+            if self
+                .entity_registry()
+                .get_type(entity_type_id)
+                .generic_info
+                .is_some()
+            {
+                return;
+            }
+
             // Validate field default ordering and collect which fields have defaults
             let field_has_default = self.validate_field_defaults(&record.fields, interner);
 
@@ -1304,6 +1351,17 @@ impl Analyzer {
                 .entity_registry_mut()
                 .type_by_name(name_id)
                 .expect("record shell registered in register_all_type_shells");
+
+            // Skip if already processed (e.g., from a previous analysis of the same module
+            // in a shared cache scenario). Check if generic_info is already set.
+            if self
+                .entity_registry()
+                .get_type(entity_type_id)
+                .generic_info
+                .is_some()
+            {
+                return;
+            }
 
             // Register and validate implements list (for generic records)
             self.validate_and_register_implements(
@@ -1676,6 +1734,17 @@ impl Analyzer {
             .entity_registry_mut()
             .type_by_name(name_id)
             .expect("interface shell registered in register_all_type_shells");
+
+        // Skip if already processed (e.g., from a previous analysis of the same module
+        // in a shared cache scenario). Check if methods are already registered.
+        if !self
+            .entity_registry()
+            .get_type(entity_type_id)
+            .methods
+            .is_empty()
+        {
+            return;
+        }
 
         let module_id = self.current_module;
         let mut type_ctx = TypeResolutionContext::with_type_params(

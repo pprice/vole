@@ -55,7 +55,7 @@ impl Compiler<'_> {
         self.next_type_id += 1;
 
         let query = self.query();
-        let module_id = query.main_module();
+        let module_id = self.program_module();
         let name_id = query.name_id(module_id, &[class.name]);
 
         // Look up the TypeDefId from EntityRegistry
@@ -85,8 +85,7 @@ impl Compiler<'_> {
 
     /// Finalize a class type: fill in field types and declare methods
     pub(super) fn finalize_class(&mut self, class: &ClassDecl, program: &Program) {
-        let query = self.query();
-        let module_id = query.main_module();
+        let module_id = self.program_module();
 
         // Look up TypeDefId first (needed as key for type_metadata)
         let type_def_id = self
@@ -154,10 +153,11 @@ impl Compiler<'_> {
             let jit_func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, jit_func_id);
             method_infos.insert(method_name_id, MethodInfo { func_key });
-            // Also populate unified method_func_keys map
+            // Also populate unified method_func_keys map using type's NameId for stable lookup
+            let type_name_id = self.query().get_type(type_def_id).name_id;
             self.state
                 .method_func_keys
-                .insert((type_def_id, method_name_id), func_key);
+                .insert((type_name_id, method_name_id), func_key);
         }
 
         // Collect method names that the class directly defines
@@ -216,10 +216,11 @@ impl Compiler<'_> {
                         let jit_func_id = self.jit.declare_function(&display_name, &sig);
                         self.func_registry.set_func_id(func_key, jit_func_id);
                         method_infos.insert(method_name_id, MethodInfo { func_key });
-                        // Also populate unified method_func_keys map
+                        // Also populate unified method_func_keys map using type's NameId for stable lookup
+                        let type_name_id = self.query().get_type(type_def_id).name_id;
                         self.state
                             .method_func_keys
-                            .insert((type_def_id, method_name_id), func_key);
+                            .insert((type_name_id, method_name_id), func_key);
                     }
                 }
             }
@@ -256,7 +257,7 @@ impl Compiler<'_> {
         self.next_type_id += 1;
 
         let query = self.query();
-        let module_id = query.main_module();
+        let module_id = self.program_module();
         let name_id = query.name_id(module_id, &[record.name]);
 
         // Look up the TypeDefId from EntityRegistry
@@ -286,8 +287,7 @@ impl Compiler<'_> {
 
     /// Finalize a record type: fill in field types and declare methods
     pub(super) fn finalize_record(&mut self, record: &RecordDecl, program: &Program) {
-        let query = self.query();
-        let module_id = query.main_module();
+        let module_id = self.program_module();
 
         // Look up TypeDefId first (needed as key for type_metadata)
         let type_def_id = self
@@ -360,10 +360,11 @@ impl Compiler<'_> {
             let jit_func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, jit_func_id);
             method_infos.insert(method_name_id, MethodInfo { func_key });
-            // Also populate unified method_func_keys map
+            // Also populate unified method_func_keys map using type's NameId for stable lookup
+            let type_name_id = self.query().get_type(type_def_id).name_id;
             self.state
                 .method_func_keys
-                .insert((type_def_id, method_name_id), func_key);
+                .insert((type_name_id, method_name_id), func_key);
         }
 
         // Collect method names that the record directly defines
@@ -422,10 +423,11 @@ impl Compiler<'_> {
                         let jit_func_id = self.jit.declare_function(&display_name, &sig);
                         self.func_registry.set_func_id(func_key, jit_func_id);
                         method_infos.insert(method_name_id, MethodInfo { func_key });
-                        // Also populate unified method_func_keys map
+                        // Also populate unified method_func_keys map using type's NameId for stable lookup
+                        let type_name_id = self.query().get_type(type_def_id).name_id;
                         self.state
                             .method_func_keys
-                            .insert((type_def_id, method_name_id), func_key);
+                            .insert((type_name_id, method_name_id), func_key);
                     }
                 }
             }
@@ -459,7 +461,7 @@ impl Compiler<'_> {
     fn register_static_methods(&mut self, statics: &StaticsBlock, type_name: Symbol) {
         // Get the TypeDefId for this type from entity_registry
         let query = self.query();
-        let module_id = query.main_module();
+        let module_id = self.program_module();
         let type_name_id = query.name_id(module_id, &[type_name]);
         let type_def_id = query
             .try_type_def_id(type_name_id)
@@ -488,10 +490,11 @@ impl Compiler<'_> {
             let jit_func_id = self.jit.declare_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, jit_func_id);
 
-            // Register in method_func_keys for codegen lookup
+            // Register in method_func_keys for codegen lookup using type's NameId for stable lookup
+            let type_name_id = self.query().get_type(type_def_id).name_id;
             self.state
                 .method_func_keys
-                .insert((type_def_id, method_name_id), func_key);
+                .insert((type_name_id, method_name_id), func_key);
         }
     }
 
@@ -599,10 +602,11 @@ impl Compiler<'_> {
 
             tracing::debug!(type_name = %type_name_str, method_name = %method_name_str, method_name_id = ?method_name_id, "Registered instance method");
             method_infos.insert(method_name_id, MethodInfo { func_key });
-            // Also populate unified method_func_keys map
+            // Also populate unified method_func_keys map using type's NameId for stable lookup
+            let type_name_id = self.query().get_type(type_def_id).name_id;
             self.state
                 .method_func_keys
-                .insert((type_def_id, method_name_id), func_key);
+                .insert((type_name_id, method_name_id), func_key);
         }
         tracing::debug!(type_name = %type_name_str, registered_count = method_infos.len(), "Finished registering instance methods");
 
@@ -625,7 +629,7 @@ impl Compiler<'_> {
             },
         );
 
-        // Register static methods
+        // Register static methods (module class)
         if let Some(ref statics) = class.statics {
             for method in &statics.methods {
                 if method.body.is_none() {
@@ -669,9 +673,11 @@ impl Compiler<'_> {
                     method_name = %method_name_str,
                     "Registering static method"
                 );
+                // Use type's NameId for stable lookup across different analyzer instances
+                let type_name_id = self.query().get_type(type_def_id).name_id;
                 self.state
                     .method_func_keys
-                    .insert((type_def_id, method_name_id), func_key);
+                    .insert((type_name_id, method_name_id), func_key);
             }
         }
     }
@@ -780,10 +786,11 @@ impl Compiler<'_> {
 
             tracing::debug!(type_name = %type_name_str, method_name = %method_name_str, method_name_id = ?method_name_id, "Registered instance method");
             method_infos.insert(method_name_id, MethodInfo { func_key });
-            // Also populate unified method_func_keys map
+            // Also populate unified method_func_keys map using type's NameId for stable lookup
+            let type_name_id = self.query().get_type(type_def_id).name_id;
             self.state
                 .method_func_keys
-                .insert((type_def_id, method_name_id), func_key);
+                .insert((type_name_id, method_name_id), func_key);
         }
         tracing::debug!(type_name = %type_name_str, registered_count = method_infos.len(), "Finished registering instance methods");
 
@@ -848,11 +855,13 @@ impl Compiler<'_> {
                 tracing::debug!(
                     type_name = %type_name_str,
                     method_name = %method_name_str,
-                    "Registering static method"
+                    "Registering static method (module record)"
                 );
+                // Use type's NameId for stable lookup across different analyzer instances
+                let type_name_id = self.query().get_type(type_def_id).name_id;
                 self.state
                     .method_func_keys
-                    .insert((type_def_id, method_name_id), func_key);
+                    .insert((type_name_id, method_name_id), func_key);
             }
         }
     }
