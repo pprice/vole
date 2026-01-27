@@ -238,6 +238,132 @@ struct FunctionCheckContext {
     type_param_stack_depth: usize,
 }
 
+/// Builder for creating Analyzer instances with various configurations.
+/// Reduces code duplication across constructors by centralizing initialization logic.
+pub struct AnalyzerBuilder {
+    file: String,
+    cache: Option<Rc<RefCell<ModuleCache>>>,
+    project_root: Option<PathBuf>,
+    auto_detect_root: bool,
+}
+
+impl AnalyzerBuilder {
+    /// Create a new builder for the given file path.
+    pub fn new(file: &str) -> Self {
+        Self {
+            file: file.to_string(),
+            cache: None,
+            project_root: None,
+            auto_detect_root: true,
+        }
+    }
+
+    /// Use a shared module cache. The analyzer will use the CompilationDb from the cache.
+    pub fn with_cache(mut self, cache: Rc<RefCell<ModuleCache>>) -> Self {
+        self.cache = Some(cache);
+        self
+    }
+
+    /// Set an explicit project root. If None is passed, auto-detection is still used.
+    pub fn with_project_root(mut self, root: Option<&std::path::Path>) -> Self {
+        self.project_root = root.map(|p| p.to_path_buf());
+        if root.is_some() {
+            self.auto_detect_root = false;
+        }
+        self
+    }
+
+    /// Build the Analyzer with the configured options.
+    pub fn build(self) -> Analyzer {
+        // Step 1: Resolve the db (new or from cache)
+        let (db, has_cache) = if let Some(ref cache) = self.cache {
+            (cache.borrow().db(), true)
+        } else {
+            (Rc::new(RefCell::new(CompilationDb::new())), false)
+        };
+
+        // Step 2: Resolve current file path
+        let file_path = std::path::Path::new(&self.file);
+        let current_file_path = file_path.canonicalize().ok();
+
+        // Step 3: Determine module ID
+        // When using shared cache, each file gets its own module ID based on its path
+        // to prevent type conflicts when different files define types with the same name.
+        let current_module = if has_cache {
+            let module_path = current_file_path
+                .as_ref()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| self.file.clone());
+            db.borrow_mut().names.module_id(&module_path)
+        } else {
+            db.borrow().main_module()
+        };
+
+        // Step 4: Determine effective project root
+        let effective_root = if let Some(root) = self.project_root {
+            Some(root)
+        } else if self.auto_detect_root {
+            current_file_path
+                .as_ref()
+                .map(|p| ModuleLoader::detect_project_root(p))
+        } else {
+            None
+        };
+
+        // Step 5: Create module loader with project root
+        let mut module_loader = ModuleLoader::new();
+        if let Some(root) = effective_root {
+            module_loader.set_project_root(root);
+        }
+
+        // Step 6: Create the analyzer with all fields initialized
+        let mut analyzer = Analyzer {
+            scope: Scope::new(),
+            functions: FxHashMap::default(),
+            functions_by_name: FxHashMap::default(),
+            globals: FxHashMap::default(),
+            constant_globals: HashSet::new(),
+            current_function_return: None,
+            current_function_error_type: None,
+            current_generator_element_type: None,
+            current_static_method: None,
+            errors: Vec::new(),
+            warnings: Vec::new(),
+            type_overrides: FxHashMap::default(),
+            lambda_captures: Vec::new(),
+            lambda_locals: Vec::new(),
+            lambda_side_effects: Vec::new(),
+            expr_types: FxHashMap::default(),
+            is_check_results: FxHashMap::default(),
+            method_resolutions: MethodResolutions::new(),
+            module_loader,
+            module_type_ids: Rc::new(RefCell::new(FxHashMap::default())),
+            module_programs: Rc::new(RefCell::new(FxHashMap::default())),
+            module_expr_types: FxHashMap::default(),
+            module_method_resolutions: FxHashMap::default(),
+            loading_prelude: false,
+            generic_calls: FxHashMap::default(),
+            class_method_calls: FxHashMap::default(),
+            static_method_calls: FxHashMap::default(),
+            substituted_return_types: FxHashMap::default(),
+            lambda_defaults: FxHashMap::default(),
+            lambda_variables: FxHashMap::default(),
+            scoped_function_types: FxHashMap::default(),
+            declared_var_types: FxHashMap::default(),
+            current_module,
+            type_param_stack: TypeParamScopeStack::new(),
+            module_cache: self.cache,
+            db,
+            current_file_path,
+        };
+
+        // Step 7: Register built-in interfaces and implementations
+        analyzer.register_builtins();
+
+        analyzer
+    }
+}
+
 pub struct Analyzer {
     scope: Scope,
     functions: FxHashMap<Symbol, FunctionType>,
@@ -337,68 +463,10 @@ pub struct MethodLookup {
 }
 
 impl Analyzer {
+    /// Create a new Analyzer for the given file.
+    /// Auto-detects project root from the file path.
     pub fn new(file: &str, _source: &str) -> Self {
-        // Create the shared CompilationDb
-        let db = Rc::new(RefCell::new(CompilationDb::new()));
-        let main_module = db.borrow().main_module();
-
-        // Determine current file path and project root
-        let file_path = std::path::Path::new(file);
-        let current_file_path = file_path.canonicalize().ok();
-        let project_root = current_file_path
-            .as_ref()
-            .map(|p| ModuleLoader::detect_project_root(p));
-
-        let mut module_loader = ModuleLoader::new();
-        if let Some(root) = project_root {
-            module_loader.set_project_root(root);
-        }
-
-        let mut analyzer = Self {
-            scope: Scope::new(),
-            functions: FxHashMap::default(),
-            functions_by_name: FxHashMap::default(),
-            globals: FxHashMap::default(),
-            constant_globals: HashSet::new(),
-            current_function_return: None,
-            current_function_error_type: None,
-            current_generator_element_type: None,
-            current_static_method: None,
-            errors: Vec::new(),
-            warnings: Vec::new(),
-            type_overrides: FxHashMap::default(),
-            lambda_captures: Vec::new(),
-            lambda_locals: Vec::new(),
-            lambda_side_effects: Vec::new(),
-            expr_types: FxHashMap::default(),
-            is_check_results: FxHashMap::default(),
-            method_resolutions: MethodResolutions::new(),
-            module_loader,
-            module_type_ids: Rc::new(RefCell::new(FxHashMap::default())),
-            module_programs: Rc::new(RefCell::new(FxHashMap::default())),
-            module_expr_types: FxHashMap::default(),
-            module_method_resolutions: FxHashMap::default(),
-            loading_prelude: false,
-            generic_calls: FxHashMap::default(),
-            class_method_calls: FxHashMap::default(),
-            static_method_calls: FxHashMap::default(),
-            substituted_return_types: FxHashMap::default(),
-            lambda_defaults: FxHashMap::default(),
-            lambda_variables: FxHashMap::default(),
-            scoped_function_types: FxHashMap::default(),
-            declared_var_types: FxHashMap::default(),
-            current_module: main_module,
-            type_param_stack: TypeParamScopeStack::new(),
-            module_cache: None,
-            db,
-            current_file_path,
-        };
-
-        // Register built-in interfaces and implementations
-        // NOTE: This is temporary - will eventually come from stdlib/traits.void
-        analyzer.register_builtins();
-
-        analyzer
+        AnalyzerBuilder::new(file).build()
     }
 
     /// Create an analyzer with a shared module cache.
@@ -406,67 +474,7 @@ impl Analyzer {
     /// re-analyzing the same modules (prelude, stdlib, user imports).
     /// The analyzer uses the CompilationDb from the cache to ensure TypeIds remain valid.
     pub fn with_cache(file: &str, _source: &str, cache: Rc<RefCell<ModuleCache>>) -> Self {
-        // Get the shared db from the cache BEFORE borrowing cache again
-        let shared_db = cache.borrow().db();
-        let main_module = shared_db.borrow().main_module();
-
-        // Determine current file path and project root
-        let file_path = std::path::Path::new(file);
-        let current_file_path = file_path.canonicalize().ok();
-        let project_root = current_file_path
-            .as_ref()
-            .map(|p| ModuleLoader::detect_project_root(p));
-
-        let mut module_loader = ModuleLoader::new();
-        if let Some(root) = project_root {
-            module_loader.set_project_root(root);
-        }
-
-        let mut analyzer = Self {
-            scope: Scope::new(),
-            functions: FxHashMap::default(),
-            functions_by_name: FxHashMap::default(),
-            globals: FxHashMap::default(),
-            constant_globals: HashSet::new(),
-            current_function_return: None,
-            current_function_error_type: None,
-            current_generator_element_type: None,
-            current_static_method: None,
-            errors: Vec::new(),
-            warnings: Vec::new(),
-            type_overrides: FxHashMap::default(),
-            lambda_captures: Vec::new(),
-            lambda_locals: Vec::new(),
-            lambda_side_effects: Vec::new(),
-            expr_types: FxHashMap::default(),
-            is_check_results: FxHashMap::default(),
-            method_resolutions: MethodResolutions::new(),
-            module_loader,
-            module_type_ids: Rc::new(RefCell::new(FxHashMap::default())),
-            module_programs: Rc::new(RefCell::new(FxHashMap::default())),
-            module_expr_types: FxHashMap::default(),
-            module_method_resolutions: FxHashMap::default(),
-            loading_prelude: false,
-            generic_calls: FxHashMap::default(),
-            class_method_calls: FxHashMap::default(),
-            static_method_calls: FxHashMap::default(),
-            substituted_return_types: FxHashMap::default(),
-            lambda_defaults: FxHashMap::default(),
-            lambda_variables: FxHashMap::default(),
-            scoped_function_types: FxHashMap::default(),
-            declared_var_types: FxHashMap::default(),
-            current_module: main_module,
-            type_param_stack: TypeParamScopeStack::new(),
-            module_cache: Some(cache),
-            db: shared_db,
-            current_file_path,
-        };
-
-        // Register built-in interfaces and implementations
-        // NOTE: This is temporary - will eventually come from stdlib/traits.void
-        analyzer.register_builtins();
-
-        analyzer
+        AnalyzerBuilder::new(file).with_cache(cache).build()
     }
 
     /// Create an analyzer with an explicit project root override.
@@ -476,72 +484,9 @@ impl Analyzer {
         _source: &str,
         project_root: Option<&std::path::Path>,
     ) -> Self {
-        // Create the shared CompilationDb
-        let db = Rc::new(RefCell::new(CompilationDb::new()));
-        let main_module = db.borrow().main_module();
-
-        // Determine current file path
-        let file_path = std::path::Path::new(file);
-        let current_file_path = file_path.canonicalize().ok();
-
-        // Use explicit project root or auto-detect
-        let effective_root = if let Some(root) = project_root {
-            Some(root.to_path_buf())
-        } else {
-            current_file_path
-                .as_ref()
-                .map(|p| ModuleLoader::detect_project_root(p))
-        };
-
-        let mut module_loader = ModuleLoader::new();
-        if let Some(root) = effective_root {
-            module_loader.set_project_root(root);
-        }
-
-        let mut analyzer = Self {
-            scope: Scope::new(),
-            functions: FxHashMap::default(),
-            functions_by_name: FxHashMap::default(),
-            globals: FxHashMap::default(),
-            constant_globals: HashSet::new(),
-            current_function_return: None,
-            current_function_error_type: None,
-            current_generator_element_type: None,
-            current_static_method: None,
-            errors: Vec::new(),
-            warnings: Vec::new(),
-            type_overrides: FxHashMap::default(),
-            lambda_captures: Vec::new(),
-            lambda_locals: Vec::new(),
-            lambda_side_effects: Vec::new(),
-            expr_types: FxHashMap::default(),
-            is_check_results: FxHashMap::default(),
-            method_resolutions: MethodResolutions::new(),
-            module_loader,
-            module_type_ids: Rc::new(RefCell::new(FxHashMap::default())),
-            module_programs: Rc::new(RefCell::new(FxHashMap::default())),
-            module_expr_types: FxHashMap::default(),
-            module_method_resolutions: FxHashMap::default(),
-            loading_prelude: false,
-            generic_calls: FxHashMap::default(),
-            class_method_calls: FxHashMap::default(),
-            static_method_calls: FxHashMap::default(),
-            substituted_return_types: FxHashMap::default(),
-            lambda_defaults: FxHashMap::default(),
-            lambda_variables: FxHashMap::default(),
-            scoped_function_types: FxHashMap::default(),
-            declared_var_types: FxHashMap::default(),
-            current_module: main_module,
-            type_param_stack: TypeParamScopeStack::new(),
-            module_cache: None,
-            db,
-            current_file_path,
-        };
-
-        // Register built-in interfaces and implementations
-        analyzer.register_builtins();
-
-        analyzer
+        AnalyzerBuilder::new(file)
+            .with_project_root(project_root)
+            .build()
     }
 
     /// Create an analyzer with a shared module cache and an explicit project root override.
@@ -552,82 +497,10 @@ impl Analyzer {
         cache: Rc<RefCell<ModuleCache>>,
         project_root: Option<&std::path::Path>,
     ) -> Self {
-        // Get the shared db from the cache BEFORE borrowing cache again
-        let shared_db = cache.borrow().db();
-
-        // Determine current file path
-        let file_path = std::path::Path::new(file);
-        let current_file_path = file_path.canonicalize().ok();
-
-        // When using shared cache, each file gets its own module ID based on its path.
-        // This prevents type conflicts when different files define types with the same name.
-        let current_module = {
-            // Use canonical path for consistent module IDs, falling back to original path
-            let module_path = current_file_path
-                .as_ref()
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|| file.to_string());
-            shared_db.borrow_mut().names.module_id(&module_path)
-        };
-
-        // Use explicit project root or auto-detect
-        let effective_root = if let Some(root) = project_root {
-            Some(root.to_path_buf())
-        } else {
-            current_file_path
-                .as_ref()
-                .map(|p| ModuleLoader::detect_project_root(p))
-        };
-
-        let mut module_loader = ModuleLoader::new();
-        if let Some(root) = effective_root {
-            module_loader.set_project_root(root);
-        }
-
-        let mut analyzer = Self {
-            scope: Scope::new(),
-            functions: FxHashMap::default(),
-            functions_by_name: FxHashMap::default(),
-            globals: FxHashMap::default(),
-            constant_globals: HashSet::new(),
-            current_function_return: None,
-            current_function_error_type: None,
-            current_generator_element_type: None,
-            current_static_method: None,
-            errors: Vec::new(),
-            warnings: Vec::new(),
-            type_overrides: FxHashMap::default(),
-            lambda_captures: Vec::new(),
-            lambda_locals: Vec::new(),
-            lambda_side_effects: Vec::new(),
-            expr_types: FxHashMap::default(),
-            is_check_results: FxHashMap::default(),
-            method_resolutions: MethodResolutions::new(),
-            module_loader,
-            module_type_ids: Rc::new(RefCell::new(FxHashMap::default())),
-            module_programs: Rc::new(RefCell::new(FxHashMap::default())),
-            module_expr_types: FxHashMap::default(),
-            module_method_resolutions: FxHashMap::default(),
-            loading_prelude: false,
-            generic_calls: FxHashMap::default(),
-            class_method_calls: FxHashMap::default(),
-            static_method_calls: FxHashMap::default(),
-            substituted_return_types: FxHashMap::default(),
-            lambda_defaults: FxHashMap::default(),
-            lambda_variables: FxHashMap::default(),
-            scoped_function_types: FxHashMap::default(),
-            declared_var_types: FxHashMap::default(),
-            current_module,
-            type_param_stack: TypeParamScopeStack::new(),
-            module_cache: Some(cache),
-            db: shared_db,
-            current_file_path,
-        };
-
-        // Register built-in interfaces and implementations
-        analyzer.register_builtins();
-
-        analyzer
+        AnalyzerBuilder::new(file)
+            .with_cache(cache)
+            .with_project_root(project_root)
+            .build()
     }
 
     // Builtin registration: builtins.rs
