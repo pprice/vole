@@ -6,7 +6,7 @@ use cranelift::codegen::ir::BlockArg;
 use cranelift::prelude::*;
 
 use crate::RuntimeFn;
-use vole_frontend::{AssignTarget, BinaryExpr, BinaryOp, CompoundAssignExpr};
+use vole_frontend::{AssignTarget, BinaryExpr, BinaryOp, CompoundAssignExpr, ExprKind};
 use vole_sema::implement_registry::ImplTypeId;
 use vole_sema::type_arena::TypeId;
 
@@ -24,6 +24,11 @@ impl Cg<'_, '_, '_> {
             _ => {}
         }
 
+        // Try to emit FMA for floating-point add/sub with multiplication
+        if let Some(result) = self.try_emit_fma(bin)? {
+            return Ok(result);
+        }
+
         let left = self.expr(&bin.left)?;
 
         // Handle string concatenation: string + Stringable
@@ -35,6 +40,100 @@ impl Cg<'_, '_, '_> {
         let right = self.expr(&bin.right)?;
 
         self.binary_op(left, right, bin.op)
+    }
+
+    /// Try to emit FMA instruction for patterns like (x * y) + z or z + (x * y)
+    /// Returns Some(result) if FMA was emitted, None otherwise
+    fn try_emit_fma(&mut self, bin: &BinaryExpr) -> Result<Option<CompiledValue>, String> {
+        // Only handle Add and Sub for FMA patterns
+        if !matches!(bin.op, BinaryOp::Add | BinaryOp::Sub) {
+            return Ok(None);
+        }
+
+        // Helper to unwrap Grouping expressions
+        fn unwrap_grouping(expr: &vole_frontend::Expr) -> &vole_frontend::Expr {
+            match &expr.kind {
+                ExprKind::Grouping(inner) => unwrap_grouping(inner),
+                _ => expr,
+            }
+        }
+
+        let left_unwrapped = unwrap_grouping(&bin.left);
+        let right_unwrapped = unwrap_grouping(&bin.right);
+
+        // Check if left is a multiplication: (x * y) + z or (x * y) - z
+        if let ExprKind::Binary(ref left_bin) = left_unwrapped.kind {
+            if left_bin.op == BinaryOp::Mul {
+                // Check if this is a floating-point operation by looking at operand types
+                let x = self.expr(&left_bin.left)?;
+                if x.ty == types::F64 || x.ty == types::F32 {
+                    let y = self.expr(&left_bin.right)?;
+                    let z = self.expr(&bin.right)?;
+
+                    let result = if bin.op == BinaryOp::Add {
+                        // (x * y) + z → fma(x, y, z)
+                        self.builder.ins().fma(x.value, y.value, z.value)
+                    } else {
+                        // (x * y) - z → fma(x, y, -z)
+                        let neg_z = self.builder.ins().fneg(z.value);
+                        self.builder.ins().fma(x.value, y.value, neg_z)
+                    };
+
+                    return Ok(Some(CompiledValue {
+                        value: result,
+                        ty: x.ty,
+                        type_id: x.type_id,
+                    }));
+                }
+            }
+        }
+
+        // Check if right is a multiplication: z + (x * y)
+        if bin.op == BinaryOp::Add {
+            if let ExprKind::Binary(ref right_bin) = right_unwrapped.kind {
+                if right_bin.op == BinaryOp::Mul {
+                    let z = self.expr(&bin.left)?;
+                    if z.ty == types::F64 || z.ty == types::F32 {
+                        let x = self.expr(&right_bin.left)?;
+                        let y = self.expr(&right_bin.right)?;
+
+                        // z + (x * y) → fma(x, y, z)
+                        let result = self.builder.ins().fma(x.value, y.value, z.value);
+
+                        return Ok(Some(CompiledValue {
+                            value: result,
+                            ty: z.ty,
+                            type_id: z.type_id,
+                        }));
+                    }
+                }
+            }
+        }
+
+        // Check for z - (x * y) pattern (FNMA)
+        if bin.op == BinaryOp::Sub {
+            if let ExprKind::Binary(ref right_bin) = right_unwrapped.kind {
+                if right_bin.op == BinaryOp::Mul {
+                    let z = self.expr(&bin.left)?;
+                    if z.ty == types::F64 || z.ty == types::F32 {
+                        let x = self.expr(&right_bin.left)?;
+                        let y = self.expr(&right_bin.right)?;
+
+                        // z - (x * y) → fma(-x, y, z)
+                        let neg_x = self.builder.ins().fneg(x.value);
+                        let result = self.builder.ins().fma(neg_x, y.value, z.value);
+
+                        return Ok(Some(CompiledValue {
+                            value: result,
+                            ty: z.ty,
+                            type_id: z.type_id,
+                        }));
+                    }
+                }
+            }
+        }
+
+        Ok(None)
     }
 
     /// Concatenate two values as strings.

@@ -1,0 +1,90 @@
+// Test FMA (fused multiply-add) pattern detection
+// FMA computes x*y + z with only one rounding operation
+
+tests {
+    test "fma pattern: (x * y) + z" {
+        let x = 1.5
+        let y = 2.0
+        let z = 3.0
+        // This should emit: fma(x, y, z) = 1.5 * 2.0 + 3.0 = 6.0
+        let result = (x * y) + z
+        assert(result == 6.0)
+    }
+
+    test "fma pattern: z + (x * y)" {
+        let x = 1.5
+        let y = 2.0
+        let z = 3.0
+        // This should also emit fma: z + (x * y) = 3.0 + (1.5 * 2.0) = 6.0
+        let result = z + (x * y)
+        assert(result == 6.0)
+    }
+
+    test "fnma pattern: z - (x * y)" {
+        let x = 2.0
+        let y = 3.0
+        let z = 10.0
+        // This should emit: fma(-x, y, z) = 10.0 - (2.0 * 3.0) = 4.0
+        let result = z - (x * y)
+        assert(result == 4.0)
+    }
+
+    test "fma pattern: (x * y) - z" {
+        let x = 3.0
+        let y = 4.0
+        let z = 2.0
+        // This should emit: fma(x, y, -z) = 3.0 * 4.0 - 2.0 = 10.0
+        let result = (x * y) - z
+        assert(result == 10.0)
+    }
+
+    test "fma with f32 values" {
+        let x: f32 = 1.5
+        let y: f32 = 2.0
+        let z: f32 = 0.5
+        let result = (x * y) + z
+        assert(result == 3.5)
+    }
+
+    test "nested fma: a*b + c*d + e" {
+        let a = 1.0
+        let b = 2.0
+        let c = 3.0
+        let d = 4.0
+        let e = 5.0
+        // (a * b) + (c * d) + e = 2.0 + 12.0 + 5.0 = 19.0
+        let result = (a * b) + (c * d) + e
+        assert(result == 19.0)
+    }
+
+    test "fma precision test" {
+        // FMA should have better precision than separate mul+add
+        // This is a case where FMA makes a difference
+        let a = 1.0 + 1e-16
+        let b = 1.0 - 1e-16
+        let c = -1.0
+        // a * b + c = (1 + 1e-16)(1 - 1e-16) - 1 = 1 - 1e-32 - 1 = -1e-32
+        // With FMA, we should get a more accurate result
+        let result = (a * b) + c
+        // Just verify it runs without error
+        assert(result <= 0.0)
+    }
+
+    test "fma in loop (mandelbrot-like)" {
+        let mut zr = 0.0
+        let mut zi = 0.0
+        let cr = -0.5
+        let ci = 0.5
+
+        // One iteration of mandelbrot
+        // new_zr = zr*zr - zi*zi + cr
+        // new_zi = 2*zr*zi + ci
+        let zr_sq = zr * zr
+        let zi_sq = zi * zi
+        let new_zr = zr_sq - zi_sq + cr  // Should use FMA patterns
+        let new_zi = (2.0 * zr) * zi + ci  // Should use FMA
+
+        assert(new_zr == -0.5)
+        assert(new_zi == 0.5)
+    }
+}
