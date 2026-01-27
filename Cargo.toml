@@ -36,5 +36,13 @@ unsafe_op_in_unsafe_fn = "warn"
 unused_qualifications = "warn"
 
 [profile.release]
-lto = true
+lto = "fat"
 codegen-units = 1
+opt-level = 3
+panic = "abort"
+strip = true
+
+[profile.release-local]
+inherits = "release"
+panic = "unwind"
+strip = false

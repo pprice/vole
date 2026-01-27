@@ -77,3 +77,5 @@ vole inspect ir file.vole        # Show Cranelift IR
 just dev-backtrace-test file.vole  # Debug segfaults
 just trace file.vole             # Tracing with VOLE_LOG
 ```
+
+For release-only issues, use `cargo build --profile release-local` which keeps symbols for debugging while maintaining release optimizations.
