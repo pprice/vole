@@ -7,6 +7,35 @@
 use super::*;
 use crate::type_arena::TypeId as ArenaTypeId;
 
+// ========== Sequence type info ==========
+//
+// Enum for unified array/fixed-array/tuple unwrapping.
+
+/// Information about a sequence type (array, fixed-array, or tuple).
+/// Used by `unwrap_sequence_id` to return unified information.
+#[derive(Debug, Clone)]
+pub(crate) enum SequenceInfo {
+    /// Dynamic array with element type
+    Array(ArenaTypeId),
+    /// Fixed-size array with element type and size
+    FixedArray(ArenaTypeId, usize),
+    /// Tuple with element types
+    Tuple(Vec<ArenaTypeId>),
+}
+
+impl SequenceInfo {
+    /// Get the element type for indexing.
+    /// For arrays/fixed-arrays, returns the element type.
+    /// For tuples, returns the first element type (common case for 2-tuples with same types).
+    #[inline]
+    pub(crate) fn element_type(&self) -> ArenaTypeId {
+        match self {
+            SequenceInfo::Array(elem) | SequenceInfo::FixedArray(elem, _) => *elem,
+            SequenceInfo::Tuple(elems) => elems.first().copied().unwrap_or(ArenaTypeId::INVALID),
+        }
+    }
+}
+
 impl Analyzer {
     /// Create a primitive TypeId (uses reserved constants - no arena access)
     #[inline]
@@ -259,6 +288,34 @@ impl Analyzer {
     #[inline]
     pub(crate) fn is_runtime_iterator_id(&self, id: ArenaTypeId) -> bool {
         self.type_arena().unwrap_runtime_iterator(id).is_some()
+    }
+
+    // ========== Sequence type helpers ==========
+    //
+    // Unified helpers for array/fixed-array/tuple unwrapping.
+
+    /// Unwrap a sequence type (array, fixed-array, or tuple) into unified info.
+    /// Returns None if the type is not a sequence type.
+    pub(crate) fn unwrap_sequence_id(&self, id: ArenaTypeId) -> Option<SequenceInfo> {
+        if let Some(elem_id) = self.unwrap_array_id(id) {
+            Some(SequenceInfo::Array(elem_id))
+        } else if let Some((elem_id, size)) = self.unwrap_fixed_array_id(id) {
+            Some(SequenceInfo::FixedArray(elem_id, size))
+        } else { self.unwrap_tuple_id(id).map(SequenceInfo::Tuple) }
+    }
+
+    /// Get the element type of an indexable type (array or fixed-array only).
+    /// Returns None if the type is not indexable for assignment (tuples excluded).
+    /// This is a simpler helper for assignment contexts where tuples are not valid targets.
+    #[inline]
+    pub(crate) fn unwrap_indexable_element_id(&self, id: ArenaTypeId) -> Option<ArenaTypeId> {
+        if let Some(elem_id) = self.unwrap_array_id(id) {
+            Some(elem_id)
+        } else if let Some((elem_id, _)) = self.unwrap_fixed_array_id(id) {
+            Some(elem_id)
+        } else {
+            None
+        }
     }
 
     // =========================================================================

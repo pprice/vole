@@ -1,3 +1,4 @@
+use super::super::type_helpers::SequenceInfo;
 use super::super::*;
 use crate::analysis_cache::IsCheckResult;
 use crate::type_arena::TypeId as ArenaTypeId;
@@ -254,31 +255,34 @@ impl Analyzer {
                 }
 
                 // Object must be array, tuple, or fixed array
-                // Use arena to inspect the TypeId
-                if let Some(elem_id) = self.unwrap_array_id(obj_ty_id) {
-                    Ok(elem_id)
-                } else if let Some((elem_id, _)) = self.unwrap_fixed_array_id(obj_ty_id) {
-                    Ok(elem_id)
-                } else if let Some(elem_ids) = self.unwrap_tuple_id(obj_ty_id) {
-                    // For tuples, try to get element type from constant index
-                    if let ExprKind::IntLiteral(i, _) = &idx.index.kind {
-                        let i = *i as usize;
-                        if i < elem_ids.len() {
-                            Ok(elem_ids[i])
-                        } else {
-                            self.add_error(
-                                SemanticError::IndexOutOfBounds {
-                                    index: i,
-                                    len: elem_ids.len(),
-                                    span: idx.index.span.into(),
-                                },
-                                idx.index.span,
-                            );
-                            Ok(ArenaTypeId::INVALID)
+                // Use unified sequence unwrapping helper
+                if let Some(seq_info) = self.unwrap_sequence_id(obj_ty_id) {
+                    match seq_info {
+                        SequenceInfo::Array(elem_id) | SequenceInfo::FixedArray(elem_id, _) => {
+                            Ok(elem_id)
                         }
-                    } else {
-                        // Non-constant index - return first element type (common case: 2-tuples)
-                        Ok(elem_ids.first().copied().unwrap_or(ArenaTypeId::INVALID))
+                        SequenceInfo::Tuple(elem_ids) => {
+                            // For tuples, try to get element type from constant index
+                            if let ExprKind::IntLiteral(i, _) = &idx.index.kind {
+                                let i = *i as usize;
+                                if i < elem_ids.len() {
+                                    Ok(elem_ids[i])
+                                } else {
+                                    self.add_error(
+                                        SemanticError::IndexOutOfBounds {
+                                            index: i,
+                                            len: elem_ids.len(),
+                                            span: idx.index.span.into(),
+                                        },
+                                        idx.index.span,
+                                    );
+                                    Ok(ArenaTypeId::INVALID)
+                                }
+                            } else {
+                                // Non-constant index - return first element type (common case: 2-tuples)
+                                Ok(elem_ids.first().copied().unwrap_or(ArenaTypeId::INVALID))
+                            }
+                        }
                     }
                 } else {
                     if !obj_ty_id.is_invalid() {

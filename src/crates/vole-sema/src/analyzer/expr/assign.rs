@@ -156,9 +156,7 @@ impl Analyzer {
                 }
 
                 // Get element type using TypeId
-                if let Some(elem_id) = self.unwrap_array_id(obj_type_id) {
-                    (elem_id, true, true)
-                } else if let Some((elem_id, _)) = self.unwrap_fixed_array_id(obj_type_id) {
+                if let Some(elem_id) = self.unwrap_indexable_element_id(obj_type_id) {
                     (elem_id, true, true)
                 } else {
                     if !obj_type_id.is_invalid() {
@@ -290,9 +288,7 @@ impl Analyzer {
                 }
 
                 // Get element type using TypeId
-                if let Some(elem_id) = self.unwrap_array_id(obj_type_id) {
-                    elem_id
-                } else if let Some((elem_id, _)) = self.unwrap_fixed_array_id(obj_type_id) {
+                if let Some(elem_id) = self.unwrap_indexable_element_id(obj_type_id) {
                     elem_id
                 } else {
                     if !obj_type_id.is_invalid() {
