@@ -172,6 +172,24 @@ pub enum NominalKind {
     Error,
 }
 
+impl NominalKind {
+    /// Convert to the corresponding TypeDefKind.
+    pub fn to_type_def_kind(self) -> crate::entity_defs::TypeDefKind {
+        use crate::entity_defs::TypeDefKind;
+        match self {
+            NominalKind::Class => TypeDefKind::Class,
+            NominalKind::Record => TypeDefKind::Record,
+            NominalKind::Interface => TypeDefKind::Interface,
+            NominalKind::Error => TypeDefKind::ErrorType,
+        }
+    }
+
+    /// Check if this is a class or record (types with fields).
+    pub fn is_class_or_record(self) -> bool {
+        matches!(self, NominalKind::Class | NominalKind::Record)
+    }
+}
+
 /// Interned representation of a structural method
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct InternedStructuralMethod {
@@ -989,6 +1007,28 @@ impl TypeArena {
                 type_def_id,
                 type_args,
             } => Some((*type_def_id, type_args)),
+            _ => None,
+        }
+    }
+
+    /// Unwrap any nominal type (class, record, or interface), returning (type_def_id, type_args, kind).
+    ///
+    /// This is a convenience helper that combines unwrap_class, unwrap_record, and unwrap_interface
+    /// into a single call. Use this when you need to handle all three nominal types uniformly.
+    pub fn unwrap_nominal(&self, id: TypeId) -> Option<(TypeDefId, &TypeIdVec, NominalKind)> {
+        match self.get(id) {
+            SemaType::Class {
+                type_def_id,
+                type_args,
+            } => Some((*type_def_id, type_args, NominalKind::Class)),
+            SemaType::Record {
+                type_def_id,
+                type_args,
+            } => Some((*type_def_id, type_args, NominalKind::Record)),
+            SemaType::Interface {
+                type_def_id,
+                type_args,
+            } => Some((*type_def_id, type_args, NominalKind::Interface)),
             _ => None,
         }
     }

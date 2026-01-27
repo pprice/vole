@@ -112,16 +112,16 @@ impl Analyzer {
         expected_type_id: ArenaTypeId,
         interner: &Interner,
     ) -> bool {
-        // Get type_def_id and type_args from TypeId using arena queries
+        // Get type_def_id and type_args from TypeId using arena queries (class or record only)
         let (type_def_id, type_args_id) = {
             let arena = self.type_arena();
-            if let Some((id, args)) = arena.unwrap_class(ty_id) {
-                (id, args.clone())
-            } else if let Some((id, args)) = arena.unwrap_record(ty_id) {
-                (id, args.clone())
-            } else {
+            let Some((id, args, kind)) = arena.unwrap_nominal(ty_id) else {
+                return false;
+            };
+            if !kind.is_class_or_record() {
                 return false;
             }
+            (id, args.clone())
         };
 
         // Clone generic_info to avoid holding borrow during subsequent operations
@@ -167,16 +167,13 @@ impl Analyzer {
         expected_sig: &FunctionType,
         interner: &Interner,
     ) -> bool {
-        // Get type_def_id from TypeId using arena queries
+        // Get type_def_id from TypeId using arena queries (class or record only)
         let type_def_id = {
             let arena = self.type_arena();
-            if let Some((id, _)) = arena.unwrap_class(ty_id) {
-                Some(id)
-            } else if let Some((id, _)) = arena.unwrap_record(ty_id) {
-                Some(id)
-            } else {
-                None
-            }
+            arena
+                .unwrap_nominal(ty_id)
+                .filter(|(_, _, kind)| kind.is_class_or_record())
+                .map(|(id, _, _)| id)
         };
 
         // For primitives/arrays, check implement registry (using TypeId)

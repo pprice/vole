@@ -311,15 +311,9 @@ fn resolve_generic_type_to_id(
                 // Get the underlying type's TypeDefId from the aliased type
                 let underlying_info = {
                     let arena = ctx.type_arena();
-                    if let Some((def_id, _)) = arena.unwrap_interface(aliased_type_id) {
-                        Some((def_id, TypeDefKind::Interface))
-                    } else if let Some((def_id, _)) = arena.unwrap_class(aliased_type_id) {
-                        Some((def_id, TypeDefKind::Class))
-                    } else if let Some((def_id, _)) = arena.unwrap_record(aliased_type_id) {
-                        Some((def_id, TypeDefKind::Record))
-                    } else {
-                        None
-                    }
+                    arena
+                        .unwrap_nominal(aliased_type_id)
+                        .map(|(def_id, _, kind)| (def_id, kind.to_type_def_kind()))
                 };
 
                 if let Some((underlying_def_id, underlying_kind)) = underlying_info {

@@ -748,16 +748,13 @@ impl Analyzer {
             return;
         }
 
-        // Get type_def_id from the type using arena
+        // Get type_def_id from the type using arena (record or class only)
         let type_def_id = {
+            use crate::type_arena::NominalKind;
             let arena = self.type_arena();
-            if let Some((type_def_id, _)) = arena.unwrap_record(ty_id) {
-                Some(type_def_id)
-            } else if let Some((type_def_id, _)) = arena.unwrap_class(ty_id) {
-                Some(type_def_id)
-            } else {
-                None
-            }
+            arena.unwrap_nominal(ty_id).and_then(|(id, _, kind)| {
+                matches!(kind, NominalKind::Class | NominalKind::Record).then_some(id)
+            })
         };
 
         let Some(type_def_id) = type_def_id else {
@@ -940,15 +937,9 @@ impl Analyzer {
         // Check if the type is a record, class, or interface
         let type_def_id = {
             let arena = self.type_arena();
-            if let Some((def_id, _)) = arena.unwrap_record(type_id) {
-                Some(def_id)
-            } else if let Some((def_id, _)) = arena.unwrap_class(type_id) {
-                Some(def_id)
-            } else if let Some((def_id, _)) = arena.unwrap_interface(type_id) {
-                Some(def_id)
-            } else {
-                None
-            }
+            arena
+                .unwrap_nominal(type_id)
+                .map(|(def_id, _, _kind)| def_id)
         };
 
         let Some(original_type_def_id) = type_def_id else {

@@ -61,11 +61,7 @@ impl Analyzer {
         // Try to get TypeDefId and type_args from the object type using arena unwraps
         let (type_def_id, type_args_id): (Option<TypeDefId>, Vec<ArenaTypeId>) = {
             let arena = self.type_arena();
-            if let Some((id, args)) = arena.unwrap_class(object_type_id) {
-                (Some(id), args.to_vec())
-            } else if let Some((id, args)) = arena.unwrap_record(object_type_id) {
-                (Some(id), args.to_vec())
-            } else if let Some((id, args)) = arena.unwrap_interface(object_type_id) {
+            if let Some((id, args, _kind)) = arena.unwrap_nominal(object_type_id) {
                 (Some(id), args.to_vec())
             } else {
                 (None, vec![])
@@ -180,11 +176,19 @@ impl Analyzer {
                 // Determine the resolution type based on the defining type's kind
                 match defining_type_kind {
                     TypeDefKind::Interface => {
-                        // Check if object_type is an interface type using arena
-                        let is_interface_type = {
+                        // Check if object_type is a nominal type and what kind
+                        use crate::type_arena::NominalKind;
+                        let nominal_kind = {
                             let arena = self.type_arena();
-                            arena.unwrap_interface(object_type_id).is_some()
+                            arena
+                                .unwrap_nominal(object_type_id)
+                                .map(|(_, _, kind)| kind)
                         };
+                        let is_interface_type = nominal_kind == Some(NominalKind::Interface);
+                        let is_class_or_record = matches!(
+                            nominal_kind,
+                            Some(NominalKind::Class) | Some(NominalKind::Record)
+                        );
 
                         // For external default methods on CONCRETE types (not interface types)
                         if method_has_default
@@ -214,11 +218,6 @@ impl Analyzer {
                         }
 
                         // For non-external default methods on concrete types (Class/Record)
-                        let is_class_or_record = {
-                            let arena = self.type_arena();
-                            arena.unwrap_class(object_type_id).is_some()
-                                || arena.unwrap_record(object_type_id).is_some()
-                        };
                         if method_has_default && is_class_or_record {
                             let type_name_id = {
                                 let registry = self.entity_registry();

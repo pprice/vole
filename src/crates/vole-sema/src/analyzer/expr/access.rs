@@ -121,14 +121,12 @@ impl Analyzer {
         }
 
         let struct_info = {
+            use crate::type_arena::NominalKind;
             let arena = self.type_arena();
-            if let Some((id, args)) = arena.unwrap_class(object_type_id) {
-                Some((id, args.clone(), true)) // is_class = true
-            } else if let Some((id, args)) = arena.unwrap_record(object_type_id) {
-                Some((id, args.clone(), false)) // is_class = false
-            } else {
-                None
-            }
+            arena
+                .unwrap_nominal(object_type_id)
+                .filter(|(_, _, kind)| kind.is_class_or_record())
+                .map(|(id, args, kind)| (id, args.clone(), kind == NominalKind::Class))
         };
         let Some((type_def_id, type_args_id, is_class)) = struct_info else {
             self.type_error_id("class or record", object_type_id, field_access.object.span);
@@ -211,16 +209,13 @@ impl Analyzer {
             return Ok(ArenaTypeId::INVALID);
         }
 
-        // Get type_def_id and type_args from inner type using arena queries
+        // Get type_def_id and type_args from inner type using arena queries (class or record only)
         let struct_info = {
             let arena = self.type_arena();
-            if let Some((id, args)) = arena.unwrap_class(inner_type_id) {
-                Some((id, args.clone()))
-            } else if let Some((id, args)) = arena.unwrap_record(inner_type_id) {
-                Some((id, args.clone()))
-            } else {
-                None
-            }
+            arena
+                .unwrap_nominal(inner_type_id)
+                .filter(|(_, _, kind)| kind.is_class_or_record())
+                .map(|(id, args, _)| (id, args.clone()))
         };
         let Some((type_def_id, type_args_id)) = struct_info else {
             self.type_error_id(
@@ -837,9 +832,9 @@ impl Analyzer {
                 let type_args_and_def = {
                     let arena = self.type_arena();
                     arena
-                        .unwrap_class(object_type_id)
-                        .or_else(|| arena.unwrap_record(object_type_id))
-                        .map(|(id, args)| (id, args.clone()))
+                        .unwrap_nominal(object_type_id)
+                        .filter(|(_, _, kind)| kind.is_class_or_record())
+                        .map(|(id, args, _)| (id, args.clone()))
                 };
                 if let Some((type_def_id, type_args)) = type_args_and_def
                     && !type_args.is_empty()
@@ -955,15 +950,12 @@ impl Analyzer {
                     .find(|(n, _)| *n == type_name_id)
                     .map(|&(_, type_id)| type_id)?;
 
-                // Extract TypeDefId from the export type
+                // Extract TypeDefId from the export type (class or record only)
                 let arena = self.type_arena();
-                let type_def_id = if let Some((id, _)) = arena.unwrap_record(export_type_id) {
-                    id
-                } else if let Some((id, _)) = arena.unwrap_class(export_type_id) {
-                    id
-                } else {
-                    return None;
-                };
+                let type_def_id = arena
+                    .unwrap_nominal(export_type_id)
+                    .filter(|(_, _, kind)| kind.is_class_or_record())
+                    .map(|(id, _, _)| id)?;
 
                 tracing::trace!(
                     module = %interner.resolve(*module_sym),
@@ -1208,21 +1200,10 @@ impl Analyzer {
         tracing::debug!(object_type_id = ?object_type_id, "record_class_method_monomorph called");
         let generic_info = {
             let arena = self.type_arena();
-            if let Some((id, args)) = arena.unwrap_class(object_type_id) {
-                if args.is_empty() {
-                    None
-                } else {
-                    Some((id, args.clone()))
-                }
-            } else if let Some((id, args)) = arena.unwrap_record(object_type_id) {
-                if args.is_empty() {
-                    None
-                } else {
-                    Some((id, args.clone()))
-                }
-            } else {
-                None
-            }
+            arena
+                .unwrap_nominal(object_type_id)
+                .filter(|(_, args, kind)| kind.is_class_or_record() && !args.is_empty())
+                .map(|(id, args, _)| (id, args.clone()))
         };
         let Some((class_type_def_id, type_args_id)) = generic_info else {
             tracing::debug!("returning early - not a generic class/record");

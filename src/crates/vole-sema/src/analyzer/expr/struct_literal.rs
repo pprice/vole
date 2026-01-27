@@ -90,15 +90,10 @@ impl Analyzer {
                         .and_then(|&(_, export_type_id)| {
                             // The export_type_id is an ArenaTypeId, we need to extract the TypeDefId
                             let arena = self.type_arena();
-                            if let Some((type_def_id, _)) = arena.unwrap_record(export_type_id) {
-                                Some(type_def_id)
-                            } else if let Some((type_def_id, _)) =
-                                arena.unwrap_class(export_type_id)
-                            {
-                                Some(type_def_id)
-                            } else {
-                                None
-                            }
+                            arena
+                                .unwrap_nominal(export_type_id)
+                                .filter(|(_, _, kind)| kind.is_class_or_record())
+                                .map(|(type_def_id, _, _)| type_def_id)
                         })
                 })
         }
@@ -172,15 +167,11 @@ impl Analyzer {
                     // Follow alias to get underlying type
                     if let Some(aliased_type_id) = type_def.aliased_type {
                         let arena = self.type_arena();
-                        // Get the underlying TypeDefId from the aliased type
-                        let underlying =
-                            if let Some((def_id, _)) = arena.unwrap_record(aliased_type_id) {
-                                Some((def_id, TypeDefKind::Record))
-                            } else if let Some((def_id, _)) = arena.unwrap_class(aliased_type_id) {
-                                Some((def_id, TypeDefKind::Class))
-                            } else {
-                                None
-                            };
+                        // Get the underlying TypeDefId from the aliased type (class or record only)
+                        let underlying = arena
+                            .unwrap_nominal(aliased_type_id)
+                            .filter(|(_, _, kind)| kind.is_class_or_record())
+                            .map(|(def_id, _, kind)| (def_id, kind.to_type_def_kind()));
 
                         if let Some((underlying_def_id, underlying_kind)) = underlying {
                             let registry = self.entity_registry();

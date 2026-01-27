@@ -61,12 +61,13 @@ impl Analyzer {
             return;
         }
 
-        // Interface types: unify type args for the same interface
-        if let (Some((p_def_id, p_args)), Some((a_def_id, a_args))) = (
-            arena.unwrap_interface(pattern_id),
-            arena.unwrap_interface(actual_id),
+        // Nominal types (class/record/interface): unify type args if same definition and kind
+        if let (Some((p_def_id, p_args, p_kind)), Some((a_def_id, a_args, a_kind))) = (
+            arena.unwrap_nominal(pattern_id),
+            arena.unwrap_nominal(actual_id),
         ) {
-            if p_def_id == a_def_id {
+            // Only unify if same kind and same type definition
+            if p_kind == a_kind && p_def_id == a_def_id {
                 let args: Vec<_> = p_args
                     .iter()
                     .zip(a_args.iter())
@@ -116,43 +117,6 @@ impl Analyzer {
             return;
         }
 
-        // Class: unify type args
-        if let (Some((p_def_id, p_args)), Some((a_def_id, a_args))) = (
-            arena.unwrap_class(pattern_id),
-            arena.unwrap_class(actual_id),
-        ) {
-            if p_def_id == a_def_id {
-                let args: Vec<_> = p_args
-                    .iter()
-                    .zip(a_args.iter())
-                    .map(|(&p, &a)| (p, a))
-                    .collect();
-                drop(arena);
-                for (p_arg, a_arg) in args {
-                    self.unify_types_id(p_arg, a_arg, type_params, inferred);
-                }
-            }
-            return;
-        }
-
-        // Record: unify type args
-        if let (Some((p_def_id, p_args)), Some((a_def_id, a_args))) = (
-            arena.unwrap_record(pattern_id),
-            arena.unwrap_record(actual_id),
-        ) && p_def_id == a_def_id
-        {
-            let args: Vec<_> = p_args
-                .iter()
-                .zip(a_args.iter())
-                .map(|(&p, &a)| (p, a))
-                .collect();
-            drop(arena);
-            for (p_arg, a_arg) in args {
-                self.unify_types_id(p_arg, a_arg, type_params, inferred);
-            }
-            return;
-        }
-
         // Structural type: unify field types from the pattern with the actual type's fields
         // This handles cases like `func foo<T>(a: { name: T })` where T should be inferred
         // from the actual argument's `name` field type.
@@ -198,16 +162,15 @@ impl Analyzer {
         ty_id: ArenaTypeId,
         field_name_id: NameId,
     ) -> Option<ArenaTypeId> {
-        // Get type_def_id and type_args from TypeId using arena queries
+        // Get type_def_id and type_args from TypeId using arena queries (class or record only)
         let (type_def_id, type_args_id) = {
+            use crate::type_arena::NominalKind;
             let arena = self.type_arena();
-            if let Some((id, args)) = arena.unwrap_class(ty_id) {
-                (id, args.to_vec())
-            } else if let Some((id, args)) = arena.unwrap_record(ty_id) {
-                (id, args.to_vec())
-            } else {
+            let (id, args, kind) = arena.unwrap_nominal(ty_id)?;
+            if !matches!(kind, NominalKind::Class | NominalKind::Record) {
                 return None;
             }
+            (id, args.to_vec())
         };
 
         // Clone generic_info to avoid holding borrow during subsequent operations

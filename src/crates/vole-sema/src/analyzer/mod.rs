@@ -46,6 +46,140 @@ use std::rc::Rc;
 use vole_frontend::*;
 use vole_identity::{self, MethodId, ModuleId, NameId, NameTable, Namer, Resolver, TypeDefId};
 
+/// Trait for type declarations (Class or Record) that share common checking logic.
+/// This allows unified handling of field defaults, methods, statics, and interface validation.
+trait TypeBodyDecl {
+    fn name(&self) -> Symbol;
+    fn type_params(&self) -> &[TypeParam];
+    fn fields(&self) -> &[FieldDef];
+    fn methods(&self) -> &[FuncDecl];
+    fn statics(&self) -> Option<&StaticsBlock>;
+    fn span(&self) -> Span;
+}
+
+impl TypeBodyDecl for ClassDecl {
+    fn name(&self) -> Symbol {
+        self.name
+    }
+    fn type_params(&self) -> &[TypeParam] {
+        &self.type_params
+    }
+    fn fields(&self) -> &[FieldDef] {
+        &self.fields
+    }
+    fn methods(&self) -> &[FuncDecl] {
+        &self.methods
+    }
+    fn statics(&self) -> Option<&StaticsBlock> {
+        self.statics.as_ref()
+    }
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
+impl TypeBodyDecl for RecordDecl {
+    fn name(&self) -> Symbol {
+        self.name
+    }
+    fn type_params(&self) -> &[TypeParam] {
+        &self.type_params
+    }
+    fn fields(&self) -> &[FieldDef] {
+        &self.fields
+    }
+    fn methods(&self) -> &[FuncDecl] {
+        &self.methods
+    }
+    fn statics(&self) -> Option<&StaticsBlock> {
+        self.statics.as_ref()
+    }
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
+/// Trait for items that can have default values (parameters, fields).
+/// Used for unified validation of default value ordering.
+trait Defaultable {
+    fn name(&self) -> Symbol;
+    fn has_default(&self) -> bool;
+    fn span(&self) -> Span;
+}
+
+impl Defaultable for Param {
+    fn name(&self) -> Symbol {
+        self.name
+    }
+    fn has_default(&self) -> bool {
+        self.default_value.is_some()
+    }
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
+impl Defaultable for FieldDef {
+    fn name(&self) -> Symbol {
+        self.name
+    }
+    fn has_default(&self) -> bool {
+        self.default_value.is_some()
+    }
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
+impl Defaultable for LambdaParam {
+    fn name(&self) -> Symbol {
+        self.name
+    }
+    fn has_default(&self) -> bool {
+        self.default_value.is_some()
+    }
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
+/// Unified validation for default value ordering.
+/// Returns (required_count, has_default_vec) where:
+/// - required_count: number of items without defaults
+/// - has_default_vec: whether each item has a default
+///
+/// The error_fn callback is called for each item that violates ordering rules
+/// (a non-defaulted item appearing after a defaulted item).
+fn validate_defaults<T: Defaultable, F>(
+    items: &[T],
+    interner: &Interner,
+    mut error_fn: F,
+) -> (usize, Vec<bool>)
+where
+    F: FnMut(String, Span),
+{
+    let mut seen_default = false;
+    let mut required_count = 0;
+    let mut has_default_vec = Vec::with_capacity(items.len());
+
+    for item in items {
+        let has_default = item.has_default();
+        has_default_vec.push(has_default);
+
+        if has_default {
+            seen_default = true;
+        } else if seen_default {
+            // Non-default item after a default item - report error
+            let name = interner.resolve(item.name()).to_string();
+            error_fn(name, item.span());
+        } else {
+            required_count += 1;
+        }
+    }
+
+    (required_count, has_default_vec)
+}
+
 /// Guard that holds a borrow of the db and provides resolver access.
 /// This allows safe access to the resolver without exposing the RefCell directly.
 pub struct ResolverGuard<'a> {
@@ -1185,13 +1319,17 @@ impl Analyzer {
                 .collect();
 
             // Get the base type and apply type arguments
+            use crate::type_arena::NominalKind;
             let arena = self.type_arena();
-            if let Some((type_def_id, _)) = arena.unwrap_record(base_type_id) {
-                return self.type_arena_mut().record(type_def_id, type_args);
-            } else if let Some((type_def_id, _)) = arena.unwrap_class(base_type_id) {
-                return self.type_arena_mut().class(type_def_id, type_args);
-            } else if let Some((type_def_id, _)) = arena.unwrap_interface(base_type_id) {
-                return self.type_arena_mut().interface(type_def_id, type_args);
+            if let Some((type_def_id, _, kind)) = arena.unwrap_nominal(base_type_id) {
+                return match kind {
+                    NominalKind::Record => self.type_arena_mut().record(type_def_id, type_args),
+                    NominalKind::Class => self.type_arena_mut().class(type_def_id, type_args),
+                    NominalKind::Interface => {
+                        self.type_arena_mut().interface(type_def_id, type_args)
+                    }
+                    NominalKind::Error => self.type_arena_mut().error_type(type_def_id),
+                };
             }
             // For other types, just return the base type (args might be ignored)
         }
@@ -1425,192 +1563,10 @@ impl Analyzer {
                     // Already processed in process_global_lets/process_module_imports
                 }
                 Decl::Class(class) => {
-                    // Set up type param scope for generic class methods
-                    // This allows method resolution to use constraint interfaces
-                    let generic_type_params = if !class.type_params.is_empty() {
-                        let class_name_id =
-                            self.name_table()
-                                .name_id(self.current_module, &[class.name], interner);
-                        class_name_id.and_then(|class_name_id| {
-                            let registry = self.entity_registry();
-                            registry
-                                .type_by_name(class_name_id)
-                                .and_then(|type_def_id| registry.get_generic_info(type_def_id))
-                                .map(|gi| gi.type_params.clone())
-                        })
-                    } else {
-                        None
-                    };
-                    if let Some(ref type_params) = generic_type_params {
-                        let mut scope = TypeParamScope::new();
-                        for tp in type_params {
-                            scope.add(tp.clone());
-                        }
-                        self.type_param_stack.push_scope(scope);
-                    }
-
-                    // Type-check field default expressions
-                    {
-                        let class_name_id =
-                            self.name_table()
-                                .name_id(self.current_module, &[class.name], interner);
-                        let field_types = class_name_id.and_then(|class_name_id| {
-                            let registry = self.entity_registry();
-                            registry
-                                .type_by_name(class_name_id)
-                                .and_then(|type_def_id| registry.get_generic_info(type_def_id))
-                                .map(|gi| gi.field_types.clone())
-                        });
-                        if let Some(field_types) = field_types {
-                            self.check_field_defaults(&class.fields, &field_types, interner)?;
-                        }
-                    }
-
-                    for method in &class.methods {
-                        self.check_method(method, class.name, interner)?;
-                    }
-                    // Check static methods if present
-                    if let Some(ref statics) = class.statics {
-                        for method in &statics.methods {
-                            self.check_static_method(method, class.name, interner)?;
-                        }
-                    }
-
-                    // Pop type param scope after checking methods
-                    if generic_type_params.is_some() {
-                        self.type_param_stack.pop();
-                    }
-                    // Validate interface satisfaction via EntityRegistry
-                    let maybe_type_def_id = {
-                        let class_name_id =
-                            self.name_table()
-                                .name_id(self.current_module, &[class.name], interner);
-                        class_name_id.and_then(|class_name_id| {
-                            let registry = self.entity_registry();
-                            registry.type_by_name(class_name_id)
-                        })
-                    };
-                    if let Some(type_def_id) = maybe_type_def_id {
-                        let type_methods = self.get_type_method_signatures(class.name, interner);
-                        let interface_ids = self
-                            .entity_registry()
-                            .get_implemented_interfaces(type_def_id);
-                        for interface_id in interface_ids {
-                            let interface_name_id = {
-                                let registry = self.entity_registry();
-                                registry.get_type(interface_id).name_id
-                            };
-                            let iface_name_str =
-                                self.name_table().last_segment_str(interface_name_id);
-                            if let Some(iface_name_str) = iface_name_str
-                                && let Some(iface_name) = interner.lookup(&iface_name_str)
-                            {
-                                self.validate_interface_satisfaction(
-                                    class.name,
-                                    iface_name,
-                                    &type_methods,
-                                    class.span,
-                                    interner,
-                                );
-                            }
-                        }
-                    }
+                    self.check_type_body(class, interner)?;
                 }
                 Decl::Record(record) => {
-                    // Set up type param scope for generic record methods
-                    // This allows method resolution to use constraint interfaces
-                    let generic_type_params = if !record.type_params.is_empty() {
-                        let record_name_id = {
-                            self.name_table()
-                                .name_id(self.current_module, &[record.name], interner)
-                        };
-                        record_name_id.and_then(|record_name_id| {
-                            let registry = self.entity_registry();
-                            registry
-                                .type_by_name(record_name_id)
-                                .and_then(|type_def_id| registry.get_generic_info(type_def_id))
-                                .map(|gi| gi.type_params.clone())
-                        })
-                    } else {
-                        None
-                    };
-                    if let Some(type_params) = &generic_type_params {
-                        let mut scope = TypeParamScope::new();
-                        for tp in type_params {
-                            scope.add(tp.clone());
-                        }
-                        self.type_param_stack.push_scope(scope);
-                    }
-
-                    // Type-check field default expressions
-                    {
-                        let record_name_id = self.name_table().name_id(
-                            self.current_module,
-                            &[record.name],
-                            interner,
-                        );
-                        let field_types = record_name_id.and_then(|record_name_id| {
-                            let registry = self.entity_registry();
-                            registry
-                                .type_by_name(record_name_id)
-                                .and_then(|type_def_id| registry.get_generic_info(type_def_id))
-                                .map(|gi| gi.field_types.clone())
-                        });
-                        if let Some(field_types) = field_types {
-                            self.check_field_defaults(&record.fields, &field_types, interner)?;
-                        }
-                    }
-
-                    for method in &record.methods {
-                        self.check_method(method, record.name, interner)?;
-                    }
-                    // Check static methods if present
-                    if let Some(ref statics) = record.statics {
-                        for method in &statics.methods {
-                            self.check_static_method(method, record.name, interner)?;
-                        }
-                    }
-
-                    // Pop type param scope after checking methods
-                    if !record.type_params.is_empty() {
-                        self.type_param_stack.pop();
-                    }
-
-                    // Validate interface satisfaction via EntityRegistry
-                    let maybe_type_def_id = {
-                        let record_name_id = self.name_table().name_id(
-                            self.current_module,
-                            &[record.name],
-                            interner,
-                        );
-                        record_name_id
-                            .and_then(|name_id| self.entity_registry().type_by_name(name_id))
-                    };
-                    if let Some(type_def_id) = maybe_type_def_id {
-                        let type_methods = self.get_type_method_signatures(record.name, interner);
-                        let interface_ids = self
-                            .entity_registry()
-                            .get_implemented_interfaces(type_def_id);
-                        for interface_id in interface_ids {
-                            let interface_name_id = {
-                                let registry = self.entity_registry();
-                                registry.get_type(interface_id).name_id
-                            };
-                            let iface_name_str =
-                                self.name_table().last_segment_str(interface_name_id);
-                            if let Some(iface_name_str) = iface_name_str
-                                && let Some(iface_name) = interner.lookup(&iface_name_str)
-                            {
-                                self.validate_interface_satisfaction(
-                                    record.name,
-                                    iface_name,
-                                    &type_methods,
-                                    record.span,
-                                    interner,
-                                );
-                            }
-                        }
-                    }
+                    self.check_type_body(record, interner)?;
                 }
                 Decl::Interface(interface_decl) => {
                     // Check static method default bodies
@@ -1658,6 +1614,115 @@ impl Analyzer {
             }
         }
         Ok(())
+    }
+
+    /// Check field defaults, methods, and static methods for a type declaration.
+    /// This is the common logic shared between Class and Record checking.
+    fn check_type_body<T: TypeBodyDecl>(
+        &mut self,
+        decl: &T,
+        interner: &Interner,
+    ) -> Result<(), Vec<TypeError>> {
+        let type_name = decl.name();
+
+        // Set up type param scope for generic type methods
+        let generic_type_params = if !decl.type_params().is_empty() {
+            let name_id = self
+                .name_table()
+                .name_id(self.current_module, &[type_name], interner);
+            name_id.and_then(|name_id| {
+                let registry = self.entity_registry();
+                registry
+                    .type_by_name(name_id)
+                    .and_then(|type_def_id| registry.get_generic_info(type_def_id))
+                    .map(|gi| gi.type_params.clone())
+            })
+        } else {
+            None
+        };
+
+        if let Some(ref type_params) = generic_type_params {
+            let mut scope = TypeParamScope::new();
+            for tp in type_params {
+                scope.add(tp.clone());
+            }
+            self.type_param_stack.push_scope(scope);
+        }
+
+        // Type-check field default expressions
+        {
+            let name_id = self
+                .name_table()
+                .name_id(self.current_module, &[type_name], interner);
+            let field_types = name_id.and_then(|name_id| {
+                let registry = self.entity_registry();
+                registry
+                    .type_by_name(name_id)
+                    .and_then(|type_def_id| registry.get_generic_info(type_def_id))
+                    .map(|gi| gi.field_types.clone())
+            });
+            if let Some(field_types) = field_types {
+                self.check_field_defaults(decl.fields(), &field_types, interner)?;
+            }
+        }
+
+        // Check instance methods
+        for method in decl.methods() {
+            self.check_method(method, type_name, interner)?;
+        }
+
+        // Check static methods if present
+        if let Some(statics) = decl.statics() {
+            for method in &statics.methods {
+                self.check_static_method(method, type_name, interner)?;
+            }
+        }
+
+        // Pop type param scope after checking methods
+        if generic_type_params.is_some() {
+            self.type_param_stack.pop();
+        }
+
+        // Validate interface satisfaction
+        self.validate_interfaces_for_type(type_name, decl.span(), interner);
+
+        Ok(())
+    }
+
+    /// Validate that a type satisfies all its implemented interfaces.
+    fn validate_interfaces_for_type(&mut self, type_name: Symbol, span: Span, interner: &Interner) {
+        let maybe_type_def_id = {
+            let name_id = self
+                .name_table()
+                .name_id(self.current_module, &[type_name], interner);
+            name_id.and_then(|name_id| self.entity_registry().type_by_name(name_id))
+        };
+
+        if let Some(type_def_id) = maybe_type_def_id {
+            let type_methods = self.get_type_method_signatures(type_name, interner);
+            let interface_ids = self
+                .entity_registry()
+                .get_implemented_interfaces(type_def_id);
+
+            for interface_id in interface_ids {
+                let interface_name_id = {
+                    let registry = self.entity_registry();
+                    registry.get_type(interface_id).name_id
+                };
+                let iface_name_str = self.name_table().last_segment_str(interface_name_id);
+                if let Some(iface_name_str) = iface_name_str
+                    && let Some(iface_name) = interner.lookup(&iface_name_str)
+                {
+                    self.validate_interface_satisfaction(
+                        type_name,
+                        iface_name,
+                        &type_methods,
+                        span,
+                        interner,
+                    );
+                }
+            }
+        }
     }
 
     fn analyze_error_decl(&mut self, decl: &ErrorDecl, interner: &Interner) {

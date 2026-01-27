@@ -41,14 +41,21 @@ impl Analyzer {
                 let field_name = interner.resolve(*field);
 
                 let struct_info = {
+                    use crate::type_arena::NominalKind;
                     let arena = self.type_arena();
-                    if let Some((id, args)) = arena.unwrap_class(obj_ty_id) {
-                        Some((id, args.clone(), true)) // is_class = true
-                    } else if let Some((id, _)) = arena.unwrap_record(obj_ty_id) {
-                        Some((id, crate::type_arena::TypeIdVec::new(), false))
-                    } else {
-                        None
-                    }
+                    arena
+                        .unwrap_nominal(obj_ty_id)
+                        .filter(|(_, _, kind)| kind.is_class_or_record())
+                        .map(|(id, args, kind)| {
+                            let is_class = kind == NominalKind::Class;
+                            // For records, use empty type args (immutable fields)
+                            let args = if is_class {
+                                args.clone()
+                            } else {
+                                crate::type_arena::TypeIdVec::new()
+                            };
+                            (id, args, is_class)
+                        })
                 };
 
                 if let Some((type_def_id, type_args_id, is_class)) = struct_info {
@@ -311,14 +318,21 @@ impl Analyzer {
                 let field_name = interner.resolve(*field);
 
                 let struct_info = {
+                    use crate::type_arena::NominalKind;
                     let arena = self.type_arena();
-                    if let Some((id, args)) = arena.unwrap_class(obj_ty_id) {
-                        Some((id, args.clone(), true)) // is_class = true
-                    } else if let Some((id, _)) = arena.unwrap_record(obj_ty_id) {
-                        Some((id, crate::type_arena::TypeIdVec::new(), false))
-                    } else {
-                        None
-                    }
+                    arena
+                        .unwrap_nominal(obj_ty_id)
+                        .filter(|(_, _, kind)| kind.is_class_or_record())
+                        .map(|(id, args, kind)| {
+                            let is_class = kind == NominalKind::Class;
+                            // For records, use empty type args (immutable fields)
+                            let args = if is_class {
+                                args.clone()
+                            } else {
+                                crate::type_arena::TypeIdVec::new()
+                            };
+                            (id, args, is_class)
+                        })
                 };
 
                 if let Some((type_def_id, type_args_id, is_class)) = struct_info {

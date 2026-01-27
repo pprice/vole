@@ -486,14 +486,12 @@ impl Analyzer {
     ) {
         // Try to get fields from the scrutinee type (record or class)
         let type_def_info = {
+            use crate::type_arena::NominalKind;
             let arena = self.type_arena();
-            if let Some((type_def_id, _args)) = arena.unwrap_record(scrutinee_type_id) {
-                Some(type_def_id)
-            } else if let Some((type_def_id, _args)) = arena.unwrap_class(scrutinee_type_id) {
-                Some(type_def_id)
-            } else {
-                None
-            }
+            arena
+                .unwrap_nominal(scrutinee_type_id)
+                .filter(|(_, _, kind)| matches!(kind, NominalKind::Class | NominalKind::Record))
+                .map(|(id, _, _)| id)
         };
 
         if let Some(type_def_id) = type_def_info {
