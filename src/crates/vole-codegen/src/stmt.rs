@@ -16,6 +16,42 @@ use super::types::{
     convert_to_type, fallible_error_tag_by_id, tuple_layout_id, type_id_to_cranelift,
 };
 
+/// Check if a block contains a `continue` statement (recursively).
+///
+/// This is used to determine if a for loop needs a separate continue block.
+/// Loops without continue can use an optimized 3-block structure.
+fn block_contains_continue(block: &vole_frontend::Block) -> bool {
+    for stmt in &block.stmts {
+        if stmt_contains_continue(stmt) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Check if a statement contains a `continue` (recursively).
+fn stmt_contains_continue(stmt: &Stmt) -> bool {
+    match stmt {
+        Stmt::Continue(_) => true,
+        Stmt::If(if_stmt) => {
+            block_contains_continue(&if_stmt.then_branch)
+                || if_stmt
+                    .else_branch
+                    .as_ref()
+                    .is_some_and(block_contains_continue)
+        }
+        // Note: we don't check nested loops because continue in a nested loop
+        // doesn't affect the outer loop
+        Stmt::While(_) | Stmt::For(_) => false,
+        Stmt::Let(_)
+        | Stmt::LetTuple(_)
+        | Stmt::Expr(_)
+        | Stmt::Return(_)
+        | Stmt::Break(_)
+        | Stmt::Raise(_) => false,
+    }
+}
+
 impl Cg<'_, '_, '_> {
     /// Pre-register a recursive lambda binding before compilation.
     ///
@@ -370,7 +406,12 @@ impl Cg<'_, '_, '_> {
         }
     }
 
-    /// Compile a for loop over a range
+    /// Compile a for loop over a range.
+    ///
+    /// Uses an optimized 3-block structure (header, body, exit) when the loop body
+    /// doesn't contain `continue` statements. For loops with `continue`, uses the
+    /// standard 4-block structure (header, body, continue, exit) to ensure the
+    /// counter is incremented before jumping back to header.
     fn for_range(
         &mut self,
         for_stmt: &vole_frontend::ForStmt,
@@ -383,6 +424,86 @@ impl Cg<'_, '_, '_> {
         self.builder.def_var(var, start_val.value);
         self.vars.insert(for_stmt.var_name, (var, TypeId::I64));
 
+        // Check if the loop body contains continue statements
+        let has_continue = block_contains_continue(&for_stmt.body);
+
+        if has_continue {
+            // Standard 4-block structure for loops with continue
+            self.for_range_with_continue(for_stmt, range, var, end_val.value)
+        } else {
+            // Optimized 3-block structure: inline increment at end of body
+            self.for_range_optimized(for_stmt, range, var, end_val.value)
+        }
+    }
+
+    /// Optimized for_range with 3 blocks (header, body, exit).
+    ///
+    /// The counter increment is inlined at the end of the body, saving one block
+    /// and one jump instruction per iteration.
+    fn for_range_optimized(
+        &mut self,
+        for_stmt: &vole_frontend::ForStmt,
+        range: &vole_frontend::RangeExpr,
+        var: Variable,
+        end_val: Value,
+    ) -> Result<bool, String> {
+        let header = self.builder.create_block();
+        let body_block = self.builder.create_block();
+        let exit_block = self.builder.create_block();
+
+        self.builder.ins().jump(header, &[]);
+
+        // Header: check loop condition
+        self.builder.switch_to_block(header);
+        let current = self.builder.use_var(var);
+        let cmp = if range.inclusive {
+            self.builder
+                .ins()
+                .icmp(IntCC::SignedLessThanOrEqual, current, end_val)
+        } else {
+            self.builder
+                .ins()
+                .icmp(IntCC::SignedLessThan, current, end_val)
+        };
+        self.builder
+            .ins()
+            .brif(cmp, body_block, &[], exit_block, &[]);
+
+        // Body: compile loop body, then increment and loop back
+        self.builder.switch_to_block(body_block);
+        // Register loop context - continue jumps to header (but there's no continue in this path)
+        self.cf.push_loop(exit_block, header);
+        let terminated = self.block(&for_stmt.body)?;
+        self.cf.pop_loop();
+
+        if !terminated {
+            // Inline the counter increment at end of body
+            let current = self.builder.use_var(var);
+            let next = self.builder.ins().iadd_imm(current, 1);
+            self.builder.def_var(var, next);
+            self.builder.ins().jump(header, &[]);
+        }
+
+        // Finalize: switch to exit and seal all blocks
+        self.builder.switch_to_block(exit_block);
+        self.builder.seal_block(header);
+        self.builder.seal_block(body_block);
+        self.builder.seal_block(exit_block);
+
+        Ok(false)
+    }
+
+    /// Standard for_range with 4 blocks (header, body, continue, exit).
+    ///
+    /// Used when the loop body contains `continue` statements, which need to
+    /// jump to the continue block to increment the counter before looping.
+    fn for_range_with_continue(
+        &mut self,
+        for_stmt: &vole_frontend::ForStmt,
+        range: &vole_frontend::RangeExpr,
+        var: Variable,
+        end_val: Value,
+    ) -> Result<bool, String> {
         let header = self.builder.create_block();
         let body_block = self.builder.create_block();
         let continue_block = self.builder.create_block();
@@ -390,24 +511,27 @@ impl Cg<'_, '_, '_> {
 
         self.builder.ins().jump(header, &[]);
 
+        // Header: check loop condition
         self.builder.switch_to_block(header);
         let current = self.builder.use_var(var);
         let cmp = if range.inclusive {
             self.builder
                 .ins()
-                .icmp(IntCC::SignedLessThanOrEqual, current, end_val.value)
+                .icmp(IntCC::SignedLessThanOrEqual, current, end_val)
         } else {
             self.builder
                 .ins()
-                .icmp(IntCC::SignedLessThan, current, end_val.value)
+                .icmp(IntCC::SignedLessThan, current, end_val)
         };
         self.builder
             .ins()
             .brif(cmp, body_block, &[], exit_block, &[]);
 
+        // Body: compile loop body
         self.builder.switch_to_block(body_block);
         self.compile_loop_body(&for_stmt.body, exit_block, continue_block)?;
 
+        // Continue: increment counter and jump to header
         self.builder.switch_to_block(continue_block);
         let current = self.builder.use_var(var);
         let next = self.builder.ins().iadd_imm(current, 1);
