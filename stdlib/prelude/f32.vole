@@ -23,7 +23,7 @@ implement Hashable for f32 {
 implement Default for f32 {
     statics {
         func default_value() -> f32 {
-            return 0.0
+            return 0.0_f32
         }
     }
 }

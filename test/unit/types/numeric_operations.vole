@@ -1,0 +1,311 @@
+// Extensive tests for numeric type operations
+// Tests arithmetic, type promotion, and edge cases for all numeric types
+
+tests {
+    // ============ f32 Operations ============
+    test "f32 + f32 returns f32" {
+        let a: f32 = 1.5_f32
+        let b: f32 = 2.5_f32
+        let c = a + b
+        assert(c == 4.0_f32)
+    }
+
+    test "f32 - f32 returns f32" {
+        let a: f32 = 5.0_f32
+        let b: f32 = 2.0_f32
+        let c = a - b
+        assert(c == 3.0_f32)
+    }
+
+    test "f32 * f32 returns f32" {
+        let a: f32 = 3.0_f32
+        let b: f32 = 4.0_f32
+        let c = a * b
+        assert(c == 12.0_f32)
+    }
+
+    test "f32 / f32 returns f32" {
+        let a: f32 = 10.0_f32
+        let b: f32 = 2.0_f32
+        let c = a / b
+        assert(c == 5.0_f32)
+    }
+
+    test "f32 comparisons" {
+        let a: f32 = 1.0_f32
+        let b: f32 = 2.0_f32
+        assert(a < b)
+        assert(b > a)
+        assert(a <= b)
+        assert(b >= a)
+        assert(a != b)
+        assert(a == 1.0_f32)
+    }
+
+    test "f32 in function return" {
+        func add32(x: f32, y: f32) -> f32 {
+            return x + y
+        }
+        let result = add32(1.5_f32, 2.5_f32)
+        assert(result == 4.0_f32)
+    }
+
+    test "f32 with negative values" {
+        let a: f32 = -1.5_f32
+        let b: f32 = 2.5_f32
+        let c = a + b
+        assert(c == 1.0_f32)
+    }
+
+    // ============ f64 Operations ============
+    test "f64 + f64 returns f64" {
+        let a: f64 = 1.5
+        let b: f64 = 2.5
+        let c = a + b
+        assert(c == 4.0)
+    }
+
+    test "f64 - f64 returns f64" {
+        let a = 5.0
+        let b = 2.0
+        let c = a - b
+        assert(c == 3.0)
+    }
+
+    test "f64 * f64 returns f64" {
+        let a = 3.0
+        let b = 4.0
+        let c = a * b
+        assert(c == 12.0)
+    }
+
+    test "f64 / f64 returns f64" {
+        let a = 10.0
+        let b = 2.0
+        let c = a / b
+        assert(c == 5.0)
+    }
+
+    // ============ Integer Operations ============
+    test "i8 + i8 promotes to i32" {
+        let a: i8 = 10
+        let b: i8 = 20
+        let c = a + b
+        assert(c == 30)
+    }
+
+    test "i16 + i16 promotes to i32" {
+        let a: i16 = 1000
+        let b: i16 = 2000
+        let c = a + b
+        assert(c == 3000)
+    }
+
+    test "i32 + i32 returns i32" {
+        let a: i32 = 100000
+        let b: i32 = 200000
+        let c = a + b
+        assert(c == 300000)
+    }
+
+    test "i64 + i64 returns i64" {
+        let a: i64 = 1000000000000
+        let b: i64 = 2000000000000
+        let c = a + b
+        assert(c == 3000000000000)
+    }
+
+    test "u8 + u8 promotes to i32" {
+        let a: u8 = 100
+        let b: u8 = 150
+        let c = a + b
+        assert(c == 250)
+    }
+
+    test "u16 + u16 promotes to i32" {
+        let a: u16 = 30000
+        let b: u16 = 30000
+        let c = a + b
+        assert(c == 60000)
+    }
+
+    test "u32 + u32 returns i32" {
+        let a: u32 = 1000000
+        let b: u32 = 2000000
+        let c = a + b
+        assert(c == 3000000)
+    }
+
+    test "u64 + u64 returns i64" {
+        let a: u64 = 1000000000000
+        let b: u64 = 2000000000000
+        let c = a + b
+        assert(c == 3000000000000)
+    }
+
+    // ============ Mixed Integer Operations ============
+    test "i8 + i32 promotes to i32" {
+        let a: i8 = 10
+        let b: i32 = 1000000
+        let c = a + b
+        assert(c == 1000010)
+    }
+
+    test "i16 + i64 promotes to i64" {
+        let a: i16 = 1000
+        let b: i64 = 1000000000000
+        let c = a + b
+        assert(c == 1000000001000)
+    }
+
+    test "u8 + i64 promotes to i64" {
+        let a: u8 = 100
+        let b: i64 = 1000000000000
+        let c = a + b
+        assert(c == 1000000000100)
+    }
+
+    // ============ Subtraction ============
+    test "integer subtraction" {
+        let a: i32 = 100
+        let b: i32 = 30
+        assert(a - b == 70)
+    }
+
+    test "subtraction with negative result" {
+        let a: i32 = 30
+        let b: i32 = 100
+        assert(a - b == -70)
+    }
+
+    // ============ Multiplication ============
+    test "integer multiplication" {
+        let a: i32 = 100
+        let b: i32 = 30
+        assert(a * b == 3000)
+    }
+
+    test "multiplication with negative" {
+        let a: i32 = -5
+        let b: i32 = 10
+        assert(a * b == -50)
+    }
+
+    // ============ Division ============
+    test "integer division" {
+        let a: i32 = 100
+        let b: i32 = 3
+        assert(a / b == 33)
+    }
+
+    test "float division" {
+        let a = 100.0
+        let b = 3.0
+        let c = a / b
+        // Approximate check
+        assert(c > 33.3 && c < 33.4)
+    }
+
+    // ============ Modulo ============
+    test "integer modulo" {
+        let a: i32 = 100
+        let b: i32 = 30
+        assert(a % b == 10)
+    }
+
+    test "float modulo" {
+        let a = 10.5
+        let b = 3.0
+        let c = a % b
+        assert(c > 1.4 && c < 1.6)
+    }
+
+    // ============ Bitwise Operations ============
+    test "bitwise and" {
+        let a: i32 = 0b1100
+        let b: i32 = 0b1010
+        assert((a & b) == 0b1000)
+    }
+
+    test "bitwise or" {
+        let a: i32 = 0b1100
+        let b: i32 = 0b1010
+        assert((a | b) == 0b1110)
+    }
+
+    test "bitwise xor" {
+        let a: i32 = 0b1100
+        let b: i32 = 0b1010
+        assert((a ^ b) == 0b0110)
+    }
+
+    test "left shift" {
+        let a: i32 = 1
+        assert((a << 4) == 16)
+    }
+
+    test "right shift" {
+        let a: i32 = 16
+        assert((a >> 2) == 4)
+    }
+
+    // ============ Compound Assignment ============
+    test "compound add" {
+        let mut a: i32 = 10
+        a += 5
+        assert(a == 15)
+    }
+
+    test "compound subtract" {
+        let mut a: i32 = 10
+        a -= 3
+        assert(a == 7)
+    }
+
+    test "compound multiply" {
+        let mut a: i32 = 10
+        a *= 3
+        assert(a == 30)
+    }
+
+    test "compound divide" {
+        let mut a: i32 = 30
+        a /= 3
+        assert(a == 10)
+    }
+
+    test "compound f32" {
+        let mut a: f32 = 10.0_f32
+        a += 5.0_f32
+        assert(a == 15.0_f32)
+    }
+
+    test "compound f64" {
+        let mut a = 10.0
+        a += 5.0
+        assert(a == 15.0)
+    }
+
+    // ============ Edge Cases ============
+    test "f32 very small numbers" {
+        let a: f32 = 0.000001_f32
+        let b: f32 = 0.000002_f32
+        let c = a + b
+        assert(c > 0.0_f32)
+    }
+
+    test "f64 very small numbers" {
+        let a = 0.000000000001
+        let b = 0.000000000002
+        let c = a + b
+        assert(c > 0.0)
+    }
+
+    test "integer overflow behavior" {
+        // Test that large numbers work
+        let a: i64 = 9223372036854775000
+        let b: i64 = 100
+        let c = a + b
+        assert(c > a)
+    }
+}
