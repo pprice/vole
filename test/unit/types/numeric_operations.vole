@@ -310,35 +310,118 @@ tests {
     }
 
     // ============ Return Type Inference ============
-    test "f32 return type infers literal" {
-        func get_f32() -> f32 {
-            return 0.0  // Should infer f32 from return type
+    // Test that unsuffixed literals infer their type from return type
+
+    // Signed integers
+    test "i8 return type infers literal" {
+        func get_i8() -> i8 {
+            return 42
         }
-        let x = get_f32()
-        assert(x == 0.0_f32)
+        assert(get_i8() == 42_i8)
     }
 
-    test "f64 return type infers literal" {
-        func get_f64() -> f64 {
-            return 1.5  // Should infer f64 from return type
+    test "i16 return type infers literal" {
+        func get_i16() -> i16 {
+            return 1000
         }
-        let x = get_f64()
-        assert(x == 1.5)
+        assert(get_i16() == 1000_i16)
     }
 
     test "i32 return type infers literal" {
         func get_i32() -> i32 {
-            return 42  // Should infer i32 from return type
+            return 100000
         }
-        let x = get_i32()
-        assert(x == 42)
+        assert(get_i32() == 100000_i32)
     }
 
-    test "i8 return type infers literal" {
-        func get_i8() -> i8 {
-            return 10  // Should infer i8 from return type
+    test "i64 return type infers literal" {
+        func get_i64() -> i64 {
+            return 1000000000000
         }
-        let x = get_i8()
-        assert(x == 10)
+        assert(get_i64() == 1000000000000_i64)
     }
+
+    // Note: i128 return inference test skipped due to codegen limitations
+
+    // Unsigned integers
+    test "u8 return type infers literal" {
+        func get_u8() -> u8 {
+            return 200
+        }
+        assert(get_u8() == 200_u8)
+    }
+
+    test "u16 return type infers literal" {
+        func get_u16() -> u16 {
+            return 50000
+        }
+        assert(get_u16() == 50000_u16)
+    }
+
+    test "u32 return type infers literal" {
+        func get_u32() -> u32 {
+            return 3000000000
+        }
+        assert(get_u32() == 3000000000_u32)
+    }
+
+    test "u64 return type infers literal" {
+        func get_u64() -> u64 {
+            return 9000000000000000000
+        }
+        assert(get_u64() == 9000000000000000000_u64)
+    }
+
+    // Floats
+    test "f32 return type infers literal" {
+        func get_f32() -> f32 {
+            return 3.14
+        }
+        let x = get_f32()
+        assert(x > 3.13_f32 && x < 3.15_f32)
+    }
+
+    test "f64 return type infers literal" {
+        func get_f64() -> f64 {
+            return 3.14159265358979
+        }
+        let x = get_f64()
+        assert(x > 3.14 && x < 3.15)
+    }
+
+    // Edge cases - zero literals
+    test "i8 return infers zero" {
+        func get_zero_i8() -> i8 {
+            return 0
+        }
+        assert(get_zero_i8() == 0_i8)
+    }
+
+    test "u8 return infers zero" {
+        func get_zero_u8() -> u8 {
+            return 0
+        }
+        assert(get_zero_u8() == 0_u8)
+    }
+
+    test "f32 return infers zero" {
+        func get_zero_f32() -> f32 {
+            return 0.0
+        }
+        assert(get_zero_f32() == 0.0_f32)
+    }
+
+    test "f64 return infers zero" {
+        func get_zero_f64() -> f64 {
+            return 0.0
+        }
+        assert(get_zero_f64() == 0.0)
+    }
+
+    // Note: Negative literals like `return -100` are Unary(Neg, literal),
+    // not raw literals, so they require explicit suffix for non-default types.
+    // This is expected behavior - inference only applies to raw literals.
+
+    // Note: Expression results like `x + x` follow promotion rules,
+    // not inference. i8 + i8 promotes to i32 by design.
 }
