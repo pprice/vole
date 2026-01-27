@@ -1,0 +1,26 @@
+// Test FMA instruction generation
+// Verifies that (x * y) + z patterns emit fma instructions
+
+func fma_add_left(x: f64, y: f64, z: f64) -> f64 {
+    return (x * y) + z
+}
+
+func fma_add_right(x: f64, y: f64, z: f64) -> f64 {
+    return z + (x * y)
+}
+
+func fma_sub_left(x: f64, y: f64, z: f64) -> f64 {
+    return (x * y) - z
+}
+
+func fma_sub_right(x: f64, y: f64, z: f64) -> f64 {
+    return z - (x * y)
+}
+
+func main() {
+    // Test runtime correctness
+    print(fma_add_left(2.0, 3.0, 4.0))   // 2*3+4 = 10
+    print(fma_add_right(2.0, 3.0, 4.0))  // 4+2*3 = 10
+    print(fma_sub_left(2.0, 3.0, 4.0))   // 2*3-4 = 2
+    print(fma_sub_right(2.0, 3.0, 4.0))  // 4-2*3 = -2
+}
