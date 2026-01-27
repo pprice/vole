@@ -13,6 +13,7 @@ mod intrinsics;
 pub mod jit;
 mod lambda;
 pub mod loop_analysis;
+pub mod loop_param_opt;
 mod method_resolution;
 mod ops;
 mod stmt;
@@ -34,3 +35,6 @@ pub use analyzed::AnalyzedProgram;
 
 // Loop analysis
 pub use loop_analysis::{FunctionLoopInfo, InductionInfo, InductionStep, LoopInfo, analyze_loops};
+
+// Loop parameter optimization
+pub use loop_param_opt::{LoopParamOptStats, optimize_loop_params};

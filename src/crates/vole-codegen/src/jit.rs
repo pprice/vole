@@ -65,6 +65,8 @@ pub struct JitOptions {
     pub release: bool,
     /// Enable disassembly output
     pub disasm: bool,
+    /// Enable loop parameter optimization (removes invariant block params from loops)
+    pub loop_param_opt: bool,
 }
 
 impl JitOptions {
@@ -73,6 +75,7 @@ impl JitOptions {
         Self {
             release: false,
             disasm: false,
+            loop_param_opt: false,
         }
     }
 
@@ -81,6 +84,7 @@ impl JitOptions {
         Self {
             release: true,
             disasm: false,
+            loop_param_opt: true, // Enable loop optimization in release mode
         }
     }
 
@@ -89,7 +93,14 @@ impl JitOptions {
         Self {
             release: false,
             disasm: true,
+            loop_param_opt: false,
         }
+    }
+
+    /// Enable loop parameter optimization
+    pub fn with_loop_param_opt(mut self) -> Self {
+        self.loop_param_opt = true;
+        self
     }
 }
 
@@ -108,6 +119,8 @@ pub struct JitContext {
     disasm: bool,
     /// Collected disassembly output from compiled functions
     disasm_output: Vec<(String, String)>,
+    /// Enable loop parameter optimization
+    loop_param_opt: bool,
 }
 
 impl JitContext {
@@ -185,6 +198,7 @@ impl JitContext {
             source_file: None,
             disasm: options.disasm,
             disasm_output: Vec::new(),
+            loop_param_opt: options.loop_param_opt,
         };
 
         // Import runtime functions so they can be called
@@ -1014,6 +1028,11 @@ impl JitContext {
         // Run CFG cleanup to eliminate trampoline blocks before Cranelift compilation
         crate::cfg_cleanup::cleanup_cfg(&mut self.ctx.func);
 
+        // Run loop parameter optimization if enabled
+        if self.loop_param_opt {
+            crate::loop_param_opt::optimize_loop_params(&mut self.ctx.func);
+        }
+
         // Enable disassembly if requested
         if self.disasm {
             self.ctx.set_disasm(true);
@@ -1044,6 +1063,11 @@ impl JitContext {
     /// Get collected disassembly output
     pub fn get_disasm(&self) -> &[(String, String)] {
         &self.disasm_output
+    }
+
+    /// Check if loop parameter optimization is enabled
+    pub fn loop_param_opt_enabled(&self) -> bool {
+        self.loop_param_opt
     }
 
     /// Finalize all functions and get code pointers

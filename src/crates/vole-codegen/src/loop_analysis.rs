@@ -249,8 +249,11 @@ impl FunctionLoopInfo {
 
                 // Check what value is passed for this parameter position
                 if let Some(passed_value) = self.get_jump_arg(func, term_inst, header, param_idx) {
+                    // Resolve aliases before comparing - a value might be an alias for the param
+                    let resolved_passed = func.dfg.resolve_aliases(passed_value);
+                    let resolved_param = func.dfg.resolve_aliases(param);
                     // If the passed value is different from the parameter, it's modified
-                    if passed_value != param {
+                    if resolved_passed != resolved_param {
                         is_modified = true;
                         break;
                     }
@@ -280,10 +283,11 @@ impl FunctionLoopInfo {
 
         for dest in destinations {
             if dest.block(&func.dfg.value_lists) == target_block
-                && param_idx < dest.len(&func.dfg.value_lists) {
-                    let arg = dest.args(&func.dfg.value_lists).nth(param_idx)?;
-                    return arg.as_value();
-                }
+                && param_idx < dest.len(&func.dfg.value_lists)
+            {
+                let arg = dest.args(&func.dfg.value_lists).nth(param_idx)?;
+                return arg.as_value();
+            }
         }
 
         None
@@ -377,9 +381,10 @@ impl FunctionLoopInfo {
                 } else if args.len() == 1 && opcode == Opcode::IaddImm {
                     // iadd_imm v1, const
                     if args[0] == base
-                        && let Some(imm) = self.get_iadd_imm(func, inst) {
-                            return Some(InductionStep::ConstInt(imm));
-                        }
+                        && let Some(imm) = self.get_iadd_imm(func, inst)
+                    {
+                        return Some(InductionStep::ConstInt(imm));
+                    }
                 }
             }
             Opcode::Isub => {
@@ -408,10 +413,12 @@ impl FunctionLoopInfo {
             }
             Opcode::Fsub => {
                 let args = func.dfg.inst_args(inst);
-                if args.len() == 2 && args[0] == base
-                    && let Some(c) = self.get_const_float(func, args[1]) {
-                        return Some(InductionStep::ConstFloat(-c));
-                    }
+                if args.len() == 2
+                    && args[0] == base
+                    && let Some(c) = self.get_const_float(func, args[1])
+                {
+                    return Some(InductionStep::ConstFloat(-c));
+                }
             }
             _ => {}
         }

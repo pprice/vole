@@ -1138,6 +1138,11 @@ impl Compiler<'_> {
         // Run CFG cleanup to show optimized IR
         crate::cfg_cleanup::cleanup_cfg(&mut self.jit.ctx.func);
 
+        // Run loop parameter optimization if enabled
+        if self.jit.loop_param_opt_enabled() {
+            crate::loop_param_opt::optimize_loop_params(&mut self.jit.ctx.func);
+        }
+
         Ok(())
     }
 
@@ -1182,6 +1187,11 @@ impl Compiler<'_> {
 
         // Run CFG cleanup to show optimized IR
         crate::cfg_cleanup::cleanup_cfg(&mut self.jit.ctx.func);
+
+        // Run loop parameter optimization if enabled
+        if self.jit.loop_param_opt_enabled() {
+            crate::loop_param_opt::optimize_loop_params(&mut self.jit.ctx.func);
+        }
 
         Ok(())
     }
