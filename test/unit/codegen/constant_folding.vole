@@ -280,4 +280,116 @@ tests {
         let result = 10 * -5 + 100
         assert(result == 50)
     }
+
+    // ============ Constant propagation tests ============
+
+    test "propagate integer constant" {
+        // The constant `size` should be propagated to the usage
+        let size = 4000
+        let result = size + 1
+        assert(result == 4001)
+    }
+
+    test "propagate float constant" {
+        // Float constants should also propagate
+        let pi = 3.14159
+        let result = pi * 2.0
+        assert(result > 6.28 && result < 6.29)
+    }
+
+    test "propagate boolean constant" {
+        let flag = true
+        let result = flag && true
+        assert(result == true)
+    }
+
+    test "propagate to division optimization" {
+        // This is the key optimization for mandelbrot:
+        // let size = 4000
+        // let cr = 2.0 * x / size
+        // After propagation: 2.0 * x / 4000
+        // After div opt: 2.0 * x * 0.00025
+        let size = 4000.0
+        let x = 2000.0
+        let cr = 2.0 * x / size - 1.5
+        // 2.0 * 2000 / 4000 - 1.5 = 4000/4000 - 1.5 = 1.0 - 1.5 = -0.5
+        assert(cr == -0.5)
+    }
+
+    test "propagate integer to float division" {
+        // Integer constant propagated, then division optimized
+        let size = 4000
+        let x = 2000.0
+        // 2.0 * 2000 / 4000 = 1.0
+        let result = 2.0 * x / size
+        assert(result == 1.0)
+    }
+
+    test "no propagation for mutable" {
+        // Mutable variables should NOT be propagated
+        let mut value = 10
+        let a = value + 1  // Should not replace value with 10
+        value = 20
+        let b = value + 1  // Should definitely use current value of 20
+        assert(a == 11)
+        assert(b == 21)
+    }
+
+    test "propagate typed integer constant" {
+        // Use suffix to indicate type, no explicit type annotation
+        // (explicit annotation prevents propagation due to potential union storage)
+        let size = 100_i32
+        let result = size * 2_i32
+        assert(result == 200_i32)
+    }
+
+    test "propagate typed float constant" {
+        // Use suffix to indicate type, no explicit type annotation
+        let value = 2.5_f32
+        let result = value * 4.0_f32
+        assert(result == 10.0_f32)
+    }
+
+    test "chained constant propagation" {
+        // Constants defined in terms of other constants
+        let a = 10
+        let b = a + 5  // b = 15
+        let c = b * 2  // c = 30
+        assert(c == 30)
+    }
+
+    test "propagate in loop condition" {
+        let limit = 5
+        let mut sum = 0
+        let mut i = 0
+        while i < limit {
+            sum = sum + 1
+            i = i + 1
+        }
+        assert(sum == 5)
+    }
+
+    test "propagate across multiple uses" {
+        let constant = 42
+        let a = constant + 1
+        let b = constant * 2
+        let c = constant - 10
+        assert(a == 43)
+        assert(b == 84)
+        assert(c == 32)
+    }
+
+    test "propagate negative constant" {
+        let neg = -10
+        let result = neg + 20
+        assert(result == 10)
+    }
+
+    test "propagate constant from expression" {
+        // If the initializer is a constant expression, it should be folded
+        // and then the folded value should be propagated
+        let value = 2 + 3  // Folded to 5
+        let result = value * 2  // Propagated as 5 * 2 = 10
+        assert(result == 10)
+    }
 }

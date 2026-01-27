@@ -10,7 +10,7 @@ use crate::codegen::{Compiler, JitContext, JitOptions};
 use crate::commands::common::AnalyzedProgram;
 use crate::errors::render_to_stderr;
 use crate::frontend::{AstPrinter, Parser};
-use crate::sema::Analyzer;
+use crate::sema::{Analyzer, optimize_all};
 
 /// Inspect compilation output for the given files
 pub fn inspect_files(
@@ -79,7 +79,7 @@ pub fn inspect_files(
             InspectType::Ir => {
                 // Parse
                 let mut parser = Parser::with_file(&source, &file_path);
-                let program = match parser.parse_program() {
+                let mut program = match parser.parse_program() {
                     Ok(p) => p,
                     Err(e) => {
                         let report = miette::Report::new(e.error.clone())
@@ -103,7 +103,10 @@ pub fn inspect_files(
                     had_error = true;
                     continue;
                 }
-                let output = analyzer.into_analysis_results();
+                let mut output = analyzer.into_analysis_results();
+
+                // Optimizer phase (constant folding, algebraic simplifications)
+                let _stats = optimize_all(&mut program, &interner, &mut output.expression_data);
 
                 // Generate IR
                 let analyzed = AnalyzedProgram::from_analysis(program, interner, output);

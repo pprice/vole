@@ -20,9 +20,10 @@
 //! ```
 
 use crate::ExpressionData;
+use std::collections::HashMap;
 use vole_frontend::{
     BinaryExpr, BinaryOp, Block, Decl, Expr, ExprKind, FuncBody, FuncDecl, Interner, NumericSuffix,
-    Program, Stmt,
+    Program, Stmt, Symbol,
 };
 
 /// Statistics from constant folding.
@@ -34,6 +35,8 @@ pub struct FoldingStats {
     pub div_to_mul: usize,
     /// Number of divisions replaced with bit shifts
     pub div_to_shift: usize,
+    /// Number of constant propagations (variable references replaced with literals)
+    pub constants_propagated: usize,
 }
 
 /// A constant value that can be computed at compile time.
@@ -72,6 +75,9 @@ struct ConstantFolder<'a> {
     interner: &'a Interner,
     expr_data: &'a mut ExpressionData,
     stats: FoldingStats,
+    /// Map from immutable variable symbols to their constant values.
+    /// Used for constant propagation.
+    constant_bindings: HashMap<Symbol, ConstValue>,
 }
 
 impl<'a> ConstantFolder<'a> {
@@ -80,6 +86,7 @@ impl<'a> ConstantFolder<'a> {
             interner,
             expr_data,
             stats: FoldingStats::default(),
+            constant_bindings: HashMap::new(),
         }
     }
 
@@ -99,12 +106,26 @@ impl<'a> ConstantFolder<'a> {
                     self.fold_decl(inner_decl);
                 }
                 for test in &mut tests.tests {
+                    // Each test has its own fresh scope
+                    let saved_bindings = std::mem::take(&mut self.constant_bindings);
                     self.fold_func_body(&mut test.body);
+                    self.constant_bindings = saved_bindings;
                 }
             }
             Decl::Let(let_stmt) => {
                 if let vole_frontend::LetInit::Expr(ref mut expr) = let_stmt.init {
                     self.fold_expr(expr);
+
+                    // For immutable bindings (not `let mut`), record constant values
+                    // for later propagation in subsequent declarations.
+                    // Only propagate if there's no explicit type annotation (see
+                    // comment in fold_stmt for rationale).
+                    if !let_stmt.mutable
+                        && let_stmt.ty.is_none()
+                        && let Some(const_val) = self.get_const_value(expr)
+                    {
+                        self.constant_bindings.insert(let_stmt.name, const_val);
+                    }
                 }
             }
             Decl::LetTuple(let_tuple) => {
@@ -136,13 +157,17 @@ impl<'a> ConstantFolder<'a> {
 
     /// Fold constants in a function declaration.
     fn fold_func(&mut self, func: &mut FuncDecl) {
-        // Fold default parameter values
+        // Fold default parameter values (using outer scope's constants)
         for param in &mut func.params {
             if let Some(ref mut default) = param.default_value {
                 self.fold_expr(default);
             }
         }
+        // Save current constant bindings and start fresh for this function
+        let saved_bindings = std::mem::take(&mut self.constant_bindings);
         self.fold_func_body(&mut func.body);
+        // Restore outer scope's constant bindings
+        self.constant_bindings = saved_bindings;
     }
 
     /// Fold constants in a function body.
@@ -166,6 +191,20 @@ impl<'a> ConstantFolder<'a> {
             Stmt::Let(let_stmt) => {
                 if let vole_frontend::LetInit::Expr(ref mut expr) = let_stmt.init {
                     self.fold_expr(expr);
+
+                    // For immutable bindings (not `let mut`), record constant values
+                    // for later propagation.
+                    // IMPORTANT: Only propagate if there's no explicit type annotation.
+                    // If there's a type annotation, the variable might be stored as a
+                    // union/optional (e.g., `let x: i32? = 42`), and propagating the
+                    // literal would change the semantics (x is a tagged union pointer,
+                    // not just the value 42).
+                    if !let_stmt.mutable
+                        && let_stmt.ty.is_none()
+                        && let Some(const_val) = self.get_const_value(expr)
+                    {
+                        self.constant_bindings.insert(let_stmt.name, const_val);
+                    }
                 }
             }
             Stmt::LetTuple(let_tuple) => {
@@ -208,7 +247,16 @@ impl<'a> ConstantFolder<'a> {
     /// This recursively visits all sub-expressions and applies folding
     /// transformations. The expression is modified in place.
     fn fold_expr(&mut self, expr: &mut Expr) {
-        // First, recursively fold sub-expressions
+        // First, try constant propagation for identifiers
+        if let ExprKind::Identifier(sym) = &expr.kind
+            && let Some(const_val) = self.constant_bindings.get(sym).cloned()
+        {
+            expr.kind = const_val.to_expr_kind();
+            self.stats.constants_propagated += 1;
+            return;
+        }
+
+        // Then, recursively fold sub-expressions
         self.fold_expr_children(expr);
 
         // Then try to fold this expression
@@ -275,7 +323,11 @@ impl<'a> ConstantFolder<'a> {
                         self.fold_expr(default);
                     }
                 }
+                // Lambdas capture their enclosing scope, so they inherit constant bindings
+                // But we need to save/restore so any new bindings inside don't leak out
+                let saved_bindings = self.constant_bindings.clone();
                 self.fold_func_body(&mut lambda.body);
+                self.constant_bindings = saved_bindings;
             }
             ExprKind::StructLiteral(lit) => {
                 for field in &mut lit.fields {
@@ -474,7 +526,7 @@ impl<'a> ConstantFolder<'a> {
         }
     }
 
-    /// Get the constant value of an expression if it's a literal.
+    /// Get the constant value of an expression if it's a literal or a known constant variable.
     fn get_const_value(&self, expr: &Expr) -> Option<ConstValue> {
         match &expr.kind {
             ExprKind::IntLiteral(v, suffix) => Some(ConstValue::Int(*v, *suffix)),
@@ -484,6 +536,8 @@ impl<'a> ConstantFolder<'a> {
             // Recurse into binary/unary for nested constant expressions
             ExprKind::Binary(bin) => self.try_fold_binary(bin),
             ExprKind::Unary(unary) => self.try_fold_unary(unary),
+            // Look up constant bindings for identifiers (constant propagation)
+            ExprKind::Identifier(sym) => self.constant_bindings.get(sym).cloned(),
             _ => None,
         }
     }
@@ -526,9 +580,27 @@ impl<'a> ConstantFolder<'a> {
                 bin.right = reciprocal_expr;
                 self.stats.div_to_mul += 1;
             }
-            ConstValue::Int(divisor_val, suffix) if divisor_val > 0 => {
-                // Check if it's a power of 2 and if type is unsigned
-                if let Some(shift) = power_of_two_shift(divisor_val) {
+            ConstValue::Int(divisor_val, _suffix) if divisor_val > 0 => {
+                // Check if the result type is floating-point (float / int -> float)
+                let is_float_result = type_id.map(|t| t.is_float()).unwrap_or(false);
+
+                if is_float_result && divisor_val != 0 {
+                    // For float results, convert integer divisor to float reciprocal
+                    // x / 4000 -> x * 0.00025 (when result type is float)
+                    let reciprocal = 1.0 / (divisor_val as f64);
+
+                    // Create the new multiplication expression with float reciprocal
+                    let reciprocal_expr = Expr {
+                        id: bin.right.id,
+                        kind: ExprKind::FloatLiteral(reciprocal, None),
+                        span: bin.right.span,
+                    };
+
+                    bin.op = BinaryOp::Mul;
+                    bin.right = reciprocal_expr;
+                    self.stats.div_to_mul += 1;
+                } else if let Some(shift) = power_of_two_shift(divisor_val) {
+                    // Check if it's a power of 2 and if type is unsigned
                     // Only optimize unsigned integers here; signed division
                     // has different semantics (rounds toward zero vs toward -infinity)
                     // The codegen already handles this optimization for unsigned
@@ -538,7 +610,7 @@ impl<'a> ConstantFolder<'a> {
                         // Replace x / 2^n with x >> n
                         let shift_expr = Expr {
                             id: bin.right.id,
-                            kind: ExprKind::IntLiteral(shift, suffix),
+                            kind: ExprKind::IntLiteral(shift, None),
                             span: bin.right.span,
                         };
 

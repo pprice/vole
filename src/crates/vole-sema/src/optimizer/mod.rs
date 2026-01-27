@@ -52,6 +52,8 @@ pub struct OptimizerStats {
     pub div_to_mul: usize,
     /// Number of divisions replaced with bit shifts
     pub div_to_shift: usize,
+    /// Number of constant propagations (variable references replaced with literals)
+    pub constants_propagated: usize,
 }
 
 /// Run all enabled optimization passes on the program.
@@ -83,6 +85,7 @@ pub fn optimize(
         stats.constants_folded = folding_stats.constants_folded;
         stats.div_to_mul = folding_stats.div_to_mul;
         stats.div_to_shift = folding_stats.div_to_shift;
+        stats.constants_propagated = folding_stats.constants_propagated;
     }
 
     stats
