@@ -12,6 +12,7 @@ mod interface_vtable;
 mod intrinsics;
 pub mod jit;
 mod lambda;
+pub mod loop_analysis;
 mod method_resolution;
 mod ops;
 mod stmt;
@@ -30,3 +31,6 @@ pub use errors::CodegenError;
 
 // Analysis types
 pub use analyzed::AnalyzedProgram;
+
+// Loop analysis
+pub use loop_analysis::{FunctionLoopInfo, InductionInfo, InductionStep, LoopInfo, analyze_loops};
