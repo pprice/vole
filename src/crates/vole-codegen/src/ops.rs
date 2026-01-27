@@ -29,6 +29,11 @@ impl Cg<'_, '_, '_> {
             return Ok(result);
         }
 
+        // Try to optimize multiply/divide/mod by power of 2 to shifts
+        if let Some(result) = self.try_emit_power_of_two(bin)? {
+            return Ok(result);
+        }
+
         let left = self.expr(&bin.left)?;
 
         // Handle string concatenation: string + Stringable
@@ -62,75 +67,174 @@ impl Cg<'_, '_, '_> {
         let right_unwrapped = unwrap_grouping(&bin.right);
 
         // Check if left is a multiplication: (x * y) + z or (x * y) - z
-        if let ExprKind::Binary(ref left_bin) = left_unwrapped.kind {
-            if left_bin.op == BinaryOp::Mul {
-                // Check if this is a floating-point operation by looking at operand types
-                let x = self.expr(&left_bin.left)?;
-                if x.ty == types::F64 || x.ty == types::F32 {
-                    let y = self.expr(&left_bin.right)?;
-                    let z = self.expr(&bin.right)?;
+        if let ExprKind::Binary(ref left_bin) = left_unwrapped.kind
+            && left_bin.op == BinaryOp::Mul
+        {
+            // Check if this is a floating-point operation by looking at operand types
+            let x = self.expr(&left_bin.left)?;
+            if x.ty == types::F64 || x.ty == types::F32 {
+                let y = self.expr(&left_bin.right)?;
+                let z = self.expr(&bin.right)?;
 
-                    let result = if bin.op == BinaryOp::Add {
-                        // (x * y) + z → fma(x, y, z)
-                        self.builder.ins().fma(x.value, y.value, z.value)
-                    } else {
-                        // (x * y) - z → fma(x, y, -z)
-                        let neg_z = self.builder.ins().fneg(z.value);
-                        self.builder.ins().fma(x.value, y.value, neg_z)
-                    };
+                let result = if bin.op == BinaryOp::Add {
+                    // (x * y) + z → fma(x, y, z)
+                    self.builder.ins().fma(x.value, y.value, z.value)
+                } else {
+                    // (x * y) - z → fma(x, y, -z)
+                    let neg_z = self.builder.ins().fneg(z.value);
+                    self.builder.ins().fma(x.value, y.value, neg_z)
+                };
 
-                    return Ok(Some(CompiledValue {
-                        value: result,
-                        ty: x.ty,
-                        type_id: x.type_id,
-                    }));
-                }
+                return Ok(Some(CompiledValue {
+                    value: result,
+                    ty: x.ty,
+                    type_id: x.type_id,
+                }));
             }
         }
 
         // Check if right is a multiplication: z + (x * y)
-        if bin.op == BinaryOp::Add {
-            if let ExprKind::Binary(ref right_bin) = right_unwrapped.kind {
-                if right_bin.op == BinaryOp::Mul {
-                    let z = self.expr(&bin.left)?;
-                    if z.ty == types::F64 || z.ty == types::F32 {
-                        let x = self.expr(&right_bin.left)?;
-                        let y = self.expr(&right_bin.right)?;
+        if bin.op == BinaryOp::Add
+            && let ExprKind::Binary(ref right_bin) = right_unwrapped.kind
+            && right_bin.op == BinaryOp::Mul
+        {
+            let z = self.expr(&bin.left)?;
+            if z.ty == types::F64 || z.ty == types::F32 {
+                let x = self.expr(&right_bin.left)?;
+                let y = self.expr(&right_bin.right)?;
 
-                        // z + (x * y) → fma(x, y, z)
-                        let result = self.builder.ins().fma(x.value, y.value, z.value);
+                // z + (x * y) → fma(x, y, z)
+                let result = self.builder.ins().fma(x.value, y.value, z.value);
 
-                        return Ok(Some(CompiledValue {
-                            value: result,
-                            ty: z.ty,
-                            type_id: z.type_id,
-                        }));
-                    }
-                }
+                return Ok(Some(CompiledValue {
+                    value: result,
+                    ty: z.ty,
+                    type_id: z.type_id,
+                }));
             }
         }
 
         // Check for z - (x * y) pattern (FNMA)
-        if bin.op == BinaryOp::Sub {
-            if let ExprKind::Binary(ref right_bin) = right_unwrapped.kind {
-                if right_bin.op == BinaryOp::Mul {
-                    let z = self.expr(&bin.left)?;
-                    if z.ty == types::F64 || z.ty == types::F32 {
-                        let x = self.expr(&right_bin.left)?;
-                        let y = self.expr(&right_bin.right)?;
+        if bin.op == BinaryOp::Sub
+            && let ExprKind::Binary(ref right_bin) = right_unwrapped.kind
+            && right_bin.op == BinaryOp::Mul
+        {
+            let z = self.expr(&bin.left)?;
+            if z.ty == types::F64 || z.ty == types::F32 {
+                let x = self.expr(&right_bin.left)?;
+                let y = self.expr(&right_bin.right)?;
 
-                        // z - (x * y) → fma(-x, y, z)
-                        let neg_x = self.builder.ins().fneg(x.value);
-                        let result = self.builder.ins().fma(neg_x, y.value, z.value);
+                // z - (x * y) → fma(-x, y, z)
+                let neg_x = self.builder.ins().fneg(x.value);
+                let result = self.builder.ins().fma(neg_x, y.value, z.value);
 
-                        return Ok(Some(CompiledValue {
-                            value: result,
-                            ty: z.ty,
-                            type_id: z.type_id,
-                        }));
+                return Ok(Some(CompiledValue {
+                    value: result,
+                    ty: z.ty,
+                    type_id: z.type_id,
+                }));
+            }
+        }
+
+        Ok(None)
+    }
+
+    /// Try to optimize integer multiply/divide/mod by power of 2 to shifts/masks
+    /// Returns Some(result) if optimization was applied, None otherwise
+    fn try_emit_power_of_two(&mut self, bin: &BinaryExpr) -> Result<Option<CompiledValue>, String> {
+        // Only handle Mul, Div, Mod for power-of-2 optimization
+        if !matches!(bin.op, BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod) {
+            return Ok(None);
+        }
+
+        /// Check if n is a positive power of 2, return the shift amount (log2)
+        fn power_of_two_shift(n: i64) -> Option<i64> {
+            if n > 0 && (n & (n - 1)) == 0 {
+                Some(n.trailing_zeros() as i64)
+            } else {
+                None
+            }
+        }
+
+        /// Helper to unwrap Grouping expressions
+        fn unwrap_grouping(expr: &vole_frontend::Expr) -> &vole_frontend::Expr {
+            match &expr.kind {
+                ExprKind::Grouping(inner) => unwrap_grouping(inner),
+                _ => expr,
+            }
+        }
+
+        let left_unwrapped = unwrap_grouping(&bin.left);
+        let right_unwrapped = unwrap_grouping(&bin.right);
+
+        // Check if right operand is a power-of-2 integer literal
+        if let ExprKind::IntLiteral(value, _) = right_unwrapped.kind
+            && let Some(shift_amount) = power_of_two_shift(value)
+        {
+            let left = self.expr(&bin.left)?;
+
+            // Only optimize integer types, not floats
+            if left.ty == types::F64 || left.ty == types::F32 {
+                return Ok(None);
+            }
+
+            let shift_val = self.builder.ins().iconst(left.ty, shift_amount);
+            let left_type_id = left.type_id;
+
+            let result = match bin.op {
+                BinaryOp::Mul => {
+                    // x * 2^n → x << n
+                    self.builder.ins().ishl(left.value, shift_val)
+                }
+                BinaryOp::Div => {
+                    // Only safe for unsigned: x / 2^n → x >> n
+                    // Signed division rounds toward zero, but arithmetic shift rounds toward -infinity
+                    if left_type_id.is_unsigned_int() {
+                        self.builder.ins().ushr(left.value, shift_val)
+                    } else {
+                        return Ok(None); // Don't optimize signed division
                     }
                 }
+                BinaryOp::Mod => {
+                    // Only safe for unsigned: x % 2^n → x & (2^n - 1)
+                    if left_type_id.is_unsigned_int() {
+                        let mask = self.builder.ins().iconst(left.ty, value - 1);
+                        self.builder.ins().band(left.value, mask)
+                    } else {
+                        return Ok(None); // Don't optimize signed modulo
+                    }
+                }
+                _ => return Ok(None),
+            };
+
+            return Ok(Some(CompiledValue {
+                value: result,
+                ty: left.ty,
+                type_id: left.type_id,
+            }));
+        }
+
+        // For multiplication, also check if LEFT operand is power of 2 (commutative)
+        if bin.op == BinaryOp::Mul
+            && let ExprKind::IntLiteral(value, _) = left_unwrapped.kind
+            && let Some(shift_amount) = power_of_two_shift(value)
+        {
+            let right = self.expr(&bin.right)?;
+
+            // Only optimize integer types
+            if right.ty == types::F64 || right.ty == types::F32 {
+                return Ok(None);
             }
+
+            let shift_val = self.builder.ins().iconst(right.ty, shift_amount);
+            // 2^n * x → x << n
+            let result = self.builder.ins().ishl(right.value, shift_val);
+
+            return Ok(Some(CompiledValue {
+                value: result,
+                ty: right.ty,
+                type_id: right.type_id,
+            }));
         }
 
         Ok(None)

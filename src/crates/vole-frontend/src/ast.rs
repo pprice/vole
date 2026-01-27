@@ -475,6 +475,7 @@ pub enum NumericSuffix {
     I16,
     I32,
     I64,
+    I128,
     F32,
     F64,
 }
@@ -491,6 +492,7 @@ impl NumericSuffix {
             "i16" => Some(NumericSuffix::I16),
             "i32" => Some(NumericSuffix::I32),
             "i64" => Some(NumericSuffix::I64),
+            "i128" => Some(NumericSuffix::I128),
             "f32" => Some(NumericSuffix::F32),
             "f64" => Some(NumericSuffix::F64),
             _ => None,
@@ -518,6 +520,7 @@ impl NumericSuffix {
             NumericSuffix::I16 => "i16",
             NumericSuffix::I32 => "i32",
             NumericSuffix::I64 => "i64",
+            NumericSuffix::I128 => "i128",
             NumericSuffix::F32 => "f32",
             NumericSuffix::F64 => "f64",
         }
@@ -534,6 +537,7 @@ impl NumericSuffix {
             NumericSuffix::I16 => PrimitiveType::I16,
             NumericSuffix::I32 => PrimitiveType::I32,
             NumericSuffix::I64 => PrimitiveType::I64,
+            NumericSuffix::I128 => PrimitiveType::I128,
             NumericSuffix::F32 => PrimitiveType::F32,
             NumericSuffix::F64 => PrimitiveType::F64,
         }

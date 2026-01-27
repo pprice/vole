@@ -173,6 +173,20 @@ pub extern "C" fn vole_f64_to_string(value: f64) -> *mut RcString {
     RcString::new(&s)
 }
 
+/// Convert f32 to string
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_f32_to_string(value: f32) -> *mut RcString {
+    let s = value.to_string();
+    RcString::new(&s)
+}
+
+/// Convert i128 to string
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_i128_to_string(value: i128) -> *mut RcString {
+    let s = value.to_string();
+    RcString::new(&s)
+}
+
 /// Convert bool to string
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_bool_to_string(value: i8) -> *mut RcString {

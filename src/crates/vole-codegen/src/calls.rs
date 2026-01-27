@@ -140,6 +140,10 @@ impl Cg<'_, '_, '_> {
 
         let (runtime, call_val) = if val.ty == types::F64 {
             (RuntimeFn::F64ToString, val.value)
+        } else if val.ty == types::F32 {
+            (RuntimeFn::F32ToString, val.value)
+        } else if val.ty == types::I128 {
+            (RuntimeFn::I128ToString, val.value)
         } else if val.ty == types::I8 {
             (RuntimeFn::BoolToString, val.value)
         } else {
@@ -911,6 +915,28 @@ impl Cg<'_, '_, '_> {
                     RuntimeFn::PrintF64
                 },
                 arg.value,
+            )
+        } else if arg.ty == types::F32 {
+            // Convert F32 to string and print
+            let str_val = self.call_runtime(RuntimeFn::F32ToString, &[arg.value])?;
+            (
+                if newline {
+                    RuntimeFn::PrintlnString
+                } else {
+                    RuntimeFn::PrintString
+                },
+                str_val,
+            )
+        } else if arg.ty == types::I128 {
+            // Convert I128 to string and print
+            let str_val = self.call_runtime(RuntimeFn::I128ToString, &[arg.value])?;
+            (
+                if newline {
+                    RuntimeFn::PrintlnString
+                } else {
+                    RuntimeFn::PrintString
+                },
+                str_val,
             )
         } else if arg.ty == types::I8 {
             (

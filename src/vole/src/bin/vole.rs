@@ -108,12 +108,14 @@ fn main() -> ExitCode {
             files,
             no_tests,
             imports,
+            all,
         } => inspect_files(
             &files,
             inspect_type,
             no_tests,
             imports.as_deref(),
             cli.release,
+            all,
         ),
         Commands::Version => print_version(),
         Commands::Bench(args) => match args.command {

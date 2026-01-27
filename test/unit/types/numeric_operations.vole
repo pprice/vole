@@ -115,6 +115,13 @@ tests {
         assert(c == 3000000000000)
     }
 
+    test "i128 + i128 returns i128" {
+        let a: i128 = 1000000000000000000
+        let b: i128 = 2000000000000000000
+        let c = a + b
+        assert(c == 3000000000000000000_i128)
+    }
+
     test "u8 + u8 promotes to i32" {
         let a: u8 = 100
         let b: u8 = 150
@@ -341,7 +348,12 @@ tests {
         assert(get_i64() == 1000000000000_i64)
     }
 
-    // Note: i128 return inference test skipped due to codegen limitations
+    test "i128 return type infers literal" {
+        func get_i128() -> i128 {
+            return 1000000000000000000
+        }
+        assert(get_i128() == 1000000000000000000_i128)
+    }
 
     // Unsigned integers
     test "u8 return type infers literal" {

@@ -97,7 +97,7 @@ pub enum Commands {
     /// Inspect compilation output (AST, IR)
     #[command(visible_alias = "i")]
     Inspect {
-        /// What to inspect: ast, ir
+        /// What to inspect: ast, ir, mir
         #[arg(value_name = "TYPE")]
         inspect_type: InspectType,
 
@@ -112,6 +112,10 @@ pub enum Commands {
         /// Include imports: "project" or "all" (not yet implemented)
         #[arg(long)]
         imports: Option<String>,
+
+        /// Show all functions including prelude (for mir)
+        #[arg(long)]
+        all: bool,
     },
     /// Show version information
     Version,
@@ -184,4 +188,5 @@ pub enum BenchCommands {
 pub enum InspectType {
     Ast,
     Ir,
+    Mir,
 }

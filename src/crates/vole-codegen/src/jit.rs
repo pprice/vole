@@ -63,17 +63,33 @@ impl CompiledModules {
 pub struct JitOptions {
     /// Release mode: disable verifier, enable speed optimizations
     pub release: bool,
+    /// Enable disassembly output
+    pub disasm: bool,
 }
 
 impl JitOptions {
     /// Create options for debug mode (default)
     pub fn debug() -> Self {
-        Self { release: false }
+        Self {
+            release: false,
+            disasm: false,
+        }
     }
 
     /// Create options for release mode
     pub fn release() -> Self {
-        Self { release: true }
+        Self {
+            release: true,
+            disasm: false,
+        }
+    }
+
+    /// Create options for disassembly output
+    pub fn disasm() -> Self {
+        Self {
+            release: false,
+            disasm: true,
+        }
     }
 }
 
@@ -88,6 +104,10 @@ pub struct JitContext {
     /// Source file path stored here so it lives as long as the JIT code.
     /// Used by assert failure messages.
     source_file: Option<Box<str>>,
+    /// Enable disassembly output
+    disasm: bool,
+    /// Collected disassembly output from compiled functions
+    disasm_output: Vec<(String, String)>,
 }
 
 impl JitContext {
@@ -125,12 +145,13 @@ impl JitContext {
             .set("enable_llvm_abi_extensions", "true")
             .unwrap();
 
+        // Always enable speed optimizations for better codegen
+        flag_builder.set("opt_level", "speed").unwrap();
+
         // Apply release mode settings
         if options.release {
             // Disable IR verifier for faster compilation
             flag_builder.set("enable_verifier", "false").unwrap();
-            // Enable speed optimizations for faster runtime
-            flag_builder.set("opt_level", "speed").unwrap();
         }
 
         let isa_builder = cranelift_native::builder().unwrap_or_else(|msg| {
@@ -162,6 +183,8 @@ impl JitContext {
             func_ids: FxHashMap::default(),
             imported_func_ids: FxHashMap::default(),
             source_file: None,
+            disasm: options.disasm,
+            disasm_output: Vec::new(),
         };
 
         // Import runtime functions so they can be called
@@ -233,6 +256,14 @@ impl JitContext {
         // vole_f64_to_string(value: f64) -> *mut RcString
         let sig = self.create_signature(&[types::F64], Some(ptr_ty));
         self.import_function("vole_f64_to_string", &sig);
+
+        // vole_f32_to_string(value: f32) -> *mut RcString
+        let sig = self.create_signature(&[types::F32], Some(ptr_ty));
+        self.import_function("vole_f32_to_string", &sig);
+
+        // vole_i128_to_string(value: i128) -> *mut RcString
+        let sig = self.create_signature(&[types::I128], Some(ptr_ty));
+        self.import_function("vole_i128_to_string", &sig);
 
         // vole_bool_to_string(value: i8) -> *mut RcString
         let sig = self.create_signature(&[types::I8], Some(ptr_ty));
@@ -614,6 +645,14 @@ impl JitContext {
             vole_runtime::builtins::vole_f64_to_string as *const u8,
         );
         builder.symbol(
+            "vole_f32_to_string",
+            vole_runtime::builtins::vole_f32_to_string as *const u8,
+        );
+        builder.symbol(
+            "vole_i128_to_string",
+            vole_runtime::builtins::vole_i128_to_string as *const u8,
+        );
+        builder.symbol(
             "vole_bool_to_string",
             vole_runtime::builtins::vole_bool_to_string as *const u8,
         );
@@ -972,9 +1011,35 @@ impl JitContext {
 
     /// Define a function (after building IR)
     pub fn define_function(&mut self, func_id: FuncId) -> Result<(), String> {
+        // Enable disassembly if requested
+        if self.disasm {
+            self.ctx.set_disasm(true);
+        }
+
         self.module
             .define_function(func_id, &mut self.ctx)
-            .map_err(|e| format!("Compilation error: {:?}", e))
+            .map_err(|e| format!("Compilation error: {:?}", e))?;
+
+        // Capture disassembly if enabled
+        if self.disasm
+            && let Some(compiled) = self.ctx.compiled_code()
+                && let Some(vcode) = &compiled.vcode {
+                    // Get function name from func_ids (reverse lookup)
+                    let func_name = self
+                        .func_ids
+                        .iter()
+                        .find(|(_, id)| **id == func_id)
+                        .map(|(name, _)| name.clone())
+                        .unwrap_or_else(|| format!("func_{:?}", func_id));
+                    self.disasm_output.push((func_name, vcode.clone()));
+                }
+
+        Ok(())
+    }
+
+    /// Get collected disassembly output
+    pub fn get_disasm(&self) -> &[(String, String)] {
+        &self.disasm_output
     }
 
     /// Finalize all functions and get code pointers

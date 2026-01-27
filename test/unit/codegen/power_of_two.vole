@@ -1,0 +1,242 @@
+// Test power-of-2 optimization patterns
+// x * 2^n → x << n
+// x / 2^n → x >> n (unsigned only)
+// x % 2^n → x & (2^n - 1) (unsigned only)
+
+tests {
+    // ============ Multiplication by power of 2 ============
+
+    test "multiply by 2" {
+        let x: i32 = 7
+        let result = x * 2
+        assert(result == 14)
+    }
+
+    test "multiply by 4" {
+        let x: i32 = 7
+        let result = x * 4
+        assert(result == 28)
+    }
+
+    test "multiply by 8" {
+        let x: i32 = 7
+        let result = x * 8
+        assert(result == 56)
+    }
+
+    test "multiply by 16" {
+        let x: i32 = 7
+        let result = x * 16
+        assert(result == 112)
+    }
+
+    test "multiply by 1024" {
+        let x: i32 = 7
+        let result = x * 1024
+        assert(result == 7168)
+    }
+
+    test "multiply negative by power of 2" {
+        let x: i32 = -7
+        let result = x * 4
+        assert(result == -28)
+    }
+
+    test "multiply zero by power of 2" {
+        let x: i32 = 0
+        let result = x * 8
+        assert(result == 0)
+    }
+
+    test "2 * x (commutative)" {
+        let x: i32 = 7
+        let result = 2 * x
+        assert(result == 14)
+    }
+
+    test "4 * x (commutative)" {
+        let x: i32 = 7
+        let result = 4 * x
+        assert(result == 28)
+    }
+
+    test "multiply by 1 (edge case)" {
+        let x: i32 = 42
+        let result = x * 1
+        assert(result == 42)
+    }
+
+    test "i64 multiply by power of 2" {
+        let x: i64 = 1000000
+        let result = x * 256
+        assert(result == 256000000)
+    }
+
+    test "i8 multiply by power of 2" {
+        let x: i8 = 3
+        let result = x * 4
+        assert(result == 12)
+    }
+
+    // ============ Unsigned division by power of 2 ============
+
+    test "u32 divide by 2" {
+        let x: u32 = 100
+        let result = x / 2
+        assert(result == 50)
+    }
+
+    test "u32 divide by 4" {
+        let x: u32 = 100
+        let result = x / 4
+        assert(result == 25)
+    }
+
+    test "u32 divide by 8" {
+        let x: u32 = 100
+        let result = x / 8
+        assert(result == 12)
+    }
+
+    test "u32 divide by 16" {
+        let x: u32 = 256
+        let result = x / 16
+        assert(result == 16)
+    }
+
+    test "u64 divide by 1024" {
+        let x: u64 = 10240
+        let result = x / 1024
+        assert(result == 10)
+    }
+
+    test "u32 divide by 1" {
+        let x: u32 = 42
+        let result = x / 1
+        assert(result == 42)
+    }
+
+    test "u8 divide by power of 2" {
+        let x: u8 = 200
+        let result = x / 8
+        assert(result == 25)
+    }
+
+    // ============ Unsigned modulo by power of 2 ============
+
+    test "u32 mod 2" {
+        let x: u32 = 7
+        let result = x % 2
+        assert(result == 1)
+    }
+
+    test "u32 mod 4" {
+        let x: u32 = 7
+        let result = x % 4
+        assert(result == 3)
+    }
+
+    test "u32 mod 8" {
+        let x: u32 = 100
+        let result = x % 8
+        assert(result == 4)
+    }
+
+    test "u32 mod 16" {
+        let x: u32 = 100
+        let result = x % 16
+        assert(result == 4)
+    }
+
+    test "u64 mod 1024" {
+        let x: u64 = 5000
+        let result = x % 1024
+        assert(result == 904)
+    }
+
+    test "u32 mod when divisible" {
+        let x: u32 = 64
+        let result = x % 8
+        assert(result == 0)
+    }
+
+    test "u8 mod power of 2" {
+        let x: u8 = 100
+        let result = x % 16
+        assert(result == 4)
+    }
+
+    // ============ Signed division/mod (should NOT be optimized but must work) ============
+
+    test "signed divide by power of 2 (positive)" {
+        let x: i32 = 100
+        let result = x / 4
+        assert(result == 25)
+    }
+
+    test "signed divide by power of 2 (negative)" {
+        // -7 / 4 = -1 (rounds toward zero)
+        let x: i32 = -7
+        let result = x / 4
+        assert(result == -1)
+    }
+
+    test "signed mod by power of 2 (positive)" {
+        let x: i32 = 7
+        let result = x % 4
+        assert(result == 3)
+    }
+
+    test "signed mod by power of 2 (negative)" {
+        // -7 % 4 = -3 (sign follows dividend)
+        let x: i32 = -7
+        let result = x % 4
+        assert(result == -3)
+    }
+
+    // ============ Non-power-of-2 (should NOT be optimized but must work) ============
+
+    test "multiply by 3 (not power of 2)" {
+        let x: i32 = 7
+        let result = x * 3
+        assert(result == 21)
+    }
+
+    test "multiply by 5 (not power of 2)" {
+        let x: i32 = 7
+        let result = x * 5
+        assert(result == 35)
+    }
+
+    test "divide by 3 (not power of 2)" {
+        let x: u32 = 21
+        let result = x / 3
+        assert(result == 7)
+    }
+
+    test "mod by 3 (not power of 2)" {
+        let x: u32 = 10
+        let result = x % 3
+        assert(result == 1)
+    }
+
+    // ============ Large powers of 2 ============
+
+    test "multiply by 2^20" {
+        let x: i64 = 1
+        let result = x * 1048576
+        assert(result == 1048576)
+    }
+
+    test "u64 divide by 2^20" {
+        let x: u64 = 1048576
+        let result = x / 1048576
+        assert(result == 1)
+    }
+
+    test "u64 mod 2^20" {
+        let x: u64 = 1048577
+        let result = x % 1048576
+        assert(result == 1)
+    }
+}

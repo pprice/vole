@@ -707,12 +707,12 @@ impl<'src> Parser<'src> {
     }
 
     /// Split a numeric literal lexeme into (number_part, optional_suffix).
-    /// Recognizes suffixes like `_u8`, `_i32`, `_f64` etc.
+    /// Recognizes suffixes like `_u8`, `_i32`, `_f64`, `_i128` etc.
     /// The suffix is the last `_` followed by a known type name.
     pub(super) fn split_numeric_suffix(lexeme: &str) -> (&str, Option<NumericSuffix>) {
         // Look for the last underscore that starts a valid suffix
-        // We try the known suffix lengths: 2 chars (u8, i8), 3 chars (u16, i16, u32, i32, u64, i64, f32, f64)
-        for suffix_len in [3, 2] {
+        // We try the known suffix lengths: 4 chars (i128), 3 chars (u16, i16, u32, i32, u64, i64, f32, f64), 2 chars (u8, i8)
+        for suffix_len in [4, 3, 2] {
             // Need at least underscore + suffix_len chars, plus at least 1 digit
             if lexeme.len() > suffix_len + 1 {
                 let split_pos = lexeme.len() - suffix_len - 1;
