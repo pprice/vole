@@ -1434,15 +1434,118 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile an if expression: if cond { then } else { else }
+    ///
+    /// Optimization: Uses Cranelift's `select` instruction for simple conditionals
+    /// where both branches are pure expressions (no side effects, no control flow).
+    /// This avoids creating 4 separate blocks and enables better register allocation.
     fn if_expr(&mut self, if_expr: &IfExpr) -> Result<CompiledValue, String> {
-        let condition = self.expr(&if_expr.condition)?;
-
         // Get the result type from semantic analysis
         let result_type_id = self
             .get_expr_type(&if_expr.then_branch.id)
             .unwrap_or(self.arena().primitives.void);
 
         let is_void = self.arena().is_void(result_type_id);
+
+        // Check if we can use select optimization:
+        // - Must have an else branch
+        // - Both branches must be selectable (pure expressions)
+        // - Result must be non-void (select needs a value)
+        let can_use_select = !is_void
+            && if_expr.else_branch.is_some()
+            && if_expr.then_branch.is_selectable()
+            && if_expr
+                .else_branch
+                .as_ref()
+                .is_some_and(|e| e.is_selectable());
+
+        if can_use_select {
+            return self.if_expr_select(if_expr, result_type_id);
+        }
+
+        // Fall back to standard block-based compilation
+        self.if_expr_blocks(if_expr, result_type_id, is_void)
+    }
+
+    /// Compile if expression using select instruction (optimized path).
+    ///
+    /// Generates code like:
+    /// ```clif
+    /// v0 = <condition>
+    /// v1 = <then_value>
+    /// v2 = <else_value>
+    /// v3 = select v0, v1, v2
+    /// ```
+    fn if_expr_select(
+        &mut self,
+        if_expr: &IfExpr,
+        result_type_id: TypeId,
+    ) -> Result<CompiledValue, String> {
+        // Compile condition
+        let condition = self.expr(&if_expr.condition)?;
+
+        // Compile both branches (they're pure, so order doesn't matter)
+        let then_result = self.expr(&if_expr.then_branch)?;
+        let else_result = self.expr(if_expr.else_branch.as_ref().unwrap())?;
+
+        let result_cranelift_type =
+            type_id_to_cranelift(result_type_id, self.arena(), self.ptr_type());
+
+        // Ensure both values have the same type (may need conversion)
+        let then_val =
+            self.convert_for_select(then_result.value, then_result.ty, result_cranelift_type);
+        let else_val =
+            self.convert_for_select(else_result.value, else_result.ty, result_cranelift_type);
+
+        // Extend condition to i8 if needed (select expects i8/i16/i32/i64 condition)
+        let cond_val = if condition.ty == types::I8 {
+            condition.value
+        } else {
+            self.builder.ins().ireduce(types::I8, condition.value)
+        };
+
+        // Use select instruction: select(cond, if_true, if_false)
+        let result = self.builder.ins().select(cond_val, then_val, else_val);
+
+        Ok(CompiledValue {
+            value: result,
+            ty: result_cranelift_type,
+            type_id: result_type_id,
+        })
+    }
+
+    /// Convert a value for use in select (ensure matching types).
+    fn convert_for_select(&mut self, value: Value, from_ty: Type, to_ty: Type) -> Value {
+        if from_ty == to_ty {
+            return value;
+        }
+        // Handle integer width mismatches
+        if from_ty.is_int() && to_ty.is_int() {
+            if to_ty.bits() < from_ty.bits() {
+                return self.builder.ins().ireduce(to_ty, value);
+            } else if to_ty.bits() > from_ty.bits() {
+                return self.builder.ins().sextend(to_ty, value);
+            }
+        }
+        // Handle float promotions/demotions
+        if from_ty == types::F32 && to_ty == types::F64 {
+            return self.builder.ins().fpromote(types::F64, value);
+        }
+        if from_ty == types::F64 && to_ty == types::F32 {
+            return self.builder.ins().fdemote(types::F32, value);
+        }
+        // For same-size types or unknown conversions, return as-is
+        value
+    }
+
+    /// Compile if expression using blocks (standard path).
+    fn if_expr_blocks(
+        &mut self,
+        if_expr: &IfExpr,
+        result_type_id: TypeId,
+        is_void: bool,
+    ) -> Result<CompiledValue, String> {
+        let condition = self.expr(&if_expr.condition)?;
+
         let result_cranelift_type =
             type_id_to_cranelift(result_type_id, self.arena(), self.ptr_type());
 
@@ -1519,6 +1622,9 @@ impl Cg<'_, '_, '_> {
     /// body3: jump merge(result3)
     /// merge: return block_param
     /// ```
+    ///
+    /// Optimization: For binary when expressions (one condition + wildcard),
+    /// uses Cranelift's `select` instruction if both bodies are selectable.
     fn when_expr(&mut self, when_expr: &WhenExpr) -> Result<CompiledValue, String> {
         // Get the result type from semantic analysis (from first arm body)
         let result_type_id = if !when_expr.arms.is_empty() {
@@ -1529,6 +1635,81 @@ impl Cg<'_, '_, '_> {
         };
 
         let is_void = self.arena().is_void(result_type_id);
+
+        // Check if we can use select optimization for binary when:
+        // - Exactly 2 arms
+        // - First arm has a condition, second is wildcard
+        // - Both bodies are selectable (pure expressions)
+        // - Result is non-void
+        let can_use_select = !is_void
+            && when_expr.arms.len() == 2
+            && when_expr.arms[0].condition.is_some()
+            && when_expr.arms[1].condition.is_none()
+            && when_expr.arms[0].body.is_selectable()
+            && when_expr.arms[1].body.is_selectable();
+
+        if can_use_select {
+            return self.when_expr_select(when_expr, result_type_id);
+        }
+
+        // Fall back to standard block-based compilation
+        self.when_expr_blocks(when_expr, result_type_id, is_void)
+    }
+
+    /// Compile binary when expression using select instruction (optimized path).
+    ///
+    /// For `when { cond => then, _ => else }`, generates:
+    /// ```clif
+    /// v0 = <cond>
+    /// v1 = <then_value>
+    /// v2 = <else_value>
+    /// v3 = select v0, v1, v2
+    /// ```
+    fn when_expr_select(
+        &mut self,
+        when_expr: &WhenExpr,
+        result_type_id: TypeId,
+    ) -> Result<CompiledValue, String> {
+        // Compile condition (first arm)
+        let condition = self.expr(when_expr.arms[0].condition.as_ref().unwrap())?;
+
+        // Compile both bodies (they're pure, so order doesn't matter)
+        let then_result = self.expr(&when_expr.arms[0].body)?;
+        let else_result = self.expr(&when_expr.arms[1].body)?;
+
+        let result_cranelift_type =
+            type_id_to_cranelift(result_type_id, self.arena(), self.ptr_type());
+
+        // Ensure both values have the same type (may need conversion)
+        let then_val =
+            self.convert_for_select(then_result.value, then_result.ty, result_cranelift_type);
+        let else_val =
+            self.convert_for_select(else_result.value, else_result.ty, result_cranelift_type);
+
+        // Extend condition to i8 if needed
+        let cond_val = if condition.ty == types::I8 {
+            condition.value
+        } else {
+            self.builder.ins().ireduce(types::I8, condition.value)
+        };
+
+        // Use select instruction
+        let result = self.builder.ins().select(cond_val, then_val, else_val);
+
+        Ok(CompiledValue {
+            value: result,
+            ty: result_cranelift_type,
+            type_id: result_type_id,
+        })
+    }
+
+    /// Compile when expression using blocks (standard path).
+    fn when_expr_blocks(
+        &mut self,
+        when_expr: &WhenExpr,
+        result_type_id: TypeId,
+        is_void: bool,
+    ) -> Result<CompiledValue, String> {
         let result_cranelift_type =
             type_id_to_cranelift(result_type_id, self.arena(), self.ptr_type());
 

@@ -462,6 +462,82 @@ impl Expr {
                 | ExprKind::Nil
         )
     }
+
+    /// Returns true if this expression can be compiled using the `select` instruction.
+    ///
+    /// Selectable expressions are pure (no side effects) and don't involve:
+    /// - Function/method calls (might have side effects)
+    /// - Assignments
+    /// - Statements (only pure expressions)
+    /// - Nested control flow (if/when/match)
+    ///
+    /// Used to optimize simple conditionals like `if cond then a else b`.
+    pub fn is_selectable(&self) -> bool {
+        match &self.kind {
+            // Literals are always selectable
+            ExprKind::IntLiteral(..)
+            | ExprKind::FloatLiteral(..)
+            | ExprKind::BoolLiteral(_)
+            | ExprKind::StringLiteral(_)
+            | ExprKind::Nil
+            | ExprKind::Done => true,
+
+            // Simple identifier lookups are selectable
+            ExprKind::Identifier(_) => true,
+
+            // Grouping preserves selectability
+            ExprKind::Grouping(inner) => inner.is_selectable(),
+
+            // Binary ops on selectable operands (arithmetic, comparison, etc.)
+            ExprKind::Binary(bin) => bin.left.is_selectable() && bin.right.is_selectable(),
+
+            // Unary ops on selectable operand
+            ExprKind::Unary(un) => un.operand.is_selectable(),
+
+            // Tuple/array literals with all selectable elements
+            ExprKind::ArrayLiteral(elements) => elements.iter().all(|e| e.is_selectable()),
+
+            // Repeat literals with selectable element
+            ExprKind::RepeatLiteral { element, .. } => element.is_selectable(),
+
+            // Index on selectable object (no side effects from read)
+            ExprKind::Index(idx) => idx.object.is_selectable() && idx.index.is_selectable(),
+
+            // Field access on selectable object
+            ExprKind::FieldAccess(fa) => fa.object.is_selectable(),
+
+            // Block expressions are selectable if they have no statements and
+            // their trailing expression (if any) is selectable
+            // This handles `{ expr }` blocks used in if-else branches
+            ExprKind::Block(block) => {
+                block.stmts.is_empty()
+                    && block
+                        .trailing_expr
+                        .as_ref()
+                        .is_some_and(|e| e.is_selectable())
+            }
+
+            // NOT selectable: function calls, method calls, assignments, control flow
+            ExprKind::Call(_)
+            | ExprKind::MethodCall(_)
+            | ExprKind::Assign(_)
+            | ExprKind::CompoundAssign(_)
+            | ExprKind::If(_)
+            | ExprKind::When(_)
+            | ExprKind::Match(_)
+            | ExprKind::Lambda(_)
+            | ExprKind::Try(_)
+            | ExprKind::NullCoalesce(_)
+            | ExprKind::OptionalChain(_)
+            | ExprKind::Is(_)
+            | ExprKind::InterpolatedString(_)
+            | ExprKind::Range(_)
+            | ExprKind::StructLiteral(_)
+            | ExprKind::TypeLiteral(_)
+            | ExprKind::Import(_)
+            | ExprKind::Yield(_) => false,
+        }
+    }
 }
 
 /// Typed numeric literal suffix (e.g., `_u8`, `_f32`)

@@ -1023,16 +1023,17 @@ impl JitContext {
         // Capture disassembly if enabled
         if self.disasm
             && let Some(compiled) = self.ctx.compiled_code()
-                && let Some(vcode) = &compiled.vcode {
-                    // Get function name from func_ids (reverse lookup)
-                    let func_name = self
-                        .func_ids
-                        .iter()
-                        .find(|(_, id)| **id == func_id)
-                        .map(|(name, _)| name.clone())
-                        .unwrap_or_else(|| format!("func_{:?}", func_id));
-                    self.disasm_output.push((func_name, vcode.clone()));
-                }
+            && let Some(vcode) = &compiled.vcode
+        {
+            // Get function name from func_ids (reverse lookup)
+            let func_name = self
+                .func_ids
+                .iter()
+                .find(|(_, id)| **id == func_id)
+                .map(|(name, _)| name.clone())
+                .unwrap_or_else(|| format!("func_{:?}", func_id));
+            self.disasm_output.push((func_name, vcode.clone()));
+        }
 
         Ok(())
     }
