@@ -5,6 +5,17 @@ use crate::type_arena::TypeId as ArenaTypeId;
 use vole_frontend::PatternKind;
 
 impl Analyzer {
+    /// Check if an expression kind is a literal that can benefit from bidirectional type inference.
+    /// This includes int literals, float literals, and nil - types that can be inferred from context.
+    fn is_inferable_literal(kind: &ExprKind) -> bool {
+        matches!(
+            kind,
+            ExprKind::IntLiteral(_, None)   // Int without suffix
+                | ExprKind::FloatLiteral(_, None) // Float without suffix
+                | ExprKind::Nil
+        )
+    }
+
     pub(crate) fn check_block(
         &mut self,
         block: &Block,
@@ -326,10 +337,16 @@ impl Analyzer {
                 let ret_value_span = ret.value.as_ref().map(|v| v.span).unwrap_or(ret.span);
 
                 // Type check the return expression.
-                // We DON'T pass expected type to avoid double error reporting (E2001 + E2096).
-                // Instead we check compatibility ourselves and report the more specific E2096.
+                // For numeric/float literals, use bidirectional inference to infer type from return type.
+                // For other expressions, check normally and report E2096 for mismatches.
                 let ret_type_id = if let Some(value) = &ret.value {
-                    self.check_expr(value, interner)?
+                    if Self::is_inferable_literal(&value.kind) {
+                        // Use bidirectional inference for literals (e.g., return 0.0 in f32 func)
+                        self.check_expr_expecting_id(value, expected_value_type_id, interner)?
+                    } else {
+                        // For non-literals, check without expected type to avoid double errors
+                        self.check_expr(value, interner)?
+                    }
                 } else {
                     self.ty_void_id()
                 };

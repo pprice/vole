@@ -308,4 +308,37 @@ tests {
         let c = a + b
         assert(c > a)
     }
+
+    // ============ Return Type Inference ============
+    test "f32 return type infers literal" {
+        func get_f32() -> f32 {
+            return 0.0  // Should infer f32 from return type
+        }
+        let x = get_f32()
+        assert(x == 0.0_f32)
+    }
+
+    test "f64 return type infers literal" {
+        func get_f64() -> f64 {
+            return 1.5  // Should infer f64 from return type
+        }
+        let x = get_f64()
+        assert(x == 1.5)
+    }
+
+    test "i32 return type infers literal" {
+        func get_i32() -> i32 {
+            return 42  // Should infer i32 from return type
+        }
+        let x = get_i32()
+        assert(x == 42)
+    }
+
+    test "i8 return type infers literal" {
+        func get_i8() -> i8 {
+            return 10  // Should infer i8 from return type
+        }
+        let x = get_i8()
+        assert(x == 10)
+    }
 }
