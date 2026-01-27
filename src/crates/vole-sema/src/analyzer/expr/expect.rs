@@ -571,7 +571,7 @@ impl Analyzer {
     }
 
     /// Get the result type for numeric operations (wider type wins)
-    fn numeric_result_type(&self, left: ArenaTypeId, right: ArenaTypeId) -> ArenaTypeId {
+    pub(crate) fn numeric_result_type(&self, left: ArenaTypeId, right: ArenaTypeId) -> ArenaTypeId {
         if left == ArenaTypeId::F64 || right == ArenaTypeId::F64 {
             ArenaTypeId::F64
         } else if left == ArenaTypeId::I64 || right == ArenaTypeId::I64 {
@@ -582,7 +582,7 @@ impl Analyzer {
     }
 
     /// Get the result type for integer operations (wider type wins)
-    fn integer_result_type(&self, left: ArenaTypeId, right: ArenaTypeId) -> ArenaTypeId {
+    pub(crate) fn integer_result_type(&self, left: ArenaTypeId, right: ArenaTypeId) -> ArenaTypeId {
         if left == ArenaTypeId::I64 || right == ArenaTypeId::I64 {
             ArenaTypeId::I64
         } else {

@@ -117,14 +117,8 @@ impl Analyzer {
                                 Ok(ArenaTypeId::INVALID)
                             }
                         } else if left_ty.is_numeric() && right_ty.is_numeric() {
-                            // Numeric addition
-                            if left_ty == ArenaTypeId::F64 || right_ty == ArenaTypeId::F64 {
-                                Ok(ArenaTypeId::F64)
-                            } else if left_ty == ArenaTypeId::I64 || right_ty == ArenaTypeId::I64 {
-                                Ok(ArenaTypeId::I64)
-                            } else {
-                                Ok(ArenaTypeId::I32)
-                            }
+                            // Numeric addition - use helper for type promotion
+                            Ok(self.numeric_result_type(left_ty, right_ty))
                         } else {
                             self.type_error_pair_id(
                                 "numeric or string",
@@ -137,14 +131,7 @@ impl Analyzer {
                     }
                     BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
                         if left_ty.is_numeric() && right_ty.is_numeric() {
-                            // Return wider type
-                            if left_ty == ArenaTypeId::F64 || right_ty == ArenaTypeId::F64 {
-                                Ok(ArenaTypeId::F64)
-                            } else if left_ty == ArenaTypeId::I64 || right_ty == ArenaTypeId::I64 {
-                                Ok(ArenaTypeId::I64)
-                            } else {
-                                Ok(ArenaTypeId::I32)
-                            }
+                            Ok(self.numeric_result_type(left_ty, right_ty))
                         } else {
                             self.type_error_pair_id("numeric", left_ty, right_ty, expr.span);
                             Ok(ArenaTypeId::INVALID)
@@ -170,11 +157,7 @@ impl Analyzer {
                     | BinaryOp::Shl
                     | BinaryOp::Shr => {
                         if left_ty.is_integer() && right_ty.is_integer() {
-                            if left_ty == ArenaTypeId::I64 || right_ty == ArenaTypeId::I64 {
-                                Ok(ArenaTypeId::I64)
-                            } else {
-                                Ok(ArenaTypeId::I32)
-                            }
+                            Ok(self.integer_result_type(left_ty, right_ty))
                         } else {
                             self.type_error_pair_id("integer", left_ty, right_ty, expr.span);
                             Ok(ArenaTypeId::INVALID)
