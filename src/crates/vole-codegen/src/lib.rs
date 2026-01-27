@@ -2,6 +2,7 @@
 
 mod analyzed;
 mod calls;
+mod cfg_cleanup;
 pub mod compiler;
 mod context;
 pub mod errors;

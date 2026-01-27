@@ -1135,6 +1135,9 @@ impl Compiler<'_> {
         // NOTE: We intentionally do NOT call define_function here.
         // This method is for IR inspection only.
 
+        // Run CFG cleanup to show optimized IR
+        crate::cfg_cleanup::cleanup_cfg(&mut self.jit.ctx.func);
+
         Ok(())
     }
 
@@ -1176,6 +1179,9 @@ impl Compiler<'_> {
 
         // NOTE: We intentionally do NOT call define_function here.
         // This method is for IR inspection only.
+
+        // Run CFG cleanup to show optimized IR
+        crate::cfg_cleanup::cleanup_cfg(&mut self.jit.ctx.func);
 
         Ok(())
     }

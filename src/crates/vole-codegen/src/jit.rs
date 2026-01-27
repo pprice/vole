@@ -1011,6 +1011,9 @@ impl JitContext {
 
     /// Define a function (after building IR)
     pub fn define_function(&mut self, func_id: FuncId) -> Result<(), String> {
+        // Run CFG cleanup to eliminate trampoline blocks before Cranelift compilation
+        crate::cfg_cleanup::cleanup_cfg(&mut self.ctx.func);
+
         // Enable disassembly if requested
         if self.disasm {
             self.ctx.set_disasm(true);
