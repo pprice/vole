@@ -111,11 +111,8 @@ impl Analyzer {
         // Check if this is a generic type (record or class with type parameters)
         // Non-generic types have generic_info for field storage but empty type_params
         if let Some(type_id) = type_id_opt {
-            let (kind, generic_info_opt) = {
-                let registry = self.entity_registry();
-                let type_def = registry.get_type(type_id);
-                (type_def.kind, type_def.generic_info.clone())
-            };
+            let kind = self.entity_registry().type_kind(type_id);
+            let generic_info_opt = self.entity_registry().type_generic_info(type_id);
             if let Some(ref generic_info) = generic_info_opt {
                 // Only use generic literal checking if there are actual type parameters to infer
                 if !generic_info.type_params.is_empty() {

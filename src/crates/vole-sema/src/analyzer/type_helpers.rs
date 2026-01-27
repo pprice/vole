@@ -301,7 +301,9 @@ impl Analyzer {
             Some(SequenceInfo::Array(elem_id))
         } else if let Some((elem_id, size)) = self.unwrap_fixed_array_id(id) {
             Some(SequenceInfo::FixedArray(elem_id, size))
-        } else { self.unwrap_tuple_id(id).map(SequenceInfo::Tuple) }
+        } else {
+            self.unwrap_tuple_id(id).map(SequenceInfo::Tuple)
+        }
     }
 
     /// Get the element type of an indexable type (array or fixed-array only).

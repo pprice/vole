@@ -357,14 +357,29 @@ impl TypeParamScope {
         merged
     }
 
-    /// Extend this scope with additional type parameters.
+    /// Extend this scope with additional type parameters (cloning from slice).
     pub fn extend(&mut self, params: &[TypeParamInfo]) {
         self.params.extend(params.iter().cloned());
     }
 
-    /// Create a scope from a slice of TypeParamInfo.
+    /// Extend this scope with owned type parameters (no cloning).
+    pub fn extend_owned(&mut self, params: impl IntoIterator<Item = TypeParamInfo>) {
+        self.params.extend(params);
+    }
+
+    /// Create a scope from a Vec of TypeParamInfo (takes ownership).
     pub fn from_params(params: Vec<TypeParamInfo>) -> Self {
         Self { params }
+    }
+
+    /// Consume the scope and return the owned params (avoids cloning).
+    pub fn into_params(self) -> Vec<TypeParamInfo> {
+        self.params
+    }
+
+    /// Clone params into a new Vec (explicit cloning when needed).
+    pub fn to_params(&self) -> Vec<TypeParamInfo> {
+        self.params.clone()
     }
 }
 

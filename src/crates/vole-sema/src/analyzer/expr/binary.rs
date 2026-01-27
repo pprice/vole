@@ -1,0 +1,112 @@
+use super::super::*;
+use crate::type_arena::TypeId as ArenaTypeId;
+
+impl Analyzer {
+    /// Check binary operator expression.
+    /// Handles arithmetic, comparison, logical, and bitwise operators.
+    pub(super) fn check_binary_expr(
+        &mut self,
+        expr: &Expr,
+        bin: &BinaryExpr,
+        interner: &Interner,
+    ) -> Result<ArenaTypeId, Vec<TypeError>> {
+        let left_ty = self.check_expr(&bin.left, interner)?;
+        let right_ty = self.check_expr(&bin.right, interner)?;
+
+        match bin.op {
+            BinaryOp::Add => self.check_add_op(left_ty, right_ty, bin, expr.span, interner),
+            BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
+                self.check_arithmetic_op(left_ty, right_ty, expr.span)
+            }
+            BinaryOp::Eq
+            | BinaryOp::Ne
+            | BinaryOp::Lt
+            | BinaryOp::Gt
+            | BinaryOp::Le
+            | BinaryOp::Ge => Ok(ArenaTypeId::BOOL),
+            BinaryOp::And | BinaryOp::Or => self.check_logical_op(left_ty, right_ty, expr.span),
+            BinaryOp::BitAnd
+            | BinaryOp::BitOr
+            | BinaryOp::BitXor
+            | BinaryOp::Shl
+            | BinaryOp::Shr => self.check_bitwise_op(left_ty, right_ty, expr.span),
+        }
+    }
+
+    /// Check addition operator - handles both numeric addition and string concatenation.
+    fn check_add_op(
+        &mut self,
+        left_ty: ArenaTypeId,
+        right_ty: ArenaTypeId,
+        bin: &BinaryExpr,
+        span: Span,
+        interner: &Interner,
+    ) -> Result<ArenaTypeId, Vec<TypeError>> {
+        // Handle string concatenation: string + Stringable
+        if left_ty == ArenaTypeId::STRING {
+            // Left is string - check if right implements Stringable
+            if right_ty == ArenaTypeId::STRING {
+                // string + string is always valid
+                Ok(ArenaTypeId::STRING)
+            } else if self.satisfies_stringable_id(right_ty, interner) {
+                // Right implements Stringable, so string + X is valid
+                Ok(ArenaTypeId::STRING)
+            } else {
+                // Right doesn't implement Stringable
+                self.type_error_id("Stringable", right_ty, bin.right.span);
+                Ok(ArenaTypeId::INVALID)
+            }
+        } else if left_ty.is_numeric() && right_ty.is_numeric() {
+            // Numeric addition - use helper for type promotion
+            Ok(self.numeric_result_type(left_ty, right_ty))
+        } else {
+            self.type_error_pair_id("numeric or string", left_ty, right_ty, span);
+            Ok(ArenaTypeId::INVALID)
+        }
+    }
+
+    /// Check arithmetic operators (sub, mul, div, mod).
+    fn check_arithmetic_op(
+        &mut self,
+        left_ty: ArenaTypeId,
+        right_ty: ArenaTypeId,
+        span: Span,
+    ) -> Result<ArenaTypeId, Vec<TypeError>> {
+        if left_ty.is_numeric() && right_ty.is_numeric() {
+            Ok(self.numeric_result_type(left_ty, right_ty))
+        } else {
+            self.type_error_pair_id("numeric", left_ty, right_ty, span);
+            Ok(ArenaTypeId::INVALID)
+        }
+    }
+
+    /// Check logical operators (and, or).
+    fn check_logical_op(
+        &mut self,
+        left_ty: ArenaTypeId,
+        right_ty: ArenaTypeId,
+        span: Span,
+    ) -> Result<ArenaTypeId, Vec<TypeError>> {
+        if left_ty == ArenaTypeId::BOOL && right_ty == ArenaTypeId::BOOL {
+            Ok(ArenaTypeId::BOOL)
+        } else {
+            self.type_error_pair_id("bool", left_ty, right_ty, span);
+            Ok(ArenaTypeId::INVALID)
+        }
+    }
+
+    /// Check bitwise operators (and, or, xor, shift left, shift right).
+    fn check_bitwise_op(
+        &mut self,
+        left_ty: ArenaTypeId,
+        right_ty: ArenaTypeId,
+        span: Span,
+    ) -> Result<ArenaTypeId, Vec<TypeError>> {
+        if left_ty.is_integer() && right_ty.is_integer() {
+            Ok(self.integer_result_type(left_ty, right_ty))
+        } else {
+            self.type_error_pair_id("integer", left_ty, right_ty, span);
+            Ok(ArenaTypeId::INVALID)
+        }
+    }
+}
