@@ -229,8 +229,8 @@ impl Analyzer {
             }
         };
 
-        let constraint_interfaces = match constraint {
-            crate::generic::TypeConstraint::Interface(symbols) => symbols,
+        let constraint_interfaces: Vec<Symbol> = match constraint {
+            crate::generic::TypeConstraint::Interface(symbols) => symbols.clone(),
             other => {
                 tracing::trace!(?param_name_id, constraint = ?other, "constraint is not interface-based");
                 return None; // Union/Structural constraints don't support method calls this way
@@ -243,7 +243,7 @@ impl Analyzer {
         );
 
         // Try to find the method in one of the constraint interfaces
-        for interface_sym in constraint_interfaces {
+        for interface_sym in &constraint_interfaces {
             let interface_name = interner.resolve(*interface_sym);
             tracing::trace!(%interface_name, "checking interface");
 
@@ -253,90 +253,20 @@ impl Analyzer {
                 .resolver(interner)
                 .resolve_type_or_interface(*interface_sym, &self.entity_registry());
 
-            if let Some(interface_type_id) = interface_type_id {
-                let method_ids = {
-                    let registry = self.entity_registry();
-                    let interface_def = registry.get_type(interface_type_id);
-                    tracing::trace!(
-                        ?interface_type_id,
-                        num_methods = interface_def.methods.len(),
-                        "found interface def"
-                    );
-                    interface_def.methods.clone()
-                };
-
-                // Search for the method in this interface
-                for method_id in method_ids {
-                    let (def_method_name_id, method_signature_id) = {
-                        let registry = self.entity_registry();
-                        let method_def = registry.get_method(method_id);
-                        (method_def.name_id, method_def.signature_id)
-                    };
-                    let method_def_name = self
-                        .name_table()
-                        .last_segment_str(def_method_name_id)
-                        .unwrap_or_default();
-
-                    tracing::trace!(
-                        ?method_id,
-                        found_method = %method_def_name,
-                        looking_for = %method_name_str,
-                        "checking method"
-                    );
-
-                    if method_def_name == method_name_str {
-                        tracing::trace!(
-                            ?method_id,
-                            %interface_name,
-                            "found method on constraint interface"
-                        );
-                        // Found the method - return InterfaceMethod resolution
-                        // The actual dispatch will happen at runtime via vtable
-                        //
-                        // Substitute SelfType placeholders with the type parameter.
-                        // The interface signature has Self as placeholder, but when
-                        // called through a constraint T: Interface, Self should be T.
-                        let self_type_id = self.type_arena_mut().type_param(param_name_id);
-                        let func_type = {
-                            let arena = self.type_arena();
-                            let (params, ret, is_closure) = arena
-                                .unwrap_function(method_signature_id)
-                                .expect("method signature must be a function type");
-                            (params.clone(), ret, is_closure)
-                        };
-                        let (params, ret, is_closure) = func_type;
-                        // Substitute SelfType in params and return type
-                        let substituted_params: smallvec::SmallVec<[_; 4]> = params
-                            .iter()
-                            .map(|&p| self.type_arena_mut().substitute_self(p, self_type_id))
-                            .collect();
-                        let substituted_ret =
-                            self.type_arena_mut().substitute_self(ret, self_type_id);
-                        let func_type = FunctionType {
-                            is_closure,
-                            params_id: substituted_params,
-                            return_type_id: substituted_ret,
-                        };
-                        let return_type_id = func_type.return_type_id;
-                        let func_type_id = func_type.intern(&mut self.type_arena_mut());
-                        // Compute vtable slot index for direct dispatch
-                        let method_index = self
-                            .entity_registry()
-                            .interface_method_slot(interface_type_id, method_name_id)
-                            .unwrap_or(0);
-                        return Some(ResolvedMethod::InterfaceMethod {
-                            method_name_id,
-                            interface_name: *interface_sym,
-                            method_name,
-                            func_type_id,
-                            return_type_id,
-                            interface_type_def_id: interface_type_id,
-                            method_index,
-                        });
-                    }
-                }
-            } else {
+            let Some(interface_type_id) = interface_type_id else {
                 tracing::trace!(%interface_name, "could not resolve interface");
+                continue;
+            };
+
+            if let Some(resolved) = self.find_method_in_constraint_interface(
+                interface_type_id,
+                *interface_sym,
+                method_name,
+                method_name_id,
+                param_name_id,
+                method_name_str,
+            ) {
+                return Some(resolved);
             }
         }
 
@@ -346,6 +276,125 @@ impl Analyzer {
             "method not found on any constraint interface"
         );
         None
+    }
+
+    /// Find a method in a constraint interface for type parameter resolution
+    fn find_method_in_constraint_interface(
+        &mut self,
+        interface_type_id: TypeDefId,
+        interface_sym: Symbol,
+        method_name: Symbol,
+        method_name_id: NameId,
+        param_name_id: NameId,
+        method_name_str: &str,
+    ) -> Option<ResolvedMethod> {
+        let method_ids = {
+            let registry = self.entity_registry();
+            let interface_def = registry.get_type(interface_type_id);
+            tracing::trace!(
+                ?interface_type_id,
+                num_methods = interface_def.methods.len(),
+                "found interface def"
+            );
+            interface_def.methods.clone()
+        };
+
+        for method_id in method_ids {
+            let (def_method_name_id, method_signature_id) = {
+                let registry = self.entity_registry();
+                let method_def = registry.get_method(method_id);
+                (method_def.name_id, method_def.signature_id)
+            };
+            let method_def_name = self
+                .name_table()
+                .last_segment_str(def_method_name_id)
+                .unwrap_or_default();
+
+            tracing::trace!(
+                ?method_id,
+                found_method = %method_def_name,
+                looking_for = %method_name_str,
+                "checking method"
+            );
+
+            if method_def_name != method_name_str {
+                continue;
+            }
+
+            let interface_name_str = self
+                .name_table()
+                .last_segment_str(self.entity_registry().get_type(interface_type_id).name_id)
+                .unwrap_or_default();
+            tracing::trace!(
+                ?method_id,
+                %interface_name_str,
+                "found method on constraint interface"
+            );
+
+            return Some(self.build_interface_method_resolution(
+                interface_type_id,
+                interface_sym,
+                method_name,
+                method_name_id,
+                param_name_id,
+                method_signature_id,
+            ));
+        }
+
+        None
+    }
+
+    /// Build the ResolvedMethod::InterfaceMethod for a type parameter constraint
+    fn build_interface_method_resolution(
+        &mut self,
+        interface_type_id: TypeDefId,
+        interface_sym: Symbol,
+        method_name: Symbol,
+        method_name_id: NameId,
+        param_name_id: NameId,
+        method_signature_id: ArenaTypeId,
+    ) -> ResolvedMethod {
+        // Substitute SelfType placeholders with the type parameter.
+        // The interface signature has Self as placeholder, but when
+        // called through a constraint T: Interface, Self should be T.
+        let self_type_id = self.type_arena_mut().type_param(param_name_id);
+        let (params, ret, is_closure) = {
+            let arena = self.type_arena();
+            let (params, ret, is_closure) = arena
+                .unwrap_function(method_signature_id)
+                .expect("method signature must be a function type");
+            (params.clone(), ret, is_closure)
+        };
+
+        // Substitute SelfType in params and return type
+        let substituted_params: smallvec::SmallVec<[_; 4]> = params
+            .iter()
+            .map(|&p| self.type_arena_mut().substitute_self(p, self_type_id))
+            .collect();
+        let substituted_ret = self.type_arena_mut().substitute_self(ret, self_type_id);
+        let func_type = FunctionType {
+            is_closure,
+            params_id: substituted_params,
+            return_type_id: substituted_ret,
+        };
+        let return_type_id = func_type.return_type_id;
+        let func_type_id = func_type.intern(&mut self.type_arena_mut());
+
+        // Compute vtable slot index for direct dispatch
+        let method_index = self
+            .entity_registry()
+            .interface_method_slot(interface_type_id, method_name_id)
+            .unwrap_or(0);
+
+        ResolvedMethod::InterfaceMethod {
+            method_name_id,
+            interface_name: interface_sym,
+            method_name,
+            func_type_id,
+            return_type_id,
+            interface_type_def_id: interface_type_id,
+            method_index,
+        }
     }
 
     /// Get the function type for a functional interface by TypeDefId
@@ -750,68 +799,97 @@ impl Analyzer {
             .get_implemented_interfaces(type_def_id);
 
         for interface_id in interface_ids {
-            let (interface_name_id, method_ids) = {
+            if let Some(resolved) = self.find_default_method_in_interface(
+                type_def_id,
+                interface_id,
+                method_name,
+                method_name_id,
+                type_sym,
+                method_name_str,
+                interner,
+            ) {
+                return Some(resolved);
+            }
+        }
+
+        None
+    }
+
+    /// Find a default method in an implemented interface
+    #[allow(clippy::too_many_arguments)]
+    fn find_default_method_in_interface(
+        &mut self,
+        type_def_id: TypeDefId,
+        interface_id: TypeDefId,
+        method_name: Symbol,
+        method_name_id: NameId,
+        type_sym: Symbol,
+        method_name_str: &str,
+        interner: &Interner,
+    ) -> Option<ResolvedMethod> {
+        let (interface_name_id, method_ids) = {
+            let registry = self.entity_registry();
+            let interface_def = registry.get_type(interface_id);
+            (interface_def.name_id, interface_def.methods.clone())
+        };
+
+        for method_id in method_ids {
+            let (
+                def_method_name_id,
+                method_has_default,
+                method_signature_id,
+                method_external_binding,
+            ) = {
                 let registry = self.entity_registry();
-                let interface_def = registry.get_type(interface_id);
-                (interface_def.name_id, interface_def.methods.clone())
+                let method = registry.get_method(method_id);
+                (
+                    method.name_id,
+                    method.has_default,
+                    method.signature_id,
+                    method.external_binding,
+                )
             };
 
-            for method_id in method_ids {
-                let (
-                    def_method_name_id,
-                    method_has_default,
-                    method_signature_id,
-                    method_external_binding,
-                ) = {
-                    let registry = self.entity_registry();
-                    let method = registry.get_method(method_id);
-                    (
-                        method.name_id,
-                        method.has_default,
-                        method.signature_id,
-                        method.external_binding,
-                    )
-                };
+            let def_method_name = self
+                .name_table()
+                .last_segment_str(def_method_name_id)
+                .unwrap_or_default();
 
-                let def_method_name = self
-                    .name_table()
-                    .last_segment_str(def_method_name_id)
-                    .unwrap_or_default();
-
-                if def_method_name == method_name_str && method_has_default {
-                    // Get interface name Symbol
-                    let interface_name = self
-                        .name_table()
-                        .last_segment_str(interface_name_id)
-                        .and_then(|s| interner.lookup(&s))
-                        .unwrap_or(Symbol(0));
-
-                    let func_type = {
-                        let arena = self.type_arena();
-                        let (params, ret, is_closure) = arena
-                            .unwrap_function(method_signature_id)
-                            .expect("method signature must be a function type");
-                        FunctionType {
-                            is_closure,
-                            params_id: params.clone(),
-                            return_type_id: ret,
-                        }
-                    };
-                    let return_type_id = func_type.return_type_id;
-                    let func_type_id = func_type.intern(&mut self.type_arena_mut());
-
-                    return Some(ResolvedMethod::DefaultMethod {
-                        type_def_id: Some(type_def_id),
-                        method_name_id,
-                        interface_name,
-                        type_name: type_sym,
-                        method_name,
-                        func_type_id,
-                        return_type_id,
-                        external_info: method_external_binding,
-                    });
-                }
+            if def_method_name != method_name_str || !method_has_default {
+                continue;
             }
+
+            // Get interface name Symbol
+            let interface_name = self
+                .name_table()
+                .last_segment_str(interface_name_id)
+                .and_then(|s| interner.lookup(&s))
+                .unwrap_or(Symbol(0));
+
+            let func_type = {
+                let arena = self.type_arena();
+                let (params, ret, is_closure) = arena
+                    .unwrap_function(method_signature_id)
+                    .expect("method signature must be a function type");
+                FunctionType {
+                    is_closure,
+                    params_id: params.clone(),
+                    return_type_id: ret,
+                }
+            };
+            let return_type_id = func_type.return_type_id;
+            let func_type_id = func_type.intern(&mut self.type_arena_mut());
+
+            return Some(ResolvedMethod::DefaultMethod {
+                type_def_id: Some(type_def_id),
+                method_name_id,
+                interface_name,
+                type_name: type_sym,
+                method_name,
+                func_type_id,
+                return_type_id,
+                external_info: method_external_binding,
+            });
         }
 
         None
