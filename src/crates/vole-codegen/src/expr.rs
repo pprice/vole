@@ -805,6 +805,10 @@ impl Cg<'_, '_, '_> {
                 let result = self.tag_eq(value.value, tag_index as i64);
                 Ok(self.bool_value(result))
             }
+            IsCheckResult::CheckUnknown(_type_id) => {
+                // TODO(v-1f38): Implement codegen for unknown type checks using TaggedValue
+                Err("unknown type narrowing not yet implemented in codegen".to_string())
+            }
         }
     }
 
@@ -832,6 +836,10 @@ impl Cg<'_, '_, '_> {
             IsCheckResult::CheckTag(tag_index) => {
                 let result = self.tag_eq(scrutinee.value, tag_index as i64);
                 Ok(Some(result))
+            }
+            IsCheckResult::CheckUnknown(_type_id) => {
+                // TODO(v-1f38): Implement codegen for unknown type checks using TaggedValue
+                Err("unknown type narrowing not yet implemented in codegen".to_string())
             }
         }
     }

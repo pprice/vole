@@ -27,7 +27,10 @@ impl Analyzer {
 
         // Compute IsCheckResult for codegen
         let union_variants = self.type_arena().unwrap_union(value_type_id).cloned();
-        let is_check_result = if let Some(variants) = &union_variants {
+        let is_check_result = if value_type_id.is_unknown() {
+            // Unknown type: always allow the check, will be resolved at runtime
+            IsCheckResult::CheckUnknown(tested_type_id)
+        } else if let Some(variants) = &union_variants {
             // Union type: find which variant the tested type matches
             if let Some(index) = variants.iter().position(|&v| v == tested_type_id) {
                 IsCheckResult::CheckTag(index as u32)

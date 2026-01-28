@@ -36,6 +36,9 @@ pub enum IsCheckResult {
     AlwaysFalse,
     /// Runtime check needed - compare against this union variant tag
     CheckTag(u32),
+    /// Runtime check needed for unknown type - compare against this type's tag
+    /// The TypeId indicates what type we're checking for at runtime.
+    CheckUnknown(TypeId),
 }
 
 /// Cached analysis results for a single module.
