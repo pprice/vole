@@ -588,6 +588,10 @@ impl TypeArena {
 
     /// Create a union type from variants.
     /// Normalizes: flattens nested unions, sorts descending (value types before sentinels), dedupes.
+    ///
+    /// Lattice simplification rules:
+    /// - `never | T` → `T` (never is the bottom type, disappears from unions)
+    /// - `unknown | T` → `unknown` (unknown is the top type, absorbs everything)
     pub fn union(&mut self, variants: impl Into<TypeIdVec>) -> TypeId {
         let variants = variants.into();
         // Propagate invalid
@@ -608,6 +612,19 @@ impl TypeArena {
             } else {
                 flattened.push(v);
             }
+        }
+
+        // Lattice simplification: unknown absorbs everything
+        if flattened.iter().any(|&v| v.is_unknown()) {
+            return TypeId::UNKNOWN;
+        }
+
+        // Lattice simplification: never disappears from unions
+        flattened.retain(|&v| !v.is_never());
+
+        // If all variants were never, return never
+        if flattened.is_empty() {
+            return TypeId::NEVER;
         }
 
         // Sort descending by Debug string - puts value types before sentinels
@@ -2394,5 +2411,124 @@ mod tests {
         // expect_substitute should return it
         let result = arena.expect_substitute(arr_t, &subs, "test context");
         assert_eq!(result, expected);
+    }
+
+    // ========================================================================
+    // Union simplification tests for never/unknown
+    // ========================================================================
+
+    #[test]
+    fn union_never_with_type_removes_never() {
+        let mut arena = TypeArena::new();
+        let never = TypeId::NEVER;
+        let i32_id = arena.i32();
+
+        // never | i32 should be i32
+        let result = arena.union(smallvec::smallvec![never, i32_id]);
+        assert_eq!(result, i32_id);
+    }
+
+    #[test]
+    fn union_never_with_multiple_types_removes_never() {
+        let mut arena = TypeArena::new();
+        let never = TypeId::NEVER;
+        let i32_id = arena.i32();
+        let string_id = arena.string();
+
+        // never | i32 | string should be i32 | string (without never)
+        let result = arena.union(smallvec::smallvec![never, i32_id, string_id]);
+        let variants = arena.unwrap_union(result).unwrap();
+        assert_eq!(variants.len(), 2);
+        assert!(!variants.contains(&never));
+        assert!(variants.contains(&i32_id));
+        assert!(variants.contains(&string_id));
+    }
+
+    #[test]
+    fn union_only_never_returns_never() {
+        let mut arena = TypeArena::new();
+        let never = TypeId::NEVER;
+
+        // never | never should be never
+        let result = arena.union(smallvec::smallvec![never, never]);
+        assert_eq!(result, TypeId::NEVER);
+    }
+
+    #[test]
+    fn union_unknown_with_type_returns_unknown() {
+        let mut arena = TypeArena::new();
+        let unknown = TypeId::UNKNOWN;
+        let i32_id = arena.i32();
+
+        // unknown | i32 should be unknown
+        let result = arena.union(smallvec::smallvec![unknown, i32_id]);
+        assert_eq!(result, TypeId::UNKNOWN);
+    }
+
+    #[test]
+    fn union_unknown_with_multiple_types_returns_unknown() {
+        let mut arena = TypeArena::new();
+        let unknown = TypeId::UNKNOWN;
+        let i32_id = arena.i32();
+        let string_id = arena.string();
+        let nil_id = arena.nil();
+
+        // unknown | i32 | string | nil should be unknown
+        let result = arena.union(smallvec::smallvec![unknown, i32_id, string_id, nil_id]);
+        assert_eq!(result, TypeId::UNKNOWN);
+    }
+
+    #[test]
+    fn union_unknown_with_never_returns_unknown() {
+        let mut arena = TypeArena::new();
+        let unknown = TypeId::UNKNOWN;
+        let never = TypeId::NEVER;
+
+        // unknown | never should be unknown (unknown absorbs everything, including never)
+        let result = arena.union(smallvec::smallvec![unknown, never]);
+        assert_eq!(result, TypeId::UNKNOWN);
+    }
+
+    #[test]
+    fn union_never_with_nil_removes_never() {
+        let mut arena = TypeArena::new();
+        let never = TypeId::NEVER;
+        let nil_id = arena.nil();
+
+        // never | nil should be nil
+        let result = arena.union(smallvec::smallvec![never, nil_id]);
+        assert_eq!(result, nil_id);
+    }
+
+    #[test]
+    fn union_nested_with_never_removes_never() {
+        let mut arena = TypeArena::new();
+        let never = TypeId::NEVER;
+        let i32_id = arena.i32();
+        let string_id = arena.string();
+
+        // Create inner union: i32 | string
+        let inner = arena.union(smallvec::smallvec![i32_id, string_id]);
+
+        // (i32 | string) | never should be i32 | string
+        let result = arena.union(smallvec::smallvec![inner, never]);
+        let variants = arena.unwrap_union(result).unwrap();
+        assert_eq!(variants.len(), 2);
+        assert!(!variants.contains(&never));
+    }
+
+    #[test]
+    fn union_nested_with_unknown_returns_unknown() {
+        let mut arena = TypeArena::new();
+        let unknown = TypeId::UNKNOWN;
+        let i32_id = arena.i32();
+        let string_id = arena.string();
+
+        // Create inner union: i32 | string
+        let inner = arena.union(smallvec::smallvec![i32_id, string_id]);
+
+        // (i32 | string) | unknown should be unknown
+        let result = arena.union(smallvec::smallvec![inner, unknown]);
+        assert_eq!(result, TypeId::UNKNOWN);
     }
 }
