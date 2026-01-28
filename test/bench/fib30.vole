@@ -9,6 +9,6 @@ func fib(n: i64) -> i64 {
 }
 
 func main() {
-    let result = fib(25)
+    let result = fib(30)
     println(result)
 }
