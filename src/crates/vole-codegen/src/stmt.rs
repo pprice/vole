@@ -145,8 +145,13 @@ impl Cg<'_, '_, '_> {
                     let is_declared_f32 = declared_type_id == arena.f32();
                     let is_declared_f64 = declared_type_id == arena.f64();
                     let is_declared_interface = arena.is_interface(declared_type_id);
+                    let is_declared_unknown = arena.is_unknown(declared_type_id);
 
-                    if is_declared_union && !self.arena().is_union(init.type_id) {
+                    if is_declared_unknown && !self.arena().is_unknown(init.type_id) {
+                        // Box value to unknown type (TaggedValue)
+                        let boxed = self.box_to_unknown(init)?;
+                        (boxed.value, boxed.type_id)
+                    } else if is_declared_union && !self.arena().is_union(init.type_id) {
                         let wrapped = self.construct_union_id(init, declared_type_id)?;
                         (wrapped.value, wrapped.type_id)
                     } else if is_declared_integer && init.type_id.is_integer() {

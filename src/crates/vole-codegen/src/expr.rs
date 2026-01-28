@@ -127,6 +127,18 @@ impl Cg<'_, '_, '_> {
                 });
             }
 
+            // Check for narrowed type from unknown
+            if let Some(narrowed_type_id) = self.get_expr_type(&expr.id)
+                && self.arena().is_unknown(*type_id)
+                && !self.arena().is_unknown(narrowed_type_id)
+            {
+                // TaggedValue layout: [tag:8][value:8]
+                // Extract the value from offset 8 and convert to proper type
+                let raw_value = self.builder.ins().load(types::I64, MemFlags::new(), val, 8);
+                let extracted = self.extract_unknown_value(raw_value, narrowed_type_id);
+                return Ok(extracted);
+            }
+
             Ok(CompiledValue {
                 value: val,
                 ty,
@@ -805,9 +817,17 @@ impl Cg<'_, '_, '_> {
                 let result = self.tag_eq(value.value, tag_index as i64);
                 Ok(self.bool_value(result))
             }
-            IsCheckResult::CheckUnknown(_type_id) => {
-                // TODO(v-1f38): Implement codegen for unknown type checks using TaggedValue
-                Err("unknown type narrowing not yet implemented in codegen".to_string())
+            IsCheckResult::CheckUnknown(tested_type_id) => {
+                // Check if the unknown value's tag matches the tested type
+                // TaggedValue layout: [tag: u64 at offset 0][value: u64 at offset 8]
+                let tag = self
+                    .builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), value.value, 0);
+                let expected_tag = crate::types::unknown_type_tag(tested_type_id, self.arena());
+                let expected_val = self.builder.ins().iconst(types::I64, expected_tag as i64);
+                let result = self.builder.ins().icmp(IntCC::Equal, tag, expected_val);
+                Ok(self.bool_value(result))
             }
         }
     }
@@ -837,9 +857,17 @@ impl Cg<'_, '_, '_> {
                 let result = self.tag_eq(scrutinee.value, tag_index as i64);
                 Ok(Some(result))
             }
-            IsCheckResult::CheckUnknown(_type_id) => {
-                // TODO(v-1f38): Implement codegen for unknown type checks using TaggedValue
-                Err("unknown type narrowing not yet implemented in codegen".to_string())
+            IsCheckResult::CheckUnknown(tested_type_id) => {
+                // Check if the unknown value's tag matches the tested type
+                // TaggedValue layout: [tag: u64 at offset 0][value: u64 at offset 8]
+                let tag = self
+                    .builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), scrutinee.value, 0);
+                let expected_tag = crate::types::unknown_type_tag(tested_type_id, self.arena());
+                let expected_val = self.builder.ins().iconst(types::I64, expected_tag as i64);
+                let result = self.builder.ins().icmp(IntCC::Equal, tag, expected_val);
+                Ok(Some(result))
             }
         }
     }

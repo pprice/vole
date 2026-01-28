@@ -1,0 +1,67 @@
+// Unit tests for the unknown type (top type)
+// unknown is the universal supertype - any value can be assigned to it
+
+tests {
+    test "unknown stores i64" {
+        let x: unknown = 42
+        assert(x is i64)
+    }
+
+    test "unknown stores string" {
+        let x: unknown = "hello"
+        assert(x is string)
+    }
+
+    test "unknown stores bool" {
+        let x: unknown = true
+        assert(x is bool)
+    }
+
+    test "unknown stores f64" {
+        let x: unknown = 3.14
+        assert(x is f64)
+    }
+
+    test "unknown is check returns false for wrong type" {
+        let x: unknown = 42
+        assert(!(x is string))
+        assert(!(x is bool))
+        assert(!(x is f64))
+    }
+
+    test "unknown narrowing extracts i64" {
+        let x: unknown = 100
+        if x is i64 {
+            assert(x == 100)
+        } else {
+            assert(false) // Should not reach here
+        }
+    }
+
+    test "unknown narrowing extracts bool" {
+        let x: unknown = false
+        if x is bool {
+            assert(!x)
+        } else {
+            assert(false)
+        }
+    }
+
+    test "unknown narrowing extracts string" {
+        let x: unknown = "test"
+        if x is string {
+            assert(x == "test")
+        } else {
+            assert(false)
+        }
+    }
+
+    test "unknown narrowing extracts f64" {
+        let x: unknown = 2.5
+        if x is f64 {
+            assert(x == 2.5)
+        } else {
+            assert(false)
+        }
+    }
+}

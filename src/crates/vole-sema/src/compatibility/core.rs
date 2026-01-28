@@ -51,6 +51,12 @@ pub fn types_compatible_core_id(from: TypeId, to: TypeId, arena: &TypeArena) -> 
         return true;
     }
 
+    // Any type is compatible with unknown (top type)
+    // The unknown type can hold any value
+    if to.is_unknown() {
+        return true;
+    }
+
     // Class compatibility: compare by type_def_id and type_args
     if let (
         SemaType::Class {

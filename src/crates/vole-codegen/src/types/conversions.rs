@@ -181,6 +181,8 @@ pub(crate) fn type_id_to_cranelift(ty: TypeId, arena: &TypeArena, pointer_type: 
         ArenaType::Range => pointer_type,
         ArenaType::Tuple(_) => pointer_type,
         ArenaType::FixedArray { .. } => pointer_type,
+        // Unknown type uses TaggedValue (16 bytes: tag + value), stored via pointer
+        ArenaType::Unknown => pointer_type,
         _ => types::I64,
     }
 }
@@ -268,6 +270,8 @@ pub(crate) fn type_id_size(
                 type_id_size(*element, pointer_type, entity_registry, arena).div_ceil(8) * 8;
             elem_size * (*size as u32)
         }
+        // Unknown type uses TaggedValue representation: 8-byte tag + 8-byte value = 16 bytes
+        ArenaType::Unknown => 16,
         _ => 8,
     }
 }
@@ -635,6 +639,48 @@ pub(crate) fn array_element_tag_id(ty: TypeId, arena: &TypeArena) -> i64 {
         ArenaType::Primitive(PrimitiveType::Bool) => 4,
         ArenaType::Array(_) => 5,
         _ => 2, // default to integer
+    }
+}
+
+// ============================================================================
+// Unknown type (TaggedValue) helpers
+// ============================================================================
+
+/// Runtime type tags for TaggedValue (used by unknown type).
+/// These correspond to vole_runtime::value constants.
+pub(crate) mod unknown_tags {
+    pub const TAG_STRING: u64 = 1;
+    pub const TAG_I64: u64 = 2;
+    pub const TAG_F64: u64 = 3;
+    pub const TAG_BOOL: u64 = 4;
+    pub const TAG_ARRAY: u64 = 5;
+    pub const TAG_CLOSURE: u64 = 6;
+    pub const TAG_INSTANCE: u64 = 7;
+}
+
+/// Get the runtime tag for boxing a value into the unknown type (TaggedValue).
+/// Returns the tag that should be stored in the TaggedValue.tag field.
+pub(crate) fn unknown_type_tag(ty: TypeId, arena: &TypeArena) -> u64 {
+    use vole_sema::type_arena::SemaType as ArenaType;
+    match arena.get(ty) {
+        ArenaType::Primitive(PrimitiveType::String) => unknown_tags::TAG_STRING,
+        ArenaType::Primitive(PrimitiveType::I64)
+        | ArenaType::Primitive(PrimitiveType::I32)
+        | ArenaType::Primitive(PrimitiveType::I16)
+        | ArenaType::Primitive(PrimitiveType::I8)
+        | ArenaType::Primitive(PrimitiveType::U64)
+        | ArenaType::Primitive(PrimitiveType::U32)
+        | ArenaType::Primitive(PrimitiveType::U16)
+        | ArenaType::Primitive(PrimitiveType::U8) => unknown_tags::TAG_I64,
+        ArenaType::Primitive(PrimitiveType::F64) | ArenaType::Primitive(PrimitiveType::F32) => {
+            unknown_tags::TAG_F64
+        }
+        ArenaType::Primitive(PrimitiveType::Bool) => unknown_tags::TAG_BOOL,
+        ArenaType::Array(_) | ArenaType::FixedArray { .. } => unknown_tags::TAG_ARRAY,
+        ArenaType::Function { .. } => unknown_tags::TAG_CLOSURE,
+        ArenaType::Class { .. } | ArenaType::Record { .. } => unknown_tags::TAG_INSTANCE,
+        // For other types (nil, done, tuples, unions, etc.), default to I64 representation
+        _ => unknown_tags::TAG_I64,
     }
 }
 

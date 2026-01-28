@@ -1024,6 +1024,10 @@ impl TypeArena {
 
     /// Check if an integer literal value fits within a type (handles unions)
     pub fn literal_fits_id(&self, value: i64, id: TypeId) -> bool {
+        // Unknown type accepts any value
+        if id.is_unknown() {
+            return true;
+        }
         // Check primitive types directly
         if id.fits_literal(value) {
             return true;

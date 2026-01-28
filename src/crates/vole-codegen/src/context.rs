@@ -784,6 +784,18 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue { value, ty, type_id }
     }
 
+    /// Extract a value from a TaggedValue (unknown type) after type narrowing.
+    /// The raw_value is the value field from the TaggedValue (already loaded from offset 8).
+    /// This converts it to the appropriate Cranelift type based on the narrowed type.
+    pub fn extract_unknown_value(&mut self, raw_value: Value, type_id: TypeId) -> CompiledValue {
+        // The value is stored as u64, need to convert to proper type
+        // This is similar to convert_field_value but for TaggedValue
+        let arena = self.env.analyzed.type_arena();
+        let (value, ty) =
+            super::structs::convert_field_value_id(self.builder, raw_value, type_id, arena);
+        CompiledValue { value, ty, type_id }
+    }
+
     /// Compile a list of expression arguments into Cranelift values.
     /// This is the common pattern for function/method calls.
     pub fn compile_call_args(&mut self, args: &[Expr]) -> Result<Vec<Value>, String> {
@@ -2214,9 +2226,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Box a value as an interface type.
     /// Coerce a value to match a target type if needed.
     ///
-    /// Handles two cases:
+    /// Handles three cases:
     /// - If target is an interface and value is not, boxes the value
     /// - If target is a union and value is not, wraps the value in a union
+    /// - If target is unknown, boxes the value with a type tag (TaggedValue)
     ///
     /// Returns the value unchanged if no coercion is needed.
     pub fn coerce_to_type(
@@ -2224,22 +2237,93 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         value: CompiledValue,
         target_type_id: TypeId,
     ) -> Result<CompiledValue, String> {
-        let (is_target_interface, is_value_interface, is_target_union, is_value_union) = {
+        let (
+            is_target_interface,
+            is_value_interface,
+            is_target_union,
+            is_value_union,
+            is_target_unknown,
+            is_value_unknown,
+        ) = {
             let arena = self.arena();
             (
                 arena.is_interface(target_type_id),
                 arena.is_interface(value.type_id),
                 arena.is_union(target_type_id),
                 arena.is_union(value.type_id),
+                arena.is_unknown(target_type_id),
+                arena.is_unknown(value.type_id),
             )
         };
         if is_target_interface && !is_value_interface {
             self.box_interface_value(value, target_type_id)
         } else if is_target_union && !is_value_union {
             self.construct_union_id(value, target_type_id)
+        } else if is_target_unknown && !is_value_unknown {
+            self.box_to_unknown(value)
         } else {
             Ok(value)
         }
+    }
+
+    /// Box a value into the unknown type (TaggedValue representation).
+    ///
+    /// Creates a 16-byte stack slot containing:
+    /// - Offset 0: tag (u64) - runtime type identifier
+    /// - Offset 8: value (u64) - the actual value (or pointer for reference types)
+    ///
+    /// Returns a pointer to the TaggedValue.
+    pub fn box_to_unknown(&mut self, value: CompiledValue) -> Result<CompiledValue, String> {
+        use crate::types::unknown_type_tag;
+
+        // Get the runtime tag for this type
+        let tag = unknown_type_tag(value.type_id, self.arena());
+
+        // Create a 16-byte stack slot for TaggedValue
+        let slot = self.alloc_stack(16);
+
+        // Store the tag at offset 0
+        let tag_val = self.builder.ins().iconst(types::I64, tag as i64);
+        self.builder.ins().stack_store(tag_val, slot, 0);
+
+        // Store the value at offset 8
+        // Convert to i64 if needed (for smaller types)
+        let value_as_i64 = if value.ty == types::I64 || value.ty == self.ptr_type() {
+            value.value
+        } else if value.ty == types::F64 {
+            // F64 is stored as bits
+            self.builder
+                .ins()
+                .bitcast(types::I64, MemFlags::new(), value.value)
+        } else if value.ty == types::F32 {
+            // F32 needs to be extended
+            let i32_val = self
+                .builder
+                .ins()
+                .bitcast(types::I32, MemFlags::new(), value.value);
+            self.builder.ins().uextend(types::I64, i32_val)
+        } else if value.ty.is_int() && value.ty.bytes() < 8 {
+            // Extend smaller integers to i64
+            if self.arena().is_unsigned(value.type_id) {
+                self.builder.ins().uextend(types::I64, value.value)
+            } else {
+                self.builder.ins().sextend(types::I64, value.value)
+            }
+        } else {
+            value.value
+        };
+
+        self.builder.ins().stack_store(value_as_i64, slot, 8);
+
+        // Return pointer to the TaggedValue
+        let ptr_type = self.ptr_type();
+        let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+
+        Ok(CompiledValue {
+            value: ptr,
+            ty: ptr_type,
+            type_id: TypeId::UNKNOWN,
+        })
     }
 
     /// Box a value as an interface type.

@@ -121,6 +121,10 @@ impl Analyzer {
                 }
 
                 if let Some(exp_id) = expected {
+                    // For unknown type, accept the literal but keep its actual type
+                    if exp_id.is_unknown() {
+                        return Ok(ArenaTypeId::I64);
+                    }
                     if self.type_arena().literal_fits_id(*value, exp_id) {
                         return Ok(exp_id);
                     }
@@ -201,6 +205,10 @@ impl Analyzer {
                     }
                     if exp_id.is_numeric() {
                         return Ok(exp_id);
+                    }
+                    // Unknown type accepts any value
+                    if exp_id.is_unknown() {
+                        return Ok(ArenaTypeId::F64);
                     }
                     // Check if union contains f64
                     if let Some(variants) = self.type_arena().unwrap_union(exp_id)
