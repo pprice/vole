@@ -43,6 +43,8 @@ pub enum IntrinsicHandler {
     UnaryIntOp(UnaryIntOp),
     /// Binary integer operation (min, max).
     BinaryIntOp(BinaryIntOp),
+    /// Unary integer wrapping operation (wrapping_neg).
+    UnaryIntWrappingOp(UnaryIntWrappingOp),
 }
 
 /// Unary float operations that take one argument and return a float.
@@ -174,6 +176,44 @@ pub enum BinaryIntOp {
     U16Rotr,
     U32Rotr,
     U64Rotr,
+    // Wrapping add
+    I8WrappingAdd,
+    I16WrappingAdd,
+    I32WrappingAdd,
+    I64WrappingAdd,
+    U8WrappingAdd,
+    U16WrappingAdd,
+    U32WrappingAdd,
+    U64WrappingAdd,
+    // Wrapping sub
+    I8WrappingSub,
+    I16WrappingSub,
+    I32WrappingSub,
+    I64WrappingSub,
+    U8WrappingSub,
+    U16WrappingSub,
+    U32WrappingSub,
+    U64WrappingSub,
+    // Wrapping mul
+    I8WrappingMul,
+    I16WrappingMul,
+    I32WrappingMul,
+    I64WrappingMul,
+    U8WrappingMul,
+    U16WrappingMul,
+    U32WrappingMul,
+    U64WrappingMul,
+}
+
+/// Unary integer wrapping operations.
+#[derive(Debug, Clone, Copy)]
+#[allow(clippy::enum_variant_names)] // All variants are WrappingNeg by design for consistency
+pub enum UnaryIntWrappingOp {
+    // Wrapping negation (signed types only)
+    I8WrappingNeg,
+    I16WrappingNeg,
+    I32WrappingNeg,
+    I64WrappingNeg,
 }
 
 /// Float constant intrinsic values.
@@ -265,6 +305,7 @@ impl IntrinsicsRegistry {
         registry.register_binary_float_operations();
         registry.register_int_operations();
         registry.register_binary_int_operations();
+        registry.register_wrapping_int_operations();
         registry
     }
 
@@ -461,6 +502,48 @@ impl IntrinsicsRegistry {
         self.register(IntrinsicKey::from("u16_rotr"), BI(U16Rotr));
         self.register(IntrinsicKey::from("u32_rotr"), BI(U32Rotr));
         self.register(IntrinsicKey::from("u64_rotr"), BI(U64Rotr));
+
+        // wrapping_add (all int types)
+        self.register(IntrinsicKey::from("i8_wrapping_add"), BI(I8WrappingAdd));
+        self.register(IntrinsicKey::from("i16_wrapping_add"), BI(I16WrappingAdd));
+        self.register(IntrinsicKey::from("i32_wrapping_add"), BI(I32WrappingAdd));
+        self.register(IntrinsicKey::from("i64_wrapping_add"), BI(I64WrappingAdd));
+        self.register(IntrinsicKey::from("u8_wrapping_add"), BI(U8WrappingAdd));
+        self.register(IntrinsicKey::from("u16_wrapping_add"), BI(U16WrappingAdd));
+        self.register(IntrinsicKey::from("u32_wrapping_add"), BI(U32WrappingAdd));
+        self.register(IntrinsicKey::from("u64_wrapping_add"), BI(U64WrappingAdd));
+
+        // wrapping_sub (all int types)
+        self.register(IntrinsicKey::from("i8_wrapping_sub"), BI(I8WrappingSub));
+        self.register(IntrinsicKey::from("i16_wrapping_sub"), BI(I16WrappingSub));
+        self.register(IntrinsicKey::from("i32_wrapping_sub"), BI(I32WrappingSub));
+        self.register(IntrinsicKey::from("i64_wrapping_sub"), BI(I64WrappingSub));
+        self.register(IntrinsicKey::from("u8_wrapping_sub"), BI(U8WrappingSub));
+        self.register(IntrinsicKey::from("u16_wrapping_sub"), BI(U16WrappingSub));
+        self.register(IntrinsicKey::from("u32_wrapping_sub"), BI(U32WrappingSub));
+        self.register(IntrinsicKey::from("u64_wrapping_sub"), BI(U64WrappingSub));
+
+        // wrapping_mul (all int types)
+        self.register(IntrinsicKey::from("i8_wrapping_mul"), BI(I8WrappingMul));
+        self.register(IntrinsicKey::from("i16_wrapping_mul"), BI(I16WrappingMul));
+        self.register(IntrinsicKey::from("i32_wrapping_mul"), BI(I32WrappingMul));
+        self.register(IntrinsicKey::from("i64_wrapping_mul"), BI(I64WrappingMul));
+        self.register(IntrinsicKey::from("u8_wrapping_mul"), BI(U8WrappingMul));
+        self.register(IntrinsicKey::from("u16_wrapping_mul"), BI(U16WrappingMul));
+        self.register(IntrinsicKey::from("u32_wrapping_mul"), BI(U32WrappingMul));
+        self.register(IntrinsicKey::from("u64_wrapping_mul"), BI(U64WrappingMul));
+    }
+
+    /// Register wrapping integer operation intrinsics (wrapping_neg).
+    fn register_wrapping_int_operations(&mut self) {
+        use IntrinsicHandler::UnaryIntWrappingOp as UW;
+        use UnaryIntWrappingOp::*;
+
+        // wrapping_neg (signed types only)
+        self.register(IntrinsicKey::from("i8_wrapping_neg"), UW(I8WrappingNeg));
+        self.register(IntrinsicKey::from("i16_wrapping_neg"), UW(I16WrappingNeg));
+        self.register(IntrinsicKey::from("i32_wrapping_neg"), UW(I32WrappingNeg));
+        self.register(IntrinsicKey::from("i64_wrapping_neg"), UW(I64WrappingNeg));
     }
 }
 
@@ -519,9 +602,10 @@ mod tests {
         // 12 unary float ops
         // 4 binary float ops (min, max)
         // 36 unary int ops (4 abs + 8 clz + 8 ctz + 8 popcnt + 8 bitrev)
-        // 32 binary int ops (8 min + 8 max + 8 rotl + 8 rotr)
-        // Total: 92
-        assert_eq!(registry.len(), 92);
+        // 56 binary int ops (8 min + 8 max + 8 rotl + 8 rotr + 8 wrapping_add + 8 wrapping_sub + 8 wrapping_mul)
+        // 4 unary int wrapping ops (wrapping_neg for signed types)
+        // Total: 120
+        assert_eq!(registry.len(), 120);
     }
 
     #[test]

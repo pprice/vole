@@ -1368,6 +1368,138 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                         let v = self.builder.ins().rotr(arg1, amt);
                         (v, types::I64, TypeId::U64)
                     }
+                    // wrapping_add - signed (Cranelift iadd wraps by default)
+                    BinaryIntOp::I8WrappingAdd => {
+                        let v = self.builder.ins().iadd(arg1, arg2);
+                        (v, types::I8, TypeId::I8)
+                    }
+                    BinaryIntOp::I16WrappingAdd => {
+                        let v = self.builder.ins().iadd(arg1, arg2);
+                        (v, types::I16, TypeId::I16)
+                    }
+                    BinaryIntOp::I32WrappingAdd => {
+                        let v = self.builder.ins().iadd(arg1, arg2);
+                        (v, types::I32, TypeId::I32)
+                    }
+                    BinaryIntOp::I64WrappingAdd => {
+                        let v = self.builder.ins().iadd(arg1, arg2);
+                        (v, types::I64, TypeId::I64)
+                    }
+                    // wrapping_add - unsigned
+                    BinaryIntOp::U8WrappingAdd => {
+                        let v = self.builder.ins().iadd(arg1, arg2);
+                        (v, types::I8, TypeId::U8)
+                    }
+                    BinaryIntOp::U16WrappingAdd => {
+                        let v = self.builder.ins().iadd(arg1, arg2);
+                        (v, types::I16, TypeId::U16)
+                    }
+                    BinaryIntOp::U32WrappingAdd => {
+                        let v = self.builder.ins().iadd(arg1, arg2);
+                        (v, types::I32, TypeId::U32)
+                    }
+                    BinaryIntOp::U64WrappingAdd => {
+                        let v = self.builder.ins().iadd(arg1, arg2);
+                        (v, types::I64, TypeId::U64)
+                    }
+                    // wrapping_sub - signed (Cranelift isub wraps by default)
+                    BinaryIntOp::I8WrappingSub => {
+                        let v = self.builder.ins().isub(arg1, arg2);
+                        (v, types::I8, TypeId::I8)
+                    }
+                    BinaryIntOp::I16WrappingSub => {
+                        let v = self.builder.ins().isub(arg1, arg2);
+                        (v, types::I16, TypeId::I16)
+                    }
+                    BinaryIntOp::I32WrappingSub => {
+                        let v = self.builder.ins().isub(arg1, arg2);
+                        (v, types::I32, TypeId::I32)
+                    }
+                    BinaryIntOp::I64WrappingSub => {
+                        let v = self.builder.ins().isub(arg1, arg2);
+                        (v, types::I64, TypeId::I64)
+                    }
+                    // wrapping_sub - unsigned
+                    BinaryIntOp::U8WrappingSub => {
+                        let v = self.builder.ins().isub(arg1, arg2);
+                        (v, types::I8, TypeId::U8)
+                    }
+                    BinaryIntOp::U16WrappingSub => {
+                        let v = self.builder.ins().isub(arg1, arg2);
+                        (v, types::I16, TypeId::U16)
+                    }
+                    BinaryIntOp::U32WrappingSub => {
+                        let v = self.builder.ins().isub(arg1, arg2);
+                        (v, types::I32, TypeId::U32)
+                    }
+                    BinaryIntOp::U64WrappingSub => {
+                        let v = self.builder.ins().isub(arg1, arg2);
+                        (v, types::I64, TypeId::U64)
+                    }
+                    // wrapping_mul - signed (Cranelift imul wraps by default)
+                    BinaryIntOp::I8WrappingMul => {
+                        let v = self.builder.ins().imul(arg1, arg2);
+                        (v, types::I8, TypeId::I8)
+                    }
+                    BinaryIntOp::I16WrappingMul => {
+                        let v = self.builder.ins().imul(arg1, arg2);
+                        (v, types::I16, TypeId::I16)
+                    }
+                    BinaryIntOp::I32WrappingMul => {
+                        let v = self.builder.ins().imul(arg1, arg2);
+                        (v, types::I32, TypeId::I32)
+                    }
+                    BinaryIntOp::I64WrappingMul => {
+                        let v = self.builder.ins().imul(arg1, arg2);
+                        (v, types::I64, TypeId::I64)
+                    }
+                    // wrapping_mul - unsigned
+                    BinaryIntOp::U8WrappingMul => {
+                        let v = self.builder.ins().imul(arg1, arg2);
+                        (v, types::I8, TypeId::U8)
+                    }
+                    BinaryIntOp::U16WrappingMul => {
+                        let v = self.builder.ins().imul(arg1, arg2);
+                        (v, types::I16, TypeId::U16)
+                    }
+                    BinaryIntOp::U32WrappingMul => {
+                        let v = self.builder.ins().imul(arg1, arg2);
+                        (v, types::I32, TypeId::U32)
+                    }
+                    BinaryIntOp::U64WrappingMul => {
+                        let v = self.builder.ins().imul(arg1, arg2);
+                        (v, types::I64, TypeId::U64)
+                    }
+                };
+                Ok(CompiledValue { value, ty, type_id })
+            }
+            IntrinsicHandler::UnaryIntWrappingOp(op) => {
+                use crate::intrinsics::UnaryIntWrappingOp;
+                if args.is_empty() {
+                    return Err(format!(
+                        "unary int wrapping intrinsic \"{}\" requires 1 argument",
+                        intrinsic_key
+                    ));
+                }
+                let arg = args[0];
+                let (value, ty, type_id) = match op {
+                    // wrapping_neg - signed (Cranelift ineg wraps by default)
+                    UnaryIntWrappingOp::I8WrappingNeg => {
+                        let v = self.builder.ins().ineg(arg);
+                        (v, types::I8, TypeId::I8)
+                    }
+                    UnaryIntWrappingOp::I16WrappingNeg => {
+                        let v = self.builder.ins().ineg(arg);
+                        (v, types::I16, TypeId::I16)
+                    }
+                    UnaryIntWrappingOp::I32WrappingNeg => {
+                        let v = self.builder.ins().ineg(arg);
+                        (v, types::I32, TypeId::I32)
+                    }
+                    UnaryIntWrappingOp::I64WrappingNeg => {
+                        let v = self.builder.ins().ineg(arg);
+                        (v, types::I64, TypeId::I64)
+                    }
                 };
                 Ok(CompiledValue { value, ty, type_id })
             }

@@ -84,3 +84,56 @@ external("vole:compiler_intrinsic") {
         u64 => "u64_rotr"
     }
 }
+
+// Wrapping addition - wraps on overflow instead of panicking
+external("vole:compiler_intrinsic") {
+    func wrapping_add<T>(x: T, y: T) -> T where {
+        i8 => "i8_wrapping_add"
+        i16 => "i16_wrapping_add"
+        i32 => "i32_wrapping_add"
+        i64 => "i64_wrapping_add"
+        u8 => "u8_wrapping_add"
+        u16 => "u16_wrapping_add"
+        u32 => "u32_wrapping_add"
+        u64 => "u64_wrapping_add"
+    }
+}
+
+// Wrapping subtraction - wraps on overflow instead of panicking
+external("vole:compiler_intrinsic") {
+    func wrapping_sub<T>(x: T, y: T) -> T where {
+        i8 => "i8_wrapping_sub"
+        i16 => "i16_wrapping_sub"
+        i32 => "i32_wrapping_sub"
+        i64 => "i64_wrapping_sub"
+        u8 => "u8_wrapping_sub"
+        u16 => "u16_wrapping_sub"
+        u32 => "u32_wrapping_sub"
+        u64 => "u64_wrapping_sub"
+    }
+}
+
+// Wrapping multiplication - wraps on overflow instead of panicking
+external("vole:compiler_intrinsic") {
+    func wrapping_mul<T>(x: T, y: T) -> T where {
+        i8 => "i8_wrapping_mul"
+        i16 => "i16_wrapping_mul"
+        i32 => "i32_wrapping_mul"
+        i64 => "i64_wrapping_mul"
+        u8 => "u8_wrapping_mul"
+        u16 => "u16_wrapping_mul"
+        u32 => "u32_wrapping_mul"
+        u64 => "u64_wrapping_mul"
+    }
+}
+
+// Wrapping negation - wraps on overflow (MIN_VALUE -> MIN_VALUE)
+// Only available for signed types
+external("vole:compiler_intrinsic") {
+    func wrapping_neg<T>(x: T) -> T where {
+        i8 => "i8_wrapping_neg"
+        i16 => "i16_wrapping_neg"
+        i32 => "i32_wrapping_neg"
+        i64 => "i64_wrapping_neg"
+    }
+}

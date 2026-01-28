@@ -1,0 +1,416 @@
+// Test wrapping arithmetic operations - wrap on overflow instead of panicking
+
+let { wrapping_add, wrapping_sub, wrapping_mul, wrapping_neg } = import "std:lowlevel"
+
+tests "wrapping_add" {
+    test "i8 wrapping_add normal" {
+        let a: i8 = 10
+        let b: i8 = 20
+        assert(wrapping_add(a, b) == 30)
+    }
+
+    test "i8 wrapping_add overflow wraps" {
+        let a: i8 = 127
+        let b: i8 = 1
+        // 127 + 1 wraps to -128
+        assert(wrapping_add(a, b) == -128)
+    }
+
+    test "i8 wrapping_add overflow wraps more" {
+        let a: i8 = 127
+        let b: i8 = 10
+        // 127 + 10 = 137, wraps to 137 - 256 = -119
+        assert(wrapping_add(a, b) == -119)
+    }
+
+    test "i16 wrapping_add normal" {
+        let a: i16 = 1000
+        let b: i16 = 2000
+        assert(wrapping_add(a, b) == 3000)
+    }
+
+    test "i16 wrapping_add overflow" {
+        let a: i16 = 32767
+        let b: i16 = 1
+        assert(wrapping_add(a, b) == -32768)
+    }
+
+    test "i32 wrapping_add normal" {
+        let a: i32 = 1000000
+        let b: i32 = 2000000
+        assert(wrapping_add(a, b) == 3000000)
+    }
+
+    test "i32 wrapping_add overflow" {
+        let a: i32 = 2147483647
+        let b: i32 = 1
+        assert(wrapping_add(a, b) == -2147483648)
+    }
+
+    test "i64 wrapping_add normal" {
+        let a: i64 = 1000000000000
+        let b: i64 = 2000000000000
+        assert(wrapping_add(a, b) == 3000000000000)
+    }
+
+    test "i64 wrapping_add overflow" {
+        let a: i64 = 9223372036854775807
+        let b: i64 = 1
+        // Wraps to MIN - use wrapping_sub to compute MIN since parser can't handle the literal
+        let i64_min: i64 = wrapping_sub(-9223372036854775807, 1)
+        assert(wrapping_add(a, b) == i64_min)
+    }
+
+    test "u8 wrapping_add normal" {
+        let a: u8 = 100
+        let b: u8 = 50
+        assert(wrapping_add(a, b) == 150)
+    }
+
+    test "u8 wrapping_add overflow" {
+        let a: u8 = 255
+        let b: u8 = 1
+        assert(wrapping_add(a, b) == 0)
+    }
+
+    test "u8 wrapping_add overflow more" {
+        let a: u8 = 255
+        let b: u8 = 10
+        // 255 + 10 = 265, wraps to 265 - 256 = 9
+        assert(wrapping_add(a, b) == 9)
+    }
+
+    test "u16 wrapping_add normal" {
+        let a: u16 = 30000
+        let b: u16 = 20000
+        assert(wrapping_add(a, b) == 50000)
+    }
+
+    test "u16 wrapping_add overflow" {
+        let a: u16 = 65535
+        let b: u16 = 1
+        assert(wrapping_add(a, b) == 0)
+    }
+
+    test "u32 wrapping_add normal" {
+        let a: u32 = 3000000000
+        let b: u32 = 1000000000
+        assert(wrapping_add(a, b) == 4000000000)
+    }
+
+    test "u32 wrapping_add overflow" {
+        let a: u32 = 4294967295
+        let b: u32 = 1
+        assert(wrapping_add(a, b) == 0)
+    }
+
+    test "u64 wrapping_add normal" {
+        let a: u64 = 1000000000000
+        let b: u64 = 2000000000000
+        assert(wrapping_add(a, b) == 3000000000000)
+    }
+
+    test "u64 wrapping_add overflow" {
+        // Use computed MAX since parser has issues with large literals
+        // MAX_U64 = 2^64 - 1, compute via wrapping_sub(0, 1) on u64
+        let zero: u64 = 0
+        let one: u64 = 1
+        let max_u64: u64 = wrapping_sub(zero, one)
+        assert(max_u64 > 0) // Sanity check that we got MAX
+        assert(wrapping_add(max_u64, one) == 0)
+    }
+}
+
+tests "wrapping_sub" {
+    test "i8 wrapping_sub normal" {
+        let a: i8 = 20
+        let b: i8 = 10
+        assert(wrapping_sub(a, b) == 10)
+    }
+
+    test "i8 wrapping_sub underflow" {
+        let a: i8 = -128
+        let b: i8 = 1
+        // -128 - 1 wraps to 127
+        assert(wrapping_sub(a, b) == 127)
+    }
+
+    test "i16 wrapping_sub underflow" {
+        let a: i16 = -32768
+        let b: i16 = 1
+        assert(wrapping_sub(a, b) == 32767)
+    }
+
+    test "i32 wrapping_sub underflow" {
+        let a: i32 = -2147483648
+        let b: i32 = 1
+        assert(wrapping_sub(a, b) == 2147483647)
+    }
+
+    test "i64 wrapping_sub underflow" {
+        // Compute MIN using wrapping since parser can't handle the literal
+        let a: i64 = wrapping_sub(-9223372036854775807, 1)
+        let b: i64 = 1
+        assert(wrapping_sub(a, b) == 9223372036854775807)
+    }
+
+    test "u8 wrapping_sub normal" {
+        let a: u8 = 100
+        let b: u8 = 50
+        assert(wrapping_sub(a, b) == 50)
+    }
+
+    test "u8 wrapping_sub underflow" {
+        let a: u8 = 0
+        let b: u8 = 1
+        // 0 - 1 wraps to 255
+        assert(wrapping_sub(a, b) == 255)
+    }
+
+    test "u16 wrapping_sub underflow" {
+        let a: u16 = 0
+        let b: u16 = 1
+        assert(wrapping_sub(a, b) == 65535)
+    }
+
+    test "u32 wrapping_sub underflow" {
+        let a: u32 = 0
+        let b: u32 = 1
+        assert(wrapping_sub(a, b) == 4294967295)
+    }
+
+    test "u64 wrapping_sub underflow" {
+        let a: u64 = 0
+        let b: u64 = 1
+        // 0 - 1 wraps to MAX_U64
+        let max_u64: u64 = wrapping_sub(a, b)
+        // It's the max because adding 1 wraps to 0
+        let one: u64 = 1
+        assert(wrapping_add(max_u64, one) == 0)
+    }
+}
+
+tests "wrapping_mul" {
+    test "i8 wrapping_mul normal" {
+        let a: i8 = 5
+        let b: i8 = 10
+        assert(wrapping_mul(a, b) == 50)
+    }
+
+    test "i8 wrapping_mul overflow" {
+        let a: i8 = 127
+        let b: i8 = 2
+        // 127 * 2 = 254 wraps to -2
+        assert(wrapping_mul(a, b) == -2)
+    }
+
+    test "i16 wrapping_mul normal" {
+        let a: i16 = 100
+        let b: i16 = 200
+        assert(wrapping_mul(a, b) == 20000)
+    }
+
+    test "i16 wrapping_mul overflow" {
+        let a: i16 = 32767
+        let b: i16 = 2
+        // 32767 * 2 = 65534 wraps to -2
+        assert(wrapping_mul(a, b) == -2)
+    }
+
+    test "i32 wrapping_mul normal" {
+        let a: i32 = 10000
+        let b: i32 = 10000
+        assert(wrapping_mul(a, b) == 100000000)
+    }
+
+    test "i32 wrapping_mul overflow" {
+        let a: i32 = 2147483647
+        let b: i32 = 2
+        // Result wraps
+        assert(wrapping_mul(a, b) == -2)
+    }
+
+    test "i64 wrapping_mul normal" {
+        let a: i64 = 1000000
+        let b: i64 = 1000000
+        assert(wrapping_mul(a, b) == 1000000000000)
+    }
+
+    test "i64 wrapping_mul overflow" {
+        let a: i64 = 9223372036854775807
+        let b: i64 = 2
+        // Result wraps
+        assert(wrapping_mul(a, b) == -2)
+    }
+
+    test "u8 wrapping_mul normal" {
+        let a: u8 = 10
+        let b: u8 = 20
+        assert(wrapping_mul(a, b) == 200)
+    }
+
+    test "u8 wrapping_mul overflow" {
+        let a: u8 = 255
+        let b: u8 = 2
+        // 255 * 2 = 510 wraps to 254
+        assert(wrapping_mul(a, b) == 254)
+    }
+
+    test "u16 wrapping_mul normal" {
+        let a: u16 = 100
+        let b: u16 = 100
+        assert(wrapping_mul(a, b) == 10000)
+    }
+
+    test "u16 wrapping_mul overflow" {
+        let a: u16 = 65535
+        let b: u16 = 2
+        // 65535 * 2 = 131070 wraps to 65534
+        assert(wrapping_mul(a, b) == 65534)
+    }
+
+    test "u32 wrapping_mul normal" {
+        let a: u32 = 10000
+        let b: u32 = 10000
+        assert(wrapping_mul(a, b) == 100000000)
+    }
+
+    test "u32 wrapping_mul overflow" {
+        let a: u32 = 4294967295
+        let b: u32 = 2
+        // Result wraps
+        assert(wrapping_mul(a, b) == 4294967294)
+    }
+
+    test "u64 wrapping_mul normal" {
+        let a: u64 = 1000000
+        let b: u64 = 1000000
+        assert(wrapping_mul(a, b) == 1000000000000)
+    }
+
+    test "u64 wrapping_mul overflow" {
+        // Use computed MAX since parser has issues with large literals
+        let zero: u64 = 0
+        let one: u64 = 1
+        let two: u64 = 2
+        let max_u64: u64 = wrapping_sub(zero, one)
+        let max_minus_1: u64 = wrapping_sub(max_u64, one)
+        // MAX * 2 = (2^64 - 1) * 2 = 2^65 - 2 wraps to 2^64 - 2 = MAX - 1
+        assert(wrapping_mul(max_u64, two) == max_minus_1)
+    }
+}
+
+tests "wrapping_neg" {
+    test "i8 wrapping_neg normal" {
+        let a: i8 = 10
+        assert(wrapping_neg(a) == -10)
+    }
+
+    test "i8 wrapping_neg of negative" {
+        let a: i8 = -10
+        assert(wrapping_neg(a) == 10)
+    }
+
+    test "i8 wrapping_neg of MIN wraps to MIN" {
+        let a: i8 = -128
+        // -(-128) would be 128 which doesn't fit in i8, so it wraps back to -128
+        assert(wrapping_neg(a) == -128)
+    }
+
+    test "i16 wrapping_neg normal" {
+        let a: i16 = 1000
+        assert(wrapping_neg(a) == -1000)
+    }
+
+    test "i16 wrapping_neg of MIN wraps to MIN" {
+        let a: i16 = -32768
+        assert(wrapping_neg(a) == -32768)
+    }
+
+    test "i32 wrapping_neg normal" {
+        let a: i32 = 1000000
+        assert(wrapping_neg(a) == -1000000)
+    }
+
+    test "i32 wrapping_neg of MIN wraps to MIN" {
+        let a: i32 = -2147483648
+        assert(wrapping_neg(a) == -2147483648)
+    }
+
+    test "i64 wrapping_neg normal" {
+        let a: i64 = 1000000000000
+        assert(wrapping_neg(a) == -1000000000000)
+    }
+
+    test "i64 wrapping_neg of MIN wraps to MIN" {
+        // Compute MIN using wrapping since parser can't handle the literal
+        let a: i64 = wrapping_sub(-9223372036854775807, 1)
+        assert(wrapping_neg(a) == a)
+    }
+
+    test "i8 wrapping_neg of zero is zero" {
+        let a: i8 = 0
+        assert(wrapping_neg(a) == 0)
+    }
+
+    test "i32 wrapping_neg of MAX" {
+        let a: i32 = 2147483647
+        assert(wrapping_neg(a) == -2147483647)
+    }
+}
+
+tests "wrapping arithmetic edge cases" {
+    test "chained wrapping_add" {
+        let a: u8 = 250
+        let b: u8 = 10
+        let c: u8 = 10
+        // (250 + 10) wraps to 4, then 4 + 10 = 14
+        assert(wrapping_add(wrapping_add(a, b), c) == 14)
+    }
+
+    test "mixed wrapping operations" {
+        let a: i32 = 2147483647
+        let b: i32 = 1
+        // Add wraps to MIN, then negate wraps back to MIN
+        let wrapped = wrapping_add(a, b)
+        assert(wrapped == -2147483648)
+        let negated = wrapping_neg(wrapped)
+        assert(negated == -2147483648)
+    }
+
+    test "wrapping_sub can produce same result as wrapping_add with negative" {
+        let a: i32 = 100
+        let b: i32 = 50
+        assert(wrapping_sub(a, b) == wrapping_add(a, wrapping_neg(b)))
+    }
+
+    test "wrapping is associative" {
+        let a: u8 = 200
+        let b: u8 = 100
+        let c: u8 = 50
+        // (a + b) + c should equal a + (b + c) even with wrapping
+        let left = wrapping_add(wrapping_add(a, b), c)
+        let right = wrapping_add(a, wrapping_add(b, c))
+        assert(left == right)
+    }
+
+    test "wrapping multiplication of zero" {
+        let a: i32 = 2147483647
+        let b: i32 = 0
+        assert(wrapping_mul(a, b) == 0)
+    }
+
+    test "wrapping multiplication of one" {
+        let a: i32 = 2147483647
+        let b: i32 = 1
+        assert(wrapping_mul(a, b) == 2147483647)
+    }
+
+    test "wrapping with negative numbers" {
+        let a: i32 = -100
+        let b: i32 = -200
+        assert(wrapping_add(a, b) == -300)
+        assert(wrapping_sub(a, b) == 100)
+        assert(wrapping_mul(a, b) == 20000)
+    }
+}
