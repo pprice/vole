@@ -100,7 +100,7 @@ impl Cg<'_, '_, '_> {
             }
             ExprKind::Block(block_expr) => self.block_expr(block_expr),
             ExprKind::If(if_expr) => self.if_expr(if_expr, expr.id),
-            ExprKind::When(when_expr) => self.when_expr(when_expr),
+            ExprKind::When(when_expr) => self.when_expr(when_expr, expr.id),
             ExprKind::Unreachable => self.unreachable_expr(expr.span.line),
         }
     }
@@ -1682,14 +1682,15 @@ impl Cg<'_, '_, '_> {
     ///
     /// Optimization: For binary when expressions (one condition + wildcard),
     /// uses Cranelift's `select` instruction if both bodies are selectable.
-    fn when_expr(&mut self, when_expr: &WhenExpr) -> Result<CompiledValue, String> {
-        // Get the result type from semantic analysis (from first arm body)
-        let result_type_id = if !when_expr.arms.is_empty() {
-            self.get_expr_type(&when_expr.arms[0].body.id)
-                .unwrap_or(self.arena().primitives.void)
-        } else {
-            self.arena().primitives.void
-        };
+    fn when_expr(
+        &mut self,
+        when_expr: &WhenExpr,
+        expr_id: NodeId,
+    ) -> Result<CompiledValue, String> {
+        // Get the result type from semantic analysis (stored on the when expression itself)
+        let result_type_id = self
+            .get_expr_type(&expr_id)
+            .unwrap_or(self.arena().primitives.void);
 
         let is_void = self.arena().is_void(result_type_id);
 

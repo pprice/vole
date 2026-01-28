@@ -2,22 +2,31 @@
 // The never type (bottom type) unifies with any other type
 
 tests {
-    test "if-else with unreachable in else branch infers then type" {
-        let x = if true { 42 } else { unreachable }
+    test "when with unreachable in false branch infers true branch type" {
+        let x = when {
+            true => 42,
+            _ => unreachable
+        }
         // x should be i64, not never
         assert(x == 42)
     }
 
-    test "if-else with unreachable in then branch infers else type" {
-        let x = if false { unreachable } else { "hello" }
+    test "when with unreachable in true branch infers false branch type" {
+        let x = when {
+            false => unreachable,
+            _ => "hello"
+        }
         // x should be string
         assert(x == "hello")
     }
 
-    test "if-else both unreachable infers never" {
+    test "when both branches unreachable infers never" {
         // This is unusual but valid - both branches are never
         func diverge() -> never {
-            _ = if true { unreachable } else { unreachable }
+            _ = when {
+                true => unreachable,
+                _ => unreachable
+            }
         }
         // Can't call diverge() since it would panic
         assert(true)
@@ -52,28 +61,36 @@ tests {
         assert(result == "match")
     }
 
-    test "nested if with unreachable" {
-        let x = if true {
-            if false { unreachable } else { 1 }
-        } else {
-            2
+    test "nested when with unreachable" {
+        let x = when {
+            true => when {
+                false => unreachable,
+                _ => 1
+            },
+            _ => 2
         }
         assert(x == 1)
     }
 
-    test "function returning never can be used in any branch" {
+    test "function returning never can be used in when branch" {
         func always_panics() -> never {
             _ = unreachable
         }
 
-        let x = if true { 42 } else { always_panics() }
+        let x = when {
+            true => 42,
+            _ => always_panics()
+        }
         assert(x == 42)
     }
 
     test "never type propagates through function return" {
-        // Function using explicit return
+        // Function using explicit return with when
         func foo(cond: bool) -> i64 {
-            return if cond { 42 } else { unreachable }
+            return when {
+                cond => 42,
+                _ => unreachable
+            }
         }
         assert(foo(true) == 42)
     }
