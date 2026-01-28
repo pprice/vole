@@ -45,6 +45,8 @@ pub enum IntrinsicHandler {
     BinaryIntOp(BinaryIntOp),
     /// Unary integer wrapping operation (wrapping_neg).
     UnaryIntWrappingOp(UnaryIntWrappingOp),
+    /// Checked integer operation (returns Optional<T> - nil on overflow).
+    CheckedIntOp(CheckedIntOp),
 }
 
 /// Unary float operations that take one argument and return a float.
@@ -243,6 +245,51 @@ pub enum UnaryIntWrappingOp {
     I64WrappingNeg,
 }
 
+/// Checked integer operations (return Optional<T> - nil on overflow).
+#[derive(Debug, Clone, Copy)]
+pub enum CheckedIntOp {
+    // Checked add - signed
+    I8CheckedAdd,
+    I16CheckedAdd,
+    I32CheckedAdd,
+    I64CheckedAdd,
+    // Checked add - unsigned
+    U8CheckedAdd,
+    U16CheckedAdd,
+    U32CheckedAdd,
+    U64CheckedAdd,
+    // Checked sub - signed
+    I8CheckedSub,
+    I16CheckedSub,
+    I32CheckedSub,
+    I64CheckedSub,
+    // Checked sub - unsigned
+    U8CheckedSub,
+    U16CheckedSub,
+    U32CheckedSub,
+    U64CheckedSub,
+    // Checked mul - signed
+    I8CheckedMul,
+    I16CheckedMul,
+    I32CheckedMul,
+    I64CheckedMul,
+    // Checked mul - unsigned
+    U8CheckedMul,
+    U16CheckedMul,
+    U32CheckedMul,
+    U64CheckedMul,
+    // Checked div - signed (returns nil on div-by-zero or MIN/-1)
+    I8CheckedDiv,
+    I16CheckedDiv,
+    I32CheckedDiv,
+    I64CheckedDiv,
+    // Checked div - unsigned (returns nil on div-by-zero)
+    U8CheckedDiv,
+    U16CheckedDiv,
+    U32CheckedDiv,
+    U64CheckedDiv,
+}
+
 /// Float constant intrinsic values.
 #[derive(Debug, Clone, Copy)]
 pub enum FloatConstant {
@@ -334,6 +381,7 @@ impl IntrinsicsRegistry {
         registry.register_binary_int_operations();
         registry.register_wrapping_int_operations();
         registry.register_saturating_int_operations();
+        registry.register_checked_int_operations();
         registry
     }
 
@@ -663,6 +711,52 @@ impl IntrinsicsRegistry {
             BI(U64SaturatingMul),
         );
     }
+
+    /// Register checked integer operation intrinsics (checked_add, checked_sub, checked_mul, checked_div).
+    fn register_checked_int_operations(&mut self) {
+        use CheckedIntOp::*;
+        use IntrinsicHandler::CheckedIntOp as CI;
+
+        // checked_add (all int types)
+        self.register(IntrinsicKey::from("i8_checked_add"), CI(I8CheckedAdd));
+        self.register(IntrinsicKey::from("i16_checked_add"), CI(I16CheckedAdd));
+        self.register(IntrinsicKey::from("i32_checked_add"), CI(I32CheckedAdd));
+        self.register(IntrinsicKey::from("i64_checked_add"), CI(I64CheckedAdd));
+        self.register(IntrinsicKey::from("u8_checked_add"), CI(U8CheckedAdd));
+        self.register(IntrinsicKey::from("u16_checked_add"), CI(U16CheckedAdd));
+        self.register(IntrinsicKey::from("u32_checked_add"), CI(U32CheckedAdd));
+        self.register(IntrinsicKey::from("u64_checked_add"), CI(U64CheckedAdd));
+
+        // checked_sub (all int types)
+        self.register(IntrinsicKey::from("i8_checked_sub"), CI(I8CheckedSub));
+        self.register(IntrinsicKey::from("i16_checked_sub"), CI(I16CheckedSub));
+        self.register(IntrinsicKey::from("i32_checked_sub"), CI(I32CheckedSub));
+        self.register(IntrinsicKey::from("i64_checked_sub"), CI(I64CheckedSub));
+        self.register(IntrinsicKey::from("u8_checked_sub"), CI(U8CheckedSub));
+        self.register(IntrinsicKey::from("u16_checked_sub"), CI(U16CheckedSub));
+        self.register(IntrinsicKey::from("u32_checked_sub"), CI(U32CheckedSub));
+        self.register(IntrinsicKey::from("u64_checked_sub"), CI(U64CheckedSub));
+
+        // checked_mul (all int types)
+        self.register(IntrinsicKey::from("i8_checked_mul"), CI(I8CheckedMul));
+        self.register(IntrinsicKey::from("i16_checked_mul"), CI(I16CheckedMul));
+        self.register(IntrinsicKey::from("i32_checked_mul"), CI(I32CheckedMul));
+        self.register(IntrinsicKey::from("i64_checked_mul"), CI(I64CheckedMul));
+        self.register(IntrinsicKey::from("u8_checked_mul"), CI(U8CheckedMul));
+        self.register(IntrinsicKey::from("u16_checked_mul"), CI(U16CheckedMul));
+        self.register(IntrinsicKey::from("u32_checked_mul"), CI(U32CheckedMul));
+        self.register(IntrinsicKey::from("u64_checked_mul"), CI(U64CheckedMul));
+
+        // checked_div (all int types)
+        self.register(IntrinsicKey::from("i8_checked_div"), CI(I8CheckedDiv));
+        self.register(IntrinsicKey::from("i16_checked_div"), CI(I16CheckedDiv));
+        self.register(IntrinsicKey::from("i32_checked_div"), CI(I32CheckedDiv));
+        self.register(IntrinsicKey::from("i64_checked_div"), CI(I64CheckedDiv));
+        self.register(IntrinsicKey::from("u8_checked_div"), CI(U8CheckedDiv));
+        self.register(IntrinsicKey::from("u16_checked_div"), CI(U16CheckedDiv));
+        self.register(IntrinsicKey::from("u32_checked_div"), CI(U32CheckedDiv));
+        self.register(IntrinsicKey::from("u64_checked_div"), CI(U64CheckedDiv));
+    }
 }
 
 #[cfg(test)]
@@ -723,8 +817,9 @@ mod tests {
         // 56 binary int ops (8 min + 8 max + 8 rotl + 8 rotr + 8 wrapping_add + 8 wrapping_sub + 8 wrapping_mul)
         // 4 unary int wrapping ops (wrapping_neg for signed types)
         // 24 saturating int ops (8 saturating_add + 8 saturating_sub + 8 saturating_mul)
-        // Total: 144
-        assert_eq!(registry.len(), 144);
+        // 32 checked int ops (8 checked_add + 8 checked_sub + 8 checked_mul + 8 checked_div)
+        // Total: 176
+        assert_eq!(registry.len(), 176);
     }
 
     #[test]

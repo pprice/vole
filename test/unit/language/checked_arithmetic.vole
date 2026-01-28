@@ -1,0 +1,588 @@
+// Test checked arithmetic operations - return nil on overflow instead of panicking
+
+let { checked_add, checked_sub, checked_mul, checked_div, wrapping_sub } = import "std:lowlevel"
+
+tests "checked_add" {
+    test "i8 checked_add normal returns Some" {
+        let a: i8 = 10
+        let b: i8 = 20
+        let result = checked_add(a, b)
+        assert(result is i8)
+        assert((result ?? -1) == 30)
+    }
+
+    test "i8 checked_add overflow returns nil" {
+        let a: i8 = 127
+        let b: i8 = 1
+        let result = checked_add(a, b)
+        assert(result is nil)
+    }
+
+    test "i8 checked_add overflow large returns nil" {
+        let a: i8 = 127
+        let b: i8 = 10
+        let result = checked_add(a, b)
+        assert(result is nil)
+    }
+
+    test "i16 checked_add normal returns Some" {
+        let a: i16 = 1000
+        let b: i16 = 2000
+        let result = checked_add(a, b)
+        assert(result is i16)
+        assert((result ?? -1) == 3000)
+    }
+
+    test "i16 checked_add overflow returns nil" {
+        let a: i16 = 32767
+        let b: i16 = 1
+        let result = checked_add(a, b)
+        assert(result is nil)
+    }
+
+    test "i32 checked_add normal returns Some" {
+        let a: i32 = 1000000
+        let b: i32 = 2000000
+        let result = checked_add(a, b)
+        assert(result is i32)
+        assert((result ?? -1) == 3000000)
+    }
+
+    test "i32 checked_add overflow returns nil" {
+        let a: i32 = 2147483647
+        let b: i32 = 1
+        let result = checked_add(a, b)
+        assert(result is nil)
+    }
+
+    test "i64 checked_add normal returns Some" {
+        let a: i64 = 1000000000000
+        let b: i64 = 2000000000000
+        let result = checked_add(a, b)
+        assert(result is i64)
+        assert((result ?? -1) == 3000000000000)
+    }
+
+    test "i64 checked_add overflow returns nil" {
+        let a: i64 = 9223372036854775807
+        let b: i64 = 1
+        let result = checked_add(a, b)
+        assert(result is nil)
+    }
+
+    test "u8 checked_add normal returns Some" {
+        let a: u8 = 100
+        let b: u8 = 50
+        let result = checked_add(a, b)
+        assert(result is u8)
+        assert((result ?? 0) == 150)
+    }
+
+    test "u8 checked_add overflow returns nil" {
+        let a: u8 = 255
+        let b: u8 = 1
+        let result = checked_add(a, b)
+        assert(result is nil)
+    }
+
+    test "u16 checked_add normal returns Some" {
+        let a: u16 = 30000
+        let b: u16 = 20000
+        let result = checked_add(a, b)
+        assert(result is u16)
+        assert((result ?? 0) == 50000)
+    }
+
+    test "u16 checked_add overflow returns nil" {
+        let a: u16 = 65535
+        let b: u16 = 1
+        let result = checked_add(a, b)
+        assert(result is nil)
+    }
+
+    test "u32 checked_add normal returns Some" {
+        let a: u32 = 3000000000
+        let b: u32 = 1000000000
+        let result = checked_add(a, b)
+        assert(result is u32)
+        assert((result ?? 0) == 4000000000)
+    }
+
+    test "u32 checked_add overflow returns nil" {
+        let a: u32 = 4294967295
+        let b: u32 = 1
+        let result = checked_add(a, b)
+        assert(result is nil)
+    }
+
+    test "u64 checked_add normal returns Some" {
+        let a: u64 = 1000000000000
+        let b: u64 = 2000000000000
+        let result = checked_add(a, b)
+        assert(result is u64)
+        assert((result ?? 0) == 3000000000000)
+    }
+
+    test "u64 checked_add overflow returns nil" {
+        // Use computed MAX since parser has issues with large literals
+        let zero: u64 = 0
+        let one: u64 = 1
+        let max_u64: u64 = wrapping_sub(zero, one)
+        let result = checked_add(max_u64, one)
+        assert(result is nil)
+    }
+}
+
+tests "checked_sub" {
+    test "i8 checked_sub normal returns Some" {
+        let a: i8 = 20
+        let b: i8 = 10
+        let result = checked_sub(a, b)
+        assert(result is i8)
+        assert((result ?? -1) == 10)
+    }
+
+    test "i8 checked_sub underflow returns nil" {
+        let a: i8 = -128
+        let b: i8 = 1
+        let result = checked_sub(a, b)
+        assert(result is nil)
+    }
+
+    test "i16 checked_sub underflow returns nil" {
+        let a: i16 = -32768
+        let b: i16 = 1
+        let result = checked_sub(a, b)
+        assert(result is nil)
+    }
+
+    test "i32 checked_sub underflow returns nil" {
+        let a: i32 = -2147483648
+        let b: i32 = 1
+        let result = checked_sub(a, b)
+        assert(result is nil)
+    }
+
+    test "i64 checked_sub underflow returns nil" {
+        // Compute MIN using wrapping since parser can't handle the literal
+        let a: i64 = wrapping_sub(-9223372036854775807, 1)
+        let b: i64 = 1
+        let result = checked_sub(a, b)
+        assert(result is nil)
+    }
+
+    test "u8 checked_sub normal returns Some" {
+        let a: u8 = 100
+        let b: u8 = 50
+        let result = checked_sub(a, b)
+        assert(result is u8)
+        assert((result ?? 0) == 50)
+    }
+
+    test "u8 checked_sub underflow returns nil" {
+        let a: u8 = 0
+        let b: u8 = 1
+        let result = checked_sub(a, b)
+        assert(result is nil)
+    }
+
+    test "u16 checked_sub underflow returns nil" {
+        let a: u16 = 0
+        let b: u16 = 1
+        let result = checked_sub(a, b)
+        assert(result is nil)
+    }
+
+    test "u32 checked_sub underflow returns nil" {
+        let a: u32 = 0
+        let b: u32 = 1
+        let result = checked_sub(a, b)
+        assert(result is nil)
+    }
+
+    test "u64 checked_sub underflow returns nil" {
+        let a: u64 = 0
+        let b: u64 = 1
+        let result = checked_sub(a, b)
+        assert(result is nil)
+    }
+}
+
+tests "checked_mul" {
+    test "i8 checked_mul normal returns Some" {
+        let a: i8 = 5
+        let b: i8 = 10
+        let result = checked_mul(a, b)
+        assert(result is i8)
+        assert((result ?? -1) == 50)
+    }
+
+    test "i8 checked_mul overflow returns nil" {
+        let a: i8 = 127
+        let b: i8 = 2
+        let result = checked_mul(a, b)
+        assert(result is nil)
+    }
+
+    test "i16 checked_mul normal returns Some" {
+        let a: i16 = 100
+        let b: i16 = 200
+        let result = checked_mul(a, b)
+        assert(result is i16)
+        assert((result ?? -1) == 20000)
+    }
+
+    test "i16 checked_mul overflow returns nil" {
+        let a: i16 = 32767
+        let b: i16 = 2
+        let result = checked_mul(a, b)
+        assert(result is nil)
+    }
+
+    test "i32 checked_mul normal returns Some" {
+        let a: i32 = 10000
+        let b: i32 = 10000
+        let result = checked_mul(a, b)
+        assert(result is i32)
+        assert((result ?? -1) == 100000000)
+    }
+
+    test "i32 checked_mul overflow returns nil" {
+        let a: i32 = 2147483647
+        let b: i32 = 2
+        let result = checked_mul(a, b)
+        assert(result is nil)
+    }
+
+    test "i64 checked_mul normal returns Some" {
+        let a: i64 = 1000000
+        let b: i64 = 1000000
+        let result = checked_mul(a, b)
+        assert(result is i64)
+        assert((result ?? -1) == 1000000000000)
+    }
+
+    test "i64 checked_mul overflow returns nil" {
+        let a: i64 = 9223372036854775807
+        let b: i64 = 2
+        let result = checked_mul(a, b)
+        assert(result is nil)
+    }
+
+    test "u8 checked_mul normal returns Some" {
+        let a: u8 = 10
+        let b: u8 = 20
+        let result = checked_mul(a, b)
+        assert(result is u8)
+        assert((result ?? 0) == 200)
+    }
+
+    test "u8 checked_mul overflow returns nil" {
+        let a: u8 = 255
+        let b: u8 = 2
+        let result = checked_mul(a, b)
+        assert(result is nil)
+    }
+
+    test "u16 checked_mul normal returns Some" {
+        let a: u16 = 100
+        let b: u16 = 100
+        let result = checked_mul(a, b)
+        assert(result is u16)
+        assert((result ?? 0) == 10000)
+    }
+
+    test "u16 checked_mul overflow returns nil" {
+        let a: u16 = 65535
+        let b: u16 = 2
+        let result = checked_mul(a, b)
+        assert(result is nil)
+    }
+
+    test "u32 checked_mul normal returns Some" {
+        let a: u32 = 10000
+        let b: u32 = 10000
+        let result = checked_mul(a, b)
+        assert(result is u32)
+        assert((result ?? 0) == 100000000)
+    }
+
+    test "u32 checked_mul overflow returns nil" {
+        let a: u32 = 4294967295
+        let b: u32 = 2
+        let result = checked_mul(a, b)
+        assert(result is nil)
+    }
+
+    test "u64 checked_mul normal returns Some" {
+        let a: u64 = 1000000
+        let b: u64 = 1000000
+        let result = checked_mul(a, b)
+        assert(result is u64)
+        assert((result ?? 0) == 1000000000000)
+    }
+
+    test "u64 checked_mul overflow returns nil" {
+        // Use computed MAX
+        let zero: u64 = 0
+        let one: u64 = 1
+        let two: u64 = 2
+        let max_u64: u64 = wrapping_sub(zero, one)
+        let result = checked_mul(max_u64, two)
+        assert(result is nil)
+    }
+}
+
+tests "checked_div" {
+    test "i8 checked_div normal returns Some" {
+        let a: i8 = 100
+        let b: i8 = 10
+        let result = checked_div(a, b)
+        assert(result is i8)
+        assert((result ?? -1) == 10)
+    }
+
+    test "i8 checked_div by zero returns nil" {
+        let a: i8 = 100
+        let b: i8 = 0
+        let result = checked_div(a, b)
+        assert(result is nil)
+    }
+
+    test "i8 checked_div MIN by -1 returns nil" {
+        let a: i8 = -128
+        let b: i8 = -1
+        let result = checked_div(a, b)
+        assert(result is nil)
+    }
+
+    test "i16 checked_div normal returns Some" {
+        let a: i16 = 1000
+        let b: i16 = 10
+        let result = checked_div(a, b)
+        assert(result is i16)
+        assert((result ?? -1) == 100)
+    }
+
+    test "i16 checked_div by zero returns nil" {
+        let a: i16 = 1000
+        let b: i16 = 0
+        let result = checked_div(a, b)
+        assert(result is nil)
+    }
+
+    test "i16 checked_div MIN by -1 returns nil" {
+        let a: i16 = -32768
+        let b: i16 = -1
+        let result = checked_div(a, b)
+        assert(result is nil)
+    }
+
+    test "i32 checked_div normal returns Some" {
+        let a: i32 = 1000000
+        let b: i32 = 100
+        let result = checked_div(a, b)
+        assert(result is i32)
+        assert((result ?? -1) == 10000)
+    }
+
+    test "i32 checked_div by zero returns nil" {
+        let a: i32 = 1000000
+        let b: i32 = 0
+        let result = checked_div(a, b)
+        assert(result is nil)
+    }
+
+    test "i32 checked_div MIN by -1 returns nil" {
+        let a: i32 = -2147483648
+        let b: i32 = -1
+        let result = checked_div(a, b)
+        assert(result is nil)
+    }
+
+    test "i64 checked_div normal returns Some" {
+        let a: i64 = 1000000000000
+        let b: i64 = 100
+        let result = checked_div(a, b)
+        assert(result is i64)
+        assert((result ?? -1) == 10000000000)
+    }
+
+    test "i64 checked_div by zero returns nil" {
+        let a: i64 = 1000000000000
+        let b: i64 = 0
+        let result = checked_div(a, b)
+        assert(result is nil)
+    }
+
+    test "i64 checked_div MIN by -1 returns nil" {
+        // Compute MIN using wrapping since parser can't handle the literal
+        let a: i64 = wrapping_sub(-9223372036854775807, 1)
+        let b: i64 = -1
+        let result = checked_div(a, b)
+        assert(result is nil)
+    }
+
+    test "u8 checked_div normal returns Some" {
+        let a: u8 = 100
+        let b: u8 = 10
+        let result = checked_div(a, b)
+        assert(result is u8)
+        assert((result ?? 0) == 10)
+    }
+
+    test "u8 checked_div by zero returns nil" {
+        let a: u8 = 100
+        let b: u8 = 0
+        let result = checked_div(a, b)
+        assert(result is nil)
+    }
+
+    test "u16 checked_div normal returns Some" {
+        let a: u16 = 10000
+        let b: u16 = 100
+        let result = checked_div(a, b)
+        assert(result is u16)
+        assert((result ?? 0) == 100)
+    }
+
+    test "u16 checked_div by zero returns nil" {
+        let a: u16 = 10000
+        let b: u16 = 0
+        let result = checked_div(a, b)
+        assert(result is nil)
+    }
+
+    test "u32 checked_div normal returns Some" {
+        let a: u32 = 1000000
+        let b: u32 = 100
+        let result = checked_div(a, b)
+        assert(result is u32)
+        assert((result ?? 0) == 10000)
+    }
+
+    test "u32 checked_div by zero returns nil" {
+        let a: u32 = 1000000
+        let b: u32 = 0
+        let result = checked_div(a, b)
+        assert(result is nil)
+    }
+
+    test "u64 checked_div normal returns Some" {
+        let a: u64 = 1000000000000
+        let b: u64 = 100
+        let result = checked_div(a, b)
+        assert(result is u64)
+        assert((result ?? 0) == 10000000000)
+    }
+
+    test "u64 checked_div by zero returns nil" {
+        let a: u64 = 1000000000000
+        let b: u64 = 0
+        let result = checked_div(a, b)
+        assert(result is nil)
+    }
+}
+
+tests "checked arithmetic edge cases" {
+    test "checked_mul by zero returns Some(0)" {
+        let a: i32 = 2147483647
+        let b: i32 = 0
+        let result = checked_mul(a, b)
+        assert(result is i32)
+        assert((result ?? -1) == 0)
+    }
+
+    test "checked_mul by one returns Some(original)" {
+        let a: i32 = 2147483647
+        let b: i32 = 1
+        let result = checked_mul(a, b)
+        assert(result is i32)
+        assert((result ?? 0) == 2147483647)
+    }
+
+    test "checked_add with negative numbers returns Some" {
+        let a: i32 = -100
+        let b: i32 = -200
+        let result = checked_add(a, b)
+        assert(result is i32)
+        assert((result ?? 0) == -300)
+    }
+
+    test "checked_sub with negative numbers returns Some" {
+        let a: i32 = -100
+        let b: i32 = -200
+        let result = checked_sub(a, b)
+        assert(result is i32)
+        assert((result ?? 0) == 100)
+    }
+
+    test "checked_mul with negative numbers returns Some" {
+        let a: i32 = -100
+        let b: i32 = -200
+        let result = checked_mul(a, b)
+        assert(result is i32)
+        assert((result ?? 0) == 20000)
+    }
+
+    test "checked_div with negative numbers returns Some" {
+        let a: i32 = -100
+        let b: i32 = -5
+        let result = checked_div(a, b)
+        assert(result is i32)
+        assert((result ?? 0) == 20)
+    }
+
+    test "chained checked operations with null coalesce" {
+        let a: i32 = 100
+        let b: i32 = 200
+        let c: i32 = 300
+        // (100 + 200) * 300 = 90000
+        let sum = checked_add(a, b)
+        assert(sum is i32)
+        let sum_val = sum ?? 0
+        let product = checked_mul(sum_val, c)
+        assert(product is i32)
+        assert((product ?? 0) == 90000)
+    }
+
+    test "checked_div negative by positive returns Some" {
+        let a: i32 = -100
+        let b: i32 = 5
+        let result = checked_div(a, b)
+        assert(result is i32)
+        assert((result ?? 0) == -20)
+    }
+
+    test "checked_div positive by negative returns Some" {
+        let a: i32 = 100
+        let b: i32 = -5
+        let result = checked_div(a, b)
+        assert(result is i32)
+        assert((result ?? 0) == -20)
+    }
+
+    test "checked_div returns integer truncation" {
+        let a: i32 = 7
+        let b: i32 = 2
+        let result = checked_div(a, b)
+        assert(result is i32)
+        assert((result ?? 0) == 3)
+    }
+
+    test "checked_add at boundary returns Some" {
+        let a: i8 = 126
+        let b: i8 = 1
+        let result = checked_add(a, b)
+        assert(result is i8)
+        assert((result ?? 0) == 127)
+    }
+
+    test "checked_sub at boundary returns Some" {
+        let a: i8 = -127
+        let b: i8 = 1
+        let result = checked_sub(a, b)
+        assert(result is i8)
+        assert((result ?? 0) == -128)
+    }
+}

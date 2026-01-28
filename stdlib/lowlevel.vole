@@ -179,3 +179,59 @@ external("vole:compiler_intrinsic") {
         u64 => "u64_saturating_mul"
     }
 }
+
+// Checked addition - returns nil on overflow
+external("vole:compiler_intrinsic") {
+    func checked_add<T>(x: T, y: T) -> T? where {
+        i8 => "i8_checked_add"
+        i16 => "i16_checked_add"
+        i32 => "i32_checked_add"
+        i64 => "i64_checked_add"
+        u8 => "u8_checked_add"
+        u16 => "u16_checked_add"
+        u32 => "u32_checked_add"
+        u64 => "u64_checked_add"
+    }
+}
+
+// Checked subtraction - returns nil on underflow
+external("vole:compiler_intrinsic") {
+    func checked_sub<T>(x: T, y: T) -> T? where {
+        i8 => "i8_checked_sub"
+        i16 => "i16_checked_sub"
+        i32 => "i32_checked_sub"
+        i64 => "i64_checked_sub"
+        u8 => "u8_checked_sub"
+        u16 => "u16_checked_sub"
+        u32 => "u32_checked_sub"
+        u64 => "u64_checked_sub"
+    }
+}
+
+// Checked multiplication - returns nil on overflow
+external("vole:compiler_intrinsic") {
+    func checked_mul<T>(x: T, y: T) -> T? where {
+        i8 => "i8_checked_mul"
+        i16 => "i16_checked_mul"
+        i32 => "i32_checked_mul"
+        i64 => "i64_checked_mul"
+        u8 => "u8_checked_mul"
+        u16 => "u16_checked_mul"
+        u32 => "u32_checked_mul"
+        u64 => "u64_checked_mul"
+    }
+}
+
+// Checked division - returns nil on div-by-zero or MIN/-1 overflow (signed)
+external("vole:compiler_intrinsic") {
+    func checked_div<T>(x: T, y: T) -> T? where {
+        i8 => "i8_checked_div"
+        i16 => "i16_checked_div"
+        i32 => "i32_checked_div"
+        i64 => "i64_checked_div"
+        u8 => "u8_checked_div"
+        u16 => "u16_checked_div"
+        u32 => "u32_checked_div"
+        u64 => "u64_checked_div"
+    }
+}
