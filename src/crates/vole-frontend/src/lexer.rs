@@ -461,6 +461,8 @@ impl<'src> Lexer<'src> {
             "f64" => Some(TokenType::KwF64),
             "bool" => Some(TokenType::KwBool),
             "string" => Some(TokenType::KwString),
+            "never" => Some(TokenType::KwNever),
+            "unknown" => Some(TokenType::KwUnknown),
             _ => None,
         }
     }
@@ -1081,6 +1083,14 @@ mod tests {
         let mut lexer = Lexer::new("class record");
         assert_eq!(lexer.next_token().ty, TokenType::KwClass);
         assert_eq!(lexer.next_token().ty, TokenType::KwRecord);
+    }
+
+    #[test]
+    fn lex_never_unknown_keywords() {
+        let mut lexer = Lexer::new("never unknown");
+        assert_eq!(lexer.next_token().ty, TokenType::KwNever);
+        assert_eq!(lexer.next_token().ty, TokenType::KwUnknown);
+        assert_eq!(lexer.next_token().ty, TokenType::Eof);
     }
 
     #[test]

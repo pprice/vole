@@ -70,6 +70,8 @@ pub enum TokenType {
     KwF64,
     KwBool,
     KwString,
+    KwNever,   // never type (bottom type - no values)
+    KwUnknown, // unknown type (top type - any value)
 
     // Operators
     Plus,
@@ -192,6 +194,8 @@ impl TokenType {
             Self::KwF64 => "f64",
             Self::KwBool => "bool",
             Self::KwString => "string",
+            Self::KwNever => "never",
+            Self::KwUnknown => "unknown",
             Self::Plus => "+",
             Self::Minus => "-",
             Self::Star => "*",
