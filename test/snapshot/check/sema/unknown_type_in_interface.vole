@@ -1,0 +1,8 @@
+// Error: interface method with unknown type
+// Tests validation of interface method signatures
+
+interface Processor {
+    func process() -> BadType
+}
+
+func main() {}

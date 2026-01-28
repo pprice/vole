@@ -1553,6 +1553,17 @@ impl Analyzer {
             return;
         }
 
+        // Validate interface method type annotations
+        for method in &interface_decl.methods {
+            self.validate_method_types(
+                &method.params,
+                &method.return_type,
+                method.span,
+                interner,
+                Some(&type_param_scope),
+            );
+        }
+
         let module_id = self.current_module;
         let mut type_ctx = TypeResolutionContext::with_type_params(
             &self.db,
