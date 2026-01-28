@@ -75,7 +75,7 @@ impl JitOptions {
         Self {
             release: false,
             disasm: false,
-            loop_param_opt: false,
+            loop_param_opt: true, // Enable loop optimization in all modes
         }
     }
 
@@ -84,7 +84,7 @@ impl JitOptions {
         Self {
             release: true,
             disasm: false,
-            loop_param_opt: true, // Enable loop optimization in release mode
+            loop_param_opt: true,
         }
     }
 
@@ -93,7 +93,7 @@ impl JitOptions {
         Self {
             release: false,
             disasm: true,
-            loop_param_opt: false,
+            loop_param_opt: true, // Enable loop optimization for IR inspection
         }
     }
 

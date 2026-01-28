@@ -167,9 +167,10 @@ fn find_entry_value(
 
             let args: Vec<_> = dest.args(&func.dfg.value_lists).collect();
             if param_idx < args.len()
-                && let Some(val) = args[param_idx].as_value() {
-                    return Some(val);
-                }
+                && let Some(val) = args[param_idx].as_value()
+            {
+                return Some(val);
+            }
         }
     }
 
@@ -187,13 +188,32 @@ fn apply_optimization(func: &mut Function, opt: &LoopOptimization) {
         opt.params_to_remove.iter().map(|r| r.param_idx).collect();
 
     // Build replacement map: old param -> replacement value
-    let replacements: FxHashMap<Value, Value> = opt
+    // Also include any values that are aliased to the parameters being removed
+    let mut replacements: FxHashMap<Value, Value> = opt
         .params_to_remove
         .iter()
         .map(|r| (r.param, r.replacement))
         .collect();
 
-    // Step 1: Replace uses of removed parameters with their replacements
+    // Find all values that are aliased to parameters we're removing
+    // A value v is an alias to param p if resolve_aliases(v) == p
+    let params_to_remove: FxHashSet<Value> = opt.params_to_remove.iter().map(|r| r.param).collect();
+
+    // Scan ALL values in the DFG to find aliases (not just block params and inst results)
+    // This catches "free" aliases created by change_to_alias during variable assignments
+    for value in func.dfg.values() {
+        if replacements.contains_key(&value) {
+            continue;
+        }
+        let resolved = func.dfg.resolve_aliases(value);
+        if params_to_remove.contains(&resolved)
+            && let Some(removal) = opt.params_to_remove.iter().find(|r| r.param == resolved)
+        {
+            replacements.insert(value, removal.replacement);
+        }
+    }
+
+    // Step 1: Replace uses of removed parameters (and their aliases) with their replacements
     replace_value_uses(func, &replacements);
 
     // Step 2: Remove parameters from header block and update all jumps
@@ -205,11 +225,14 @@ fn replace_value_uses(func: &mut Function, replacements: &FxHashMap<Value, Value
     // Collect instructions that use values we need to replace
     let mut inst_replacements: Vec<(cranelift_codegen::ir::Inst, Vec<(usize, Value)>)> = Vec::new();
 
+    // Collect branch destination replacements: (inst, dest_idx, new_args)
+    let mut branch_replacements: Vec<(cranelift_codegen::ir::Inst, usize, Vec<Value>)> = Vec::new();
+
     for block in func.layout.blocks() {
         for inst in func.layout.block_insts(block) {
             let mut arg_updates = Vec::new();
 
-            // Check instruction arguments
+            // Check instruction arguments (for non-branch instructions)
             for (idx, &arg) in func.dfg.inst_args(inst).iter().enumerate() {
                 if let Some(&replacement) = replacements.get(&arg) {
                     arg_updates.push((idx, replacement));
@@ -219,14 +242,51 @@ fn replace_value_uses(func: &mut Function, replacements: &FxHashMap<Value, Value
             if !arg_updates.is_empty() {
                 inst_replacements.push((inst, arg_updates));
             }
+
+            // Check branch destination arguments (for jumps/branches)
+            let opcode = func.dfg.insts[inst].opcode();
+            if opcode == Opcode::Jump || opcode == Opcode::Brif || opcode == Opcode::BrTable {
+                let destinations = func.dfg.insts[inst]
+                    .branch_destination(&func.dfg.jump_tables, &func.dfg.exception_tables);
+                for (dest_idx, dest) in destinations.iter().enumerate() {
+                    let mut any_replaced = false;
+                    let new_args: Vec<Value> = dest
+                        .args(&func.dfg.value_lists)
+                        .filter_map(|arg| arg.as_value())
+                        .map(|val| {
+                            if let Some(&replacement) = replacements.get(&val) {
+                                any_replaced = true;
+                                replacement
+                            } else {
+                                val
+                            }
+                        })
+                        .collect();
+                    if any_replaced {
+                        branch_replacements.push((inst, dest_idx, new_args));
+                    }
+                }
+            }
         }
     }
 
-    // Apply replacements
+    // Apply instruction argument replacements
     for (inst, updates) in inst_replacements {
         let args = func.dfg.inst_args_mut(inst);
         for (idx, replacement) in updates {
             args[idx] = replacement;
+        }
+    }
+
+    // Apply branch destination argument replacements (clear and repopulate)
+    for (inst, dest_idx, new_args) in branch_replacements {
+        let dfg = &mut func.dfg;
+        let destinations_mut =
+            dfg.insts[inst].branch_destination_mut(&mut dfg.jump_tables, &mut dfg.exception_tables);
+        let dest_mut = &mut destinations_mut[dest_idx];
+        dest_mut.clear(&mut dfg.value_lists);
+        for val in new_args {
+            dest_mut.append_argument(val, &mut dfg.value_lists);
         }
     }
 }

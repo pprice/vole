@@ -112,10 +112,11 @@ pub fn inspect_files(
 
                 // Generate IR
                 let analyzed = AnalyzedProgram::from_analysis(program, interner, output);
+                // For IR inspection, always enable loop optimization to show optimized IR
                 let options = if release {
                     JitOptions::release()
                 } else {
-                    JitOptions::debug()
+                    JitOptions::disasm() // Use disasm options to enable loop optimization
                 };
                 let mut jit = JitContext::with_options(options);
                 let mut compiler = Compiler::new(&mut jit, &analyzed);
