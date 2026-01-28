@@ -1,0 +1,5 @@
+[stdout]
+
+[stderr]
+panic: integer overflow in division
+  at <path>/div_overflow.vole:7

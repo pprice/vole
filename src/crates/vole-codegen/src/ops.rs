@@ -98,7 +98,7 @@ fn integer_result_type_id(left: TypeId, right: TypeId) -> TypeId {
 
 impl Cg<'_, '_, '_> {
     /// Compile a binary expression
-    pub fn binary(&mut self, bin: &BinaryExpr) -> Result<CompiledValue, String> {
+    pub fn binary(&mut self, bin: &BinaryExpr, line: u32) -> Result<CompiledValue, String> {
         // Handle short-circuit evaluation for And/Or
         match bin.op {
             BinaryOp::And => return self.binary_and(bin),
@@ -112,7 +112,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Try to optimize multiply/divide/mod by power of 2 to shifts
-        if let Some(result) = self.try_emit_power_of_two(bin)? {
+        if let Some(result) = self.try_emit_power_of_two(bin, line)? {
             return Ok(result);
         }
 
@@ -126,7 +126,7 @@ impl Cg<'_, '_, '_> {
 
         let right = self.expr(&bin.right)?;
 
-        self.binary_op(left, right, bin.op)
+        self.binary_op(left, right, bin.op, line)
     }
 
     /// Try to emit FMA instruction for patterns like (x * y) + z or z + (x * y)
@@ -223,7 +223,11 @@ impl Cg<'_, '_, '_> {
 
     /// Try to optimize integer multiply/divide/mod by power of 2 to shifts/masks
     /// Returns Some(result) if optimization was applied, None otherwise
-    fn try_emit_power_of_two(&mut self, bin: &BinaryExpr) -> Result<Option<CompiledValue>, String> {
+    fn try_emit_power_of_two(
+        &mut self,
+        bin: &BinaryExpr,
+        _line: u32,
+    ) -> Result<Option<CompiledValue>, String> {
         // Only handle Mul, Div, Mod for power-of-2 optimization
         if !matches!(bin.op, BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod) {
             return Ok(None);
@@ -489,6 +493,7 @@ impl Cg<'_, '_, '_> {
         left: CompiledValue,
         right: CompiledValue,
         op: BinaryOp,
+        line: u32,
     ) -> Result<CompiledValue, String> {
         // Handle optional/nil comparisons specially
         // When comparing optional == nil or optional != nil, we need to check the tag
@@ -563,8 +568,13 @@ impl Cg<'_, '_, '_> {
                 if result_ty == types::F64 || result_ty == types::F32 {
                     self.builder.ins().fdiv(left_val, right_val)
                 } else if left_type_id.is_unsigned_int() {
+                    // Unsigned division: check for division by zero
+                    self.emit_div_by_zero_check(right_val, line)?;
                     self.builder.ins().udiv(left_val, right_val)
                 } else {
+                    // Signed division: check for division by zero and MIN/-1 overflow
+                    self.emit_div_by_zero_check(right_val, line)?;
+                    self.emit_signed_div_overflow_check(left_val, right_val, result_ty, line)?;
                     self.builder.ins().sdiv(left_val, right_val)
                 }
             }
@@ -575,8 +585,13 @@ impl Cg<'_, '_, '_> {
                     let mul = self.builder.ins().fmul(floor, right_val);
                     self.builder.ins().fsub(left_val, mul)
                 } else if left_type_id.is_unsigned_int() {
+                    // Unsigned remainder: check for division by zero
+                    self.emit_div_by_zero_check(right_val, line)?;
                     self.builder.ins().urem(left_val, right_val)
                 } else {
+                    // Signed remainder: check for division by zero and MIN/-1 overflow
+                    self.emit_div_by_zero_check(right_val, line)?;
+                    self.emit_signed_div_overflow_check(left_val, right_val, result_ty, line)?;
                     self.builder.ins().srem(left_val, right_val)
                 }
             }
@@ -782,6 +797,7 @@ impl Cg<'_, '_, '_> {
     pub fn compound_assign(
         &mut self,
         compound: &CompoundAssignExpr,
+        line: u32,
     ) -> Result<CompiledValue, String> {
         match &compound.target {
             AssignTarget::Discard => {
@@ -789,12 +805,12 @@ impl Cg<'_, '_, '_> {
                 // Sema should catch this, but handle it gracefully
                 Err("cannot use compound assignment with discard pattern".to_string())
             }
-            AssignTarget::Variable(sym) => self.compound_assign_var(*sym, compound),
+            AssignTarget::Variable(sym) => self.compound_assign_var(*sym, compound, line),
             AssignTarget::Index { object, index } => {
-                self.compound_assign_index(object, index, compound)
+                self.compound_assign_index(object, index, compound, line)
             }
             AssignTarget::Field { object, field, .. } => {
-                self.compound_assign_field(object, *field, compound)
+                self.compound_assign_field(object, *field, compound, line)
             }
         }
     }
@@ -804,6 +820,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         sym: vole_frontend::Symbol,
         compound: &CompoundAssignExpr,
+        line: u32,
     ) -> Result<CompiledValue, String> {
         let (var, var_type_id) = self
             .vars
@@ -817,7 +834,7 @@ impl Cg<'_, '_, '_> {
 
         let rhs = self.expr(&compound.value)?;
         let binary_op = compound.op.to_binary_op();
-        let result = self.binary_op(current, rhs, binary_op)?;
+        let result = self.binary_op(current, rhs, binary_op, line)?;
 
         self.builder.def_var(var, result.value);
         Ok(result)
@@ -829,6 +846,7 @@ impl Cg<'_, '_, '_> {
         object: &vole_frontend::Expr,
         index: &vole_frontend::Expr,
         compound: &CompoundAssignExpr,
+        line: u32,
     ) -> Result<CompiledValue, String> {
         let arr = self.expr(object)?;
         let idx = self.expr(index)?;
@@ -846,7 +864,7 @@ impl Cg<'_, '_, '_> {
 
         let rhs = self.expr(&compound.value)?;
         let binary_op = compound.op.to_binary_op();
-        let result = self.binary_op(current, rhs, binary_op)?;
+        let result = self.binary_op(current, rhs, binary_op, line)?;
 
         // Store back
         let array_set_ref = self.runtime_func_ref(RuntimeFn::ArraySet)?;
@@ -871,6 +889,7 @@ impl Cg<'_, '_, '_> {
         object: &vole_frontend::Expr,
         field: vole_frontend::Symbol,
         compound: &CompoundAssignExpr,
+        line: u32,
     ) -> Result<CompiledValue, String> {
         let obj = self.expr(object)?;
 
@@ -884,7 +903,7 @@ impl Cg<'_, '_, '_> {
 
         let rhs = self.expr(&compound.value)?;
         let binary_op = compound.op.to_binary_op();
-        let result = self.binary_op(current, rhs, binary_op)?;
+        let result = self.binary_op(current, rhs, binary_op, line)?;
 
         // Store back
         let store_value = convert_to_i64_for_storage(self.builder, &result);
@@ -917,5 +936,73 @@ impl Cg<'_, '_, '_> {
         } else {
             self.builder.ins().icmp(signed_cc, left_val, right_val)
         }
+    }
+
+    /// Emit division by zero check for integer division/remainder.
+    /// Creates a branch: if divisor == 0, panic; else continue.
+    /// Returns the continue block that should be used for subsequent code.
+    fn emit_div_by_zero_check(&mut self, divisor: Value, line: u32) -> Result<Block, String> {
+        let is_zero = self.builder.ins().icmp_imm(IntCC::Equal, divisor, 0);
+
+        let panic_block = self.builder.create_block();
+        let continue_block = self.builder.create_block();
+
+        self.builder
+            .ins()
+            .brif(is_zero, panic_block, &[], continue_block, &[]);
+
+        // Panic block
+        self.switch_and_seal(panic_block);
+        self.emit_panic_static("division by zero", line)?;
+
+        // Continue block
+        self.switch_and_seal(continue_block);
+
+        Ok(continue_block)
+    }
+
+    /// Emit signed division overflow check for MIN / -1 case.
+    /// For signed division, INT_MIN / -1 causes overflow.
+    /// Creates a branch: if (dividend == MIN && divisor == -1), panic; else continue.
+    fn emit_signed_div_overflow_check(
+        &mut self,
+        dividend: Value,
+        divisor: Value,
+        result_ty: Type,
+        line: u32,
+    ) -> Result<(), String> {
+        // Get MIN value for the integer type
+        let min_val = match result_ty {
+            types::I8 => i8::MIN as i64,
+            types::I16 => i16::MIN as i64,
+            types::I32 => i32::MIN as i64,
+            types::I64 => i64::MIN,
+            _ => return Ok(()), // Not a standard signed integer type
+        };
+
+        // Check if dividend == MIN
+        let is_min = self.builder.ins().icmp_imm(IntCC::Equal, dividend, min_val);
+
+        // Check if divisor == -1
+        let is_neg_one = self.builder.ins().icmp_imm(IntCC::Equal, divisor, -1);
+
+        // Combine: both must be true for overflow
+        let would_overflow = self.builder.ins().band(is_min, is_neg_one);
+
+        let panic_block = self.builder.create_block();
+        let continue_block = self.builder.create_block();
+
+        self.builder
+            .ins()
+            .brif(would_overflow, panic_block, &[], continue_block, &[]);
+
+        // Panic block
+        self.switch_and_seal(panic_block);
+        self.emit_panic_static("integer overflow in division", line)?;
+
+        // Continue block
+        self.switch_and_seal(continue_block);
+
+        Ok(())
     }
 }

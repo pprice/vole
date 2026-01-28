@@ -1064,6 +1064,36 @@ impl Cg<'_, '_, '_> {
         Ok(self.void_value())
     }
 
+    /// Emit a panic with a static message at the given line.
+    /// Used for runtime errors like division by zero that don't have a user-provided message.
+    /// Returns Ok(()) on success, but note that control flow doesn't continue after this
+    /// (an unreachable block is created for any following code).
+    pub fn emit_panic_static(&mut self, msg: &str, line: u32) -> Result<(), String> {
+        // Create the message string constant
+        let msg_val = self.string_literal(msg)?;
+
+        // vole_panic(msg, file_ptr, file_len, line)
+        let (file_ptr, file_len) = self.source_file();
+        let ptr_type = self.ptr_type();
+        let file_ptr_val = self.builder.ins().iconst(ptr_type, file_ptr as i64);
+        let file_len_val = self.builder.ins().iconst(ptr_type, file_len as i64);
+        let line_val = self.builder.ins().iconst(types::I32, line as i64);
+
+        self.call_runtime_void(
+            RuntimeFn::Panic,
+            &[msg_val.value, file_ptr_val, file_len_val, line_val],
+        )?;
+
+        // Since panic never returns, emit trap and create unreachable block
+        self.builder.ins().trap(TrapCode::unwrap_user(3));
+
+        // Create an unreachable block for code that follows the panic call
+        let unreachable_block = self.builder.create_block();
+        self.switch_and_seal(unreachable_block);
+
+        Ok(())
+    }
+
     /// Call a function via variable (dispatches to closure or pure function call)
     fn call_closure(
         &mut self,

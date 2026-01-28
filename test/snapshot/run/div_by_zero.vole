@@ -1,0 +1,7 @@
+// Test division by zero panic message
+func main() {
+    let x = 42
+    let y = 0
+    let z = x / y  // should panic here
+    println(z)
+}

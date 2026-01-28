@@ -52,10 +52,10 @@ impl Cg<'_, '_, '_> {
             }
             ExprKind::BoolLiteral(b) => Ok(self.bool_const(*b)),
             ExprKind::Identifier(sym) => self.identifier(*sym, expr),
-            ExprKind::Binary(bin) => self.binary(bin),
+            ExprKind::Binary(bin) => self.binary(bin, expr.span.line),
             ExprKind::Unary(un) => self.unary(un),
             ExprKind::Assign(assign) => self.assign(assign),
-            ExprKind::CompoundAssign(compound) => self.compound_assign(compound),
+            ExprKind::CompoundAssign(compound) => self.compound_assign(compound, expr.span.line),
             ExprKind::Grouping(inner) => self.expr(inner),
             ExprKind::StringLiteral(s) => self.string_literal(s),
             ExprKind::Call(call) => self.call(call, expr.span.line, expr.id),

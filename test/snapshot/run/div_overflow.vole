@@ -1,0 +1,9 @@
+// Test signed division overflow (MIN / -1) panic message
+// i64::MIN is -9223372036854775808 which can't be represented as a literal
+// We construct it by shifting: -1 << 63 = MIN
+func main() {
+    let x: i64 = (-1) << 63  // i64::MIN = -9223372036854775808
+    let y: i64 = -1
+    let z = x / y  // should panic: overflow
+    println(z)
+}

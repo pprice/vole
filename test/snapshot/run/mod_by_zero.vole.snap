@@ -1,0 +1,5 @@
+[stdout]
+
+[stderr]
+panic: division by zero
+  at <path>/mod_by_zero.vole:5
