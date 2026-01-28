@@ -6,16 +6,82 @@
 //!
 //! # Architecture
 //!
+//! Vole has a two-level optimization pipeline:
+//!
+//! ## Level 1: AST-level optimizations (vole-sema/optimizer)
+//!
+//! These run on the typed AST before code generation:
+//!
 //! ```text
-//! Parse -> Sema (type check) -> Optimizer (constant fold) -> Codegen
+//! Parse -> Sema (type check) -> AST Optimizer -> Codegen
+//!                                     |
+//!                               ConstantFolding
+//!                               (future: CSE, DCE at AST level)
 //! ```
 //!
-//! # Available Passes
+//! ## Level 2: IR-level optimizations (vole-codegen)
 //!
-//! - `constant_folding`: Evaluate constant expressions at compile time
-//!   - Fold binary ops with constant operands
+//! These run on Cranelift IR after basic code generation:
+//!
+//! ```text
+//! Codegen -> IR Build -> CFG Cleanup -> Loop Param Opt -> Define Function
+//!                             |              |
+//!                    (trampoline removal)   (LICM foundation)
+//! ```
+//!
+//! # Pass Dependency Graph
+//!
+//! ```text
+//!                    AST Optimizations
+//!                    =================
+//!
+//!                    ConstantFolding
+//!                         |
+//!              +----------+----------+
+//!              |                     |
+//!              v                     v
+//!            CSE*                  DCE*
+//!
+//!
+//!                    IR Optimizations
+//!                    ================
+//!
+//!                    CFG Cleanup
+//!                         |
+//!                         v
+//!                  Loop Param Opt (foundation for LICM)
+//!                         |
+//!                         v
+//!                    Cranelift opt_level=speed
+//!
+//! (* = planned, not yet implemented)
+//! ```
+//!
+//! # Available AST Passes
+//!
+//! - [`constant_folding`]: Evaluate constant expressions at compile time
+//!   - Fold binary ops with constant operands (e.g., `2 + 3` -> `5`)
 //!   - Replace division by constant with multiplication by reciprocal
 //!   - Replace division by power-of-2 with bit shifts (unsigned integers)
+//!   - Constant propagation for immutable bindings
+//!
+//! # Planned AST Passes
+//!
+//! - **CSE (Common Subexpression Elimination)**: Detect and reuse repeated expressions
+//! - **DCE (Dead Code Elimination)**: Remove unused variables and unreachable code
+//!
+//! # IR Passes (in vole-codegen)
+//!
+//! - **CFG Cleanup**: Remove trampoline blocks (single-jump blocks)
+//! - **Loop Parameter Optimization**: Remove invariant block parameters from loops
+//!
+//! # Measurement Strategy
+//!
+//! Optimization effectiveness is measured using:
+//! 1. Benchmarks in `test/bench/` (mandelbrot, fib)
+//! 2. `vole bench` command for timing
+//! 3. `vole inspect ir` for IR quality analysis
+//! 4. OptimizerStats for pass-level metrics
 
 pub mod constant_folding;
 
