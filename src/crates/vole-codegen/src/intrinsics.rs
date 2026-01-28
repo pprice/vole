@@ -203,6 +203,33 @@ pub enum BinaryIntOp {
     U16WrappingMul,
     U32WrappingMul,
     U64WrappingMul,
+    // Saturating add
+    I8SaturatingAdd,
+    I16SaturatingAdd,
+    I32SaturatingAdd,
+    I64SaturatingAdd,
+    U8SaturatingAdd,
+    U16SaturatingAdd,
+    U32SaturatingAdd,
+    U64SaturatingAdd,
+    // Saturating sub
+    I8SaturatingSub,
+    I16SaturatingSub,
+    I32SaturatingSub,
+    I64SaturatingSub,
+    U8SaturatingSub,
+    U16SaturatingSub,
+    U32SaturatingSub,
+    U64SaturatingSub,
+    // Saturating mul
+    I8SaturatingMul,
+    I16SaturatingMul,
+    I32SaturatingMul,
+    I64SaturatingMul,
+    U8SaturatingMul,
+    U16SaturatingMul,
+    U32SaturatingMul,
+    U64SaturatingMul,
 }
 
 /// Unary integer wrapping operations.
@@ -306,6 +333,7 @@ impl IntrinsicsRegistry {
         registry.register_int_operations();
         registry.register_binary_int_operations();
         registry.register_wrapping_int_operations();
+        registry.register_saturating_int_operations();
         registry
     }
 
@@ -545,6 +573,96 @@ impl IntrinsicsRegistry {
         self.register(IntrinsicKey::from("i32_wrapping_neg"), UW(I32WrappingNeg));
         self.register(IntrinsicKey::from("i64_wrapping_neg"), UW(I64WrappingNeg));
     }
+
+    /// Register saturating integer operation intrinsics (saturating_add, saturating_sub, saturating_mul).
+    fn register_saturating_int_operations(&mut self) {
+        use BinaryIntOp::*;
+        use IntrinsicHandler::BinaryIntOp as BI;
+
+        // saturating_add (all int types)
+        self.register(IntrinsicKey::from("i8_saturating_add"), BI(I8SaturatingAdd));
+        self.register(
+            IntrinsicKey::from("i16_saturating_add"),
+            BI(I16SaturatingAdd),
+        );
+        self.register(
+            IntrinsicKey::from("i32_saturating_add"),
+            BI(I32SaturatingAdd),
+        );
+        self.register(
+            IntrinsicKey::from("i64_saturating_add"),
+            BI(I64SaturatingAdd),
+        );
+        self.register(IntrinsicKey::from("u8_saturating_add"), BI(U8SaturatingAdd));
+        self.register(
+            IntrinsicKey::from("u16_saturating_add"),
+            BI(U16SaturatingAdd),
+        );
+        self.register(
+            IntrinsicKey::from("u32_saturating_add"),
+            BI(U32SaturatingAdd),
+        );
+        self.register(
+            IntrinsicKey::from("u64_saturating_add"),
+            BI(U64SaturatingAdd),
+        );
+
+        // saturating_sub (all int types)
+        self.register(IntrinsicKey::from("i8_saturating_sub"), BI(I8SaturatingSub));
+        self.register(
+            IntrinsicKey::from("i16_saturating_sub"),
+            BI(I16SaturatingSub),
+        );
+        self.register(
+            IntrinsicKey::from("i32_saturating_sub"),
+            BI(I32SaturatingSub),
+        );
+        self.register(
+            IntrinsicKey::from("i64_saturating_sub"),
+            BI(I64SaturatingSub),
+        );
+        self.register(IntrinsicKey::from("u8_saturating_sub"), BI(U8SaturatingSub));
+        self.register(
+            IntrinsicKey::from("u16_saturating_sub"),
+            BI(U16SaturatingSub),
+        );
+        self.register(
+            IntrinsicKey::from("u32_saturating_sub"),
+            BI(U32SaturatingSub),
+        );
+        self.register(
+            IntrinsicKey::from("u64_saturating_sub"),
+            BI(U64SaturatingSub),
+        );
+
+        // saturating_mul (all int types)
+        self.register(IntrinsicKey::from("i8_saturating_mul"), BI(I8SaturatingMul));
+        self.register(
+            IntrinsicKey::from("i16_saturating_mul"),
+            BI(I16SaturatingMul),
+        );
+        self.register(
+            IntrinsicKey::from("i32_saturating_mul"),
+            BI(I32SaturatingMul),
+        );
+        self.register(
+            IntrinsicKey::from("i64_saturating_mul"),
+            BI(I64SaturatingMul),
+        );
+        self.register(IntrinsicKey::from("u8_saturating_mul"), BI(U8SaturatingMul));
+        self.register(
+            IntrinsicKey::from("u16_saturating_mul"),
+            BI(U16SaturatingMul),
+        );
+        self.register(
+            IntrinsicKey::from("u32_saturating_mul"),
+            BI(U32SaturatingMul),
+        );
+        self.register(
+            IntrinsicKey::from("u64_saturating_mul"),
+            BI(U64SaturatingMul),
+        );
+    }
 }
 
 #[cfg(test)]
@@ -604,8 +722,9 @@ mod tests {
         // 36 unary int ops (4 abs + 8 clz + 8 ctz + 8 popcnt + 8 bitrev)
         // 56 binary int ops (8 min + 8 max + 8 rotl + 8 rotr + 8 wrapping_add + 8 wrapping_sub + 8 wrapping_mul)
         // 4 unary int wrapping ops (wrapping_neg for signed types)
-        // Total: 120
-        assert_eq!(registry.len(), 120);
+        // 24 saturating int ops (8 saturating_add + 8 saturating_sub + 8 saturating_mul)
+        // Total: 144
+        assert_eq!(registry.len(), 144);
     }
 
     #[test]

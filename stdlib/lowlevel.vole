@@ -137,3 +137,45 @@ external("vole:compiler_intrinsic") {
         i64 => "i64_wrapping_neg"
     }
 }
+
+// Saturating addition - clamps to max on overflow, min on underflow
+external("vole:compiler_intrinsic") {
+    func saturating_add<T>(x: T, y: T) -> T where {
+        i8 => "i8_saturating_add"
+        i16 => "i16_saturating_add"
+        i32 => "i32_saturating_add"
+        i64 => "i64_saturating_add"
+        u8 => "u8_saturating_add"
+        u16 => "u16_saturating_add"
+        u32 => "u32_saturating_add"
+        u64 => "u64_saturating_add"
+    }
+}
+
+// Saturating subtraction - clamps to min on underflow, max on overflow
+external("vole:compiler_intrinsic") {
+    func saturating_sub<T>(x: T, y: T) -> T where {
+        i8 => "i8_saturating_sub"
+        i16 => "i16_saturating_sub"
+        i32 => "i32_saturating_sub"
+        i64 => "i64_saturating_sub"
+        u8 => "u8_saturating_sub"
+        u16 => "u16_saturating_sub"
+        u32 => "u32_saturating_sub"
+        u64 => "u64_saturating_sub"
+    }
+}
+
+// Saturating multiplication - clamps to max/min on overflow
+external("vole:compiler_intrinsic") {
+    func saturating_mul<T>(x: T, y: T) -> T where {
+        i8 => "i8_saturating_mul"
+        i16 => "i16_saturating_mul"
+        i32 => "i32_saturating_mul"
+        i64 => "i64_saturating_mul"
+        u8 => "u8_saturating_mul"
+        u16 => "u16_saturating_mul"
+        u32 => "u32_saturating_mul"
+        u64 => "u64_saturating_mul"
+    }
+}

@@ -1,0 +1,469 @@
+// Test saturating arithmetic operations - clamp on overflow instead of wrapping/panicking
+
+let { saturating_add, saturating_sub, saturating_mul, wrapping_sub } = import "std:lowlevel"
+
+tests "saturating_add" {
+    test "i8 saturating_add normal" {
+        let a: i8 = 10
+        let b: i8 = 20
+        assert(saturating_add(a, b) == 30)
+    }
+
+    test "i8 saturating_add overflow clamps to max" {
+        let a: i8 = 127
+        let b: i8 = 1
+        // 127 + 1 would overflow, clamps to 127
+        assert(saturating_add(a, b) == 127)
+    }
+
+    test "i8 saturating_add overflow more" {
+        let a: i8 = 127
+        let b: i8 = 100
+        // 127 + 100 would overflow, clamps to 127
+        assert(saturating_add(a, b) == 127)
+    }
+
+    test "i8 saturating_add underflow clamps to min" {
+        let a: i8 = -128
+        let b: i8 = -1
+        // -128 + (-1) would underflow, clamps to -128
+        assert(saturating_add(a, b) == -128)
+    }
+
+    test "i16 saturating_add normal" {
+        let a: i16 = 1000
+        let b: i16 = 2000
+        assert(saturating_add(a, b) == 3000)
+    }
+
+    test "i16 saturating_add overflow" {
+        let a: i16 = 32767
+        let b: i16 = 1
+        assert(saturating_add(a, b) == 32767)
+    }
+
+    test "i16 saturating_add underflow" {
+        let a: i16 = -32768
+        let b: i16 = -1
+        assert(saturating_add(a, b) == -32768)
+    }
+
+    test "i32 saturating_add normal" {
+        let a: i32 = 1000000
+        let b: i32 = 2000000
+        assert(saturating_add(a, b) == 3000000)
+    }
+
+    test "i32 saturating_add overflow" {
+        let a: i32 = 2147483647
+        let b: i32 = 1
+        assert(saturating_add(a, b) == 2147483647)
+    }
+
+    test "i32 saturating_add underflow" {
+        let a: i32 = -2147483648
+        let b: i32 = -1
+        assert(saturating_add(a, b) == -2147483648)
+    }
+
+    test "i64 saturating_add normal" {
+        let a: i64 = 1000000000000
+        let b: i64 = 2000000000000
+        assert(saturating_add(a, b) == 3000000000000)
+    }
+
+    test "i64 saturating_add overflow" {
+        let a: i64 = 9223372036854775807
+        let b: i64 = 1
+        assert(saturating_add(a, b) == 9223372036854775807)
+    }
+
+    test "i64 saturating_add underflow" {
+        // Compute MIN using wrapping since parser can't handle the literal
+        let i64_min: i64 = wrapping_sub(-9223372036854775807, 1)
+        let b: i64 = -1
+        assert(saturating_add(i64_min, b) == i64_min)
+    }
+
+    test "u8 saturating_add normal" {
+        let a: u8 = 100
+        let b: u8 = 50
+        assert(saturating_add(a, b) == 150)
+    }
+
+    test "u8 saturating_add overflow" {
+        let a: u8 = 255
+        let b: u8 = 1
+        assert(saturating_add(a, b) == 255)
+    }
+
+    test "u8 saturating_add overflow more" {
+        let a: u8 = 200
+        let b: u8 = 100
+        // 200 + 100 = 300, clamps to 255
+        assert(saturating_add(a, b) == 255)
+    }
+
+    test "u16 saturating_add normal" {
+        let a: u16 = 30000
+        let b: u16 = 20000
+        assert(saturating_add(a, b) == 50000)
+    }
+
+    test "u16 saturating_add overflow" {
+        let a: u16 = 65535
+        let b: u16 = 1
+        assert(saturating_add(a, b) == 65535)
+    }
+
+    test "u32 saturating_add normal" {
+        let a: u32 = 3000000000
+        let b: u32 = 1000000000
+        assert(saturating_add(a, b) == 4000000000)
+    }
+
+    test "u32 saturating_add overflow" {
+        let a: u32 = 4294967295
+        let b: u32 = 1
+        assert(saturating_add(a, b) == 4294967295)
+    }
+
+    test "u64 saturating_add normal" {
+        let a: u64 = 1000000000000
+        let b: u64 = 2000000000000
+        assert(saturating_add(a, b) == 3000000000000)
+    }
+
+    test "u64 saturating_add overflow" {
+        // Use computed MAX since parser has issues with large literals
+        let zero: u64 = 0
+        let one: u64 = 1
+        let max_u64: u64 = wrapping_sub(zero, one)
+        assert(saturating_add(max_u64, one) == max_u64)
+    }
+}
+
+tests "saturating_sub" {
+    test "i8 saturating_sub normal" {
+        let a: i8 = 20
+        let b: i8 = 10
+        assert(saturating_sub(a, b) == 10)
+    }
+
+    test "i8 saturating_sub underflow clamps to min" {
+        let a: i8 = -128
+        let b: i8 = 1
+        // -128 - 1 would underflow, clamps to -128
+        assert(saturating_sub(a, b) == -128)
+    }
+
+    test "i8 saturating_sub overflow clamps to max" {
+        let a: i8 = 127
+        let b: i8 = -1
+        // 127 - (-1) = 128, would overflow, clamps to 127
+        assert(saturating_sub(a, b) == 127)
+    }
+
+    test "i16 saturating_sub normal" {
+        let a: i16 = 1000
+        let b: i16 = 500
+        assert(saturating_sub(a, b) == 500)
+    }
+
+    test "i16 saturating_sub underflow" {
+        let a: i16 = -32768
+        let b: i16 = 1
+        assert(saturating_sub(a, b) == -32768)
+    }
+
+    test "i32 saturating_sub normal" {
+        let a: i32 = 1000000
+        let b: i32 = 500000
+        assert(saturating_sub(a, b) == 500000)
+    }
+
+    test "i32 saturating_sub underflow" {
+        let a: i32 = -2147483648
+        let b: i32 = 1
+        assert(saturating_sub(a, b) == -2147483648)
+    }
+
+    test "i64 saturating_sub normal" {
+        let a: i64 = 1000000000000
+        let b: i64 = 500000000000
+        assert(saturating_sub(a, b) == 500000000000)
+    }
+
+    test "i64 saturating_sub underflow" {
+        // Compute MIN using wrapping
+        let i64_min: i64 = wrapping_sub(-9223372036854775807, 1)
+        let b: i64 = 1
+        assert(saturating_sub(i64_min, b) == i64_min)
+    }
+
+    test "u8 saturating_sub normal" {
+        let a: u8 = 100
+        let b: u8 = 50
+        assert(saturating_sub(a, b) == 50)
+    }
+
+    test "u8 saturating_sub underflow clamps to zero" {
+        let a: u8 = 0
+        let b: u8 = 1
+        // 0 - 1 would underflow, clamps to 0
+        assert(saturating_sub(a, b) == 0)
+    }
+
+    test "u8 saturating_sub underflow more" {
+        let a: u8 = 10
+        let b: u8 = 100
+        // 10 - 100 would be -90, clamps to 0
+        assert(saturating_sub(a, b) == 0)
+    }
+
+    test "u16 saturating_sub normal" {
+        let a: u16 = 1000
+        let b: u16 = 500
+        assert(saturating_sub(a, b) == 500)
+    }
+
+    test "u16 saturating_sub underflow" {
+        let a: u16 = 0
+        let b: u16 = 1
+        assert(saturating_sub(a, b) == 0)
+    }
+
+    test "u32 saturating_sub normal" {
+        let a: u32 = 1000000000
+        let b: u32 = 500000000
+        assert(saturating_sub(a, b) == 500000000)
+    }
+
+    test "u32 saturating_sub underflow" {
+        let a: u32 = 0
+        let b: u32 = 1
+        assert(saturating_sub(a, b) == 0)
+    }
+
+    test "u64 saturating_sub normal" {
+        let a: u64 = 1000000000000
+        let b: u64 = 500000000000
+        assert(saturating_sub(a, b) == 500000000000)
+    }
+
+    test "u64 saturating_sub underflow" {
+        let a: u64 = 0
+        let b: u64 = 1
+        assert(saturating_sub(a, b) == 0)
+    }
+}
+
+tests "saturating_mul" {
+    test "i8 saturating_mul normal" {
+        let a: i8 = 5
+        let b: i8 = 10
+        assert(saturating_mul(a, b) == 50)
+    }
+
+    test "i8 saturating_mul overflow clamps to max" {
+        let a: i8 = 127
+        let b: i8 = 2
+        // 127 * 2 = 254, would overflow, clamps to 127
+        assert(saturating_mul(a, b) == 127)
+    }
+
+    test "i8 saturating_mul underflow clamps to min" {
+        let a: i8 = 127
+        let b: i8 = -2
+        // 127 * -2 = -254, would underflow, clamps to -128
+        assert(saturating_mul(a, b) == -128)
+    }
+
+    test "i8 saturating_mul negative times negative overflow" {
+        let a: i8 = -128
+        let b: i8 = -1
+        // -128 * -1 = 128, would overflow, clamps to 127
+        assert(saturating_mul(a, b) == 127)
+    }
+
+    test "i16 saturating_mul normal" {
+        let a: i16 = 100
+        let b: i16 = 200
+        assert(saturating_mul(a, b) == 20000)
+    }
+
+    test "i16 saturating_mul overflow" {
+        let a: i16 = 32767
+        let b: i16 = 2
+        assert(saturating_mul(a, b) == 32767)
+    }
+
+    test "i16 saturating_mul underflow" {
+        let a: i16 = 32767
+        let b: i16 = -2
+        assert(saturating_mul(a, b) == -32768)
+    }
+
+    test "i32 saturating_mul normal" {
+        let a: i32 = 10000
+        let b: i32 = 10000
+        assert(saturating_mul(a, b) == 100000000)
+    }
+
+    test "i32 saturating_mul overflow" {
+        let a: i32 = 2147483647
+        let b: i32 = 2
+        assert(saturating_mul(a, b) == 2147483647)
+    }
+
+    test "i32 saturating_mul underflow" {
+        let a: i32 = 2147483647
+        let b: i32 = -2
+        assert(saturating_mul(a, b) == -2147483648)
+    }
+
+    test "i64 saturating_mul normal" {
+        let a: i64 = 1000000
+        let b: i64 = 1000000
+        assert(saturating_mul(a, b) == 1000000000000)
+    }
+
+    test "i64 saturating_mul overflow" {
+        let a: i64 = 9223372036854775807
+        let b: i64 = 2
+        assert(saturating_mul(a, b) == 9223372036854775807)
+    }
+
+    test "i64 saturating_mul underflow" {
+        let a: i64 = 9223372036854775807
+        let b: i64 = -2
+        // Compute MIN using wrapping
+        let i64_min: i64 = wrapping_sub(-9223372036854775807, 1)
+        assert(saturating_mul(a, b) == i64_min)
+    }
+
+    test "u8 saturating_mul normal" {
+        let a: u8 = 10
+        let b: u8 = 20
+        assert(saturating_mul(a, b) == 200)
+    }
+
+    test "u8 saturating_mul overflow" {
+        let a: u8 = 255
+        let b: u8 = 2
+        // 255 * 2 = 510, clamps to 255
+        assert(saturating_mul(a, b) == 255)
+    }
+
+    test "u8 saturating_mul overflow more" {
+        let a: u8 = 16
+        let b: u8 = 20
+        // 16 * 20 = 320, clamps to 255
+        assert(saturating_mul(a, b) == 255)
+    }
+
+    test "u16 saturating_mul normal" {
+        let a: u16 = 100
+        let b: u16 = 100
+        assert(saturating_mul(a, b) == 10000)
+    }
+
+    test "u16 saturating_mul overflow" {
+        let a: u16 = 65535
+        let b: u16 = 2
+        assert(saturating_mul(a, b) == 65535)
+    }
+
+    test "u32 saturating_mul normal" {
+        let a: u32 = 10000
+        let b: u32 = 10000
+        assert(saturating_mul(a, b) == 100000000)
+    }
+
+    test "u32 saturating_mul overflow" {
+        let a: u32 = 4294967295
+        let b: u32 = 2
+        assert(saturating_mul(a, b) == 4294967295)
+    }
+
+    test "u64 saturating_mul normal" {
+        let a: u64 = 1000000
+        let b: u64 = 1000000
+        assert(saturating_mul(a, b) == 1000000000000)
+    }
+
+    test "u64 saturating_mul overflow" {
+        // Use computed MAX
+        let zero: u64 = 0
+        let one: u64 = 1
+        let two: u64 = 2
+        let max_u64: u64 = wrapping_sub(zero, one)
+        assert(saturating_mul(max_u64, two) == max_u64)
+    }
+}
+
+tests "saturating arithmetic edge cases" {
+    test "saturating_add with zero" {
+        let a: i32 = 2147483647
+        let b: i32 = 0
+        assert(saturating_add(a, b) == 2147483647)
+    }
+
+    test "saturating_sub with zero" {
+        let a: i32 = -2147483648
+        let b: i32 = 0
+        assert(saturating_sub(a, b) == -2147483648)
+    }
+
+    test "saturating_mul with zero" {
+        let a: i32 = 2147483647
+        let b: i32 = 0
+        assert(saturating_mul(a, b) == 0)
+    }
+
+    test "saturating_mul with one" {
+        let a: i32 = 2147483647
+        let b: i32 = 1
+        assert(saturating_mul(a, b) == 2147483647)
+    }
+
+    test "saturating_mul with negative one signed" {
+        let a: i32 = 2147483647
+        let b: i32 = -1
+        assert(saturating_mul(a, b) == -2147483647)
+    }
+
+    test "chained saturating_add" {
+        let a: u8 = 250
+        let b: u8 = 10
+        let c: u8 = 10
+        // 250 + 10 clamps to 255, then 255 + 10 still 255
+        assert(saturating_add(saturating_add(a, b), c) == 255)
+    }
+
+    test "chained saturating_sub" {
+        let a: u8 = 10
+        let b: u8 = 5
+        let c: u8 = 20
+        // 10 - 5 = 5, then 5 - 20 clamps to 0
+        assert(saturating_sub(saturating_sub(a, b), c) == 0)
+    }
+
+    test "saturating with negative numbers" {
+        let a: i32 = -100
+        let b: i32 = -200
+        assert(saturating_add(a, b) == -300)
+        assert(saturating_sub(a, b) == 100)
+        assert(saturating_mul(a, b) == 20000)
+    }
+
+    test "compare saturating vs normal at boundary" {
+        let a: i8 = 100
+        let b: i8 = 50
+        // Normal case: both should give same result
+        assert(saturating_add(a, b) == 127) // would overflow, clamps
+        let c: i8 = 100
+        let d: i8 = 20
+        assert(saturating_add(c, d) == 120) // no overflow, same as normal
+    }
+}

@@ -859,6 +859,273 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         ))
     }
 
+    // ========== Saturating arithmetic helpers ==========
+
+    /// Signed saturating multiplication.
+    /// If overflow occurs, clamp to MIN or MAX based on the sign of the result.
+    /// Logic: If signs are same and overflow, result should be MAX.
+    ///        If signs differ and overflow, result should be MIN.
+    pub fn signed_saturating_mul(&mut self, a: Value, b: Value, ty: Type) -> Value {
+        // Compute min and max for this type
+        let bits = ty.bits();
+        let (min_val, max_val) = match bits {
+            8 => (i8::MIN as i64, i8::MAX as i64),
+            16 => (i16::MIN as i64, i16::MAX as i64),
+            32 => (i32::MIN as i64, i32::MAX as i64),
+            64 => (i64::MIN, i64::MAX),
+            _ => panic!("Unsupported bit width: {}", bits),
+        };
+        let max = self.builder.ins().iconst(ty, max_val);
+        let min = self.builder.ins().iconst(ty, min_val);
+        let zero = self.builder.ins().iconst(ty, 0);
+
+        // Perform multiplication with overflow detection
+        let (result, overflow) = self.builder.ins().smul_overflow(a, b);
+
+        // Determine if the result should be positive or negative
+        // If a and b have same sign, positive overflow -> MAX
+        // If a and b have different sign, negative overflow -> MIN
+        let a_neg = self.builder.ins().icmp(IntCC::SignedLessThan, a, zero);
+        let b_neg = self.builder.ins().icmp(IntCC::SignedLessThan, b, zero);
+        let signs_differ = self.builder.ins().bxor(a_neg, b_neg);
+
+        // If overflow: use min if signs differ (result would be negative), else max
+        let sat_value = self.builder.ins().select(signs_differ, min, max);
+
+        // Final result: if overflow, use saturated value, else use computed result
+        self.builder.ins().select(overflow, sat_value, result)
+    }
+
+    /// Unsigned saturating multiplication.
+    /// If overflow occurs, clamp to MAX.
+    pub fn unsigned_saturating_mul(&mut self, a: Value, b: Value, ty: Type) -> Value {
+        // Compute max for this type
+        let bits = ty.bits();
+        let max_val = if bits == 64 {
+            // u64 max can't be represented as positive i64, use -1 which is all 1s
+            -1i64
+        } else {
+            (1i64 << bits) - 1
+        };
+        let max = self.builder.ins().iconst(ty, max_val);
+
+        // Perform multiplication with overflow detection
+        let (result, overflow) = self.builder.ins().umul_overflow(a, b);
+
+        // If overflow, use max, else use result
+        self.builder.ins().select(overflow, max, result)
+    }
+
+    /// Signed saturating addition using overflow detection.
+    /// If overflow occurs, clamp to MIN or MAX based on direction.
+    pub fn signed_saturating_add(&mut self, a: Value, b: Value, ty: Type) -> Value {
+        // Compute min and max for this type
+        let bits = ty.bits();
+        let (min_val, max_val) = match bits {
+            8 => (i8::MIN as i64, i8::MAX as i64),
+            16 => (i16::MIN as i64, i16::MAX as i64),
+            32 => (i32::MIN as i64, i32::MAX as i64),
+            64 => (i64::MIN, i64::MAX),
+            _ => panic!("Unsupported bit width: {}", bits),
+        };
+        let max = self.builder.ins().iconst(ty, max_val);
+        let min = self.builder.ins().iconst(ty, min_val);
+        let zero = self.builder.ins().iconst(ty, 0);
+
+        // Perform addition with overflow detection
+        let (result, overflow) = self.builder.ins().sadd_overflow(a, b);
+
+        // On overflow: if b >= 0 (positive overflow), use max; else use min
+        let b_non_neg = self
+            .builder
+            .ins()
+            .icmp(IntCC::SignedGreaterThanOrEqual, b, zero);
+        let sat_value = self.builder.ins().select(b_non_neg, max, min);
+
+        // Final result: if overflow, use saturated value, else use computed result
+        self.builder.ins().select(overflow, sat_value, result)
+    }
+
+    /// Unsigned saturating addition using overflow detection.
+    /// If overflow occurs, clamp to MAX.
+    pub fn unsigned_saturating_add(&mut self, a: Value, b: Value, ty: Type) -> Value {
+        // Compute max for this type
+        let bits = ty.bits();
+        let max_val = if bits == 64 {
+            -1i64 // All 1s
+        } else {
+            (1i64 << bits) - 1
+        };
+        let max = self.builder.ins().iconst(ty, max_val);
+
+        // Perform addition with overflow detection
+        let (result, overflow) = self.builder.ins().uadd_overflow(a, b);
+
+        // If overflow, use max, else use result
+        self.builder.ins().select(overflow, max, result)
+    }
+
+    /// Signed saturating subtraction using overflow detection.
+    /// If overflow occurs, clamp to MIN or MAX based on direction.
+    pub fn signed_saturating_sub(&mut self, a: Value, b: Value, ty: Type) -> Value {
+        // Compute min and max for this type
+        let bits = ty.bits();
+        let (min_val, max_val) = match bits {
+            8 => (i8::MIN as i64, i8::MAX as i64),
+            16 => (i16::MIN as i64, i16::MAX as i64),
+            32 => (i32::MIN as i64, i32::MAX as i64),
+            64 => (i64::MIN, i64::MAX),
+            _ => panic!("Unsupported bit width: {}", bits),
+        };
+        let max = self.builder.ins().iconst(ty, max_val);
+        let min = self.builder.ins().iconst(ty, min_val);
+        let zero = self.builder.ins().iconst(ty, 0);
+
+        // Perform subtraction with overflow detection
+        let (result, overflow) = self.builder.ins().ssub_overflow(a, b);
+
+        // On overflow: if b > 0 (subtracting positive -> underflow), use min; else use max
+        let b_positive = self.builder.ins().icmp(IntCC::SignedGreaterThan, b, zero);
+        let sat_value = self.builder.ins().select(b_positive, min, max);
+
+        // Final result: if overflow, use saturated value, else use computed result
+        self.builder.ins().select(overflow, sat_value, result)
+    }
+
+    /// Unsigned saturating subtraction using overflow detection.
+    /// If overflow occurs, clamp to 0.
+    pub fn unsigned_saturating_sub(&mut self, a: Value, b: Value, ty: Type) -> Value {
+        let zero = self.builder.ins().iconst(ty, 0);
+
+        // Perform subtraction with overflow detection
+        let (result, overflow) = self.builder.ins().usub_overflow(a, b);
+
+        // If overflow (underflow), use 0, else use result
+        self.builder.ins().select(overflow, zero, result)
+    }
+
+    /// Signed saturating add for i8 using widen-clamp-narrow approach.
+    /// Cranelift's sadd_sat doesn't support i8, so we widen to i16 first.
+    pub fn i8_sadd_sat(&mut self, a: Value, b: Value) -> Value {
+        // Widen to i16
+        let a16 = self.builder.ins().sextend(types::I16, a);
+        let b16 = self.builder.ins().sextend(types::I16, b);
+        // Add in i16 (no overflow possible for i8 range)
+        let sum = self.builder.ins().iadd(a16, b16);
+        // Clamp to i8 range [-128, 127]
+        let min = self.builder.ins().iconst(types::I16, -128);
+        let max = self.builder.ins().iconst(types::I16, 127);
+        let clamped = self.builder.ins().smax(sum, min);
+        let clamped = self.builder.ins().smin(clamped, max);
+        // Narrow back to i8
+        self.builder.ins().ireduce(types::I8, clamped)
+    }
+
+    /// Unsigned saturating add for u8 using widen-clamp-narrow approach.
+    pub fn u8_uadd_sat(&mut self, a: Value, b: Value) -> Value {
+        // Widen to i16 (zero extend)
+        let a16 = self.builder.ins().uextend(types::I16, a);
+        let b16 = self.builder.ins().uextend(types::I16, b);
+        // Add in i16
+        let sum = self.builder.ins().iadd(a16, b16);
+        // Clamp to u8 range [0, 255]
+        let max = self.builder.ins().iconst(types::I16, 255);
+        let clamped = self.builder.ins().umin(sum, max);
+        // Narrow back to i8
+        self.builder.ins().ireduce(types::I8, clamped)
+    }
+
+    /// Signed saturating sub for i8 using widen-clamp-narrow approach.
+    pub fn i8_ssub_sat(&mut self, a: Value, b: Value) -> Value {
+        // Widen to i16
+        let a16 = self.builder.ins().sextend(types::I16, a);
+        let b16 = self.builder.ins().sextend(types::I16, b);
+        // Subtract in i16
+        let diff = self.builder.ins().isub(a16, b16);
+        // Clamp to i8 range [-128, 127]
+        let min = self.builder.ins().iconst(types::I16, -128);
+        let max = self.builder.ins().iconst(types::I16, 127);
+        let clamped = self.builder.ins().smax(diff, min);
+        let clamped = self.builder.ins().smin(clamped, max);
+        // Narrow back to i8
+        self.builder.ins().ireduce(types::I8, clamped)
+    }
+
+    /// Unsigned saturating sub for u8 using widen-clamp-narrow approach.
+    pub fn u8_usub_sat(&mut self, a: Value, b: Value) -> Value {
+        // Widen to i16 (zero extend)
+        let a16 = self.builder.ins().uextend(types::I16, a);
+        let b16 = self.builder.ins().uextend(types::I16, b);
+        // Subtract in i16
+        let diff = self.builder.ins().isub(a16, b16);
+        // Clamp to u8 range - min is 0
+        let zero = self.builder.ins().iconst(types::I16, 0);
+        let clamped = self.builder.ins().smax(diff, zero);
+        // Narrow back to i8
+        self.builder.ins().ireduce(types::I8, clamped)
+    }
+
+    /// Signed saturating add for i16 using widen-clamp-narrow approach.
+    /// Cranelift's sadd_sat doesn't support i16, so we widen to i32 first.
+    pub fn i16_sadd_sat(&mut self, a: Value, b: Value) -> Value {
+        // Widen to i32
+        let a32 = self.builder.ins().sextend(types::I32, a);
+        let b32 = self.builder.ins().sextend(types::I32, b);
+        // Add in i32 (no overflow possible for i16 range)
+        let sum = self.builder.ins().iadd(a32, b32);
+        // Clamp to i16 range [-32768, 32767]
+        let min = self.builder.ins().iconst(types::I32, -32768);
+        let max = self.builder.ins().iconst(types::I32, 32767);
+        let clamped = self.builder.ins().smax(sum, min);
+        let clamped = self.builder.ins().smin(clamped, max);
+        // Narrow back to i16
+        self.builder.ins().ireduce(types::I16, clamped)
+    }
+
+    /// Unsigned saturating add for u16 using widen-clamp-narrow approach.
+    pub fn u16_uadd_sat(&mut self, a: Value, b: Value) -> Value {
+        // Widen to i32 (zero extend)
+        let a32 = self.builder.ins().uextend(types::I32, a);
+        let b32 = self.builder.ins().uextend(types::I32, b);
+        // Add in i32
+        let sum = self.builder.ins().iadd(a32, b32);
+        // Clamp to u16 range [0, 65535]
+        let max = self.builder.ins().iconst(types::I32, 65535);
+        let clamped = self.builder.ins().umin(sum, max);
+        // Narrow back to i16
+        self.builder.ins().ireduce(types::I16, clamped)
+    }
+
+    /// Signed saturating sub for i16 using widen-clamp-narrow approach.
+    pub fn i16_ssub_sat(&mut self, a: Value, b: Value) -> Value {
+        // Widen to i32
+        let a32 = self.builder.ins().sextend(types::I32, a);
+        let b32 = self.builder.ins().sextend(types::I32, b);
+        // Subtract in i32
+        let diff = self.builder.ins().isub(a32, b32);
+        // Clamp to i16 range [-32768, 32767]
+        let min = self.builder.ins().iconst(types::I32, -32768);
+        let max = self.builder.ins().iconst(types::I32, 32767);
+        let clamped = self.builder.ins().smax(diff, min);
+        let clamped = self.builder.ins().smin(clamped, max);
+        // Narrow back to i16
+        self.builder.ins().ireduce(types::I16, clamped)
+    }
+
+    /// Unsigned saturating sub for u16 using widen-clamp-narrow approach.
+    pub fn u16_usub_sat(&mut self, a: Value, b: Value) -> Value {
+        // Widen to i32 (zero extend)
+        let a32 = self.builder.ins().uextend(types::I32, a);
+        let b32 = self.builder.ins().uextend(types::I32, b);
+        // Subtract in i32
+        let diff = self.builder.ins().isub(a32, b32);
+        // Clamp to u16 range - min is 0
+        let zero = self.builder.ins().iconst(types::I32, 0);
+        let clamped = self.builder.ins().smax(diff, zero);
+        // Narrow back to i16
+        self.builder.ins().ireduce(types::I16, clamped)
+    }
+
     // ========== External native function calls ==========
 
     /// The module path for compiler intrinsics (e.g., f64.nan(), f32.infinity())
@@ -1468,6 +1735,108 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                     }
                     BinaryIntOp::U64WrappingMul => {
                         let v = self.builder.ins().imul(arg1, arg2);
+                        (v, types::I64, TypeId::U64)
+                    }
+                    // saturating_add - signed (Cranelift sadd_sat doesn't support i8)
+                    BinaryIntOp::I8SaturatingAdd => {
+                        let v = self.i8_sadd_sat(arg1, arg2);
+                        (v, types::I8, TypeId::I8)
+                    }
+                    BinaryIntOp::I16SaturatingAdd => {
+                        let v = self.i16_sadd_sat(arg1, arg2);
+                        (v, types::I16, TypeId::I16)
+                    }
+                    BinaryIntOp::I32SaturatingAdd => {
+                        let v = self.signed_saturating_add(arg1, arg2, types::I32);
+                        (v, types::I32, TypeId::I32)
+                    }
+                    BinaryIntOp::I64SaturatingAdd => {
+                        let v = self.signed_saturating_add(arg1, arg2, types::I64);
+                        (v, types::I64, TypeId::I64)
+                    }
+                    // saturating_add - unsigned (Cranelift uadd_sat doesn't support u8)
+                    BinaryIntOp::U8SaturatingAdd => {
+                        let v = self.u8_uadd_sat(arg1, arg2);
+                        (v, types::I8, TypeId::U8)
+                    }
+                    BinaryIntOp::U16SaturatingAdd => {
+                        let v = self.u16_uadd_sat(arg1, arg2);
+                        (v, types::I16, TypeId::U16)
+                    }
+                    BinaryIntOp::U32SaturatingAdd => {
+                        let v = self.unsigned_saturating_add(arg1, arg2, types::I32);
+                        (v, types::I32, TypeId::U32)
+                    }
+                    BinaryIntOp::U64SaturatingAdd => {
+                        let v = self.unsigned_saturating_add(arg1, arg2, types::I64);
+                        (v, types::I64, TypeId::U64)
+                    }
+                    // saturating_sub - signed (Cranelift ssub_sat doesn't support i8)
+                    BinaryIntOp::I8SaturatingSub => {
+                        let v = self.i8_ssub_sat(arg1, arg2);
+                        (v, types::I8, TypeId::I8)
+                    }
+                    BinaryIntOp::I16SaturatingSub => {
+                        let v = self.i16_ssub_sat(arg1, arg2);
+                        (v, types::I16, TypeId::I16)
+                    }
+                    BinaryIntOp::I32SaturatingSub => {
+                        let v = self.signed_saturating_sub(arg1, arg2, types::I32);
+                        (v, types::I32, TypeId::I32)
+                    }
+                    BinaryIntOp::I64SaturatingSub => {
+                        let v = self.signed_saturating_sub(arg1, arg2, types::I64);
+                        (v, types::I64, TypeId::I64)
+                    }
+                    // saturating_sub - unsigned (Cranelift usub_sat doesn't support u8)
+                    BinaryIntOp::U8SaturatingSub => {
+                        let v = self.u8_usub_sat(arg1, arg2);
+                        (v, types::I8, TypeId::U8)
+                    }
+                    BinaryIntOp::U16SaturatingSub => {
+                        let v = self.u16_usub_sat(arg1, arg2);
+                        (v, types::I16, TypeId::U16)
+                    }
+                    BinaryIntOp::U32SaturatingSub => {
+                        let v = self.unsigned_saturating_sub(arg1, arg2, types::I32);
+                        (v, types::I32, TypeId::U32)
+                    }
+                    BinaryIntOp::U64SaturatingSub => {
+                        let v = self.unsigned_saturating_sub(arg1, arg2, types::I64);
+                        (v, types::I64, TypeId::U64)
+                    }
+                    // saturating_mul - signed (use overflow detection + select)
+                    BinaryIntOp::I8SaturatingMul => {
+                        let v = self.signed_saturating_mul(arg1, arg2, types::I8);
+                        (v, types::I8, TypeId::I8)
+                    }
+                    BinaryIntOp::I16SaturatingMul => {
+                        let v = self.signed_saturating_mul(arg1, arg2, types::I16);
+                        (v, types::I16, TypeId::I16)
+                    }
+                    BinaryIntOp::I32SaturatingMul => {
+                        let v = self.signed_saturating_mul(arg1, arg2, types::I32);
+                        (v, types::I32, TypeId::I32)
+                    }
+                    BinaryIntOp::I64SaturatingMul => {
+                        let v = self.signed_saturating_mul(arg1, arg2, types::I64);
+                        (v, types::I64, TypeId::I64)
+                    }
+                    // saturating_mul - unsigned (use overflow detection + select)
+                    BinaryIntOp::U8SaturatingMul => {
+                        let v = self.unsigned_saturating_mul(arg1, arg2, types::I8);
+                        (v, types::I8, TypeId::U8)
+                    }
+                    BinaryIntOp::U16SaturatingMul => {
+                        let v = self.unsigned_saturating_mul(arg1, arg2, types::I16);
+                        (v, types::I16, TypeId::U16)
+                    }
+                    BinaryIntOp::U32SaturatingMul => {
+                        let v = self.unsigned_saturating_mul(arg1, arg2, types::I32);
+                        (v, types::I32, TypeId::U32)
+                    }
+                    BinaryIntOp::U64SaturatingMul => {
+                        let v = self.unsigned_saturating_mul(arg1, arg2, types::I64);
                         (v, types::I64, TypeId::U64)
                     }
                 };
