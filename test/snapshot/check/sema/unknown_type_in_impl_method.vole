@@ -1,0 +1,11 @@
+// Error: unknown type 'Int' in implement block method (v-2c4d regression test)
+// Previously this caused a panic: 'method should have function signature'
+// Now it should emit a proper error message
+
+record Point { x: i64, y: i64 }
+
+implement Point {
+    func getX() -> Int {
+        return self.x
+    }
+}

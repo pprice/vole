@@ -1,0 +1,13 @@
+// Error: method with unknown parameter type
+// Tests resolution.rs panic path for params
+
+class Processor {
+    func process(x: BadType) -> i64 {
+        return 0
+    }
+}
+
+func main() {
+    let p = Processor {}
+    let x = p.process(42)  // Should error, not panic
+}

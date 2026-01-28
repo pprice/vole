@@ -2660,12 +2660,14 @@ impl Analyzer {
             .expect("method should be registered in EntityRegistry");
 
         // Get signature components from arena
+        // If the signature is invalid (e.g., due to an unknown type in the method signature),
+        // skip checking this method - the type error will be reported from declarations
         let (params_id, return_type_id) = {
             let arena = self.type_arena();
-            let (params, ret, _) = arena
-                .unwrap_function(lookup.signature_id)
-                .expect("method signature must be a function type");
-            (params.clone(), ret)
+            match arena.unwrap_function(lookup.signature_id) {
+                Some((params, ret, _)) => (params.clone(), ret),
+                None => return Ok(()), // Invalid signature - skip body checking
+            }
         };
 
         // Determine if we need to infer the return type
@@ -2896,9 +2898,10 @@ impl Analyzer {
         // Get signature components from arena
         let (params_id, return_type_id) = {
             let arena = self.type_arena();
-            let (params, ret, _) = arena
-                .unwrap_function(signature_id)
-                .expect("method signature must be a function type");
+            // If signature is invalid (unknown type), skip checking - error already reported
+            let Some((params, ret, _)) = arena.unwrap_function(signature_id) else {
+                return Ok(());
+            };
             (params.clone(), ret)
         };
 

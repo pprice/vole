@@ -1,0 +1,13 @@
+// Test static method with bad type
+
+class Factory {
+    statics {
+        func create() -> BadType {
+            return 0
+        }
+    }
+}
+
+func main() {
+    let x = Factory.create()
+}

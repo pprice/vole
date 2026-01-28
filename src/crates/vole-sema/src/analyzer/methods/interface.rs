@@ -56,9 +56,10 @@ impl Analyzer {
             // Step 2: Get signature from arena
             let signature = {
                 let arena = self.type_arena();
-                let (params, ret, is_closure) = arena
-                    .unwrap_function(signature_id)
-                    .expect("method signature must be a function type");
+                // Skip methods with invalid signatures (unknown types) - error reported elsewhere
+                let Some((params, ret, is_closure)) = arena.unwrap_function(signature_id) else {
+                    continue;
+                };
                 FunctionType {
                     is_closure,
                     params_id: params.clone(),
@@ -189,9 +190,10 @@ impl Analyzer {
             let signature_id = self.entity_registry().method_signature(method_id);
             let found_sig = {
                 let arena = self.type_arena();
-                let (params, ret, is_closure) = arena
-                    .unwrap_function(signature_id)
-                    .expect("method signature must be a function type");
+                // If signature is invalid (unknown type), treat as not having the method
+                let Some((params, ret, is_closure)) = arena.unwrap_function(signature_id) else {
+                    return false;
+                };
                 FunctionType {
                     is_closure,
                     params_id: params.clone(),
@@ -312,9 +314,10 @@ impl Analyzer {
                 };
 
             // Collect method info upfront (name_str, has_default, signature with substitutions applied)
+            // Use filter_map to skip methods with invalid signatures (unknown types)
             let method_infos: Vec<(String, bool, FunctionType)> = method_ids
                 .iter()
-                .map(|&method_id| {
+                .filter_map(|&method_id| {
                     let (has_default, name_id, signature_id) =
                         self.entity_registry().method_default_name_sig(method_id);
                     let name = self
@@ -322,12 +325,10 @@ impl Analyzer {
                         .last_segment_str(name_id)
                         .unwrap_or_default();
 
-                    // Get original signature from arena
+                    // Get original signature from arena - skip if invalid
                     let (param_ids, return_id, is_closure) = {
                         let arena = self.type_arena();
-                        let (params, ret, is_closure) = arena
-                            .unwrap_function(signature_id)
-                            .expect("method signature must be a function type");
+                        let (params, ret, is_closure) = arena.unwrap_function(signature_id)?;
                         (params.to_vec(), ret, is_closure)
                     };
 
@@ -353,7 +354,7 @@ impl Analyzer {
                         // Build FunctionType from substituted TypeIds
                         FunctionType::from_ids(&subst_params, subst_ret, is_closure)
                     };
-                    (name, has_default, subst_sig)
+                    Some((name, has_default, subst_sig))
                 })
                 .collect();
 
@@ -579,18 +580,20 @@ impl Analyzer {
                     let method = registry.get_method(method_id);
                     (method.signature_id, method.name_id)
                 };
-                let sig = {
+                // Skip methods with invalid signatures (e.g., unknown types)
+                let sig_opt = {
                     let arena = self.type_arena();
-                    let (params, ret, is_closure) = arena
+                    arena
                         .unwrap_function(signature_id)
-                        .expect("method signature must be a function type");
-                    FunctionType {
-                        is_closure,
-                        params_id: params.clone(),
-                        return_type_id: ret,
-                    }
+                        .map(|(params, ret, is_closure)| FunctionType {
+                            is_closure,
+                            params_id: params.clone(),
+                            return_type_id: ret,
+                        })
                 };
-                method_sigs.insert(method_name_str(name_id), sig);
+                if let Some(sig) = sig_opt {
+                    method_sigs.insert(method_name_str(name_id), sig);
+                }
             }
 
             // Methods from implement blocks

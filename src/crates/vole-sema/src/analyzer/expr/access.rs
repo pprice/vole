@@ -991,12 +991,15 @@ impl Analyzer {
             };
 
             // Get signature components from arena
-            let (param_type_ids, return_type_id, _is_closure) = {
+            // If signature is invalid (unknown type), return INVALID - error already reported
+            let sig_result = {
                 let arena = self.type_arena();
-                let (params, ret, is_closure) = arena
+                arena
                     .unwrap_function(signature_id)
-                    .expect("method signature must be a function type");
-                (params.to_vec(), ret, is_closure)
+                    .map(|(params, ret, is_closure)| (params.to_vec(), ret, is_closure))
+            };
+            let Some((param_type_ids, return_type_id, _is_closure)) = sig_result else {
+                return Ok(self.type_arena_mut().invalid());
             };
 
             // Check argument count with defaults support

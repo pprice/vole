@@ -1,0 +1,15 @@
+// Error: calling a method with unknown type in signature
+// Tests resolution.rs panic path
+
+class Counter {
+    value: i64
+
+    func get() -> BadType {
+        return self.value
+    }
+}
+
+func main() {
+    let c = Counter { value: 42 }
+    let x = c.get()  // Should error, not panic
+}

@@ -536,6 +536,120 @@ impl Analyzer {
         FunctionType::from_ids(&params_id, return_type_id, false).intern(&mut self.type_arena_mut())
     }
 
+    /// Validate a type expression and emit an error if it resolves to an unknown type.
+    /// This is called during method registration to provide proper error messages
+    /// for unknown types in method signatures.
+    fn validate_type_annotation(
+        &mut self,
+        type_expr: &TypeExpr,
+        span: Span,
+        interner: &Interner,
+        type_param_scope: Option<&TypeParamScope>,
+    ) {
+        // For TypeExpr::Named, check if the type is resolvable
+        match type_expr {
+            TypeExpr::Named(sym) => {
+                let name_str = interner.resolve(*sym);
+                // Skip primitive types and "void"
+                if name_str == "void" {
+                    return;
+                }
+                // Check if it's a type parameter in scope
+                if let Some(scope) = type_param_scope
+                    && scope.get(*sym).is_some()
+                {
+                    return;
+                }
+                // Check from type_param_stack too
+                if self
+                    .type_param_stack
+                    .current()
+                    .is_some_and(|s| s.get(*sym).is_some())
+                {
+                    return;
+                }
+                // Try to resolve the type
+                let resolved = self
+                    .resolver(interner)
+                    .resolve_type(*sym, &self.entity_registry());
+                if resolved.is_none() {
+                    self.add_error(
+                        SemanticError::UnknownType {
+                            name: name_str.to_string(),
+                            span: span.into(),
+                        },
+                        span,
+                    );
+                }
+            }
+            TypeExpr::Generic { name, args } => {
+                // Validate the base type
+                self.validate_type_annotation(
+                    &TypeExpr::Named(*name),
+                    span,
+                    interner,
+                    type_param_scope,
+                );
+                // Validate type arguments
+                for arg in args {
+                    self.validate_type_annotation(arg, span, interner, type_param_scope);
+                }
+            }
+            TypeExpr::Array(elem) | TypeExpr::Optional(elem) => {
+                self.validate_type_annotation(elem, span, interner, type_param_scope);
+            }
+            TypeExpr::FixedArray { element, .. } => {
+                self.validate_type_annotation(element, span, interner, type_param_scope);
+            }
+            TypeExpr::Tuple(elements) => {
+                for elem in elements {
+                    self.validate_type_annotation(elem, span, interner, type_param_scope);
+                }
+            }
+            TypeExpr::Union(variants) => {
+                for variant in variants {
+                    self.validate_type_annotation(variant, span, interner, type_param_scope);
+                }
+            }
+            TypeExpr::Function {
+                params,
+                return_type,
+            } => {
+                for param in params {
+                    self.validate_type_annotation(param, span, interner, type_param_scope);
+                }
+                self.validate_type_annotation(return_type, span, interner, type_param_scope);
+            }
+            TypeExpr::Fallible {
+                success_type,
+                error_type,
+            } => {
+                self.validate_type_annotation(success_type, span, interner, type_param_scope);
+                self.validate_type_annotation(error_type, span, interner, type_param_scope);
+            }
+            // Primitives, SelfType, Done, Nil, etc. don't need validation
+            _ => {}
+        }
+    }
+
+    /// Validate method parameter and return type annotations, emitting errors for unknown types.
+    fn validate_method_types(
+        &mut self,
+        params: &[Param],
+        return_type: &Option<TypeExpr>,
+        func_span: Span,
+        interner: &Interner,
+        type_param_scope: Option<&TypeParamScope>,
+    ) {
+        for param in params {
+            self.validate_type_annotation(&param.ty, param.span, interner, type_param_scope);
+        }
+        if let Some(ret_ty) = return_type {
+            // Use the function span for return type errors since TypeExpr doesn't have its own span
+            self.validate_type_annotation(ret_ty, func_span, interner, type_param_scope);
+        }
+    }
+
     /// Register an instance method from a FuncDecl.
     /// Used for class and record instance methods.
     fn register_instance_method(
@@ -547,6 +661,15 @@ impl Analyzer {
         type_param_scope: Option<&TypeParamScope>,
         self_type: Option<ArenaTypeId>,
     ) {
+        // Validate type annotations to emit errors for unknown types
+        self.validate_method_types(
+            &method.params,
+            &method.return_type,
+            method.span,
+            interner,
+            type_param_scope,
+        );
+
         let (method_name_id, full_method_name_id) =
             self.build_method_names(type_name, method.name, interner);
         let signature_id = self.build_method_signature(
@@ -615,6 +738,16 @@ impl Analyzer {
         } else {
             type_param_scope
         };
+
+        // Validate type annotations to emit errors for unknown types
+        // Must be after building merged_scope so method's own type params are in scope
+        self.validate_method_types(
+            &method.params,
+            &method.return_type,
+            method.span,
+            interner,
+            scope_for_resolution,
+        );
 
         let signature_id = self.build_method_signature(
             &method.params,
@@ -1938,6 +2071,15 @@ impl Analyzer {
             });
 
             for method in &impl_block.methods {
+                // Validate type annotations to emit errors for unknown types
+                self.validate_method_types(
+                    &method.params,
+                    &method.return_type,
+                    method.span,
+                    interner,
+                    None,
+                );
+
                 // Use target_type_id as Self when resolving method signatures
                 // This ensures `Self` in method params/return types resolves to the implementing type
                 let params_id: Vec<ArenaTypeId> = method

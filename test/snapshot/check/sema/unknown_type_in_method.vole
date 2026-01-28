@@ -1,0 +1,11 @@
+// Error: unknown type 'Int' in method signature (v-2c4d regression test)
+// Previously this caused a panic: 'method signature must be a function type'
+// Now it should emit a proper error message
+
+class Counter {
+    value: Int,
+
+    func get() -> Int {
+        return self.value
+    }
+}

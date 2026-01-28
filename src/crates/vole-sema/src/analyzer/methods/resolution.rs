@@ -324,14 +324,14 @@ impl Analyzer {
                 "found method on constraint interface"
             );
 
-            return Some(self.build_interface_method_resolution(
+            return self.build_interface_method_resolution(
                 interface_type_id,
                 interface_sym,
                 method_name,
                 method_name_id,
                 param_name_id,
                 method_signature_id,
-            ));
+            );
         }
 
         None
@@ -346,16 +346,15 @@ impl Analyzer {
         method_name_id: NameId,
         param_name_id: NameId,
         method_signature_id: ArenaTypeId,
-    ) -> ResolvedMethod {
+    ) -> Option<ResolvedMethod> {
         // Substitute SelfType placeholders with the type parameter.
         // The interface signature has Self as placeholder, but when
         // called through a constraint T: Interface, Self should be T.
         let self_type_id = self.type_arena_mut().type_param(param_name_id);
         let (params, ret, is_closure) = {
             let arena = self.type_arena();
-            let (params, ret, is_closure) = arena
-                .unwrap_function(method_signature_id)
-                .expect("method signature must be a function type");
+            // If signature is invalid (e.g., due to unknown return type), skip resolution
+            let (params, ret, is_closure) = arena.unwrap_function(method_signature_id)?;
             (params.clone(), ret, is_closure)
         };
 
@@ -379,7 +378,7 @@ impl Analyzer {
             .interface_method_slot(interface_type_id, method_name_id)
             .unwrap_or(0);
 
-        ResolvedMethod::InterfaceMethod {
+        Some(ResolvedMethod::InterfaceMethod {
             method_name_id,
             interface_name: interface_sym,
             method_name,
@@ -387,7 +386,7 @@ impl Analyzer {
             return_type_id,
             interface_type_def_id: interface_type_id,
             method_index,
-        }
+        })
     }
 
     /// Get the function type for a functional interface by TypeDefId
@@ -399,9 +398,8 @@ impl Analyzer {
         let signature_id = self.entity_registry().method_signature(method_id);
         // Build from arena - get params and return type from signature_id
         let arena = self.type_arena();
-        let (params, ret, _) = arena
-            .unwrap_function(signature_id)
-            .expect("method signature must be a function type");
+        // If signature is invalid (e.g., due to unknown return type), return None
+        let (params, ret, _) = arena.unwrap_function(signature_id)?;
         Some(FunctionType::from_ids(params, ret, true)) // is_closure for functional interface
     }
 
@@ -542,12 +540,14 @@ impl Analyzer {
             FxHashMap::default()
         };
 
-        // Get signature from arena
+        // Get signature from arena - if invalid (due to unknown types), return None
         let method_sig = {
             let arena = self.type_arena();
-            let (params, ret, is_closure) = arena
-                .unwrap_function(method_signature_id)
-                .expect("method signature must be a function type");
+            let Some((params, ret, is_closure)) = arena.unwrap_function(method_signature_id) else {
+                // Method has invalid signature (e.g., unknown type in return/params)
+                // Error was already reported during method registration
+                return None;
+            };
             FunctionType {
                 is_closure,
                 params_id: params.clone(),
@@ -841,9 +841,11 @@ impl Analyzer {
 
             let func_type = {
                 let arena = self.type_arena();
-                let (params, ret, is_closure) = arena
-                    .unwrap_function(method_signature_id)
-                    .expect("method signature must be a function type");
+                let Some((params, ret, is_closure)) = arena.unwrap_function(method_signature_id)
+                else {
+                    // Invalid signature - error already reported
+                    return None;
+                };
                 FunctionType {
                     is_closure,
                     params_id: params.clone(),

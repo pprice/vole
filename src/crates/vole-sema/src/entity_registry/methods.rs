@@ -231,9 +231,10 @@ impl EntityRegistry {
         let old_sig_id = method.signature_id;
 
         // Get the old function's params and is_closure from arena
-        let (params, _old_ret, is_closure) = arena
-            .unwrap_function(old_sig_id)
-            .expect("method signature must be a function type");
+        // If signature is invalid (unknown type), don't update - error already reported
+        let Some((params, _old_ret, is_closure)) = arena.unwrap_function(old_sig_id) else {
+            return;
+        };
         let params = params.clone();
 
         // Create new function type with updated return type

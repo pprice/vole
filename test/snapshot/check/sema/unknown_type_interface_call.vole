@@ -1,0 +1,25 @@
+// Error: calling through interface with bad method signature
+// Tests interface.rs panic paths
+
+interface Getter {
+    func get() -> i64
+}
+
+class Counter {
+    value: i64
+
+    func get() -> BadType {
+        return self.value
+    }
+}
+
+implement Getter for Counter {}
+
+func use_getter(g: Getter) -> i64 {
+    return g.get()
+}
+
+func main() {
+    let c = Counter { value: 42 }
+    let x = use_getter(c)
+}
