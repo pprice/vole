@@ -233,8 +233,17 @@ impl Cg<'_, '_, '_> {
             }
 
             Stmt::Expr(expr_stmt) => {
-                self.expr(&expr_stmt.expr)?;
-                Ok(false)
+                let result = self.expr(&expr_stmt.expr)?;
+                if result.type_id == TypeId::NEVER {
+                    // The expression diverges (e.g. `unreachable`, `panic`).
+                    // emit_panic_static creates an unreachable continuation block
+                    // that needs a terminator so Cranelift doesn't complain about
+                    // an unfilled block.
+                    self.builder.ins().trap(TrapCode::unwrap_user(1));
+                    Ok(true)
+                } else {
+                    Ok(false)
+                }
             }
 
             Stmt::Return(ret) => {
@@ -347,6 +356,12 @@ impl Cg<'_, '_, '_> {
                 }
 
                 self.builder.switch_to_block(merge_block);
+
+                // If both branches terminated, the merge block is unreachable.
+                // Cranelift still requires it to be filled, so emit a trap.
+                if then_terminated && else_terminated {
+                    self.builder.ins().trap(TrapCode::user(1).unwrap());
+                }
 
                 self.builder.seal_block(then_block);
                 self.builder.seal_block(else_block);

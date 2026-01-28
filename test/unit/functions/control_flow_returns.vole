@@ -62,6 +62,34 @@ func classify(x: i64) -> string {
     }
 }
 
+// Bare unreachable in else branch (v-5c4b)
+func unreachable_in_else(x: bool) -> i64 {
+    if x {
+        return 42
+    } else {
+        unreachable
+    }
+}
+
+// Bare unreachable in then branch (v-5c4b)
+func unreachable_in_then(x: bool) -> i64 {
+    if x {
+        unreachable
+    } else {
+        return 99
+    }
+}
+
+// Bare unreachable in both branches with implicit return (v-5c4b)
+func unreachable_with_early_return(x: bool) -> i64 {
+    if x {
+        return 7
+    } else {
+        return 14
+    }
+    unreachable
+}
+
 tests {
     test "if/else both return" {
         assert(if_else_returns(5) == 1)
@@ -90,6 +118,19 @@ tests {
             error _ => assert(false)
             _ => assert(false)
         }
+    }
+
+    test "bare unreachable in else branch" {
+        assert(unreachable_in_else(true) == 42)
+    }
+
+    test "bare unreachable in then branch" {
+        assert(unreachable_in_then(false) == 99)
+    }
+
+    test "unreachable after exhaustive if/else" {
+        assert(unreachable_with_early_return(true) == 7)
+        assert(unreachable_with_early_return(false) == 14)
     }
 
     test "deeply nested returns" {

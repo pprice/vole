@@ -10,10 +10,7 @@ impl Analyzer {
     /// A block definitely returns if any of its statements definitely returns
     /// (e.g. a return/raise statement, or a branching construct where all branches return).
     fn block_definitely_returns(block: &Block) -> bool {
-        block
-            .stmts
-            .iter()
-            .any(Self::stmt_definitely_returns)
+        block.stmts.iter().any(Self::stmt_definitely_returns)
     }
 
     /// Checks whether a statement definitely returns on all control flow paths.
@@ -78,10 +75,7 @@ impl Analyzer {
 
     /// Checks whether a block expression definitely returns on all control flow paths.
     fn block_expr_definitely_returns(block: &BlockExpr) -> bool {
-        block
-            .stmts
-            .iter()
-            .any(Self::stmt_definitely_returns)
+        block.stmts.iter().any(Self::stmt_definitely_returns)
     }
 
     /// Check if an expression kind is a literal that can benefit from bidirectional type inference.
