@@ -1,0 +1,134 @@
+// Test checked arithmetic - integer operations panic on overflow
+// Phase 1: Default integer arithmetic uses checked operations
+
+tests "normal arithmetic works" {
+    test "basic addition" {
+        assert(1 + 2 == 3)
+        assert(100 + 200 == 300)
+        assert(-5 + 10 == 5)
+    }
+
+    test "basic subtraction" {
+        assert(5 - 3 == 2)
+        assert(100 - 150 == -50)
+        assert(-10 - 5 == -15)
+    }
+
+    test "basic multiplication" {
+        assert(3 * 4 == 12)
+        assert(100 * 10 == 1000)
+        assert(-5 * 3 == -15)
+        assert(-4 * -3 == 12)
+    }
+
+    test "basic division" {
+        assert(10 / 2 == 5)
+        assert(100 / 10 == 10)
+        assert(-15 / 3 == -5)
+        assert(15 / -3 == -5)
+        assert(-15 / -3 == 5)
+    }
+
+    test "basic modulo" {
+        assert(10 % 3 == 1)
+        assert(100 % 7 == 2)
+        assert(-10 % 3 == -1)
+    }
+
+    test "basic negation" {
+        assert(-5 == -5)
+        assert(-(-10) == 10)
+        assert(-(100) == -100)
+    }
+}
+
+tests "i32 boundary values work" {
+    test "i32 max" {
+        let max: i32 = 2147483647
+        assert(max == 2147483647)
+    }
+
+    test "i32 min" {
+        let min: i32 = -2147483648
+        assert(min == -2147483648)
+    }
+
+    test "i32 max - 1 + 1" {
+        let x: i32 = 2147483646
+        let y = x + 1
+        assert(y == 2147483647)
+    }
+
+    test "i32 min + 1 - 1" {
+        let x: i32 = -2147483647
+        let y = x - 1
+        assert(y == -2147483648)
+    }
+}
+
+tests "i64 boundary values work" {
+    test "i64 max" {
+        let max: i64 = 9223372036854775807
+        assert(max == 9223372036854775807)
+    }
+
+    test "i64 near min" {
+        // Can't express i64::MIN directly since literal parsing can't handle it
+        // Instead, test with a value close to min
+        let near_min: i64 = -9223372036854775807
+        assert(near_min == -9223372036854775807)
+    }
+
+    test "i64 operations near boundaries" {
+        let a: i64 = 9223372036854775800
+        let b: i64 = 7
+        assert(a + b == 9223372036854775807)
+    }
+}
+
+tests "unsigned arithmetic works" {
+    test "u32 addition" {
+        let a: u32 = 100
+        let b: u32 = 200
+        assert(a + b == 300)
+    }
+
+    test "u64 addition" {
+        let a: u64 = 1000000000000
+        let b: u64 = 2000000000000
+        assert(a + b == 3000000000000)
+    }
+
+    test "u32 subtraction" {
+        let a: u32 = 500
+        let b: u32 = 200
+        assert(a - b == 300)
+    }
+
+    test "u32 multiplication" {
+        let a: u32 = 1000
+        let b: u32 = 1000
+        assert(a * b == 1000000)
+    }
+}
+
+tests "float arithmetic unaffected" {
+    test "f64 addition" {
+        let a: f64 = 1.5
+        let b: f64 = 2.5
+        assert(a + b == 4.0)
+    }
+
+    test "f32 addition" {
+        let a: f32 = 1.5
+        let b: f32 = 2.5
+        assert(a + b == 4.0)
+    }
+
+    test "f64 can overflow to infinity" {
+        let big: f64 = 1.0e308
+        let result = big * 10.0
+        // This should not panic, floats overflow to infinity
+        assert(result > big)
+    }
+}
