@@ -266,6 +266,7 @@ impl<'a> GeneratorTransformer<'a> {
             | ExprKind::Identifier(_)
             | ExprKind::Nil
             | ExprKind::Done
+            | ExprKind::Unreachable
             | ExprKind::TypeLiteral(_)
             | ExprKind::Import(_) => false,
         }
@@ -552,6 +553,7 @@ impl<'a> GeneratorTransformer<'a> {
             | ExprKind::Identifier(_)
             | ExprKind::Nil
             | ExprKind::Done
+            | ExprKind::Unreachable
             | ExprKind::TypeLiteral(_)
             | ExprKind::Import(_) => {}
         }
@@ -656,6 +658,8 @@ impl<'a> GeneratorTransformer<'a> {
             TypeExpr::Named(sym) => self.interner.resolve(*sym).to_string(),
             TypeExpr::Nil => "nil".to_string(),
             TypeExpr::Done => "Done".to_string(),
+            TypeExpr::Never => "never".to_string(),
+            TypeExpr::Unknown => "unknown".to_string(),
             TypeExpr::Optional(inner) => format!("{}?", self.type_expr_to_string(inner)),
             TypeExpr::Array(inner) => format!("[{}]", self.type_expr_to_string(inner)),
             TypeExpr::Union(variants) => variants

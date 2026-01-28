@@ -57,6 +57,8 @@ fn display_sema_type(
         SemaType::Done => "done".to_string(),
         SemaType::Range => "range".to_string(),
         SemaType::MetaType => "type".to_string(),
+        SemaType::Never => "never".to_string(),
+        SemaType::Unknown => "unknown".to_string(),
         SemaType::Invalid { .. } => "<invalid>".to_string(),
 
         SemaType::Function { params, ret, .. } => {

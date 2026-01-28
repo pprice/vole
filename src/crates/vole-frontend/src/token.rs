@@ -30,31 +30,32 @@ pub enum TokenType {
     KwIn,
     KwContinue,
     KwMatch,
-    KwNil,        // nil keyword (literal and type)
-    KwIs,         // is keyword (type test)
-    KwClass,      // class keyword
-    KwRecord,     // record keyword
-    KwInterface,  // interface keyword
-    KwImplements, // implements keyword (record implements Trait)
-    KwImplement,  // implement keyword (implement Trait for Type)
-    KwExtends,    // extends keyword (interface inheritance)
-    KwSelfType,   // Self keyword (implementing type in interface)
-    KwVal,        // val keyword (value comparison in match patterns)
-    KwError,      // error keyword
-    KwSuccess,    // success keyword
-    KwFallible,   // fallible keyword
-    KwRaise,      // raise keyword
-    KwTry,        // try keyword (propagation operator)
-    KwExternal,   // external keyword
-    KwAs,         // as keyword (for external func mapping)
-    KwImport,     // import keyword
-    KwDone,       // Done keyword (iterator termination sentinel)
-    KwYield,      // yield keyword (generator yield expression)
-    KwDefault,    // default keyword (interface default methods)
-    KwStatics,    // statics keyword (static method blocks)
-    KwStatic,     // static keyword (static interface sugar)
-    KwWhen,       // when keyword (conditional expressions)
-    KwWhere,      // where keyword (generic type mappings)
+    KwNil,         // nil keyword (literal and type)
+    KwIs,          // is keyword (type test)
+    KwClass,       // class keyword
+    KwRecord,      // record keyword
+    KwInterface,   // interface keyword
+    KwImplements,  // implements keyword (record implements Trait)
+    KwImplement,   // implement keyword (implement Trait for Type)
+    KwExtends,     // extends keyword (interface inheritance)
+    KwSelfType,    // Self keyword (implementing type in interface)
+    KwVal,         // val keyword (value comparison in match patterns)
+    KwError,       // error keyword
+    KwSuccess,     // success keyword
+    KwFallible,    // fallible keyword
+    KwRaise,       // raise keyword
+    KwTry,         // try keyword (propagation operator)
+    KwExternal,    // external keyword
+    KwAs,          // as keyword (for external func mapping)
+    KwImport,      // import keyword
+    KwDone,        // Done keyword (iterator termination sentinel)
+    KwYield,       // yield keyword (generator yield expression)
+    KwDefault,     // default keyword (interface default methods)
+    KwStatics,     // statics keyword (static method blocks)
+    KwStatic,      // static keyword (static interface sugar)
+    KwWhen,        // when keyword (conditional expressions)
+    KwWhere,       // where keyword (generic type mappings)
+    KwUnreachable, // unreachable keyword (bottom type expression)
 
     // Type keywords
     KwI8,
@@ -181,6 +182,7 @@ impl TokenType {
             Self::KwStatic => "static",
             Self::KwWhen => "when",
             Self::KwWhere => "where",
+            Self::KwUnreachable => "unreachable",
             Self::KwI8 => "i8",
             Self::KwI16 => "i16",
             Self::KwI32 => "i32",

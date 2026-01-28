@@ -99,6 +99,9 @@ impl Analyzer {
             ExprKind::Block(block) => self.check_block_expr(block, interner),
             ExprKind::If(if_expr) => self.check_if_expr(if_expr, interner),
             ExprKind::When(when_expr) => self.check_when_expr(when_expr, interner),
+
+            // Unreachable returns never type
+            ExprKind::Unreachable => Ok(ArenaTypeId::NEVER),
         }
     }
 

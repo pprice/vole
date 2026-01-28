@@ -446,6 +446,7 @@ fn print_expr<'a>(
             }
             doc.append(arena.text("}"))
         }
+        ExprKind::Unreachable => arena.text("unreachable"),
     }
 }
 
@@ -1053,6 +1054,8 @@ fn print_type_expr<'a>(
         }
         TypeExpr::Nil => arena.text("nil"),
         TypeExpr::Done => arena.text("Done"),
+        TypeExpr::Never => arena.text("never"),
+        TypeExpr::Unknown => arena.text("unknown"),
         TypeExpr::Function {
             params,
             return_type,

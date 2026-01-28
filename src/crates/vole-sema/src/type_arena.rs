@@ -263,6 +263,10 @@ pub enum SemaType {
     Range,
     MetaType, // metatype - the type of types
 
+    // Top and bottom types
+    Never, // Bottom type - the type of expressions that never return (e.g., unreachable, panic)
+    Unknown, // Top type - the type that includes all values (used for inference/gradual typing)
+
     // Error/invalid type
     Invalid {
         kind: &'static str,
@@ -453,10 +457,10 @@ impl TypeArena {
         arena.primitives.metatype = arena.intern(SemaType::MetaType);
         debug_assert_eq!(arena.primitives.metatype, TypeId::METATYPE);
 
-        // Top and bottom types (placeholder Invalid variants until SemaType::Never/Unknown are added)
-        let never = arena.intern(SemaType::Invalid { kind: "never" });
+        // Top and bottom types
+        let never = arena.intern(SemaType::Never);
         debug_assert_eq!(never, TypeId::NEVER);
-        let unknown = arena.intern(SemaType::Invalid { kind: "unknown" });
+        let unknown = arena.intern(SemaType::Unknown);
         debug_assert_eq!(unknown, TypeId::UNKNOWN);
 
         arena
@@ -1153,6 +1157,8 @@ impl TypeArena {
             SemaType::Done => "Done".to_string(),
             SemaType::Range => "range".to_string(),
             SemaType::MetaType => "type".to_string(),
+            SemaType::Never => "never".to_string(),
+            SemaType::Unknown => "unknown".to_string(),
             SemaType::Invalid { kind } => format!("<invalid: {}>", kind),
             SemaType::Union(variants) => {
                 let parts: Vec<String> = variants.iter().map(|&v| self.display_basic(v)).collect();
@@ -1389,6 +1395,8 @@ impl TypeArena {
             | SemaType::Done
             | SemaType::Range
             | SemaType::MetaType
+            | SemaType::Never
+            | SemaType::Unknown
             | SemaType::Invalid { .. }
             | SemaType::Error { .. }
             | SemaType::Module(_)
@@ -1612,6 +1620,8 @@ impl TypeArena {
             | SemaType::Done
             | SemaType::Range
             | SemaType::MetaType
+            | SemaType::Never
+            | SemaType::Unknown
             | SemaType::Invalid { .. }
             | SemaType::Error { .. }
             | SemaType::Module(_)
@@ -1746,6 +1756,8 @@ impl TypeArena {
             | SemaType::Done
             | SemaType::Range
             | SemaType::MetaType
+            | SemaType::Never
+            | SemaType::Unknown
             | SemaType::Invalid { .. }
             | SemaType::Error { .. }
             | SemaType::Module(_)

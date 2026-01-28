@@ -220,6 +220,12 @@ impl<'a> AstPrinter<'a> {
             TypeExpr::Done => {
                 out.push_str("Done");
             }
+            TypeExpr::Never => {
+                out.push_str("never");
+            }
+            TypeExpr::Unknown => {
+                out.push_str("unknown");
+            }
             TypeExpr::Function {
                 params,
                 return_type,
@@ -668,6 +674,11 @@ impl<'a> AstPrinter<'a> {
                 writeln!(out, "Done").unwrap();
             }
 
+            ExprKind::Unreachable => {
+                self.write_indent(out);
+                writeln!(out, "Unreachable").unwrap();
+            }
+
             ExprKind::NullCoalesce(nc) => {
                 self.write_indent(out);
                 writeln!(out, "NullCoalesce").unwrap();
@@ -929,6 +940,8 @@ impl<'a> AstPrinter<'a> {
             }
             TypeExpr::Nil => out.push_str("nil"),
             TypeExpr::Done => out.push_str("Done"),
+            TypeExpr::Never => out.push_str("never"),
+            TypeExpr::Unknown => out.push_str("unknown"),
             TypeExpr::Function {
                 params,
                 return_type,

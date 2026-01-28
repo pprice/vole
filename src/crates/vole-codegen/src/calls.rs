@@ -1654,6 +1654,7 @@ fn find_lambda_in_expr(expr: &Expr, node_id: NodeId) -> Option<&LambdaExpr> {
         | ExprKind::Identifier(_)
         | ExprKind::Nil
         | ExprKind::Done
+        | ExprKind::Unreachable
         | ExprKind::TypeLiteral(_)
         | ExprKind::Import(_) => None,
     }

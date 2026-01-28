@@ -262,6 +262,8 @@ pub enum TypeExpr {
     Combination(Vec<TypeExpr>), // A + B + C (must satisfy all constraints)
     Nil,                        // nil type
     Done,                       // Done type (iterator termination sentinel)
+    Never,                      // never type (bottom type - no values)
+    Unknown,                    // unknown type (top type - any value)
     Function {
         params: Vec<TypeExpr>,
         return_type: Box<TypeExpr>,
@@ -535,7 +537,8 @@ impl Expr {
             | ExprKind::StructLiteral(_)
             | ExprKind::TypeLiteral(_)
             | ExprKind::Import(_)
-            | ExprKind::Yield(_) => false,
+            | ExprKind::Yield(_)
+            | ExprKind::Unreachable => false,
         }
     }
 }
@@ -663,6 +666,9 @@ pub enum ExprKind {
 
     /// Done literal (iterator termination sentinel)
     Done,
+
+    /// Unreachable expression (never type / bottom type)
+    Unreachable,
 
     /// Null coalescing: value ?? default
     NullCoalesce(Box<NullCoalesceExpr>),

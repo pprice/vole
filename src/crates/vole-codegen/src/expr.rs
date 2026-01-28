@@ -101,6 +101,7 @@ impl Cg<'_, '_, '_> {
             ExprKind::Block(block_expr) => self.block_expr(block_expr),
             ExprKind::If(if_expr) => self.if_expr(if_expr),
             ExprKind::When(when_expr) => self.when_expr(when_expr),
+            ExprKind::Unreachable => self.unreachable_expr(),
         }
     }
 
@@ -420,6 +421,27 @@ impl Cg<'_, '_, '_> {
                 self.index_assign(object, index, &assign.value)
             }
         }
+    }
+
+    /// Compile an unreachable expression (never type / bottom type)
+    /// This emits a trap instruction and creates an unreachable block for any following code.
+    fn unreachable_expr(&mut self) -> Result<CompiledValue, String> {
+        use cranelift::codegen::ir::TrapCode;
+
+        // Emit a trap - this code should never be reached at runtime
+        self.builder.ins().trap(TrapCode::unwrap_user(1));
+
+        // Create an unreachable block for any code that follows
+        let unreachable_block = self.builder.create_block();
+        self.switch_and_seal(unreachable_block);
+
+        // Return a dummy value with the never type
+        // The actual value doesn't matter since control never reaches here
+        Ok(CompiledValue {
+            value: self.builder.ins().iconst(types::I64, 0),
+            ty: types::I64,
+            type_id: TypeId::NEVER,
+        })
     }
 
     /// Compile an array or tuple literal

@@ -448,6 +448,7 @@ impl<'src> Lexer<'src> {
             "static" => Some(TokenType::KwStatic),
             "when" => Some(TokenType::KwWhen),
             "where" => Some(TokenType::KwWhere),
+            "unreachable" => Some(TokenType::KwUnreachable),
             "i8" => Some(TokenType::KwI8),
             "i16" => Some(TokenType::KwI16),
             "i32" => Some(TokenType::KwI32),

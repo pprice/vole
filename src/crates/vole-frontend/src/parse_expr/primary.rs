@@ -156,6 +156,14 @@ impl<'src> Parser<'src> {
                     span: start_span.merge(end_span),
                 })
             }
+            TokenType::KwUnreachable => {
+                self.advance();
+                Ok(Expr {
+                    id: self.next_id(),
+                    kind: ExprKind::Unreachable,
+                    span: token.span,
+                })
+            }
             TokenType::KwImport => {
                 let start_span = token.span;
                 self.advance(); // consume 'import'

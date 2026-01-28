@@ -179,6 +179,14 @@ impl<'src> Parser<'src> {
                 self.advance();
                 Ok(TypeExpr::Done)
             }
+            TokenType::KwNever => {
+                self.advance();
+                Ok(TypeExpr::Never)
+            }
+            TokenType::KwUnknown => {
+                self.advance();
+                Ok(TypeExpr::Unknown)
+            }
             TokenType::KwI8 => {
                 self.advance();
                 Ok(TypeExpr::Primitive(PrimitiveType::I8))

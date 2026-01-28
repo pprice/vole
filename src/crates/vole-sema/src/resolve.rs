@@ -177,6 +177,8 @@ pub fn resolve_type_to_id(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) ->
         }
         TypeExpr::Nil => ctx.type_arena_mut().nil(),
         TypeExpr::Done => ctx.type_arena_mut().done(),
+        TypeExpr::Never => ctx.type_arena_mut().never(),
+        TypeExpr::Unknown => ctx.type_arena_mut().unknown(),
         TypeExpr::Optional(inner) => {
             let inner_id = resolve_type_to_id(inner, ctx);
             ctx.type_arena_mut().optional(inner_id)
