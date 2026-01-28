@@ -1455,6 +1455,12 @@ impl Analyzer {
                             .ty
                             .as_ref()
                             .map(|t| self.resolve_type_id(t, interner));
+
+                        // Check that never is not used in variable declarations
+                        if let Some(decl_type_id) = declared_type_id {
+                            self.check_never_not_allowed(decl_type_id, let_stmt.span);
+                        }
+
                         let init_type_id =
                             self.check_expr_expecting_id(init_expr, declared_type_id, interner)?;
 

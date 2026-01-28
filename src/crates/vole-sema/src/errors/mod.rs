@@ -634,6 +634,18 @@ pub enum SemanticError {
         #[label("'{name}' is {found}, not a module")]
         span: SourceSpan,
     },
+
+    #[error("the `never` type can only be used as a return type")]
+    #[diagnostic(
+        code(E2098),
+        help(
+            "`never` indicates a function that never returns; it cannot be used for variables, parameters, or fields"
+        )
+    )]
+    NeverNotAllowed {
+        #[label("cannot use `never` here")]
+        span: SourceSpan,
+    },
 }
 
 /// Semantic warnings (W3xxx) - these don't prevent compilation but indicate potential issues

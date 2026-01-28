@@ -1,0 +1,38 @@
+[stdout]
+
+[stderr]
+  x [E2098]: the `never` type can only be used as a return type
+   ,-[<path>/never_not_allowed.vole:7:16]
+ 6 | // Error: function parameter with never type
+ 7 | func bad_param(a: never) {
+   :                |
+   :                `-- cannot use `never` here
+ 8 | }
+   `----
+  help: `never` indicates a function that never returns; it cannot be used for variables, parameters, or fields
+  x [E2098]: the `never` type can only be used as a return type
+    ,-[<path>/never_not_allowed.vole:12:5]
+ 11 | record BadRecord {
+ 12 |     f: never,
+    :     ^^^^|^^^^
+    :         `-- cannot use `never` here
+ 13 | }
+    `----
+  help: `never` indicates a function that never returns; it cannot be used for variables, parameters, or fields
+  x [E2098]: the `never` type can only be used as a return type
+   ,-[<path>/never_not_allowed.vole:4:1]
+ 3 | // Error: variable declaration with never type
+ 4 | let x: never = 0
+   : ^^^^^^^^|^^^^^^^
+   :         `-- cannot use `never` here
+ 5 | 
+   `----
+  help: `never` indicates a function that never returns; it cannot be used for variables, parameters, or fields
+  x [E2001]: expected never, found integer literal
+   ,-[<path>/never_not_allowed.vole:4:16]
+ 3 | // Error: variable declaration with never type
+ 4 | let x: never = 0
+   :                |
+   :                `-- type mismatch
+ 5 | 
+   `----

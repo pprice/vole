@@ -68,6 +68,11 @@ impl Analyzer {
                             .as_ref()
                             .map(|t| self.resolve_type_id(t, interner));
 
+                        // Check that never is not used in variable declarations
+                        if let Some(decl_type_id) = declared_type_id {
+                            self.check_never_not_allowed(decl_type_id, let_stmt.span);
+                        }
+
                         // Store declared type for codegen (keyed by init expression id)
                         if let Some(decl_type_id) = declared_type_id {
                             self.declared_var_types.insert(init_expr.id, decl_type_id);

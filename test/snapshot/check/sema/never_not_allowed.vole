@@ -1,0 +1,13 @@
+// Test that never type is only allowed in return type position
+
+// Error: variable declaration with never type
+let x: never = 0
+
+// Error: function parameter with never type
+func bad_param(a: never) {
+}
+
+// Error: record field with never type
+record BadRecord {
+    f: never,
+}

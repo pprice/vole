@@ -146,4 +146,13 @@ impl Analyzer {
             );
         }
     }
+
+    /// Check if a resolved type is `never` and emit an error if so.
+    /// This should be called for types in non-return-type positions
+    /// (e.g., variable declarations, parameters, fields).
+    pub(crate) fn check_never_not_allowed(&mut self, type_id: ArenaTypeId, span: Span) {
+        if type_id.is_never() {
+            self.add_error(SemanticError::NeverNotAllowed { span: span.into() }, span);
+        }
+    }
 }

@@ -315,7 +315,11 @@ impl Analyzer {
             let params_id: Vec<_> = func
                 .params
                 .iter()
-                .map(|p| self.resolve_type_id(&p.ty, interner))
+                .map(|p| {
+                    let type_id = self.resolve_type_id(&p.ty, interner);
+                    self.check_never_not_allowed(type_id, p.span);
+                    type_id
+                })
                 .collect();
             let return_type_id = func
                 .return_type
@@ -406,6 +410,11 @@ impl Analyzer {
                 .as_ref()
                 .map(|t| resolve_type_to_id(t, &mut ctx))
                 .unwrap_or_else(|| self.type_arena().void());
+
+            // Check that never is not used in function parameters (after ctx is no longer borrowed)
+            for (param, &type_id) in func.params.iter().zip(&param_type_ids) {
+                self.check_never_not_allowed(type_id, param.span);
+            }
 
             // Create a FunctionType from TypeIds
             let signature = FunctionType::from_ids(&param_type_ids, return_type_id, false);
@@ -515,6 +524,11 @@ impl Analyzer {
                 }
             })
             .collect();
+
+        // Check that never is not used in method parameters
+        for (param, &type_id) in params.iter().zip(&params_id) {
+            self.check_never_not_allowed(type_id, param.span);
+        }
 
         let return_type_id = return_type
             .as_ref()
@@ -1094,6 +1108,11 @@ impl Analyzer {
                 .collect()
         };
 
+        // Check that never is not used in record/class fields
+        for (field, &type_id) in fields.iter().zip(&field_type_ids) {
+            self.check_never_not_allowed(type_id, field.span);
+        }
+
         (field_names, field_type_ids)
     }
 
@@ -1225,6 +1244,11 @@ impl Analyzer {
                 .map(|f| self.resolve_type_id(&f.ty, interner))
                 .collect();
 
+            // Check that never is not used in record fields
+            for (field, &type_id) in record.fields.iter().zip(&field_type_ids) {
+                self.check_never_not_allowed(type_id, field.span);
+            }
+
             // Set generic_info (with empty type_params for non-generic records)
             self.entity_registry_mut().set_generic_info(
                 entity_type_id,
@@ -1336,6 +1360,11 @@ impl Analyzer {
                 .iter()
                 .map(|tp| tp.name_id)
                 .collect();
+
+            // Check that never is not used in record fields (after ctx is no longer borrowed)
+            for (field, &type_id) in record.fields.iter().zip(&field_type_ids) {
+                self.check_never_not_allowed(type_id, field.span);
+            }
 
             // Lookup shell registered in pass 0.5
             let entity_type_id = self
