@@ -1,0 +1,791 @@
+// src/sema/analyzer/functions.rs
+//! Function and method checking: context management, body analysis, monomorphization.
+
+use super::*;
+
+/// Saved state when entering a function/method check context.
+/// Used by enter_function_context/exit_function_context for uniform save/restore.
+pub(super) struct FunctionCheckContext {
+    return_type: Option<ArenaTypeId>,
+    error_type: Option<ArenaTypeId>,
+    generator_element_type: Option<ArenaTypeId>,
+    static_method: Option<String>,
+    /// How many scopes were on the stack when we entered this context
+    type_param_stack_depth: usize,
+}
+
+impl Analyzer {
+    /// Enter a function/method check context, saving current state.
+    /// Automatically sets return/error/generator types from return_type_id.
+    /// For static methods, caller should set static_method and push type params after calling.
+    pub(super) fn enter_function_context(
+        &mut self,
+        return_type_id: ArenaTypeId,
+    ) -> FunctionCheckContext {
+        let saved = FunctionCheckContext {
+            return_type: self.current_function_return.take(),
+            error_type: self.current_function_error_type.take(),
+            generator_element_type: self.current_generator_element_type.take(),
+            static_method: self.current_static_method.take(),
+            type_param_stack_depth: self.type_param_stack.depth(),
+        };
+
+        self.current_function_return = Some(return_type_id);
+
+        // Set error type context if this is a fallible function
+        let error_type = self
+            .type_arena()
+            .unwrap_fallible(return_type_id)
+            .map(|(_, e)| e);
+        if let Some(error) = error_type {
+            self.current_function_error_type = Some(error);
+        }
+
+        // Set generator context if return type is Iterator<T>
+        if let Some(element_type_id) = self.extract_iterator_element_type_id(return_type_id) {
+            self.current_generator_element_type = Some(element_type_id);
+        }
+
+        saved
+    }
+
+    /// Enter a function context for return type inference (no known return type).
+    /// The first return statement will set current_function_return; subsequent returns check against it.
+    pub(super) fn enter_function_context_inferring(&mut self) -> FunctionCheckContext {
+        // current_function_return stays None to signal inference mode
+        FunctionCheckContext {
+            return_type: self.current_function_return.take(),
+            error_type: self.current_function_error_type.take(),
+            generator_element_type: self.current_generator_element_type.take(),
+            static_method: self.current_static_method.take(),
+            type_param_stack_depth: self.type_param_stack.depth(),
+        }
+    }
+
+    /// Exit function/method check context, restoring saved state.
+    pub(super) fn exit_function_context(&mut self, saved: FunctionCheckContext) {
+        self.current_function_return = saved.return_type;
+        self.current_function_error_type = saved.error_type;
+        self.current_generator_element_type = saved.generator_element_type;
+        self.current_static_method = saved.static_method;
+        // Pop any scopes that were pushed during this context
+        while self.type_param_stack.depth() > saved.type_param_stack_depth {
+            self.type_param_stack.pop();
+        }
+    }
+
+    /// Infer the return type from collected return_types in ReturnInfo.
+    ///
+    /// This enables multi-branch return type inference:
+    /// - If no return types collected, returns void
+    /// - If one return type, returns that type
+    /// - If multiple different return types, creates a union type
+    ///
+    /// Example: `func foo(x: bool) { if x { return 1 } else { return "hi" } }`
+    /// will infer return type `i64 | string`.
+    pub(super) fn infer_return_type_from_info(&mut self, info: &ReturnInfo) -> ArenaTypeId {
+        if info.return_types.is_empty() {
+            ArenaTypeId::VOID
+        } else if info.return_types.len() == 1 {
+            info.return_types[0].0
+        } else {
+            // Extract just the types for union creation
+            let types: Vec<ArenaTypeId> = info.return_types.iter().map(|(ty, _)| *ty).collect();
+            // Create union of all return types (the union method handles deduplication)
+            self.type_arena_mut().union(types)
+        }
+    }
+
+    pub(super) fn check_function(
+        &mut self,
+        func: &FuncDecl,
+        interner: &Interner,
+    ) -> Result<(), Vec<TypeError>> {
+        // Skip generic functions - they will be type-checked when monomorphized
+        // This includes both explicitly generic functions (with type params in the AST)
+        // and implicitly generified functions (with structural type parameters)
+        // TODO: In M4+, we could type-check with abstract type params
+        if !func.type_params.is_empty() {
+            return Ok(());
+        }
+
+        // Also skip implicitly generified functions (structural types in parameters)
+        // These have generic_info but no AST-level type_params
+        let name_id = self
+            .name_table_mut()
+            .intern(self.current_module, &[func.name], interner);
+        let has_generic_info = self
+            .entity_registry()
+            .function_by_name(name_id)
+            .map(|func_id| {
+                self.entity_registry()
+                    .get_function(func_id)
+                    .generic_info
+                    .is_some()
+            })
+            .unwrap_or(false);
+        if has_generic_info {
+            return Ok(());
+        }
+
+        let func_type = self
+            .functions
+            .get(&func.name)
+            .cloned()
+            .expect("function registered in signature collection pass");
+
+        // Determine if we need to infer the return type
+        let needs_inference = func.return_type.is_none();
+
+        let saved_ctx = if needs_inference {
+            self.enter_function_context_inferring()
+        } else {
+            self.enter_function_context(func_type.return_type_id)
+        };
+
+        // Create new scope with parameters
+        let parent_scope = std::mem::take(&mut self.scope);
+        self.scope = Scope::with_parent(parent_scope);
+
+        for (param, &ty_id) in func.params.iter().zip(func_type.params_id.iter()) {
+            self.scope.define(
+                param.name,
+                Variable {
+                    ty: ty_id,
+                    mutable: false,
+                },
+            );
+        }
+
+        // Type-check parameter default expressions
+        self.check_param_defaults(&func.params, &func_type.params_id, interner)?;
+
+        // Check body
+        let body_info = self.check_func_body(&func.body, interner)?;
+
+        // If we were inferring the return type, update the function signature
+        if needs_inference {
+            // Use ReturnInfo to infer type from all return statements (creates union if needed)
+            let inferred_return_type = self.infer_return_type_from_info(&body_info);
+
+            // Update the function signature with the inferred return type
+            if let Some(existing) = self.functions.get_mut(&func.name) {
+                existing.return_type_id = inferred_return_type;
+            }
+
+            // Also update in entity_registry
+            // Get func_id first, then drop borrow before mutating
+            let name_id = self
+                .name_table_mut()
+                .intern(self.current_module, &[func.name], interner);
+            let func_id = self.entity_registry().function_by_name(name_id);
+            if let Some(func_id) = func_id {
+                self.entity_registry_mut()
+                    .update_function_return_type(func_id, inferred_return_type);
+            }
+        } else {
+            // Check for missing return statement when return type is explicit and non-void
+            let is_void = func_type.return_type_id.is_void();
+            if !is_void && !body_info.definitely_returns {
+                let func_name = interner.resolve(func.name).to_string();
+                let expected = self.type_display_id(func_type.return_type_id);
+                let hint = self.compute_missing_return_hint(
+                    &func.body,
+                    func_type.return_type_id,
+                    interner,
+                );
+                self.add_error(
+                    SemanticError::MissingReturn {
+                        name: func_name,
+                        expected,
+                        hint,
+                        span: func.span.into(),
+                    },
+                    func.span,
+                );
+            }
+        }
+
+        // Restore scope
+        if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
+            self.scope = parent;
+        }
+        self.exit_function_context(saved_ctx);
+
+        Ok(())
+    }
+
+    /// Analyze a generic function body with type substitutions applied.
+    /// This discovers nested generic function calls and creates their MonomorphInstances.
+    fn analyze_monomorph_body(
+        &mut self,
+        func: &FuncDecl,
+        substitutions: &FxHashMap<NameId, ArenaTypeId>,
+        interner: &Interner,
+    ) {
+        // Get the generic function info to resolve parameter and return types
+        let name_id = self
+            .name_table_mut()
+            .intern(self.current_module, &[func.name], interner);
+        let generic_info = {
+            let registry = self.entity_registry();
+            registry
+                .function_by_name(name_id)
+                .and_then(|fid| registry.get_function(fid).generic_info.clone())
+        };
+
+        let Some(generic_info) = generic_info else {
+            return;
+        };
+
+        // Compute concrete parameter and return types
+        let (concrete_param_ids, concrete_return_id) = {
+            let mut arena = self.type_arena_mut();
+            let param_ids: Vec<_> = generic_info
+                .param_types
+                .iter()
+                .map(|&t| arena.substitute(t, substitutions))
+                .collect();
+            let return_id = arena.substitute(generic_info.return_type, substitutions);
+            (param_ids, return_id)
+        };
+
+        // Set up function context with the concrete return type
+        let saved_ctx = self.enter_function_context(concrete_return_id);
+
+        // Create new scope with parameters (using concrete types)
+        let parent_scope = std::mem::take(&mut self.scope);
+        self.scope = Scope::with_parent(parent_scope);
+
+        for (param, &ty_id) in func.params.iter().zip(concrete_param_ids.iter()) {
+            self.scope.define(
+                param.name,
+                Variable {
+                    ty: ty_id,
+                    mutable: false,
+                },
+            );
+        }
+
+        // Set up type parameter scope with the substitutions
+        // This maps type param names to their concrete types
+        let mut type_param_scope = TypeParamScope::new();
+        for tp in &generic_info.type_params {
+            // Create TypeParamInfo with the substituted type
+            type_param_scope.add(tp.clone());
+        }
+        self.type_param_stack.push_scope(type_param_scope);
+
+        // Store substitutions for use during type resolution
+        // We need to make type param lookups return the substituted concrete types
+        // This is handled via type_arena.substitute during check_call_expr
+
+        // Check the function body - this will discover nested generic calls
+        // and create MonomorphInstances for them
+        let _ = self.check_func_body(&func.body, interner);
+
+        // Pop type parameter scope
+        self.type_param_stack.pop();
+
+        // Restore scope
+        if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
+            self.scope = parent;
+        }
+        self.exit_function_context(saved_ctx);
+    }
+
+    /// Analyze all monomorphized function bodies to discover nested generic calls.
+    /// Iterates until no new MonomorphInstances are created (fixpoint).
+    pub(super) fn analyze_monomorph_bodies(&mut self, program: &Program, interner: &Interner) {
+        // Build map of generic function names to their ASTs
+        // Include both explicit generics (type_params in AST) and implicit generics
+        // (structural type params that create generic_info in entity registry)
+        let generic_func_asts: FxHashMap<NameId, &FuncDecl> = program
+            .declarations
+            .iter()
+            .filter_map(|decl| {
+                if let Decl::Function(func) = decl {
+                    let name_id =
+                        self.name_table_mut()
+                            .intern(self.current_module, &[func.name], interner);
+
+                    // Check for explicit type params OR implicit generic_info
+                    let has_explicit_type_params = !func.type_params.is_empty();
+                    let has_implicit_generic_info = self
+                        .entity_registry()
+                        .function_by_name(name_id)
+                        .map(|func_id| {
+                            self.entity_registry()
+                                .get_function(func_id)
+                                .generic_info
+                                .is_some()
+                        })
+                        .unwrap_or(false);
+
+                    if has_explicit_type_params || has_implicit_generic_info {
+                        return Some((name_id, func));
+                    }
+                }
+                None
+            })
+            .collect();
+
+        // Track which instances we've already analyzed
+        let mut analyzed_keys: HashSet<MonomorphKey> = HashSet::new();
+
+        // Iterate until fixpoint
+        loop {
+            // Collect current instances that haven't been analyzed yet
+            let instances: Vec<_> = self
+                .entity_registry()
+                .monomorph_cache
+                .collect_instances()
+                .into_iter()
+                .filter(|inst| {
+                    let key = MonomorphKey::new(
+                        inst.original_name,
+                        inst.substitutions.values().copied().collect(),
+                    );
+                    !analyzed_keys.contains(&key)
+                })
+                .collect();
+
+            if instances.is_empty() {
+                break;
+            }
+
+            for instance in instances {
+                // Mark as analyzed
+                let key = MonomorphKey::new(
+                    instance.original_name,
+                    instance.substitutions.values().copied().collect(),
+                );
+                analyzed_keys.insert(key);
+
+                // Find the function AST
+                if let Some(func) = generic_func_asts.get(&instance.original_name) {
+                    // Analyze the body with substitutions
+                    self.analyze_monomorph_body(func, &instance.substitutions, interner);
+                }
+            }
+        }
+    }
+
+    pub(super) fn check_method(
+        &mut self,
+        method: &FuncDecl,
+        type_name: Symbol,
+        interner: &Interner,
+    ) -> Result<(), Vec<TypeError>> {
+        // Look up method type via Resolver
+        let type_def_id = self
+            .resolver(interner)
+            .resolve_type(type_name, &self.entity_registry())
+            .expect("type should be registered in EntityRegistry");
+        let lookup = self
+            .lookup_method(type_def_id, method.name, interner)
+            .expect("method should be registered in EntityRegistry");
+
+        // Get signature components from arena
+        // If the signature is invalid (e.g., due to an unknown type in the method signature),
+        // skip checking this method - the type error will be reported from declarations
+        let (params_id, return_type_id) = {
+            let arena = self.type_arena();
+            match arena.unwrap_function(lookup.signature_id) {
+                Some((params, ret, _)) => (params.clone(), ret),
+                None => return Ok(()), // Invalid signature - skip body checking
+            }
+        };
+
+        // Determine if we need to infer the return type
+        let needs_inference = method.return_type.is_none();
+
+        let saved_ctx = if needs_inference {
+            self.enter_function_context_inferring()
+        } else {
+            self.enter_function_context(return_type_id)
+        };
+
+        // Create scope with 'self' and parameters
+        let parent_scope = std::mem::take(&mut self.scope);
+        self.scope = Scope::with_parent(parent_scope);
+
+        // Add 'self' to scope
+        // Note: "self" should already be interned by the parser when it parses method bodies
+        let self_sym = interner
+            .lookup("self")
+            .expect("'self' should be interned during parsing");
+        // Build self type directly as TypeId.
+        // For generic types, include type parameter TypeIds as type args so that
+        // method calls on `self` (e.g. self.getItem()) properly record class method
+        // monomorphizations with the type parameters.
+        let kind = {
+            let registry = self.entity_registry();
+            registry.get_type(type_def_id).kind
+        };
+        let type_args = {
+            let generic_info = {
+                let registry = self.entity_registry();
+                registry.get_generic_info(type_def_id).cloned()
+            };
+            if let Some(gi) = generic_info {
+                let mut args = crate::type_arena::TypeIdVec::new();
+                for tp in &gi.type_params {
+                    let tp_type_id = self.type_arena_mut().type_param(tp.name_id);
+                    args.push(tp_type_id);
+                }
+                args
+            } else {
+                crate::type_arena::TypeIdVec::new()
+            }
+        };
+        let self_type_id = match kind {
+            TypeDefKind::Class => self.type_arena_mut().class(type_def_id, type_args),
+            TypeDefKind::Record => self.type_arena_mut().record(type_def_id, type_args),
+            _ => self.type_arena().invalid(),
+        };
+        self.scope.define(
+            self_sym,
+            Variable {
+                ty: self_type_id,
+                mutable: false,
+            },
+        );
+
+        // Add parameters
+        for (param, &ty_id) in method.params.iter().zip(params_id.iter()) {
+            self.scope.define(
+                param.name,
+                Variable {
+                    ty: ty_id,
+                    mutable: false,
+                },
+            );
+        }
+
+        // Type-check parameter default expressions
+        self.check_param_defaults(&method.params, &params_id, interner)?;
+
+        // Check body
+        let body_info = self.check_func_body(&method.body, interner)?;
+
+        // If we were inferring the return type, update the method signature
+        if needs_inference {
+            // Use ReturnInfo to infer type from all return statements (creates union if needed)
+            let inferred_return_type = self.infer_return_type_from_info(&body_info);
+
+            // Update the method's return type in EntityRegistry
+            {
+                let mut db = self.ctx.db.borrow_mut();
+                let CompilationDb {
+                    ref mut entities,
+                    ref mut types,
+                    ..
+                } = *db;
+                Rc::make_mut(entities).update_method_return_type(
+                    lookup.method_id,
+                    inferred_return_type,
+                    Rc::make_mut(types),
+                );
+            }
+        } else {
+            // Check for missing return statement when return type is explicit and non-void
+            let is_void = return_type_id.is_void();
+            if !is_void && !body_info.definitely_returns {
+                let method_name = interner.resolve(method.name).to_string();
+                let expected = self.type_display_id(return_type_id);
+                let hint = self.compute_missing_return_hint(&method.body, return_type_id, interner);
+                self.add_error(
+                    SemanticError::MissingReturn {
+                        name: method_name,
+                        expected,
+                        hint,
+                        span: method.span.into(),
+                    },
+                    method.span,
+                );
+            }
+        }
+
+        // Restore scope
+        if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
+            self.scope = parent;
+        }
+        self.exit_function_context(saved_ctx);
+
+        Ok(())
+    }
+
+    /// Check a function body - either a block or a single expression
+    pub(super) fn check_func_body(
+        &mut self,
+        body: &FuncBody,
+        interner: &Interner,
+    ) -> Result<ReturnInfo, Vec<TypeError>> {
+        match body {
+            FuncBody::Block(block) => self.check_block(block, interner),
+            FuncBody::Expr(expr) => {
+                // Expression body is implicitly a return
+                let expr_type = self.check_expr(expr, interner)?;
+
+                // Handle return type inference or checking
+                if let Some(expected_return) = self.current_function_return {
+                    // Explicit return type - check for match
+                    if !self.types_compatible_id(expr_type, expected_return, interner) {
+                        let expected_str = self.type_display_id(expected_return);
+                        let found = self.type_display_id(expr_type);
+                        self.add_error(
+                            SemanticError::ReturnTypeMismatch {
+                                expected: expected_str,
+                                found,
+                                span: expr.span.into(),
+                            },
+                            expr.span,
+                        );
+                    }
+                } else {
+                    // Inference mode - set the return type
+                    self.current_function_return = Some(expr_type);
+                }
+                // Expression body definitely returns with the expression type
+                Ok(ReturnInfo {
+                    definitely_returns: true,
+                    return_types: vec![(expr_type, expr.span)],
+                })
+            }
+        }
+    }
+
+    /// Compute the hint for a MissingReturn error.
+    /// If the last statement in the block is an expression whose type matches the expected return type,
+    /// suggest adding `return` before it. Otherwise, provide a generic hint.
+    pub(super) fn compute_missing_return_hint(
+        &mut self,
+        body: &FuncBody,
+        expected_return_type: ArenaTypeId,
+        interner: &Interner,
+    ) -> String {
+        if let FuncBody::Block(block) = body
+            && let Some(Stmt::Expr(expr_stmt)) = block.stmts.last()
+        {
+            // Check if we have a recorded type for this expression
+            if let Some(&expr_type) = self.expr_types.get(&expr_stmt.expr.id) {
+                // Check if it matches the expected return type
+                if self.types_compatible_id(expr_type, expected_return_type, interner) {
+                    return "did you mean to add `return` before the last expression?".to_string();
+                }
+            }
+        }
+        // Default hint
+        "add a return statement, or change return type to void".to_string()
+    }
+
+    /// Check a static method body (no `self` access allowed)
+    pub(super) fn check_static_method(
+        &mut self,
+        method: &InterfaceMethod,
+        type_name: Symbol,
+        interner: &Interner,
+    ) -> Result<(), Vec<TypeError>> {
+        // Resolve type name and delegate to check_static_method_with_type_def
+        let type_def_id = self
+            .resolver(interner)
+            .resolve_type(type_name, &self.entity_registry())
+            .expect("type should be registered in EntityRegistry");
+        self.check_static_method_with_type_def(method, type_def_id, interner)
+    }
+
+    /// Check a static method body with the type already resolved to a TypeDefId.
+    /// This is used for primitive types where we can't resolve via Symbol.
+    pub(super) fn check_static_method_with_type_def(
+        &mut self,
+        method: &InterfaceMethod,
+        type_def_id: TypeDefId,
+        interner: &Interner,
+    ) -> Result<(), Vec<TypeError>> {
+        // Only check methods with bodies
+        let Some(ref body) = method.body else {
+            return Ok(());
+        };
+
+        let method_name_id = self.method_name_id(method.name, interner);
+        let method_id = self
+            .entity_registry_mut()
+            .find_static_method_on_type(type_def_id, method_name_id)
+            .expect("static method should be registered in EntityRegistry");
+        let (method_type_params, signature_id) = {
+            let registry = self.entity_registry();
+            let method_def = registry.get_method(method_id);
+            (
+                method_def.method_type_params.clone(),
+                method_def.signature_id,
+            )
+        };
+
+        // Get signature components from arena
+        let (params_id, return_type_id) = {
+            let arena = self.type_arena();
+            // If signature is invalid (unknown type), skip checking - error already reported
+            let Some((params, ret, _)) = arena.unwrap_function(signature_id) else {
+                return Ok(());
+            };
+            (params.clone(), ret)
+        };
+
+        // Determine if we need to infer the return type
+        let needs_inference = method.return_type.is_none();
+        let saved_ctx = if needs_inference {
+            self.enter_function_context_inferring()
+        } else {
+            self.enter_function_context(return_type_id)
+        };
+
+        // Mark that we're in a static method (for self-usage detection)
+        self.current_static_method = Some(interner.resolve(method.name).to_string());
+
+        // Push method-level type params onto the stack (merged with any class/record type params)
+        let has_method_type_params = !method_type_params.is_empty();
+        if has_method_type_params {
+            self.type_param_stack.push_merged(method_type_params);
+        }
+
+        // Create scope WITHOUT 'self'
+        let parent_scope = std::mem::take(&mut self.scope);
+        self.scope = Scope::with_parent(parent_scope);
+
+        // Add parameters (no 'self' for static methods)
+        for (param, &ty_id) in method.params.iter().zip(params_id.iter()) {
+            self.scope.define(
+                param.name,
+                Variable {
+                    ty: ty_id,
+                    mutable: false,
+                },
+            );
+        }
+
+        // Check body
+        let body_info = self.check_func_body(body, interner)?;
+
+        // If we were inferring the return type, update the method signature
+        if needs_inference {
+            // Use ReturnInfo to infer type from all return statements (creates union if needed)
+            let inferred_return_type = self.infer_return_type_from_info(&body_info);
+
+            // Update the method signature with the inferred return type
+            // Destructure db to get both entities and types to avoid RefCell conflict
+            {
+                let mut db = self.ctx.db.borrow_mut();
+                let CompilationDb {
+                    ref mut entities,
+                    ref mut types,
+                    ..
+                } = *db;
+                Rc::make_mut(entities).update_method_return_type(
+                    method_id,
+                    inferred_return_type,
+                    Rc::make_mut(types),
+                );
+            }
+        }
+
+        // Restore scope and context
+        if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
+            self.scope = parent;
+        }
+        self.exit_function_context(saved_ctx);
+
+        Ok(())
+    }
+
+    /// Check a function declaration scoped to a tests block
+    pub(super) fn check_scoped_function(
+        &mut self,
+        func: &FuncDecl,
+        interner: &Interner,
+    ) -> Result<(), Vec<TypeError>> {
+        // Skip generic functions - not supported in tests blocks for now
+        if !func.type_params.is_empty() {
+            return Ok(());
+        }
+
+        // Resolve parameter types
+        let param_types: Vec<ArenaTypeId> = func
+            .params
+            .iter()
+            .map(|p| self.resolve_type_id(&p.ty, interner))
+            .collect();
+
+        // Resolve return type (or infer later)
+        let declared_return_type = func
+            .return_type
+            .as_ref()
+            .map(|t| self.resolve_type_id(t, interner));
+
+        // Create function type (for reference, though scoped funcs aren't in self.functions)
+        let return_type_id = declared_return_type.unwrap_or_else(|| self.type_arena().void());
+
+        // Enter function context
+        let needs_inference = func.return_type.is_none();
+        let saved_ctx = if needs_inference {
+            self.enter_function_context_inferring()
+        } else {
+            self.enter_function_context(return_type_id)
+        };
+
+        // Create new scope with parameters
+        let parent_scope = std::mem::take(&mut self.scope);
+        self.scope = Scope::with_parent(parent_scope);
+
+        for (param, &ty_id) in func.params.iter().zip(param_types.iter()) {
+            self.scope.define(
+                param.name,
+                Variable {
+                    ty: ty_id,
+                    mutable: false,
+                },
+            );
+        }
+
+        // Type-check parameter default expressions
+        let param_type_vec: crate::type_arena::TypeIdVec = param_types.iter().copied().collect();
+        self.check_param_defaults(&func.params, &param_type_vec, interner)?;
+
+        // Check body
+        let body_info = self.check_func_body(&func.body, interner)?;
+
+        // Get inferred return type if needed
+        let final_return_type = if needs_inference {
+            // Use ReturnInfo to infer type from all return statements (creates union if needed)
+            self.infer_return_type_from_info(&body_info)
+        } else {
+            return_type_id
+        };
+
+        // Restore scope
+        if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
+            self.scope = parent;
+        }
+        self.exit_function_context(saved_ctx);
+
+        // Build closure function type and register in scope as a variable.
+        // Scoped functions are always compiled as closures, so we use is_closure=true.
+        let param_ids: crate::type_arena::TypeIdVec = param_types.iter().copied().collect();
+        let func_type_id = self
+            .type_arena_mut()
+            .function(param_ids, final_return_type, true);
+
+        // Store the closure type for codegen to look up
+        self.scoped_function_types.insert(func.span, func_type_id);
+
+        self.scope.define(
+            func.name,
+            Variable {
+                ty: func_type_id,
+                mutable: false,
+            },
+        );
+
+        Ok(())
+    }
+}
