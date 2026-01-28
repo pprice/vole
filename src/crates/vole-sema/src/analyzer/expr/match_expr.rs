@@ -141,31 +141,45 @@ impl Analyzer {
             }
 
             // Check body expression with expected type from first arm (if known)
-            let body_type_id = self.check_expr_expecting_id(&arm.body, result_type_id, interner)?;
+            // Don't propagate never as expected type - it's a bottom type that unifies with anything
+            let expected_for_body = result_type_id.filter(|id| !id.is_never());
+            let body_type_id =
+                self.check_expr_expecting_id(&arm.body, expected_for_body, interner)?;
 
             // Restore type overrides
             self.type_overrides = saved_overrides;
 
-            // Unify with previous arms
+            // Unify with previous arms, handling top/bottom types
             match result_type_id {
                 None => {
                     result_type_id = Some(body_type_id);
                     first_arm_span = Some(arm.span);
                 }
                 Some(expected_id) if expected_id != body_type_id => {
-                    let expected_str = self.type_display_id(expected_id);
-                    let found = self.type_display_id(body_type_id);
-                    self.add_error(
-                        SemanticError::MatchArmTypeMismatch {
-                            expected: expected_str,
-                            found,
-                            first_arm: first_arm_span
-                                .expect("first_arm_span set when result_type became Some")
-                                .into(),
-                            span: arm.body.span.into(),
-                        },
-                        arm.body.span,
-                    );
+                    // Handle never type (bottom): never unifies with any type
+                    if expected_id.is_never() {
+                        result_type_id = Some(body_type_id);
+                        first_arm_span = Some(arm.span);
+                    } else if body_type_id.is_never() {
+                        // This arm is never, keep previous result (do nothing)
+                    } else if expected_id.is_unknown() || body_type_id.is_unknown() {
+                        // Either is unknown, result is unknown
+                        result_type_id = Some(ArenaTypeId::UNKNOWN);
+                    } else {
+                        let expected_str = self.type_display_id(expected_id);
+                        let found = self.type_display_id(body_type_id);
+                        self.add_error(
+                            SemanticError::MatchArmTypeMismatch {
+                                expected: expected_str,
+                                found,
+                                first_arm: first_arm_span
+                                    .expect("first_arm_span set when result_type became Some")
+                                    .into(),
+                                span: arm.body.span.into(),
+                            },
+                            arm.body.span,
+                        );
+                    }
                 }
                 _ => {}
             }

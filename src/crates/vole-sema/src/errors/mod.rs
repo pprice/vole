@@ -680,4 +680,14 @@ pub enum SemanticWarning {
         #[label("'mut' has no effect here")]
         span: SourceSpan,
     },
+
+    #[error("union with `{ty}` will be simplified")]
+    #[diagnostic(code(W3004), help("{simplification_hint}"))]
+    UnionSimplification {
+        ty: String,
+        simplification_hint: String,
+        #[label("{label}")]
+        span: SourceSpan,
+        label: String,
+    },
 }

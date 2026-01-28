@@ -99,7 +99,7 @@ impl Cg<'_, '_, '_> {
                 Err(CodegenError::unsupported("yield expression outside generator context").into())
             }
             ExprKind::Block(block_expr) => self.block_expr(block_expr),
-            ExprKind::If(if_expr) => self.if_expr(if_expr),
+            ExprKind::If(if_expr) => self.if_expr(if_expr, expr.id),
             ExprKind::When(when_expr) => self.when_expr(when_expr),
             ExprKind::Unreachable => self.unreachable_expr(expr.span.line),
         }
@@ -1495,10 +1495,10 @@ impl Cg<'_, '_, '_> {
     /// Optimization: Uses Cranelift's `select` instruction for simple conditionals
     /// where both branches are pure expressions (no side effects, no control flow).
     /// This avoids creating 4 separate blocks and enables better register allocation.
-    fn if_expr(&mut self, if_expr: &IfExpr) -> Result<CompiledValue, String> {
-        // Get the result type from semantic analysis
+    fn if_expr(&mut self, if_expr: &IfExpr, expr_id: NodeId) -> Result<CompiledValue, String> {
+        // Get the result type from semantic analysis (stored on the if expression itself)
         let result_type_id = self
-            .get_expr_type(&if_expr.then_branch.id)
+            .get_expr_type(&expr_id)
             .unwrap_or(self.arena().primitives.void);
 
         let is_void = self.arena().is_void(result_type_id);

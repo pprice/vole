@@ -51,6 +51,12 @@ pub fn types_compatible_core_id(from: TypeId, to: TypeId, arena: &TypeArena) -> 
         return true;
     }
 
+    // Never is compatible with any type (bottom type)
+    // The never type has no values, so it can be coerced to any type
+    if from.is_never() {
+        return true;
+    }
+
     // Any type is compatible with unknown (top type)
     // The unknown type can hold any value
     if to.is_unknown() {

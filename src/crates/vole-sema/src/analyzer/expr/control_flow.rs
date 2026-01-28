@@ -74,6 +74,20 @@ impl Analyzer {
         // Restore original overrides
         self.type_overrides = saved_overrides;
 
+        // Compute the join (least upper bound) of both branch types
+        // Special cases for top/bottom types:
+        // - If either branch is `never` (bottom), result is the other branch's type
+        // - If either branch is `unknown` (top), result is `unknown`
+        if then_ty_id.is_never() {
+            return Ok(else_ty_id);
+        }
+        if else_ty_id.is_never() {
+            return Ok(then_ty_id);
+        }
+        if then_ty_id.is_unknown() || else_ty_id.is_unknown() {
+            return Ok(ArenaTypeId::UNKNOWN);
+        }
+
         // Both branches must have compatible types
         if !self.types_compatible_id(then_ty_id, else_ty_id, interner) {
             self.add_type_mismatch_id(then_ty_id, else_ty_id, else_branch.span);
@@ -151,11 +165,20 @@ impl Analyzer {
 
             if i == 0 {
                 result_type = body_ty;
-            } else if body_ty != ArenaTypeId::INVALID
-                && result_type != ArenaTypeId::INVALID
-                && !self.types_compatible_id(result_type, body_ty, interner)
-            {
-                self.add_type_mismatch_id(result_type, body_ty, arm.body.span);
+            } else if body_ty != ArenaTypeId::INVALID && result_type != ArenaTypeId::INVALID {
+                // Compute join of types, handling top/bottom types
+                if result_type.is_never() {
+                    // Previous result was never, take this arm's type
+                    result_type = body_ty;
+                } else if body_ty.is_never() {
+                    // This arm is never, keep previous result
+                    // (do nothing)
+                } else if result_type.is_unknown() || body_ty.is_unknown() {
+                    // Either is unknown, result is unknown
+                    result_type = ArenaTypeId::UNKNOWN;
+                } else if !self.types_compatible_id(result_type, body_ty, interner) {
+                    self.add_type_mismatch_id(result_type, body_ty, arm.body.span);
+                }
             }
         }
 

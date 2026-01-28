@@ -1,0 +1,90 @@
+// Unit tests for never type inference in control flow expressions
+// The never type (bottom type) unifies with any other type
+
+tests {
+    test "if-else with unreachable in else branch infers then type" {
+        let x = if true { 42 } else { unreachable }
+        // x should be i64, not never
+        assert(x == 42)
+    }
+
+    test "if-else with unreachable in then branch infers else type" {
+        let x = if false { unreachable } else { "hello" }
+        // x should be string
+        assert(x == "hello")
+    }
+
+    test "if-else both unreachable infers never" {
+        // This is unusual but valid - both branches are never
+        func diverge() -> never {
+            _ = if true { unreachable } else { unreachable }
+        }
+        // Can't call diverge() since it would panic
+        assert(true)
+    }
+
+    test "match with unreachable in default arm infers pattern type" {
+        let x: i64 = 5
+        let result = match x {
+            5 => "five",
+            10 => "ten",
+            _ => unreachable
+        }
+        assert(result == "five")
+    }
+
+    test "match with unreachable in first arm infers other arms type" {
+        let x: i64 = 10  // not 5, so won't hit unreachable
+        let result = match x {
+            5 => unreachable,
+            _ => 100
+        }
+        // result should be i64
+        assert(result == 100)
+    }
+
+    test "when with unreachable arm infers correct type" {
+        let x = 5
+        let result = when {
+            x == 5 => "match",
+            _ => unreachable
+        }
+        assert(result == "match")
+    }
+
+    test "nested if with unreachable" {
+        let x = if true {
+            if false { unreachable } else { 1 }
+        } else {
+            2
+        }
+        assert(x == 1)
+    }
+
+    test "function returning never can be used in any branch" {
+        func always_panics() -> never {
+            _ = unreachable
+        }
+
+        let x = if true { 42 } else { always_panics() }
+        assert(x == 42)
+    }
+
+    test "never type propagates through function return" {
+        // Function using explicit return
+        func foo(cond: bool) -> i64 {
+            return if cond { 42 } else { unreachable }
+        }
+        assert(foo(true) == 42)
+    }
+
+    test "match all arms unreachable infers never" {
+        func diverge(x: i64) -> never {
+            _ = match x {
+                1 => unreachable,
+                _ => unreachable
+            }
+        }
+        assert(true)
+    }
+}
