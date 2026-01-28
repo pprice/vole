@@ -76,10 +76,10 @@ record Rectangle {
         }
 
         func from_points(p1: Point, p2: Point) -> Rectangle {
-            let min_x = if p1.x < p2.x { p1.x } else { p2.x }
-            let min_y = if p1.y < p2.y { p1.y } else { p2.y }
-            let max_x = if p1.x > p2.x { p1.x } else { p2.x }
-            let max_y = if p1.y > p2.y { p1.y } else { p2.y }
+            let min_x = when { p1.x < p2.x => p1.x, _ => p2.x }
+            let min_y = when { p1.y < p2.y => p1.y, _ => p2.y }
+            let max_x = when { p1.x > p2.x => p1.x, _ => p2.x }
+            let max_y = when { p1.y > p2.y => p1.y, _ => p2.y }
             return Rectangle {
                 x: min_x,
                 y: min_y,

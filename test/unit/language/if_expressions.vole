@@ -1,49 +1,68 @@
-// WIP: If as expression syntax
-// Requires: if expressions (if-else returning a value)
+// Tests for conditional expressions using `when`
+// Note: `if` is now statement-only; use `when` for conditional values
 
-tests "if as expression" {
-    test "simple if-else returns value" {
-        let sign = if 10 > 0 { "positive" } else { "non-positive" }
+tests "when as conditional expression" {
+    test "simple when returns value" {
+        let sign = when { 10 > 0 => "positive", _ => "non-positive" }
         assert(sign == "positive")
     }
 
-    test "if-else returns else branch" {
-        let sign = if -5 > 0 { "positive" } else { "non-positive" }
+    test "when returns else branch" {
+        let sign = when { -5 > 0 => "positive", _ => "non-positive" }
         assert(sign == "non-positive")
     }
 
-    test "if expression with integers" {
-        let abs = if -10 < 0 { 10 } else { -10 }
+    test "when expression with integers" {
+        let abs = when { -10 < 0 => 10, _ => -10 }
         assert(abs == 10)
     }
 
-    test "if-else-if expression" {
-        let sign = if 0 > 0 { "positive" } else if 0 < 0 { "negative" } else { "zero" }
+    test "when with multiple conditions" {
+        let sign = when {
+            0 > 0 => "positive",
+            0 < 0 => "negative",
+            _ => "zero"
+        }
         assert(sign == "zero")
     }
 
-    test "nested if expression" {
-        let result = if 5 > 0 { if 10 > 5 { "b" } else { "a" } } else { "neg" }
+    test "nested when expression" {
+        let result = when {
+            5 > 0 => when { 10 > 5 => "b", _ => "a" },
+            _ => "neg"
+        }
         assert(result == "b")
     }
 
-    test "nested if expression inner else" {
-        let result = if 5 > 0 { if 10 < 5 { "b" } else { "a" } } else { "neg" }
+    test "nested when expression inner else" {
+        let result = when {
+            5 > 0 => when { 10 < 5 => "b", _ => "a" },
+            _ => "neg"
+        }
         assert(result == "a")
     }
 
-    test "nested if expression outer else" {
-        let result = if 5 < 0 { if 10 > 5 { "b" } else { "a" } } else { "neg" }
+    test "nested when expression outer else" {
+        let result = when {
+            5 < 0 => when { 10 > 5 => "b", _ => "a" },
+            _ => "neg"
+        }
         assert(result == "neg")
     }
 
-    test "deeply nested if expression" {
-        let result = if 1 > 0 { if 2 > 0 { if 3 > 0 { "deep" } else { "c" } } else { "b" } } else { "a" }
+    test "deeply nested when expression" {
+        let result = when {
+            1 > 0 => when {
+                2 > 0 => when { 3 > 0 => "deep", _ => "c" },
+                _ => "b"
+            },
+            _ => "a"
+        }
         assert(result == "deep")
     }
 
-    test "if expression arithmetic" {
-        let result = if 3 > 5 { 3 * 2 } else { 3 * 3 }
+    test "when expression arithmetic" {
+        let result = when { 3 > 5 => 3 * 2, _ => 3 * 3 }
         assert(result == 9)
     }
 }

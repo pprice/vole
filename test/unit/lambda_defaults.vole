@@ -21,7 +21,7 @@ tests {
     }
 
     test "lambda with bool default" {
-        let negate = (x: i64, should_negate: bool = false) => if should_negate { -x } else { x }
+        let negate = (x: i64, should_negate: bool = false) => when { should_negate => -x, _ => x }
         assert(negate(42) == 42)
         assert(negate(42, false) == 42)
         assert(negate(42, true) == -42)

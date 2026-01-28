@@ -20,7 +20,7 @@ func manhattan_distance(p: HasCoordinates) -> i64 {
     // Can access fields through the type param
     let a = p.x
     let b = p.y
-    return (if a < 0 { -a } else { a }) + (if b < 0 { -b } else { b })
+    return (when { a < 0 => -a, _ => a }) + (when { b < 0 => -b, _ => b })
 }
 
 // Inline multi-field structural

@@ -646,6 +646,26 @@ pub enum SemanticError {
         #[label("cannot use `never` here")]
         span: SourceSpan,
     },
+
+    #[error("`if` expressions cannot be used as values")]
+    #[diagnostic(
+        code(E2099),
+        help("use `when` for conditional expressions: when {{ cond => value, _ => other }}")
+    )]
+    IfExpressionUsedAsValue {
+        #[label("`if` is a statement, not an expression")]
+        span: SourceSpan,
+    },
+
+    #[error("block expressions cannot have trailing expressions")]
+    #[diagnostic(
+        code(E2100),
+        help("use explicit `return` in functions, or use `when`/`match` for conditional values")
+    )]
+    BlockTrailingExpression {
+        #[label("trailing expression not allowed in block")]
+        span: SourceSpan,
+    },
 }
 
 /// Semantic warnings (W3xxx) - these don't prevent compilation but indicate potential issues

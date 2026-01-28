@@ -709,7 +709,7 @@ tests {
 
     test "static - conditional on constraint result" {
         let eq = ComparableBox.areEqual(Id { n: 5 }, Id { n: 5 })
-        let result = if eq { 100 } else { 0 }
+        let result = when { eq => 100, _ => 0 }
         assert(result == 100)
     }
 

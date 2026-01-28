@@ -489,6 +489,7 @@ impl AnalyzerBuilder {
             module_cache: self.cache,
             db,
             current_file_path,
+            in_arm_body: false,
         };
 
         // Step 7: Register built-in interfaces and implementations
@@ -588,6 +589,9 @@ pub struct Analyzer {
     /// This is set from the file path passed to Analyzer::new() and updated
     /// when analyzing imported modules.
     current_file_path: Option<PathBuf>,
+    /// Whether we are currently checking a when/match arm body.
+    /// When true, block expressions are allowed to have trailing expressions.
+    in_arm_body: bool,
 }
 
 /// Result of looking up a method on a type via EntityRegistry
@@ -3645,6 +3649,7 @@ impl Analyzer {
             db: Rc::clone(&self.db), // Share the compilation db
             // Use module's file path so relative imports resolve correctly
             current_file_path: module_file_path,
+            in_arm_body: false,
         }
     }
 }

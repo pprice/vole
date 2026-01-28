@@ -1,67 +1,67 @@
 // Test: Select instruction optimization for simple conditionals
 //
-// This tests that simple if/when expressions with pure expressions
+// This tests that simple when expressions with pure expressions
 // can use the select instruction instead of creating multiple blocks.
+// Note: `if` is statement-only; use `when` for conditional values.
 
 tests "select instruction optimization" {
-    // --- If expression tests ---
+    // --- When expression tests (binary form for select) ---
 
-    test "if expression with integer literals uses select" {
+    test "when expression with integer literals uses select" {
         let x = 5
-        let result = if x > 0 { 10 } else { 20 }
+        let result = when { x > 0 => 10, _ => 20 }
         assert(result == 10)
     }
 
-    test "if expression with variables uses select" {
+    test "when expression with variables uses select" {
         let a = 100
         let b = 200
         let cond = true
-        // Note: using `cond == true` due to parser limitation with bare identifier conditions
-        let result = if cond == true { a } else { b }
+        let result = when { cond == true => a, _ => b }
         assert(result == 100)
     }
 
-    test "if expression with arithmetic uses select" {
+    test "when expression with arithmetic uses select" {
         let x = 5
         let y = 3
-        let result = if x > y { x + y } else { x - y }
+        let result = when { x > y => x + y, _ => x - y }
         assert(result == 8)
     }
 
-    test "if expression with nested arithmetic" {
+    test "when expression with nested arithmetic" {
         let a = 10
         let b = 20
         let c = 30
-        let result = if a < b { a * 2 + c } else { b * 2 - c }
+        let result = when { a < b => a * 2 + c, _ => b * 2 - c }
         assert(result == 50)  // 10 * 2 + 30
     }
 
-    test "if expression with boolean result" {
+    test "when expression with boolean result" {
         let x = 5
-        let result = if x > 0 { true } else { false }
+        let result = when { x > 0 => true, _ => false }
         assert(result == true)
     }
 
-    test "if expression with float literals" {
+    test "when expression with float literals" {
         let x = 1.0
-        let result = if x > 0.0 { 3.14 } else { 2.71 }
+        let result = when { x > 0.0 => 3.14, _ => 2.71 }
         assert(result == 3.14)
     }
 
-    test "if expression with unary operators" {
+    test "when expression with unary operators" {
         let x = 5
-        let result = if x > 0 { -x } else { x }
+        let result = when { x > 0 => -x, _ => x }
         assert(result == -5)
     }
 
-    test "if expression with comparison" {
+    test "when expression with comparison" {
         let a = 10
         let b = 20
-        let result = if a < b { a == 10 } else { b == 20 }
+        let result = when { a < b => a == 10, _ => b == 20 }
         assert(result == true)
     }
 
-    // --- When expression tests (binary form) ---
+    // --- More when expression tests ---
 
     test "binary when expression uses select" {
         let x = 5
@@ -97,7 +97,7 @@ tests "select instruction optimization" {
 
     test "select with same value both sides" {
         let x = 5
-        let result = if x > 0 { 42 } else { 42 }
+        let result = when { x > 0 => 42, _ => 42 }
         assert(result == 42)
     }
 
@@ -106,29 +106,29 @@ tests "select instruction optimization" {
         let b = 2
         let c = 3
         // Both branches involve multiple operations but still selectable
-        let result = if a < b { (a + b) * c } else { (a - b) * c }
+        let result = when { a < b => (a + b) * c, _ => (a - b) * c }
         assert(result == 9)  // (1 + 2) * 3
     }
 
     test "select with bitwise operations" {
         let x = 5
-        let result = if x > 0 { x & 3 } else { x | 3 }
+        let result = when { x > 0 => x & 3, _ => x | 3 }
         assert(result == 1)  // 5 & 3 = 1
     }
 
     test "chained comparisons in condition" {
         let x = 5
-        let result = if x > 0 && x < 10 { 1 } else { 2 }
+        let result = when { x > 0 && x < 10 => 1, _ => 2 }
         assert(result == 1)
     }
 
     // --- Cases that should NOT use select (but still work correctly) ---
     // These have side effects or control flow, so they fall back to blocks
 
-    test "if with function call in branch (no select)" {
+    test "when with function call in branch (no select)" {
         func double(n: i64) -> i64 => n * 2
         let x = 5
-        let result = if x > 0 { double(x) } else { x }
+        let result = when { x > 0 => double(x), _ => x }
         assert(result == 10)
     }
 
@@ -149,20 +149,19 @@ tests "select instruction optimization" {
         assert(result == 1)
     }
 
-    test "if with block expression (no select)" {
+    test "when with computed value (no select)" {
         let x = 5
-        let result = if x > 0 {
-            let y = x
-            y * 2
-        } else { x }
+        // Blocks aren't allowed directly in when arms, so compute beforehand
+        let y = x * 2
+        let result = when { x > 0 => y, _ => x }
         assert(result == 10)
     }
 
     // --- Verify select works for false conditions too ---
 
-    test "if expression false condition" {
+    test "when expression false condition" {
         let x = -5
-        let result = if x > 0 { 10 } else { 20 }
+        let result = when { x > 0 => 10, _ => 20 }
         assert(result == 20)
     }
 
@@ -179,13 +178,13 @@ tests "select instruction optimization" {
 
     test "select with different integer literals" {
         let x = 1
-        let result = if x > 0 { 100 } else { -100 }
+        let result = when { x > 0 => 100, _ => -100 }
         assert(result == 100)
     }
 
     test "select with zero" {
         let x = 0
-        let result = if x == 0 { 0 } else { 1 }
+        let result = when { x == 0 => 0, _ => 1 }
         assert(result == 0)
     }
 }

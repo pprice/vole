@@ -8,6 +8,22 @@ impl Analyzer {
         block: &BlockExpr,
         interner: &Interner,
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
+        // Check trailing expression permission before processing statements
+        if block.trailing_expr.is_some() {
+            if self.in_arm_body {
+                // Consume the flag so nested blocks don't inherit the permission
+                self.in_arm_body = false;
+            } else {
+                // Trailing expressions are only allowed in arm bodies
+                self.add_error(
+                    SemanticError::BlockTrailingExpression {
+                        span: block.span.into(),
+                    },
+                    block.span,
+                );
+            }
+        }
+
         // Type check all statements
         for stmt in &block.stmts {
             // TODO(v-bd6c): Aggregate ReturnInfo from statements
@@ -23,6 +39,9 @@ impl Analyzer {
     }
 
     /// Check if expression.
+    ///
+    /// `if` expressions are statement-only (they always return void).
+    /// For conditional expressions that produce a value, use `when`.
     pub(super) fn check_if_expr(
         &mut self,
         if_expr: &IfExpr,
@@ -49,52 +68,53 @@ impl Analyzer {
         // Restore overrides for else branch
         self.type_overrides = saved_overrides.clone();
 
-        // If expression requires else branch
-        let Some(else_branch) = &if_expr.else_branch else {
+        // Check else branch if present
+        let else_ty_id = if let Some(else_branch) = &if_expr.else_branch {
+            // Apply else-branch narrowing: if x is T, else branch has x: (original - T)
+            if let Some((sym, tested_type_id, Some(original_type_id))) = &narrowing_info
+                && let Some(else_narrowed) =
+                    self.compute_else_narrowed_type(*tested_type_id, *original_type_id)
+            {
+                self.type_overrides.insert(*sym, else_narrowed);
+            }
+
+            let else_ty_id = self.check_expr(else_branch, interner)?;
+
+            // Restore original overrides
             self.type_overrides = saved_overrides;
+
+            else_ty_id
+        } else {
+            self.type_overrides = saved_overrides;
+            ArenaTypeId::VOID
+        };
+
+        // Compute the effective result type (for checking purposes)
+        // Handle never type: if a branch is never, it doesn't contribute to the result
+        let effective_then = if then_ty_id.is_never() {
+            ArenaTypeId::VOID
+        } else {
+            then_ty_id
+        };
+        let effective_else = if else_ty_id.is_never() {
+            ArenaTypeId::VOID
+        } else {
+            else_ty_id
+        };
+
+        // If either branch produces a non-void value, emit error
+        // (if expressions are statement-only; use `when` for conditional values)
+        if effective_then != ArenaTypeId::VOID || effective_else != ArenaTypeId::VOID {
             self.add_error(
-                SemanticError::IfExprMissingElse {
+                SemanticError::IfExpressionUsedAsValue {
                     span: if_expr.span.into(),
                 },
                 if_expr.span,
             );
-            return Ok(ArenaTypeId::INVALID);
-        };
-
-        // Apply else-branch narrowing: if x is T, else branch has x: (original - T)
-        if let Some((sym, tested_type_id, Some(original_type_id))) = &narrowing_info
-            && let Some(else_narrowed) =
-                self.compute_else_narrowed_type(*tested_type_id, *original_type_id)
-        {
-            self.type_overrides.insert(*sym, else_narrowed);
         }
 
-        let else_ty_id = self.check_expr(else_branch, interner)?;
-
-        // Restore original overrides
-        self.type_overrides = saved_overrides;
-
-        // Compute the join (least upper bound) of both branch types
-        // Special cases for top/bottom types:
-        // - If either branch is `never` (bottom), result is the other branch's type
-        // - If either branch is `unknown` (top), result is `unknown`
-        if then_ty_id.is_never() {
-            return Ok(else_ty_id);
-        }
-        if else_ty_id.is_never() {
-            return Ok(then_ty_id);
-        }
-        if then_ty_id.is_unknown() || else_ty_id.is_unknown() {
-            return Ok(ArenaTypeId::UNKNOWN);
-        }
-
-        // Both branches must have compatible types
-        if !self.types_compatible_id(then_ty_id, else_ty_id, interner) {
-            self.add_type_mismatch_id(then_ty_id, else_ty_id, else_branch.span);
-            Ok(ArenaTypeId::INVALID)
-        } else {
-            Ok(then_ty_id)
-        }
+        // if expressions always return void (they are statements, not expressions)
+        Ok(ArenaTypeId::VOID)
     }
 
     /// Check when expression.
@@ -157,8 +177,11 @@ impl Analyzer {
                 self.type_overrides.insert(*sym, *narrowed_type_id);
             }
 
-            // Check body with narrowed type
+            // Check body with narrowed type (arm bodies allow trailing expressions)
+            let saved_in_arm = self.in_arm_body;
+            self.in_arm_body = true;
             let body_ty = self.check_expr(&arm.body, interner)?;
+            self.in_arm_body = saved_in_arm;
 
             // Restore overrides for next arm
             self.type_overrides = saved_overrides.clone();

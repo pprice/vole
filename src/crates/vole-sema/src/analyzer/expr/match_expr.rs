@@ -143,8 +143,11 @@ impl Analyzer {
             // Check body expression with expected type from first arm (if known)
             // Don't propagate never as expected type - it's a bottom type that unifies with anything
             let expected_for_body = result_type_id.filter(|id| !id.is_never());
+            let saved_in_arm = self.in_arm_body;
+            self.in_arm_body = true;
             let body_type_id =
                 self.check_expr_expecting_id(&arm.body, expected_for_body, interner)?;
+            self.in_arm_body = saved_in_arm;
 
             // Restore type overrides
             self.type_overrides = saved_overrides;

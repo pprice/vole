@@ -190,11 +190,11 @@ record Timestamp {
 
         func from_parts(year: i64, month: i64, day: i64, hour: i64, minute: i64, second: i64) -> Timestamp | nil {
             // Build an ISO string and parse it
-            let month_str = if month < 10 { "0{month}" } else { "{month}" }
-            let day_str = if day < 10 { "0{day}" } else { "{day}" }
-            let hour_str = if hour < 10 { "0{hour}" } else { "{hour}" }
-            let minute_str = if minute < 10 { "0{minute}" } else { "{minute}" }
-            let second_str = if second < 10 { "0{second}" } else { "{second}" }
+            let month_str = when { month < 10 => "0{month}", _ => "{month}" }
+            let day_str = when { day < 10 => "0{day}", _ => "{day}" }
+            let hour_str = when { hour < 10 => "0{hour}", _ => "{hour}" }
+            let minute_str = when { minute < 10 => "0{minute}", _ => "{minute}" }
+            let second_str = when { second < 10 => "0{second}", _ => "{second}" }
             let iso = "{year}-{month_str}-{day_str}T{hour_str}:{minute_str}:{second_str}Z"
             return Timestamp.parse(iso)
         }

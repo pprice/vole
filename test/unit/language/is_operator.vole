@@ -60,22 +60,27 @@ tests "is operator narrowing in if-statements" {
     }
 }
 
-tests "is operator narrowing in if-expressions" {
-    test "narrows then branch in if-expression" {
+tests "is operator narrowing in when-expressions (formerly if-expressions)" {
+    test "narrows then branch in when-expression" {
         let x: i64 | string = "hello"
-        let result = if x is string { x.length() } else { 0 }
+        let result = when { x is string => x.length(), _ => 0 }
         assert(result == 5)
     }
 
-    test "narrows else branch in if-expression" {
+    test "narrows else branch in when-expression" {
         let x: i64 | string = 42
-        let result = if x is string { x.length() } else { x + 1 }
+        // Explicit is check needed in when (no automatic else-narrowing like if)
+        let result = when {
+            x is string => x.length(),
+            x is i64 => x + 1,
+            _ => 0
+        }
         assert(result == 43)
     }
 
-    test "if-expression with three-type union" {
+    test "when-expression with three-type union" {
         let x: i64 | string | bool = "test"
-        let len = if x is string { x.length() } else { 0 }
+        let len = when { x is string => x.length(), _ => 0 }
         assert(len == 4)
     }
 }

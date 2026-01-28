@@ -187,6 +187,7 @@ impl Analyzer {
             module_cache: None,
             db: Rc::clone(&self.db),
             current_file_path: Some(module_info.path.clone()),
+            in_arm_body: false,
         };
 
         // Analyze the prelude file

@@ -1,0 +1,10 @@
+// Error: E2100 block expressions cannot have trailing expressions
+// Blocks used in if/else cannot produce values via trailing expressions
+
+func main() {
+    // Error: if block with trailing expression assigned to variable
+    let x = if true { 5 } else { 0 }
+
+    // Error: nested if/else with trailing expressions
+    let y = if true { 100 } else { 200 }
+}
