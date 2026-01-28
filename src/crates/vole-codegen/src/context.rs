@@ -465,6 +465,23 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .collect()
     }
 
+    /// Convert an i64 value back to its proper type (reverse of convert_to_i64_for_storage)
+    pub fn convert_from_i64_storage(&mut self, word: Value, type_id: TypeId) -> Value {
+        use super::types::word_to_value_type_id;
+        // Get the needed data before mutable borrow of builder
+        let ptr_type = self.ptr_type();
+        let arena = self.env.analyzed.type_arena();
+        let entity_registry = self.env.analyzed.query().registry();
+        word_to_value_type_id(
+            self.builder,
+            word,
+            type_id,
+            ptr_type,
+            entity_registry,
+            arena,
+        )
+    }
+
     /// Get the size (in bits) of a TypeId
     pub fn type_size(&self, ty: TypeId) -> u32 {
         type_id_size(ty, self.ptr_type(), self.query().registry(), self.arena())
@@ -606,6 +623,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Get the result of a call instruction as a CompiledValue.
     ///
     /// If the call has no results, returns void_value().
+    /// For fallible returns with 2 results (tag, payload), packs them into a stack slot.
     /// Otherwise, wraps the first result with the given return_type_id.
     pub fn call_result(
         &mut self,
@@ -614,10 +632,35 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ) -> CompiledValue {
         let results = self.builder.inst_results(call);
         if results.is_empty() {
-            self.void_value()
-        } else {
-            self.compiled(results[0], return_type_id)
+            return self.void_value();
         }
+
+        // Check for fallible multi-value return (2 results: tag, payload)
+        if results.len() == 2 && self.arena().unwrap_fallible(return_type_id).is_some() {
+            let tag = results[0];
+            let payload = results[1];
+
+            // Allocate stack slot to store (tag, payload) for callers that expect a pointer
+            let slot_size = 16u32; // 8 bytes tag + 8 bytes payload
+            let slot = self.alloc_stack(slot_size);
+
+            // Store tag at offset 0
+            self.builder.ins().stack_store(tag, slot, 0);
+            // Store payload at offset 8
+            self.builder.ins().stack_store(payload, slot, 8);
+
+            // Get pointer to stack slot
+            let ptr_type = self.ptr_type();
+            let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+
+            return CompiledValue {
+                value: ptr,
+                ty: ptr_type,
+                type_id: return_type_id,
+            };
+        }
+
+        self.compiled(results[0], return_type_id)
     }
 
     // ========== CompiledValue constructors ==========

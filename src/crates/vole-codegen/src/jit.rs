@@ -1001,6 +1001,19 @@ impl JitContext {
         sig
     }
 
+    /// Create a function signature with given parameters and multiple return types.
+    /// Used for fallible functions which return (tag, payload) in registers.
+    pub fn create_signature_multi_return(&self, params: &[Type], returns: &[Type]) -> Signature {
+        let mut sig = self.module.make_signature();
+        for &param in params {
+            sig.params.push(AbiParam::new(param));
+        }
+        for &ret_type in returns {
+            sig.returns.push(AbiParam::new(ret_type));
+        }
+        sig
+    }
+
     /// Declare a function in the module
     pub fn declare_function(&mut self, name: &str, sig: &Signature) -> FuncId {
         let func_id = self

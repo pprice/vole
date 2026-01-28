@@ -6,7 +6,7 @@
 
 use rustc_hash::FxHashMap;
 
-use cranelift::prelude::{FunctionBuilder, InstBuilder, Type, Variable, types};
+use cranelift::prelude::{FunctionBuilder, InstBuilder, MemFlags, Type, Variable, types};
 use vole_frontend::{FuncBody, Symbol};
 use vole_sema::type_arena::TypeId;
 
@@ -213,7 +213,27 @@ pub fn compile_function_body_with_cg(
 
     // Add implicit return if no explicit return
     if let Some(value) = expr_value {
-        cg.builder.ins().return_(&[value.value]);
+        // Check if the return type is fallible - need multi-value return
+        let is_fallible_return = cg
+            .return_type
+            .map(|ret_type_id| cg.arena().unwrap_fallible(ret_type_id).is_some())
+            .unwrap_or(false);
+
+        if is_fallible_return {
+            // Expression-bodied fallible function: the value is a pointer to (tag, payload)
+            // We need to load both and return them
+            let tag = cg
+                .builder
+                .ins()
+                .load(types::I64, MemFlags::new(), value.value, 0);
+            let payload = cg
+                .builder
+                .ins()
+                .load(types::I64, MemFlags::new(), value.value, 8);
+            cg.builder.ins().return_(&[tag, payload]);
+        } else {
+            cg.builder.ins().return_(&[value.value]);
+        }
     } else if !terminated {
         match default_return {
             DefaultReturn::Empty => {

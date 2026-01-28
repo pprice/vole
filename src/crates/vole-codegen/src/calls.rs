@@ -1118,11 +1118,17 @@ impl Cg<'_, '_, '_> {
         }
         let arena = self.arena();
         if ret != arena.void() {
-            sig.returns.push(AbiParam::new(type_id_to_cranelift(
-                ret,
-                arena,
-                self.ptr_type(),
-            )));
+            // For fallible returns, use multi-value return (tag: i64, payload: i64)
+            if arena.unwrap_fallible(ret).is_some() {
+                sig.returns.push(AbiParam::new(types::I64)); // tag
+                sig.returns.push(AbiParam::new(types::I64)); // payload
+            } else {
+                sig.returns.push(AbiParam::new(type_id_to_cranelift(
+                    ret,
+                    arena,
+                    self.ptr_type(),
+                )));
+            }
         }
 
         let sig_ref = self.builder.import_signature(sig);
@@ -1192,6 +1198,25 @@ impl Cg<'_, '_, '_> {
 
         if results.is_empty() {
             Ok(self.void_value())
+        } else if results.len() == 2 && self.arena().unwrap_fallible(ret).is_some() {
+            // Fallible multi-value return: pack (tag, payload) into stack slot
+            let tag = results[0];
+            let payload = results[1];
+
+            let slot_size = 16u32; // 8 bytes tag + 8 bytes payload
+            let slot = self.alloc_stack(slot_size);
+
+            self.builder.ins().stack_store(tag, slot, 0);
+            self.builder.ins().stack_store(payload, slot, 8);
+
+            let ptr_type = self.ptr_type();
+            let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+
+            Ok(CompiledValue {
+                value: ptr,
+                ty: ptr_type,
+                type_id: ret,
+            })
         } else {
             // If the return type is a union, the returned value is a pointer to callee's stack.
             // We need to copy the union data to our own stack to prevent it from being

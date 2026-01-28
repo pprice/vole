@@ -12,8 +12,8 @@ use vole_sema::type_arena::TypeId;
 use super::context::Cg;
 use super::structs::{convert_to_i64_for_storage, get_field_slot_and_type_id_cg};
 use super::types::{
-    CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, FALLIBLE_TAG_OFFSET,
-    convert_to_type, fallible_error_tag_by_id, tuple_layout_id, type_id_to_cranelift,
+    CompiledValue, FALLIBLE_SUCCESS_TAG, convert_to_type, fallible_error_tag_by_id,
+    tuple_layout_id, type_id_to_cranelift,
 };
 
 /// Check if a block contains a `continue` statement (recursively).
@@ -253,30 +253,14 @@ impl Cg<'_, '_, '_> {
                     if let Some(ret_type_id) = return_type_id
                         && self.arena().unwrap_fallible(ret_type_id).is_some()
                     {
-                        // For fallible functions, wrap the success value in a fallible struct
-                        let fallible_size = self.type_size(ret_type_id);
-
-                        // Allocate stack slot for the fallible result
-                        let slot = self.alloc_stack(fallible_size);
-
-                        // Store the success tag at offset 0
+                        // For fallible functions, return (tag, payload) directly in registers
+                        // Both tag and payload are i64 for uniform representation
                         let tag_val = self.builder.ins().iconst(types::I64, FALLIBLE_SUCCESS_TAG);
-                        self.builder
-                            .ins()
-                            .stack_store(tag_val, slot, FALLIBLE_TAG_OFFSET);
 
-                        // Store the success value at the payload offset
-                        // Convert to i64 if needed for storage
-                        let store_value = convert_to_i64_for_storage(self.builder, &compiled);
-                        self.builder
-                            .ins()
-                            .stack_store(store_value, slot, FALLIBLE_PAYLOAD_OFFSET);
+                        // Convert payload to i64 for uniform representation
+                        let payload_val = convert_to_i64_for_storage(self.builder, &compiled);
 
-                        // Get the pointer to the fallible result
-                        let ptr_type = self.ptr_type();
-                        let fallible_ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
-
-                        self.builder.ins().return_(&[fallible_ptr]);
+                        self.builder.ins().return_(&[tag_val, payload_val]);
                     } else if let Some(ret_type_id) = return_type_id
                         && self.arena().is_union(ret_type_id)
                     {
@@ -922,11 +906,12 @@ impl Cg<'_, '_, '_> {
 
     /// Compile a raise statement: raise ErrorName { field: value, ... }
     ///
-    /// This allocates a fallible result on the stack with:
-    /// - Tag at offset 0 (error tag from fallible_error_tag())
-    /// - Error fields at payload offset 8+
+    /// Uses multi-value return (tag, payload):
+    /// - Tag: error tag (1+) from fallible_error_tag_by_id
+    /// - Payload: For errors with no fields, just 0. For errors with fields,
+    ///   a pointer to stack-allocated error data.
     ///
-    /// Then returns from the function with the fallible pointer.
+    /// Then returns from the function with (tag, payload).
     fn raise_stmt(&mut self, raise_stmt: &RaiseStmt) -> Result<bool, String> {
         // Get the current function's return type - must be Fallible
         let return_type_id = self
@@ -960,18 +945,6 @@ impl Cg<'_, '_, '_> {
                 self.interner().resolve(raise_stmt.error_name)
             )
         })?;
-
-        // Calculate the size of the fallible type
-        let fallible_size = self.type_size(return_type_id);
-
-        // Allocate stack slot for the fallible result
-        let slot = self.alloc_stack(fallible_size);
-
-        // Store the error tag at offset 0
-        let tag_val = self.builder.ins().iconst(types::I64, error_tag);
-        self.builder
-            .ins()
-            .stack_store(tag_val, slot, FALLIBLE_TAG_OFFSET);
 
         // Get the error type_def_id to look up field order from EntityRegistry
         let raise_error_name = self.interner().resolve(raise_stmt.error_name);
@@ -1013,10 +986,20 @@ impl Cg<'_, '_, '_> {
             .map(|field_id| self.query().get_field(field_id).clone())
             .collect();
 
-        // Store each field value at the appropriate offset in the payload
-        // Fields are stored sequentially at 8-byte intervals (i64 storage)
-        for (field_idx, field_def) in error_fields.iter().enumerate() {
-            // Find the matching field in the raise statement
+        // Create the tag value
+        let tag_val = self.builder.ins().iconst(types::I64, error_tag);
+
+        // Determine payload based on number of fields
+        // This matches the layout used by external functions in runtime:
+        // - 0 fields: payload is 0
+        // - 1 field: payload is the field value directly (inline)
+        // - 2+ fields: payload is a pointer to field data
+        let payload_val = if error_fields.is_empty() {
+            // No fields - payload is 0
+            self.builder.ins().iconst(types::I64, 0)
+        } else if error_fields.len() == 1 {
+            // Single field - store inline as payload value
+            let field_def = &error_fields[0];
             let field_name = self
                 .name_table()
                 .last_segment_str(field_def.name_id)
@@ -1027,27 +1010,39 @@ impl Cg<'_, '_, '_> {
                 .find(|f| self.interner().resolve(f.name) == field_name)
                 .ok_or_else(|| format!("Missing field {} in raise statement", &field_name))?;
 
-            // Compile the field value expression
             let field_value = self.expr(&field_init.value)?;
+            convert_to_i64_for_storage(self.builder, &field_value)
+        } else {
+            // Multiple fields - allocate on stack and store field values
+            let error_payload_size = (error_fields.len() * 8) as u32;
+            let slot = self.alloc_stack(error_payload_size);
 
-            // Convert to i64 for storage (same as struct fields)
-            let store_value = convert_to_i64_for_storage(self.builder, &field_value);
+            // Store each field value at the appropriate offset
+            for (field_idx, field_def) in error_fields.iter().enumerate() {
+                let field_name = self
+                    .name_table()
+                    .last_segment_str(field_def.name_id)
+                    .unwrap_or_default();
+                let field_init = raise_stmt
+                    .fields
+                    .iter()
+                    .find(|f| self.interner().resolve(f.name) == field_name)
+                    .ok_or_else(|| format!("Missing field {} in raise statement", &field_name))?;
 
-            // Calculate field offset: payload starts at offset 8, each field is 8 bytes
-            let field_offset = FALLIBLE_PAYLOAD_OFFSET + (field_idx as i32 * 8);
+                let field_value = self.expr(&field_init.value)?;
+                let store_value = convert_to_i64_for_storage(self.builder, &field_value);
+                let field_offset = (field_idx as i32) * 8;
+                self.builder
+                    .ins()
+                    .stack_store(store_value, slot, field_offset);
+            }
 
-            // Store the field value
-            self.builder
-                .ins()
-                .stack_store(store_value, slot, field_offset);
-        }
+            let ptr_type = self.ptr_type();
+            self.builder.ins().stack_addr(ptr_type, slot, 0)
+        };
 
-        // Get the pointer to the fallible result
-        let ptr_type = self.ptr_type();
-        let fallible_ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
-
-        // Return from the function with the fallible pointer
-        self.builder.ins().return_(&[fallible_ptr]);
+        // Return from the function with (tag, payload)
+        self.builder.ins().return_(&[tag_val, payload_val]);
 
         // Raise always terminates the current block
         Ok(true)

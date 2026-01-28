@@ -90,7 +90,13 @@ impl Cg<'_, '_, '_> {
         for &param_ty in &param_types {
             sig.params.push(AbiParam::new(param_ty));
         }
-        sig.returns.push(AbiParam::new(return_type));
+        // For fallible returns, use multi-value return (tag: i64, payload: i64)
+        if self.arena().unwrap_fallible(return_type_id).is_some() {
+            sig.returns.push(AbiParam::new(types::I64)); // tag
+            sig.returns.push(AbiParam::new(types::I64)); // payload
+        } else {
+            sig.returns.push(AbiParam::new(return_type));
+        }
 
         let func_key = self.funcs().intern_lambda(lambda_id);
         let lambda_name = self.funcs().display(func_key);
@@ -184,7 +190,13 @@ impl Cg<'_, '_, '_> {
         for &param_ty in &param_types {
             sig.params.push(AbiParam::new(param_ty));
         }
-        sig.returns.push(AbiParam::new(return_type));
+        // For fallible returns, use multi-value return (tag: i64, payload: i64)
+        if self.arena().unwrap_fallible(return_type_id).is_some() {
+            sig.returns.push(AbiParam::new(types::I64)); // tag
+            sig.returns.push(AbiParam::new(types::I64)); // payload
+        } else {
+            sig.returns.push(AbiParam::new(return_type));
+        }
 
         let func_key = self.funcs().intern_lambda(lambda_id);
         let lambda_name = self.funcs().display(func_key);

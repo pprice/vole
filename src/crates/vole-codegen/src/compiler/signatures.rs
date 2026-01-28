@@ -1,4 +1,4 @@
-use cranelift::prelude::{Signature, Type as CraneliftType};
+use cranelift::prelude::{Signature, Type as CraneliftType, types};
 use smallvec::{SmallVec, smallvec};
 
 use super::Compiler;
@@ -50,6 +50,9 @@ impl Compiler<'_> {
     ///
     /// This is the most direct method for building signatures when types are already
     /// resolved to TypeIds (e.g., from FunctionDef.signature or type analysis).
+    ///
+    /// For fallible return types, this generates a multi-value return signature
+    /// with (tag: i64, payload: payload_type) to avoid stack allocation.
     pub fn build_signature_from_type_ids(
         &self,
         params_id: &[TypeId],
@@ -70,6 +73,18 @@ impl Compiler<'_> {
         // Add param types
         for &type_id in params_id {
             cranelift_params.push(type_id_to_cranelift(type_id, arena_ref, self.pointer_type));
+        }
+
+        // Check if this is a fallible return type - use multi-value returns
+        if let Some(ret_type_id) = return_type_id
+            && arena_ref.unwrap_fallible(ret_type_id).is_some()
+        {
+            // Fallible returns: (tag: i64, payload: i64)
+            // We use i64 for both to have a uniform representation that works
+            // for both success values and error pointers.
+            return self
+                .jit
+                .create_signature_multi_return(&cranelift_params, &[types::I64, types::I64]);
         }
 
         // Convert return type (filter out void)

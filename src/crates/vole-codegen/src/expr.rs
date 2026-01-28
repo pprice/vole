@@ -1354,7 +1354,7 @@ impl Cg<'_, '_, '_> {
     /// Compile a try expression (propagation)
     ///
     /// On success: returns unwrapped value
-    /// On error: propagates by returning from function
+    /// On error: propagates by returning from function with (tag: i64, payload: i64)
     fn try_propagate(&mut self, inner: &Expr) -> Result<CompiledValue, String> {
         // Compile the inner fallible expression
         let fallible = self.expr(inner)?;
@@ -1374,7 +1374,7 @@ impl Cg<'_, '_, '_> {
             }
         };
 
-        // Load the tag
+        // Load the tag from the fallible (stored at offset 0 in stack slot)
         let tag = load_fallible_tag(self.builder, fallible.value);
 
         // Check if success (tag == 0)
@@ -1397,13 +1397,18 @@ impl Cg<'_, '_, '_> {
             .ins()
             .brif(is_success, success_block, &[], error_block, &[]);
 
-        // Error block: propagate by returning the fallible value
+        // Error block: propagate by returning (tag, payload) for multi-value return
+        // Payload is stored as i64 in the stack slot
         self.switch_and_seal(error_block);
-        self.builder.ins().return_(&[fallible.value]);
+        let error_payload_i64 = load_fallible_payload(self.builder, fallible.value, types::I64);
+        self.builder.ins().return_(&[tag, error_payload_i64]);
 
         // Success block: extract payload and jump to merge
+        // The payload is stored as i64 in the stack slot, convert to actual type
         self.switch_and_seal(success_block);
-        let payload = load_fallible_payload(self.builder, fallible.value, payload_ty);
+        let payload_i64 = load_fallible_payload(self.builder, fallible.value, types::I64);
+        // Convert i64 back to the actual success type
+        let payload = self.convert_from_i64_storage(payload_i64, success_type_id);
         let payload_arg = BlockArg::from(payload);
         self.builder.ins().jump(merge_block, &[payload_arg]);
 
@@ -1976,8 +1981,25 @@ impl Cg<'_, '_, '_> {
             .map(|field_id| self.query().get_field(field_id).clone())
             .collect();
 
-        // Error fields are stored inline in the fallible structure
-        // Layout: tag at offset 0, fields at offset 8, 16, 24, ...
+        // Fallible layout (consistent with external functions in runtime):
+        // - Offset 0: tag (i64)
+        // - Offset 8: payload (i64)
+        //   - For 0 fields: 0
+        //   - For 1 field: the field value directly (inline)
+        //   - For 2+ fields: pointer to field data
+        //
+        // Load the payload from the fallible
+        let payload = self.builder.ins().load(
+            types::I64,
+            MemFlags::new(),
+            scrutinee.value,
+            FALLIBLE_PAYLOAD_OFFSET,
+        );
+
+        // For single-field errors, the payload IS the field value
+        // For multi-field errors, the payload is a pointer to field data
+        let single_field = error_fields.len() == 1;
+
         for field_pattern in fields.iter() {
             let field_name = self.interner().resolve(field_pattern.field_name);
 
@@ -1988,14 +2010,17 @@ impl Cg<'_, '_, '_> {
                 continue;
             };
 
-            // Calculate field offset: payload starts at offset 8, each field is 8 bytes
-            let field_offset = FALLIBLE_PAYLOAD_OFFSET + (field_idx as i32 * 8);
-
-            // Load the field value as i64 (stored as i64)
-            let raw_value =
+            // Load the field value
+            let raw_value = if single_field {
+                // For single-field errors, the payload is the value directly
+                payload
+            } else {
+                // For multi-field errors, payload is a pointer to field data
+                let field_offset = (field_idx as i32) * 8;
                 self.builder
                     .ins()
-                    .load(types::I64, MemFlags::new(), scrutinee.value, field_offset);
+                    .load(types::I64, MemFlags::new(), payload, field_offset)
+            };
 
             // Convert from i64 to the actual field type
             let field_ty_id = field_def.ty;
