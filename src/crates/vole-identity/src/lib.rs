@@ -13,7 +13,7 @@ pub use entities::{FieldId, FunctionId, GlobalId, MethodId, TypeDefId, TypeParam
 pub use namer::{Namer, NamerLookup, method_name_id_by_str};
 pub use resolver::Resolver;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct ModuleId(u32);
 
 impl ModuleId {

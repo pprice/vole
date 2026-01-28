@@ -217,9 +217,14 @@ impl Analyzer {
                 // Direct structural type - resolve it to an InternedStructural
                 let module_id = self.current_module;
                 let mut ctx = if let Some(scope) = type_param_scope {
-                    TypeResolutionContext::with_type_params(&self.db, interner, module_id, scope)
+                    TypeResolutionContext::with_type_params(
+                        &self.ctx.db,
+                        interner,
+                        module_id,
+                        scope,
+                    )
                 } else {
-                    TypeResolutionContext::new(&self.db, interner, module_id)
+                    TypeResolutionContext::new(&self.ctx.db, interner, module_id)
                 };
                 let type_id = resolve_type_to_id(ty, &mut ctx);
                 self.type_arena().unwrap_structural(type_id).cloned()
@@ -385,7 +390,7 @@ impl Analyzer {
             // For synthetic type params, use the type param instead of the structural type
             let module_id = self.current_module;
             let mut ctx = TypeResolutionContext::with_type_params(
-                &self.db,
+                &self.ctx.db,
                 interner,
                 module_id,
                 &type_param_scope,
@@ -513,7 +518,10 @@ impl Analyzer {
             .map(|p| {
                 if let Some(scope) = type_param_scope {
                     let mut ctx = TypeResolutionContext::with_type_params(
-                        &self.db, interner, module_id, scope,
+                        &self.ctx.db,
+                        interner,
+                        module_id,
+                        scope,
                     );
                     ctx.self_type = self_type;
                     resolve_type_to_id(&p.ty, &mut ctx)
@@ -535,7 +543,10 @@ impl Analyzer {
             .map(|t| {
                 if let Some(scope) = type_param_scope {
                     let mut ctx = TypeResolutionContext::with_type_params(
-                        &self.db, interner, module_id, scope,
+                        &self.ctx.db,
+                        interner,
+                        module_id,
+                        scope,
                     );
                     ctx.self_type = self_type;
                     resolve_type_to_id(t, &mut ctx)
@@ -1096,7 +1107,7 @@ impl Analyzer {
         let field_type_ids: Vec<ArenaTypeId> = if let Some(scope) = type_param_scope {
             let module_id = self.current_module;
             let mut ctx =
-                TypeResolutionContext::with_type_params(&self.db, interner, module_id, scope);
+                TypeResolutionContext::with_type_params(&self.ctx.db, interner, module_id, scope);
             fields
                 .iter()
                 .map(|f| resolve_type_to_id(&f.ty, &mut ctx))
@@ -1341,7 +1352,7 @@ impl Analyzer {
             // Resolve field types with type params in scope
             let module_id = self.current_module;
             let mut ctx = TypeResolutionContext::with_type_params(
-                &self.db,
+                &self.ctx.db,
                 interner,
                 module_id,
                 &type_param_scope,
@@ -1536,7 +1547,7 @@ impl Analyzer {
             // so that find_method_on_type works for inherited default methods.
             // Destructure db to allow simultaneous mutable access to entities and names.
             {
-                let mut db = self.db.borrow_mut();
+                let mut db = self.ctx.db.borrow_mut();
                 let CompilationDb {
                     ref mut entities,
                     ref mut names,
@@ -1595,7 +1606,7 @@ impl Analyzer {
 
         let module_id = self.current_module;
         let mut type_ctx = TypeResolutionContext::with_type_params(
-            &self.db,
+            &self.ctx.db,
             interner,
             module_id,
             &type_param_scope,
@@ -1828,7 +1839,7 @@ impl Analyzer {
 
                 // Create a fresh type context for each static method
                 let mut static_type_ctx = TypeResolutionContext::with_type_params(
-                    &self.db,
+                    &self.ctx.db,
                     interner,
                     module_id,
                     &type_param_scope,
@@ -2361,7 +2372,7 @@ impl Analyzer {
                 // Resolve with type params in scope
                 let module_id = self.current_module;
                 let mut ctx = TypeResolutionContext::with_type_params(
-                    &self.db,
+                    &self.ctx.db,
                     interner,
                     module_id,
                     &type_param_scope,

@@ -9,14 +9,8 @@
 
 use super::Analyzer;
 use crate::analysis_cache::CachedModule;
-use crate::generic::TypeParamScopeStack;
-use crate::resolution::MethodResolutions;
-use crate::scope::Scope;
 use crate::type_arena::TypeId as ArenaTypeId;
-use rustc_hash::FxHashMap;
 use smallvec::smallvec;
-use std::collections::HashSet;
-use std::rc::Rc;
 use vole_frontend::ast::Decl;
 use vole_frontend::{Interner, Parser};
 use vole_identity::NameId;
@@ -100,7 +94,7 @@ impl Analyzer {
             .to_string();
 
         // Check cache first using canonical_path for consistent lookup
-        if let Some(ref cache) = self.module_cache
+        if let Some(ref cache) = self.ctx.module_cache
             && let Some(cached) = cache.borrow().get(import_path)
         {
             // Use cached analysis results.
@@ -109,7 +103,7 @@ impl Analyzer {
                     .insert(name.clone(), func_type.clone());
             }
             // Use import_path for prelude files (consistent with module_id)
-            self.module_programs.borrow_mut().insert(
+            self.ctx.module_programs.borrow_mut().insert(
                 import_path.to_string(),
                 (cached.program.clone(), cached.interner.clone()),
             );
@@ -145,50 +139,8 @@ impl Analyzer {
         // This ensures Iterator<T> comparisons work correctly across modules.
         let prelude_module = self.name_table_mut().module_id(import_path);
 
-        // Create a sub-analyzer that shares the same db
-        let mut sub_analyzer = Analyzer {
-            scope: Scope::new(),
-            functions: FxHashMap::default(),
-            functions_by_name: FxHashMap::default(),
-            globals: FxHashMap::default(),
-            constant_globals: HashSet::new(),
-            current_function_return: None,
-            current_function_error_type: None,
-            current_generator_element_type: None,
-            current_static_method: None,
-            errors: Vec::new(),
-            warnings: Vec::new(),
-            type_overrides: FxHashMap::default(),
-            lambda_captures: Vec::new(),
-            lambda_locals: Vec::new(),
-            lambda_side_effects: Vec::new(),
-            expr_types: FxHashMap::default(),
-            is_check_results: FxHashMap::default(),
-            method_resolutions: MethodResolutions::new(),
-            // Use child loader to inherit sandbox settings (stdlib_root, project_root)
-            module_loader: self.module_loader.new_child(),
-            // Share module_type_ids so imports to already-loaded prelude files hit the cache
-            module_type_ids: self.module_type_ids.clone(),
-            // Share module_programs so codegen can find already-loaded prelude modules
-            module_programs: self.module_programs.clone(),
-            module_expr_types: self.module_expr_types.clone(),
-            module_method_resolutions: self.module_method_resolutions.clone(),
-            loading_prelude: true, // Prevent sub-analyzer from loading prelude
-            generic_calls: FxHashMap::default(),
-            class_method_calls: FxHashMap::default(),
-            static_method_calls: FxHashMap::default(),
-            substituted_return_types: FxHashMap::default(),
-            lambda_defaults: FxHashMap::default(),
-            lambda_variables: FxHashMap::default(),
-            scoped_function_types: FxHashMap::default(),
-            declared_var_types: FxHashMap::default(),
-            current_module: prelude_module,
-            type_param_stack: TypeParamScopeStack::new(),
-            module_cache: None,
-            db: Rc::clone(&self.db),
-            current_file_path: Some(module_info.path.clone()),
-            in_arm_body: false,
-        };
+        // Create a sub-analyzer that shares the same context
+        let mut sub_analyzer = self.fork_for_prelude(prelude_module, module_info.path.clone());
 
         // Analyze the prelude file
         let analyze_result = sub_analyzer.analyze(&program, &prelude_interner);
@@ -197,7 +149,7 @@ impl Analyzer {
         }
         if analyze_result.is_ok() {
             // Cache the analysis results
-            if let Some(ref cache) = self.module_cache {
+            if let Some(ref cache) = self.ctx.module_cache {
                 cache.borrow_mut().insert(
                     import_path.to_string(),
                     CachedModule {
@@ -242,12 +194,14 @@ impl Analyzer {
             // Create module type and cache it
             // Use canonical_path for module_type_ids cache (for deduplication)
             let module_type_id = self.type_arena_mut().module(prelude_module, exports);
-            self.module_type_ids
+            self.ctx
+                .module_type_ids
                 .borrow_mut()
                 .insert(canonical_path, module_type_id);
 
             // Use import_path for program/expr/method maps (consistent with module_id)
-            self.module_programs
+            self.ctx
+                .module_programs
                 .borrow_mut()
                 .insert(import_path.to_string(), (program, prelude_interner));
             self.module_expr_types

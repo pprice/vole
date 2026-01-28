@@ -28,7 +28,7 @@ impl Analyzer {
 
                 // Use arena-based substitution - get raw pointer to arena to avoid borrow conflict
                 // Rc::make_mut provides copy-on-write (free when refcount is 1)
-                let mut db = self.db.borrow_mut();
+                let mut db = self.ctx.db.borrow_mut();
                 let arena = Rc::make_mut(&mut db.types) as *mut _;
                 let substituted_id = Rc::make_mut(&mut db.entities).substitute_type_id_with_args(
                     type_def_id,

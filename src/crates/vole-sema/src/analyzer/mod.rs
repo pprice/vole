@@ -450,46 +450,14 @@ impl AnalyzerBuilder {
             module_loader.set_project_root(root);
         }
 
-        // Step 6: Create the analyzer with all fields initialized
+        // Step 6: Create shared context and the analyzer
+        let ctx = Rc::new(AnalyzerContext::new(db, self.cache));
         let mut analyzer = Analyzer {
-            scope: Scope::new(),
-            functions: FxHashMap::default(),
-            functions_by_name: FxHashMap::default(),
-            globals: FxHashMap::default(),
-            constant_globals: HashSet::new(),
-            current_function_return: None,
-            current_function_error_type: None,
-            current_generator_element_type: None,
-            current_static_method: None,
-            errors: Vec::new(),
-            warnings: Vec::new(),
-            type_overrides: FxHashMap::default(),
-            lambda_captures: Vec::new(),
-            lambda_locals: Vec::new(),
-            lambda_side_effects: Vec::new(),
-            expr_types: FxHashMap::default(),
-            is_check_results: FxHashMap::default(),
-            method_resolutions: MethodResolutions::new(),
-            module_loader,
-            module_type_ids: Rc::new(RefCell::new(FxHashMap::default())),
-            module_programs: Rc::new(RefCell::new(FxHashMap::default())),
-            module_expr_types: FxHashMap::default(),
-            module_method_resolutions: FxHashMap::default(),
-            loading_prelude: false,
-            generic_calls: FxHashMap::default(),
-            class_method_calls: FxHashMap::default(),
-            static_method_calls: FxHashMap::default(),
-            substituted_return_types: FxHashMap::default(),
-            lambda_defaults: FxHashMap::default(),
-            lambda_variables: FxHashMap::default(),
-            scoped_function_types: FxHashMap::default(),
-            declared_var_types: FxHashMap::default(),
+            ctx,
             current_module,
-            type_param_stack: TypeParamScopeStack::new(),
-            module_cache: self.cache,
-            db,
             current_file_path,
-            in_arm_body: false,
+            module_loader,
+            ..Default::default()
         };
 
         // Step 7: Register built-in interfaces and implementations
@@ -499,7 +467,44 @@ impl AnalyzerBuilder {
     }
 }
 
+/// Shared state across all Analyzer instances (parent + sub-analyzers).
+/// Single `Rc` clone instead of 3-4 individual `Rc` clones per sub-analyzer.
+pub struct AnalyzerContext {
+    /// Unified compilation database containing all registries.
+    /// Shared via `Rc<RefCell>` so sub-analyzers use the same db, making TypeIds
+    /// valid across all analyzers and eliminating clone/merge operations.
+    pub db: Rc<RefCell<CompilationDb>>,
+    /// Cached module TypeIds by import path (avoids re-parsing).
+    pub module_type_ids: RefCell<FxHashMap<String, ArenaTypeId>>,
+    /// Parsed module programs and their interners (for compiling pure Vole functions).
+    pub module_programs: RefCell<FxHashMap<String, (Program, Interner)>>,
+    /// Optional shared cache for module analysis results.
+    /// When set, modules are cached after analysis and reused across Analyzer instances.
+    pub module_cache: Option<Rc<RefCell<ModuleCache>>>,
+}
+
+impl AnalyzerContext {
+    /// Create a new context with the given db and optional cache.
+    fn new(db: Rc<RefCell<CompilationDb>>, cache: Option<Rc<RefCell<ModuleCache>>>) -> Self {
+        Self {
+            db,
+            module_type_ids: RefCell::new(FxHashMap::default()),
+            module_programs: RefCell::new(FxHashMap::default()),
+            module_cache: cache,
+        }
+    }
+
+    /// Create an empty context (for Default impl).
+    fn empty() -> Self {
+        Self::new(Rc::new(RefCell::new(CompilationDb::new())), None)
+    }
+}
+
 pub struct Analyzer {
+    // Shared state (single Rc clone for sub-analyzers)
+    pub ctx: Rc<AnalyzerContext>,
+
+    // Per-analysis state
     scope: Scope,
     functions: FxHashMap<Symbol, FunctionType>,
     /// Functions registered by string name (for prelude functions that cross interner boundaries)
@@ -538,12 +543,6 @@ pub struct Analyzer {
     pub method_resolutions: MethodResolutions,
     /// Module loader for handling imports
     module_loader: ModuleLoader,
-    /// Cached module TypeIds by import path (avoids re-parsing).
-    /// Shared via Rc<RefCell> so sub-analyzers can see and update the same cache.
-    module_type_ids: Rc<RefCell<FxHashMap<String, ArenaTypeId>>>,
-    /// Parsed module programs and their interners (for compiling pure Vole functions).
-    /// Shared via Rc<RefCell> so sub-analyzers can see and update the same cache.
-    module_programs: Rc<RefCell<FxHashMap<String, (Program, Interner)>>>,
     /// Expression types for module programs (keyed by module path -> NodeId -> ArenaTypeId)
     /// Stored separately since NodeIds are per-program and can't be merged into main expr_types.
     /// Uses interned ArenaTypeId handles for O(1) equality during analysis.
@@ -578,13 +577,6 @@ pub struct Analyzer {
     current_module: ModuleId,
     /// Stack of type parameter scopes for nested generic contexts.
     type_param_stack: TypeParamScopeStack,
-    /// Optional shared cache for module analysis results.
-    /// When set, modules are cached after analysis and reused across Analyzer instances.
-    module_cache: Option<Rc<RefCell<ModuleCache>>>,
-    /// Unified compilation database containing all registries.
-    /// Shared via Rc<RefCell> so sub-analyzers use the same db, making TypeIds
-    /// valid across all analyzers and eliminating clone/merge operations.
-    pub db: Rc<RefCell<CompilationDb>>,
     /// Current file path being analyzed (for relative imports).
     /// This is set from the file path passed to Analyzer::new() and updated
     /// when analyzing imported modules.
@@ -673,7 +665,7 @@ impl Analyzer {
     /// Create a resolver for name resolution.
     /// Note: The returned resolver holds a borrow of the db's name_table.
     pub fn resolver<'a>(&'a self, interner: &'a Interner) -> ResolverGuard<'a> {
-        ResolverGuard::new(&self.db, interner, self.current_module)
+        ResolverGuard::new(&self.ctx.db, interner, self.current_module)
     }
 
     /// Create a resolver for a specific module context.
@@ -683,7 +675,7 @@ impl Analyzer {
         interner: &'a Interner,
         module_id: ModuleId,
     ) -> ResolverGuard<'a> {
-        ResolverGuard::new(&self.db, interner, module_id)
+        ResolverGuard::new(&self.ctx.db, interner, module_id)
     }
 
     /// Take ownership of the expression types (consuming self)
@@ -714,10 +706,8 @@ impl Analyzer {
         );
         AnalysisOutput {
             expression_data,
-            module_programs: Rc::try_unwrap(self.module_programs)
-                .map(|cell| cell.into_inner())
-                .unwrap_or_else(|rc| rc.borrow().clone()),
-            db: self.db,
+            module_programs: self.ctx.module_programs.borrow().clone(),
+            db: Rc::clone(&self.ctx.db),
             module_id: self.current_module,
         }
     }
@@ -791,49 +781,49 @@ impl Analyzer {
     /// Get the type arena (read access)
     #[inline]
     fn type_arena(&self) -> std::cell::Ref<'_, TypeArena> {
-        std::cell::Ref::map(self.db.borrow(), |db| &*db.types)
+        std::cell::Ref::map(self.ctx.db.borrow(), |db| &*db.types)
     }
 
     /// Get the type arena (write access) - uses Rc::make_mut for copy-on-write
     #[inline]
     fn type_arena_mut(&self) -> std::cell::RefMut<'_, TypeArena> {
-        std::cell::RefMut::map(self.db.borrow_mut(), |db| db.types_mut())
+        std::cell::RefMut::map(self.ctx.db.borrow_mut(), |db| db.types_mut())
     }
 
     /// Get the entity registry (read access)
     #[inline]
     fn entity_registry(&self) -> std::cell::Ref<'_, EntityRegistry> {
-        std::cell::Ref::map(self.db.borrow(), |db| &*db.entities)
+        std::cell::Ref::map(self.ctx.db.borrow(), |db| &*db.entities)
     }
 
     /// Get the entity registry (write access) - uses Rc::make_mut for copy-on-write
     #[inline]
     fn entity_registry_mut(&self) -> std::cell::RefMut<'_, EntityRegistry> {
-        std::cell::RefMut::map(self.db.borrow_mut(), |db| db.entities_mut())
+        std::cell::RefMut::map(self.ctx.db.borrow_mut(), |db| db.entities_mut())
     }
 
     /// Get the name table (read access)
     #[inline]
     fn name_table(&self) -> std::cell::Ref<'_, NameTable> {
-        std::cell::Ref::map(self.db.borrow(), |db| &db.names)
+        std::cell::Ref::map(self.ctx.db.borrow(), |db| &db.names)
     }
 
     /// Get the name table (write access)
     #[inline]
     fn name_table_mut(&self) -> std::cell::RefMut<'_, NameTable> {
-        std::cell::RefMut::map(self.db.borrow_mut(), |db| &mut db.names)
+        std::cell::RefMut::map(self.ctx.db.borrow_mut(), |db| &mut db.names)
     }
 
     /// Get the implement registry (read access)
     #[inline]
     fn implement_registry(&self) -> std::cell::Ref<'_, ImplementRegistry> {
-        std::cell::Ref::map(self.db.borrow(), |db| &*db.implements)
+        std::cell::Ref::map(self.ctx.db.borrow(), |db| &*db.implements)
     }
 
     /// Get the implement registry (write access) - uses Rc::make_mut for copy-on-write
     #[inline]
     fn implement_registry_mut(&self) -> std::cell::RefMut<'_, ImplementRegistry> {
-        std::cell::RefMut::map(self.db.borrow_mut(), |db| db.implements_mut())
+        std::cell::RefMut::map(self.ctx.db.borrow_mut(), |db| db.implements_mut())
     }
 
     /// Pre-compute substituted field types for a generic class/record instantiation.
@@ -971,7 +961,7 @@ impl Analyzer {
             let table = self.name_table();
             table.module_path(module_id).to_string()
         };
-        let programs = self.module_programs.borrow();
+        let programs = self.ctx.module_programs.borrow();
         let (_, module_interner) = programs.get(&module_path)?;
         let sym = module_interner.lookup(name)?;
         self.name_table()
@@ -1104,7 +1094,7 @@ impl Analyzer {
         // Populate well-known TypeDefIds now that interfaces are registered
         // Destructure db to allow simultaneous mutable and immutable borrows of different fields
         {
-            let mut db = self.db.borrow_mut();
+            let mut db = self.ctx.db.borrow_mut();
             let CompilationDb {
                 ref mut names,
                 ref entities,
@@ -1204,7 +1194,7 @@ impl Analyzer {
 
         let module_id = self.current_module;
         let mut ctx = TypeResolutionContext {
-            db: &self.db,
+            db: &self.ctx.db,
             interner,
             module_id,
             type_params: self.type_param_stack.current(),
@@ -1752,7 +1742,7 @@ impl Analyzer {
             // Resolve field type directly to TypeId
             let module_id = self.current_module;
             let mut ctx = TypeResolutionContext {
-                db: &self.db,
+                db: &self.ctx.db,
                 interner,
                 module_id,
                 type_params: None,
@@ -1844,7 +1834,7 @@ impl Analyzer {
             TypeConstraint::Union(types) => {
                 let module_id = self.current_module;
                 let mut ctx = TypeResolutionContext::with_type_params(
-                    &self.db,
+                    &self.ctx.db,
                     interner,
                     module_id,
                     type_param_scope,
@@ -1858,7 +1848,7 @@ impl Analyzer {
             TypeConstraint::Structural { fields, methods } => {
                 let module_id = self.current_module;
                 let mut ctx = TypeResolutionContext::with_type_params(
-                    &self.db,
+                    &self.ctx.db,
                     interner,
                     module_id,
                     type_param_scope,
@@ -2759,7 +2749,7 @@ impl Analyzer {
 
             // Update the method's return type in EntityRegistry
             {
-                let mut db = self.db.borrow_mut();
+                let mut db = self.ctx.db.borrow_mut();
                 let CompilationDb {
                     ref mut entities,
                     ref mut types,
@@ -2958,7 +2948,7 @@ impl Analyzer {
             // Update the method signature with the inferred return type
             // Destructure db to get both entities and types to avoid RefCell conflict
             {
-                let mut db = self.db.borrow_mut();
+                let mut db = self.ctx.db.borrow_mut();
                 let CompilationDb {
                     ref mut entities,
                     ref mut types,
@@ -3181,7 +3171,12 @@ impl Analyzer {
         };
 
         // Check cache with canonical path
-        let cached_type_id = self.module_type_ids.borrow().get(&canonical_path).copied();
+        let cached_type_id = self
+            .ctx
+            .module_type_ids
+            .borrow()
+            .get(&canonical_path)
+            .copied();
         if let Some(type_id) = cached_type_id {
             tracing::debug!(import_path, %canonical_path, "analyze_module: cache HIT");
             return Ok(type_id);
@@ -3350,7 +3345,7 @@ impl Analyzer {
                             // Resolve types with type params in scope
                             let (func_type_id, param_type_ids, return_type_id) = {
                                 let mut ctx = TypeResolutionContext::with_type_params(
-                                    &self.db,
+                                    &self.ctx.db,
                                     &module_interner,
                                     module_id,
                                     &type_param_scope,
@@ -3399,7 +3394,7 @@ impl Analyzer {
                             // Non-generic external: resolve types directly
                             let func_type_id = {
                                 let mut ctx = TypeResolutionContext {
-                                    db: &self.db,
+                                    db: &self.ctx.db,
                                     interner: &module_interner,
                                     module_id,
                                     type_params: None,
@@ -3453,7 +3448,7 @@ impl Analyzer {
 
         // Store the program and interner for compiling pure Vole functions
         // Use module_key for consistent lookup with module_id
-        self.module_programs.borrow_mut().insert(
+        self.ctx.module_programs.borrow_mut().insert(
             module_key.clone(),
             (program.clone(), module_interner.clone()),
         );
@@ -3461,7 +3456,7 @@ impl Analyzer {
         // Run semantic analysis on the module to populate expr_types for function bodies.
         // This is needed for codegen to resolve return types of calls to external functions
         // inside the module (e.g., min(max(x, lo), hi) in math.clamp).
-        let mut sub_analyzer = self.create_module_sub_analyzer(module_id, Some(module_file_path));
+        let mut sub_analyzer = self.fork_for_module(module_id, Some(module_file_path));
         let analyze_result = sub_analyzer.analyze(&program, &module_interner);
         if let Err(ref errors) = analyze_result {
             tracing::warn!(import_path, ?errors, "module analysis errors");
@@ -3491,7 +3486,7 @@ impl Analyzer {
         for (name_id, f) in deferred_functions {
             let func_type_id = {
                 let mut ctx = TypeResolutionContext {
-                    db: &self.db,
+                    db: &self.ctx.db,
                     interner: &module_interner,
                     module_id,
                     type_params: None,
@@ -3591,23 +3586,48 @@ impl Analyzer {
         );
 
         // Cache the TypeId with canonical path for consistent lookups
-        self.module_type_ids
+        self.ctx
+            .module_type_ids
             .borrow_mut()
             .insert(canonical_path, type_id);
 
         Ok(type_id)
     }
 
-    /// Create a sub-analyzer for analyzing a module's function bodies.
-    /// This shares the CompilationDb so TypeIds remain valid across analyzers.
-    /// The module_file_path is the actual file path of the module being analyzed,
-    /// used to resolve relative imports within that module.
-    fn create_module_sub_analyzer(
-        &self,
-        module_id: ModuleId,
-        module_file_path: Option<PathBuf>,
-    ) -> Analyzer {
+    /// Fork for analyzing an imported module.
+    /// Shares the `AnalyzerContext` so TypeIds remain valid across analyzers.
+    fn fork_for_module(&self, module_id: ModuleId, module_file_path: Option<PathBuf>) -> Analyzer {
         Analyzer {
+            ctx: Rc::clone(&self.ctx),
+            current_module: module_id,
+            current_file_path: module_file_path,
+            loading_prelude: true, // Prevent sub-analyzer from loading prelude
+            module_loader: self.module_loader.new_child(),
+            ..Default::default()
+        }
+    }
+
+    /// Fork for analyzing a prelude file.
+    /// Clones `module_expr_types` and `module_method_resolutions` from parent
+    /// so previously loaded prelude modules are visible.
+    fn fork_for_prelude(&self, module_id: ModuleId, file_path: PathBuf) -> Analyzer {
+        Analyzer {
+            ctx: Rc::clone(&self.ctx),
+            current_module: module_id,
+            current_file_path: Some(file_path),
+            loading_prelude: true, // Prevent sub-analyzer from loading prelude
+            module_loader: self.module_loader.new_child(),
+            module_expr_types: self.module_expr_types.clone(),
+            module_method_resolutions: self.module_method_resolutions.clone(),
+            ..Default::default()
+        }
+    }
+}
+
+impl Default for Analyzer {
+    fn default() -> Self {
+        Self {
+            ctx: Rc::new(AnalyzerContext::empty()),
             scope: Scope::new(),
             functions: FxHashMap::default(),
             functions_by_name: FxHashMap::default(),
@@ -3626,15 +3646,10 @@ impl Analyzer {
             expr_types: FxHashMap::default(),
             is_check_results: FxHashMap::default(),
             method_resolutions: MethodResolutions::new(),
-            // Use child loader to inherit sandbox settings (stdlib_root, project_root)
-            module_loader: self.module_loader.new_child(),
-            // Share module_type_ids so nested imports reuse cached modules
-            module_type_ids: Rc::clone(&self.module_type_ids),
-            // Share module_programs so nested imports are visible to parent
-            module_programs: Rc::clone(&self.module_programs),
+            module_loader: ModuleLoader::new(),
             module_expr_types: FxHashMap::default(),
             module_method_resolutions: FxHashMap::default(),
-            loading_prelude: true, // Prevent sub-analyzer from loading prelude
+            loading_prelude: false,
             generic_calls: FxHashMap::default(),
             class_method_calls: FxHashMap::default(),
             static_method_calls: FxHashMap::default(),
@@ -3643,18 +3658,13 @@ impl Analyzer {
             lambda_variables: FxHashMap::default(),
             scoped_function_types: FxHashMap::default(),
             declared_var_types: FxHashMap::default(),
-            current_module: module_id,
+            current_module: ModuleId::default(),
             type_param_stack: TypeParamScopeStack::new(),
-            module_cache: None,
-            db: Rc::clone(&self.db), // Share the compilation db
-            // Use module's file path so relative imports resolve correctly
-            current_file_path: module_file_path,
+            current_file_path: None,
             in_arm_body: false,
         }
     }
 }
-
-// Note: Default is not implemented because Analyzer requires file and source parameters
 
 #[cfg(test)]
 mod tests;
