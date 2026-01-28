@@ -1,0 +1,42 @@
+[stdout]
+
+[stderr]
+  x [E2083]: missing return statement in function 'if_no_else'
+   ,-[<path>/missing_return_branches.vole:4:1]
+ 3 |     // If without else: cannot guarantee return
+ 4 | ,-> func if_no_else(x: i64) -> i64 {
+ 5 | |       if x > 0 {
+ 6 | |           return 1
+ 7 | |       }
+ 8 | |-> }
+   : `---- function expects to return i64
+ 9 |     
+   `----
+  help: add a return statement, or change return type to void
+  x [E2083]: missing return statement in function 'only_then_returns'
+    ,-[<path>/missing_return_branches.vole:11:1]
+ 10 |     // If where only then branch returns
+ 11 | ,-> func only_then_returns(x: i64) -> i64 {
+ 12 | |       if x > 0 {
+ 13 | |           return 1
+ 14 | |       } else {
+ 15 | |           let y = 2
+ 16 | |       }
+ 17 | |-> }
+    : `---- function expects to return i64
+ 18 |     
+    `----
+  help: add a return statement, or change return type to void
+  x [E2083]: missing return statement in function 'only_else_returns'
+    ,-[<path>/missing_return_branches.vole:20:1]
+ 19 |     // If where only else branch returns
+ 20 | ,-> func only_else_returns(x: i64) -> i64 {
+ 21 | |       if x > 0 {
+ 22 | |           let y = 1
+ 23 | |       } else {
+ 24 | |           return 2
+ 25 | |       }
+ 26 | |-> }
+    : `---- function expects to return i64
+    `----
+  help: add a return statement, or change return type to void

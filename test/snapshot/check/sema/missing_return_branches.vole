@@ -1,0 +1,26 @@
+// Test: E2083 - missing return with incomplete branches
+
+// If without else: cannot guarantee return
+func if_no_else(x: i64) -> i64 {
+    if x > 0 {
+        return 1
+    }
+}
+
+// If where only then branch returns
+func only_then_returns(x: i64) -> i64 {
+    if x > 0 {
+        return 1
+    } else {
+        let y = 2
+    }
+}
+
+// If where only else branch returns
+func only_else_returns(x: i64) -> i64 {
+    if x > 0 {
+        let y = 1
+    } else {
+        return 2
+    }
+}

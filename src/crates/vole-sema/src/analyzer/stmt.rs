@@ -5,6 +5,85 @@ use crate::type_arena::TypeId as ArenaTypeId;
 use vole_frontend::PatternKind;
 
 impl Analyzer {
+    /// Checks whether all control flow paths through a block definitely return.
+    ///
+    /// A block definitely returns if any of its statements definitely returns
+    /// (e.g. a return/raise statement, or a branching construct where all branches return).
+    fn block_definitely_returns(block: &Block) -> bool {
+        block
+            .stmts
+            .iter()
+            .any(Self::stmt_definitely_returns)
+    }
+
+    /// Checks whether a statement definitely returns on all control flow paths.
+    fn stmt_definitely_returns(stmt: &Stmt) -> bool {
+        match stmt {
+            Stmt::Return(_) => true,
+            Stmt::Raise(_) => true,
+            Stmt::If(if_stmt) => {
+                // Both branches must exist and both must definitely return
+                if let Some(else_branch) = &if_stmt.else_branch {
+                    Self::block_definitely_returns(&if_stmt.then_branch)
+                        && Self::block_definitely_returns(else_branch)
+                } else {
+                    false
+                }
+            }
+            Stmt::Expr(expr_stmt) => Self::expr_definitely_returns(&expr_stmt.expr),
+            // While/For loops may never execute their body
+            _ => false,
+        }
+    }
+
+    /// Checks whether an expression definitely returns on all control flow paths.
+    ///
+    /// This is used for expression-statements that contain control flow like
+    /// match/when with return statements in all arms, or unreachable.
+    fn expr_definitely_returns(expr: &Expr) -> bool {
+        match &expr.kind {
+            ExprKind::Unreachable => true,
+            ExprKind::Block(block_expr) => Self::block_expr_definitely_returns(block_expr),
+            ExprKind::Match(match_expr) => {
+                // All arms must definitely return, and there must be at least one arm
+                !match_expr.arms.is_empty()
+                    && match_expr
+                        .arms
+                        .iter()
+                        .all(|arm| Self::expr_definitely_returns(&arm.body))
+            }
+            ExprKind::When(when_expr) => {
+                // All arms must definitely return, must have a wildcard (else) arm,
+                // and there must be at least one arm
+                let has_wildcard = when_expr.arms.iter().any(|arm| arm.condition.is_none());
+                has_wildcard
+                    && !when_expr.arms.is_empty()
+                    && when_expr
+                        .arms
+                        .iter()
+                        .all(|arm| Self::expr_definitely_returns(&arm.body))
+            }
+            ExprKind::If(if_expr) => {
+                // Both branches must exist and both must definitely return
+                if let Some(else_branch) = &if_expr.else_branch {
+                    Self::expr_definitely_returns(&if_expr.then_branch)
+                        && Self::expr_definitely_returns(else_branch)
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        }
+    }
+
+    /// Checks whether a block expression definitely returns on all control flow paths.
+    fn block_expr_definitely_returns(block: &BlockExpr) -> bool {
+        block
+            .stmts
+            .iter()
+            .any(Self::stmt_definitely_returns)
+    }
+
     /// Check if an expression kind is a literal that can benefit from bidirectional type inference.
     /// This includes int literals, float literals, and nil - types that can be inferred from context.
     fn is_inferable_literal(kind: &ExprKind) -> bool {
@@ -152,6 +231,10 @@ impl Analyzer {
                 }
             }
             Stmt::Expr(expr_stmt) => {
+                // Check if the expression definitely returns before type-checking
+                // (structural analysis on the AST, independent of types)
+                let definitely_returns = Self::expr_definitely_returns(&expr_stmt.expr);
+
                 let expr_type_id = self.check_expr(&expr_stmt.expr, interner)?;
 
                 // Check for unused expression result
@@ -165,7 +248,10 @@ impl Analyzer {
                     &expr_stmt.expr.kind,
                     ExprKind::Assign(_) | ExprKind::CompoundAssign(_)
                 );
-                if !is_assignment && expr_type_id != ArenaTypeId::VOID && !expr_type_id.is_invalid()
+                if !is_assignment
+                    && expr_type_id != ArenaTypeId::VOID
+                    && !expr_type_id.is_invalid()
+                    && !expr_type_id.is_never()
                 {
                     let ty = self.type_display_id(expr_type_id);
                     self.add_warning(
@@ -175,6 +261,13 @@ impl Analyzer {
                         },
                         expr_stmt.expr.span,
                     );
+                }
+
+                if definitely_returns {
+                    return Ok(ReturnInfo {
+                        definitely_returns: true,
+                        return_types: vec![],
+                    });
                 }
             }
             Stmt::While(while_stmt) => {

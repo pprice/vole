@@ -1,0 +1,101 @@
+// Test: control flow analysis for missing return detection
+// Functions where all branches return should NOT produce E2083
+
+// If/else where both branches return
+func if_else_returns(x: i64) -> i64 {
+    if x > 0 {
+        return 1
+    } else {
+        return -1
+    }
+}
+
+// Nested: if/else inside if/else
+func nested_if_returns(x: i64) -> string {
+    if x > 0 {
+        if x > 100 {
+            return "big"
+        } else {
+            return "small"
+        }
+    } else {
+        return "negative"
+    }
+}
+
+// Raise terminates a path (in fallible function)
+error DivError {}
+
+func safe_div(a: i64, b: i64) -> fallible(i64, DivError) {
+    if b == 0 {
+        raise DivError {}
+    } else {
+        return a / b
+    }
+}
+
+// If/else where one branch returns and other raises
+error BadInput {}
+
+func validate_positive(x: i64) -> fallible(i64, BadInput) {
+    if x <= 0 {
+        raise BadInput {}
+    } else {
+        return x
+    }
+}
+
+// Deeply nested if/else with returns
+func classify(x: i64) -> string {
+    if x < 0 {
+        return "negative"
+    } else {
+        if x == 0 {
+            return "zero"
+        } else {
+            if x < 10 {
+                return "small"
+            } else {
+                return "large"
+            }
+        }
+    }
+}
+
+tests {
+    test "if/else both return" {
+        assert(if_else_returns(5) == 1)
+        assert(if_else_returns(-3) == -1)
+    }
+
+    test "nested if/else returns" {
+        assert(nested_if_returns(200) == "big")
+        assert(nested_if_returns(50) == "small")
+        assert(nested_if_returns(-5) == "negative")
+    }
+
+    test "raise terminates path" {
+        let result = safe_div(10, 2)
+        match result {
+            success v => assert(v == 5)
+            error _ => assert(false)
+            _ => assert(false)
+        }
+    }
+
+    test "one branch returns, other raises" {
+        let result = validate_positive(42)
+        match result {
+            success v => assert(v == 42)
+            error _ => assert(false)
+            _ => assert(false)
+        }
+    }
+
+    test "deeply nested returns" {
+        assert(classify(-5) == "negative")
+        assert(classify(0) == "zero")
+        assert(classify(5) == "small")
+        assert(classify(100) == "large")
+    }
+}
