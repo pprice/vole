@@ -1172,22 +1172,39 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                         let v = self.builder.ins().popcnt(arg);
                         (v, types::I64, TypeId::I64)
                     }
-                    // bitrev
-                    UnaryIntOp::I8Bitrev | UnaryIntOp::U8Bitrev => {
+                    // bitrev - signed variants
+                    UnaryIntOp::I8Bitrev => {
                         let v = self.builder.ins().bitrev(arg);
                         (v, types::I8, TypeId::I8)
                     }
-                    UnaryIntOp::I16Bitrev | UnaryIntOp::U16Bitrev => {
+                    UnaryIntOp::I16Bitrev => {
                         let v = self.builder.ins().bitrev(arg);
                         (v, types::I16, TypeId::I16)
                     }
-                    UnaryIntOp::I32Bitrev | UnaryIntOp::U32Bitrev => {
+                    UnaryIntOp::I32Bitrev => {
                         let v = self.builder.ins().bitrev(arg);
                         (v, types::I32, TypeId::I32)
                     }
-                    UnaryIntOp::I64Bitrev | UnaryIntOp::U64Bitrev => {
+                    UnaryIntOp::I64Bitrev => {
                         let v = self.builder.ins().bitrev(arg);
                         (v, types::I64, TypeId::I64)
+                    }
+                    // bitrev - unsigned variants
+                    UnaryIntOp::U8Bitrev => {
+                        let v = self.builder.ins().bitrev(arg);
+                        (v, types::I8, TypeId::U8)
+                    }
+                    UnaryIntOp::U16Bitrev => {
+                        let v = self.builder.ins().bitrev(arg);
+                        (v, types::I16, TypeId::U16)
+                    }
+                    UnaryIntOp::U32Bitrev => {
+                        let v = self.builder.ins().bitrev(arg);
+                        (v, types::I32, TypeId::U32)
+                    }
+                    UnaryIntOp::U64Bitrev => {
+                        let v = self.builder.ins().bitrev(arg);
+                        (v, types::I64, TypeId::U64)
                     }
                 };
                 Ok(CompiledValue { value, ty, type_id })
@@ -1271,45 +1288,85 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                         let v = self.builder.ins().umax(arg1, arg2);
                         (v, types::I64, TypeId::U64)
                     }
-                    // rotl (arg2 is u8, needs extension to target type)
-                    BinaryIntOp::I8Rotl | BinaryIntOp::U8Rotl => {
+                    // rotl - signed (arg2 is u8, needs extension to target type)
+                    BinaryIntOp::I8Rotl => {
                         let v = self.builder.ins().rotl(arg1, arg2);
                         (v, types::I8, TypeId::I8)
                     }
-                    BinaryIntOp::I16Rotl | BinaryIntOp::U16Rotl => {
+                    BinaryIntOp::I16Rotl => {
                         let amt = self.builder.ins().uextend(types::I16, arg2);
                         let v = self.builder.ins().rotl(arg1, amt);
                         (v, types::I16, TypeId::I16)
                     }
-                    BinaryIntOp::I32Rotl | BinaryIntOp::U32Rotl => {
+                    BinaryIntOp::I32Rotl => {
                         let amt = self.builder.ins().uextend(types::I32, arg2);
                         let v = self.builder.ins().rotl(arg1, amt);
                         (v, types::I32, TypeId::I32)
                     }
-                    BinaryIntOp::I64Rotl | BinaryIntOp::U64Rotl => {
+                    BinaryIntOp::I64Rotl => {
                         let amt = self.builder.ins().uextend(types::I64, arg2);
                         let v = self.builder.ins().rotl(arg1, amt);
                         (v, types::I64, TypeId::I64)
                     }
-                    // rotr (arg2 is u8, needs extension to target type)
-                    BinaryIntOp::I8Rotr | BinaryIntOp::U8Rotr => {
+                    // rotl - unsigned
+                    BinaryIntOp::U8Rotl => {
+                        let v = self.builder.ins().rotl(arg1, arg2);
+                        (v, types::I8, TypeId::U8)
+                    }
+                    BinaryIntOp::U16Rotl => {
+                        let amt = self.builder.ins().uextend(types::I16, arg2);
+                        let v = self.builder.ins().rotl(arg1, amt);
+                        (v, types::I16, TypeId::U16)
+                    }
+                    BinaryIntOp::U32Rotl => {
+                        let amt = self.builder.ins().uextend(types::I32, arg2);
+                        let v = self.builder.ins().rotl(arg1, amt);
+                        (v, types::I32, TypeId::U32)
+                    }
+                    BinaryIntOp::U64Rotl => {
+                        let amt = self.builder.ins().uextend(types::I64, arg2);
+                        let v = self.builder.ins().rotl(arg1, amt);
+                        (v, types::I64, TypeId::U64)
+                    }
+                    // rotr - signed (arg2 is u8, needs extension to target type)
+                    BinaryIntOp::I8Rotr => {
                         let v = self.builder.ins().rotr(arg1, arg2);
                         (v, types::I8, TypeId::I8)
                     }
-                    BinaryIntOp::I16Rotr | BinaryIntOp::U16Rotr => {
+                    BinaryIntOp::I16Rotr => {
                         let amt = self.builder.ins().uextend(types::I16, arg2);
                         let v = self.builder.ins().rotr(arg1, amt);
                         (v, types::I16, TypeId::I16)
                     }
-                    BinaryIntOp::I32Rotr | BinaryIntOp::U32Rotr => {
+                    BinaryIntOp::I32Rotr => {
                         let amt = self.builder.ins().uextend(types::I32, arg2);
                         let v = self.builder.ins().rotr(arg1, amt);
                         (v, types::I32, TypeId::I32)
                     }
-                    BinaryIntOp::I64Rotr | BinaryIntOp::U64Rotr => {
+                    BinaryIntOp::I64Rotr => {
                         let amt = self.builder.ins().uextend(types::I64, arg2);
                         let v = self.builder.ins().rotr(arg1, amt);
                         (v, types::I64, TypeId::I64)
+                    }
+                    // rotr - unsigned
+                    BinaryIntOp::U8Rotr => {
+                        let v = self.builder.ins().rotr(arg1, arg2);
+                        (v, types::I8, TypeId::U8)
+                    }
+                    BinaryIntOp::U16Rotr => {
+                        let amt = self.builder.ins().uextend(types::I16, arg2);
+                        let v = self.builder.ins().rotr(arg1, amt);
+                        (v, types::I16, TypeId::U16)
+                    }
+                    BinaryIntOp::U32Rotr => {
+                        let amt = self.builder.ins().uextend(types::I32, arg2);
+                        let v = self.builder.ins().rotr(arg1, amt);
+                        (v, types::I32, TypeId::U32)
+                    }
+                    BinaryIntOp::U64Rotr => {
+                        let amt = self.builder.ins().uextend(types::I64, arg2);
+                        let v = self.builder.ins().rotr(arg1, amt);
+                        (v, types::I64, TypeId::U64)
                     }
                 };
                 Ok(CompiledValue { value, ty, type_id })

@@ -14,6 +14,88 @@ use super::context::Cg;
 use super::structs::{convert_to_i64_for_storage, get_field_slot_and_type_id_cg};
 use super::types::{CompiledValue, array_element_tag_id, convert_to_type};
 
+/// Convert a numeric TypeId to its corresponding Cranelift type.
+/// Only handles numeric types; other types will default to I64.
+fn type_id_to_cranelift_type(type_id: TypeId) -> Type {
+    match type_id {
+        TypeId::I8 => types::I8,
+        TypeId::I16 => types::I16,
+        TypeId::I32 => types::I32,
+        TypeId::I64 => types::I64,
+        TypeId::I128 => types::I128,
+        TypeId::U8 => types::I8,
+        TypeId::U16 => types::I16,
+        TypeId::U32 => types::I32,
+        TypeId::U64 => types::I64,
+        TypeId::F32 => types::F32,
+        TypeId::F64 => types::F64,
+        _ => types::I64, // Default for other types
+    }
+}
+
+/// Compute the result TypeId for numeric binary operations.
+/// Mirrors sema's numeric_result_type/integer_result_type logic to ensure consistency.
+fn numeric_result_type_id(left: TypeId, right: TypeId) -> TypeId {
+    // Float types take precedence, wider float wins
+    if left == TypeId::F64 || right == TypeId::F64 {
+        TypeId::F64
+    } else if left == TypeId::F32 || right == TypeId::F32 {
+        TypeId::F32
+    } else {
+        // Both are integers - use integer promotion rules (wider type wins)
+        integer_result_type_id(left, right)
+    }
+}
+
+/// Compute the result TypeId for integer binary operations.
+/// Follows sema's integer promotion: wider type wins.
+fn integer_result_type_id(left: TypeId, right: TypeId) -> TypeId {
+    // i128 is widest
+    if left == TypeId::I128 || right == TypeId::I128 {
+        TypeId::I128
+    }
+    // 64-bit types
+    else if left == TypeId::I64
+        || right == TypeId::I64
+        || left == TypeId::U64
+        || right == TypeId::U64
+    {
+        // If mixing signed/unsigned 64-bit, result is i64
+        TypeId::I64
+    }
+    // 32-bit types
+    else if left == TypeId::I32
+        || right == TypeId::I32
+        || left == TypeId::U32
+        || right == TypeId::U32
+    {
+        if left == TypeId::U32 && right == TypeId::U32 {
+            TypeId::U32
+        } else {
+            TypeId::I32
+        }
+    }
+    // 16-bit types
+    else if left == TypeId::I16
+        || right == TypeId::I16
+        || left == TypeId::U16
+        || right == TypeId::U16
+    {
+        if left == TypeId::U16 && right == TypeId::U16 {
+            TypeId::U16
+        } else {
+            TypeId::I16
+        }
+    }
+    // 8-bit types
+    else if left == TypeId::U8 && right == TypeId::U8 {
+        TypeId::U8
+    } else {
+        // Default: i8 or mixed 8-bit
+        TypeId::I8
+    }
+}
+
 impl Cg<'_, '_, '_> {
     /// Compile a binary expression
     pub fn binary(&mut self, bin: &BinaryExpr) -> Result<CompiledValue, String> {
@@ -178,28 +260,40 @@ impl Cg<'_, '_, '_> {
                 return Ok(None);
             }
 
-            let shift_val = self.builder.ins().iconst(left.ty, shift_amount);
-            let left_type_id = left.type_id;
+            // Get the literal's type from sema (or default to i64)
+            let literal_type_id = self
+                .get_expr_type(&right_unwrapped.id)
+                .unwrap_or(TypeId::I64);
+
+            // Apply type promotion to match sema's behavior
+            let result_type_id = numeric_result_type_id(left.type_id, literal_type_id);
+            let result_ty = type_id_to_cranelift_type(result_type_id);
+
+            // Convert left operand to result type if needed
+            let arena = self.env.analyzed.type_arena();
+            let left_val = convert_to_type(self.builder, left, result_ty, arena);
+
+            let shift_val = self.builder.ins().iconst(result_ty, shift_amount);
 
             let result = match bin.op {
                 BinaryOp::Mul => {
                     // x * 2^n → x << n
-                    self.builder.ins().ishl(left.value, shift_val)
+                    self.builder.ins().ishl(left_val, shift_val)
                 }
                 BinaryOp::Div => {
                     // Only safe for unsigned: x / 2^n → x >> n
                     // Signed division rounds toward zero, but arithmetic shift rounds toward -infinity
-                    if left_type_id.is_unsigned_int() {
-                        self.builder.ins().ushr(left.value, shift_val)
+                    if result_type_id.is_unsigned_int() {
+                        self.builder.ins().ushr(left_val, shift_val)
                     } else {
                         return Ok(None); // Don't optimize signed division
                     }
                 }
                 BinaryOp::Mod => {
                     // Only safe for unsigned: x % 2^n → x & (2^n - 1)
-                    if left_type_id.is_unsigned_int() {
-                        let mask = self.builder.ins().iconst(left.ty, value - 1);
-                        self.builder.ins().band(left.value, mask)
+                    if result_type_id.is_unsigned_int() {
+                        let mask = self.builder.ins().iconst(result_ty, value - 1);
+                        self.builder.ins().band(left_val, mask)
                     } else {
                         return Ok(None); // Don't optimize signed modulo
                     }
@@ -209,8 +303,8 @@ impl Cg<'_, '_, '_> {
 
             return Ok(Some(CompiledValue {
                 value: result,
-                ty: left.ty,
-                type_id: left.type_id,
+                ty: result_ty,
+                type_id: result_type_id,
             }));
         }
 
@@ -226,14 +320,27 @@ impl Cg<'_, '_, '_> {
                 return Ok(None);
             }
 
-            let shift_val = self.builder.ins().iconst(right.ty, shift_amount);
+            // Get the literal's type from sema (or default to i64)
+            let literal_type_id = self
+                .get_expr_type(&left_unwrapped.id)
+                .unwrap_or(TypeId::I64);
+
+            // Apply type promotion to match sema's behavior
+            let result_type_id = numeric_result_type_id(literal_type_id, right.type_id);
+            let result_ty = type_id_to_cranelift_type(result_type_id);
+
+            // Convert right operand to result type if needed
+            let arena = self.env.analyzed.type_arena();
+            let right_val = convert_to_type(self.builder, right, result_ty, arena);
+
+            let shift_val = self.builder.ins().iconst(result_ty, shift_amount);
             // 2^n * x → x << n
-            let result = self.builder.ins().ishl(right.value, shift_val);
+            let result = self.builder.ins().ishl(right_val, shift_val);
 
             return Ok(Some(CompiledValue {
                 value: result,
-                ty: right.ty,
-                type_id: right.type_id,
+                ty: result_ty,
+                type_id: result_type_id,
             }));
         }
 
@@ -411,18 +518,19 @@ impl Cg<'_, '_, '_> {
             }
         }
 
-        // Determine result type - original behavior: use left's type for integers
-        // This matches the original compiler.rs behavior
-        let result_ty = if left.ty == types::F64 || right.ty == types::F64 {
-            types::F64
-        } else if left.ty == types::F32 || right.ty == types::F32 {
-            types::F32
-        } else {
-            left.ty
-        };
-
         let left_type_id = left.type_id;
         let left_is_string = left_type_id == TypeId::STRING;
+
+        // Determine result type using type promotion rules.
+        // For numeric types, use sema's numeric_result_type logic.
+        // For non-numeric types (like strings), use left's type directly.
+        let (result_type_id, result_ty) = if left_type_id.is_numeric() && right.type_id.is_numeric()
+        {
+            let promoted = numeric_result_type_id(left_type_id, right.type_id);
+            (promoted, type_id_to_cranelift_type(promoted))
+        } else {
+            (left_type_id, left.ty)
+        };
 
         // Convert operands - access arena via env to avoid borrow conflict
         let arena = self.env.analyzed.type_arena();
@@ -546,32 +654,22 @@ impl Cg<'_, '_, '_> {
             }
         };
 
-        let final_ty = match op {
+        // For comparison ops, result is bool; otherwise use the promoted type
+        let (final_ty, final_type_id) = match op {
             BinaryOp::Eq
             | BinaryOp::Ne
             | BinaryOp::Lt
             | BinaryOp::Gt
             | BinaryOp::Le
-            | BinaryOp::Ge => types::I8,
+            | BinaryOp::Ge => (types::I8, TypeId::BOOL),
             BinaryOp::And | BinaryOp::Or => unreachable!(),
-            _ => result_ty,
-        };
-
-        let result_type_id = match op {
-            BinaryOp::Eq
-            | BinaryOp::Ne
-            | BinaryOp::Lt
-            | BinaryOp::Gt
-            | BinaryOp::Le
-            | BinaryOp::Ge => TypeId::BOOL,
-            BinaryOp::And | BinaryOp::Or => unreachable!(),
-            _ => left_type_id,
+            _ => (result_ty, result_type_id),
         };
 
         Ok(CompiledValue {
             value: result,
             ty: final_ty,
-            type_id: result_type_id,
+            type_id: final_type_id,
         })
     }
 
