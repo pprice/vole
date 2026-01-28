@@ -101,7 +101,7 @@ impl Cg<'_, '_, '_> {
             ExprKind::Block(block_expr) => self.block_expr(block_expr),
             ExprKind::If(if_expr) => self.if_expr(if_expr),
             ExprKind::When(when_expr) => self.when_expr(when_expr),
-            ExprKind::Unreachable => self.unreachable_expr(),
+            ExprKind::Unreachable => self.unreachable_expr(expr.span.line),
         }
     }
 
@@ -424,16 +424,10 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile an unreachable expression (never type / bottom type)
-    /// This emits a trap instruction and creates an unreachable block for any following code.
-    fn unreachable_expr(&mut self) -> Result<CompiledValue, String> {
-        use cranelift::codegen::ir::TrapCode;
-
-        // Emit a trap - this code should never be reached at runtime
-        self.builder.ins().trap(TrapCode::unwrap_user(1));
-
-        // Create an unreachable block for any code that follows
-        let unreachable_block = self.builder.create_block();
-        self.switch_and_seal(unreachable_block);
+    /// This emits a panic with file:line info if reached at runtime.
+    fn unreachable_expr(&mut self, line: u32) -> Result<CompiledValue, String> {
+        // Emit panic with location - this code should never be reached at runtime
+        self.emit_panic_static("unreachable code reached", line)?;
 
         // Return a dummy value with the never type
         // The actual value doesn't matter since control never reaches here

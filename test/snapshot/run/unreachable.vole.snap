@@ -1,0 +1,6 @@
+[stdout]
+before unreachable
+
+[stderr]
+panic: unreachable code reached
+  at <path>/unreachable.vole:3
