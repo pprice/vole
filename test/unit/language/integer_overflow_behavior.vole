@@ -1,0 +1,217 @@
+// Tests for integer overflow behavior
+//
+// Promotion rules:
+// - Integer literals default to i64
+// - Mixed type operations (e.g., i32 + i64_literal) promote to larger type
+// - Same type operations (e.g., i32 + i32) stay that type and may wrap
+// - Explicit type annotations force the result type (may truncate/wrap)
+
+tests "literal integers are i64" {
+    test "literal promotes i32 in addition" {
+        let x: i32 = 2147483647
+        let y = x + 1  // 1 is i64, so result is i64
+        assert(y == 2147483648)
+    }
+
+    test "literal promotes i32 in multiplication" {
+        let x: i32 = 2147483647
+        let y = x * 2  // 2 is i64, so result is i64
+        assert(y == 4294967294)
+    }
+
+    test "explicit i32 literal does not promote" {
+        let x: i32 = 2147483647
+        let two: i32 = 2
+        let y = x * two  // both i32, stays i32, wraps
+        assert(y == -2)
+    }
+
+    test "both operands i32 wraps" {
+        let a: i32 = 100000
+        let b: i32 = 100000
+        let c = a * b  // both i32, wraps
+        assert(c == 1410065408)
+    }
+}
+
+tests "inferred type promotes to i64" {
+    test "i32 max + 1 promotes" {
+        let x: i32 = 2147483647
+        let y = x + 1  // inferred, promotes to i64
+        assert(y == 2147483648)
+    }
+
+    test "i32 min - 1 promotes" {
+        let x: i32 = -2147483648
+        let y = x - 1  // inferred, promotes to i64
+        assert(y == -2147483649)
+    }
+
+    test "u8 max + 1 promotes" {
+        let x: u8 = 255
+        let y = x + 1  // inferred, promotes to i64
+        assert(y == 256)
+    }
+
+    test "u16 max + 1 promotes" {
+        let x: u16 = 65535
+        let y = x + 1  // inferred, promotes to i64
+        assert(y == 65536)
+    }
+
+    test "u32 max + 1 promotes" {
+        let x: u32 = 4294967295
+        let y = x + 1  // inferred, promotes to i64
+        assert(y == 4294967296)
+    }
+
+    test "i8 max + 1 promotes" {
+        let x: i8 = 127
+        let y = x + 1  // inferred, promotes to i64
+        assert(y == 128)
+    }
+
+    test "i16 max + 1 promotes" {
+        let x: i16 = 32767
+        let y = x + 1  // inferred, promotes to i64
+        assert(y == 32768)
+    }
+
+    // Note: multiplication does NOT promote like addition does
+    // It uses the operand types directly
+    test "multiplication uses operand type" {
+        let x: i32 = 100000
+        let y: i32 = 100000
+        let z = x * y  // stays i32, wraps
+        assert(z == 1410065408)
+    }
+}
+
+tests "explicit type wraps on overflow" {
+    test "i32 max + 1 wraps" {
+        let x: i32 = 2147483647
+        let y: i32 = x + 1
+        assert(y == -2147483648)
+    }
+
+    test "i32 min - 1 wraps" {
+        let x: i32 = -2147483648
+        let y: i32 = x - 1
+        assert(y == 2147483647)
+    }
+
+    test "u8 max + 1 wraps" {
+        let x: u8 = 255
+        let y: u8 = x + 1
+        assert(y == 0)
+    }
+
+    test "u8 0 - 1 wraps" {
+        let x: u8 = 0
+        let y: u8 = x - 1
+        assert(y == 255)
+    }
+
+    test "u16 max + 1 wraps" {
+        let x: u16 = 65535
+        let y: u16 = x + 1
+        assert(y == 0)
+    }
+
+    test "u32 max + 1 wraps" {
+        let x: u32 = 4294967295
+        let y: u32 = x + 1
+        assert(y == 0)
+    }
+
+    test "i8 max + 1 wraps" {
+        let x: i8 = 127
+        let y: i8 = x + 1
+        assert(y == -128)
+    }
+
+    test "i8 min - 1 wraps" {
+        let x: i8 = -128
+        let y: i8 = x - 1
+        assert(y == 127)
+    }
+
+    test "i16 max + 1 wraps" {
+        let x: i16 = 32767
+        let y: i16 = x + 1
+        assert(y == -32768)
+    }
+
+    test "i16 min - 1 wraps" {
+        let x: i16 = -32768
+        let y: i16 = x - 1
+        assert(y == 32767)
+    }
+
+    test "multiplication wraps" {
+        let x: i32 = 100000
+        let y: i32 = 100000
+        let z: i32 = x * y  // overflows i32
+        assert(z == 1410065408)  // 10000000000 mod 2^32, as signed
+    }
+}
+
+tests "i64 boundary behavior" {
+    test "i64 max value" {
+        let x: i64 = 9223372036854775807
+        assert(x == 9223372036854775807)
+    }
+
+    test "i64 near max arithmetic" {
+        let x: i64 = 9223372036854775800
+        let y: i64 = 7
+        assert(x + y == 9223372036854775807)
+    }
+
+    test "i64 max + 1 wraps" {
+        let x: i64 = 9223372036854775807
+        let y: i64 = x + 1
+        // Can't write MIN literal directly, check it's negative and less than -9223372036854775807
+        assert(y < 0)
+        assert(y < -9223372036854775807)
+    }
+
+    test "u64 max + 1 wraps" {
+        // Compute MAX by wrapping: 0 - 1
+        let zero: u64 = 0
+        let x: u64 = zero - 1  // This is MAX
+        let y: u64 = x + 1
+        assert(y == 0)
+    }
+}
+
+tests "negation overflow" {
+    test "i32 min negation wraps" {
+        let x: i32 = -2147483648
+        let y: i32 = -x
+        assert(y == -2147483648)  // MIN negated is still MIN (wraps)
+    }
+
+    test "i8 min negation wraps" {
+        let x: i8 = -128
+        let y: i8 = -x
+        assert(y == -128)
+    }
+
+    test "i16 min negation wraps" {
+        let x: i16 = -32768
+        let y: i16 = -x
+        assert(y == -32768)
+    }
+
+    test "i64 min negation wraps" {
+        // Compute MIN by wrapping: MAX + 1
+        let max: i64 = 9223372036854775807
+        let x: i64 = max + 1  // This is MIN
+        let y: i64 = -x
+        // Negating MIN wraps back to MIN
+        assert(y < 0)
+        assert(y < -9223372036854775807)
+        assert(x == y)
+    }
+}
