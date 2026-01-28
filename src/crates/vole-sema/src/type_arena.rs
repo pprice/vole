@@ -60,8 +60,12 @@ impl TypeId {
     pub const RANGE: TypeId = TypeId(17);
     pub const METATYPE: TypeId = TypeId(18);
 
+    // Top and bottom types
+    pub const NEVER: TypeId = TypeId(19);
+    pub const UNKNOWN: TypeId = TypeId(20);
+
     /// First non-reserved TypeId index (for dynamic types)
-    pub const FIRST_DYNAMIC: u32 = 19;
+    pub const FIRST_DYNAMIC: u32 = 21;
 
     /// Get the raw index (for debugging/serialization)
     pub fn index(self) -> u32 {
@@ -84,6 +88,18 @@ impl TypeId {
     #[inline]
     pub fn is_void(self) -> bool {
         self == Self::VOID
+    }
+
+    /// Check if this is the never type (no arena needed)
+    #[inline]
+    pub fn is_never(self) -> bool {
+        self == Self::NEVER
+    }
+
+    /// Check if this is the unknown type (no arena needed)
+    #[inline]
+    pub fn is_unknown(self) -> bool {
+        self == Self::UNKNOWN
     }
 
     /// Check if this is a signed integer type (no arena needed)
@@ -437,6 +453,12 @@ impl TypeArena {
         arena.primitives.metatype = arena.intern(SemaType::MetaType);
         debug_assert_eq!(arena.primitives.metatype, TypeId::METATYPE);
 
+        // Top and bottom types (placeholder Invalid variants until SemaType::Never/Unknown are added)
+        let never = arena.intern(SemaType::Invalid { kind: "never" });
+        debug_assert_eq!(never, TypeId::NEVER);
+        let unknown = arena.intern(SemaType::Invalid { kind: "unknown" });
+        debug_assert_eq!(unknown, TypeId::UNKNOWN);
+
         arena
     }
 
@@ -529,6 +551,12 @@ impl TypeArena {
     }
     pub fn invalid(&self) -> TypeId {
         self.primitives.invalid
+    }
+    pub fn never(&self) -> TypeId {
+        TypeId::NEVER
+    }
+    pub fn unknown(&self) -> TypeId {
+        TypeId::UNKNOWN
     }
 
     /// Get TypeId for a PrimitiveType
@@ -954,6 +982,18 @@ impl TypeArena {
     #[inline]
     pub fn is_void(&self, id: TypeId) -> bool {
         id.is_void()
+    }
+
+    /// Check if this is the never type (bottom type)
+    #[inline]
+    pub fn is_never(&self, id: TypeId) -> bool {
+        id.is_never()
+    }
+
+    /// Check if this is the unknown type (top type)
+    #[inline]
+    pub fn is_unknown(&self, id: TypeId) -> bool {
+        id.is_unknown()
     }
 
     /// Check if this is a runtime iterator type
