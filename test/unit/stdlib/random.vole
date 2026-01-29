@@ -65,6 +65,17 @@ tests "random int" {
             i = i + 1
         }
     }
+
+    test "int with max i64 range" {
+        let n = random.int(0, i64.max_value())
+        assert(n >= 0)
+    }
+
+    test "int with full i64 range" {
+        let n = random.int(i64.min_value(), i64.max_value())
+        assert(n >= i64.min_value())
+        assert(n <= i64.max_value())
+    }
 }
 
 tests "random coin" {
