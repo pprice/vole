@@ -83,6 +83,7 @@ impl Analyzer {
             module_id,
             type_params: self.type_param_stack.current(),
             self_type: self_type_id,
+            imports: &self.parent_modules,
         };
         resolve_type_to_id(ty, &mut ctx)
     }
@@ -240,6 +241,7 @@ impl Analyzer {
                 module_id,
                 type_params: None,
                 self_type: None,
+                imports: &self.parent_modules,
             };
             let field_type_id = resolve_type_to_id(&field.ty, &mut ctx);
 

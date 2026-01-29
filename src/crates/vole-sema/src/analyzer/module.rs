@@ -416,6 +416,7 @@ impl Analyzer {
                                     module_id,
                                     type_params: None,
                                     self_type: None,
+                                    imports: &[],
                                 };
                                 let param_ids: crate::type_arena::TypeIdVec = func
                                     .params
@@ -499,6 +500,7 @@ impl Analyzer {
                     module_id,
                     type_params: None,
                     self_type: None,
+                    imports: &[],
                 };
                 let param_ids: crate::type_arena::TypeIdVec = f
                     .params
@@ -613,6 +615,91 @@ impl Analyzer {
             module_loader: self.module_loader.new_child(),
             ..Default::default()
         }
+    }
+
+    /// Fork for analyzing a tests block as a virtual module.
+    /// Shares the `AnalyzerContext` so TypeIds remain valid, and inherits
+    /// the parent's scope so test code can see parent types/functions.
+    ///
+    /// The sub-analyzer keeps the parent's `current_module` so that all name
+    /// lookups (function calls, entity registry) work normally. The virtual
+    /// `module_id` is used only for type shell registration (to isolate types).
+    pub(super) fn fork_for_tests_module(&mut self, _module_id: ModuleId) -> Analyzer {
+        // Build a child scope from the parent's current scope.
+        // The sub-analyzer gets a fresh scope that has the parent scope as parent,
+        // so lookups chain to parent definitions.
+        let parent_scope = std::mem::take(&mut self.scope);
+        let child_scope = Scope::with_parent(parent_scope);
+
+        let mut sub = Analyzer {
+            ctx: Rc::clone(&self.ctx),
+            // Keep the parent's module ID for all lookups
+            current_module: self.current_module,
+            current_file_path: self.current_file_path.clone(),
+            loading_prelude: true, // Prevent sub-analyzer from loading prelude
+            module_loader: self.module_loader.new_child(),
+            scope: child_scope,
+            // Inherit parent functions and globals so tests can call parent functions
+            functions: self.functions.clone(),
+            functions_by_name: self.functions_by_name.clone(),
+            globals: self.globals.clone(),
+            constant_globals: self.constant_globals.clone(),
+            // Inherit parent_modules chain
+            parent_modules: self.parent_modules.clone(),
+            ..Default::default()
+        };
+        // Carry over the type_param_stack so type params from parent scope are visible
+        sub.type_param_stack = self.type_param_stack.clone();
+        sub
+    }
+
+    /// Restore scope from a tests module sub-analyzer.
+    /// The sub-analyzer's scope chain has the parent scope at its root.
+    /// We pop back to recover the original parent scope.
+    pub(super) fn restore_scope_from_tests_module(&mut self, mut sub: Analyzer) {
+        // The sub-analyzer scope chain: sub.scope -> parent_scope
+        // We want the parent scope back.
+        if let Some(parent) = std::mem::take(&mut sub.scope).into_parent() {
+            self.scope = parent;
+        }
+    }
+
+    /// Merge analysis results from a tests module sub-analyzer back into the parent.
+    pub(super) fn merge_tests_module_results(&mut self, sub: &Analyzer) {
+        // Merge expr_types
+        self.expr_types
+            .extend(sub.expr_types.iter().map(|(&k, &v)| (k, v)));
+        // Merge method_resolutions
+        for (k, v) in sub.method_resolutions.clone_inner() {
+            self.method_resolutions.insert(k, v);
+        }
+        // Merge scoped_function_types (for codegen backward compat)
+        self.scoped_function_types
+            .extend(sub.scoped_function_types.iter().map(|(&k, &v)| (k, v)));
+        // Merge generic_calls
+        self.generic_calls
+            .extend(sub.generic_calls.iter().map(|(&k, v)| (k, v.clone())));
+        // Merge class_method_calls
+        self.class_method_calls
+            .extend(sub.class_method_calls.iter().map(|(&k, v)| (k, v.clone())));
+        // Merge static_method_calls
+        self.static_method_calls
+            .extend(sub.static_method_calls.iter().map(|(&k, v)| (k, v.clone())));
+        // Merge substituted_return_types
+        self.substituted_return_types
+            .extend(sub.substituted_return_types.iter().map(|(&k, &v)| (k, v)));
+        // Merge lambda_defaults
+        self.lambda_defaults
+            .extend(sub.lambda_defaults.iter().map(|(&k, v)| (k, v.clone())));
+        // Merge is_check_results
+        self.is_check_results
+            .extend(sub.is_check_results.iter().map(|(&k, v)| (k, *v)));
+        // Merge declared_var_types
+        self.declared_var_types
+            .extend(sub.declared_var_types.iter().map(|(&k, &v)| (k, v)));
+        // Merge errors and warnings
+        self.errors.extend(sub.errors.iter().cloned());
+        self.warnings.extend(sub.warnings.iter().cloned());
     }
 
     /// Fork for analyzing a prelude file.

@@ -59,15 +59,22 @@ pub struct ResolverGuard<'a> {
     _guard: std::cell::Ref<'a, CompilationDb>,
     interner: &'a Interner,
     module_id: ModuleId,
+    imports: &'a [ModuleId],
 }
 
 impl<'a> ResolverGuard<'a> {
-    fn new(db: &'a RefCell<CompilationDb>, interner: &'a Interner, module_id: ModuleId) -> Self {
+    fn new(
+        db: &'a RefCell<CompilationDb>,
+        interner: &'a Interner,
+        module_id: ModuleId,
+        imports: &'a [ModuleId],
+    ) -> Self {
         let guard = db.borrow();
         Self {
             _guard: guard,
             interner,
             module_id,
+            imports,
         }
     }
 
@@ -75,7 +82,7 @@ impl<'a> ResolverGuard<'a> {
     pub fn resolver(&self) -> Resolver<'_> {
         // SAFETY: We hold the guard, so the borrow is valid
         let names = unsafe { &*(&self._guard.names as *const NameTable) };
-        Resolver::new(self.interner, names, self.module_id, &[])
+        Resolver::new(self.interner, names, self.module_id, self.imports)
     }
 
     /// Resolve a Symbol to a TypeDefId through the resolution chain.
@@ -406,6 +413,10 @@ pub struct Analyzer {
     /// This is set from the file path passed to Analyzer::new() and updated
     /// when analyzing imported modules.
     current_file_path: Option<PathBuf>,
+    /// Parent module IDs for hierarchical resolution (e.g., virtual test modules
+    /// that need to see parent module types). These are searched after the current
+    /// module but before the builtin module, providing scope inheritance for types.
+    parent_modules: Vec<ModuleId>,
 }
 
 /// Result of looking up a method on a type via EntityRegistry
@@ -479,15 +490,24 @@ impl Analyzer {
         interner: &'a Interner,
         db: &'a CompilationDb,
     ) -> Resolver<'a> {
-        // For now, we don't track imports at the Analyzer level.
-        // The resolver will check: primitives, current module, then builtin module.
-        Resolver::new(interner, &db.names, self.current_module, &[])
+        Resolver::new(
+            interner,
+            &db.names,
+            self.current_module,
+            &self.parent_modules,
+        )
     }
 
     /// Create a resolver for name resolution.
     /// Note: The returned resolver holds a borrow of the db's name_table.
+    /// Parent modules are included in the search chain for virtual test modules.
     pub fn resolver<'a>(&'a self, interner: &'a Interner) -> ResolverGuard<'a> {
-        ResolverGuard::new(&self.ctx.db, interner, self.current_module)
+        ResolverGuard::new(
+            &self.ctx.db,
+            interner,
+            self.current_module,
+            &self.parent_modules,
+        )
     }
 
     /// Create a resolver for a specific module context.
@@ -497,7 +517,7 @@ impl Analyzer {
         interner: &'a Interner,
         module_id: ModuleId,
     ) -> ResolverGuard<'a> {
-        ResolverGuard::new(&self.ctx.db, interner, module_id)
+        ResolverGuard::new(&self.ctx.db, interner, module_id, &[])
     }
 
     /// Take ownership of the expression types (consuming self)
@@ -1022,6 +1042,7 @@ impl Default for Analyzer {
             current_module: ModuleId::default(),
             type_param_stack: TypeParamScopeStack::new(),
             current_file_path: None,
+            parent_modules: Vec::new(),
         }
     }
 }

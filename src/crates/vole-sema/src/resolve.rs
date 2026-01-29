@@ -84,6 +84,8 @@ pub struct TypeResolutionContext<'a> {
     pub type_params: Option<&'a TypeParamScope>,
     /// The concrete type that `Self` resolves to (for method signatures), as interned TypeId
     pub self_type: Option<TypeId>,
+    /// Parent module IDs for hierarchical resolution (virtual test modules).
+    pub imports: &'a [ModuleId],
 }
 
 impl<'a> TypeResolutionContext<'a> {
@@ -100,6 +102,7 @@ impl<'a> TypeResolutionContext<'a> {
             module_id,
             type_params: Some(type_params),
             self_type: None,
+            imports: &[],
         }
     }
 
@@ -115,6 +118,7 @@ impl<'a> TypeResolutionContext<'a> {
             module_id,
             type_params: None,
             self_type: None,
+            imports: &[],
         }
     }
 
@@ -147,7 +151,7 @@ impl<'a> TypeResolutionContext<'a> {
     /// This borrows db for the duration of the call.
     pub fn resolve_type_or_interface(&self, sym: Symbol) -> Option<TypeDefId> {
         let db = self.db.borrow();
-        let resolver = Resolver::new(self.interner, &db.names, self.module_id, &[]);
+        let resolver = Resolver::new(self.interner, &db.names, self.module_id, self.imports);
         resolver.resolve_type_or_interface(sym, &db.entities)
     }
 
@@ -155,7 +159,7 @@ impl<'a> TypeResolutionContext<'a> {
     /// This borrows db for the duration of the call.
     pub fn resolve_type_str_or_interface(&self, name: &str) -> Option<TypeDefId> {
         let db = self.db.borrow();
-        let resolver = Resolver::new(self.interner, &db.names, self.module_id, &[]);
+        let resolver = Resolver::new(self.interner, &db.names, self.module_id, self.imports);
         resolver.resolve_type_str_or_interface(name, &db.entities)
     }
 }

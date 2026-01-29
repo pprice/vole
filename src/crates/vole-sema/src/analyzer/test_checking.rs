@@ -1,7 +1,7 @@
 // src/sema/analyzer/test_checking.rs
 //
 // Test block checking and related analysis passes:
-// - check_tests / check_scoped_decl / is_assert_call
+// - check_tests (virtual module analysis) / is_assert_call
 // - process_global_lets / collect_type_aliases / register_type_alias_id
 // - check_type_body / validate_interfaces_for_type / TypeBodyDecl trait
 
@@ -338,69 +338,105 @@ impl Analyzer {
         }
     }
 
+    /// Analyze a tests block as a virtual module.
+    ///
+    /// Each tests block gets its own ModuleId for type registration, ensuring
+    /// that types defined inside tests blocks are not visible to the parent.
+    /// The sub-analyzer keeps the parent's module ID as current_module (so all
+    /// function/type lookups work), but registers new type shells under the
+    /// virtual module ID to achieve scope isolation.
     pub(crate) fn check_tests(
         &mut self,
         tests_decl: &TestsDecl,
         interner: &Interner,
     ) -> Result<(), Vec<TypeError>> {
-        // Create a scope for the tests block (scoped declarations live here)
-        let module_scope = std::mem::take(&mut self.scope);
-        self.scope = Scope::with_parent(module_scope);
+        // Allocate a virtual ModuleId with a synthetic path
+        let label = tests_decl.label.as_deref().unwrap_or("anonymous");
+        let synthetic_path = format!(
+            "{}::tests_{}_{}",
+            self.current_file_path
+                .as_ref()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| "unknown".to_string()),
+            label,
+            tests_decl.span.start,
+        );
+        let virtual_module_id = self.name_table_mut().module_id(&synthetic_path);
 
-        // Process scoped declarations
+        // Create a sub-analyzer that inherits the parent scope.
+        // current_module stays as the parent's module so all lookups work.
+        let mut sub = self.fork_for_tests_module(virtual_module_id);
+
+        // Build a synthetic Program from the tests block's declarations
+        let synthetic_program = Program {
+            declarations: tests_decl.decls.clone(),
+            next_node_id: 0,
+        };
+
+        // Register type shells under the virtual module ID for scope isolation.
+        // Temporarily swap current_module for shell registration only.
+        let saved_module = sub.current_module;
+        sub.current_module = virtual_module_id;
+        sub.register_all_type_shells(&synthetic_program, interner);
+        sub.current_module = saved_module;
+
+        // Add the virtual module to parent_modules so the resolver can find
+        // types registered under the virtual module.
+        sub.parent_modules.push(virtual_module_id);
+
+        // Resolve type aliases (uses resolver which searches parent_modules)
+        sub.collect_type_aliases(&synthetic_program, interner);
+
+        // Collect signatures - these register under current_module (parent).
+        // This is intentional: functions in tests blocks need to be findable
+        // via entity registry lookups using the parent module's NameId.
+        sub.collect_signatures(&synthetic_program, interner);
+
+        // Process global lets (scoped lets in the tests block)
+        let _ = sub.process_global_lets(&synthetic_program, interner);
+
+        // Check declaration bodies (including nested tests blocks)
+        let _ = sub.check_declaration_bodies(&synthetic_program, interner);
+
+        // For backward compat with codegen: populate scoped_function_types
+        // for any function declarations in this tests block.
+        // Codegen still compiles scoped functions as closures.
         for decl in &tests_decl.decls {
-            self.check_scoped_decl(decl, interner)?;
+            if let Decl::Function(func) = decl
+                && let Some(func_type) = sub.functions.get(&func.name) {
+                    let param_ids: crate::type_arena::TypeIdVec =
+                        func_type.params_id.iter().copied().collect();
+                    let func_type_id = sub.type_arena_mut().function(
+                        param_ids,
+                        func_type.return_type_id,
+                        true, // closure for codegen compat
+                    );
+                    sub.scoped_function_types.insert(func.span, func_type_id);
+                }
         }
 
         // Check each test case (each gets its own child scope)
         for test_case in &tests_decl.tests {
-            // Each test gets its own scope (child of tests block scope)
-            let tests_block_scope = std::mem::take(&mut self.scope);
-            self.scope = Scope::with_parent(tests_block_scope);
+            let tests_block_scope = std::mem::take(&mut sub.scope);
+            sub.scope = Scope::with_parent(tests_block_scope);
 
-            // Tests implicitly return void
-            let void_id = self.type_arena().void();
-            let saved_ctx = self.enter_function_context(void_id);
+            let void_id = sub.type_arena().void();
+            let saved_ctx = sub.enter_function_context(void_id);
 
-            // Type check the test body
-            let _body_info = self.check_func_body(&test_case.body, interner)?;
+            let _body_info = sub.check_func_body(&test_case.body, interner);
 
-            // Restore to tests block scope
-            if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
-                self.scope = parent;
+            if let Some(parent) = std::mem::take(&mut sub.scope).into_parent() {
+                sub.scope = parent;
             }
-            self.exit_function_context(saved_ctx);
+            sub.exit_function_context(saved_ctx);
         }
 
-        // Restore to module scope
-        if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
-            self.scope = parent;
-        }
+        // Merge analysis results back to parent
+        self.merge_tests_module_results(&sub);
 
-        Ok(())
-    }
+        // Restore the parent scope from the sub-analyzer
+        self.restore_scope_from_tests_module(sub);
 
-    /// Check a scoped declaration in a tests block
-    pub(crate) fn check_scoped_decl(
-        &mut self,
-        decl: &Decl,
-        interner: &Interner,
-    ) -> Result<(), Vec<TypeError>> {
-        match decl {
-            Decl::Function(func) => {
-                self.check_scoped_function(func, interner)?;
-            }
-            Decl::Let(let_stmt) => {
-                // Process let like a local let (check init, add to scope)
-                // We create a temporary Stmt::Let wrapper to reuse the existing logic
-                let _ = self.check_stmt(&Stmt::Let(let_stmt.clone()), interner)?;
-            }
-            _ => {
-                // record, class, interface, implement, error, external
-                // TODO(vole-2vgz): Support these declaration types in tests blocks
-                // For now, they will be silently ignored (types won't be visible)
-            }
-        }
         Ok(())
     }
 
