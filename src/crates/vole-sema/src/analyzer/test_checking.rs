@@ -363,6 +363,10 @@ impl Analyzer {
         );
         let virtual_module_id = self.name_table_mut().module_id(&synthetic_path);
 
+        // Store the virtual module ID for codegen to look up
+        self.tests_virtual_modules
+            .insert(tests_decl.span, virtual_module_id);
+
         // Create a sub-analyzer that inherits the parent scope.
         // current_module stays as the parent's module so all lookups work.
         let mut sub = self.fork_for_tests_module(virtual_module_id);
@@ -397,23 +401,6 @@ impl Analyzer {
 
         // Check declaration bodies (including nested tests blocks)
         let _ = sub.check_declaration_bodies(&synthetic_program, interner);
-
-        // For backward compat with codegen: populate scoped_function_types
-        // for any function declarations in this tests block.
-        // Codegen still compiles scoped functions as closures.
-        for decl in &tests_decl.decls {
-            if let Decl::Function(func) = decl
-                && let Some(func_type) = sub.functions.get(&func.name) {
-                    let param_ids: crate::type_arena::TypeIdVec =
-                        func_type.params_id.iter().copied().collect();
-                    let func_type_id = sub.type_arena_mut().function(
-                        param_ids,
-                        func_type.return_type_id,
-                        true, // closure for codegen compat
-                    );
-                    sub.scoped_function_types.insert(func.span, func_type_id);
-                }
-        }
 
         // Check each test case (each gets its own child scope)
         for test_case in &tests_decl.tests {

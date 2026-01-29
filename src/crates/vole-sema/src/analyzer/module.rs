@@ -673,9 +673,6 @@ impl Analyzer {
         for (k, v) in sub.method_resolutions.clone_inner() {
             self.method_resolutions.insert(k, v);
         }
-        // Merge scoped_function_types (for codegen backward compat)
-        self.scoped_function_types
-            .extend(sub.scoped_function_types.iter().map(|(&k, &v)| (k, v)));
         // Merge generic_calls
         self.generic_calls
             .extend(sub.generic_calls.iter().map(|(&k, v)| (k, v.clone())));
@@ -697,6 +694,9 @@ impl Analyzer {
         // Merge declared_var_types
         self.declared_var_types
             .extend(sub.declared_var_types.iter().map(|(&k, &v)| (k, v)));
+        // Merge tests_virtual_modules
+        self.tests_virtual_modules
+            .extend(sub.tests_virtual_modules.iter().map(|(&k, &v)| (k, v)));
         // Merge errors and warnings
         self.errors.extend(sub.errors.iter().cloned());
         self.warnings.extend(sub.warnings.iter().cloned());

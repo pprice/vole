@@ -399,9 +399,9 @@ pub struct Analyzer {
     /// Variable to lambda expression mapping. Tracks which variables hold lambdas with defaults.
     /// Maps Symbol -> (lambda_node_id, required_params)
     lambda_variables: FxHashMap<Symbol, (NodeId, usize)>,
-    /// Scoped function closure types. Maps function declaration span to its closure function type.
-    /// Used for scoped functions in test blocks which are compiled as closures.
-    scoped_function_types: FxHashMap<Span, ArenaTypeId>,
+    /// Virtual module IDs for tests blocks. Maps tests block span to its virtual ModuleId.
+    /// Used by codegen to compile scoped type declarations (records, classes) within tests blocks.
+    tests_virtual_modules: FxHashMap<Span, ModuleId>,
     /// Declared variable types for let statements with explicit type annotations.
     /// Maps init expression NodeId -> declared TypeId for codegen to use.
     declared_var_types: FxHashMap<NodeId, ArenaTypeId>,
@@ -544,7 +544,7 @@ impl Analyzer {
             module_method_resolutions,
             self.substituted_return_types,
             self.lambda_defaults,
-            self.scoped_function_types,
+            self.tests_virtual_modules,
             self.is_check_results,
             self.declared_var_types,
         );
@@ -1037,7 +1037,7 @@ impl Default for Analyzer {
             substituted_return_types: FxHashMap::default(),
             lambda_defaults: FxHashMap::default(),
             lambda_variables: FxHashMap::default(),
-            scoped_function_types: FxHashMap::default(),
+            tests_virtual_modules: FxHashMap::default(),
             declared_var_types: FxHashMap::default(),
             current_module: ModuleId::default(),
             type_param_stack: TypeParamScopeStack::new(),

@@ -3,8 +3,7 @@ use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
 
-use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, InstBuilder, types};
-use cranelift_module::{FuncId, Module};
+use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
 
 use super::common::{
     DefaultReturn, FunctionCompileConfig, compile_function_inner_with_params,
@@ -13,7 +12,6 @@ use super::common::{
 use super::{Compiler, TestInfo};
 
 use crate::FunctionKey;
-use crate::RuntimeFn;
 use crate::context::Cg;
 use crate::types::{CodegenCtx, CompileEnv, function_name_id_with_interner, type_id_to_cranelift};
 use vole_frontend::{
@@ -26,16 +24,6 @@ use vole_sema::generic::{
     StaticMethodMonomorphInstance,
 };
 use vole_sema::type_arena::TypeId;
-
-/// Information about a compiled scoped function, used to make it available in tests
-struct ScopedFuncInfo {
-    /// The function's name (Symbol) for looking up in variables
-    name: Symbol,
-    /// The compiled function ID
-    func_id: FuncId,
-    /// The closure function type (pre-computed by sema)
-    func_type_id: TypeId,
-}
 
 impl Compiler<'_> {
     fn main_function_key_and_name(&mut self, sym: Symbol) -> (FunctionKey, String) {
@@ -171,6 +159,9 @@ impl Compiler<'_> {
                 Decl::Record(record) => {
                     self.pre_register_record(record);
                 }
+                Decl::Tests(_) => {
+                    // Scoped types use finalize_module_class/record in pass 1
+                }
                 _ => {}
             }
         }
@@ -204,6 +195,9 @@ impl Compiler<'_> {
                     self.func_registry.set_return_type(func_key, return_type_id);
                 }
                 Decl::Tests(tests_decl) => {
+                    // Declare scoped declarations within the tests block
+                    self.declare_tests_scoped_decls(tests_decl, program);
+
                     // Declare each test with a generated name and signature () -> i64
                     let i64_type_id = self.analyzed.type_arena().primitives.i64;
                     for _ in &tests_decl.tests {
@@ -293,7 +287,7 @@ impl Compiler<'_> {
                     self.compile_function(func)?;
                 }
                 Decl::Tests(tests_decl) => {
-                    self.compile_tests(tests_decl, &mut test_count)?;
+                    self.compile_tests(tests_decl, program, &mut test_count)?;
                 }
                 Decl::Let(_) | Decl::LetTuple(_) => {
                     // Globals are handled during identifier lookup
@@ -755,126 +749,15 @@ impl Compiler<'_> {
         Ok(())
     }
 
-    /// Compile a scoped function declaration (like a pure lambda).
-    /// Returns the FuncId and type information needed to make it callable in tests.
-    fn compile_scoped_function(&mut self, func: &FuncDecl) -> Result<ScopedFuncInfo, String> {
-        self.state
-            .lambda_counter
-            .set(self.state.lambda_counter.get() + 1);
-
-        // Look up the closure function type from sema (pre-computed during analysis)
-        let func_type_id = self
-            .query()
-            .scoped_function_type(func.span)
-            .ok_or_else(|| {
-                format!(
-                    "Scoped function type not found for '{}'",
-                    self.analyzed.interner.resolve(func.name)
-                )
-            })?;
-
-        // Extract param and return types from the function type
-        let (param_type_ids, return_type_id) = {
-            let arena = self.analyzed.type_arena();
-            let (params, ret, _) = arena.unwrap_function(func_type_id).ok_or_else(|| {
-                format!(
-                    "Scoped function has non-function type for '{}'",
-                    self.analyzed.interner.resolve(func.name)
-                )
-            })?;
-            (params.to_vec(), ret)
-        };
-
-        // Convert to Cranelift types
-        let param_types = self.type_ids_to_cranelift(&param_type_ids);
-
-        let return_type = type_id_to_cranelift(
-            return_type_id,
-            self.analyzed.type_arena(),
-            self.pointer_type,
-        );
-
-        // Create closure calling convention signature (first param is closure ptr)
-        let mut sig = self.jit.module.make_signature();
-        sig.params
-            .push(cranelift::prelude::AbiParam::new(self.pointer_type)); // closure ptr
-        for &param_ty in &param_types {
-            sig.params.push(cranelift::prelude::AbiParam::new(param_ty));
-        }
-        sig.returns
-            .push(cranelift::prelude::AbiParam::new(return_type));
-
-        // Create unique function name
-        let scoped_func_name = format!("__scoped_{}_{}", self.state.lambda_counter.get(), {
-            self.analyzed.interner.resolve(func.name)
-        });
-        let func_id = self
-            .jit
-            .module
-            .declare_function(&scoped_func_name, cranelift_module::Linkage::Local, &sig)
-            .map_err(|e| e.to_string())?;
-
-        // Compile the function body
-        let mut func_ctx = self.jit.module.make_context();
-        func_ctx.func.signature = sig.clone();
-
-        // Build params: Vec<(Symbol, TypeId, Type)>
-        let params: Vec<(Symbol, TypeId, cranelift::prelude::Type)> = func
-            .params
-            .iter()
-            .enumerate()
-            .map(|(i, p)| (p.name, param_type_ids[i], param_types[i]))
-            .collect();
-
-        // Get source file pointer
-        let source_file_ptr = self.source_file_ptr();
-
-        {
-            let mut builder_ctx = FunctionBuilderContext::new();
-            let builder = FunctionBuilder::new(&mut func_ctx.func, &mut builder_ctx);
-
-            // Create split contexts
-            let env = compile_env!(self, source_file_ptr);
-            let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
-
-            // Use pure lambda config (skip_block_params=1 for closure ptr)
-            let config = FunctionCompileConfig::pure_lambda(&func.body, params, return_type_id);
-            compile_function_inner_with_params(
-                builder,
-                &mut codegen_ctx,
-                &env,
-                config,
-                None,
-                None,
-            )?;
-        }
-
-        self.jit
-            .module
-            .define_function(func_id, &mut func_ctx)
-            .map_err(|e| format!("Failed to define scoped function: {:?}", e))?;
-
-        Ok(ScopedFuncInfo {
-            name: func.name,
-            func_id,
-            func_type_id,
-        })
-    }
-
     /// Compile all tests in a tests block
     fn compile_tests(
         &mut self,
         tests_decl: &TestsDecl,
+        program: &Program,
         test_count: &mut usize,
     ) -> Result<(), String> {
-        // Phase 1: Compile all scoped function declarations (once, before test loop)
-        let mut scoped_funcs: Vec<ScopedFuncInfo> = Vec::new();
-        for decl in &tests_decl.decls {
-            if let Decl::Function(func) = decl {
-                let info = self.compile_scoped_function(func)?;
-                scoped_funcs.push(info);
-            }
-        }
+        // Phase 1: Compile scoped function/class/record bodies
+        self.compile_tests_scoped_bodies(tests_decl, program)?;
 
         // Collect scoped let declarations for compiling in each test
         let scoped_lets: Vec<&LetStmt> = tests_decl
@@ -918,37 +801,8 @@ impl Compiler<'_> {
                 let mut codegen_ctx =
                     CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
-                // Build pre-seeded variables map with scoped functions
-                let mut variables = FxHashMap::default();
-                for scoped_func in &scoped_funcs {
-                    // Get func_ref for this function in the current test's context
-                    let func_ref = codegen_ctx
-                        .module
-                        .declare_func_in_func(scoped_func.func_id, builder.func);
-                    let func_addr = builder.ins().func_addr(self.pointer_type, func_ref);
-
-                    // Wrap in Closure struct via vole_closure_alloc
-                    let alloc_id = codegen_ctx
-                        .func_registry
-                        .runtime_key(RuntimeFn::ClosureAlloc)
-                        .and_then(|key| codegen_ctx.func_registry.func_id(key))
-                        .ok_or_else(|| "vole_closure_alloc not found".to_string())?;
-                    let alloc_ref = codegen_ctx
-                        .module
-                        .declare_func_in_func(alloc_id, builder.func);
-                    let zero_captures = builder.ins().iconst(types::I64, 0);
-                    let alloc_call = builder.ins().call(alloc_ref, &[func_addr, zero_captures]);
-                    let closure_ptr = builder.inst_results(alloc_call)[0];
-
-                    // Declare Cranelift variable and add to map
-                    // Use the pre-computed closure function type from sema
-                    let var = builder.declare_var(self.pointer_type);
-                    builder.def_var(var, closure_ptr);
-                    variables.insert(scoped_func.name, (var, scoped_func.func_type_id));
-                }
-
                 // Compile scoped let declarations and test body
-                let mut cg = Cg::new(&mut builder, &mut codegen_ctx, &env).with_vars(variables);
+                let mut cg = Cg::new(&mut builder, &mut codegen_ctx, &env);
 
                 if !scoped_lets.is_empty() {
                     // Create a synthetic block with the let statements
@@ -990,6 +844,116 @@ impl Compiler<'_> {
             *test_count += 1;
         }
 
+        Ok(())
+    }
+
+    /// Declare scoped declarations within a tests block (pass 1).
+    /// Handles scoped functions, records, and classes so they're available
+    /// during test compilation.
+    fn declare_tests_scoped_decls(&mut self, tests_decl: &TestsDecl, _program: &Program) {
+        let program_module = self.program_module();
+        let interner = &self.analyzed.interner;
+
+        // Look up the virtual module ID for scoped type declarations
+        let virtual_module_id = self.query().tests_virtual_module(tests_decl.span);
+
+        for inner_decl in &tests_decl.decls {
+            match inner_decl {
+                Decl::Function(func) => {
+                    // Skip generic functions
+                    if !func.type_params.is_empty() {
+                        continue;
+                    }
+                    // Scoped functions are registered under the program module by sema
+                    let Some(semantic_func_id) =
+                        self.query().function_id(program_module, func.name)
+                    else {
+                        continue;
+                    };
+                    let sig = self.build_signature_for_function(semantic_func_id);
+                    let (func_key, display_name) = self.main_function_key_and_name(func.name);
+                    let jit_func_id = self.jit.declare_function(&display_name, &sig);
+                    self.func_registry.set_func_id(func_key, jit_func_id);
+                    let return_type_id = self
+                        .query()
+                        .registry()
+                        .get_function(semantic_func_id)
+                        .signature
+                        .return_type_id;
+                    self.func_registry.set_return_type(func_key, return_type_id);
+                }
+                Decl::Class(class) => {
+                    // Scoped classes are registered under the virtual module
+                    if let Some(vm_id) = virtual_module_id {
+                        self.finalize_module_class(class, interner, vm_id);
+                    }
+                }
+                Decl::Record(record) => {
+                    // Scoped records are registered under the virtual module
+                    if let Some(vm_id) = virtual_module_id {
+                        self.finalize_module_record(record, interner, vm_id);
+                    }
+                }
+                Decl::Implement(impl_block) => {
+                    self.register_implement_block(impl_block);
+                }
+                _ => {
+                    // Let declarations, interfaces, etc. don't need pass 1 handling
+                }
+            }
+        }
+    }
+
+    /// Compile scoped function and method bodies within a tests block (pass 2).
+    fn compile_tests_scoped_bodies(
+        &mut self,
+        tests_decl: &TestsDecl,
+        program: &Program,
+    ) -> Result<(), String> {
+        let program_module = self.program_module();
+
+        for inner_decl in &tests_decl.decls {
+            match inner_decl {
+                Decl::Function(func) => {
+                    // Skip generic functions
+                    if !func.type_params.is_empty() {
+                        continue;
+                    }
+                    // Check for implicit generics
+                    let query = self.query();
+                    let name_id = query.function_name_id(program_module, func.name);
+                    let has_implicit_generic_info = self
+                        .analyzed
+                        .entity_registry()
+                        .function_by_name(name_id)
+                        .map(|func_id| {
+                            self.analyzed
+                                .entity_registry()
+                                .get_function(func_id)
+                                .generic_info
+                                .is_some()
+                        })
+                        .unwrap_or(false);
+                    if has_implicit_generic_info {
+                        continue;
+                    }
+                    // Compile as a regular function
+                    self.compile_function(func)?;
+                }
+                Decl::Class(class) => {
+                    self.compile_class_methods(class, program)?;
+                }
+                Decl::Record(record) => {
+                    self.compile_record_methods(record, program)?;
+                }
+                Decl::Implement(impl_block) => {
+                    self.compile_implement_block(impl_block)?;
+                }
+                _ => {
+                    // Let declarations are handled during test body compilation
+                }
+            }
+        }
         Ok(())
     }
 

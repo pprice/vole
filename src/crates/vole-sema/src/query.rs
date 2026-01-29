@@ -98,12 +98,11 @@ impl<'a> ProgramQuery<'a> {
         self.expr_data.get_static_method_generic(node)
     }
 
-    /// Get the closure function type for a scoped function by its declaration span.
-    /// Scoped functions (in test blocks) are compiled as closures, and sema pre-computes
-    /// their function types so codegen doesn't need to create them.
+    /// Get the virtual module ID for a tests block by its span.
+    /// Each tests block gets its own virtual ModuleId for type registration.
     #[must_use]
-    pub fn scoped_function_type(&self, span: Span) -> Option<TypeId> {
-        self.expr_data.get_scoped_function_type(span)
+    pub fn tests_virtual_module(&self, span: Span) -> Option<ModuleId> {
+        self.expr_data.get_tests_virtual_module(span)
     }
 
     // =========================================================================

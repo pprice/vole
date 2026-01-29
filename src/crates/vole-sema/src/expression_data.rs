@@ -10,6 +10,7 @@ use crate::generic::{ClassMethodMonomorphKey, MonomorphKey, StaticMethodMonomorp
 use crate::resolution::ResolvedMethod;
 use crate::type_arena::TypeId;
 use vole_frontend::{NodeId, Span};
+use vole_identity::ModuleId;
 
 /// Information about a lambda's parameter defaults.
 /// Used to support calling closures with default arguments.
@@ -47,10 +48,9 @@ pub struct ExpressionData {
     /// Lambda defaults for closure calls.
     /// Maps a call site NodeId to the lambda's defaults info.
     lambda_defaults: FxHashMap<NodeId, LambdaDefaults>,
-    /// Scoped function closure types.
-    /// Maps function declaration span to its closure function type.
-    /// Used for scoped functions in test blocks which are compiled as closures.
-    scoped_function_types: FxHashMap<Span, TypeId>,
+    /// Virtual module IDs for tests blocks. Maps tests block span to its virtual ModuleId.
+    /// Used by codegen to compile scoped type declarations (records, classes) within tests blocks.
+    tests_virtual_modules: FxHashMap<Span, ModuleId>,
     /// Type check results for `is` expressions and type patterns.
     /// Maps NodeId → IsCheckResult to eliminate runtime type lookups in codegen.
     is_check_results: FxHashMap<NodeId, IsCheckResult>,
@@ -78,7 +78,7 @@ impl ExpressionData {
         module_methods: FxHashMap<String, FxHashMap<NodeId, ResolvedMethod>>,
         substituted_return_types: FxHashMap<NodeId, TypeId>,
         lambda_defaults: FxHashMap<NodeId, LambdaDefaults>,
-        scoped_function_types: FxHashMap<Span, TypeId>,
+        tests_virtual_modules: FxHashMap<Span, ModuleId>,
         is_check_results: FxHashMap<NodeId, IsCheckResult>,
         declared_var_types: FxHashMap<NodeId, TypeId>,
     ) -> Self {
@@ -92,7 +92,7 @@ impl ExpressionData {
             module_methods,
             substituted_return_types,
             lambda_defaults,
-            scoped_function_types,
+            tests_virtual_modules,
             is_check_results,
             declared_var_types,
         }
@@ -304,19 +304,14 @@ impl ExpressionData {
         &mut self.lambda_defaults
     }
 
-    /// Get the closure function type for a scoped function by its declaration span
-    pub fn get_scoped_function_type(&self, span: Span) -> Option<TypeId> {
-        self.scoped_function_types.get(&span).copied()
+    /// Get the virtual module ID for a tests block by its span
+    pub fn get_tests_virtual_module(&self, span: Span) -> Option<ModuleId> {
+        self.tests_virtual_modules.get(&span).copied()
     }
 
-    /// Set the closure function type for a scoped function
-    pub fn set_scoped_function_type(&mut self, span: Span, type_id: TypeId) {
-        self.scoped_function_types.insert(span, type_id);
-    }
-
-    /// Get all scoped function types
-    pub fn scoped_function_types(&self) -> &FxHashMap<Span, TypeId> {
-        &self.scoped_function_types
+    /// Set the virtual module ID for a tests block
+    pub fn set_tests_virtual_module(&mut self, span: Span, module_id: ModuleId) {
+        self.tests_virtual_modules.insert(span, module_id);
     }
 
     /// Get the IsCheckResult for a type check node (is expression or type pattern)
