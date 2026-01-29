@@ -65,48 +65,77 @@ impl Analyzer {
         ast_type_params: &[TypeParam],
         interner: &Interner,
     ) -> TypeParamScope {
-        let builtin_mod = self.name_table_mut().builtin_module();
-
         // First pass: create name_scope for constraint resolution
         // Type param constraints may reference other type params (e.g., T: Container<U>),
         // so we need all type param names available before resolving constraints.
-        let mut name_scope = TypeParamScope::new();
-        for tp in ast_type_params {
-            let tp_name_str = interner.resolve(tp.name);
-            let tp_name_id = self
-                .name_table_mut()
-                .intern_raw(builtin_mod, &[tp_name_str]);
-            name_scope.add(TypeParamInfo {
-                name: tp.name,
-                name_id: tp_name_id,
-                constraint: None,
-                type_param_id: None,
-                variance: TypeParamVariance::default(),
-            });
-        }
+        let name_scope = self.build_unconstrained_scope(ast_type_params, interner);
 
         // Second pass: resolve constraints with name_scope available, building final scope
         let type_params: Vec<TypeParamInfo> = ast_type_params
             .iter()
             .map(|tp| {
-                let tp_name_str = interner.resolve(tp.name);
-                let tp_name_id = self
-                    .name_table_mut()
-                    .intern_raw(builtin_mod, &[tp_name_str]);
-                let constraint = tp.constraint.as_ref().and_then(|c| {
+                let mut info = self.intern_type_param(tp, interner);
+                info.constraint = tp.constraint.as_ref().and_then(|c| {
                     self.resolve_type_param_constraint(c, &name_scope, interner, tp.span)
                 });
-                TypeParamInfo {
-                    name: tp.name,
-                    name_id: tp_name_id,
-                    constraint,
-                    type_param_id: None,
-                    variance: TypeParamVariance::default(),
-                }
+                info
             })
             .collect();
 
         TypeParamScope::from_params(type_params)
+    }
+
+    /// Create an unconstrained TypeParamInfo from an AST TypeParam.
+    /// Interns the type param name as a NameId under the builtin module.
+    fn intern_type_param(&mut self, tp: &TypeParam, interner: &Interner) -> TypeParamInfo {
+        let builtin_mod = self.name_table_mut().builtin_module();
+        let tp_name_str = interner.resolve(tp.name);
+        let tp_name_id = self
+            .name_table_mut()
+            .intern_raw(builtin_mod, &[tp_name_str]);
+        TypeParamInfo {
+            name: tp.name,
+            name_id: tp_name_id,
+            constraint: None,
+            type_param_id: None,
+            variance: TypeParamVariance::default(),
+        }
+    }
+
+    /// Build a TypeParamScope with unconstrained entries from AST type params.
+    /// This is the first pass of type param resolution - names only, no constraints.
+    /// Used when constraints aren't needed (e.g., building a name scope for structural type resolution).
+    fn build_unconstrained_scope(
+        &mut self,
+        ast_type_params: &[TypeParam],
+        interner: &Interner,
+    ) -> TypeParamScope {
+        let mut scope = TypeParamScope::new();
+        for tp in ast_type_params {
+            scope.add(self.intern_type_param(tp, interner));
+        }
+        scope
+    }
+
+    /// Extract type param NameIds from a scope and register them on an entity type.
+    fn register_type_params_on_entity(
+        &mut self,
+        entity_type_id: TypeDefId,
+        scope: &TypeParamScope,
+    ) {
+        let name_ids: Vec<NameId> = scope.params().iter().map(|tp| tp.name_id).collect();
+        self.entity_registry_mut()
+            .set_type_params(entity_type_id, name_ids);
+    }
+
+    /// Build type argument placeholder TypeIds from a type param scope.
+    /// Each type param gets a `type_param(name_id)` entry in the arena.
+    fn build_type_arg_placeholders(&mut self, scope: &TypeParamScope) -> Vec<ArenaTypeId> {
+        scope
+            .params()
+            .iter()
+            .map(|tp| self.type_arena_mut().type_param(tp.name_id))
+            .collect()
     }
 
     /// Register a type shell (name and kind only, no fields/methods yet).
@@ -270,23 +299,8 @@ impl Analyzer {
 
         // Build initial type param scope from explicit type params (if any)
         // This is needed so that structural types like { name: T } can resolve T
-        let builtin_mod = self.name_table_mut().builtin_module();
         let explicit_type_param_scope: Option<TypeParamScope> = if !func.type_params.is_empty() {
-            let mut scope = TypeParamScope::new();
-            for tp in &func.type_params {
-                let tp_name_str = interner.resolve(tp.name);
-                let tp_name_id = self
-                    .name_table_mut()
-                    .intern_raw(builtin_mod, &[tp_name_str]);
-                scope.add(TypeParamInfo {
-                    name: tp.name,
-                    name_id: tp_name_id,
-                    constraint: None,
-                    type_param_id: None,
-                    variance: TypeParamVariance::default(),
-                });
-            }
-            Some(scope)
+            Some(self.build_unconstrained_scope(&func.type_params, interner))
         } else {
             None
         };
@@ -351,14 +365,13 @@ impl Analyzer {
             );
         } else {
             // Generic function (explicit or via implicit generification)
-            let builtin_mod = self.name_table_mut().builtin_module();
-
             // Build explicit type params with resolved constraints
             let mut type_param_scope =
                 self.build_type_params_with_constraints(&func.type_params, interner);
 
             // Create synthetic type parameters for structural types in parameters
             // Map: param index -> synthetic type param name_id
+            let builtin_mod = self.name_table_mut().builtin_module();
             let mut synthetic_param_map: FxHashMap<usize, NameId> = FxHashMap::default();
             for (i, (param_idx, structural)) in synthetic_type_params.into_iter().enumerate() {
                 // Generate synthetic type param name like __T0, __T1, etc.
@@ -747,23 +760,11 @@ impl Analyzer {
         // Build merged scope if method has its own type params
         let merged_scope: Option<TypeParamScope>;
         let scope_for_resolution = if !method.type_params.is_empty() {
-            let builtin_mod = self.name_table_mut().builtin_module();
             let mut scope = type_param_scope
                 .cloned()
                 .unwrap_or_else(TypeParamScope::new);
-            for tp in &method.type_params {
-                let tp_name_str = interner.resolve(tp.name);
-                let tp_name_id = self
-                    .name_table_mut()
-                    .intern_raw(builtin_mod, &[tp_name_str]);
-                scope.add(TypeParamInfo {
-                    name: tp.name,
-                    name_id: tp_name_id,
-                    constraint: None,
-                    type_param_id: None,
-                    variance: TypeParamVariance::default(),
-                });
-            }
+            let method_scope = self.build_unconstrained_scope(&method.type_params, interner);
+            scope.extend(method_scope.params());
             merged_scope = Some(scope);
             merged_scope.as_ref()
         } else {
@@ -821,44 +822,23 @@ impl Analyzer {
             return Vec::new();
         }
 
-        let builtin_mod = self.name_table_mut().builtin_module();
-
-        // Build merged scope for constraint resolution
+        // Build merged scope for constraint resolution (parent + method type params)
         let mut merged_scope = type_param_scope
             .cloned()
             .unwrap_or_else(TypeParamScope::new);
-        for tp in &method.type_params {
-            let tp_name_str = interner.resolve(tp.name);
-            let tp_name_id = self
-                .name_table_mut()
-                .intern_raw(builtin_mod, &[tp_name_str]);
-            merged_scope.add(TypeParamInfo {
-                name: tp.name,
-                name_id: tp_name_id,
-                constraint: None,
-                type_param_id: None,
-                variance: TypeParamVariance::default(),
-            });
-        }
+        let method_scope = self.build_unconstrained_scope(&method.type_params, interner);
+        merged_scope.extend(method_scope.params());
 
+        // Resolve constraints using merged scope
         method
             .type_params
             .iter()
             .map(|tp| {
-                let tp_name_str = interner.resolve(tp.name);
-                let tp_name_id = self
-                    .name_table_mut()
-                    .intern_raw(builtin_mod, &[tp_name_str]);
-                let constraint = tp.constraint.as_ref().and_then(|c| {
+                let mut info = self.intern_type_param(tp, interner);
+                info.constraint = tp.constraint.as_ref().and_then(|c| {
                     self.resolve_type_param_constraint(c, &merged_scope, interner, tp.span)
                 });
-                TypeParamInfo {
-                    name: tp.name,
-                    name_id: tp_name_id,
-                    constraint,
-                    type_param_id: None,
-                    variance: TypeParamVariance::default(),
-                }
+                info
             })
             .collect()
     }
@@ -960,7 +940,7 @@ impl Analyzer {
         );
 
         // Register fields in EntityRegistry
-        self.register_class_fields(
+        self.register_type_fields(
             entity_type_id,
             class.name,
             &class.fields,
@@ -1029,13 +1009,7 @@ impl Analyzer {
         }
 
         // Set type params on the type definition (needed for method substitutions)
-        let type_param_name_ids: Vec<NameId> = type_param_scope
-            .params()
-            .iter()
-            .map(|tp| tp.name_id)
-            .collect();
-        self.entity_registry_mut()
-            .set_type_params(entity_type_id, type_param_name_ids);
+        self.register_type_params_on_entity(entity_type_id, &type_param_scope);
 
         // Set generic info for type inference during struct literal checking
         // Use to_params() since we still need type_param_scope below
@@ -1050,7 +1024,7 @@ impl Analyzer {
         );
 
         // Register fields with placeholder types
-        self.register_class_fields(
+        self.register_type_fields(
             entity_type_id,
             class.name,
             &class.fields,
@@ -1068,11 +1042,7 @@ impl Analyzer {
         );
 
         // Build self_type_id with type param placeholders
-        let type_arg_ids: Vec<ArenaTypeId> = type_param_scope
-            .params()
-            .iter()
-            .map(|tp| self.type_arena_mut().type_param(tp.name_id))
-            .collect();
+        let type_arg_ids = self.build_type_arg_placeholders(&type_param_scope);
         let self_type_id = self.type_arena_mut().class(entity_type_id, type_arg_ids);
         let base_type_id = self
             .type_arena_mut()
@@ -1134,11 +1104,11 @@ impl Analyzer {
         (field_names, field_type_ids)
     }
 
-    /// Register fields in the EntityRegistry for a class.
-    fn register_class_fields(
+    /// Register fields in the EntityRegistry for a class or record.
+    fn register_type_fields(
         &mut self,
         entity_type_id: TypeDefId,
-        class_name: Symbol,
+        type_name: Symbol,
         fields: &[AstFieldDef],
         field_names: &[NameId],
         field_type_ids: &[ArenaTypeId],
@@ -1148,7 +1118,7 @@ impl Analyzer {
             let field_name_str = interner.resolve(field.name);
             let full_field_name_id = self.name_table_mut().intern_raw(
                 self.current_module,
-                &[interner.resolve(class_name), field_name_str],
+                &[interner.resolve(type_name), field_name_str],
             );
             self.entity_registry_mut().register_field(
                 entity_type_id,
@@ -1244,29 +1214,9 @@ impl Analyzer {
             // Validate field default ordering and collect which fields have defaults
             let field_has_default = self.validate_field_defaults(&record.fields, interner);
 
-            // Collect field info for generic_info (needed for struct literal checking)
-            // Convert Symbol field names to NameId at registration time
-            let builtin_mod = self.name_table_mut().builtin_module();
-            let field_names: Vec<NameId> = record
-                .fields
-                .iter()
-                .map(|f| {
-                    let name_str = interner.resolve(f.name);
-                    self.name_table_mut().intern_raw(builtin_mod, &[name_str])
-                })
-                .collect();
-            // Resolve field types directly to TypeId
-            let field_type_ids: Vec<ArenaTypeId> = record
-                .fields
-                .iter()
-                .map(|f| self.resolve_type_id(&f.ty, interner))
-                .collect();
-
-            // Check that never is not used in record fields
-            for (field, &type_id) in record.fields.iter().zip(&field_type_ids) {
-                self.check_never_not_allowed(type_id, field.span);
-                self.check_union_simplification(&field.ty, field.span);
-            }
+            // Collect field info using shared helper (handles name interning + type resolution + never checks)
+            let (field_names, field_type_ids) =
+                self.collect_field_info(&record.fields, interner, None);
 
             // Set generic_info (with empty type_params for non-generic records)
             self.entity_registry_mut().set_generic_info(
@@ -1280,20 +1230,14 @@ impl Analyzer {
             );
 
             // Register fields in EntityRegistry
-            for (i, field) in record.fields.iter().enumerate() {
-                let field_name_str = interner.resolve(field.name);
-                let full_field_name_id = self.name_table_mut().intern_raw(
-                    self.current_module,
-                    &[interner.resolve(record.name), field_name_str],
-                );
-                self.entity_registry_mut().register_field(
-                    entity_type_id,
-                    field_names[i],
-                    full_field_name_id,
-                    field_type_ids[i],
-                    i,
-                );
-            }
+            self.register_type_fields(
+                entity_type_id,
+                record.name,
+                &record.fields,
+                &field_names,
+                &field_type_ids,
+                interner,
+            );
 
             // Register and validate implements list
             self.validate_and_register_implements(
@@ -1337,7 +1281,6 @@ impl Analyzer {
             }
         } else {
             // Generic record: store with type params as placeholders
-            let builtin_mod = self.name_table_mut().builtin_module();
 
             // Validate field default ordering and collect which fields have defaults
             let field_has_default = self.validate_field_defaults(&record.fields, interner);
@@ -1346,45 +1289,9 @@ impl Analyzer {
             let type_param_scope =
                 self.build_type_params_with_constraints(&record.type_params, interner);
 
-            // Convert Symbol field names to NameId at registration time
-            // (must be done before creating ctx which borrows name_table)
-            let field_names: Vec<NameId> = record
-                .fields
-                .iter()
-                .map(|f| {
-                    let name_str = interner.resolve(f.name);
-                    self.name_table_mut().intern_raw(builtin_mod, &[name_str])
-                })
-                .collect();
-
-            // Resolve field types with type params in scope
-            let module_id = self.current_module;
-            let mut ctx = TypeResolutionContext::with_type_params(
-                &self.ctx.db,
-                interner,
-                module_id,
-                &type_param_scope,
-            );
-
-            // Resolve field types directly to TypeId
-            let field_type_ids: Vec<ArenaTypeId> = record
-                .fields
-                .iter()
-                .map(|f| resolve_type_to_id(&f.ty, &mut ctx))
-                .collect();
-
-            // Extract type param name IDs from scope
-            let type_param_name_ids: Vec<NameId> = type_param_scope
-                .params()
-                .iter()
-                .map(|tp| tp.name_id)
-                .collect();
-
-            // Check that never is not used in record fields (after ctx is no longer borrowed)
-            for (field, &type_id) in record.fields.iter().zip(&field_type_ids) {
-                self.check_never_not_allowed(type_id, field.span);
-                self.check_union_simplification(&field.ty, field.span);
-            }
+            // Collect field info with type params in scope
+            let (field_names, field_type_ids) =
+                self.collect_field_info(&record.fields, interner, Some(&type_param_scope));
 
             // Lookup shell registered in pass 0.5
             let entity_type_id = self
@@ -1392,8 +1299,7 @@ impl Analyzer {
                 .type_by_name(name_id)
                 .expect("record shell registered in register_all_type_shells");
 
-            // Skip if already processed (e.g., from a previous analysis of the same module
-            // in a shared cache scenario). Check if generic_info is already set.
+            // Skip if already processed (shared cache scenario)
             if self
                 .entity_registry()
                 .get_type(entity_type_id)
@@ -1412,25 +1318,17 @@ impl Analyzer {
             );
 
             // Register fields in EntityRegistry (needed for self.field access in methods)
-            for (i, field) in record.fields.iter().enumerate() {
-                let field_name_str = interner.resolve(field.name);
-                let full_field_name_id = self.name_table_mut().intern_raw(
-                    self.current_module,
-                    &[interner.resolve(record.name), field_name_str],
-                );
-                // Use field_type_ids already computed above
-                self.entity_registry_mut().register_field(
-                    entity_type_id,
-                    field_names[i],
-                    full_field_name_id,
-                    field_type_ids[i],
-                    i,
-                );
-            }
+            self.register_type_fields(
+                entity_type_id,
+                record.name,
+                &record.fields,
+                &field_names,
+                &field_type_ids,
+                interner,
+            );
 
             // Set type params on the type definition
-            self.entity_registry_mut()
-                .set_type_params(entity_type_id, type_param_name_ids);
+            self.register_type_params_on_entity(entity_type_id, &type_param_scope);
 
             // Set generic info for type inference during struct literal checking
             // Use to_params() since we still need type_param_scope for method registration below
@@ -1445,11 +1343,7 @@ impl Analyzer {
             );
 
             // Build self_type_id directly from entity_type_id with type param placeholders
-            let type_arg_ids: Vec<ArenaTypeId> = type_param_scope
-                .params()
-                .iter()
-                .map(|tp| self.type_arena_mut().type_param(tp.name_id))
-                .collect();
+            let type_arg_ids = self.build_type_arg_placeholders(&type_param_scope);
             let self_type_id = self.type_arena_mut().record(entity_type_id, type_arg_ids);
             // Store base_type_id (with empty type args) for codegen to look up
             let base_type_id = self
@@ -1742,13 +1636,7 @@ impl Analyzer {
         }
 
         // Set type parameters in EntityRegistry (using NameIds only)
-        let entity_type_params: Vec<_> = type_param_scope
-            .params()
-            .iter()
-            .map(|tp| tp.name_id)
-            .collect();
-        self.entity_registry_mut()
-            .set_type_params(entity_type_id, entity_type_params);
+        self.register_type_params_on_entity(entity_type_id, &type_param_scope);
 
         // Register extends relationships
         // Collect parent type IDs first (separate from mutation to avoid borrow conflicts)
