@@ -47,6 +47,8 @@ pub enum IntrinsicHandler {
     UnaryIntWrappingOp(UnaryIntWrappingOp),
     /// Checked integer operation (returns Optional<T> - nil on overflow).
     CheckedIntOp(CheckedIntOp),
+    /// Built-in panic: terminates execution with a message.
+    BuiltinPanic,
 }
 
 /// Unary float operations that take one argument and return a float.
@@ -382,6 +384,7 @@ impl IntrinsicsRegistry {
         registry.register_wrapping_int_operations();
         registry.register_saturating_int_operations();
         registry.register_checked_int_operations();
+        registry.register_builtin_intrinsics();
         registry
     }
 
@@ -757,6 +760,11 @@ impl IntrinsicsRegistry {
         self.register(IntrinsicKey::from("u32_checked_div"), CI(U32CheckedDiv));
         self.register(IntrinsicKey::from("u64_checked_div"), CI(U64CheckedDiv));
     }
+
+    /// Register built-in intrinsics (panic, etc.).
+    fn register_builtin_intrinsics(&mut self) {
+        self.register(IntrinsicKey::from("panic"), IntrinsicHandler::BuiltinPanic);
+    }
 }
 
 #[cfg(test)]
@@ -818,8 +826,8 @@ mod tests {
         // 4 unary int wrapping ops (wrapping_neg for signed types)
         // 24 saturating int ops (8 saturating_add + 8 saturating_sub + 8 saturating_mul)
         // 32 checked int ops (8 checked_add + 8 checked_sub + 8 checked_mul + 8 checked_div)
-        // Total: 176
-        assert_eq!(registry.len(), 176);
+        // Total: 177 (176 numeric intrinsics + 1 builtin panic)
+        assert_eq!(registry.len(), 177);
     }
 
     #[test]

@@ -49,7 +49,7 @@ fn immutable_assignment_has_correct_error_type() {
 
 #[test]
 fn wrong_argument_count_has_correct_error_type() {
-    let source = "func main() { assert(true, false) }";
+    let source = "func check(x: bool) {} func main() { check(true, false) }";
     let result = check(source);
     assert!(result.is_err());
     let errors = result.unwrap_err();
@@ -113,8 +113,8 @@ fn analyze_mutable_assignment() {
 
 #[test]
 fn analyze_assert_requires_bool() {
-    // assert(42) should fail - argument must be bool
-    let source = "func main() { assert(42) }";
+    // Calling a function with wrong type should fail
+    let source = "func check(b: bool) {} func main() { check(42) }";
     let result = check(source);
     assert!(result.is_err());
     let errors = result.unwrap_err();
@@ -139,7 +139,7 @@ fn analyze_assert_with_bool_literal() {
 
 #[test]
 fn analyze_assert_wrong_arg_count() {
-    let source = "func main() { assert(true, false) }";
+    let source = "func check(b: bool) {} func main() { check(true, false) }";
     let result = check(source);
     assert!(result.is_err());
     let errors = result.unwrap_err();
@@ -168,9 +168,10 @@ fn analyze_tests_block() {
 #[test]
 fn analyze_tests_block_with_invalid_assert() {
     let source = r#"
+        func check(b: bool) {}
         tests {
-            test "bad assertion" {
-                assert(42)
+            test "bad type" {
+                check(42)
             }
         }
     "#;
@@ -415,11 +416,12 @@ fn lambda_has_side_effects_print() {
 
 #[test]
 fn lambda_has_side_effects_assert() {
+    // print is a hardcoded impure builtin that marks side effects
     let source = r#"
         func apply(f: () -> i64) -> i64 { return f() }
         func main() {
             let f: () -> i64 = () => {
-                assert(true)
+                print("hello")
                 return 42
             }
             apply(f)

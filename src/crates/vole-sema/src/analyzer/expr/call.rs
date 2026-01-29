@@ -11,41 +11,6 @@ impl Analyzer {
         call: &CallExpr,
         interner: &Interner,
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
-        // Handle assert specially
-        if self.is_assert_call(&call.callee, interner) {
-            // Assert is an impure builtin - mark side effects if inside lambda
-            if self.in_lambda() {
-                self.mark_lambda_has_side_effects();
-            }
-
-            if call.args.len() != 1 {
-                self.add_error(
-                    SemanticError::WrongArgumentCount {
-                        expected: 1,
-                        found: call.args.len(),
-                        span: expr.span.into(),
-                    },
-                    expr.span,
-                );
-                return Ok(ArenaTypeId::VOID);
-            }
-
-            let arg_ty_id = self.check_expr(&call.args[0], interner)?;
-            if !self.is_bool_id(arg_ty_id) && !arg_ty_id.is_invalid() {
-                let found = self.type_display_id(arg_ty_id);
-                self.add_error(
-                    SemanticError::TypeMismatch {
-                        expected: "bool".to_string(),
-                        found,
-                        span: call.args[0].span.into(),
-                    },
-                    call.args[0].span,
-                );
-            }
-
-            return Ok(ArenaTypeId::VOID);
-        }
-
         if let ExprKind::Identifier(sym) = &call.callee.kind {
             // First check if it's a top-level function
             let func_type = self.functions.get(sym).cloned().or_else(|| {

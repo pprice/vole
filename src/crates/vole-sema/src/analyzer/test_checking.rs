@@ -428,12 +428,4 @@ impl Analyzer {
 
         Ok(())
     }
-
-    pub(crate) fn is_assert_call(&self, callee: &Expr, interner: &Interner) -> bool {
-        if let ExprKind::Identifier(sym) = &callee.kind {
-            interner.resolve(*sym) == "assert"
-        } else {
-            false
-        }
-    }
 }

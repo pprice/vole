@@ -7,8 +7,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use cranelift::prelude::{
-    AbiParam, FunctionBuilder, InstBuilder, IntCC, MemFlags, StackSlotData, StackSlotKind, Type,
-    Value, Variable, types,
+    AbiParam, FunctionBuilder, InstBuilder, IntCC, MemFlags, StackSlotData, StackSlotKind,
+    TrapCode, Type, Value, Variable, types,
 };
 use cranelift_codegen::ir::StackSlot;
 use cranelift_module::{FuncId, Module};
@@ -1555,6 +1555,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         args: &[Value],
         _return_type_id: TypeId,
     ) -> Result<CompiledValue, String> {
+        self.call_compiler_intrinsic_with_line(intrinsic_key, args, _return_type_id, 0)
+    }
+
+    /// Call a compiler intrinsic with an optional source line number.
+    pub fn call_compiler_intrinsic_with_line(
+        &mut self,
+        intrinsic_key: &str,
+        args: &[Value],
+        _return_type_id: TypeId,
+        call_line: u32,
+    ) -> Result<CompiledValue, String> {
         use crate::intrinsics::{FloatConstant, IntrinsicHandler, IntrinsicKey, UnaryFloatOp};
 
         let key = IntrinsicKey::from(intrinsic_key);
@@ -2220,6 +2231,33 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 // Build optional result: if overflow -> nil (tag=0), else -> Some(result) (tag=1, value)
                 // Stack layout: [tag: i8] + padding + [value: T] = 16 bytes for alignment
                 self.checked_int_op_impl(*op, arg1, arg2, _return_type_id)
+            }
+            IntrinsicHandler::BuiltinPanic => {
+                if args.is_empty() {
+                    return Err(
+                        "panic intrinsic requires 1 argument (message: string), got 0".to_string(),
+                    );
+                }
+
+                // vole_panic(msg, file_ptr, file_len, line)
+                let msg = args[0];
+                let (file_ptr, file_len) = self.source_file();
+                let ptr_type = self.ptr_type();
+                let file_ptr_val = self.builder.ins().iconst(ptr_type, file_ptr as i64);
+                let file_len_val = self.builder.ins().iconst(ptr_type, file_len as i64);
+                let line_val = self.builder.ins().iconst(types::I32, call_line as i64);
+
+                self.call_runtime_void(
+                    RuntimeFn::Panic,
+                    &[msg, file_ptr_val, file_len_val, line_val],
+                )?;
+
+                // Panic never returns - emit trap and unreachable block
+                self.builder.ins().trap(TrapCode::unwrap_user(3));
+                let unreachable_block = self.builder.create_block();
+                self.switch_and_seal(unreachable_block);
+
+                Ok(self.void_value())
             }
         }
     }

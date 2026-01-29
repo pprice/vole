@@ -36,11 +36,6 @@ pub fn set_capture_mode(enabled: bool) {
     });
 }
 
-/// Check if capture mode is enabled.
-fn is_capture_mode() -> bool {
-    CAPTURE_MODE.with(|cell| cell.get())
-}
-
 /// Write to captured stdout or real stdout
 fn write_stdout(s: &str) {
     STDOUT_CAPTURE.with(|cell| {
@@ -248,8 +243,8 @@ pub extern "C" fn vole_print_char(c: u8) {
     write_stdout(&(c as char).to_string());
 }
 
-/// Panic with a message - prints to stderr and exits with code 1
-/// In capture mode (for snapshot testing), it uses longjmp to escape.
+/// Panic with a message - prints to stderr and exits with code 1.
+/// If a test jmp_buf is set (unit tests or capture mode), uses longjmp to escape.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_panic(
@@ -271,21 +266,25 @@ pub extern "C" fn vole_panic(
     writeln_stderr(&format!("panic: {}", msg_str));
     writeln_stderr(&format!("  at {}:{}", file_str, line));
 
-    if is_capture_mode() {
-        // In capture mode, use longjmp to escape back to the test harness
-        // This reuses the assert jmp_buf mechanism
-        use crate::assert::{ASSERT_JMP_BUF, siglongjmp};
-        ASSERT_JMP_BUF.with(|jb| {
-            let buf = jb.get();
-            if !buf.is_null() {
-                unsafe {
-                    siglongjmp(buf, 2); // Use value 2 to distinguish from assert failure
-                }
+    // If a test jmp_buf is set, longjmp back to the test harness.
+    // This handles both unit test mode (set_test_jmp_buf) and capture mode.
+    use crate::assert::{ASSERT_FAILURE, ASSERT_JMP_BUF, AssertFailure, siglongjmp};
+    ASSERT_JMP_BUF.with(|jb| {
+        let buf = jb.get();
+        if !buf.is_null() {
+            ASSERT_FAILURE.with(|f| {
+                f.set(Some(AssertFailure {
+                    file: file_str.to_string(),
+                    line,
+                }));
+            });
+            unsafe {
+                siglongjmp(buf, 2); // Use value 2 to distinguish from assert failure
             }
-        });
-    }
+        }
+    });
 
-    // Not in capture mode or no jmp_buf set - exit process
+    // No jmp_buf set - exit process
     std::process::exit(1);
 }
 

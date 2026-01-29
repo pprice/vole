@@ -37,7 +37,7 @@ unsafe extern "C" {
 
 thread_local! {
     pub(crate) static ASSERT_JMP_BUF: Cell<*mut JmpBuf> = const { Cell::new(std::ptr::null_mut()) };
-    static ASSERT_FAILURE: Cell<Option<AssertFailure>> = const { Cell::new(None) };
+    pub(crate) static ASSERT_FAILURE: Cell<Option<AssertFailure>> = const { Cell::new(None) };
 }
 
 /// Information about an assertion failure

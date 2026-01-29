@@ -14,7 +14,7 @@ type ArgVec = SmallVec<[Value; 8]>;
 use vole_frontend::{
     CallExpr, Decl, Expr, ExprKind, LambdaExpr, NodeId, Program, Stmt, StringPart, Symbol,
 };
-use vole_identity::ModuleId;
+use vole_identity::{ModuleId, NameId};
 use vole_runtime::native_registry::{NativeFunction, NativeType};
 use vole_sema::type_arena::TypeId;
 
@@ -231,11 +231,13 @@ impl Cg<'_, '_, '_> {
         let callee_name = self.interner().resolve(callee_sym);
 
         // Handle builtins
+        // print/println need type-dispatch codegen.
+        // assert uses inline codegen (brif) to avoid function-call overhead
+        // and a pre-existing class-field-access register clobber bug (v-a1f9).
         match callee_name {
             "print" | "println" => return self.call_println(call, callee_name == "println"),
             "print_char" => return self.call_print_char(call),
             "assert" => return self.call_assert(call, call_line),
-            "panic" => return self.call_panic(call, call_line),
             _ => {}
         }
 
@@ -580,8 +582,35 @@ impl Cg<'_, '_, '_> {
         let ext_info = self
             .analyzed()
             .implement_registry()
-            .get_external_func(callee_name);
-        let native_func = ext_info.and_then(|info| {
+            .get_external_func(callee_name)
+            .copied();
+        if let Some(ref info) = ext_info {
+            // Check if this is a compiler intrinsic (e.g., panic)
+            let module_path_str = self
+                .name_table()
+                .last_segment_str(info.module_path)
+                .unwrap_or_default();
+            if module_path_str == Cg::COMPILER_INTRINSIC_MODULE {
+                // Compile args and dispatch through intrinsic handler
+                let mut args = Vec::new();
+                for arg in &call.args {
+                    let compiled = self.expr(arg)?;
+                    args.push(compiled.value);
+                }
+                let native_name_str = self
+                    .name_table()
+                    .last_segment_str(info.native_name)
+                    .unwrap_or_default();
+                let return_type_id = self.get_expr_type(&call_expr_id).unwrap_or(TypeId::VOID);
+                return self.call_compiler_intrinsic_with_line(
+                    &native_name_str,
+                    &args,
+                    return_type_id,
+                    call_line,
+                );
+            }
+        }
+        let native_func = ext_info.as_ref().and_then(|info| {
             let name_table = self.name_table();
             let module_path = name_table.last_segment_str(info.module_path)?;
             let native_name = name_table.last_segment_str(info.native_name)?;
@@ -618,6 +647,24 @@ impl Cg<'_, '_, '_> {
                     ),
                     type_id,
                 });
+            }
+        }
+
+        // Try prelude Vole functions (e.g., assert from builtins.vole)
+        let prelude_paths: Vec<String> = self
+            .query()
+            .module_paths()
+            .filter(|p| p.starts_with("std:prelude/"))
+            .map(String::from)
+            .collect();
+        for module_path in &prelude_paths {
+            let module_id = self.query().module_id_or_main(module_path);
+            let name_id = crate::types::module_name_id(self.analyzed(), module_id, callee_name);
+            if let Some(name_id) = name_id {
+                let func_key = self.funcs().intern_name_id(name_id);
+                if let Some(func_id) = self.funcs_ref().func_id(func_key) {
+                    return self.call_func_id_by_name_id(func_key, func_id, call, name_id);
+                }
             }
         }
 
@@ -751,6 +798,102 @@ impl Cg<'_, '_, '_> {
             .unwrap_or_else(|| self.env.analyzed.type_arena().void());
 
         Ok(self.call_result(call_inst, return_type_id))
+    }
+
+    /// Call a function by FuncId using NameId for default parameter lookup.
+    /// Used for prelude Vole functions where the callee's NameId is already known.
+    fn call_func_id_by_name_id(
+        &mut self,
+        func_key: FunctionKey,
+        func_id: FuncId,
+        call: &CallExpr,
+        name_id: NameId,
+    ) -> Result<CompiledValue, String> {
+        let func_ref = self
+            .codegen_ctx
+            .jit_module()
+            .declare_func_in_func(func_id, self.builder.func);
+
+        // Get expected parameter types from the function's signature
+        let sig_ref = self.builder.func.dfg.ext_funcs[func_ref].signature;
+        let sig = &self.builder.func.dfg.signatures[sig_ref];
+        let expected_types: Vec<Type> = sig.params.iter().map(|p| p.value_type).collect();
+
+        // Compile arguments with type narrowing
+        let mut args = Vec::new();
+        for (i, arg) in call.args.iter().enumerate() {
+            let compiled = self.expr(arg)?;
+            let expected_ty = expected_types.get(i).copied();
+            let arg_value = if let Some(expected) = expected_ty {
+                if compiled.ty.is_int() && expected.is_int() && expected.bits() < compiled.ty.bits()
+                {
+                    self.builder.ins().ireduce(expected, compiled.value)
+                } else if compiled.ty.is_int()
+                    && expected.is_int()
+                    && expected.bits() > compiled.ty.bits()
+                {
+                    self.builder.ins().sextend(expected, compiled.value)
+                } else {
+                    compiled.value
+                }
+            } else {
+                compiled.value
+            };
+            args.push(arg_value);
+        }
+
+        // If there are fewer provided args than expected, compile default expressions
+        if args.len() < expected_types.len() {
+            let provided_args = args.len();
+            let remaining_expected_types = expected_types[provided_args..].to_vec();
+            let default_args = self.compile_default_args_by_name_id(
+                name_id,
+                provided_args,
+                &remaining_expected_types,
+            )?;
+            args.extend(default_args);
+        }
+
+        let call_inst = self.builder.ins().call(func_ref, &args);
+
+        let return_type_id = self
+            .codegen_ctx
+            .funcs()
+            .return_type(func_key)
+            .unwrap_or_else(|| self.env.analyzed.type_arena().void());
+
+        Ok(self.call_result(call_inst, return_type_id))
+    }
+
+    /// Compile default expressions using a NameId directly (for cross-module calls).
+    fn compile_default_args_by_name_id(
+        &mut self,
+        name_id: NameId,
+        start_index: usize,
+        _expected_types: &[Type],
+    ) -> Result<Vec<Value>, String> {
+        let func_id = self.query().registry().function_by_name(name_id);
+        let Some(func_id) = func_id else {
+            return Ok(Vec::new());
+        };
+
+        let (default_ptrs, param_type_ids): (Vec<Option<*const Expr>>, Vec<TypeId>) = {
+            let func_def = self.query().registry().get_function(func_id);
+            let ptrs = func_def
+                .param_defaults
+                .iter()
+                .map(|opt| opt.as_ref().map(|e| e.as_ref() as *const Expr))
+                .collect();
+            let type_ids = func_def.signature.params_id.iter().copied().collect();
+            (ptrs, type_ids)
+        };
+
+        self.compile_defaults_from_ptrs(
+            &default_ptrs,
+            start_index,
+            &param_type_ids[start_index..],
+            false,
+        )
     }
 
     /// Compile default expressions for omitted function parameters.
@@ -994,7 +1137,9 @@ impl Cg<'_, '_, '_> {
         Ok(self.void_value())
     }
 
-    /// Compile assert
+    /// Compile assert as inline codegen.
+    /// Uses brif + assert_fail instead of a function call to avoid
+    /// a pre-existing class-field-access register clobber bug (v-a1f9).
     fn call_assert(&mut self, call: &CallExpr, call_line: u32) -> Result<CompiledValue, String> {
         if call.args.is_empty() {
             return Err(CodegenError::arg_count("assert", 1, 0).into());
@@ -1026,40 +1171,6 @@ impl Cg<'_, '_, '_> {
         self.builder.ins().jump(pass_block, &[]);
 
         self.switch_and_seal(pass_block);
-
-        Ok(self.void_value())
-    }
-
-    /// Compile panic
-    fn call_panic(&mut self, call: &CallExpr, call_line: u32) -> Result<CompiledValue, String> {
-        if call.args.is_empty() {
-            return Err(CodegenError::arg_count("panic", 1, 0).into());
-        }
-
-        // Get the message argument - must be a string
-        let msg = self.expr(&call.args[0])?;
-
-        // vole_panic(msg, file_ptr, file_len, line)
-        let (file_ptr, file_len) = self.source_file();
-        let ptr_type = self.ptr_type();
-        let file_ptr_val = self.builder.ins().iconst(ptr_type, file_ptr as i64);
-        let file_len_val = self.builder.ins().iconst(ptr_type, file_len as i64);
-        let line_val = self.builder.ins().iconst(types::I32, call_line as i64);
-
-        self.call_runtime_void(
-            RuntimeFn::Panic,
-            &[msg.value, file_ptr_val, file_len_val, line_val],
-        )?;
-
-        // Since panic never returns, we need to emit unreachable code
-        // to satisfy Cranelift's control flow requirements.
-        // The trap terminates this block, so we create a new unreachable block
-        // for any code that follows (which will never execute).
-        self.builder.ins().trap(TrapCode::unwrap_user(3));
-
-        // Create an unreachable block for code that follows the panic call
-        let unreachable_block = self.builder.create_block();
-        self.switch_and_seal(unreachable_block);
 
         Ok(self.void_value())
     }
@@ -1346,7 +1457,7 @@ impl Cg<'_, '_, '_> {
     pub(crate) fn find_intrinsic_key_for_monomorph(
         &self,
         type_mappings: &[vole_sema::implement_registry::TypeMappingEntry],
-        substitutions: &rustc_hash::FxHashMap<vole_identity::NameId, TypeId>,
+        substitutions: &rustc_hash::FxHashMap<NameId, TypeId>,
     ) -> Option<String> {
         // Check each mapping to see if it matches any of the substituted types
         for mapping in type_mappings {
