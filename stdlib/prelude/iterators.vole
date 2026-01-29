@@ -4,31 +4,25 @@
 
 let { Iterator } = import "./traits"
 
-// repeat(value) - creates an infinite iterator yielding the same value
-// WARNING: Must use with take() or similar to avoid infinite loops
-// Example: repeat(42).take(3).collect() => [42, 42, 42]
 external("vole:std:runtime") {
+    // repeat(value) - creates an infinite iterator yielding the same value
+    // WARNING: Must use with take() or similar to avoid infinite loops
+    // Example: repeat(42).take(3).collect() => [42, 42, 42]
     func "iter_repeat" as repeat(value: i64) -> Iterator<i64>
-}
 
-// once(value) - creates an iterator that yields exactly one value
-// Example: once(42).collect() => [42]
-external("vole:std:runtime") {
+    // once(value) - creates an iterator that yields exactly one value
+    // Example: once(42).collect() => [42]
     func "iter_once" as once(value: i64) -> Iterator<i64>
-}
 
-// empty() - creates an iterator that yields nothing
-// Example: empty().collect() => []
-external("vole:std:runtime") {
+    // empty() - creates an iterator that yields nothing
+    // Example: empty().collect() => []
     func "iter_empty" as empty() -> Iterator<i64>
-}
 
-// from_fn(f) - creates an iterator from a generator function
-// The function should return T? - when it returns nil, iteration ends
-// Example:
-//   let mut n = 0
-//   from_fn(() => { n = n + 1; if n <= 3 { return n } else { return nil } }).collect()
-//   => [1, 2, 3]
-external("vole:std:runtime") {
+    // from_fn(f) - creates an iterator from a generator function
+    // The function should return T? - when it returns nil, iteration ends
+    // Example:
+    //   let mut n = 0
+    //   from_fn(() => { n = n + 1; if n <= 3 { return n } else { return nil } }).collect()
+    //   => [1, 2, 3]
     func "iter_from_fn" as from_fn(generator: () -> i64?) -> Iterator<i64>
 }

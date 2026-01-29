@@ -2,14 +2,12 @@
 // I/O operations module for stdin/stdout
 // Note: print and println are builtins, not in this module
 
-// Read a line from stdin
-// Returns the line as a string (without trailing newline), or nil on EOF
 external("std:io") {
+    // Read a line from stdin
+    // Returns the line as a string (without trailing newline), or nil on EOF
     func read_line() -> string?
-}
 
-// Flush stdout
-// Useful for interactive output, especially when using print() without newline
-external("std:io") {
+    // Flush stdout
+    // Useful for interactive output, especially when using print() without newline
     func flush()
 }

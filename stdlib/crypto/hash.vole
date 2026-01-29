@@ -8,26 +8,24 @@
 // SHA256 Functions
 // =============================================================================
 
-// sha256(input) -> string
-// Compute the SHA256 hash of a string, returning a 64-character hex string.
-//
-// Example:
-//   sha256("hello world") -> "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
-//
-// The empty string has a well-known hash:
-//   sha256("") -> "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 external("std:crypto/hash") {
+    // sha256(input) -> string
+    // Compute the SHA256 hash of a string, returning a 64-character hex string.
+    //
+    // Example:
+    //   sha256("hello world") -> "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+    //
+    // The empty string has a well-known hash:
+    //   sha256("") -> "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     func sha256(input: string) -> string
-}
 
-// sha256_bytes(input) -> [i64]
-// Compute the SHA256 hash of a string, returning a 32-element array of byte values (0-255).
-//
-// Example:
-//   sha256_bytes("hello world")[0] -> 185 (0xb9)
-//
-// This is useful when you need to work with the raw hash bytes, e.g. for
-// further processing or comparison with external systems.
-external("std:crypto/hash") {
+    // sha256_bytes(input) -> [i64]
+    // Compute the SHA256 hash of a string, returning a 32-element array of byte values (0-255).
+    //
+    // Example:
+    //   sha256_bytes("hello world")[0] -> 185 (0xb9)
+    //
+    // This is useful when you need to work with the raw hash bytes, e.g. for
+    // further processing or comparison with external systems.
     func sha256_bytes(input: string) -> [i64]
 }

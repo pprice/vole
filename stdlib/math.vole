@@ -15,16 +15,14 @@ external("std:math") {
     func pow(base: f64, exp: f64) -> f64
 }
 
-// Square root (floats only)
 external("vole:compiler_intrinsic") {
+    // Square root (floats only)
     func sqrt<T>(x: T) -> T where {
         f32 => "f32_sqrt"
         f64 => "f64_sqrt"
     }
-}
 
-// Absolute value (floats and signed integers)
-external("vole:compiler_intrinsic") {
+    // Absolute value (floats and signed integers)
     func abs<T>(x: T) -> T where {
         f32 => "f32_abs"
         f64 => "f64_abs"
@@ -33,42 +31,32 @@ external("vole:compiler_intrinsic") {
         i32 => "i32_abs"
         i64 => "i64_abs"
     }
-}
 
-// Ceiling - round up to nearest integer (floats only)
-external("vole:compiler_intrinsic") {
+    // Ceiling - round up to nearest integer (floats only)
     func ceil<T>(x: T) -> T where {
         f32 => "f32_ceil"
         f64 => "f64_ceil"
     }
-}
 
-// Floor - round down to nearest integer (floats only)
-external("vole:compiler_intrinsic") {
+    // Floor - round down to nearest integer (floats only)
     func floor<T>(x: T) -> T where {
         f32 => "f32_floor"
         f64 => "f64_floor"
     }
-}
 
-// Truncate - round toward zero (floats only)
-external("vole:compiler_intrinsic") {
+    // Truncate - round toward zero (floats only)
     func trunc<T>(x: T) -> T where {
         f32 => "f32_trunc"
         f64 => "f64_trunc"
     }
-}
 
-// Round to nearest integer, ties to even (floats only)
-external("vole:compiler_intrinsic") {
+    // Round to nearest integer, ties to even (floats only)
     func round<T>(x: T) -> T where {
         f32 => "f32_round"
         f64 => "f64_round"
     }
-}
 
-// Minimum of two values (all numeric types)
-external("vole:compiler_intrinsic") {
+    // Minimum of two values (all numeric types)
     func min<T>(a: T, b: T) -> T where {
         f32 => "f32_min"
         f64 => "f64_min"
@@ -81,10 +69,8 @@ external("vole:compiler_intrinsic") {
         u32 => "u32_min"
         u64 => "u64_min"
     }
-}
 
-// Maximum of two values (all numeric types)
-external("vole:compiler_intrinsic") {
+    // Maximum of two values (all numeric types)
     func max<T>(a: T, b: T) -> T where {
         f32 => "f32_max"
         f64 => "f64_max"

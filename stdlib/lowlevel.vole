@@ -1,8 +1,8 @@
 // stdlib/lowlevel.vole
 // Low-level operations for integers (bit manipulation)
 
-// Count leading zeros
 external("vole:compiler_intrinsic") {
+    // Count leading zeros
     func clz<T>(x: T) -> T where {
         i8 => "i8_clz"
         i16 => "i16_clz"
@@ -13,10 +13,8 @@ external("vole:compiler_intrinsic") {
         u32 => "u32_clz"
         u64 => "u64_clz"
     }
-}
 
-// Count trailing zeros
-external("vole:compiler_intrinsic") {
+    // Count trailing zeros
     func ctz<T>(x: T) -> T where {
         i8 => "i8_ctz"
         i16 => "i16_ctz"
@@ -27,10 +25,8 @@ external("vole:compiler_intrinsic") {
         u32 => "u32_ctz"
         u64 => "u64_ctz"
     }
-}
 
-// Population count - count of 1 bits
-external("vole:compiler_intrinsic") {
+    // Population count - count of 1 bits
     func popcnt<T>(x: T) -> T where {
         i8 => "i8_popcnt"
         i16 => "i16_popcnt"
@@ -41,10 +37,8 @@ external("vole:compiler_intrinsic") {
         u32 => "u32_popcnt"
         u64 => "u64_popcnt"
     }
-}
 
-// Bit reverse - reverse order of bits
-external("vole:compiler_intrinsic") {
+    // Bit reverse - reverse order of bits
     func bitrev<T>(x: T) -> T where {
         i8 => "i8_bitrev"
         i16 => "i16_bitrev"
@@ -55,10 +49,8 @@ external("vole:compiler_intrinsic") {
         u32 => "u32_bitrev"
         u64 => "u64_bitrev"
     }
-}
 
-// Rotate left
-external("vole:compiler_intrinsic") {
+    // Rotate left
     func rotl<T>(x: T, amount: u8) -> T where {
         i8 => "i8_rotl"
         i16 => "i16_rotl"
@@ -69,10 +61,8 @@ external("vole:compiler_intrinsic") {
         u32 => "u32_rotl"
         u64 => "u64_rotl"
     }
-}
 
-// Rotate right
-external("vole:compiler_intrinsic") {
+    // Rotate right
     func rotr<T>(x: T, amount: u8) -> T where {
         i8 => "i8_rotr"
         i16 => "i16_rotr"
@@ -83,10 +73,8 @@ external("vole:compiler_intrinsic") {
         u32 => "u32_rotr"
         u64 => "u64_rotr"
     }
-}
 
-// Wrapping addition - wraps on overflow instead of panicking
-external("vole:compiler_intrinsic") {
+    // Wrapping addition - wraps on overflow instead of panicking
     func wrapping_add<T>(x: T, y: T) -> T where {
         i8 => "i8_wrapping_add"
         i16 => "i16_wrapping_add"
@@ -97,10 +85,8 @@ external("vole:compiler_intrinsic") {
         u32 => "u32_wrapping_add"
         u64 => "u64_wrapping_add"
     }
-}
 
-// Wrapping subtraction - wraps on overflow instead of panicking
-external("vole:compiler_intrinsic") {
+    // Wrapping subtraction - wraps on overflow instead of panicking
     func wrapping_sub<T>(x: T, y: T) -> T where {
         i8 => "i8_wrapping_sub"
         i16 => "i16_wrapping_sub"
@@ -111,10 +97,8 @@ external("vole:compiler_intrinsic") {
         u32 => "u32_wrapping_sub"
         u64 => "u64_wrapping_sub"
     }
-}
 
-// Wrapping multiplication - wraps on overflow instead of panicking
-external("vole:compiler_intrinsic") {
+    // Wrapping multiplication - wraps on overflow instead of panicking
     func wrapping_mul<T>(x: T, y: T) -> T where {
         i8 => "i8_wrapping_mul"
         i16 => "i16_wrapping_mul"
@@ -125,21 +109,17 @@ external("vole:compiler_intrinsic") {
         u32 => "u32_wrapping_mul"
         u64 => "u64_wrapping_mul"
     }
-}
 
-// Wrapping negation - wraps on overflow (MIN_VALUE -> MIN_VALUE)
-// Only available for signed types
-external("vole:compiler_intrinsic") {
+    // Wrapping negation - wraps on overflow (MIN_VALUE -> MIN_VALUE)
+    // Only available for signed types
     func wrapping_neg<T>(x: T) -> T where {
         i8 => "i8_wrapping_neg"
         i16 => "i16_wrapping_neg"
         i32 => "i32_wrapping_neg"
         i64 => "i64_wrapping_neg"
     }
-}
 
-// Saturating addition - clamps to max on overflow, min on underflow
-external("vole:compiler_intrinsic") {
+    // Saturating addition - clamps to max on overflow, min on underflow
     func saturating_add<T>(x: T, y: T) -> T where {
         i8 => "i8_saturating_add"
         i16 => "i16_saturating_add"
@@ -150,10 +130,8 @@ external("vole:compiler_intrinsic") {
         u32 => "u32_saturating_add"
         u64 => "u64_saturating_add"
     }
-}
 
-// Saturating subtraction - clamps to min on underflow, max on overflow
-external("vole:compiler_intrinsic") {
+    // Saturating subtraction - clamps to min on underflow, max on overflow
     func saturating_sub<T>(x: T, y: T) -> T where {
         i8 => "i8_saturating_sub"
         i16 => "i16_saturating_sub"
@@ -164,10 +142,8 @@ external("vole:compiler_intrinsic") {
         u32 => "u32_saturating_sub"
         u64 => "u64_saturating_sub"
     }
-}
 
-// Saturating multiplication - clamps to max/min on overflow
-external("vole:compiler_intrinsic") {
+    // Saturating multiplication - clamps to max/min on overflow
     func saturating_mul<T>(x: T, y: T) -> T where {
         i8 => "i8_saturating_mul"
         i16 => "i16_saturating_mul"
@@ -178,10 +154,8 @@ external("vole:compiler_intrinsic") {
         u32 => "u32_saturating_mul"
         u64 => "u64_saturating_mul"
     }
-}
 
-// Checked addition - returns nil on overflow
-external("vole:compiler_intrinsic") {
+    // Checked addition - returns nil on overflow
     func checked_add<T>(x: T, y: T) -> T? where {
         i8 => "i8_checked_add"
         i16 => "i16_checked_add"
@@ -192,10 +166,8 @@ external("vole:compiler_intrinsic") {
         u32 => "u32_checked_add"
         u64 => "u64_checked_add"
     }
-}
 
-// Checked subtraction - returns nil on underflow
-external("vole:compiler_intrinsic") {
+    // Checked subtraction - returns nil on underflow
     func checked_sub<T>(x: T, y: T) -> T? where {
         i8 => "i8_checked_sub"
         i16 => "i16_checked_sub"
@@ -206,10 +178,8 @@ external("vole:compiler_intrinsic") {
         u32 => "u32_checked_sub"
         u64 => "u64_checked_sub"
     }
-}
 
-// Checked multiplication - returns nil on overflow
-external("vole:compiler_intrinsic") {
+    // Checked multiplication - returns nil on overflow
     func checked_mul<T>(x: T, y: T) -> T? where {
         i8 => "i8_checked_mul"
         i16 => "i16_checked_mul"
@@ -220,10 +190,8 @@ external("vole:compiler_intrinsic") {
         u32 => "u32_checked_mul"
         u64 => "u64_checked_mul"
     }
-}
 
-// Checked division - returns nil on div-by-zero or MIN/-1 overflow (signed)
-external("vole:compiler_intrinsic") {
+    // Checked division - returns nil on div-by-zero or MIN/-1 overflow (signed)
     func checked_div<T>(x: T, y: T) -> T? where {
         i8 => "i8_checked_div"
         i16 => "i16_checked_div"

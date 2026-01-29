@@ -6,13 +6,10 @@
 // Thread-local RNG functions (non-deterministic)
 // =============================================================================
 
-// float() -> f64 - random float in [0.0, 1.0)
 external("std:random") {
+    // float() -> f64 - random float in [0.0, 1.0)
     func float() -> f64
-}
-
-// int(min, max) -> i64 - random int in [min, max] inclusive
-external("std:random") {
+    // int(min, max) -> i64 - random int in [min, max] inclusive
     func int(min: i64, max: i64) -> i64
 }
 
