@@ -3,7 +3,7 @@
 //!
 //! Provides:
 //! - sha256(string) -> string - SHA256 hash as hex string
-//! - sha256_bytes(string) -> [i64] - SHA256 hash as array of byte values (0-255)
+//! - sha256_bytes(string) -> [u8] - SHA256 hash as array of byte values (0-255)
 
 use crate::array::RcArray;
 use crate::native_registry::{NativeModule, NativeSignature, NativeType};
@@ -25,13 +25,13 @@ pub fn module() -> NativeModule {
         },
     );
 
-    // sha256_bytes: (string) -> [i64] - SHA256 hash as array of bytes
+    // sha256_bytes: (string) -> [u8] - SHA256 hash as array of bytes
     m.register(
         "sha256_bytes",
         crypto_sha256_bytes as *const u8,
         NativeSignature {
             params: vec![NativeType::String],
-            return_type: NativeType::Array(Box::new(NativeType::I64)),
+            return_type: NativeType::Array(Box::new(NativeType::U8)),
         },
     );
 
