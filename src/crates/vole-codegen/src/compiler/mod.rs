@@ -77,6 +77,9 @@ pub struct Compiler<'a> {
     /// Global module bindings from top-level destructuring imports
     /// local_name -> (module_id, export_name, type_id)
     global_module_bindings: FxHashMap<Symbol, ModuleExportBinding>,
+    /// When true, skip compilation of `Decl::Tests` blocks.
+    /// Set by `vole run` to avoid codegen cost for tests in production.
+    skip_tests: bool,
 }
 
 impl<'a> Compiler<'a> {
@@ -107,6 +110,7 @@ impl<'a> Compiler<'a> {
             next_type_id: 0,
             func_registry,
             global_module_bindings: FxHashMap::default(),
+            skip_tests: false,
         }
     }
 
@@ -173,6 +177,12 @@ impl<'a> Compiler<'a> {
     /// The string is stored in the JitContext so it lives as long as the JIT code.
     pub fn set_source_file(&mut self, file: &str) {
         self.jit.set_source_file(file);
+    }
+
+    /// Set whether to skip compilation of tests blocks.
+    /// When true, `Decl::Tests` is ignored during code generation.
+    pub fn set_skip_tests(&mut self, skip: bool) {
+        self.skip_tests = skip;
     }
 
     /// Get the source file pointer and length from the JitContext.

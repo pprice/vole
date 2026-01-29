@@ -1,0 +1,13 @@
+// Tests blocks are analyzed during `vole check` (and `vole test`).
+// This tests block has a type error that should be caught.
+
+func main() {
+    println("hello")
+}
+
+tests "has type error" {
+    test "broken" {
+        let x: i64 = "not an integer"
+        assert(x == 42)
+    }
+}

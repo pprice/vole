@@ -1,0 +1,14 @@
+// Tests blocks should be skipped during `vole run`.
+// This tests block contains a type error that would fail sema,
+// but `vole run` should succeed because it skips tests blocks entirely.
+
+func main() {
+    println("tests skipped in run mode")
+}
+
+tests "has type error" {
+    test "broken" {
+        let x: i64 = "not an integer"
+        assert(x == 42)
+    }
+}

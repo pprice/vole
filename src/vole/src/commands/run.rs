@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 use std::process::ExitCode;
 
-use super::common::{parse_and_analyze, read_stdin};
+use super::common::{parse_and_analyze_skip_tests, read_stdin};
 use crate::codegen::{Compiler, JitContext, JitOptions};
 use crate::runtime::{push_context, replace_context};
 
@@ -48,10 +48,10 @@ fn execute(path: &Path, project_root: Option<&Path>, release: bool) -> Result<()
     // Set context for signal handler
     push_context(&file_path);
 
-    // Parse and type check
+    // Parse and type check (skip tests blocks in run mode)
     replace_context(&format!("{} (parsing)", file_path));
-    let analyzed =
-        parse_and_analyze(&source, &file_path, project_root).map_err(|()| String::new())?;
+    let analyzed = parse_and_analyze_skip_tests(&source, &file_path, project_root)
+        .map_err(|()| String::new())?;
 
     // Codegen phase
     replace_context(&format!("{} (compiling)", file_path));
@@ -66,6 +66,7 @@ fn execute(path: &Path, project_root: Option<&Path>, release: bool) -> Result<()
         {
             let mut compiler = Compiler::new(&mut jit, &analyzed);
             compiler.set_source_file(&file_path);
+            compiler.set_skip_tests(true);
             compiler
                 .compile_program(&analyzed.program)
                 .map_err(|e| format!("compilation error: {}", e))?;

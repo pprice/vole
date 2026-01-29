@@ -159,6 +159,7 @@ impl Compiler<'_> {
                 Decl::Record(record) => {
                     self.pre_register_record(record);
                 }
+                Decl::Tests(_) if self.skip_tests => {}
                 Decl::Tests(_) => {
                     // Scoped types use finalize_module_class/record in pass 1
                 }
@@ -194,6 +195,7 @@ impl Compiler<'_> {
                         .return_type_id;
                     self.func_registry.set_return_type(func_key, return_type_id);
                 }
+                Decl::Tests(_) if self.skip_tests => {}
                 Decl::Tests(tests_decl) => {
                     // Declare scoped declarations within the tests block
                     self.declare_tests_scoped_decls(tests_decl, program, &mut test_count);
@@ -286,6 +288,7 @@ impl Compiler<'_> {
 
                     self.compile_function(func)?;
                 }
+                Decl::Tests(_) if self.skip_tests => {}
                 Decl::Tests(tests_decl) => {
                     self.compile_tests(tests_decl, program, &mut test_count)?;
                 }

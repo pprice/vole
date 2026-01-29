@@ -103,6 +103,32 @@ pub fn parse_and_analyze(
     file_path: &str,
     project_root: Option<&std::path::Path>,
 ) -> Result<AnalyzedProgram, ()> {
+    parse_and_analyze_opts(source, file_path, project_root, false)
+}
+
+/// Parse and analyze a source file, skipping tests blocks.
+///
+/// Used by `vole run` to avoid sema cost for tests blocks in production.
+#[allow(clippy::result_unit_err)]
+pub fn parse_and_analyze_skip_tests(
+    source: &str,
+    file_path: &str,
+    project_root: Option<&std::path::Path>,
+) -> Result<AnalyzedProgram, ()> {
+    parse_and_analyze_opts(source, file_path, project_root, true)
+}
+
+/// Parse and analyze a source file, optionally skipping tests blocks.
+///
+/// When `skip_tests` is true, `Decl::Tests` is ignored in all sema passes.
+/// This is used by `vole run` to avoid sema cost for tests blocks in production.
+#[allow(clippy::result_unit_err)]
+fn parse_and_analyze_opts(
+    source: &str,
+    file_path: &str,
+    project_root: Option<&std::path::Path>,
+    skip_tests: bool,
+) -> Result<AnalyzedProgram, ()> {
     // Parse phase
     let (mut program, mut interner) = {
         let _span = tracing::info_span!("parse", file = %file_path).entered();
@@ -154,6 +180,7 @@ pub fn parse_and_analyze(
     let mut analyzer = {
         let _span = tracing::info_span!("sema").entered();
         let mut analyzer = Analyzer::with_project_root(file_path, source, project_root);
+        analyzer.set_skip_tests(skip_tests);
         if let Err(errors) = analyzer.analyze(&program, &interner) {
             for err in &errors {
                 render_sema_error(err, file_path, source);
@@ -442,8 +469,9 @@ pub fn run_captured<W: Write + Send + 'static>(
         return Err(());
     }
 
-    // Type check
+    // Type check (skip tests blocks, matching `vole run` behavior)
     let mut analyzer = Analyzer::new(file_path, source);
+    analyzer.set_skip_tests(true);
     if let Err(errors) = analyzer.analyze(&program, &interner) {
         for err in &errors {
             render_sema_error_to(err, file_path, source, &mut stderr);
@@ -457,11 +485,12 @@ pub fn run_captured<W: Write + Send + 'static>(
 
     let analyzed = AnalyzedProgram::from_analysis(program, interner, output);
 
-    // Compile
+    // Compile (skip tests blocks, matching `vole run` behavior)
     let mut jit = JitContext::new();
     {
         let mut compiler = Compiler::new(&mut jit, &analyzed);
         compiler.set_source_file(file_path);
+        compiler.set_skip_tests(true);
         if let Err(e) = compiler.compile_program(&analyzed.program) {
             let _ = writeln!(stderr, "compilation error: {}", e);
             return Err(());

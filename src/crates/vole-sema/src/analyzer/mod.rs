@@ -208,6 +208,7 @@ pub struct AnalyzerBuilder {
     cache: Option<Rc<RefCell<ModuleCache>>>,
     project_root: Option<PathBuf>,
     auto_detect_root: bool,
+    skip_tests: bool,
 }
 
 impl AnalyzerBuilder {
@@ -218,12 +219,20 @@ impl AnalyzerBuilder {
             cache: None,
             project_root: None,
             auto_detect_root: true,
+            skip_tests: false,
         }
     }
 
     /// Use a shared module cache. The analyzer will use the CompilationDb from the cache.
     pub fn with_cache(mut self, cache: Rc<RefCell<ModuleCache>>) -> Self {
         self.cache = Some(cache);
+        self
+    }
+
+    /// Skip processing of tests blocks during analysis.
+    /// When true, `Decl::Tests` is ignored in all analysis passes.
+    pub fn skip_tests(mut self, skip: bool) -> Self {
+        self.skip_tests = skip;
         self
     }
 
@@ -286,6 +295,7 @@ impl AnalyzerBuilder {
             current_module,
             current_file_path,
             module_loader,
+            skip_tests: self.skip_tests,
             ..Default::default()
         };
 
@@ -417,6 +427,9 @@ pub struct Analyzer {
     /// that need to see parent module types). These are searched after the current
     /// module but before the builtin module, providing scope inheritance for types.
     parent_modules: Vec<ModuleId>,
+    /// When true, skip processing of `Decl::Tests` in all analysis passes.
+    /// Set by `vole run` to avoid sema/codegen cost for tests blocks in production.
+    skip_tests: bool,
 }
 
 /// Result of looking up a method on a type via EntityRegistry
@@ -464,6 +477,12 @@ impl Analyzer {
             .with_cache(cache)
             .with_project_root(project_root)
             .build()
+    }
+
+    /// Set whether to skip processing of tests blocks.
+    /// When true, `Decl::Tests` is ignored in all analysis passes.
+    pub fn set_skip_tests(&mut self, skip: bool) {
+        self.skip_tests = skip;
     }
 
     // Builtin registration: builtins.rs
@@ -889,7 +908,9 @@ impl Analyzer {
                     self.check_function(func, interner)?;
                 }
                 Decl::Tests(tests_decl) => {
-                    self.check_tests(tests_decl, interner)?;
+                    if !self.skip_tests {
+                        self.check_tests(tests_decl, interner)?;
+                    }
                 }
                 Decl::Let(_) | Decl::LetTuple(_) => {
                     // Already processed in process_global_lets/process_module_imports
@@ -1043,6 +1064,7 @@ impl Default for Analyzer {
             type_param_stack: TypeParamScopeStack::new(),
             current_file_path: None,
             parent_modules: Vec::new(),
+            skip_tests: false,
         }
     }
 }
