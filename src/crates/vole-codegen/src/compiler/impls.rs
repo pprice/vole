@@ -191,7 +191,7 @@ impl Compiler<'_> {
 
         // Compile static methods
         if let Some(statics) = data.statics {
-            self.compile_static_methods(statics, data.name)?;
+            self.compile_static_methods(statics, data.name, module_id)?;
         }
 
         Ok(())
@@ -1131,9 +1131,8 @@ impl Compiler<'_> {
         &mut self,
         statics: &StaticsBlock,
         type_name: Symbol,
+        module_id: ModuleId,
     ) -> Result<(), String> {
-        let module_id = self.program_module();
-
         // Get the TypeDefId for looking up method info
         let type_name_id = self.query().name_id(module_id, &[type_name]);
         let type_def_id = self

@@ -94,6 +94,23 @@ tests "scoped class with methods" {
     }
 }
 
+tests "scoped class with static methods" {
+    class ScopedBox {
+        value: i64
+
+        func get() -> i64 => self.value
+
+        statics {
+            func new(v: i64) -> ScopedBox => ScopedBox { value: v }
+        }
+    }
+
+    test "class static constructor" {
+        let b = ScopedBox.new(42)
+        assert(b.get() == 42)
+    }
+}
+
 tests "scoped interface and implement block" {
     interface ScopedDescribable {
         func describe() -> string
