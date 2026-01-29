@@ -323,6 +323,7 @@ impl Analyzer {
                 .map(|p| {
                     let type_id = self.resolve_type_id(&p.ty, interner);
                     self.check_never_not_allowed(type_id, p.span);
+                    self.check_union_simplification(&p.ty, p.span);
                     type_id
                 })
                 .collect();
@@ -331,6 +332,9 @@ impl Analyzer {
                 .as_ref()
                 .map(|t| self.resolve_type_id(t, interner))
                 .unwrap_or_else(|| self.type_arena().void());
+            if let Some(rt) = &func.return_type {
+                self.check_union_simplification(rt, func.span);
+            }
 
             let signature = FunctionType::from_ids(&params_id, return_type_id, false);
 
@@ -419,6 +423,7 @@ impl Analyzer {
             // Check that never is not used in function parameters (after ctx is no longer borrowed)
             for (param, &type_id) in func.params.iter().zip(&param_type_ids) {
                 self.check_never_not_allowed(type_id, param.span);
+                self.check_union_simplification(&param.ty, param.span);
             }
 
             // Create a FunctionType from TypeIds
@@ -536,6 +541,7 @@ impl Analyzer {
         // Check that never is not used in method parameters
         for (param, &type_id) in params.iter().zip(&params_id) {
             self.check_never_not_allowed(type_id, param.span);
+            self.check_union_simplification(&param.ty, param.span);
         }
 
         let return_type_id = return_type
@@ -1122,6 +1128,7 @@ impl Analyzer {
         // Check that never is not used in record/class fields
         for (field, &type_id) in fields.iter().zip(&field_type_ids) {
             self.check_never_not_allowed(type_id, field.span);
+            self.check_union_simplification(&field.ty, field.span);
         }
 
         (field_names, field_type_ids)
@@ -1258,6 +1265,7 @@ impl Analyzer {
             // Check that never is not used in record fields
             for (field, &type_id) in record.fields.iter().zip(&field_type_ids) {
                 self.check_never_not_allowed(type_id, field.span);
+                self.check_union_simplification(&field.ty, field.span);
             }
 
             // Set generic_info (with empty type_params for non-generic records)
@@ -1375,6 +1383,7 @@ impl Analyzer {
             // Check that never is not used in record fields (after ctx is no longer borrowed)
             for (field, &type_id) in record.fields.iter().zip(&field_type_ids) {
                 self.check_never_not_allowed(type_id, field.span);
+                self.check_union_simplification(&field.ty, field.span);
             }
 
             // Lookup shell registered in pass 0.5

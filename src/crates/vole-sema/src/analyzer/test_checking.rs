@@ -148,6 +148,9 @@ impl Analyzer {
                         if let Some(decl_type_id) = declared_type_id {
                             self.check_never_not_allowed(decl_type_id, let_stmt.span);
                         }
+                        if let Some(ty) = &let_stmt.ty {
+                            self.check_union_simplification(ty, let_stmt.span);
+                        }
 
                         let init_type_id =
                             self.check_expr_expecting_id(init_expr, declared_type_id, interner)?;

@@ -1,0 +1,16 @@
+func with_never(x: i64 | never) -> i64 {
+    return x
+}
+
+func returns_unknown() -> string | unknown {
+    return "hello"
+}
+
+func with_let() {
+    let x: i64 | never = 5
+    _ = x
+}
+
+record Foo {
+    value: i64 | never,
+}

@@ -145,6 +145,9 @@ impl Analyzer {
                         if let Some(decl_type_id) = declared_type_id {
                             self.check_never_not_allowed(decl_type_id, let_stmt.span);
                         }
+                        if let Some(ty) = &let_stmt.ty {
+                            self.check_union_simplification(ty, let_stmt.span);
+                        }
 
                         // Store declared type for codegen (keyed by init expression id)
                         if let Some(decl_type_id) = declared_type_id {

@@ -5,6 +5,7 @@ use crate::errors::{SemanticError, SemanticWarning};
 use crate::type_arena::{InternedStructural, TypeId as ArenaTypeId};
 use crate::type_display::{display_structural_constraint, display_type_id};
 use vole_frontend::Span;
+use vole_frontend::ast::TypeExpr;
 
 use super::Analyzer;
 
@@ -153,6 +154,78 @@ impl Analyzer {
     pub(crate) fn check_never_not_allowed(&mut self, type_id: ArenaTypeId, span: Span) {
         if type_id.is_never() {
             self.add_error(SemanticError::NeverNotAllowed { span: span.into() }, span);
+        }
+    }
+
+    /// Check if a type expression contains a union with `never` or `unknown` and emit W3004.
+    /// This walks the type expression tree to catch nested unions like `[i32 | never]`.
+    pub(crate) fn check_union_simplification(&mut self, ty: &TypeExpr, span: Span) {
+        match ty {
+            TypeExpr::Union(variants) => {
+                for variant in variants {
+                    match variant {
+                        TypeExpr::Never => {
+                            self.add_warning(
+                                SemanticWarning::UnionSimplification {
+                                    ty: "never".to_string(),
+                                    simplification_hint: "`never` is the bottom type and is automatically removed from unions; `T | never` simplifies to `T`".to_string(),
+                                    span: span.into(),
+                                    label: "`never` in union will be removed".to_string(),
+                                },
+                                span,
+                            );
+                        }
+                        TypeExpr::Unknown => {
+                            self.add_warning(
+                                SemanticWarning::UnionSimplification {
+                                    ty: "unknown".to_string(),
+                                    simplification_hint: "`unknown` is the top type and absorbs all other types; `T | unknown` simplifies to `unknown`".to_string(),
+                                    span: span.into(),
+                                    label: "`unknown` in union absorbs all other types".to_string(),
+                                },
+                                span,
+                            );
+                        }
+                        _ => {}
+                    }
+                    // Recurse into variant to catch nested unions
+                    self.check_union_simplification(variant, span);
+                }
+            }
+            // Recurse into container types
+            TypeExpr::Array(inner) | TypeExpr::Optional(inner) => {
+                self.check_union_simplification(inner, span);
+            }
+            TypeExpr::FixedArray { element, .. } => {
+                self.check_union_simplification(element, span);
+            }
+            TypeExpr::Tuple(elements) => {
+                for elem in elements {
+                    self.check_union_simplification(elem, span);
+                }
+            }
+            TypeExpr::Function {
+                params,
+                return_type,
+            } => {
+                for param in params {
+                    self.check_union_simplification(param, span);
+                }
+                self.check_union_simplification(return_type, span);
+            }
+            TypeExpr::Fallible {
+                success_type,
+                error_type,
+            } => {
+                self.check_union_simplification(success_type, span);
+                self.check_union_simplification(error_type, span);
+            }
+            TypeExpr::Generic { args, .. } => {
+                for arg in args {
+                    self.check_union_simplification(arg, span);
+                }
+            }
+            _ => {}
         }
     }
 }
