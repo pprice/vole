@@ -116,7 +116,7 @@ impl<'a, 'ctx> VtableCtx for VtableCtxView<'a, 'ctx> {
 
     fn resolve_type_str_or_interface(&self, name: &str) -> Option<TypeDefId> {
         let query = self.query();
-        let module_id = query.main_module();
+        let module_id = self.env.analyzed.module_id;
         query.resolve_type_def_by_str(module_id, name)
     }
 
