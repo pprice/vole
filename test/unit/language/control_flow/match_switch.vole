@@ -1,0 +1,164 @@
+// Match expression with dense integer literals (br_table optimization)
+
+tests "switch dispatch with dense integer arms" {
+    test "4 consecutive arms" {
+        let x = 2
+        let result = match x {
+            0 => "zero"
+            1 => "one"
+            2 => "two"
+            3 => "three"
+            _ => "other"
+        }
+        assert(result == "two")
+    }
+
+    test "4 consecutive arms - first" {
+        let x = 0
+        let result = match x {
+            0 => "zero"
+            1 => "one"
+            2 => "two"
+            3 => "three"
+            _ => "other"
+        }
+        assert(result == "zero")
+    }
+
+    test "4 consecutive arms - last literal" {
+        let x = 3
+        let result = match x {
+            0 => "zero"
+            1 => "one"
+            2 => "two"
+            3 => "three"
+            _ => "other"
+        }
+        assert(result == "three")
+    }
+
+    test "4 consecutive arms - wildcard" {
+        let x = 99
+        let result = match x {
+            0 => "zero"
+            1 => "one"
+            2 => "two"
+            3 => "three"
+            _ => "other"
+        }
+        assert(result == "other")
+    }
+
+    test "6 dense arms with offset" {
+        let x = 12
+        let result = match x {
+            10 => "ten"
+            11 => "eleven"
+            12 => "twelve"
+            13 => "thirteen"
+            14 => "fourteen"
+            15 => "fifteen"
+            _ => "unknown"
+        }
+        assert(result == "twelve")
+    }
+
+    test "6 dense arms - wildcard fallback" {
+        let x = 100
+        let result = match x {
+            10 => "ten"
+            11 => "eleven"
+            12 => "twelve"
+            13 => "thirteen"
+            14 => "fourteen"
+            15 => "fifteen"
+            _ => "unknown"
+        }
+        assert(result == "unknown")
+    }
+
+    test "4 arms returning integers" {
+        let x = 2
+        let result = match x {
+            0 => 100
+            1 => 200
+            2 => 300
+            3 => 400
+            _ => -1
+        }
+        assert(result == 300)
+    }
+
+    test "dense arms with small gap" {
+        // Values 0,1,2,4 - range is 5, count is 4, ratio 1.25 (dense enough)
+        let x = 4
+        let result = match x {
+            0 => "a"
+            1 => "b"
+            2 => "c"
+            4 => "e"
+            _ => "other"
+        }
+        assert(result == "e")
+    }
+
+    test "dense arms with small gap - missing value" {
+        // 3 is not in the switch table, should fall to wildcard
+        let x = 3
+        let result = match x {
+            0 => "a"
+            1 => "b"
+            2 => "c"
+            4 => "e"
+            _ => "other"
+        }
+        assert(result == "other")
+    }
+
+    test "negative integer arms" {
+        let x = -2
+        let result = match x {
+            -3 => "neg three"
+            -2 => "neg two"
+            -1 => "neg one"
+            0 => "zero"
+            _ => "other"
+        }
+        assert(result == "neg two")
+    }
+
+    test "wildcard in middle position" {
+        // Wildcard is not the last arm
+        let x = 99
+        let result = match x {
+            1 => "one"
+            2 => "two"
+            3 => "three"
+            _ => "default"
+            4 => "four"
+        }
+        assert(result == "default")
+    }
+}
+
+tests "match still works with fewer arms (brif path)" {
+    test "2 arms uses brif" {
+        let x = 1
+        let result = match x {
+            1 => "one"
+            _ => "other"
+        }
+        assert(result == "one")
+    }
+
+    test "3 literal arms uses brif" {
+        let x = 2
+        let result = match x {
+            0 => "zero"
+            1 => "one"
+            2 => "two"
+            _ => "other"
+        }
+        assert(result == "two")
+    }
+}

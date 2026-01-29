@@ -14,6 +14,7 @@ pub mod jit;
 mod lambda;
 pub mod loop_analysis;
 pub mod loop_param_opt;
+mod match_switch;
 mod method_resolution;
 mod ops;
 mod stmt;
