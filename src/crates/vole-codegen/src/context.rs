@@ -4,6 +4,7 @@
 // Methods are implemented across multiple files using split impl blocks.
 
 use std::cell::RefCell;
+use std::rc::Rc;
 
 use cranelift::prelude::{
     AbiParam, FunctionBuilder, InstBuilder, IntCC, MemFlags, StackSlotData, StackSlotKind, Type,
@@ -339,7 +340,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Get global variable initializer by name
     #[inline]
-    pub fn global_init(&self, name: Symbol) -> Option<&Expr> {
+    pub fn global_init(&self, name: Symbol) -> Option<&Rc<Expr>> {
         self.env.global_inits.get(&name)
     }
 

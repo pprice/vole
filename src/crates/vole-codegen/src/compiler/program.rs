@@ -1,5 +1,7 @@
-use rustc_hash::FxHashMap;
 use std::io::Write;
+use std::rc::Rc;
+
+use rustc_hash::FxHashMap;
 
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, InstBuilder, types};
 use cranelift_module::{FuncId, Module};
@@ -217,7 +219,8 @@ impl Compiler<'_> {
                 Decl::Let(let_stmt) => {
                     // Store global initializer expressions (skip type aliases)
                     if let LetInit::Expr(expr) = &let_stmt.init {
-                        self.global_inits.insert(let_stmt.name, expr.clone());
+                        self.global_inits
+                            .insert(let_stmt.name, Rc::new(expr.clone()));
                     }
                 }
                 Decl::LetTuple(let_tuple) => {
@@ -411,14 +414,14 @@ impl Compiler<'_> {
             let (program, module_interner) = &self.analyzed.module_programs[module_path];
 
             // Extract module global initializer expressions
-            let module_global_inits: FxHashMap<Symbol, Expr> = program
+            let module_global_inits: FxHashMap<Symbol, Rc<Expr>> = program
                 .declarations
                 .iter()
                 .filter_map(|decl| {
                     if let Decl::Let(let_stmt) = decl
                         && let LetInit::Expr(expr) = &let_stmt.init
                     {
-                        Some((let_stmt.name, expr.clone()))
+                        Some((let_stmt.name, Rc::new(expr.clone())))
                     } else {
                         None
                     }
@@ -602,7 +605,7 @@ impl Compiler<'_> {
         name_id: NameId,
         func: &FuncDecl,
         module_interner: &Interner,
-        module_global_inits: &FxHashMap<Symbol, Expr>,
+        module_global_inits: &FxHashMap<Symbol, Rc<Expr>>,
     ) -> Result<(), String> {
         let func_key = self.func_registry.intern_name_id(name_id);
         let display_name = self.query().display_name(name_id);
@@ -1109,7 +1112,7 @@ impl Compiler<'_> {
         let mut builder_ctx = FunctionBuilderContext::new();
         {
             let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-            let empty_global_inits = FxHashMap::default();
+            let empty_global_inits: FxHashMap<Symbol, Rc<Expr>> = FxHashMap::default();
             let env = CompileEnv {
                 analyzed: self.analyzed,
                 state: &self.state,
@@ -1165,7 +1168,7 @@ impl Compiler<'_> {
             builder.switch_to_block(entry_block);
 
             // Compile test body (no parameters, no return type)
-            let empty_global_inits = FxHashMap::default();
+            let empty_global_inits: FxHashMap<Symbol, Rc<Expr>> = FxHashMap::default();
             let env = CompileEnv {
                 analyzed: self.analyzed,
                 state: &self.state,

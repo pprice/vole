@@ -64,8 +64,8 @@ pub struct Compiler<'a> {
     analyzed: &'a AnalyzedProgram,
     pointer_type: clif_types::Type,
     tests: Vec<TestInfo>,
-    /// Global variable initializer expressions keyed by name
-    global_inits: FxHashMap<Symbol, Expr>,
+    /// Global variable initializer expressions keyed by name (Rc to avoid cloning AST nodes)
+    global_inits: FxHashMap<Symbol, Rc<Expr>>,
     /// FunctionKeys for declared test functions by index
     test_func_keys: Vec<FunctionKey>,
     /// Codegen lookup tables (type_metadata, method_infos, vtables, etc.)

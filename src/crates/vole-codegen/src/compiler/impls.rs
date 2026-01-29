@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use rustc_hash::FxHashMap;
 
 use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
@@ -1193,7 +1195,7 @@ impl Compiler<'_> {
         class: &ClassDecl,
         module_interner: &Interner,
         module_path: &str,
-        module_global_inits: &FxHashMap<Symbol, Expr>,
+        module_global_inits: &FxHashMap<Symbol, Rc<Expr>>,
     ) -> Result<(), String> {
         let type_name_str = module_interner.resolve(class.name);
         // Look up the actual module_id from the module_path (not main_module!)
@@ -1432,7 +1434,7 @@ impl Compiler<'_> {
         record: &RecordDecl,
         module_interner: &Interner,
         module_path: &str,
-        module_global_inits: &FxHashMap<Symbol, Expr>,
+        module_global_inits: &FxHashMap<Symbol, Rc<Expr>>,
     ) -> Result<(), String> {
         let type_name_str = module_interner.resolve(record.name);
         // Look up the actual module_id from the module_path (not main_module!)
