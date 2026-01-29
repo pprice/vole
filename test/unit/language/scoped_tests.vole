@@ -16,14 +16,175 @@ tests "scoped declarations" {
     }
 }
 
-// Note: Scoped records/classes are not yet supported (tracked by separate bead)
-// tests "scoped types" {
-//     record TestData { value: i64 }
-//     test "use scoped record" {
-//         let d = TestData { value: 5 }
-//         assert(d.value == 5)
-//     }
-// }
+tests "scoped types" {
+    record TestData { value: i64 }
+    test "use scoped record" {
+        let d = TestData { value: 5 }
+        assert(d.value == 5)
+    }
+}
+
+tests "scoped record with fields and construction" {
+    record ScopedPoint {
+        x: i64,
+        y: i64,
+    }
+
+    test "construct and access fields" {
+        let p = ScopedPoint { x: 10, y: 20 }
+        assert(p.x == 10)
+        assert(p.y == 20)
+    }
+
+    test "multiple instances" {
+        let a = ScopedPoint { x: 1, y: 2 }
+        let b = ScopedPoint { x: 3, y: 4 }
+        assert(a.x + b.x == 4)
+        assert(a.y + b.y == 6)
+    }
+}
+
+tests "scoped record with methods" {
+    record ScopedVec2 {
+        x: i64,
+        y: i64,
+
+        func magnitude_squared() -> i64 {
+            return self.x * self.x + self.y * self.y
+        }
+
+        func sum() -> i64 => self.x + self.y
+    }
+
+    test "call method on scoped record" {
+        let v = ScopedVec2 { x: 3, y: 4 }
+        assert(v.magnitude_squared() == 25)
+    }
+
+    test "expression-bodied method on scoped record" {
+        let v = ScopedVec2 { x: 10, y: 20 }
+        assert(v.sum() == 30)
+    }
+}
+
+tests "scoped class with methods" {
+    class ScopedCounter {
+        value: i64,
+
+        func get() -> i64 {
+            return self.value
+        }
+
+        func increment() -> i64 {
+            self.value = self.value + 1
+            return self.value
+        }
+    }
+
+    test "class instantiation and read" {
+        let c = ScopedCounter { value: 0 }
+        assert(c.get() == 0)
+    }
+
+    test "class mutation via method" {
+        let c = ScopedCounter { value: 10 }
+        assert(c.increment() == 11)
+        assert(c.increment() == 12)
+        assert(c.get() == 12)
+    }
+}
+
+tests "scoped interface and implement block" {
+    interface ScopedDescribable {
+        func describe() -> string
+    }
+
+    record ScopedItem {
+        name: string,
+    }
+
+    implement ScopedDescribable for ScopedItem {
+        func describe() -> string {
+            return self.name
+        }
+    }
+
+    test "implement block method on scoped record" {
+        let item = ScopedItem { name: "widget" }
+        assert(item.describe() == "widget")
+    }
+
+    test "scoped interface value dispatch" {
+        let d: ScopedDescribable = ScopedItem { name: "gadget" }
+        assert(d.describe() == "gadget")
+    }
+}
+
+// Parent module types used by scoped tests
+record Pair {
+    a: i64,
+    b: i64,
+}
+
+tests "scoped types referencing parent module types" {
+    func make_pair(x: i64, y: i64) -> Pair {
+        return Pair { a: x, b: y }
+    }
+
+    test "scoped function returns parent record type" {
+        let p = make_pair(3, 7)
+        assert(p.a == 3)
+        assert(p.b == 7)
+    }
+
+    test "use parent module record directly" {
+        let p = Pair { a: 100, b: 200 }
+        assert(p.a + p.b == 300)
+    }
+}
+
+tests "nested tests blocks with scope inheritance" {
+    func outer_helper(x: i64) -> i64 => x + 1
+
+    test "outer test uses outer helper" {
+        assert(outer_helper(5) == 6)
+    }
+
+    tests "inner scope" {
+        func inner_helper(x: i64) -> i64 => x * 10
+
+        test "inner test uses inner helper" {
+            assert(inner_helper(3) == 30)
+        }
+
+        test "inner test uses outer helper" {
+            assert(outer_helper(9) == 10)
+        }
+    }
+}
+
+tests "mixed ordering: test then decl then test" {
+    test "first test before any declarations" {
+        assert(1 + 1 == 2)
+    }
+
+    func compute(a: i64, b: i64) -> i64 => a * b + 1
+
+    record ScopedResult {
+        value: i64,
+    }
+
+    test "second test uses declarations defined after first test" {
+        let r = ScopedResult { value: compute(3, 4) }
+        assert(r.value == 13)
+    }
+
+    func negate(x: i64) -> i64 => 0 - x
+
+    test "third test uses later declaration" {
+        assert(negate(42) == -42)
+    }
+}
 
 tests "expression test syntax" {
     test "simple expression test" => assert(1 + 1 == 2)

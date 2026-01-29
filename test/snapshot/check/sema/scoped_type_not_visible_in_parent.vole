@@ -1,0 +1,15 @@
+// Error: Parent module cannot access types scoped within a tests block
+
+tests "defines a scoped type" {
+    record ScopedOnly { value: i64 }
+
+    test "can use scoped type" {
+        let s = ScopedOnly { value: 1 }
+        assert(s.value == 1)
+    }
+}
+
+// This should fail: ScopedOnly is not visible outside the tests block
+func main() {
+    let s = ScopedOnly { value: 42 }
+}

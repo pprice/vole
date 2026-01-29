@@ -196,7 +196,7 @@ impl Compiler<'_> {
                 }
                 Decl::Tests(tests_decl) => {
                     // Declare scoped declarations within the tests block
-                    self.declare_tests_scoped_decls(tests_decl, program);
+                    self.declare_tests_scoped_decls(tests_decl, program, &mut test_count);
 
                     // Declare each test with a generated name and signature () -> i64
                     let i64_type_id = self.analyzed.type_arena().primitives.i64;
@@ -756,8 +756,8 @@ impl Compiler<'_> {
         program: &Program,
         test_count: &mut usize,
     ) -> Result<(), String> {
-        // Phase 1: Compile scoped function/class/record bodies
-        self.compile_tests_scoped_bodies(tests_decl, program)?;
+        // Phase 1: Compile scoped function/class/record bodies (and nested tests)
+        self.compile_tests_scoped_bodies(tests_decl, program, test_count)?;
 
         // Collect scoped let declarations for compiling in each test
         let scoped_lets: Vec<&LetStmt> = tests_decl
@@ -850,7 +850,12 @@ impl Compiler<'_> {
     /// Declare scoped declarations within a tests block (pass 1).
     /// Handles scoped functions, records, and classes so they're available
     /// during test compilation.
-    fn declare_tests_scoped_decls(&mut self, tests_decl: &TestsDecl, _program: &Program) {
+    fn declare_tests_scoped_decls(
+        &mut self,
+        tests_decl: &TestsDecl,
+        _program: &Program,
+        test_count: &mut usize,
+    ) {
         let program_module = self.program_module();
         let interner = &self.analyzed.interner;
 
@@ -895,7 +900,28 @@ impl Compiler<'_> {
                     }
                 }
                 Decl::Implement(impl_block) => {
-                    self.register_implement_block(impl_block);
+                    // Scoped implement blocks target types under the virtual module
+                    if let Some(vm_id) = virtual_module_id {
+                        self.register_implement_block_in_module(impl_block, vm_id);
+                    } else {
+                        self.register_implement_block(impl_block);
+                    }
+                }
+                Decl::Tests(nested_tests) => {
+                    // Recursively declare nested tests block scoped decls
+                    self.declare_tests_scoped_decls(nested_tests, _program, test_count);
+
+                    // Declare each nested test with a generated name and signature () -> i64
+                    let i64_type_id = self.analyzed.type_arena().primitives.i64;
+                    for _ in &nested_tests.tests {
+                        let func_key = self.test_function_key(*test_count);
+                        let func_name = self.test_display_name(func_key);
+                        let sig = self.jit.create_signature(&[], Some(types::I64));
+                        let func_id = self.jit.declare_function(&func_name, &sig);
+                        self.func_registry.set_return_type(func_key, i64_type_id);
+                        self.func_registry.set_func_id(func_key, func_id);
+                        *test_count += 1;
+                    }
                 }
                 _ => {
                     // Let declarations, interfaces, etc. don't need pass 1 handling
@@ -909,8 +935,14 @@ impl Compiler<'_> {
         &mut self,
         tests_decl: &TestsDecl,
         program: &Program,
+        test_count: &mut usize,
     ) -> Result<(), String> {
         let program_module = self.program_module();
+        // Scoped types are registered under the virtual module in sema
+        let virtual_module_id = self
+            .query()
+            .tests_virtual_module(tests_decl.span)
+            .unwrap_or(program_module);
 
         for inner_decl in &tests_decl.decls {
             match inner_decl {
@@ -941,13 +973,17 @@ impl Compiler<'_> {
                     self.compile_function(func)?;
                 }
                 Decl::Class(class) => {
-                    self.compile_class_methods(class, program)?;
+                    self.compile_class_methods_in_module(class, program, virtual_module_id)?;
                 }
                 Decl::Record(record) => {
-                    self.compile_record_methods(record, program)?;
+                    self.compile_record_methods_in_module(record, program, virtual_module_id)?;
                 }
                 Decl::Implement(impl_block) => {
-                    self.compile_implement_block(impl_block)?;
+                    self.compile_implement_block_in_module(impl_block, virtual_module_id)?;
+                }
+                Decl::Tests(nested_tests) => {
+                    // Recursively compile nested tests blocks
+                    self.compile_tests(nested_tests, program, test_count)?;
                 }
                 _ => {
                     // Let declarations are handled during test body compilation

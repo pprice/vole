@@ -2,15 +2,6 @@
 
 [stderr]
   x [E2098]: the `never` type can only be used as a return type
-   ,-[<path>/never_not_allowed.vole:7:16]
- 6 | // Error: function parameter with never type
- 7 | func bad_param(a: never) {
-   :                |
-   :                `-- cannot use `never` here
- 8 | }
-   `----
-  help: `never` indicates a function that never returns; it cannot be used for variables, parameters, or fields
-  x [E2098]: the `never` type can only be used as a return type
     ,-[<path>/never_not_allowed.vole:12:5]
  11 | record BadRecord {
  12 |     f: never,
@@ -18,6 +9,15 @@
     :         `-- cannot use `never` here
  13 | }
     `----
+  help: `never` indicates a function that never returns; it cannot be used for variables, parameters, or fields
+  x [E2098]: the `never` type can only be used as a return type
+   ,-[<path>/never_not_allowed.vole:7:16]
+ 6 | // Error: function parameter with never type
+ 7 | func bad_param(a: never) {
+   :                |
+   :                `-- cannot use `never` here
+ 8 | }
+   `----
   help: `never` indicates a function that never returns; it cannot be used for variables, parameters, or fields
   x [E2098]: the `never` type can only be used as a return type
    ,-[<path>/never_not_allowed.vole:4:1]

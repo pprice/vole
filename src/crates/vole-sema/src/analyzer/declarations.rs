@@ -195,17 +195,14 @@ impl Analyzer {
 
     /// Pass 1: Collect signatures for functions, classes, records, interfaces, and implement blocks
     pub(super) fn collect_signatures(&mut self, program: &Program, interner: &Interner) {
+        self.collect_type_signatures(program, interner);
+        self.collect_function_signatures(program, interner);
+    }
+
+    /// Collect signatures for type declarations: classes, records, interfaces, implement blocks, errors.
+    pub(super) fn collect_type_signatures(&mut self, program: &Program, interner: &Interner) {
         for decl in &program.declarations {
             match decl {
-                Decl::Function(func) => {
-                    self.collect_function_signature(func, interner);
-                }
-                Decl::Tests(_) => {
-                    // Tests don't need signatures in the first pass
-                }
-                Decl::Let(_) | Decl::LetTuple(_) => {
-                    // Let declarations are processed before the second pass
-                }
                 Decl::Class(class) => {
                     self.collect_class_signature(class, interner);
                 }
@@ -221,10 +218,22 @@ impl Analyzer {
                 Decl::Error(decl) => {
                     self.analyze_error_decl(decl, interner);
                 }
+                _ => {}
+            }
+        }
+    }
+
+    /// Collect signatures for functions and external blocks.
+    pub(super) fn collect_function_signatures(&mut self, program: &Program, interner: &Interner) {
+        for decl in &program.declarations {
+            match decl {
+                Decl::Function(func) => {
+                    self.collect_function_signature(func, interner);
+                }
                 Decl::External(ext_block) => {
-                    // Register external functions as top-level functions
                     self.collect_external_block(ext_block, interner);
                 }
+                _ => {}
             }
         }
     }

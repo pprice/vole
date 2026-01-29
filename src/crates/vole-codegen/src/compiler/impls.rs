@@ -15,6 +15,7 @@ use vole_frontend::{
     ClassDecl, Expr, FuncDecl, ImplementBlock, InterfaceMethod, Interner, RecordDecl, StaticsBlock,
     Symbol, TypeExpr,
 };
+use vole_identity::ModuleId;
 use vole_sema::type_arena::TypeId;
 
 /// Get the canonical name for an AST primitive type
@@ -55,6 +56,17 @@ impl Compiler<'_> {
         class: &ClassDecl,
         program: &vole_frontend::Program,
     ) -> Result<(), String> {
+        let module_id = self.program_module();
+        self.compile_class_methods_in_module(class, program, module_id)
+    }
+
+    /// Compile methods for a class using a specific module for type lookups.
+    pub(super) fn compile_class_methods_in_module(
+        &mut self,
+        class: &ClassDecl,
+        program: &vole_frontend::Program,
+        module_id: ModuleId,
+    ) -> Result<(), String> {
         // Skip generic classes - they're compiled via monomorphized instances
         if !class.type_params.is_empty() {
             return Ok(());
@@ -67,6 +79,7 @@ impl Compiler<'_> {
                 type_kind: "class",
             },
             program,
+            module_id,
         )
     }
 
@@ -75,6 +88,17 @@ impl Compiler<'_> {
         &mut self,
         record: &RecordDecl,
         program: &vole_frontend::Program,
+    ) -> Result<(), String> {
+        let module_id = self.program_module();
+        self.compile_record_methods_in_module(record, program, module_id)
+    }
+
+    /// Compile methods for a record using a specific module for type lookups.
+    pub(super) fn compile_record_methods_in_module(
+        &mut self,
+        record: &RecordDecl,
+        program: &vole_frontend::Program,
+        module_id: ModuleId,
     ) -> Result<(), String> {
         // Skip generic records - they're compiled via monomorphized instances
         if !record.type_params.is_empty() {
@@ -88,6 +112,7 @@ impl Compiler<'_> {
                 type_kind: "record",
             },
             program,
+            module_id,
         )
     }
 
@@ -96,10 +121,10 @@ impl Compiler<'_> {
         &mut self,
         data: TypeMethodsData<'_>,
         program: &vole_frontend::Program,
+        module_id: ModuleId,
     ) -> Result<(), String> {
         // Look up TypeDefId from name (needed as key for type_metadata)
         let query = self.query();
-        let module_id = self.program_module();
         let type_def_id = query
             .try_name_id(module_id, &[data.name])
             .and_then(|name_id| query.try_type_def_id(name_id))
@@ -135,9 +160,8 @@ impl Compiler<'_> {
         // Collect interface names using query (avoids borrow conflicts with compile_default_method)
         let interface_names: Vec<Symbol> = {
             let query = self.query();
-            let program_module = self.program_module();
             query
-                .try_name_id(program_module, &[data.name])
+                .try_name_id(module_id, &[data.name])
                 .and_then(|type_name_id| query.try_type_def_id(type_name_id))
                 .map(|type_def_id| {
                     query
@@ -184,7 +208,18 @@ impl Compiler<'_> {
 
     /// Register implement block methods (first pass)
     pub(super) fn register_implement_block(&mut self, impl_block: &ImplementBlock) {
-        self.register_implement_block_with_interner(impl_block, &self.analyzed.interner.clone())
+        let module_id = self.program_module();
+        self.register_implement_block_in_module(impl_block, module_id)
+    }
+
+    /// Register implement block methods using a specific module for type lookups.
+    pub(super) fn register_implement_block_in_module(
+        &mut self,
+        impl_block: &ImplementBlock,
+        module_id: ModuleId,
+    ) {
+        let interner = self.analyzed.interner.clone();
+        self.register_implement_block_with_interner(impl_block, &interner, module_id)
     }
 
     /// Register ONLY static methods from implement block with a specific interner (for module programs)
@@ -367,13 +402,13 @@ impl Compiler<'_> {
         }
     }
 
-    /// Register implement block methods with a specific interner (for module programs)
+    /// Register implement block methods with a specific interner and module (for module programs)
     pub(super) fn register_implement_block_with_interner(
         &mut self,
         impl_block: &ImplementBlock,
         interner: &Interner,
+        module_id: ModuleId,
     ) {
-        let module_id = self.program_module();
         // Get type name string (works for primitives and named types)
         let Some(type_name) = self.get_type_name_from_expr(&impl_block.target_type) else {
             return; // Unsupported type for implement block
@@ -571,6 +606,16 @@ impl Compiler<'_> {
         &mut self,
         impl_block: &ImplementBlock,
     ) -> Result<(), String> {
+        let module_id = self.program_module();
+        self.compile_implement_block_in_module(impl_block, module_id)
+    }
+
+    /// Compile implement block methods using a specific module for type lookups.
+    pub(super) fn compile_implement_block_in_module(
+        &mut self,
+        impl_block: &ImplementBlock,
+        module_id: ModuleId,
+    ) -> Result<(), String> {
         // Get type name string (works for primitives and named types)
         let Some(type_name) = self.get_type_name_from_expr(&impl_block.target_type) else {
             return Ok(()); // Unsupported type for implement block
@@ -584,7 +629,6 @@ impl Compiler<'_> {
                 self.analyzed.type_arena().primitive(prim_type)
             }
             TypeExpr::Named(sym) => {
-                let module_id = self.program_module();
                 let type_def_id = self
                     .query()
                     .try_name_id(module_id, &[*sym])

@@ -1,0 +1,17 @@
+// Error: Sibling tests blocks cannot see each other's scoped types
+
+tests "first block" {
+    record FirstOnly { value: i64 }
+
+    test "can use own type" {
+        let f = FirstOnly { value: 1 }
+        assert(f.value == 1)
+    }
+}
+
+tests "second block" {
+    // This should fail: FirstOnly is scoped to the first tests block
+    test "cannot use sibling type" {
+        let f = FirstOnly { value: 2 }
+    }
+}

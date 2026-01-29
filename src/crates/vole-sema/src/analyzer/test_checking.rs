@@ -378,11 +378,9 @@ impl Analyzer {
         };
 
         // Register type shells under the virtual module ID for scope isolation.
-        // Temporarily swap current_module for shell registration only.
         let saved_module = sub.current_module;
         sub.current_module = virtual_module_id;
         sub.register_all_type_shells(&synthetic_program, interner);
-        sub.current_module = saved_module;
 
         // Add the virtual module to parent_modules so the resolver can find
         // types registered under the virtual module.
@@ -391,10 +389,14 @@ impl Analyzer {
         // Resolve type aliases (uses resolver which searches parent_modules)
         sub.collect_type_aliases(&synthetic_program, interner);
 
-        // Collect signatures - these register under current_module (parent).
-        // This is intentional: functions in tests blocks need to be findable
-        // via entity registry lookups using the parent module's NameId.
-        sub.collect_signatures(&synthetic_program, interner);
+        // Collect type signatures (records, classes, interfaces, implement blocks) under
+        // the virtual module so they match the shells registered above.
+        sub.collect_type_signatures(&synthetic_program, interner);
+        sub.current_module = saved_module;
+
+        // Collect function signatures under the parent module so codegen can find
+        // them via program_module() lookups.
+        sub.collect_function_signatures(&synthetic_program, interner);
 
         // Process global lets (scoped lets in the tests block)
         let _ = sub.process_global_lets(&synthetic_program, interner);
