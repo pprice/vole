@@ -1,0 +1,32 @@
+// stdlib/prelude/builtins.vole
+// Built-in functions: print, println, panic, assert
+
+let { Stringable } = import "./traits"
+
+// Native bindings (internal - not meant to be called directly)
+external("vole:std:runtime") {
+    func _print_string(s: string)
+    func _println_string(s: string)
+}
+
+// Compiler intrinsics
+external("vole:compiler_intrinsic") {
+    func panic(message: string) -> never
+}
+
+// Prints a value without a trailing newline.
+func print<T: Stringable>(value: T) {
+    _print_string(value.to_string())
+}
+
+// Prints a value followed by a newline.
+func println<T: Stringable>(value: T) {
+    _println_string(value.to_string())
+}
+
+// Asserts that a condition is true. Panics with the given message if it is false.
+func assert(condition: bool, message: string = "assertion failed") {
+    if !condition {
+        panic(message)
+    }
+}
