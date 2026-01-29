@@ -89,7 +89,7 @@ pub enum FuncBody {
 #[derive(Debug, Clone)]
 pub struct TestsDecl {
     pub label: Option<String>,
-    /// Scoped declarations (func, let, record, etc.) - must come before tests
+    /// Scoped declarations (func, let, record, etc.) and nested tests blocks
     pub decls: Vec<Decl>,
     pub tests: Vec<TestCase>,
     pub span: Span,

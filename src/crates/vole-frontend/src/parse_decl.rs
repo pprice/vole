@@ -107,40 +107,15 @@ impl<'src> Parser<'src> {
         self.consume(TokenType::LBrace, "expected '{' after 'tests'")?;
         self.skip_newlines();
 
-        // Parse scoped declarations first (until we see 'test' keyword or '}')
+        // Parse declarations and test cases in any order
         let mut decls = Vec::new();
-        while !self.check(TokenType::RBrace)
-            && !self.check(TokenType::Eof)
-            && !self.check(TokenType::KwTest)
-        {
-            // Check for nested tests blocks (not allowed)
-            if self.check(TokenType::KwTests) {
-                return Err(ParseError::new(
-                    ParserError::NestedTestsBlock {
-                        span: self.current.span.into(),
-                    },
-                    self.current.span,
-                ));
-            }
-
-            decls.push(self.declaration()?);
-            self.skip_newlines();
-        }
-
-        // Parse test cases
         let mut tests = Vec::new();
         while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
-            // Check for declarations after tests (not allowed)
-            if self.is_declaration_start() && !self.check(TokenType::KwTest) {
-                return Err(ParseError::new(
-                    ParserError::DeclarationAfterTest {
-                        span: self.current.span.into(),
-                    },
-                    self.current.span,
-                ));
+            if self.check(TokenType::KwTest) {
+                tests.push(self.test_case()?);
+            } else {
+                decls.push(self.declaration()?);
             }
-
-            tests.push(self.test_case()?);
             self.skip_newlines();
         }
 
@@ -153,23 +128,6 @@ impl<'src> Parser<'src> {
             tests,
             span,
         }))
-    }
-
-    /// Check if the current token starts a declaration
-    fn is_declaration_start(&self) -> bool {
-        matches!(
-            self.current.ty,
-            TokenType::KwFunc
-                | TokenType::KwTests
-                | TokenType::KwLet
-                | TokenType::KwClass
-                | TokenType::KwRecord
-                | TokenType::KwInterface
-                | TokenType::KwStatic
-                | TokenType::KwImplement
-                | TokenType::KwError
-                | TokenType::KwExternal
-        )
     }
 
     fn let_decl(&mut self) -> Result<Decl, ParseError> {
