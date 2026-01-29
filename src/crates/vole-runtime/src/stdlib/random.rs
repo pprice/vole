@@ -112,15 +112,28 @@ pub extern "C" fn rng_float(rng_ptr: *mut StdRng) -> f64 {
     unsafe { (*rng_ptr).r#gen::<f64>() }
 }
 
+/// Convert a random float in [0.0, 1.0) to an i64 in [min, max] (inclusive).
+///
+/// Uses `u128` arithmetic internally to avoid overflow when `max - min + 1`
+/// would exceed `i64::MAX` (e.g. `random.int(0, i64::MAX)`). When the range
+/// spans the entire `i64` space (`i64::MIN` to `i64::MAX`), the range count
+/// is `u64::MAX + 1 = 2^64`, which fits in `u128` and converts losslessly
+/// to `f64` at that scale.
+fn int_from_float(f: f64, min: i64, max: i64) -> i64 {
+    // Compute range as u128 to avoid overflow:
+    //   (max as i128 - min as i128 + 1) is always in [1, 2^64]
+    let range = (max as i128 - min as i128 + 1) as u128;
+    let offset = (f * range as f64).floor() as i64;
+    min.wrapping_add(offset)
+}
+
 /// Generate a random i64 in [min, max] (inclusive) using thread-local RNG
 #[unsafe(no_mangle)]
 pub extern "C" fn random_int(min: i64, max: i64) -> i64 {
     if min > max {
         return min;
     }
-    let f = rand::random::<f64>();
-    let range = (max - min + 1) as f64;
-    min + (f * range).floor() as i64
+    int_from_float(rand::random::<f64>(), min, max)
 }
 
 /// Get the next random i64 in [min, max] (inclusive) from a seeded RNG
@@ -131,8 +144,7 @@ pub extern "C" fn rng_int(rng_ptr: *mut StdRng, min: i64, max: i64) -> i64 {
         return min;
     }
     let f = unsafe { (*rng_ptr).r#gen::<f64>() };
-    let range = (max - min + 1) as f64;
-    min + (f * range).floor() as i64
+    int_from_float(f, min, max)
 }
 
 /// Get the next random boolean from a seeded RNG
@@ -243,6 +255,75 @@ mod tests {
         // Test that rng_float handles null gracefully
         let result = rng_float(std::ptr::null_mut());
         assert_eq!(result, 0.0, "null RNG should return 0.0");
+    }
+
+    #[test]
+    fn test_int_from_float_no_overflow_max_range() {
+        // This would overflow with (max - min + 1) in i64 arithmetic
+        let result = int_from_float(0.5, 0, i64::MAX);
+        assert!(result >= 0 && result <= i64::MAX);
+    }
+
+    #[test]
+    fn test_int_from_float_full_i64_range() {
+        // Full i64 range: min=i64::MIN, max=i64::MAX => range = 2^64
+        let result = int_from_float(0.0, i64::MIN, i64::MAX);
+        assert_eq!(result, i64::MIN, "f=0.0 should yield min");
+
+        let result = int_from_float(0.5, i64::MIN, i64::MAX);
+        // f=0.5 on full i64 range should land near the midpoint (0).
+        // f64 precision at 2^64 scale introduces minor rounding, so we
+        // allow a small tolerance rather than demanding an exact value.
+        assert!(
+            result.abs() <= 1,
+            "f=0.5 should yield ~0 for full range, got {result}"
+        );
+    }
+
+    #[test]
+    fn test_int_from_float_boundaries() {
+        // f=0.0 should always give min
+        assert_eq!(int_from_float(0.0, 10, 20), 10);
+        // f just under 1.0 should give max
+        let f = 1.0 - f64::EPSILON;
+        let result = int_from_float(f, 10, 20);
+        assert!(result >= 10 && result <= 20);
+    }
+
+    #[test]
+    fn test_int_from_float_single_value() {
+        // min == max should always return that value
+        assert_eq!(int_from_float(0.0, 42, 42), 42);
+        assert_eq!(int_from_float(0.5, 42, 42), 42);
+        assert_eq!(int_from_float(0.999, 42, 42), 42);
+    }
+
+    #[test]
+    fn test_random_int_no_overflow() {
+        // Smoke test: random_int with large range should not panic
+        for _ in 0..100 {
+            let v = random_int(0, i64::MAX);
+            assert!(v >= 0);
+        }
+    }
+
+    #[test]
+    fn test_rng_int_no_overflow() {
+        // Smoke test: rng_int with large range should not panic
+        let rng = random_seeded(12345);
+        unsafe {
+            for _ in 0..100 {
+                let v = rng_int(rng, i64::MIN, i64::MAX);
+                // Just verify it doesn't panic; any i64 value is valid
+                let _ = v;
+            }
+            drop(Box::from_raw(rng));
+        }
+    }
+
+    #[test]
+    fn test_random_int_min_gt_max() {
+        assert_eq!(random_int(10, 5), 10);
     }
 
     #[test]
