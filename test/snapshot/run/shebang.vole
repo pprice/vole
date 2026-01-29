@@ -1,0 +1,4 @@
+#!/usr/bin/env vole
+func main() {
+    println("shebang script works")
+}

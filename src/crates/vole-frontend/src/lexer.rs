@@ -26,7 +26,7 @@ impl<'src> Lexer<'src> {
     }
 
     pub fn new_with_file(source: &'src str, _filename: &str) -> Self {
-        Self {
+        let mut lexer = Self {
             source,
             chars: source.char_indices().peekable(),
             start: 0,
@@ -38,6 +38,24 @@ impl<'src> Lexer<'src> {
             interp_brace_depth: 0,
             in_interp_string: false,
             errors: Vec::new(),
+        };
+        lexer.skip_shebang();
+        lexer
+    }
+
+    /// Skip a shebang line (`#!...`) if present at the very start of the source.
+    fn skip_shebang(&mut self) {
+        if self.source.starts_with("#!") {
+            // Consume characters until end of line or end of source
+            while let Some(c) = self.advance() {
+                if c == '\n' {
+                    self.line += 1;
+                    self.column = 1;
+                    break;
+                }
+            }
+            // Reset start to after the shebang line
+            self.start = self.current;
         }
     }
 
@@ -1257,5 +1275,58 @@ mod tests {
         let t2 = lexer.next_token();
         assert_eq!(t2.ty, TokenType::IntLiteral);
         assert_eq!(t2.lexeme, "00");
+    }
+
+    #[test]
+    fn lex_shebang_skipped_at_start() {
+        let mut lexer = Lexer::new("#!/usr/bin/env vole\nlet x = 42");
+        // Shebang line should be completely skipped
+        assert_eq!(lexer.next_token().ty, TokenType::KwLet);
+        assert_eq!(lexer.next_token().ty, TokenType::Identifier);
+        assert_eq!(lexer.next_token().ty, TokenType::Eq);
+        let t = lexer.next_token();
+        assert_eq!(t.ty, TokenType::IntLiteral);
+        assert_eq!(t.lexeme, "42");
+        assert_eq!(lexer.next_token().ty, TokenType::Eof);
+        assert!(!lexer.has_errors());
+    }
+
+    #[test]
+    fn lex_shebang_line_number_starts_at_two() {
+        let mut lexer = Lexer::new("#!/usr/bin/env vole\nlet x = 42");
+        let token = lexer.next_token(); // `let`
+        assert_eq!(token.span.line, 2);
+    }
+
+    #[test]
+    fn lex_shebang_only_at_position_zero() {
+        // #! not at the start of the file should produce errors, not be treated as shebang
+        let mut lexer = Lexer::new("let x\n#!/usr/bin/env vole");
+        assert_eq!(lexer.next_token().ty, TokenType::KwLet);
+        assert_eq!(lexer.next_token().ty, TokenType::Identifier);
+        assert_eq!(lexer.next_token().ty, TokenType::Newline);
+        // '#' and '!' are not valid tokens; they should produce errors
+        assert_eq!(lexer.next_token().ty, TokenType::Error); // #
+        assert_eq!(lexer.next_token().ty, TokenType::Bang); // !
+    }
+
+    #[test]
+    fn lex_no_shebang_normal_source() {
+        // Regular source without shebang should work as before
+        let mut lexer = Lexer::new("let x = 1");
+        assert_eq!(lexer.next_token().ty, TokenType::KwLet);
+        assert_eq!(lexer.next_token().ty, TokenType::Identifier);
+        assert_eq!(lexer.next_token().ty, TokenType::Eq);
+        assert_eq!(lexer.next_token().ty, TokenType::IntLiteral);
+        assert_eq!(lexer.next_token().ty, TokenType::Eof);
+        assert!(!lexer.has_errors());
+    }
+
+    #[test]
+    fn lex_shebang_eof_without_newline() {
+        // A file that is only a shebang line with no trailing newline
+        let mut lexer = Lexer::new("#!/usr/bin/env vole");
+        assert_eq!(lexer.next_token().ty, TokenType::Eof);
+        assert!(!lexer.has_errors());
     }
 }

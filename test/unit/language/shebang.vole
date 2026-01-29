@@ -1,0 +1,21 @@
+#!/usr/bin/env vole
+// Test that shebang line is properly ignored by the lexer
+
+tests "shebang support" {
+    test "code after shebang executes normally" {
+        let x = 42
+        assert(x == 42)
+    }
+
+    test "functions work after shebang" {
+        func add(a: i64, b: i64) -> i64 {
+            return a + b
+        }
+        assert(add(1, 2) == 3)
+    }
+
+    test "strings work after shebang" {
+        let s = "hello"
+        assert(s == "hello")
+    }
+}
