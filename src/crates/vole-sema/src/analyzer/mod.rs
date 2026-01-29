@@ -300,6 +300,14 @@ pub struct AnalyzerContext {
     pub module_type_ids: RefCell<FxHashMap<String, ArenaTypeId>>,
     /// Parsed module programs and their interners (for compiling pure Vole functions).
     pub module_programs: RefCell<FxHashMap<String, (Program, Interner)>>,
+    /// Expression types for module programs (keyed by module path -> NodeId -> ArenaTypeId).
+    /// Stored separately since NodeIds are per-program and can't be merged into main expr_types.
+    /// Shared across sub-analyzers so prelude modules' expr_types accumulate without cloning.
+    pub module_expr_types: RefCell<FxHashMap<String, FxHashMap<NodeId, ArenaTypeId>>>,
+    /// Method resolutions for module programs (keyed by module path -> NodeId -> ResolvedMethod).
+    /// Stored separately since NodeIds are per-program and can't be merged into main method_resolutions.
+    /// Shared across sub-analyzers so prelude modules' method resolutions accumulate without cloning.
+    pub module_method_resolutions: RefCell<FxHashMap<String, FxHashMap<NodeId, ResolvedMethod>>>,
     /// Optional shared cache for module analysis results.
     /// When set, modules are cached after analysis and reused across Analyzer instances.
     pub module_cache: Option<Rc<RefCell<ModuleCache>>>,
@@ -312,6 +320,8 @@ impl AnalyzerContext {
             db,
             module_type_ids: RefCell::new(FxHashMap::default()),
             module_programs: RefCell::new(FxHashMap::default()),
+            module_expr_types: RefCell::new(FxHashMap::default()),
+            module_method_resolutions: RefCell::new(FxHashMap::default()),
             module_cache: cache,
         }
     }
@@ -365,13 +375,6 @@ pub struct Analyzer {
     pub method_resolutions: MethodResolutions,
     /// Module loader for handling imports
     module_loader: ModuleLoader,
-    /// Expression types for module programs (keyed by module path -> NodeId -> ArenaTypeId)
-    /// Stored separately since NodeIds are per-program and can't be merged into main expr_types.
-    /// Uses interned ArenaTypeId handles for O(1) equality during analysis.
-    pub module_expr_types: FxHashMap<String, FxHashMap<NodeId, ArenaTypeId>>,
-    /// Method resolutions for module programs (keyed by module path -> NodeId -> ResolvedMethod)
-    /// Stored separately since NodeIds are per-program and can't be merged into main method_resolutions
-    pub module_method_resolutions: FxHashMap<String, FxHashMap<NodeId, ResolvedMethod>>,
     /// Flag to prevent recursive prelude loading
     loading_prelude: bool,
     /// Mapping from call expression NodeId to MonomorphKey (for generic function calls)
@@ -509,14 +512,16 @@ impl Analyzer {
 
     /// Take ownership of analysis results (consuming self)
     pub fn into_analysis_results(self) -> AnalysisOutput {
+        let module_expr_types = self.ctx.module_expr_types.borrow().clone();
+        let module_method_resolutions = self.ctx.module_method_resolutions.borrow().clone();
         let expression_data = ExpressionData::from_analysis(
             self.expr_types,
             self.method_resolutions.into_inner(),
             self.generic_calls,
             self.class_method_calls,
             self.static_method_calls,
-            self.module_expr_types,
-            self.module_method_resolutions,
+            module_expr_types,
+            module_method_resolutions,
             self.substituted_return_types,
             self.lambda_defaults,
             self.scoped_function_types,
@@ -1005,8 +1010,6 @@ impl Default for Analyzer {
             is_check_results: FxHashMap::default(),
             method_resolutions: MethodResolutions::new(),
             module_loader: ModuleLoader::new(),
-            module_expr_types: FxHashMap::default(),
-            module_method_resolutions: FxHashMap::default(),
             loading_prelude: false,
             generic_calls: FxHashMap::default(),
             class_method_calls: FxHashMap::default(),

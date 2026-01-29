@@ -107,9 +107,13 @@ impl Analyzer {
                 import_path.to_string(),
                 (cached.program.clone(), cached.interner.clone()),
             );
-            self.module_expr_types
+            self.ctx
+                .module_expr_types
+                .borrow_mut()
                 .insert(import_path.to_string(), cached.expr_types.clone());
-            self.module_method_resolutions
+            self.ctx
+                .module_method_resolutions
+                .borrow_mut()
                 .insert(import_path.to_string(), cached.method_resolutions.clone());
             return;
         }
@@ -204,9 +208,11 @@ impl Analyzer {
                 .module_programs
                 .borrow_mut()
                 .insert(import_path.to_string(), (program, prelude_interner));
-            self.module_expr_types
+            self.ctx
+                .module_expr_types
+                .borrow_mut()
                 .insert(import_path.to_string(), sub_analyzer.expr_types.clone());
-            self.module_method_resolutions.insert(
+            self.ctx.module_method_resolutions.borrow_mut().insert(
                 import_path.to_string(),
                 sub_analyzer.method_resolutions.into_inner(),
             );

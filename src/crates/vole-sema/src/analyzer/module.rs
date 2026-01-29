@@ -479,25 +479,16 @@ impl Analyzer {
             tracing::warn!(import_path, ?errors, "module analysis errors");
         }
         // Store module-specific expr_types (NodeIds are per-program)
-        self.module_expr_types
+        // Nested module entries are already in the shared ctx from the sub-analyzer.
+        self.ctx
+            .module_expr_types
+            .borrow_mut()
             .insert(module_key.clone(), sub_analyzer.expr_types.clone());
-        // Merge nested module expr_types from sub-analyzer (for chained imports)
-        for (nested_key, nested_types) in sub_analyzer.module_expr_types {
-            self.module_expr_types
-                .entry(nested_key)
-                .or_insert(nested_types);
-        }
         // Store module-specific method_resolutions (NodeIds are per-program)
-        self.module_method_resolutions.insert(
+        self.ctx.module_method_resolutions.borrow_mut().insert(
             module_key.clone(),
             sub_analyzer.method_resolutions.into_inner(),
         );
-        // Merge nested module method_resolutions from sub-analyzer (for chained imports)
-        for (nested_key, nested_methods) in sub_analyzer.module_method_resolutions {
-            self.module_method_resolutions
-                .entry(nested_key)
-                .or_insert(nested_methods);
-        }
 
         // Now resolve deferred function types after sub-analysis has registered record/class types
         for (name_id, f) in deferred_functions {
@@ -625,8 +616,8 @@ impl Analyzer {
     }
 
     /// Fork for analyzing a prelude file.
-    /// Clones `module_expr_types` and `module_method_resolutions` from parent
-    /// so previously loaded prelude modules are visible.
+    /// Shares the `AnalyzerContext` so module_expr_types, module_method_resolutions,
+    /// and other shared maps are visible without cloning.
     pub(super) fn fork_for_prelude(&self, module_id: ModuleId, file_path: PathBuf) -> Analyzer {
         Analyzer {
             ctx: Rc::clone(&self.ctx),
@@ -634,8 +625,6 @@ impl Analyzer {
             current_file_path: Some(file_path),
             loading_prelude: true, // Prevent sub-analyzer from loading prelude
             module_loader: self.module_loader.new_child(),
-            module_expr_types: self.module_expr_types.clone(),
-            module_method_resolutions: self.module_method_resolutions.clone(),
             ..Default::default()
         }
     }
