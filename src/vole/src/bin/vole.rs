@@ -2,6 +2,8 @@
 
 use clap::builder::styling::{AnsiColor, Effects, Styles};
 use clap::{ColorChoice, CommandFactory, FromArgMatches};
+use std::ffi::OsString;
+use std::path::PathBuf;
 use std::process::ExitCode;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt::format::FmtSpan;
@@ -142,6 +144,7 @@ fn main() -> ExitCode {
             check,
             stdout,
         } => format_files(&paths, FmtOptions { check, stdout }),
+        Commands::External(args) => handle_external_args(&args, cli.release),
     }
 }
 
@@ -184,4 +187,29 @@ fn parse_color_choice(value: &str) -> ColorChoice {
 fn is_stdout_tty() -> bool {
     use std::io::IsTerminal;
     std::io::stdout().is_terminal()
+}
+
+/// Handle external (unrecognized) subcommand args.
+///
+/// When the first argument is a `.vole` file path, treat it as `vole run <file>`.
+/// This enables shebang support: `#!/usr/bin/env vole` in a .vole file causes
+/// the kernel to invoke `vole script.vole`, which arrives here as an external
+/// subcommand.
+fn handle_external_args(args: &[OsString], release: bool) -> ExitCode {
+    let first = args
+        .first()
+        .expect("external subcommand requires at least one argument");
+    let path = PathBuf::from(first);
+
+    // Only treat as implicit `run` if the path looks like a .vole file
+    let is_vole = path.extension().is_some_and(|ext| ext == "vole");
+
+    if !is_vole {
+        let name = first.to_string_lossy();
+        eprintln!("error: unrecognized command '{name}'");
+        eprintln!("tip: run 'vole --help' for available commands");
+        return ExitCode::FAILURE;
+    }
+
+    run_file(&path, None, release)
 }

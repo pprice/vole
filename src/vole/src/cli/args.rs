@@ -1,6 +1,7 @@
 // src/cli/args.rs
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use std::ffi::OsString;
 use std::path::PathBuf;
 
 use crate::commands::version::version_string;
@@ -136,6 +137,10 @@ pub enum Commands {
         #[arg(long)]
         stdout: bool,
     },
+
+    /// Run a .vole file directly (e.g. `vole file.vole` or via shebang)
+    #[command(external_subcommand)]
+    External(Vec<OsString>),
 }
 
 #[derive(Args)]
