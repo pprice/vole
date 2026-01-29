@@ -42,9 +42,10 @@ you must follow these rules.
    and take shortcuts. If you cannot complete the task, provide suggetions on
    how to decompose it to the user.
 4. NEVER use shortcuts in implementation, this is **false progress**.
-5. ALWAYS use existing functions and helpers, do not create duplicates.
-5. Use your tools, `ast-grep`, `just`, `rg`, `lldb` etc; your default tools suck.
-6. If `just unit` (`vole test`) is failing, NEVER grep output if running >1 times
+5. NEVER keep something for "backwards compatability" unless explictly asked to.
+6. ALWAYS use existing functions and helpers, do not create duplicates.
+7. Use your tools, `ast-grep`, `just`, `rg`, `lldb` etc; your default tools suck.
+8. If `just unit` (`vole test`) is failing, NEVER grep output if running >1 times
    you often fail to locate the issue without seeing full output.
 
 ## Limits
