@@ -1,4 +1,5 @@
 use super::super::*;
+use super::ExprContext;
 use crate::type_arena::TypeId as ArenaTypeId;
 
 impl Analyzer {
@@ -9,7 +10,26 @@ impl Analyzer {
         expr: &Expr,
         interner: &Interner,
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
-        let type_id = self.check_expr_inner(expr, interner)?;
+        self.check_expr_with_ctx(expr, interner, ExprContext::Standard)
+    }
+
+    /// Check expression in an arm body context (trailing block expressions allowed).
+    pub(crate) fn check_expr_in_arm(
+        &mut self,
+        expr: &Expr,
+        interner: &Interner,
+    ) -> Result<ArenaTypeId, Vec<TypeError>> {
+        self.check_expr_with_ctx(expr, interner, ExprContext::ArmBody)
+    }
+
+    /// Check expression with an explicit context.
+    pub(crate) fn check_expr_with_ctx(
+        &mut self,
+        expr: &Expr,
+        interner: &Interner,
+        ctx: ExprContext,
+    ) -> Result<ArenaTypeId, Vec<TypeError>> {
+        let type_id = self.check_expr_inner(expr, interner, ctx)?;
         tracing::trace!(
             line = expr.span.line,
             inferred_type = %self.type_display_id(type_id),
@@ -23,6 +43,7 @@ impl Analyzer {
         &mut self,
         expr: &Expr,
         interner: &Interner,
+        ctx: ExprContext,
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
         match &expr.kind {
             // Literals - simple type returns
@@ -50,7 +71,7 @@ impl Analyzer {
             }
 
             // Grouping - just recurse
-            ExprKind::Grouping(inner) => self.check_expr(inner, interner),
+            ExprKind::Grouping(inner) => self.check_expr_with_ctx(inner, interner, ctx),
 
             // Array and range expressions
             ExprKind::ArrayLiteral(elements) => self.check_array_literal_expr(elements, interner),
@@ -96,7 +117,7 @@ impl Analyzer {
             ExprKind::Yield(yield_expr) => self.check_yield_expr(yield_expr, interner),
 
             // Control flow
-            ExprKind::Block(block) => self.check_block_expr(block, interner),
+            ExprKind::Block(block) => self.check_block_expr(block, interner, ctx),
             ExprKind::If(if_expr) => self.check_if_expr(if_expr, interner),
             ExprKind::When(when_expr) => self.check_when_expr(when_expr, interner),
 

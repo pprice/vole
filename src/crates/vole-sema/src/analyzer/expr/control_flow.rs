@@ -1,4 +1,5 @@
 use super::super::*;
+use super::ExprContext;
 use crate::type_arena::TypeId as ArenaTypeId;
 
 impl Analyzer {
@@ -7,21 +8,17 @@ impl Analyzer {
         &mut self,
         block: &BlockExpr,
         interner: &Interner,
+        ctx: ExprContext,
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
         // Check trailing expression permission before processing statements
-        if block.trailing_expr.is_some() {
-            if self.in_arm_body {
-                // Consume the flag so nested blocks don't inherit the permission
-                self.in_arm_body = false;
-            } else {
-                // Trailing expressions are only allowed in arm bodies
-                self.add_error(
-                    SemanticError::BlockTrailingExpression {
-                        span: block.span.into(),
-                    },
-                    block.span,
-                );
-            }
+        if block.trailing_expr.is_some() && ctx != ExprContext::ArmBody {
+            // Trailing expressions are only allowed in arm bodies
+            self.add_error(
+                SemanticError::BlockTrailingExpression {
+                    span: block.span.into(),
+                },
+                block.span,
+            );
         }
 
         // Type check all statements
@@ -178,10 +175,7 @@ impl Analyzer {
             }
 
             // Check body with narrowed type (arm bodies allow trailing expressions)
-            let saved_in_arm = self.in_arm_body;
-            self.in_arm_body = true;
-            let body_ty = self.check_expr(&arm.body, interner)?;
-            self.in_arm_body = saved_in_arm;
+            let body_ty = self.check_expr_in_arm(&arm.body, interner)?;
 
             // Restore overrides for next arm
             self.type_overrides = saved_overrides.clone();

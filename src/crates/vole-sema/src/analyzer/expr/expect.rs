@@ -1,4 +1,5 @@
 use super::super::*;
+use super::ExprContext;
 use crate::type_arena::TypeId as ArenaTypeId;
 use crate::types::PlaceholderKind;
 
@@ -11,7 +12,27 @@ impl Analyzer {
         expected: Option<ArenaTypeId>,
         interner: &Interner,
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
-        let ty_id = self.check_expr_expecting_inner_id(expr, expected, interner)?;
+        self.check_expr_expecting_id_with_ctx(expr, expected, interner, ExprContext::Standard)
+    }
+
+    /// Check expression against expected type in an arm body context.
+    pub(crate) fn check_expr_expecting_id_in_arm(
+        &mut self,
+        expr: &Expr,
+        expected: Option<ArenaTypeId>,
+        interner: &Interner,
+    ) -> Result<ArenaTypeId, Vec<TypeError>> {
+        self.check_expr_expecting_id_with_ctx(expr, expected, interner, ExprContext::ArmBody)
+    }
+
+    fn check_expr_expecting_id_with_ctx(
+        &mut self,
+        expr: &Expr,
+        expected: Option<ArenaTypeId>,
+        interner: &Interner,
+        ctx: ExprContext,
+    ) -> Result<ArenaTypeId, Vec<TypeError>> {
+        let ty_id = self.check_expr_expecting_inner_id(expr, expected, interner, ctx)?;
         Ok(self.record_expr_type_id(expr, ty_id))
     }
 
@@ -20,6 +41,7 @@ impl Analyzer {
         expr: &Expr,
         expected: Option<ArenaTypeId>,
         interner: &Interner,
+        ctx: ExprContext,
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
         match &expr.kind {
             ExprKind::IntLiteral(value, suffix) => {
@@ -232,13 +254,15 @@ impl Analyzer {
                 self.check_binary_expr_expecting_id(expr, bin, expected, interner)
             }
             ExprKind::Unary(un) => self.check_unary_expr_expecting_id(expr, un, expected, interner),
-            ExprKind::Grouping(inner) => self.check_expr_expecting_id(inner, expected, interner),
+            ExprKind::Grouping(inner) => {
+                self.check_expr_expecting_id_with_ctx(inner, expected, interner, ctx)
+            }
             ExprKind::ArrayLiteral(elements) => {
                 self.check_array_literal_expecting_id(expr, elements, expected, interner)
             }
             ExprKind::Index(_) => {
                 // Index expressions just delegate to check_expr
-                self.check_expr(expr, interner)
+                self.check_expr_with_ctx(expr, interner, ctx)
             }
             ExprKind::Lambda(lambda) => {
                 // Extract expected function type if available
@@ -258,7 +282,7 @@ impl Analyzer {
             }
             // All other cases: infer type, then check compatibility
             _ => {
-                let inferred_id = self.check_expr(expr, interner)?;
+                let inferred_id = self.check_expr_with_ctx(expr, interner, ctx)?;
                 if let Some(expected_id) = expected
                     && !self.types_compatible_id(inferred_id, expected_id, interner)
                 {

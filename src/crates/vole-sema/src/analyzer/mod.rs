@@ -403,9 +403,6 @@ pub struct Analyzer {
     /// This is set from the file path passed to Analyzer::new() and updated
     /// when analyzing imported modules.
     current_file_path: Option<PathBuf>,
-    /// Whether we are currently checking a when/match arm body.
-    /// When true, block expressions are allowed to have trailing expressions.
-    in_arm_body: bool,
 }
 
 /// Result of looking up a method on a type via EntityRegistry
@@ -1022,7 +1019,6 @@ impl Default for Analyzer {
             current_module: ModuleId::default(),
             type_param_stack: TypeParamScopeStack::new(),
             current_file_path: None,
-            in_arm_body: false,
         }
     }
 }
