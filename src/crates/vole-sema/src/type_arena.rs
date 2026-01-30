@@ -1043,6 +1043,11 @@ impl TypeArena {
         matches!(self.get(id), SemaType::Record { .. })
     }
 
+    /// Check if this is a struct type (stack-allocated value type)
+    pub fn is_struct(&self, id: TypeId) -> bool {
+        matches!(self.get(id), SemaType::Struct { .. })
+    }
+
     /// Check if this is an interface type
     pub fn is_interface(&self, id: TypeId) -> bool {
         matches!(self.get(id), SemaType::Interface { .. })
@@ -1129,6 +1134,17 @@ impl TypeArena {
     pub fn unwrap_record(&self, id: TypeId) -> Option<(TypeDefId, &TypeIdVec)> {
         match self.get(id) {
             SemaType::Record {
+                type_def_id,
+                type_args,
+            } => Some((*type_def_id, type_args)),
+            _ => None,
+        }
+    }
+
+    /// Unwrap a struct type, returning (type_def_id, type_args)
+    pub fn unwrap_struct(&self, id: TypeId) -> Option<(TypeDefId, &TypeIdVec)> {
+        match self.get(id) {
+            SemaType::Struct {
                 type_def_id,
                 type_args,
             } => Some((*type_def_id, type_args)),

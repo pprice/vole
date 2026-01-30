@@ -181,6 +181,8 @@ pub(crate) fn type_id_to_cranelift(ty: TypeId, arena: &TypeArena, pointer_type: 
         ArenaType::Range => pointer_type,
         ArenaType::Tuple(_) => pointer_type,
         ArenaType::FixedArray { .. } => pointer_type,
+        // Struct types are stack-allocated, represented as pointers
+        ArenaType::Struct { .. } => pointer_type,
         // Unknown type uses TaggedValue (16 bytes: tag + value), stored via pointer
         ArenaType::Unknown => pointer_type,
         _ => types::I64,
@@ -269,6 +271,11 @@ pub(crate) fn type_id_size(
             let elem_size =
                 type_id_size(*element, pointer_type, entity_registry, arena).div_ceil(8) * 8;
             elem_size * (*size as u32)
+        }
+        // Struct types: each field is 8 bytes
+        ArenaType::Struct { type_def_id, .. } => {
+            let field_count = entity_registry.fields_on_type(*type_def_id).count() as u32;
+            field_count * 8
         }
         // Unknown type uses TaggedValue representation: 8-byte tag + 8-byte value = 16 bytes
         ArenaType::Unknown => 16,

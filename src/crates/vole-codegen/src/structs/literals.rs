@@ -2,6 +2,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+use rustc_hash::FxHashMap;
+
 use super::helpers::convert_to_i64_for_storage;
 use crate::RuntimeFn;
 use crate::context::Cg;
@@ -9,6 +11,7 @@ use crate::errors::CodegenError;
 use crate::types::CompiledValue;
 use cranelift::prelude::*;
 use vole_frontend::{Decl, Expr, FieldDef, Program, StructLiteralExpr, Symbol};
+use vole_sema::entity_defs::TypeDefKind;
 use vole_sema::type_arena::TypeId;
 
 /// Find the field definitions for a type by looking up the class/record declaration in the program.
@@ -18,6 +21,7 @@ fn find_type_fields(program: &Program, type_name: Symbol) -> Option<&[FieldDef]>
         match decl {
             Decl::Class(class) if class.name == type_name => return Some(&class.fields),
             Decl::Record(record) if record.name == type_name => return Some(&record.fields),
+            Decl::Struct(s) if s.name == type_name => return Some(&s.fields),
             _ => {}
         }
     }
@@ -61,7 +65,6 @@ impl Cg<'_, '_, '_> {
 
             // If this is a type alias, resolve through to the underlying type
             if let Some(def_id) = resolved_id {
-                use vole_sema::entity_defs::TypeDefKind;
                 let type_def = query.registry().get_type(def_id);
                 if type_def.kind == TypeDefKind::Alias
                     && let Some(aliased_type_id) = type_def.aliased_type
@@ -71,6 +74,8 @@ impl Cg<'_, '_, '_> {
                     if let Some((underlying_id, _)) = arena.unwrap_record(aliased_type_id) {
                         resolved_id = Some(underlying_id);
                     } else if let Some((underlying_id, _)) = arena.unwrap_class(aliased_type_id) {
+                        resolved_id = Some(underlying_id);
+                    } else if let Some((underlying_id, _)) = arena.unwrap_struct(aliased_type_id) {
                         resolved_id = Some(underlying_id);
                     }
                 }
@@ -84,6 +89,8 @@ impl Cg<'_, '_, '_> {
                     Some(id)
                 } else if let Some((id, _)) = arena.unwrap_class(expr_type_id) {
                     Some(id)
+                } else if let Some((id, _)) = arena.unwrap_struct(expr_type_id) {
+                    Some(id)
                 } else {
                     None
                 }
@@ -95,6 +102,18 @@ impl Cg<'_, '_, '_> {
             .type_metadata()
             .get(&type_def_id)
             .ok_or_else(|| format!("Unknown type: {} (not in type_metadata)", path_str))?;
+
+        // Check if this is a struct type (stack-allocated value type)
+        let is_struct_type = {
+            let kind = self.query().registry().type_kind(type_def_id);
+            kind == TypeDefKind::Struct
+        };
+
+        if is_struct_type {
+            let result_type_id = self.get_expr_type(&expr.id).unwrap_or(metadata.vole_type);
+            let field_slots = metadata.field_slots.clone();
+            return self.struct_value_literal(sl, &field_slots, result_type_id, &path_str);
+        }
 
         let type_id = metadata.type_id;
         let field_count = metadata.field_slots.len() as u32;
@@ -370,6 +389,45 @@ impl Cg<'_, '_, '_> {
             value: heap_ptr,
             ty: self.ptr_type(),
             type_id: union_type_id,
+        })
+    }
+
+    /// Compile a struct literal to a stack-allocated value.
+    /// Each field occupies 8 bytes at offset field_slot * 8.
+    fn struct_value_literal(
+        &mut self,
+        sl: &StructLiteralExpr,
+        field_slots: &FxHashMap<String, usize>,
+        result_type_id: TypeId,
+        path_str: &str,
+    ) -> Result<CompiledValue, String> {
+        let field_count = field_slots.len();
+        let total_size = (field_count as u32) * 8;
+
+        // Allocate stack slot for the struct
+        let slot = self.alloc_stack(total_size);
+
+        // Compile and store each field
+        for init in &sl.fields {
+            let init_name = self.interner().resolve(init.name);
+            let field_slot = *field_slots
+                .get(init_name)
+                .ok_or_else(|| format!("Unknown field: {} in type {}", init_name, path_str))?;
+            let offset = (field_slot as i32) * 8;
+
+            let value = self.expr(&init.value)?;
+            let store_value = convert_to_i64_for_storage(self.builder, &value);
+            self.builder.ins().stack_store(store_value, slot, offset);
+        }
+
+        // Return pointer to the struct
+        let ptr_type = self.ptr_type();
+        let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+
+        Ok(CompiledValue {
+            value: ptr,
+            ty: ptr_type,
+            type_id: result_type_id,
         })
     }
 }

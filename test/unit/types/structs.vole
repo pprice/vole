@@ -1,0 +1,78 @@
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+struct Color {
+    r: i64,
+    g: i64,
+    b: i64,
+}
+
+func make_point(x: i64, y: i64) -> Point {
+    return Point { x: x, y: y }
+}
+
+func sum_point(p: Point) -> i64 {
+    return p.x + p.y
+}
+
+tests {
+    test "struct literal and field access" {
+        let p = Point { x: 10, y: 20 }
+        assert(p.x == 10)
+        assert(p.y == 20)
+    }
+
+    test "struct returned from function" {
+        let p = make_point(3, 7)
+        assert(p.x == 3)
+        assert(p.y == 7)
+    }
+
+    test "struct passed to function" {
+        let p = Point { x: 5, y: 15 }
+        let result = sum_point(p)
+        assert(result == 20)
+    }
+
+    test "struct copy semantics" {
+        let a = Point { x: 1, y: 2 }
+        let b = a
+        // b should be a copy, not a reference to a
+        assert(b.x == 1)
+        assert(b.y == 2)
+    }
+
+    test "struct with three fields" {
+        let c = Color { r: 255, g: 128, b: 0 }
+        assert(c.r == 255)
+        assert(c.g == 128)
+        assert(c.b == 0)
+    }
+
+    test "struct field access after computation" {
+        let p = Point { x: 3 * 4, y: 5 + 6 }
+        assert(p.x == 12)
+        assert(p.y == 11)
+    }
+
+    test "multiple struct instances" {
+        let p1 = Point { x: 1, y: 2 }
+        let p2 = Point { x: 10, y: 20 }
+        assert(p1.x + p2.x == 11)
+        assert(p1.y + p2.y == 22)
+    }
+
+    test "struct field in expression" {
+        let p = Point { x: 100, y: 200 }
+        let sum = p.x + p.y
+        assert(sum == 300)
+    }
+
+    test "nested struct function calls" {
+        let p = make_point(sum_point(Point { x: 1, y: 2 }), 50)
+        assert(p.x == 3)
+        assert(p.y == 50)
+    }
+}

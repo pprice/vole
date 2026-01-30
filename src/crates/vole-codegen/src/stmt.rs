@@ -134,6 +134,14 @@ impl Cg<'_, '_, '_> {
                 // Clear self_capture context
                 self.self_capture = None;
 
+                // Struct copy: when binding a struct value, copy to a new stack slot
+                // to maintain value semantics (structs are stack-allocated value types)
+                let init = if self.arena().is_struct(init.type_id) {
+                    self.copy_struct_value(init)?
+                } else {
+                    init
+                };
+
                 // Look up the declared type from sema (pre-computed for let statements with type annotations)
                 let declared_type_id_opt = self.get_declared_var_type(&init_expr.id);
 

@@ -159,6 +159,9 @@ impl Compiler<'_> {
                 Decl::Record(record) => {
                     self.pre_register_record(record);
                 }
+                Decl::Struct(s) => {
+                    self.pre_register_struct(s);
+                }
                 Decl::Tests(_) if self.skip_tests => {}
                 Decl::Tests(_) => {
                     // Scoped types use finalize_module_class/record in pass 1
@@ -238,8 +241,8 @@ impl Compiler<'_> {
                 Decl::Implement(impl_block) => {
                     self.register_implement_block(impl_block);
                 }
-                Decl::Struct(_) => {
-                    // Struct declarations don't generate code in pass 1
+                Decl::Struct(s) => {
+                    self.finalize_struct(s);
                 }
                 Decl::Error(_) => {
                     // Error declarations don't generate code in pass 1

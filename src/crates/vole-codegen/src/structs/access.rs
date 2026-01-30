@@ -7,6 +7,7 @@ use crate::errors::CodegenError;
 use crate::types::{CompiledValue, module_name_id};
 use cranelift::prelude::*;
 use vole_frontend::{Expr, FieldAccessExpr, NodeId, OptionalChainExpr, Symbol};
+use vole_sema::type_arena::TypeId;
 use vole_sema::types::ConstantValue;
 
 impl Cg<'_, '_, '_> {
@@ -100,6 +101,12 @@ impl Cg<'_, '_, '_> {
         // Non-module field access - use TypeId-based helpers
         let field_name = self.interner().resolve(fa.field);
         let (slot, field_type_id) = get_field_slot_and_type_id_cg(obj.type_id, field_name, self)?;
+
+        // Struct types are stack-allocated: load field directly from pointer + offset
+        let is_struct = self.arena().is_struct(obj.type_id);
+        if is_struct {
+            return self.struct_field_load(obj.value, slot, field_type_id);
+        }
 
         let result_raw = self.get_field_cached(obj.value, slot as u32)?;
         Ok(self.convert_field_value(result_raw, field_type_id))
@@ -225,6 +232,18 @@ impl Cg<'_, '_, '_> {
 
         let field_name = self.interner().resolve(field);
         let (slot, field_type_id) = get_field_slot_and_type_id_cg(obj.type_id, field_name, self)?;
+
+        // Struct types: store directly to pointer + offset
+        let is_struct = self.arena().is_struct(obj.type_id);
+        if is_struct {
+            let offset = (slot as i32) * 8;
+            let store_value = convert_to_i64_for_storage(self.builder, &value);
+            self.builder
+                .ins()
+                .store(MemFlags::new(), store_value, obj.value, offset);
+            return Ok(value);
+        }
+
         let value = if self.arena().is_interface(field_type_id) {
             self.box_interface_value(value, field_type_id)?
         } else {
@@ -241,5 +260,22 @@ impl Cg<'_, '_, '_> {
         self.field_cache.clear(); // Invalidate cached field reads
 
         Ok(value)
+    }
+
+    /// Load a field from a struct pointer at the given slot.
+    /// Structs are stack-allocated with 8-byte fields at offset slot * 8.
+    pub fn struct_field_load(
+        &mut self,
+        struct_ptr: Value,
+        slot: usize,
+        field_type_id: TypeId,
+    ) -> Result<CompiledValue, String> {
+        let offset = (slot as i32) * 8;
+        // Load as i64, then convert to proper type
+        let raw_value = self
+            .builder
+            .ins()
+            .load(types::I64, MemFlags::new(), struct_ptr, offset);
+        Ok(self.convert_field_value(raw_value, field_type_id))
     }
 }
