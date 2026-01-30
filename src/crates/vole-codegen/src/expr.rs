@@ -2030,10 +2030,28 @@ impl Cg<'_, '_, '_> {
         tag: Value,
         arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
     ) -> Result<Option<Value>, String> {
-        // Check if this is an error type name via EntityRegistry
+        // Check if this is an error type name by looking in the fallible's error union.
+        // This handles error types from imported modules that aren't in the consumer's scope.
         let is_error_type = self
             .resolve_type(name)
-            .is_some_and(|type_id| self.query().get_type(type_id).kind == TypeDefKind::ErrorType);
+            .is_some_and(|type_id| self.query().get_type(type_id).kind == TypeDefKind::ErrorType)
+            || {
+                // Fallback: check if name matches an error type in the fallible's error union
+                let arena = self.arena();
+                arena
+                    .unwrap_fallible(scrutinee.type_id)
+                    .and_then(|(_, error_type_id)| {
+                        fallible_error_tag_by_id(
+                            error_type_id,
+                            name,
+                            arena,
+                            self.interner(),
+                            self.name_table(),
+                            self.query().registry(),
+                        )
+                    })
+                    .is_some()
+            };
 
         if is_error_type {
             return self.compile_specific_error_type_pattern(name, scrutinee, tag);
@@ -2103,15 +2121,25 @@ impl Cg<'_, '_, '_> {
         tag: Value,
         arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
     ) -> Result<Option<Value>, String> {
-        // Look up error type_def_id via EntityRegistry
-        let error_type_id = self.resolve_type(name).and_then(|type_id| {
-            let type_def = self.query().get_type(type_id);
-            if type_def.kind == TypeDefKind::ErrorType && type_def.error_info.is_some() {
-                Some(type_id)
-            } else {
-                None
-            }
-        });
+        // Look up error type_def_id via EntityRegistry, with fallback to
+        // searching the fallible's error union for imported module error types
+        let error_type_id = self
+            .resolve_type(name)
+            .and_then(|type_id| {
+                let type_def = self.query().get_type(type_id);
+                if type_def.kind == TypeDefKind::ErrorType && type_def.error_info.is_some() {
+                    Some(type_id)
+                } else {
+                    None
+                }
+            })
+            .or_else(|| {
+                // Fallback: search error types in the fallible's error union by name
+                let name_str = self.interner().resolve(name);
+                let arena = self.arena();
+                let (_, error_union_id) = arena.unwrap_fallible(scrutinee.type_id)?;
+                self.find_error_type_in_union(error_union_id, name_str)
+            });
 
         let Some(error_type_def_id) = error_type_id else {
             // Unknown error type

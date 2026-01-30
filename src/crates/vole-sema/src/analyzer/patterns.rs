@@ -208,7 +208,7 @@ impl Analyzer {
 
                 // If there's an inner pattern, check it against error type
                 if let Some(inner_pattern) = inner {
-                    self.check_pattern_id(inner_pattern, error_type_id, interner)
+                    self.check_error_inner_pattern(inner_pattern, error_type_id, interner)
                 } else {
                     // Bare error - no narrowing
                     None
@@ -517,6 +517,141 @@ impl Analyzer {
                 span,
             );
         }
+    }
+
+    /// Check an inner pattern within an `error` pattern.
+    ///
+    /// For identifier patterns (e.g., `error NotFound`), resolves the error type
+    /// from the fallible's error union rather than from scope. This allows matching
+    /// error types from imported modules without requiring them to be in scope.
+    ///
+    /// For record patterns (e.g., `error NotFound { path: p }`), similarly resolves
+    /// the type name from the error union.
+    fn check_error_inner_pattern(
+        &mut self,
+        pattern: &Pattern,
+        error_type_id: ArenaTypeId,
+        interner: &Interner,
+    ) -> Option<ArenaTypeId> {
+        let span = pattern.span;
+
+        match &pattern.kind {
+            PatternKind::Identifier { name } => {
+                // Try to resolve as error type from the error union first
+                if let Some(type_def_id) =
+                    self.resolve_error_type_from_union(*name, error_type_id, interner)
+                {
+                    let pattern_type_id = self.type_arena_mut().error_type(type_def_id);
+                    self.check_type_pattern_compatibility_id(
+                        pattern_type_id,
+                        error_type_id,
+                        span,
+                        interner,
+                    );
+                    let is_check_result =
+                        self.compute_type_pattern_check_result(pattern_type_id, error_type_id);
+                    self.record_is_check_result(pattern.id, is_check_result);
+                    return Some(pattern_type_id);
+                }
+                // Fall through to regular pattern checking (e.g., variable binding)
+                self.check_pattern_id(pattern, error_type_id, interner)
+            }
+            PatternKind::Record {
+                type_name: Some(name),
+                ..
+            } => {
+                // Try to resolve the record type name from the error union
+                if let Some(type_def_id) =
+                    self.resolve_error_type_from_union(*name, error_type_id, interner)
+                {
+                    // Resolve using the found TypeDefId
+                    let kind = self.entity_registry().type_kind(type_def_id);
+                    if kind == TypeDefKind::ErrorType {
+                        let field_ids = self.entity_registry().type_fields(type_def_id);
+                        let fields_ref: Vec<StructFieldId> = field_ids
+                            .into_iter()
+                            .map(|field_id| {
+                                let (name_id, ty) =
+                                    self.entity_registry().field_name_and_type(field_id);
+                                let slot = self.entity_registry().get_field(field_id).slot;
+                                StructFieldId { name_id, ty, slot }
+                            })
+                            .collect();
+                        let pattern_type_id = self.type_arena_mut().error_type(type_def_id);
+
+                        // Check pattern fields
+                        if let PatternKind::Record { fields, .. } = &pattern.kind {
+                            self.check_record_pattern_fields_id(
+                                fields,
+                                &fields_ref,
+                                span,
+                                interner,
+                            );
+                        }
+
+                        self.check_type_pattern_compatibility_id(
+                            pattern_type_id,
+                            error_type_id,
+                            span,
+                            interner,
+                        );
+                        let is_check_result =
+                            self.compute_type_pattern_check_result(pattern_type_id, error_type_id);
+                        self.record_is_check_result(pattern.id, is_check_result);
+                        return Some(pattern_type_id);
+                    }
+                }
+                // Fall through to regular pattern checking
+                self.check_pattern_id(pattern, error_type_id, interner)
+            }
+            _ => {
+                // For other patterns (wildcard, binding, etc.), use regular checking
+                self.check_pattern_id(pattern, error_type_id, interner)
+            }
+        }
+    }
+
+    /// Resolve an error type name from a fallible's error union type.
+    ///
+    /// When matching `error NotFound { ... }`, the `NotFound` needs to be resolved
+    /// from the error union's variants, not from the consumer's scope. This is necessary
+    /// because error types defined in imported modules aren't in the consumer's scope.
+    fn resolve_error_type_from_union(
+        &self,
+        name: Symbol,
+        error_type_id: ArenaTypeId,
+        interner: &Interner,
+    ) -> Option<TypeDefId> {
+        let name_str = interner.resolve(name);
+        let name_table = self.name_table();
+        let entity_reg = self.entity_registry();
+
+        // Helper to check if a TypeDefId's last name segment matches the target name
+        let check_variant = |type_def_id: TypeDefId| -> bool {
+            name_table
+                .last_segment_str(entity_reg.name_id(type_def_id))
+                .is_some_and(|seg| seg == name_str)
+        };
+
+        // Check if error_type_id is a single error type
+        if let Some(type_def_id) = self.type_arena().unwrap_error(error_type_id)
+            && check_variant(type_def_id)
+        {
+            return Some(type_def_id);
+        }
+
+        // Check union variants
+        if let Some(variants) = self.type_arena().unwrap_union(error_type_id) {
+            for &variant in variants {
+                if let Some(type_def_id) = self.type_arena().unwrap_error(variant)
+                    && check_variant(type_def_id)
+                {
+                    return Some(type_def_id);
+                }
+            }
+        }
+
+        None
     }
 
     /// Check if a match expression is exhaustive (TypeId version)

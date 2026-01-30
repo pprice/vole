@@ -16,7 +16,7 @@ error Other { path: string }
 let IoError = NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other
 
 // =============================================================================
-// Non-fallible file system operations (always available via module)
+// Non-fallible file system operations
 // =============================================================================
 
 external("std:fs/sync") {
@@ -32,27 +32,14 @@ external("std:fs/sync") {
 
 // =============================================================================
 // Fallible file system operations
-//
-// Due to a compiler limitation with module exports, fallible external functions
-// cannot be accessed via module prefix (e.g., fs.read_string).
-//
-// To use fallible operations, define error types locally and declare the external
-// functions directly in your code:
-//
-//   error NotFound { path: string }
-//   error PermissionDenied { path: string }
-//   error IsDirectory { path: string }
-//   error NotDirectory { path: string }
-//   error AlreadyExists { path: string }
-//   error Other { path: string }
-//
-//   external("std:fs/sync") {
-//       func read_string(path: string) -> fallible(string, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other)
-//       func write_string(path: string, content: string) -> fallible(Done, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other)
-//       func append_string(path: string, content: string) -> fallible(Done, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other)
-//       func list(path: string) -> fallible([string], NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other)
-//       func mkdir(path: string) -> fallible(Done, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other)
-//       func remove_file(path: string) -> fallible(Done, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other)
-//       func remove_dir(path: string) -> fallible(Done, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other)
-//   }
 // =============================================================================
+
+external("std:fs/sync") {
+    func read_string(path: string) -> fallible(string, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other)
+    func write_string(path: string, content: string) -> fallible(Done, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other)
+    func append_string(path: string, content: string) -> fallible(Done, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other)
+    func list(path: string) -> fallible([string], NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other)
+    func mkdir(path: string) -> fallible(Done, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other)
+    func remove_file(path: string) -> fallible(Done, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other)
+    func remove_dir(path: string) -> fallible(Done, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other)
+}

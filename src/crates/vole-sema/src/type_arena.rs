@@ -586,6 +586,49 @@ impl TypeArena {
     // Compound type builders - intern on construction
     // ========================================================================
 
+    /// Stable sort key for union variants.
+    ///
+    /// Returns a numeric key that produces a deterministic ordering:
+    ///   - Higher values appear earlier (used with Reverse)
+    ///   - Value types (primitives, compounds) > Nominal types (by TypeDefId) > Sentinels
+    ///
+    /// Uses numeric TypeDefId comparison instead of string-based Debug formatting,
+    /// avoiding issues when TypeDefId indices cross digit boundaries (e.g., 99 vs 100).
+    fn union_sort_key(&self, type_id: TypeId) -> (u32, u64) {
+        match self.get(type_id) {
+            // Value types get highest category
+            SemaType::Primitive(_) => (100, type_id.0 as u64),
+            SemaType::Array(_) | SemaType::FixedArray { .. } => (90, type_id.0 as u64),
+            SemaType::Tuple(_) => (85, type_id.0 as u64),
+            SemaType::Function { .. } => (80, type_id.0 as u64),
+            SemaType::Fallible { .. } => (75, type_id.0 as u64),
+            SemaType::RuntimeIterator(_) => (70, type_id.0 as u64),
+            SemaType::Structural(_) => (65, type_id.0 as u64),
+            // Nominal types sorted by TypeDefId (descending) within category
+            SemaType::Class { type_def_id, .. } => (50, type_def_id.index() as u64),
+            SemaType::Record { type_def_id, .. } => (50, type_def_id.index() as u64),
+            SemaType::Interface { type_def_id, .. } => (50, type_def_id.index() as u64),
+            SemaType::Error { type_def_id } => (50, type_def_id.index() as u64),
+            // Type params
+            SemaType::TypeParam(_) | SemaType::TypeParamRef(_) => (40, type_id.0 as u64),
+            // Module types
+            SemaType::Module(_) => (35, type_id.0 as u64),
+            // Sentinel types
+            SemaType::Done => (20, 0),
+            SemaType::Nil => (10, 0),
+            SemaType::Void => (5, 0),
+            SemaType::Range => (4, 0),
+            SemaType::MetaType => (3, 0),
+            // Placeholder and special
+            SemaType::Placeholder(_) => (2, type_id.0 as u64),
+            SemaType::Never => (1, 0),
+            SemaType::Unknown => (0, 0),
+            // Union and Invalid shouldn't appear in union variants, but handle gracefully
+            SemaType::Union(_) => (0, type_id.0 as u64),
+            SemaType::Invalid { .. } => (0, 0),
+        }
+    }
+
     /// Create a union type from variants.
     /// Normalizes: flattens nested unions, sorts descending (value types before sentinels), dedupes.
     ///
@@ -627,9 +670,11 @@ impl TypeArena {
             return TypeId::NEVER;
         }
 
-        // Sort descending by Debug string - puts value types before sentinels
-        // e.g., "Primitive(I64)" > "Nil" > "Done" alphabetically reversed
-        flattened.sort_by_cached_key(|&v| std::cmp::Reverse(format!("{:?}", self.get(v))));
+        // Sort descending using a stable numeric sort key.
+        // Each SemaType variant gets a category number (higher = earlier in union):
+        //   Primitives/compound > Named types (by TypeDefId desc) > Sentinels
+        // This ensures union order is deterministic regardless of Debug string formatting.
+        flattened.sort_by_cached_key(|&v| std::cmp::Reverse(self.union_sort_key(v)));
 
         // Dedupe
         flattened.dedup();

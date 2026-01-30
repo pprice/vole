@@ -277,9 +277,13 @@ impl Analyzer {
         let mut interface_names: Vec<(NameId, Symbol)> = Vec::new();
         let mut record_names: Vec<(NameId, Symbol)> = Vec::new();
         let mut class_names: Vec<(NameId, Symbol)> = Vec::new();
-        // Functions are collected for post-analysis type resolution (needed for functions
-        // that reference record/class types defined in the same module)
+        let mut error_names: Vec<(NameId, Symbol)> = Vec::new();
+        // Functions and external functions are collected for post-analysis type resolution
+        // (needed for types that reference record/class/error types defined in the same module,
+        // e.g. fallible return types that reference module-local error types)
         let mut deferred_functions: Vec<(NameId, &FuncDecl)> = Vec::new();
+        let mut deferred_externals: Vec<(NameId, &ExternalFunc)> = Vec::new();
+        let mut deferred_generic_externals: Vec<(NameId, &ExternalFunc)> = Vec::new();
         let module_interner = parser.into_interner();
 
         // For stdlib modules, use symbolic paths like "std:math" for native registry lookups.
@@ -329,111 +333,19 @@ impl Analyzer {
                     }
                 }
                 Decl::External(ext) => {
-                    // External block functions become exports and are marked as external
+                    // Defer external function type resolution until after sub_analyzer.analyze()
+                    // runs. This allows fallible return types to reference error types defined
+                    // in the same module (e.g. `fallible(string, NotFound | PermissionDenied)`).
                     for func in &ext.functions {
                         let name_id = self.name_table_mut().intern(
                             module_id,
                             &[func.vole_name],
                             &module_interner,
                         );
-
-                        // Handle generic external functions differently
                         if !func.type_params.is_empty() {
-                            // Build type param scope and collect TypeParamInfo for generic externals
-                            let builtin_mod = self.name_table_mut().builtin_module();
-                            let mut type_param_scope = TypeParamScope::new();
-                            let mut type_params: Vec<TypeParamInfo> = Vec::new();
-                            for tp in &func.type_params {
-                                let tp_name_str = module_interner.resolve(tp.name);
-                                let tp_name_id = self
-                                    .name_table_mut()
-                                    .intern_raw(builtin_mod, &[tp_name_str]);
-                                let tp_info = TypeParamInfo {
-                                    name: tp.name,
-                                    name_id: tp_name_id,
-                                    constraint: None,
-                                    type_param_id: None,
-                                    variance: TypeParamVariance::default(),
-                                };
-                                type_param_scope.add(tp_info.clone());
-                                type_params.push(tp_info);
-                            }
-
-                            // Resolve types with type params in scope
-                            let (func_type_id, param_type_ids, return_type_id) = {
-                                let mut ctx = TypeResolutionContext::with_type_params(
-                                    &self.ctx.db,
-                                    &module_interner,
-                                    module_id,
-                                    &type_param_scope,
-                                );
-                                let param_ids: Vec<ArenaTypeId> = func
-                                    .params
-                                    .iter()
-                                    .map(|p| resolve_type_to_id(&p.ty, &mut ctx))
-                                    .collect();
-                                let return_id = func
-                                    .return_type
-                                    .as_ref()
-                                    .map(|rt| resolve_type_to_id(rt, &mut ctx))
-                                    .unwrap_or_else(|| self.type_arena().void());
-                                let func_id = self.type_arena_mut().function(
-                                    param_ids.clone(),
-                                    return_id,
-                                    false,
-                                );
-                                (func_id, param_ids, return_id)
-                            };
-
-                            exports.insert(name_id, func_type_id);
-
-                            // Register in EntityRegistry so module destructuring can find generic info
-                            let signature =
-                                FunctionType::from_ids(&param_type_ids, return_type_id, false);
-                            let func_id = self.entity_registry_mut().register_function_full(
-                                name_id,
-                                name_id,
-                                module_id,
-                                signature,
-                                func.params.len(), // required_params (no defaults for externals)
-                                vec![],            // param_defaults
-                            );
-                            self.entity_registry_mut().set_function_generic_info(
-                                func_id,
-                                GenericFuncInfo {
-                                    type_params,
-                                    param_types: param_type_ids,
-                                    return_type: return_type_id,
-                                },
-                            );
-                            // Generic externals use intrinsic calls, not FFI
+                            deferred_generic_externals.push((name_id, func));
                         } else {
-                            // Non-generic external: resolve types directly
-                            let func_type_id = {
-                                let mut ctx = TypeResolutionContext {
-                                    db: &self.ctx.db,
-                                    interner: &module_interner,
-                                    module_id,
-                                    type_params: None,
-                                    self_type: None,
-                                    imports: &[],
-                                };
-                                let param_ids: crate::type_arena::TypeIdVec = func
-                                    .params
-                                    .iter()
-                                    .map(|p| resolve_type_to_id(&p.ty, &mut ctx))
-                                    .collect();
-                                let return_id = func
-                                    .return_type
-                                    .as_ref()
-                                    .map(|rt| resolve_type_to_id(rt, &mut ctx))
-                                    .unwrap_or_else(|| self.type_arena().void());
-                                self.type_arena_mut().function(param_ids, return_id, false)
-                            };
-
-                            exports.insert(name_id, func_type_id);
-                            // Mark as external function (FFI)
-                            external_funcs.insert(name_id);
+                            deferred_externals.push((name_id, func));
                         }
                     }
                 }
@@ -459,6 +371,13 @@ impl Analyzer {
                         self.name_table_mut()
                             .intern(module_id, &[class.name], &module_interner);
                     class_names.push((name_id, class.name));
+                }
+                Decl::Error(err) => {
+                    // Export error types so they can be used in match patterns
+                    let name_id =
+                        self.name_table_mut()
+                            .intern(module_id, &[err.name], &module_interner);
+                    error_names.push((name_id, err.name));
                 }
                 _ => {} // Skip other declarations (implement blocks, etc.)
             }
@@ -522,6 +441,100 @@ impl Analyzer {
             exports.insert(name_id, func_type_id);
         }
 
+        // Now resolve deferred non-generic external function types
+        // Error types (e.g. NotFound, PermissionDenied) are now registered by sub-analysis
+        for (name_id, func) in deferred_externals {
+            let func_type_id = {
+                let mut ctx = TypeResolutionContext {
+                    db: &self.ctx.db,
+                    interner: &module_interner,
+                    module_id,
+                    type_params: None,
+                    self_type: None,
+                    imports: &[],
+                };
+                let param_ids: crate::type_arena::TypeIdVec = func
+                    .params
+                    .iter()
+                    .map(|p| resolve_type_to_id(&p.ty, &mut ctx))
+                    .collect();
+                let return_id = func
+                    .return_type
+                    .as_ref()
+                    .map(|rt| resolve_type_to_id(rt, &mut ctx))
+                    .unwrap_or_else(|| self.type_arena().void());
+                self.type_arena_mut().function(param_ids, return_id, false)
+            };
+            exports.insert(name_id, func_type_id);
+            external_funcs.insert(name_id);
+        }
+
+        // Now resolve deferred generic external function types
+        for (name_id, func) in deferred_generic_externals {
+            let builtin_mod = self.name_table_mut().builtin_module();
+            let mut type_param_scope = TypeParamScope::new();
+            let mut type_params: Vec<TypeParamInfo> = Vec::new();
+            for tp in &func.type_params {
+                let tp_name_str = module_interner.resolve(tp.name);
+                let tp_name_id = self
+                    .name_table_mut()
+                    .intern_raw(builtin_mod, &[tp_name_str]);
+                let tp_info = TypeParamInfo {
+                    name: tp.name,
+                    name_id: tp_name_id,
+                    constraint: None,
+                    type_param_id: None,
+                    variance: TypeParamVariance::default(),
+                };
+                type_param_scope.add(tp_info.clone());
+                type_params.push(tp_info);
+            }
+
+            let (func_type_id, param_type_ids, return_type_id) = {
+                let mut ctx = TypeResolutionContext::with_type_params(
+                    &self.ctx.db,
+                    &module_interner,
+                    module_id,
+                    &type_param_scope,
+                );
+                let param_ids: Vec<ArenaTypeId> = func
+                    .params
+                    .iter()
+                    .map(|p| resolve_type_to_id(&p.ty, &mut ctx))
+                    .collect();
+                let return_id = func
+                    .return_type
+                    .as_ref()
+                    .map(|rt| resolve_type_to_id(rt, &mut ctx))
+                    .unwrap_or_else(|| self.type_arena().void());
+                let func_id = self
+                    .type_arena_mut()
+                    .function(param_ids.clone(), return_id, false);
+                (func_id, param_ids, return_id)
+            };
+
+            exports.insert(name_id, func_type_id);
+
+            // Register in EntityRegistry so module destructuring can find generic info
+            let signature = FunctionType::from_ids(&param_type_ids, return_type_id, false);
+            let func_id = self.entity_registry_mut().register_function_full(
+                name_id,
+                name_id,
+                module_id,
+                signature,
+                func.params.len(),
+                vec![],
+            );
+            self.entity_registry_mut().set_function_generic_info(
+                func_id,
+                GenericFuncInfo {
+                    type_params,
+                    param_types: param_type_ids,
+                    return_type: return_type_id,
+                },
+            );
+        }
+
         // Now populate interface exports after sub-analysis has registered them
         for (name_id, iface_sym) in interface_names {
             // Look up interface type from entity registry
@@ -572,6 +585,19 @@ impl Analyzer {
                     .type_arena_mut()
                     .class(type_def_id, smallvec::smallvec![]);
                 exports.insert(name_id, class_type_id);
+            }
+        }
+
+        // Now populate error type exports after sub-analysis has registered them
+        for (name_id, error_sym) in error_names {
+            let type_def_id = {
+                let error_str = module_interner.resolve(error_sym);
+                self.resolver_for_module(&module_interner, module_id)
+                    .resolve_type_str_or_interface(error_str, &self.entity_registry())
+            };
+            if let Some(type_def_id) = type_def_id {
+                let error_type_id = self.type_arena_mut().error_type(type_def_id);
+                exports.insert(name_id, error_type_id);
             }
         }
 

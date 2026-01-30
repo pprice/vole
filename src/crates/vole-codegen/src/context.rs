@@ -537,6 +537,46 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         query.resolve_type_def_by_str(module_id, name)
     }
 
+    /// Find an error type in a union by its short name.
+    ///
+    /// Used to resolve error types from imported modules when matching
+    /// fallible error patterns (e.g., `error NotFound { path: p }`).
+    pub fn find_error_type_in_union(
+        &self,
+        error_union_id: TypeId,
+        name: &str,
+    ) -> Option<vole_identity::TypeDefId> {
+        let arena = self.arena();
+        let name_table = self.name_table();
+        let registry = self.query().registry();
+
+        let check_variant = |type_def_id: vole_identity::TypeDefId| -> bool {
+            name_table
+                .last_segment_str(registry.name_id(type_def_id))
+                .is_some_and(|seg| seg == name)
+        };
+
+        // Check single error type
+        if let Some(type_def_id) = arena.unwrap_error(error_union_id)
+            && check_variant(type_def_id)
+        {
+            return Some(type_def_id);
+        }
+
+        // Check union variants
+        if let Some(variants) = arena.unwrap_union(error_union_id) {
+            for &variant in variants {
+                if let Some(type_def_id) = arena.unwrap_error(variant)
+                    && check_variant(type_def_id)
+                {
+                    return Some(type_def_id);
+                }
+            }
+        }
+
+        None
+    }
+
     /// Get capture binding for a symbol, if any
     pub fn get_capture(&self, sym: &Symbol) -> Option<&CaptureBinding> {
         self.captures.as_ref()?.bindings.get(sym)
