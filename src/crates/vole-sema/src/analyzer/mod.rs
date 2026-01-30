@@ -968,6 +968,9 @@ impl Analyzer {
                         }
                     }
                 }
+                Decl::Struct(_) => {
+                    // Struct declarations handled in later passes
+                }
                 Decl::Error(_) => {
                     // Error declarations fully processed in first pass
                 }

@@ -238,6 +238,9 @@ impl Compiler<'_> {
                 Decl::Implement(impl_block) => {
                     self.register_implement_block(impl_block);
                 }
+                Decl::Struct(_) => {
+                    // Struct declarations don't generate code in pass 1
+                }
                 Decl::Error(_) => {
                     // Error declarations don't generate code in pass 1
                 }
@@ -307,6 +310,9 @@ impl Compiler<'_> {
                 }
                 Decl::Implement(impl_block) => {
                     self.compile_implement_block(impl_block)?;
+                }
+                Decl::Struct(_) => {
+                    // Struct declarations don't generate code in pass 2
                 }
                 Decl::Error(_) => {
                     // Error declarations don't generate code in pass 2

@@ -1,0 +1,11 @@
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+struct Color {
+    r: u8,
+    g: u8,
+    b: u8,
+    a: u8,
+}

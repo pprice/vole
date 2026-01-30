@@ -445,6 +445,7 @@ impl<'src> Lexer<'src> {
             "is" => Some(TokenType::KwIs),
             "class" => Some(TokenType::KwClass),
             "record" => Some(TokenType::KwRecord),
+            "struct" => Some(TokenType::KwStruct),
             "interface" => Some(TokenType::KwInterface),
             "implements" => Some(TokenType::KwImplements),
             "implement" => Some(TokenType::KwImplement),

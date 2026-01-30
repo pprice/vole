@@ -34,6 +34,7 @@ pub enum TokenType {
     KwIs,          // is keyword (type test)
     KwClass,       // class keyword
     KwRecord,      // record keyword
+    KwStruct,      // struct keyword
     KwInterface,   // interface keyword
     KwImplements,  // implements keyword (record implements Trait)
     KwImplement,   // implement keyword (implement Trait for Type)
@@ -161,6 +162,7 @@ impl TokenType {
             Self::KwIs => "is",
             Self::KwClass => "class",
             Self::KwRecord => "record",
+            Self::KwStruct => "struct",
             Self::KwInterface => "interface",
             Self::KwImplements => "implements",
             Self::KwImplement => "implement",

@@ -69,6 +69,7 @@ impl<'a> AstPrinter<'a> {
             Decl::Class(_) | Decl::Record(_) => {
                 // TODO: implement class/record display
             }
+            Decl::Struct(s) => self.write_struct_decl(out, s),
             Decl::Interface(_) | Decl::Implement(_) => {
                 // TODO: implement interface/implement display
             }
@@ -145,6 +146,28 @@ impl<'a> AstPrinter<'a> {
             inner.write_indent(out);
             out.push_str("fields: [");
             for (i, field) in error_decl.fields.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                let field_name = self.interner.resolve(field.name);
+                write!(out, "({}: ", field_name).unwrap();
+                self.write_type_inline(out, &field.ty);
+                out.push(')');
+            }
+            out.push_str("]\n");
+        }
+    }
+
+    fn write_struct_decl(&self, out: &mut String, struct_decl: &crate::StructDecl) {
+        self.write_indent(out);
+        let name = self.interner.resolve(struct_decl.name);
+        writeln!(out, "StructDecl \"{}\"", name).unwrap();
+
+        if !struct_decl.fields.is_empty() {
+            let inner = self.indented();
+            inner.write_indent(out);
+            out.push_str("fields: [");
+            for (i, field) in struct_decl.fields.iter().enumerate() {
                 if i > 0 {
                     out.push_str(", ");
                 }

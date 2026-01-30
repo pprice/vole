@@ -1,0 +1,9 @@
+[stdout]
+Program
+  StructDecl "Point"
+    fields: [(x: i64), (y: i64)]
+  StructDecl "Color"
+    fields: [(r: u8), (g: u8), (b: u8), (a: u8)]
+
+[stderr]
+// <path>/struct_decl.vole

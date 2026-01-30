@@ -42,6 +42,7 @@ fn print_decl<'a>(
         Decl::Tests(tests) => print_tests_decl(arena, tests, interner),
         Decl::Class(class) => print_class_decl(arena, class, interner),
         Decl::Record(record) => print_record_decl(arena, record, interner),
+        Decl::Struct(struct_decl) => print_struct_decl(arena, struct_decl, interner),
         Decl::Interface(iface) => print_interface_decl(arena, iface, interner),
         Decl::Implement(impl_block) => print_implement_block(arena, impl_block, interner),
         Decl::Error(error_decl) => print_error_decl(arena, error_decl, interner),
@@ -1376,6 +1377,25 @@ fn print_record_decl<'a>(
         &record.methods,
         interner,
         "record",
+    )
+}
+
+fn print_struct_decl<'a>(
+    arena: &'a Arena<'a>,
+    struct_decl: &StructDecl,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    let name = interner.resolve(struct_decl.name).to_string();
+
+    print_class_like_body(
+        arena,
+        &name,
+        arena.nil(),
+        &struct_decl.fields,
+        None,
+        &[],
+        interner,
+        "struct",
     )
 }
 

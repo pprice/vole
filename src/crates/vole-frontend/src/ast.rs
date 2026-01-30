@@ -59,6 +59,7 @@ pub enum Decl {
     LetTuple(LetTupleStmt), // Top-level destructuring: let { a, b } = import "..."
     Class(ClassDecl),
     Record(RecordDecl),
+    Struct(StructDecl),
     Interface(InterfaceDecl),
     Implement(ImplementBlock),
     Error(ErrorDecl),
@@ -144,6 +145,14 @@ pub struct RecordDecl {
     pub external: Option<ExternalBlock>, // External methods from native code
     pub methods: Vec<FuncDecl>,
     pub statics: Option<StaticsBlock>, // Static methods
+    pub span: Span,
+}
+
+/// Struct declaration (stack-allocated value type with C-ABI-compatible layout)
+#[derive(Debug, Clone)]
+pub struct StructDecl {
+    pub name: Symbol,
+    pub fields: Vec<FieldDef>,
     pub span: Span,
 }
 

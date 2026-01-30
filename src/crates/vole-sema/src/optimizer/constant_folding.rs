@@ -151,7 +151,11 @@ impl<'a> ConstantFolder<'a> {
                     self.fold_func(method);
                 }
             }
-            Decl::Interface(_) | Decl::Implement(_) | Decl::Error(_) | Decl::External(_) => {}
+            Decl::Struct(_)
+            | Decl::Interface(_)
+            | Decl::Implement(_)
+            | Decl::Error(_)
+            | Decl::External(_) => {}
         }
     }
 
