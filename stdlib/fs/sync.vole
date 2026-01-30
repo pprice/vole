@@ -2,9 +2,6 @@
 // Synchronous filesystem operations module
 
 // Error types for filesystem operations
-// IMPORTANT: The order here matches the error tags in the native implementation (fs.rs)
-// Do not reorder without updating fs.rs
-
 error NotFound { path: string }
 error PermissionDenied { path: string }
 error IsDirectory { path: string }
@@ -14,6 +11,24 @@ error Other { path: string }
 
 // Union type for all IO errors
 let IoError = NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other
+
+// =============================================================================
+// Result structs for native function returns
+// =============================================================================
+
+struct ReadStringResult {
+    code: i64,
+    value: string,
+}
+
+struct WriteResult {
+    code: i64,
+}
+
+struct ListResult {
+    code: i64,
+    value: [string],
+}
 
 // =============================================================================
 // Non-fallible file system operations
@@ -31,15 +46,96 @@ external("std:fs/sync") {
 }
 
 // =============================================================================
-// Fallible file system operations
+// Native (underscore-prefixed) file system operations returning structs
 // =============================================================================
 
 external("std:fs/sync") {
-    func read_string(path: string) -> fallible(string, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other)
-    func write_string(path: string, content: string) -> fallible(Done, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other)
-    func append_string(path: string, content: string) -> fallible(Done, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other)
-    func list(path: string) -> fallible([string], NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other)
-    func mkdir(path: string) -> fallible(Done, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other)
-    func remove_file(path: string) -> fallible(Done, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other)
-    func remove_dir(path: string) -> fallible(Done, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other)
+    func _read_string(path: string) -> ReadStringResult
+    func _write_string(path: string, content: string) -> WriteResult
+    func _append_string(path: string, content: string) -> WriteResult
+    func _list(path: string) -> ListResult
+    func _mkdir(path: string) -> WriteResult
+    func _remove_file(path: string) -> WriteResult
+    func _remove_dir(path: string) -> WriteResult
+}
+
+// =============================================================================
+// Vole wrapper functions with proper error handling
+// =============================================================================
+
+func read_string(path: string) -> fallible(string, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other) {
+    let r = _read_string(path)
+    if r.code == 0 { return r.value }
+    if r.code == 1 { raise NotFound { path } }
+    if r.code == 2 { raise PermissionDenied { path } }
+    if r.code == 3 { raise IsDirectory { path } }
+    if r.code == 4 { raise NotDirectory { path } }
+    if r.code == 5 { raise AlreadyExists { path } }
+    raise Other { path }
+}
+
+func write_string(path: string, content: string) -> fallible(Done, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other) {
+    let r = _write_string(path, content)
+    if r.code == 0 { return Done {} }
+    if r.code == 1 { raise NotFound { path } }
+    if r.code == 2 { raise PermissionDenied { path } }
+    if r.code == 3 { raise IsDirectory { path } }
+    if r.code == 4 { raise NotDirectory { path } }
+    if r.code == 5 { raise AlreadyExists { path } }
+    raise Other { path }
+}
+
+func append_string(path: string, content: string) -> fallible(Done, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other) {
+    let r = _append_string(path, content)
+    if r.code == 0 { return Done {} }
+    if r.code == 1 { raise NotFound { path } }
+    if r.code == 2 { raise PermissionDenied { path } }
+    if r.code == 3 { raise IsDirectory { path } }
+    if r.code == 4 { raise NotDirectory { path } }
+    if r.code == 5 { raise AlreadyExists { path } }
+    raise Other { path }
+}
+
+func list(path: string) -> fallible([string], NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other) {
+    let r = _list(path)
+    if r.code == 0 { return r.value }
+    if r.code == 1 { raise NotFound { path } }
+    if r.code == 2 { raise PermissionDenied { path } }
+    if r.code == 3 { raise IsDirectory { path } }
+    if r.code == 4 { raise NotDirectory { path } }
+    if r.code == 5 { raise AlreadyExists { path } }
+    raise Other { path }
+}
+
+func mkdir(path: string) -> fallible(Done, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other) {
+    let r = _mkdir(path)
+    if r.code == 0 { return Done {} }
+    if r.code == 1 { raise NotFound { path } }
+    if r.code == 2 { raise PermissionDenied { path } }
+    if r.code == 3 { raise IsDirectory { path } }
+    if r.code == 4 { raise NotDirectory { path } }
+    if r.code == 5 { raise AlreadyExists { path } }
+    raise Other { path }
+}
+
+func remove_file(path: string) -> fallible(Done, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other) {
+    let r = _remove_file(path)
+    if r.code == 0 { return Done {} }
+    if r.code == 1 { raise NotFound { path } }
+    if r.code == 2 { raise PermissionDenied { path } }
+    if r.code == 3 { raise IsDirectory { path } }
+    if r.code == 4 { raise NotDirectory { path } }
+    if r.code == 5 { raise AlreadyExists { path } }
+    raise Other { path }
+}
+
+func remove_dir(path: string) -> fallible(Done, NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other) {
+    let r = _remove_dir(path)
+    if r.code == 0 { return Done {} }
+    if r.code == 1 { raise NotFound { path } }
+    if r.code == 2 { raise PermissionDenied { path } }
+    if r.code == 3 { raise IsDirectory { path } }
+    if r.code == 4 { raise NotDirectory { path } }
+    if r.code == 5 { raise AlreadyExists { path } }
+    raise Other { path }
 }

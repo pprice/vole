@@ -1,98 +1,125 @@
 // src/runtime/stdlib/fs.rs
 //! Native filesystem functions for std:fs/sync module.
 //!
-//! All fallible operations return a boxed fallible type:
-//! - Offset 0 (i64): Tag - 0 for success, 1+ for error variant
-//! - Offset 8: Payload - success value or error data (path string pointer)
+//! Fallible operations return `#[repr(C)]` structs with an error code and optional value.
+//! Error codes: 0 = Ok, 1 = NotFound, 2 = PermissionDenied, 3 = IsDirectory,
+//! 4 = NotDirectory, 5 = AlreadyExists, 6 = Other
 //!
-//! Error tags matching Vole's sorted union order for:
-//!   NotFound | PermissionDenied | IsDirectory | NotDirectory | AlreadyExists | Other
-//!
-//! Vole sorts union types in reverse debug format order, resulting in:
-//! - 0 = success
-//! - 1 = Other
-//! - 2 = AlreadyExists
-//! - 3 = NotDirectory
-//! - 4 = IsDirectory
-//! - 5 = PermissionDenied
-//! - 6 = NotFound
+//! The Vole wrapper functions in stdlib/fs/sync.vole translate these error codes
+//! into proper fallible(T, IoError) values.
 
 use crate::native_registry::{NativeModule, NativeSignature, NativeType};
 use crate::string::RcString;
-use std::alloc::{Layout, alloc};
 use std::fs;
 use std::io::ErrorKind;
 use std::path::Path;
 
-// Error tags matching Vole's sorted union order (reverse of declaration order)
-const TAG_SUCCESS: i64 = 0;
-const TAG_OTHER: i64 = 1;
-const TAG_ALREADY_EXISTS: i64 = 2;
-const TAG_NOT_DIRECTORY: i64 = 3;
-const TAG_IS_DIRECTORY: i64 = 4;
-const TAG_PERMISSION_DENIED: i64 = 5;
-const TAG_NOT_FOUND: i64 = 6;
+// =============================================================================
+// C-ABI result structs
+// =============================================================================
+
+/// Result struct for operations that return a string value (read_string).
+/// Fields: error (i64), value (i64 = string pointer)
+/// 2 fields => returned in registers (RAX + RDX).
+#[repr(C)]
+pub struct ReadStringResult {
+    pub code: i64,
+    pub value: i64, // *const RcString as i64, only valid when error == 0
+}
+
+/// Result struct for operations that return no value (write, append, mkdir, remove).
+/// Fields: error (i64)
+/// 1 field => returned in 1 register (padded to 2).
+#[repr(C)]
+pub struct WriteResult {
+    pub code: i64,
+}
+
+/// Result struct for operations that return an array value (list).
+/// Fields: error (i64), value (i64 = array pointer)
+/// 2 fields => returned in registers (RAX + RDX).
+#[repr(C)]
+pub struct ListResult {
+    pub code: i64,
+    pub value: i64, // *mut RcArray as i64, only valid when error == 0
+}
+
+// =============================================================================
+// Error code mapping
+// =============================================================================
+
+/// Map std::io::Error to our numeric error code.
+/// These codes are matched in the Vole wrapper functions in sync.vole.
+fn error_to_code(err: &std::io::Error) -> i64 {
+    match err.kind() {
+        ErrorKind::NotFound => 1,
+        ErrorKind::PermissionDenied => 2,
+        ErrorKind::IsADirectory => 3,
+        ErrorKind::NotADirectory => 4,
+        ErrorKind::AlreadyExists => 5,
+        _ => 6,
+    }
+}
+
+// =============================================================================
+// Module registration
+// =============================================================================
 
 /// Create the std:fs/sync native module
 pub fn module() -> NativeModule {
     let mut m = NativeModule::new();
 
-    // read_string: (string) -> fallible(string, IoError)
-    // Returns ptr to boxed fallible result
+    // _read_string: (string) -> ReadStringResult { error, value }
     m.register(
-        "read_string",
+        "_read_string",
         fs_read_string as *const u8,
         NativeSignature {
             params: vec![NativeType::String],
-            return_type: NativeType::I64, // Pointer to fallible
+            return_type: NativeType::Struct { field_count: 2 },
         },
     );
 
-    // write_string: (string, string) -> fallible(bool, IoError)
-    // Returns ptr to boxed fallible result (bool = Done)
+    // _write_string: (string, string) -> WriteResult { error }
     m.register(
-        "write_string",
+        "_write_string",
         fs_write_string as *const u8,
         NativeSignature {
             params: vec![NativeType::String, NativeType::String],
-            return_type: NativeType::I64, // Pointer to fallible
+            return_type: NativeType::Struct { field_count: 1 },
         },
     );
 
-    // append_string: (string, string) -> fallible(bool, IoError)
-    // Returns ptr to boxed fallible result (bool = Done)
+    // _append_string: (string, string) -> WriteResult { error }
     m.register(
-        "append_string",
+        "_append_string",
         fs_append_string as *const u8,
         NativeSignature {
             params: vec![NativeType::String, NativeType::String],
-            return_type: NativeType::I64, // Pointer to fallible
+            return_type: NativeType::Struct { field_count: 1 },
         },
     );
 
-    // list: (string) -> fallible([string], IoError)
-    // Returns ptr to boxed fallible result (array of strings)
+    // _list: (string) -> ListResult { error, value }
     m.register(
-        "list",
+        "_list",
         fs_list as *const u8,
         NativeSignature {
             params: vec![NativeType::String],
-            return_type: NativeType::I64, // Pointer to fallible
+            return_type: NativeType::Struct { field_count: 2 },
         },
     );
 
-    // mkdir: (string) -> fallible(bool, IoError)
-    // Returns ptr to boxed fallible result (bool = Done)
+    // _mkdir: (string) -> WriteResult { error }
     m.register(
-        "mkdir",
+        "_mkdir",
         fs_mkdir as *const u8,
         NativeSignature {
             params: vec![NativeType::String],
-            return_type: NativeType::I64, // Pointer to fallible
+            return_type: NativeType::Struct { field_count: 1 },
         },
     );
 
-    // exists: (string) -> bool
+    // exists: (string) -> bool (non-fallible, unchanged)
     m.register(
         "exists",
         fs_exists as *const u8,
@@ -102,7 +129,7 @@ pub fn module() -> NativeModule {
         },
     );
 
-    // is_dir: (string) -> bool
+    // is_dir: (string) -> bool (non-fallible, unchanged)
     m.register(
         "is_dir",
         fs_is_dir as *const u8,
@@ -112,7 +139,7 @@ pub fn module() -> NativeModule {
         },
     );
 
-    // is_file: (string) -> bool
+    // is_file: (string) -> bool (non-fallible, unchanged)
     m.register(
         "is_file",
         fs_is_file as *const u8,
@@ -122,23 +149,23 @@ pub fn module() -> NativeModule {
         },
     );
 
-    // remove_file: (string) -> fallible(bool, IoError)
+    // _remove_file: (string) -> WriteResult { error }
     m.register(
-        "remove_file",
+        "_remove_file",
         fs_remove_file as *const u8,
         NativeSignature {
             params: vec![NativeType::String],
-            return_type: NativeType::I64, // Pointer to fallible
+            return_type: NativeType::Struct { field_count: 1 },
         },
     );
 
-    // remove_dir: (string) -> fallible(bool, IoError)
+    // _remove_dir: (string) -> WriteResult { error }
     m.register(
-        "remove_dir",
+        "_remove_dir",
         fs_remove_dir as *const u8,
         NativeSignature {
             params: vec![NativeType::String],
-            return_type: NativeType::I64, // Pointer to fallible
+            return_type: NativeType::Struct { field_count: 1 },
         },
     );
 
@@ -146,78 +173,16 @@ pub fn module() -> NativeModule {
 }
 
 // =============================================================================
-// Helper functions
-// =============================================================================
-
-/// Allocate a boxed fallible result (16 bytes: tag + payload)
-fn alloc_fallible() -> *mut u8 {
-    let layout = Layout::from_size_align(16, 8).expect("valid fallible layout");
-    let ptr = unsafe { alloc(layout) };
-    if ptr.is_null() {
-        std::alloc::handle_alloc_error(layout);
-    }
-    ptr
-}
-
-/// Map std::io::Error to our error tag
-fn error_to_tag(err: &std::io::Error) -> i64 {
-    match err.kind() {
-        ErrorKind::NotFound => TAG_NOT_FOUND,
-        ErrorKind::PermissionDenied => TAG_PERMISSION_DENIED,
-        ErrorKind::IsADirectory => TAG_IS_DIRECTORY,
-        ErrorKind::NotADirectory => TAG_NOT_DIRECTORY,
-        ErrorKind::AlreadyExists => TAG_ALREADY_EXISTS,
-        _ => TAG_OTHER,
-    }
-}
-
-/// Write success with string payload
-fn write_success_string(ptr: *mut u8, s: *const RcString) {
-    unsafe {
-        std::ptr::write(ptr as *mut i64, TAG_SUCCESS);
-        std::ptr::write(ptr.add(8) as *mut i64, s as i64);
-    }
-}
-
-/// Write success with Done (bool true) payload
-fn write_success_done(ptr: *mut u8) {
-    unsafe {
-        std::ptr::write(ptr as *mut i64, TAG_SUCCESS);
-        std::ptr::write(ptr.add(8) as *mut i64, 1); // Done = true
-    }
-}
-
-/// Write success with array payload
-fn write_success_array(ptr: *mut u8, arr: *mut crate::array::RcArray) {
-    unsafe {
-        std::ptr::write(ptr as *mut i64, TAG_SUCCESS);
-        std::ptr::write(ptr.add(8) as *mut i64, arr as i64);
-    }
-}
-
-/// Write error with path payload
-fn write_error(ptr: *mut u8, tag: i64, path: *const RcString) {
-    unsafe {
-        std::ptr::write(ptr as *mut i64, tag);
-        std::ptr::write(ptr.add(8) as *mut i64, path as i64);
-    }
-}
-
-// =============================================================================
 // Native function implementations
 // =============================================================================
 
 /// Read a file to string.
-/// Returns a boxed fallible: success(string) or error with path.
+/// Returns ReadStringResult { error, value }.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
-pub extern "C" fn fs_read_string(path_ptr: *const RcString) -> *mut u8 {
-    let result_ptr = alloc_fallible();
-
+pub extern "C" fn fs_read_string(path_ptr: *const RcString) -> ReadStringResult {
     if path_ptr.is_null() {
-        let path_str = RcString::new("");
-        write_error(result_ptr, TAG_NOT_FOUND, path_str);
-        return result_ptr;
+        return ReadStringResult { code: 1, value: 0 };
     }
 
     let path_str = unsafe { (*path_ptr).as_str() };
@@ -226,33 +191,28 @@ pub extern "C" fn fs_read_string(path_ptr: *const RcString) -> *mut u8 {
     match fs::read_to_string(path) {
         Ok(contents) => {
             let s = RcString::new(&contents);
-            write_success_string(result_ptr, s);
+            ReadStringResult {
+                code: 0,
+                value: s as i64,
+            }
         }
-        Err(err) => {
-            let tag = error_to_tag(&err);
-            // Clone the path for error context
-            let path_copy = RcString::new(path_str);
-            write_error(result_ptr, tag, path_copy);
-        }
+        Err(err) => ReadStringResult {
+            code: error_to_code(&err),
+            value: 0,
+        },
     }
-
-    result_ptr
 }
 
 /// Write string to file (create/truncate).
-/// Returns a boxed fallible: success(Done) or error with path.
+/// Returns WriteResult { error }.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn fs_write_string(
     path_ptr: *const RcString,
     content_ptr: *const RcString,
-) -> *mut u8 {
-    let result_ptr = alloc_fallible();
-
+) -> WriteResult {
     if path_ptr.is_null() {
-        let path_str = RcString::new("");
-        write_error(result_ptr, TAG_NOT_FOUND, path_str);
-        return result_ptr;
+        return WriteResult { code: 1 };
     }
 
     let path_str = unsafe { (*path_ptr).as_str() };
@@ -263,36 +223,26 @@ pub extern "C" fn fs_write_string(
     };
 
     match fs::write(path_str, content) {
-        Ok(()) => {
-            write_success_done(result_ptr);
-        }
-        Err(err) => {
-            let tag = error_to_tag(&err);
-            let path_copy = RcString::new(path_str);
-            write_error(result_ptr, tag, path_copy);
-        }
+        Ok(()) => WriteResult { code: 0 },
+        Err(err) => WriteResult {
+            code: error_to_code(&err),
+        },
     }
-
-    result_ptr
 }
 
 /// Append string to file.
-/// Returns a boxed fallible: success(Done) or error with path.
+/// Returns WriteResult { error }.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn fs_append_string(
     path_ptr: *const RcString,
     content_ptr: *const RcString,
-) -> *mut u8 {
+) -> WriteResult {
     use std::fs::OpenOptions;
     use std::io::Write;
 
-    let result_ptr = alloc_fallible();
-
     if path_ptr.is_null() {
-        let path_str = RcString::new("");
-        write_error(result_ptr, TAG_NOT_FOUND, path_str);
-        return result_ptr;
+        return WriteResult { code: 1 };
     }
 
     let path_str = unsafe { (*path_ptr).as_str() };
@@ -309,33 +259,23 @@ pub extern "C" fn fs_append_string(
         .and_then(|mut file| file.write_all(content.as_bytes()));
 
     match result {
-        Ok(()) => {
-            write_success_done(result_ptr);
-        }
-        Err(err) => {
-            let tag = error_to_tag(&err);
-            let path_copy = RcString::new(path_str);
-            write_error(result_ptr, tag, path_copy);
-        }
+        Ok(()) => WriteResult { code: 0 },
+        Err(err) => WriteResult {
+            code: error_to_code(&err),
+        },
     }
-
-    result_ptr
 }
 
 /// List directory contents.
-/// Returns a boxed fallible: success([string]) or error with path.
+/// Returns ListResult { error, value }.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
-pub extern "C" fn fs_list(path_ptr: *const RcString) -> *mut u8 {
+pub extern "C" fn fs_list(path_ptr: *const RcString) -> ListResult {
     use crate::array::RcArray;
     use crate::value::{TYPE_STRING, TaggedValue};
 
-    let result_ptr = alloc_fallible();
-
     if path_ptr.is_null() {
-        let path_str = RcString::new("");
-        write_error(result_ptr, TAG_NOT_FOUND, path_str);
-        return result_ptr;
+        return ListResult { code: 1, value: 0 };
     }
 
     let path_str = unsafe { (*path_ptr).as_str() };
@@ -358,45 +298,35 @@ pub extern "C" fn fs_list(path_ptr: *const RcString) -> *mut u8 {
                     }
                 }
             }
-            write_success_array(result_ptr, arr);
+            ListResult {
+                code: 0,
+                value: arr as i64,
+            }
         }
-        Err(err) => {
-            let tag = error_to_tag(&err);
-            let path_copy = RcString::new(path_str);
-            write_error(result_ptr, tag, path_copy);
-        }
+        Err(err) => ListResult {
+            code: error_to_code(&err),
+            value: 0,
+        },
     }
-
-    result_ptr
 }
 
 /// Create a directory (and parents).
-/// Returns a boxed fallible: success(Done) or error with path.
+/// Returns WriteResult { error }.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
-pub extern "C" fn fs_mkdir(path_ptr: *const RcString) -> *mut u8 {
-    let result_ptr = alloc_fallible();
-
+pub extern "C" fn fs_mkdir(path_ptr: *const RcString) -> WriteResult {
     if path_ptr.is_null() {
-        let path_str = RcString::new("");
-        write_error(result_ptr, TAG_NOT_FOUND, path_str);
-        return result_ptr;
+        return WriteResult { code: 1 };
     }
 
     let path_str = unsafe { (*path_ptr).as_str() };
 
     match fs::create_dir_all(path_str) {
-        Ok(()) => {
-            write_success_done(result_ptr);
-        }
-        Err(err) => {
-            let tag = error_to_tag(&err);
-            let path_copy = RcString::new(path_str);
-            write_error(result_ptr, tag, path_copy);
-        }
+        Ok(()) => WriteResult { code: 0 },
+        Err(err) => WriteResult {
+            code: error_to_code(&err),
+        },
     }
-
-    result_ptr
 }
 
 /// Check if path exists.
@@ -433,61 +363,41 @@ pub extern "C" fn fs_is_file(path_ptr: *const RcString) -> bool {
 }
 
 /// Remove a file.
-/// Returns a boxed fallible: success(Done) or error with path.
+/// Returns WriteResult { error }.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
-pub extern "C" fn fs_remove_file(path_ptr: *const RcString) -> *mut u8 {
-    let result_ptr = alloc_fallible();
-
+pub extern "C" fn fs_remove_file(path_ptr: *const RcString) -> WriteResult {
     if path_ptr.is_null() {
-        let path_str = RcString::new("");
-        write_error(result_ptr, TAG_NOT_FOUND, path_str);
-        return result_ptr;
+        return WriteResult { code: 1 };
     }
 
     let path_str = unsafe { (*path_ptr).as_str() };
 
     match fs::remove_file(path_str) {
-        Ok(()) => {
-            write_success_done(result_ptr);
-        }
-        Err(err) => {
-            let tag = error_to_tag(&err);
-            let path_copy = RcString::new(path_str);
-            write_error(result_ptr, tag, path_copy);
-        }
+        Ok(()) => WriteResult { code: 0 },
+        Err(err) => WriteResult {
+            code: error_to_code(&err),
+        },
     }
-
-    result_ptr
 }
 
 /// Remove an empty directory.
-/// Returns a boxed fallible: success(Done) or error with path.
+/// Returns WriteResult { error }.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
-pub extern "C" fn fs_remove_dir(path_ptr: *const RcString) -> *mut u8 {
-    let result_ptr = alloc_fallible();
-
+pub extern "C" fn fs_remove_dir(path_ptr: *const RcString) -> WriteResult {
     if path_ptr.is_null() {
-        let path_str = RcString::new("");
-        write_error(result_ptr, TAG_NOT_FOUND, path_str);
-        return result_ptr;
+        return WriteResult { code: 1 };
     }
 
     let path_str = unsafe { (*path_ptr).as_str() };
 
     match fs::remove_dir(path_str) {
-        Ok(()) => {
-            write_success_done(result_ptr);
-        }
-        Err(err) => {
-            let tag = error_to_tag(&err);
-            let path_copy = RcString::new(path_str);
-            write_error(result_ptr, tag, path_copy);
-        }
+        Ok(()) => WriteResult { code: 0 },
+        Err(err) => WriteResult {
+            code: error_to_code(&err),
+        },
     }
-
-    result_ptr
 }
 
 // =============================================================================
@@ -500,25 +410,6 @@ mod tests {
     use std::fs::File;
     use std::io::Write;
     use tempfile::TempDir;
-
-    // Helper to read tag from fallible result
-    unsafe fn read_tag(ptr: *mut u8) -> i64 {
-        unsafe { std::ptr::read(ptr as *const i64) }
-    }
-
-    // Helper to read payload as string ptr from fallible result
-    unsafe fn read_payload_string(ptr: *mut u8) -> *const RcString {
-        unsafe { std::ptr::read(ptr.add(8) as *const i64) as *const RcString }
-    }
-
-    // Helper to read string value
-    unsafe fn read_string(s: *const RcString) -> String {
-        if s.is_null() {
-            String::new()
-        } else {
-            unsafe { (*s).as_str().to_string() }
-        }
-    }
 
     #[test]
     fn test_fs_exists() {
@@ -574,10 +465,10 @@ mod tests {
         let path = RcString::new(file_path.to_str().unwrap());
         let result = fs_read_string(path);
 
+        assert_eq!(result.code, 0);
+        let content = result.value as *const RcString;
         unsafe {
-            assert_eq!(read_tag(result), TAG_SUCCESS);
-            let content = read_payload_string(result);
-            assert_eq!(read_string(content), "hello world");
+            assert_eq!((*content).as_str(), "hello world");
         }
     }
 
@@ -586,9 +477,7 @@ mod tests {
         let path = RcString::new("/nonexistent/file/12345.txt");
         let result = fs_read_string(path);
 
-        unsafe {
-            assert_eq!(read_tag(result), TAG_NOT_FOUND);
-        }
+        assert_eq!(result.code, 1); // NotFound
     }
 
     #[test]
@@ -600,9 +489,7 @@ mod tests {
         let content = RcString::new("test content");
         let result = fs_write_string(path, content);
 
-        unsafe {
-            assert_eq!(read_tag(result), TAG_SUCCESS);
-        }
+        assert_eq!(result.code, 0);
 
         // Verify file was written
         let contents = fs::read_to_string(&file_path).unwrap();
@@ -618,17 +505,13 @@ mod tests {
         let path1 = RcString::new(file_path.to_str().unwrap());
         let content1 = RcString::new("hello");
         let result1 = fs_write_string(path1, content1);
-        unsafe {
-            assert_eq!(read_tag(result1), TAG_SUCCESS);
-        }
+        assert_eq!(result1.code, 0);
 
         // Append more content
         let path2 = RcString::new(file_path.to_str().unwrap());
         let content2 = RcString::new(" world");
         let result2 = fs_append_string(path2, content2);
-        unsafe {
-            assert_eq!(read_tag(result2), TAG_SUCCESS);
-        }
+        assert_eq!(result2.code, 0);
 
         // Verify combined content
         let contents = fs::read_to_string(&file_path).unwrap();
@@ -647,9 +530,9 @@ mod tests {
         let path = RcString::new(dir.path().to_str().unwrap());
         let result = fs_list(path);
 
+        assert_eq!(result.code, 0);
         unsafe {
-            assert_eq!(read_tag(result), TAG_SUCCESS);
-            let arr = std::ptr::read(result.add(8) as *const i64) as *mut RcArray;
+            let arr = result.value as *mut RcArray;
             let len = RcArray::len(arr);
             assert_eq!(len, 3);
         }
@@ -660,9 +543,7 @@ mod tests {
         let path = RcString::new("/nonexistent/dir/12345");
         let result = fs_list(path);
 
-        unsafe {
-            assert_eq!(read_tag(result), TAG_NOT_FOUND);
-        }
+        assert_eq!(result.code, 1); // NotFound
     }
 
     #[test]
@@ -673,9 +554,7 @@ mod tests {
         let path = RcString::new(new_dir.to_str().unwrap());
         let result = fs_mkdir(path);
 
-        unsafe {
-            assert_eq!(read_tag(result), TAG_SUCCESS);
-        }
+        assert_eq!(result.code, 0);
 
         assert!(new_dir.exists());
         assert!(new_dir.is_dir());
@@ -690,9 +569,7 @@ mod tests {
         let path = RcString::new(file_path.to_str().unwrap());
         let result = fs_remove_file(path);
 
-        unsafe {
-            assert_eq!(read_tag(result), TAG_SUCCESS);
-        }
+        assert_eq!(result.code, 0);
 
         assert!(!file_path.exists());
     }
@@ -702,9 +579,7 @@ mod tests {
         let path = RcString::new("/nonexistent/file/12345.txt");
         let result = fs_remove_file(path);
 
-        unsafe {
-            assert_eq!(read_tag(result), TAG_NOT_FOUND);
-        }
+        assert_eq!(result.code, 1); // NotFound
     }
 
     #[test]
@@ -716,9 +591,7 @@ mod tests {
         let path = RcString::new(subdir.to_str().unwrap());
         let result = fs_remove_dir(path);
 
-        unsafe {
-            assert_eq!(read_tag(result), TAG_SUCCESS);
-        }
+        assert_eq!(result.code, 0);
 
         assert!(!subdir.exists());
     }
@@ -727,16 +600,46 @@ mod tests {
     fn test_module_registration() {
         let m = module();
 
-        // Check all functions are registered
-        assert!(m.get("read_string").is_some());
-        assert!(m.get("write_string").is_some());
-        assert!(m.get("append_string").is_some());
-        assert!(m.get("list").is_some());
-        assert!(m.get("mkdir").is_some());
+        // Check all functions are registered with underscore-prefixed names
+        assert!(m.get("_read_string").is_some());
+        assert!(m.get("_write_string").is_some());
+        assert!(m.get("_append_string").is_some());
+        assert!(m.get("_list").is_some());
+        assert!(m.get("_mkdir").is_some());
         assert!(m.get("exists").is_some());
         assert!(m.get("is_dir").is_some());
         assert!(m.get("is_file").is_some());
-        assert!(m.get("remove_file").is_some());
-        assert!(m.get("remove_dir").is_some());
+        assert!(m.get("_remove_file").is_some());
+        assert!(m.get("_remove_dir").is_some());
+    }
+
+    #[test]
+    fn test_struct_return_signatures() {
+        let m = module();
+
+        // Verify struct return types
+        let read = m.get("_read_string").unwrap();
+        assert_eq!(
+            read.signature.return_type,
+            NativeType::Struct { field_count: 2 }
+        );
+
+        let write = m.get("_write_string").unwrap();
+        assert_eq!(
+            write.signature.return_type,
+            NativeType::Struct { field_count: 1 }
+        );
+
+        let list = m.get("_list").unwrap();
+        assert_eq!(
+            list.signature.return_type,
+            NativeType::Struct { field_count: 2 }
+        );
+
+        let mkdir = m.get("_mkdir").unwrap();
+        assert_eq!(
+            mkdir.signature.return_type,
+            NativeType::Struct { field_count: 1 }
+        );
     }
 }
