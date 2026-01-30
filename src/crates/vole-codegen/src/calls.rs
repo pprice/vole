@@ -549,27 +549,15 @@ impl Cg<'_, '_, '_> {
                 // Compile args with defaults for omitted parameters
                 let args = self.compile_external_call_args(callee_sym, call, &expected_types)?;
                 let call_inst = self.call_native_indirect(native_func, &args);
-                let results = self.builder.inst_results(call_inst);
-
-                if results.is_empty() {
+                if native_func.signature.return_type == NativeType::Nil {
                     return Ok(self.void_value());
-                } else {
-                    // Sema records return types for all module external calls.
-                    let type_id = self
-                        .get_expr_type(&call_expr_id)
-                        .expect("module external call must have sema-recorded return type");
-                    // Convert Iterator<T> to RuntimeIterator(T) since external functions
-                    // return raw iterator pointers, not boxed interface values
-                    let type_id = self.maybe_convert_iterator_return_type(type_id);
-                    return Ok(CompiledValue {
-                        value: results[0],
-                        ty: native_type_to_cranelift(
-                            &native_func.signature.return_type,
-                            self.ptr_type(),
-                        ),
-                        type_id,
-                    });
                 }
+                // Sema records return types for all module external calls.
+                let type_id = self
+                    .get_expr_type(&call_expr_id)
+                    .expect("module external call must have sema-recorded return type");
+                let type_id = self.maybe_convert_iterator_return_type(type_id);
+                return Ok(self.native_call_result(call_inst, native_func, type_id));
             }
 
             // Fall through to try prelude external functions
@@ -625,27 +613,15 @@ impl Cg<'_, '_, '_> {
             // Compile args with defaults for omitted parameters
             let args = self.compile_external_call_args(callee_sym, call, &expected_types)?;
             let call_inst = self.call_native_indirect(native_func, &args);
-            let results = self.builder.inst_results(call_inst);
-
-            if results.is_empty() {
+            if native_func.signature.return_type == NativeType::Nil {
                 return Ok(self.void_value());
-            } else {
-                // Sema records return types for all prelude external calls.
-                let type_id = self
-                    .get_expr_type(&call_expr_id)
-                    .expect("prelude external call must have sema-recorded return type");
-                // Convert Iterator<T> to RuntimeIterator(T) since external functions
-                // return raw iterator pointers, not boxed interface values
-                let type_id = self.maybe_convert_iterator_return_type(type_id);
-                return Ok(CompiledValue {
-                    value: results[0],
-                    ty: native_type_to_cranelift(
-                        &native_func.signature.return_type,
-                        self.ptr_type(),
-                    ),
-                    type_id,
-                });
             }
+            // Sema records return types for all prelude external calls.
+            let type_id = self
+                .get_expr_type(&call_expr_id)
+                .expect("prelude external call must have sema-recorded return type");
+            let type_id = self.maybe_convert_iterator_return_type(type_id);
+            return Ok(self.native_call_result(call_inst, native_func, type_id));
         }
 
         // Try prelude Vole functions (e.g., assert from builtins.vole)
@@ -704,23 +680,12 @@ impl Cg<'_, '_, '_> {
             // Compile args with defaults for omitted parameters
             let args = self.compile_external_call_args(export_name, call, &expected_types)?;
             let call_inst = self.call_native_indirect(native_func, &args);
-            let results = self.builder.inst_results(call_inst);
-
-            if results.is_empty() {
+            if native_func.signature.return_type == NativeType::Nil {
                 return Ok(self.void_value());
-            } else {
-                // Get the return type from the sema-recorded type or export type
-                let type_id = self.get_expr_type(&call_expr_id).unwrap_or(export_type_id);
-                let type_id = self.maybe_convert_iterator_return_type(type_id);
-                return Ok(CompiledValue {
-                    value: results[0],
-                    ty: native_type_to_cranelift(
-                        &native_func.signature.return_type,
-                        self.ptr_type(),
-                    ),
-                    type_id,
-                });
             }
+            let type_id = self.get_expr_type(&call_expr_id).unwrap_or(export_type_id);
+            let type_id = self.maybe_convert_iterator_return_type(type_id);
+            return Ok(self.native_call_result(call_inst, native_func, type_id));
         }
 
         Err(CodegenError::not_found(
@@ -743,28 +708,53 @@ impl Cg<'_, '_, '_> {
             .jit_module()
             .declare_func_in_func(func_id, self.builder.func);
 
+        // Get return type early to check for sret convention
+        let return_type_id = self
+            .codegen_ctx
+            .funcs()
+            .return_type(func_key)
+            .unwrap_or_else(|| self.env.analyzed.type_arena().void());
+
+        let is_sret = self.is_sret_struct_return(return_type_id);
+
         // Get expected parameter types from the function's signature
         let sig_ref = self.builder.func.dfg.ext_funcs[func_ref].signature;
         let sig = &self.builder.func.dfg.signatures[sig_ref];
         let expected_types: Vec<Type> = sig.params.iter().map(|p| p.value_type).collect();
 
-        // Compile arguments with type narrowing
+        // For sret convention, allocate return buffer and prepend as first arg
+        let ptr_type = self.ptr_type();
         let mut args = Vec::new();
+        let sret_slot = if is_sret {
+            let field_count = self
+                .struct_field_count(return_type_id)
+                .expect("sret struct must have field count");
+            let total_size = (field_count as u32) * 8;
+            let slot = self.alloc_stack(total_size);
+            let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+            args.push(ptr);
+            Some(slot)
+        } else {
+            None
+        };
+
+        // Determine the offset into expected_types for user args (skip sret param)
+        let user_param_offset = if is_sret { 1 } else { 0 };
+
+        // Compile arguments with type narrowing
         for (i, arg) in call.args.iter().enumerate() {
             let compiled = self.expr(arg)?;
-            let expected_ty = expected_types.get(i).copied();
+            let expected_ty = expected_types.get(i + user_param_offset).copied();
 
             // Narrow/extend integer types if needed
             let arg_value = if let Some(expected) = expected_ty {
                 if compiled.ty.is_int() && expected.is_int() && expected.bits() < compiled.ty.bits()
                 {
-                    // Truncate to narrower type
                     self.builder.ins().ireduce(expected, compiled.value)
                 } else if compiled.ty.is_int()
                     && expected.is_int()
                     && expected.bits() > compiled.ty.bits()
                 {
-                    // Extend to wider type
                     self.builder.ins().sextend(expected, compiled.value)
                 } else {
                     compiled.value
@@ -776,11 +766,12 @@ impl Cg<'_, '_, '_> {
         }
 
         // If there are fewer provided args than expected, compile default expressions
-        if args.len() < expected_types.len() {
-            let provided_args = args.len();
-            let remaining_expected_types = expected_types[provided_args..].to_vec();
-
-            // Compile defaults for omitted parameters
+        let total_user_args = args.len() - user_param_offset;
+        let expected_user_params = expected_types.len() - user_param_offset;
+        if total_user_args < expected_user_params {
+            let provided_args = total_user_args;
+            let remaining_start = user_param_offset + provided_args;
+            let remaining_expected_types = expected_types[remaining_start..].to_vec();
             let default_args =
                 self.compile_default_args(callee_sym, provided_args, &remaining_expected_types)?;
             args.extend(default_args);
@@ -788,12 +779,15 @@ impl Cg<'_, '_, '_> {
 
         let call_inst = self.builder.ins().call(func_ref, &args);
 
-        // Get return type
-        let return_type_id = self
-            .codegen_ctx
-            .funcs()
-            .return_type(func_key)
-            .unwrap_or_else(|| self.env.analyzed.type_arena().void());
+        // For sret, the returned value is the sret pointer we passed in
+        if sret_slot.is_some() {
+            let results = self.builder.inst_results(call_inst);
+            return Ok(CompiledValue {
+                value: results[0],
+                ty: ptr_type,
+                type_id: return_type_id,
+            });
+        }
 
         Ok(self.call_result(call_inst, return_type_id))
     }
@@ -812,16 +806,42 @@ impl Cg<'_, '_, '_> {
             .jit_module()
             .declare_func_in_func(func_id, self.builder.func);
 
+        // Get return type early to check for sret convention
+        let return_type_id = self
+            .codegen_ctx
+            .funcs()
+            .return_type(func_key)
+            .unwrap_or_else(|| self.env.analyzed.type_arena().void());
+
+        let is_sret = self.is_sret_struct_return(return_type_id);
+
         // Get expected parameter types from the function's signature
         let sig_ref = self.builder.func.dfg.ext_funcs[func_ref].signature;
         let sig = &self.builder.func.dfg.signatures[sig_ref];
         let expected_types: Vec<Type> = sig.params.iter().map(|p| p.value_type).collect();
 
-        // Compile arguments with type narrowing
+        // For sret convention, allocate return buffer and prepend as first arg
+        let ptr_type = self.ptr_type();
         let mut args = Vec::new();
+        let sret_slot = if is_sret {
+            let field_count = self
+                .struct_field_count(return_type_id)
+                .expect("sret struct must have field count");
+            let total_size = (field_count as u32) * 8;
+            let slot = self.alloc_stack(total_size);
+            let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+            args.push(ptr);
+            Some(slot)
+        } else {
+            None
+        };
+
+        let user_param_offset = if is_sret { 1 } else { 0 };
+
+        // Compile arguments with type narrowing
         for (i, arg) in call.args.iter().enumerate() {
             let compiled = self.expr(arg)?;
-            let expected_ty = expected_types.get(i).copied();
+            let expected_ty = expected_types.get(i + user_param_offset).copied();
             let arg_value = if let Some(expected) = expected_ty {
                 if compiled.ty.is_int() && expected.is_int() && expected.bits() < compiled.ty.bits()
                 {
@@ -841,9 +861,12 @@ impl Cg<'_, '_, '_> {
         }
 
         // If there are fewer provided args than expected, compile default expressions
-        if args.len() < expected_types.len() {
-            let provided_args = args.len();
-            let remaining_expected_types = expected_types[provided_args..].to_vec();
+        let total_user_args = args.len() - user_param_offset;
+        let expected_user_params = expected_types.len() - user_param_offset;
+        if total_user_args < expected_user_params {
+            let provided_args = total_user_args;
+            let remaining_start = user_param_offset + provided_args;
+            let remaining_expected_types = expected_types[remaining_start..].to_vec();
             let default_args = self.compile_default_args_by_name_id(
                 name_id,
                 provided_args,
@@ -854,11 +877,14 @@ impl Cg<'_, '_, '_> {
 
         let call_inst = self.builder.ins().call(func_ref, &args);
 
-        let return_type_id = self
-            .codegen_ctx
-            .funcs()
-            .return_type(func_key)
-            .unwrap_or_else(|| self.env.analyzed.type_arena().void());
+        if sret_slot.is_some() {
+            let results = self.builder.inst_results(call_inst);
+            return Ok(CompiledValue {
+                value: results[0],
+                ty: ptr_type,
+                type_id: return_type_id,
+            });
+        }
 
         Ok(self.call_result(call_inst, return_type_id))
     }
@@ -1314,11 +1340,20 @@ impl Cg<'_, '_, '_> {
     /// This helper builds the Cranelift signature from NativeSignature,
     /// imports it, and emits the indirect call. Returns the call instruction
     /// so callers can handle results with their own type logic.
+    ///
+    /// For struct returns, uses C ABI conventions:
+    /// - Small structs (1-2 fields): multi-value return in registers
+    /// - Large structs (3+ fields): sret convention with hidden first param
     fn call_native_indirect(
         &mut self,
         native_func: &NativeFunction,
         args: &[Value],
     ) -> cranelift_codegen::ir::Inst {
+        // Check for struct return type with special ABI handling
+        if let NativeType::Struct { field_count } = &native_func.signature.return_type {
+            return self.call_native_indirect_struct(native_func, args, *field_count);
+        }
+
         // Build the Cranelift signature from NativeSignature
         let mut sig = self.jit_module().make_signature();
         for param_type in &native_func.signature.params {
@@ -1343,6 +1378,108 @@ impl Cg<'_, '_, '_> {
             .call_indirect(sig_ref, func_ptr_val, args)
     }
 
+    /// Emit a native call that returns a C-ABI struct.
+    ///
+    /// For small structs (1-2 fields), the C ABI returns values in RAX+RDX,
+    /// which maps to a multi-value return in Cranelift.
+    /// For large structs (3+ fields), uses sret convention.
+    fn call_native_indirect_struct(
+        &mut self,
+        native_func: &NativeFunction,
+        args: &[Value],
+        field_count: usize,
+    ) -> cranelift_codegen::ir::Inst {
+        let ptr_type = self.ptr_type();
+        let mut sig = self.jit_module().make_signature();
+
+        if field_count <= 2 {
+            // Small struct: C returns in registers (RAX, RDX)
+            for param_type in &native_func.signature.params {
+                sig.params.push(AbiParam::new(native_type_to_cranelift(
+                    param_type, ptr_type,
+                )));
+            }
+            for _ in 0..field_count.max(1) {
+                sig.returns.push(AbiParam::new(types::I64));
+            }
+            // Pad to 2 for consistent convention
+            if field_count < 2 {
+                sig.returns.push(AbiParam::new(types::I64));
+            }
+
+            let sig_ref = self.builder.import_signature(sig);
+            let func_ptr_val = self.builder.ins().iconst(ptr_type, native_func.ptr as i64);
+            self.builder
+                .ins()
+                .call_indirect(sig_ref, func_ptr_val, args)
+        } else {
+            // Large struct: sret convention
+            // Add hidden sret pointer as first parameter
+            sig.params.push(AbiParam::new(ptr_type)); // sret
+            for param_type in &native_func.signature.params {
+                sig.params.push(AbiParam::new(native_type_to_cranelift(
+                    param_type, ptr_type,
+                )));
+            }
+            sig.returns.push(AbiParam::new(ptr_type)); // returns sret pointer
+
+            // Allocate buffer for the return value
+            let total_size = (field_count as u32) * 8;
+            let slot = self.alloc_stack(total_size);
+            let sret_ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+
+            // Prepend sret pointer to args
+            let mut sret_args = Vec::with_capacity(args.len() + 1);
+            sret_args.push(sret_ptr);
+            sret_args.extend_from_slice(args);
+
+            let sig_ref = self.builder.import_signature(sig);
+            let func_ptr_val = self.builder.ins().iconst(ptr_type, native_func.ptr as i64);
+            self.builder
+                .ins()
+                .call_indirect(sig_ref, func_ptr_val, &sret_args)
+        }
+    }
+
+    /// Extract the result of a native function call as a CompiledValue.
+    ///
+    /// For struct-returning native functions, this reconstructs the struct from
+    /// the multi-value return registers or sret pointer.
+    fn native_call_result(
+        &mut self,
+        call_inst: cranelift_codegen::ir::Inst,
+        native_func: &NativeFunction,
+        type_id: TypeId,
+    ) -> CompiledValue {
+        let results = self.builder.inst_results(call_inst);
+
+        if results.is_empty() {
+            return self.void_value();
+        }
+
+        // Handle struct return types
+        if let NativeType::Struct { field_count } = &native_func.signature.return_type {
+            if *field_count <= 2 {
+                // Small struct: reconstruct from register values
+                let results_vec: Vec<Value> = results.to_vec();
+                return self.reconstruct_struct_from_regs(&results_vec, type_id);
+            }
+            // Large struct (sret): result[0] is already the pointer to our buffer
+            return CompiledValue {
+                value: results[0],
+                ty: self.ptr_type(),
+                type_id,
+            };
+        }
+
+        // Non-struct: standard single result
+        CompiledValue {
+            value: results[0],
+            ty: native_type_to_cranelift(&native_func.signature.return_type, self.ptr_type()),
+            type_id,
+        }
+    }
+
     /// Compile a native function call with known Vole types (for generic external functions)
     /// This uses the concrete types from the monomorphized FunctionType rather than
     /// inferring types from the native signature.
@@ -1354,20 +1491,9 @@ impl Cg<'_, '_, '_> {
     ) -> Result<CompiledValue, String> {
         let args = self.compile_call_args(&call.args)?;
         let call_inst = self.call_native_indirect(native_func, &args);
-        let results = self.builder.inst_results(call_inst);
-
-        if results.is_empty() {
-            Ok(self.void_value())
-        } else {
-            // Apply class type substitutions if available (for calls inside monomorphized methods)
-            let type_id = self.substitute_type(return_type_id);
-            let type_id = self.maybe_convert_iterator_return_type(type_id);
-            Ok(CompiledValue {
-                value: results[0],
-                ty: native_type_to_cranelift(&native_func.signature.return_type, self.ptr_type()),
-                type_id,
-            })
-        }
+        let type_id = self.substitute_type(return_type_id);
+        let type_id = self.maybe_convert_iterator_return_type(type_id);
+        Ok(self.native_call_result(call_inst, native_func, type_id))
     }
 
     /// Find the intrinsic key for a generic external function call based on type mappings.

@@ -285,6 +285,54 @@ impl Cg<'_, '_, '_> {
 
                         self.builder.ins().return_(&[tag_val, payload_val]);
                     } else if let Some(ret_type_id) = return_type_id
+                        && self.is_small_struct_return(ret_type_id)
+                    {
+                        // Small struct (1-2 fields): return field values in registers
+                        let field_count = self
+                            .struct_field_count(ret_type_id)
+                            .expect("small struct return must have field count");
+                        let struct_ptr = compiled.value;
+                        let mut return_vals = Vec::with_capacity(2);
+                        for i in 0..field_count {
+                            let offset = (i as i32) * 8;
+                            let val = self.builder.ins().load(
+                                types::I64,
+                                MemFlags::new(),
+                                struct_ptr,
+                                offset,
+                            );
+                            return_vals.push(val);
+                        }
+                        // Pad to 2 registers for consistent convention
+                        while return_vals.len() < 2 {
+                            return_vals.push(self.builder.ins().iconst(types::I64, 0));
+                        }
+                        self.builder.ins().return_(&return_vals);
+                    } else if let Some(ret_type_id) = return_type_id
+                        && self.is_sret_struct_return(ret_type_id)
+                    {
+                        // Large struct (3+ fields): copy fields into sret buffer
+                        // The sret pointer is the first block parameter (hidden param)
+                        let entry_block = self.builder.func.layout.entry_block().unwrap();
+                        let sret_ptr = self.builder.block_params(entry_block)[0];
+                        let field_count = self
+                            .struct_field_count(ret_type_id)
+                            .expect("sret struct return must have field count");
+                        let struct_ptr = compiled.value;
+                        for i in 0..field_count {
+                            let offset = (i as i32) * 8;
+                            let val = self.builder.ins().load(
+                                types::I64,
+                                MemFlags::new(),
+                                struct_ptr,
+                                offset,
+                            );
+                            self.builder
+                                .ins()
+                                .store(MemFlags::new(), val, sret_ptr, offset);
+                        }
+                        self.builder.ins().return_(&[sret_ptr]);
+                    } else if let Some(ret_type_id) = return_type_id
                         && self.arena().is_union(ret_type_id)
                     {
                         // For union return types, wrap the value in a union

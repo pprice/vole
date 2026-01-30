@@ -9,12 +9,47 @@ struct Color {
     b: i64,
 }
 
+struct Quad {
+    a: i64,
+    b: i64,
+    c: i64,
+    d: i64,
+}
+
+struct Single {
+    value: i64,
+}
+
 func make_point(x: i64, y: i64) -> Point {
     return Point { x: x, y: y }
 }
 
 func sum_point(p: Point) -> i64 {
     return p.x + p.y
+}
+
+func make_color(r: i64, g: i64, b: i64) -> Color {
+    return Color { r: r, g: g, b: b }
+}
+
+func make_quad(a: i64, b: i64, c: i64, d: i64) -> Quad {
+    return Quad { a: a, b: b, c: c, d: d }
+}
+
+func make_single(v: i64) -> Single {
+    return Single { value: v }
+}
+
+func transform_point(p: Point) -> Point {
+    return Point { x: p.x * 2, y: p.y + 10 }
+}
+
+func scale_color(c: Color, factor: i64) -> Color {
+    return Color { r: c.r * factor, g: c.g * factor, b: c.b * factor }
+}
+
+func double_quad(q: Quad) -> Quad {
+    return Quad { a: q.a * 2, b: q.b * 2, c: q.c * 2, d: q.d * 2 }
 }
 
 tests {
@@ -74,5 +109,73 @@ tests {
         let p = make_point(sum_point(Point { x: 1, y: 2 }), 50)
         assert(p.x == 3)
         assert(p.y == 50)
+    }
+
+    // ===== Struct return ABI tests =====
+
+    test "single-field struct return (small, register)" {
+        let s = make_single(42)
+        assert(s.value == 42)
+    }
+
+    test "two-field struct return (small, register pair)" {
+        let p = make_point(100, 200)
+        assert(p.x == 100)
+        assert(p.y == 200)
+    }
+
+    test "three-field struct return (sret convention)" {
+        let c = make_color(10, 20, 30)
+        assert(c.r == 10)
+        assert(c.g == 20)
+        assert(c.b == 30)
+    }
+
+    test "four-field struct return (sret convention)" {
+        let q = make_quad(1, 2, 3, 4)
+        assert(q.a == 1)
+        assert(q.b == 2)
+        assert(q.c == 3)
+        assert(q.d == 4)
+    }
+
+    test "struct transform: pass and return small struct" {
+        let p = Point { x: 5, y: 15 }
+        let p2 = transform_point(p)
+        assert(p2.x == 10)
+        assert(p2.y == 25)
+    }
+
+    test "struct transform: pass and return large struct (sret)" {
+        let c = Color { r: 10, g: 20, b: 30 }
+        let c2 = scale_color(c, 3)
+        assert(c2.r == 30)
+        assert(c2.g == 60)
+        assert(c2.b == 90)
+    }
+
+    test "large struct round-trip through function" {
+        let q = Quad { a: 5, b: 10, c: 15, d: 20 }
+        let q2 = double_quad(q)
+        assert(q2.a == 10)
+        assert(q2.b == 20)
+        assert(q2.c == 30)
+        assert(q2.d == 40)
+    }
+
+    test "chained struct function calls" {
+        let p = transform_point(transform_point(Point { x: 1, y: 1 }))
+        assert(p.x == 4)
+        assert(p.y == 21)
+    }
+
+    test "struct returned from function used in expression" {
+        let sum = make_point(3, 7).x + make_point(10, 20).y
+        assert(sum == 23)
+    }
+
+    test "large struct returned from function used in field access" {
+        let green = make_color(100, 200, 50).g
+        assert(green == 200)
     }
 }

@@ -41,7 +41,8 @@ pub struct FunctionCompileConfig<'a> {
     /// Return type (for nested return type context)
     pub return_type_id: Option<TypeId>,
     /// Number of block params to skip before binding user params.
-    /// Used for lambdas where the first param is the closure pointer.
+    /// Used for lambdas where the first param is the closure pointer,
+    /// or for sret functions where the first param is the return buffer pointer.
     pub skip_block_params: usize,
     /// What to return when the block doesn't terminate explicitly
     pub default_return: DefaultReturn,
@@ -64,6 +65,12 @@ impl<'a> FunctionCompileConfig<'a> {
             skip_block_params: 0,
             default_return: DefaultReturn::Empty,
         }
+    }
+
+    /// Set skip_block_params to 1 (for sret hidden parameter).
+    pub fn with_sret(mut self) -> Self {
+        self.skip_block_params = 1;
+        self
     }
 
     /// Create a config for a method (has self, no captures)
@@ -231,6 +238,48 @@ pub fn compile_function_body_with_cg(
                 .ins()
                 .load(types::I64, MemFlags::new(), value.value, 8);
             cg.builder.ins().return_(&[tag, payload]);
+        } else if let Some(ret_type_id) = cg.return_type
+            && cg.is_small_struct_return(ret_type_id)
+        {
+            // Small struct: return field values in registers
+            let field_count = cg
+                .struct_field_count(ret_type_id)
+                .expect("small struct return must have field count");
+            let struct_ptr = value.value;
+            let mut return_vals = Vec::with_capacity(2);
+            for i in 0..field_count {
+                let offset = (i as i32) * 8;
+                let val = cg
+                    .builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), struct_ptr, offset);
+                return_vals.push(val);
+            }
+            while return_vals.len() < 2 {
+                return_vals.push(cg.builder.ins().iconst(types::I64, 0));
+            }
+            cg.builder.ins().return_(&return_vals);
+        } else if let Some(ret_type_id) = cg.return_type
+            && cg.is_sret_struct_return(ret_type_id)
+        {
+            // Large struct: copy fields into sret buffer
+            let entry_block = cg.builder.func.layout.entry_block().unwrap();
+            let sret_ptr = cg.builder.block_params(entry_block)[0];
+            let field_count = cg
+                .struct_field_count(ret_type_id)
+                .expect("sret struct return must have field count");
+            let struct_ptr = value.value;
+            for i in 0..field_count {
+                let offset = (i as i32) * 8;
+                let val = cg
+                    .builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), struct_ptr, offset);
+                cg.builder
+                    .ins()
+                    .store(MemFlags::new(), val, sret_ptr, offset);
+            }
+            cg.builder.ins().return_(&[sret_ptr]);
         } else {
             cg.builder.ins().return_(&[value.value]);
         }
@@ -274,6 +323,29 @@ pub fn compile_function_inner_with_params<'ctx>(
     module_id: Option<vole_identity::ModuleId>,
     substitutions: Option<&FxHashMap<vole_identity::NameId, TypeId>>,
 ) -> Result<(), String> {
+    // Auto-detect sret convention: if return type is a large struct (3+ fields),
+    // the signature has a hidden sret pointer as the first parameter.
+    let config = if let Some(ret_type_id) = config.return_type_id {
+        let arena = env.analyzed.type_arena();
+        if let Some((type_def_id, _)) = arena.unwrap_struct(ret_type_id) {
+            let type_def = env.analyzed.query().get_type(type_def_id);
+            let field_count = type_def
+                .generic_info
+                .as_ref()
+                .map(|gi| gi.field_names.len())
+                .unwrap_or(0);
+            if field_count > 2 {
+                config.with_sret()
+            } else {
+                config
+            }
+        } else {
+            config
+        }
+    } else {
+        config
+    };
+
     // Set up entry block and bind parameters
     let (variables, captures) = setup_function_entry(&mut builder, &config);
 

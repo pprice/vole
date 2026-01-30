@@ -718,6 +718,16 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             };
         }
 
+        // Check for small struct multi-value return (2 results: field0, field1)
+        if results.len() == 2 && self.is_small_struct_return(return_type_id) {
+            let results_vec: Vec<Value> = results.to_vec();
+            return self.reconstruct_struct_from_regs(&results_vec, return_type_id);
+        }
+
+        // Large struct sret return: the result is already a pointer to the buffer
+        // (handled by the caller passing the sret arg, result[0] is the sret pointer)
+        // No special handling needed here since result[0] is already the pointer.
+
         self.compiled(results[0], return_type_id)
     }
 
@@ -927,6 +937,58 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             size,
             0,
         ))
+    }
+
+    /// Get the number of fields in a struct type.
+    /// Returns None if the type is not a struct.
+    pub fn struct_field_count(&self, type_id: TypeId) -> Option<usize> {
+        let arena = self.arena();
+        let (type_def_id, _) = arena.unwrap_struct(type_id)?;
+        let type_def = self.query().get_type(type_def_id);
+        type_def
+            .generic_info
+            .as_ref()
+            .map(|gi| gi.field_names.len())
+    }
+
+    /// Check if a struct type uses small return convention (1-2 fields, returned in registers).
+    pub fn is_small_struct_return(&self, type_id: TypeId) -> bool {
+        self.struct_field_count(type_id)
+            .is_some_and(|count| count <= 2)
+    }
+
+    /// Check if a struct type uses sret convention (3+ fields, caller-allocated buffer).
+    pub fn is_sret_struct_return(&self, type_id: TypeId) -> bool {
+        self.struct_field_count(type_id)
+            .is_some_and(|count| count > 2)
+    }
+
+    /// Reconstruct a struct from a multi-value return (two i64 registers).
+    /// Allocates a stack slot and stores the register values as fields.
+    pub fn reconstruct_struct_from_regs(
+        &mut self,
+        values: &[Value],
+        type_id: TypeId,
+    ) -> CompiledValue {
+        let field_count = self
+            .struct_field_count(type_id)
+            .expect("reconstruct_struct_from_regs: expected struct type");
+        let total_size = (field_count as u32) * 8;
+        let slot = self.alloc_stack(total_size);
+
+        for (i, &val) in values.iter().enumerate().take(field_count) {
+            let offset = (i as i32) * 8;
+            self.builder.ins().stack_store(val, slot, offset);
+        }
+
+        let ptr_type = self.ptr_type();
+        let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+
+        CompiledValue {
+            value: ptr,
+            ty: ptr_type,
+            type_id,
+        }
     }
 
     /// Copy a struct value to a new stack slot (value semantics).

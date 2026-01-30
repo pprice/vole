@@ -711,5 +711,8 @@ pub(crate) fn native_type_to_cranelift(nt: &NativeType, pointer_type: Type) -> T
         NativeType::Nil => types::I8, // Nil uses I8 as placeholder
         NativeType::Optional(_) => types::I64, // Optionals are boxed
         NativeType::Array(_) => pointer_type,
+        // Struct returns use pointer type (the actual return convention
+        // is handled by call_native_indirect_struct)
+        NativeType::Struct { .. } => pointer_type,
     }
 }

@@ -87,12 +87,53 @@ impl Compiler<'_> {
                 .create_signature_multi_return(&cranelift_params, &[types::I64, types::I64]);
         }
 
+        // Check for struct return types - use multi-value or sret convention
+        if let Some(ret_type_id) = return_type_id
+            && let Some(field_count) = self.struct_field_count(ret_type_id)
+        {
+            if field_count <= 2 {
+                // Small struct: return in two i64 registers
+                let mut returns: SmallVec<[CraneliftType; 2]> = SmallVec::new();
+                for _ in 0..field_count {
+                    returns.push(types::I64);
+                }
+                // Pad to 2 registers for consistent calling convention
+                while returns.len() < 2 {
+                    returns.push(types::I64);
+                }
+                return self
+                    .jit
+                    .create_signature_multi_return(&cranelift_params, &returns);
+            } else {
+                // Large struct: sret convention - add hidden first param for return buffer
+                let mut sret_params = SmallVec::<[CraneliftType; 8]>::new();
+                sret_params.push(self.pointer_type); // sret pointer
+                sret_params.extend_from_slice(&cranelift_params);
+                // Return the sret pointer
+                return self
+                    .jit
+                    .create_signature(&sret_params, Some(self.pointer_type));
+            }
+        }
+
         // Convert return type (filter out void)
         let ret = return_type_id
             .filter(|id| !id.is_void())
             .map(|id| type_id_to_cranelift(id, arena_ref, self.pointer_type));
 
         self.jit.create_signature(&cranelift_params, ret)
+    }
+
+    /// Get the number of fields in a struct type.
+    /// Returns None if the type is not a struct.
+    pub fn struct_field_count(&self, type_id: TypeId) -> Option<usize> {
+        let arena = self.analyzed.type_arena();
+        let (type_def_id, _) = arena.unwrap_struct(type_id)?;
+        let type_def = self.query().get_type(type_def_id);
+        type_def
+            .generic_info
+            .as_ref()
+            .map(|gi| gi.field_names.len())
     }
 
     /// Build a Cranelift signature directly from a FunctionId.

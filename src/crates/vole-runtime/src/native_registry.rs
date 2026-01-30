@@ -22,6 +22,12 @@ pub enum NativeType {
     Nil,
     Optional(Box<NativeType>),
     Array(Box<NativeType>),
+    /// A C-ABI struct with a known number of i64-sized fields.
+    /// Small structs (1-2 fields) are returned in registers (RAX+RDX).
+    /// Large structs (3+ fields) use sret (caller-allocated buffer).
+    Struct {
+        field_count: usize,
+    },
 }
 
 /// Signature of a native function
@@ -137,5 +143,44 @@ mod tests {
     fn lookup_nonexistent() {
         let registry = NativeRegistry::new();
         assert!(registry.lookup("test:module", "missing").is_none());
+    }
+
+    #[test]
+    fn register_struct_return_type() {
+        let mut module = NativeModule::new();
+        module.register(
+            "make_pair",
+            dummy_fn as *const u8,
+            NativeSignature {
+                params: vec![NativeType::I64, NativeType::I64],
+                return_type: NativeType::Struct { field_count: 2 },
+            },
+        );
+
+        let func = module.get("make_pair").unwrap();
+        assert_eq!(
+            func.signature.return_type,
+            NativeType::Struct { field_count: 2 }
+        );
+        assert_eq!(func.signature.params.len(), 2);
+    }
+
+    #[test]
+    fn register_large_struct_return_type() {
+        let mut module = NativeModule::new();
+        module.register(
+            "make_quad",
+            dummy_fn as *const u8,
+            NativeSignature {
+                params: vec![NativeType::I64; 4],
+                return_type: NativeType::Struct { field_count: 4 },
+            },
+        );
+
+        let func = module.get("make_quad").unwrap();
+        assert_eq!(
+            func.signature.return_type,
+            NativeType::Struct { field_count: 4 }
+        );
     }
 }
