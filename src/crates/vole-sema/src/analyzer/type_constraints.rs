@@ -245,23 +245,29 @@ impl Analyzer {
                             // Use TypeId directly - check what kind of type it is
                             let arena = self.type_arena();
 
-                            // Check if it's a structural type - return as Structural constraint
-                            if let Some(structural) = arena.unwrap_structural(aliased_type_id) {
-                                return Some(crate::generic::TypeConstraint::Structural(
-                                    structural.clone(),
-                                ));
-                            }
+                            // Check if the aliased type is an interface - keep as Interface constraint
+                            if arena.is_interface(aliased_type_id) {
+                                // Don't convert interface aliases to UnionId;
+                                // fall through to the Interface validation below
+                            } else {
+                                // Check if it's a structural type - return as Structural constraint
+                                if let Some(structural) = arena.unwrap_structural(aliased_type_id) {
+                                    return Some(crate::generic::TypeConstraint::Structural(
+                                        structural.clone(),
+                                    ));
+                                }
 
-                            // Check if it's a union type
-                            let type_ids =
-                                if let Some(variants) = arena.unwrap_union(aliased_type_id) {
-                                    // It's a union - use the variant TypeIds
-                                    variants.to_vec()
-                                } else {
-                                    // Not a union - use the single TypeId
-                                    vec![aliased_type_id]
-                                };
-                            return Some(crate::generic::TypeConstraint::UnionId(type_ids));
+                                // Check if it's a union type
+                                let type_ids =
+                                    if let Some(variants) = arena.unwrap_union(aliased_type_id) {
+                                        // It's a union - use the variant TypeIds
+                                        variants.to_vec()
+                                    } else {
+                                        // Not a union - use the single TypeId
+                                        vec![aliased_type_id]
+                                    };
+                                return Some(crate::generic::TypeConstraint::UnionId(type_ids));
+                            }
                         }
                     }
                 }
@@ -285,7 +291,11 @@ impl Analyzer {
                         return None;
                     }
                 }
-                Some(crate::generic::TypeConstraint::Interface(syms.clone()))
+                Some(crate::generic::TypeConstraint::Interface(
+                    syms.iter()
+                        .map(|s| interner.resolve(*s).to_string())
+                        .collect(),
+                ))
             }
             TypeConstraint::Union(types) => {
                 let module_id = self.current_module;
@@ -388,14 +398,14 @@ impl Analyzer {
 
             match constraint {
                 crate::generic::TypeConstraint::Interface(interface_names) => {
-                    // Check each interface constraint with TypeId
+                    // Check each interface constraint by string name (cross-interner safe)
                     for interface_name in interface_names {
-                        if !self.satisfies_interface_id(found_id, *interface_name, interner) {
+                        if !self.satisfies_interface_by_name(found_id, interface_name, interner) {
                             let found_display = self.type_display_id(found_id);
                             self.add_error(
                                 SemanticError::TypeParamConstraintMismatch {
                                     type_param: self.get_type_param_display_name(param, interner),
-                                    expected: interner.resolve(*interface_name).to_string(),
+                                    expected: interface_name.clone(),
                                     found: found_display,
                                     span: span.into(),
                                 },
@@ -405,24 +415,42 @@ impl Analyzer {
                     }
                 }
                 crate::generic::TypeConstraint::UnionId(variant_ids) => {
-                    // TypeId-based - no conversion needed
+                    // TypeId-based - check if the found type is compatible with the union,
+                    // OR if it satisfies any interface variant in the union.
                     let expected_id = self.type_arena_mut().union(variant_ids.clone());
                     let is_compatible = {
                         let arena = self.type_arena();
                         types_compatible_core_id(found_id, expected_id, &arena)
                     };
                     if !is_compatible {
-                        let expected_display = self.type_display_id(expected_id);
-                        let found_display = self.type_display_id(found_id);
-                        self.add_error(
-                            SemanticError::TypeParamConstraintMismatch {
-                                type_param: self.get_type_param_display_name(param, interner),
-                                expected: expected_display,
-                                found: found_display,
-                                span: span.into(),
-                            },
-                            span,
-                        );
+                        // Check if any variant is an interface the type satisfies
+                        let satisfies_interface_variant = variant_ids.iter().any(|&vid| {
+                            let iface_name: Option<String> = {
+                                let arena = self.type_arena();
+                                arena.unwrap_interface(vid).and_then(|(td, _)| {
+                                    let name_id = self.entity_registry().name_id(td);
+                                    self.name_table().last_segment_str(name_id)
+                                })
+                            };
+                            if let Some(ref name) = iface_name {
+                                self.satisfies_interface_by_name(found_id, name, interner)
+                            } else {
+                                false
+                            }
+                        });
+                        if !satisfies_interface_variant {
+                            let expected_display = self.type_display_id(expected_id);
+                            let found_display = self.type_display_id(found_id);
+                            self.add_error(
+                                SemanticError::TypeParamConstraintMismatch {
+                                    type_param: self.get_type_param_display_name(param, interner),
+                                    expected: expected_display,
+                                    found: found_display,
+                                    span: span.into(),
+                                },
+                                span,
+                            );
+                        }
                     }
                 }
                 crate::generic::TypeConstraint::Structural(structural) => {

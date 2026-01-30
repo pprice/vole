@@ -305,6 +305,23 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.env.analyzed.query().expr_data().get_type(*node_id)
     }
 
+    /// Get IsCheckResult for an is-expression or type pattern, checking module-specific results first
+    #[inline]
+    pub fn get_is_check_result(
+        &self,
+        node_id: vole_frontend::NodeId,
+    ) -> Option<vole_sema::IsCheckResult> {
+        let module_path = self.current_module.map(|mid| {
+            let name_table = self.name_table();
+            name_table.module_path(mid).to_string()
+        });
+        self.env
+            .analyzed
+            .query()
+            .expr_data()
+            .get_is_check_result_in_module(node_id, module_path.as_deref())
+    }
+
     /// Get substituted return type for generic method calls
     #[inline]
     pub fn get_substituted_return_type(&self, node_id: &vole_frontend::NodeId) -> Option<TypeId> {

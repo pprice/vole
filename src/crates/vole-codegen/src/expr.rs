@@ -796,6 +796,86 @@ impl Cg<'_, '_, '_> {
         }
     }
 
+    /// Resolve a simple TypeExpr to a TypeId (for monomorphized generic fallback).
+    /// Only handles primitive types, nil, done, never, unknown.
+    /// Only handles primitive types, nil, done, never, unknown — enough for `is` checks
+    /// in generic function bodies that sema didn't analyze.
+    fn resolve_simple_type_expr(&self, type_expr: &vole_frontend::TypeExpr) -> Option<TypeId> {
+        use vole_frontend::{PrimitiveType, TypeExpr as TE};
+        let arena = self.arena();
+        match type_expr {
+            TE::Nil => Some(TypeId::NIL),
+            TE::Done => Some(arena.done()),
+            TE::Never => Some(TypeId::NEVER),
+            TE::Unknown => Some(TypeId::UNKNOWN),
+            TE::Primitive(p) => Some(match p {
+                PrimitiveType::Bool => TypeId::BOOL,
+                PrimitiveType::I8 => arena.i8(),
+                PrimitiveType::I16 => arena.i16(),
+                PrimitiveType::I32 => arena.i32(),
+                PrimitiveType::I64 => arena.i64(),
+                PrimitiveType::I128 => arena.i128(),
+                PrimitiveType::U8 => arena.u8(),
+                PrimitiveType::U16 => arena.u16(),
+                PrimitiveType::U32 => arena.u32(),
+                PrimitiveType::U64 => arena.u64(),
+                PrimitiveType::F32 => arena.f32(),
+                PrimitiveType::F64 => arena.f64(),
+                PrimitiveType::String => arena.string(),
+            }),
+            _ => None,
+        }
+    }
+
+    /// Compute IsCheckResult at codegen time for monomorphized generic functions.
+    /// Sema skips generic function bodies, so `is` expressions inside them have no
+    /// pre-computed result. This uses the substituted value type to compute it.
+    fn compute_is_check_result(
+        &self,
+        value_type_id: TypeId,
+        tested_type_id: TypeId,
+    ) -> IsCheckResult {
+        let arena = self.arena();
+        if value_type_id.is_unknown() {
+            IsCheckResult::CheckUnknown(tested_type_id)
+        } else if let Some(variants) = arena.unwrap_union(value_type_id) {
+            if let Some(index) = variants.iter().position(|&v| v == tested_type_id) {
+                IsCheckResult::CheckTag(index as u32)
+            } else {
+                IsCheckResult::AlwaysFalse
+            }
+        } else if value_type_id == tested_type_id {
+            IsCheckResult::AlwaysTrue
+        } else {
+            IsCheckResult::AlwaysFalse
+        }
+    }
+
+    /// Try to statically determine the result of an `is` check without compiling the value.
+    /// Returns Some(IsCheckResult) if the result is known, None if compilation is needed.
+    /// Used to eliminate dead branches in monomorphized generics.
+    pub(crate) fn try_static_is_check(
+        &self,
+        is_expr: &vole_frontend::IsExpr,
+        expr_id: NodeId,
+    ) -> Option<IsCheckResult> {
+        // First check sema's pre-computed result
+        if let Some(result) = self.get_is_check_result(expr_id) {
+            return Some(result);
+        }
+
+        // For monomorphized generics: compute from the value's variable type
+        let tested_type_id = self.resolve_simple_type_expr(&is_expr.type_expr)?;
+
+        // Get the value's type from the variable scope (for identifiers)
+        let value_type_id = match &is_expr.value.kind {
+            ExprKind::Identifier(sym) => self.vars.get(sym).map(|(_, tid)| *tid)?,
+            _ => return None,
+        };
+
+        Some(self.compute_is_check_result(value_type_id, tested_type_id))
+    }
+
     /// Compile an `is` type check expression
     fn is_expr(
         &mut self,
@@ -804,12 +884,22 @@ impl Cg<'_, '_, '_> {
     ) -> Result<CompiledValue, String> {
         let value = self.expr(&is_expr.value)?;
 
-        // Look up pre-computed type check result from sema
-        let is_check_result = self
-            .analyzed()
-            .expression_data
-            .get_is_check_result(expr_id)
-            .expect("is expression missing IsCheckResult from sema");
+        // Look up pre-computed type check result from sema (module-aware).
+        // Falls back to computing it at codegen time for monomorphized generic functions,
+        // since sema skips generic function bodies.
+        let is_check_result = match self.get_is_check_result(expr_id) {
+            Some(result) => result,
+            None => {
+                // Monomorphized generic: compute from substituted types
+                let tested_type_id = self
+                    .resolve_simple_type_expr(&is_expr.type_expr)
+                    .ok_or_else(|| {
+                        "is expression in monomorphized generic: cannot resolve tested type"
+                            .to_string()
+                    })?;
+                self.compute_is_check_result(value.type_id, tested_type_id)
+            }
+        };
 
         match is_check_result {
             IsCheckResult::AlwaysTrue => Ok(self.bool_const(true)),
@@ -840,10 +930,8 @@ impl Cg<'_, '_, '_> {
         scrutinee: &CompiledValue,
         pattern_id: NodeId,
     ) -> Result<Option<Value>, String> {
-        // Look up pre-computed type check result from sema
+        // Look up pre-computed type check result from sema (module-aware)
         let is_check_result = self
-            .analyzed()
-            .expression_data
             .get_is_check_result(pattern_id)
             .expect("type pattern missing IsCheckResult from sema");
 
@@ -1507,6 +1595,24 @@ impl Cg<'_, '_, '_> {
         let result_type_id = self
             .get_expr_type(&expr_id)
             .unwrap_or(self.arena().primitives.void);
+
+        // Check for statically known `is` condition (important for monomorphized generics
+        // where sema didn't analyze the body and dead branches may contain invalid code).
+        if let ExprKind::Is(is) = &if_expr.condition.kind
+            && let Some(static_result) = self.try_static_is_check(is, if_expr.condition.id)
+        {
+            match static_result {
+                IsCheckResult::AlwaysTrue => return self.expr(&if_expr.then_branch),
+                IsCheckResult::AlwaysFalse => {
+                    return if let Some(ref else_branch) = if_expr.else_branch {
+                        self.expr(else_branch)
+                    } else {
+                        Ok(self.void_value())
+                    };
+                }
+                _ => {} // Runtime check needed, fall through
+            }
+        }
 
         let is_void = self.arena().is_void(result_type_id);
 

@@ -6,5 +6,5 @@ func main() {
     let x = if true { 42 } else { 0 }
 
     // Error: using if expression as function argument
-    print(if true { "yes" } else { "no" })
+    let y = if true { "yes" } else { "no" }
 }

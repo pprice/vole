@@ -122,7 +122,14 @@ fn shebang_end_to_end() {
     let tmp = TempVoleFile::new("shebang_test.vole", &source);
     tmp.make_executable();
 
+    // The copied binary loses its development-layout stdlib discovery
+    // (normally <exe_dir>/../../stdlib). Point it explicitly via env var.
+    let stdlib_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("stdlib");
     let output = Command::new(&tmp.path)
+        .env("VOLE_STDLIB_PATH", &stdlib_path)
         .output()
         .expect("failed to execute shebang script");
 

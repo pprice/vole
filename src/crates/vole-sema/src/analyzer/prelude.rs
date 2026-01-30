@@ -102,6 +102,23 @@ impl Analyzer {
                 self.functions_by_name
                     .insert(name.clone(), func_type.clone());
             }
+            // Register generic prelude functions from cached module
+            {
+                let cached_module_id = self.name_table_mut().module_id(import_path);
+                for decl in &cached.program.declarations {
+                    if let Decl::Function(func) = decl
+                        && !func.type_params.is_empty()
+                    {
+                        let name_str = cached.interner.resolve(func.name).to_string();
+                        let name_id = self.name_table_mut().intern(
+                            cached_module_id,
+                            &[func.name],
+                            &cached.interner,
+                        );
+                        self.generic_prelude_functions.insert(name_str, name_id);
+                    }
+                }
+            }
             // Use import_path for prelude files (consistent with module_id)
             self.ctx.module_programs.borrow_mut().insert(
                 import_path.to_string(),
@@ -172,6 +189,21 @@ impl Analyzer {
                 self.functions_by_name.insert(name, func_type);
             }
 
+            // Register generic prelude functions for cross-interner generic lookup
+            for decl in &program.declarations {
+                if let Decl::Function(func) = decl
+                    && !func.type_params.is_empty()
+                {
+                    let name_str = prelude_interner.resolve(func.name).to_string();
+                    let name_id = self.name_table_mut().intern(
+                        prelude_module,
+                        &[func.name],
+                        &prelude_interner,
+                    );
+                    self.generic_prelude_functions.insert(name_str, name_id);
+                }
+            }
+
             // Create module type with exports so other prelude files can import this one.
             // Only export interfaces - that's what prelude files need to import from each other.
             let mut exports: smallvec::SmallVec<[(NameId, ArenaTypeId); 8]> = smallvec![];
@@ -216,6 +248,49 @@ impl Analyzer {
                 import_path.to_string(),
                 sub_analyzer.method_resolutions.into_inner(),
             );
+            self.ctx.module_is_check_results.borrow_mut().insert(
+                import_path.to_string(),
+                sub_analyzer.is_check_results.clone(),
+            );
         }
+    }
+
+    /// Check if a function name refers to a generic function in a prelude module.
+    /// Used for cross-interner detection of generic prelude functions like print/println.
+    pub(crate) fn is_prelude_generic_function(
+        &self,
+        sym: vole_frontend::Symbol,
+        interner: &Interner,
+    ) -> bool {
+        let name = interner.resolve(sym);
+        let programs = self.ctx.module_programs.borrow();
+        for (path, (_, module_interner)) in programs.iter() {
+            if !path.starts_with("std:prelude/") {
+                continue;
+            }
+            let Some(module_sym) = module_interner.lookup(name) else {
+                continue;
+            };
+            let Some(module_id) = self.name_table().module_id_if_known(path) else {
+                continue;
+            };
+            let name_id = self
+                .name_table()
+                .name_id(module_id, &[module_sym], module_interner);
+            if let Some(name_id) = name_id
+                && self
+                    .entity_registry()
+                    .function_by_name(name_id)
+                    .is_some_and(|fid| {
+                        self.entity_registry()
+                            .get_function(fid)
+                            .generic_info
+                            .is_some()
+                    })
+            {
+                return true;
+            }
+        }
+        false
     }
 }

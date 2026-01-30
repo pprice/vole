@@ -231,11 +231,9 @@ impl Cg<'_, '_, '_> {
         let callee_name = self.interner().resolve(callee_sym);
 
         // Handle builtins
-        // print/println need type-dispatch codegen.
         // assert uses inline codegen (brif) to avoid function-call overhead
         // and a pre-existing class-field-access register clobber bug (v-a1f9).
         match callee_name {
-            "print" | "println" => return self.call_println(call, callee_name == "println"),
             "print_char" => return self.call_print_char(call),
             "assert" => return self.call_assert(call, call_line),
             _ => {}
@@ -1029,86 +1027,6 @@ impl Cg<'_, '_, '_> {
         }
 
         Err(CodegenError::type_mismatch("call expression", "function", "non-function").into())
-    }
-
-    /// Compile print/println - dispatches to correct vole_println_* based on argument type
-    fn call_println(&mut self, call: &CallExpr, newline: bool) -> Result<CompiledValue, String> {
-        if call.args.len() != 1 {
-            let fn_name = if newline { "println" } else { "print" };
-            return Err(CodegenError::arg_count(fn_name, 1, call.args.len()).into());
-        }
-
-        let arg = self.expr(&call.args[0])?;
-
-        // Dispatch based on argument type
-        let (runtime, call_arg) = if arg.type_id == TypeId::STRING {
-            (
-                if newline {
-                    RuntimeFn::PrintlnString
-                } else {
-                    RuntimeFn::PrintString
-                },
-                arg.value,
-            )
-        } else if arg.ty == types::F64 {
-            (
-                if newline {
-                    RuntimeFn::PrintlnF64
-                } else {
-                    RuntimeFn::PrintF64
-                },
-                arg.value,
-            )
-        } else if arg.ty == types::F32 {
-            // Convert F32 to string and print
-            let str_val = self.call_runtime(RuntimeFn::F32ToString, &[arg.value])?;
-            (
-                if newline {
-                    RuntimeFn::PrintlnString
-                } else {
-                    RuntimeFn::PrintString
-                },
-                str_val,
-            )
-        } else if arg.ty == types::I128 {
-            // Convert I128 to string and print
-            let str_val = self.call_runtime(RuntimeFn::I128ToString, &[arg.value])?;
-            (
-                if newline {
-                    RuntimeFn::PrintlnString
-                } else {
-                    RuntimeFn::PrintString
-                },
-                str_val,
-            )
-        } else if arg.ty == types::I8 {
-            (
-                if newline {
-                    RuntimeFn::PrintlnBool
-                } else {
-                    RuntimeFn::PrintBool
-                },
-                arg.value,
-            )
-        } else {
-            // Extend smaller integer types to I64
-            let extended = if arg.ty.is_int() && arg.ty != types::I64 {
-                self.builder.ins().sextend(types::I64, arg.value)
-            } else {
-                arg.value
-            };
-            (
-                if newline {
-                    RuntimeFn::PrintlnI64
-                } else {
-                    RuntimeFn::PrintI64
-                },
-                extended,
-            )
-        };
-
-        self.call_runtime_void(runtime, &[call_arg])?;
-        Ok(self.void_value())
     }
 
     /// Compile print_char builtin for ASCII output

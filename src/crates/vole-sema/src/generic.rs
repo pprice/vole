@@ -287,7 +287,8 @@ pub fn merge_type_params(
 #[derive(Debug, Clone)]
 pub enum TypeConstraint {
     /// Interface constraints: T: Stringable or T: Hashable + Eq
-    Interface(Vec<Symbol>),
+    /// Stored as String names (not Symbol) for cross-interner safety.
+    Interface(Vec<String>),
     /// Union constraint: T: i32 | i64 (TypeId version)
     UnionId(Vec<ArenaTypeId>),
     /// Structural constraint: T: { name: string, func get() -> i32 }

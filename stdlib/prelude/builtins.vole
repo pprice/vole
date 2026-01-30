@@ -1,12 +1,33 @@
 // stdlib/prelude/builtins.vole
-// Built-in functions: panic, assert
-//
-// print and println are still handled as compiler builtins because they
-// require type-dispatch codegen (different runtime functions per type).
+// Built-in functions: print, println, panic, assert
 
-// Compiler intrinsics
+let { Stringable } = import "./traits"
+
+external("vole:builtins") {
+    func _print_string(s: string)
+    func _println_string(s: string)
+}
+
 external("vole:compiler_intrinsic") {
     func panic(message: string) -> never
+}
+
+// Prints a value without a trailing newline.
+func print<T: Stringable | nil>(value: T) {
+    if value is nil {
+        _print_string("nil")
+    } else {
+        _print_string(value.to_string())
+    }
+}
+
+// Prints a value followed by a newline.
+func println<T: Stringable | nil>(value: T) {
+    if value is nil {
+        _println_string("nil")
+    } else {
+        _println_string(value.to_string())
+    }
 }
 
 // Asserts that a condition is true. Panics with the given message if it is false.

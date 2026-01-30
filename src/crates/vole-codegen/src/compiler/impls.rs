@@ -222,179 +222,142 @@ impl Compiler<'_> {
         self.register_implement_block_with_interner(impl_block, &interner, module_id)
     }
 
-    /// Register ONLY static methods from implement block with a specific interner (for module programs)
-    /// This is used when compiling modules where we want to skip instance methods
-    /// but still need to register and compile statics like `i32::default_value`.
-    pub(super) fn register_implement_statics_only_with_interner(
+    /// Import all methods (instance + static) from a module implement block.
+    /// Uses Linkage::Import for pre-compiled modules in shared cache.
+    pub(super) fn import_module_implement_block(
         &mut self,
         impl_block: &ImplementBlock,
         interner: &Interner,
+        module_id: ModuleId,
     ) {
-        // Get type name string (works for primitives and named types)
         let Some(type_name) = self.get_type_name_from_expr(&impl_block.target_type) else {
-            return; // Unsupported type for implement block
-        };
-        // Skip if no statics block
-        let Some(ref statics) = impl_block.statics else {
             return;
         };
 
-        // Get TypeDefId for this type
-        let type_def_id = {
-            let name_table = self.analyzed.name_table();
+        // Get TypeId for self binding (same as register_implement_block_with_interner)
+        let (self_type_id, impl_type_id) =
             match &impl_block.target_type {
                 TypeExpr::Primitive(p) => {
-                    let name_id = name_table.primitives.from_ast(*p);
-                    self.query().try_type_def_id(name_id)
+                    let prim_type = vole_sema::PrimitiveType::from_ast(*p);
+                    let type_id = self.analyzed.type_arena().primitive(prim_type);
+                    let impl_id = self.impl_type_id_from_type_id(type_id);
+                    (type_id, impl_id)
                 }
                 TypeExpr::Named(sym) => {
-                    let name_id = name_table.name_id(self.program_module(), &[*sym], interner);
-                    name_id.and_then(|id| self.query().try_type_def_id(id))
+                    let type_def_id = self
+                        .query()
+                        .try_name_id(module_id, &[*sym])
+                        .and_then(|name_id| self.query().try_type_def_id(name_id))
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "import_module_implement_block: type not found: {}",
+                                type_name
+                            )
+                        });
+                    let metadata = self.state.type_metadata.get(&type_def_id).unwrap_or_else(
+                        || {
+                            panic!(
+                                "import_module_implement_block: type not in type_metadata: {:?}",
+                                type_def_id
+                            )
+                        },
+                    );
+                    let impl_id = self.impl_type_id_from_type_id(metadata.vole_type);
+                    (metadata.vole_type, impl_id)
                 }
-                _ => None,
-            }
-        };
-
-        for method in &statics.methods {
-            // Only register methods with bodies
-            if method.body.is_none() {
-                continue;
-            }
-
-            // Get method name id for lookup
-            let method_name_id = method_name_id_with_interner(self.analyzed, interner, method.name);
-
-            // Build signature and method_id from pre-resolved types via sema
-            let (method_id, sig) = {
-                let tdef_id = type_def_id.unwrap_or_else(|| {
-                    panic!(
-                        "implement statics method without TypeDefId: {}.{}",
-                        type_name,
-                        interner.resolve(method.name)
-                    )
-                });
-                let name_id = method_name_id.unwrap_or_else(|| {
-                    panic!(
-                        "implement statics method without NameId: {}.{}",
-                        type_name,
-                        interner.resolve(method.name)
-                    )
-                });
-                let method_id = self
-                    .query()
-                    .registry()
-                    .find_static_method_on_type(tdef_id, name_id)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "implement statics method not in entity_registry: {}.{} (type_def_id={:?}, method_name_id={:?})",
-                            type_name,
-                            interner.resolve(method.name),
-                            tdef_id,
-                            name_id
-                        )
-                    });
-                let sig = self.build_signature_for_method(method_id, SelfParam::None);
-                (method_id, sig)
+                _ => unreachable!(),
             };
 
-            // Function key from EntityRegistry full_name_id
-            let method_def = self.analyzed.entity_registry().get_method(method_id);
-            let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
-            let display_name = self.func_registry.display(func_key);
-            let jit_func_id = self.jit.declare_function(&display_name, &sig);
-            self.func_registry.set_func_id(func_key, jit_func_id);
-
-            // Register in method_func_keys for codegen lookup using type's NameId for stable lookup
-            let type_name_id = self.query().get_type(type_def_id.unwrap()).name_id;
-            self.state
-                .method_func_keys
-                .insert((type_name_id, method_name_id.unwrap()), func_key);
-        }
-    }
-
-    /// Import ONLY static methods from implement block with a specific interner (for module reuse)
-    /// This is used when importing pre-compiled modules - it uses Linkage::Import instead of Export.
-    pub(super) fn import_implement_statics_only_with_interner(
-        &mut self,
-        impl_block: &ImplementBlock,
-        interner: &Interner,
-    ) {
-        // Get type name string (works for primitives and named types)
-        let Some(type_name) = self.get_type_name_from_expr(&impl_block.target_type) else {
-            return; // Unsupported type for implement block
-        };
-        // Skip if no statics block
-        let Some(ref statics) = impl_block.statics else {
-            return;
-        };
-
-        // Get TypeDefId for this type
-        let type_def_id = {
-            let name_table = self.analyzed.name_table();
-            match &impl_block.target_type {
-                TypeExpr::Primitive(p) => {
-                    let name_id = name_table.primitives.from_ast(*p);
-                    self.query().try_type_def_id(name_id)
-                }
-                TypeExpr::Named(sym) => {
-                    let name_id = name_table.name_id(self.program_module(), &[*sym], interner);
-                    name_id.and_then(|id| self.query().try_type_def_id(id))
-                }
-                _ => None,
-            }
-        };
-
-        for method in &statics.methods {
-            // Only import methods with bodies (skip external declarations)
-            if method.body.is_none() {
-                continue;
-            }
-
-            // Get method name id for lookup
+        // Import instance methods
+        for method in &impl_block.methods {
             let method_name_id = method_name_id_with_interner(self.analyzed, interner, method.name);
+            let type_def_id =
+                impl_type_id.and_then(|impl_id| self.query().try_type_def_id(impl_id.name_id()));
 
-            // Build signature and method_id from pre-resolved types via sema
-            let (method_id, sig) = {
-                let tdef_id = type_def_id.unwrap_or_else(|| {
-                    panic!(
-                        "import statics method without TypeDefId: {}.{}",
-                        type_name,
-                        interner.resolve(method.name)
-                    )
-                });
-                let name_id = method_name_id.unwrap_or_else(|| {
-                    panic!(
-                        "import statics method without NameId: {}.{}",
-                        type_name,
-                        interner.resolve(method.name)
-                    )
-                });
+            let (sig, semantic_method_id) = {
+                let tdef_id = type_def_id.unwrap();
+                let name_id = method_name_id.unwrap();
                 let method_id = self
-                    .query()
-                    .registry()
-                    .find_static_method_on_type(tdef_id, name_id)
+                    .analyzed
+                    .entity_registry()
+                    .find_method_on_type(tdef_id, name_id)
                     .unwrap_or_else(|| {
                         panic!(
-                            "import statics method not in entity_registry: {}.{} (type_def_id={:?}, method_name_id={:?})",
+                            "import: method {}.{} not in entity_registry",
                             type_name,
-                            interner.resolve(method.name),
-                            tdef_id,
-                            name_id
+                            interner.resolve(method.name)
                         )
                     });
-                let sig = self.build_signature_for_method(method_id, SelfParam::None);
-                (method_id, sig)
+                let sig =
+                    self.build_signature_for_method(method_id, SelfParam::TypedId(self_type_id));
+                (sig, method_id)
             };
-
-            // Function key from EntityRegistry full_name_id
-            let method_def = self.analyzed.entity_registry().get_method(method_id);
+            let method_def = self
+                .analyzed
+                .entity_registry()
+                .get_method(semantic_method_id);
             let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
             let display_name = self.func_registry.display(func_key);
-            // Use import_function (Linkage::Import) instead of declare_function
             let jit_func_id = self.jit.import_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, jit_func_id);
 
-            // Register in method_func_keys for codegen lookup using type's NameId for stable lookup
+            if let Some(tdef_id) = type_def_id
+                && let Some(name_id) = method_name_id
+            {
+                let type_name_id = self.query().get_type(tdef_id).name_id;
+                self.state
+                    .method_func_keys
+                    .insert((type_name_id, name_id), func_key);
+            }
+        }
+
+        // Import static methods
+        if let Some(ref statics) = impl_block.statics {
+            self.import_implement_statics_block(statics, &type_name, interner, module_id);
+        }
+    }
+
+    /// Import static methods from a statics block.
+    fn import_implement_statics_block(
+        &mut self,
+        statics: &StaticsBlock,
+        type_name: &str,
+        interner: &Interner,
+        module_id: ModuleId,
+    ) {
+        let type_def_id = self.query().resolve_type_def_by_str(module_id, type_name);
+
+        for method in &statics.methods {
+            if method.body.is_none() {
+                continue;
+            }
+            let method_name_id = method_name_id_with_interner(self.analyzed, interner, method.name);
+            let (sig, semantic_method_id) = {
+                let tdef_id = type_def_id.unwrap();
+                let name_id = method_name_id.unwrap();
+                let method_id = self
+                    .query()
+                    .registry()
+                    .find_static_method_on_type(tdef_id, name_id)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "import: static method {}.{} not in entity_registry",
+                            type_name,
+                            interner.resolve(method.name)
+                        )
+                    });
+                let sig = self.build_signature_for_method(method_id, SelfParam::None);
+                (sig, method_id)
+            };
+            let method_def = self
+                .analyzed
+                .entity_registry()
+                .get_method(semantic_method_id);
+            let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
+            let display_name = self.func_registry.display(func_key);
+            let jit_func_id = self.jit.import_function(&display_name, &sig);
+            self.func_registry.set_func_id(func_key, jit_func_id);
+
             let type_name_id = self.query().get_type(type_def_id.unwrap()).name_id;
             self.state
                 .method_func_keys
@@ -687,20 +650,193 @@ impl Compiler<'_> {
         Ok(())
     }
 
-    /// Compile ONLY the static methods from an implement block (for module programs)
-    pub(super) fn compile_implement_statics_only(
+    /// Compile implement block methods from a module, using the module interner.
+    /// Handles both instance methods and statics.
+    pub(super) fn compile_module_implement_block(
         &mut self,
         impl_block: &ImplementBlock,
-        module_path: Option<&str>,
         interner: &Interner,
+        module_id: ModuleId,
+        module_path: Option<&str>,
     ) -> Result<(), String> {
         let Some(type_name) = self.get_type_name_from_expr(&impl_block.target_type) else {
-            return Ok(()); // Unsupported type
+            return Ok(());
         };
 
+        // Get the TypeId for `self` binding
+        let self_type_id = match &impl_block.target_type {
+            TypeExpr::Primitive(p) => {
+                let prim_type = vole_sema::PrimitiveType::from_ast(*p);
+                self.analyzed.type_arena().primitive(prim_type)
+            }
+            TypeExpr::Named(sym) => {
+                let type_def_id = self
+                    .query()
+                    .try_name_id(module_id, &[*sym])
+                    .and_then(|name_id| self.query().try_type_def_id(name_id))
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "INTERNAL ERROR: implement block self type not in entity registry: {:?}",
+                            sym
+                        )
+                    });
+                self.state
+                    .type_metadata
+                    .get(&type_def_id)
+                    .map(|m| m.vole_type)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "INTERNAL ERROR: implement block self type not in type_metadata: {:?}",
+                            type_def_id
+                        )
+                    })
+            }
+            _ => unreachable!("target_type was neither Primitive nor Named"),
+        };
+
+        let impl_type_id = self.impl_type_id_from_type_id(self_type_id);
+        let type_def_id = impl_type_id.and_then(|id| self.query().try_type_def_id(id.name_id()));
+
+        // Compile instance methods using module interner for name resolution
+        for method in &impl_block.methods {
+            let method_key = type_def_id.and_then(|type_def_id| {
+                let type_name_id = self.query().get_type(type_def_id).name_id;
+                // Use module interner for method name lookup (cross-interner safe)
+                let method_name_id =
+                    method_name_id_with_interner(self.analyzed, interner, method.name);
+                method_name_id.and_then(|mid| {
+                    self.state
+                        .method_func_keys
+                        .get(&(type_name_id, mid))
+                        .map(|&func_key| MethodInfo { func_key })
+                })
+            });
+            self.compile_module_implement_method(
+                method,
+                self_type_id,
+                method_key,
+                interner,
+                module_id,
+            )?;
+        }
+
+        // Compile static methods
         if let Some(ref statics) = impl_block.statics {
             self.compile_implement_statics(statics, &type_name, module_path, interner)?;
         }
+
+        Ok(())
+    }
+
+    /// Compile a single method from a module implement block, using a module interner.
+    fn compile_module_implement_method(
+        &mut self,
+        method: &FuncDecl,
+        self_type_id: TypeId,
+        method_info: Option<MethodInfo>,
+        interner: &Interner,
+        module_id: ModuleId,
+    ) -> Result<(), String> {
+        let impl_type_id = self.impl_type_id_from_type_id(self_type_id);
+        let type_def_id =
+            impl_type_id.and_then(|impl_id| self.query().try_type_def_id(impl_id.name_id()));
+        let method_name_id = method_name_id_with_interner(self.analyzed, interner, method.name)
+            .unwrap_or_else(|| {
+                panic!(
+                    "method name_id not found for '{}'",
+                    interner.resolve(method.name)
+                )
+            });
+
+        let semantic_method_id = type_def_id
+            .and_then(|tdef_id| {
+                self.analyzed
+                    .entity_registry()
+                    .find_method_on_type(tdef_id, method_name_id)
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "implement block method not registered: {} (type_def_id={:?})",
+                    interner.resolve(method.name),
+                    type_def_id
+                )
+            });
+
+        let func_key = if let Some(info) = method_info {
+            info.func_key
+        } else {
+            let method_def = self
+                .analyzed
+                .entity_registry()
+                .get_method(semantic_method_id);
+            self.func_registry.intern_name_id(method_def.full_name_id)
+        };
+        let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
+            let display = self.func_registry.display(func_key);
+            format!("Internal error: implement method {} not declared", display)
+        })?;
+
+        let sig =
+            self.build_signature_for_method(semantic_method_id, SelfParam::TypedId(self_type_id));
+        self.jit.ctx.func.signature = sig;
+
+        let self_cranelift_type =
+            type_id_to_cranelift(self_type_id, self.analyzed.type_arena(), self.pointer_type);
+
+        let params: Vec<(Symbol, TypeId, types::Type)> = {
+            let method_def = self.query().get_method(semantic_method_id);
+            let arena = self.analyzed.type_arena();
+            let (param_type_ids, _, _) = arena
+                .unwrap_function(method_def.signature_id)
+                .expect("method should have function signature");
+            method
+                .params
+                .iter()
+                .zip(param_type_ids.iter())
+                .map(|(param, &type_id)| {
+                    let cranelift_type = type_id_to_cranelift(type_id, arena, self.pointer_type);
+                    (param.name, type_id, cranelift_type)
+                })
+                .collect()
+        };
+
+        let source_file_ptr = self.source_file_ptr();
+        let self_sym = self.self_symbol();
+
+        let method_return_type_id = {
+            let method_def = self.query().get_method(semantic_method_id);
+            let arena = self.analyzed.type_arena();
+            arena
+                .unwrap_function(method_def.signature_id)
+                .map(|(_, ret, _)| ret)
+        };
+
+        let no_global_inits = FxHashMap::default();
+        let mut builder_ctx = FunctionBuilderContext::new();
+        {
+            let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
+            // Use module interner for compilation
+            let env = compile_env!(self, interner, &no_global_inits, source_file_ptr, module_id);
+            let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
+
+            let self_binding = (self_sym, self_type_id, self_cranelift_type);
+            let config = FunctionCompileConfig::method(
+                &method.body,
+                params,
+                self_binding,
+                method_return_type_id,
+            );
+            compile_function_inner_with_params(
+                builder,
+                &mut codegen_ctx,
+                &env,
+                config,
+                Some(module_id),
+                None,
+            )?;
+        }
+
+        self.finalize_function(func_id)?;
         Ok(())
     }
 

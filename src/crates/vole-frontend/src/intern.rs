@@ -30,6 +30,16 @@ impl Interner {
         &self.strings[sym.0 as usize]
     }
 
+    /// Returns the number of interned strings.
+    pub fn len(&self) -> usize {
+        self.strings.len()
+    }
+
+    /// Returns true if no strings have been interned.
+    pub fn is_empty(&self) -> bool {
+        self.strings.is_empty()
+    }
+
     /// Look up a string to get its symbol, if it has been interned.
     /// Returns None if the string hasn't been interned.
     pub fn lookup(&self, s: &str) -> Option<Symbol> {

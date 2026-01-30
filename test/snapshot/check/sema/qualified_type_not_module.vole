@@ -4,7 +4,7 @@ let x = 42
 
 // Error: x is not a module - should error at call site
 func bad_qualified(v: x.Type) {
-    print(v)
+    let _ = v
 }
 
 func main() {

@@ -19,30 +19,52 @@ impl Analyzer {
                 self.functions_by_name.get(name).cloned()
             });
             if let Some(func_type) = func_type {
-                // Calling a user-defined function - conservatively mark side effects
-                if self.in_lambda() {
-                    self.mark_lambda_has_side_effects();
-                }
-
-                // Look up required_params from entity registry if available
-                let required_params = {
+                // Check if this is actually a generic function (e.g. from prelude)
+                // If so, skip to the generic function resolution path below
+                let is_generic = {
                     let name_id =
                         self.name_table_mut()
                             .intern(self.current_module, &[*sym], interner);
-                    self.entity_registry()
+                    let is_gen = self
+                        .entity_registry()
                         .function_by_name(name_id)
-                        .map(|fid| self.entity_registry().get_function(fid).required_params)
-                        .unwrap_or(func_type.params_id.len())
+                        .is_some_and(|fid| {
+                            self.entity_registry()
+                                .get_function(fid)
+                                .generic_info
+                                .is_some()
+                        });
+                    // Also check prelude modules for cross-interner generic functions
+                    is_gen || self.is_prelude_generic_function(*sym, interner)
                 };
 
-                return self.check_call_args_with_defaults_id(
-                    &call.args,
-                    &func_type.params_id,
-                    required_params,
-                    func_type.return_type_id,
-                    expr.span,
-                    interner,
-                );
+                if !is_generic {
+                    // Calling a user-defined function - conservatively mark side effects
+                    if self.in_lambda() {
+                        self.mark_lambda_has_side_effects();
+                    }
+
+                    // Look up required_params from entity registry if available
+                    let required_params = {
+                        let name_id =
+                            self.name_table_mut()
+                                .intern(self.current_module, &[*sym], interner);
+                        self.entity_registry()
+                            .function_by_name(name_id)
+                            .map(|fid| self.entity_registry().get_function(fid).required_params)
+                            .unwrap_or(func_type.params_id.len())
+                    };
+
+                    return self.check_call_args_with_defaults_id(
+                        &call.args,
+                        &func_type.params_id,
+                        required_params,
+                        func_type.return_type_id,
+                        expr.span,
+                        interner,
+                    );
+                }
+                // Fall through to generic function resolution
             }
 
             // Check if it's a variable with a function type (using TypeId path)
@@ -189,17 +211,40 @@ impl Analyzer {
                     let builtin_name_id =
                         self.name_table_mut().intern(builtin_mod, &[*sym], interner);
                     let registry = self.entity_registry();
-                    registry
-                        .function_by_name(builtin_name_id)
-                        .map(|fid| {
-                            let func_def = registry.get_function(fid);
-                            (
-                                func_def.generic_info.clone(),
-                                func_def.required_params,
-                                func_def.full_name_id,
-                            )
-                        })
-                        .unwrap_or((None, 0, builtin_name_id))
+                    let builtin_result = registry.function_by_name(builtin_name_id).map(|fid| {
+                        let func_def = registry.get_function(fid);
+                        (
+                            func_def.generic_info.clone(),
+                            func_def.required_params,
+                            func_def.full_name_id,
+                        )
+                    });
+                    drop(registry);
+
+                    if builtin_result.is_some() {
+                        builtin_result.unwrap_or((None, 0, builtin_name_id))
+                    } else {
+                        // Try prelude generic functions (e.g., print, println)
+                        let func_name = interner.resolve(*sym);
+                        if let Some(&prelude_name_id) =
+                            self.generic_prelude_functions.get(func_name)
+                        {
+                            let registry = self.entity_registry();
+                            registry
+                                .function_by_name(prelude_name_id)
+                                .map(|fid| {
+                                    let func_def = registry.get_function(fid);
+                                    (
+                                        func_def.generic_info.clone(),
+                                        func_def.required_params,
+                                        func_def.full_name_id,
+                                    )
+                                })
+                                .unwrap_or((None, 0, prelude_name_id))
+                        } else {
+                            (None, 0, builtin_name_id)
+                        }
+                    }
                 } else {
                     result.unwrap_or((None, 0, name_id))
                 }
@@ -325,7 +370,7 @@ impl Analyzer {
 
             // Check if it's a known builtin function
             let name = interner.resolve(*sym);
-            if name == "println" || name == "print_char" || name == "flush" || name == "print" {
+            if name == "print_char" || name == "flush" {
                 // Impure builtins - mark side effects if inside lambda
                 if self.in_lambda() {
                     self.mark_lambda_has_side_effects();
@@ -353,8 +398,11 @@ impl Analyzer {
                 return Ok(ArenaTypeId::INVALID);
             }
 
-            // Unknown identifier - might be an undefined function
-            // (will be caught by codegen or other checks)
+            // Unknown identifier - conservatively mark as having side effects
+            // since we can't prove the function is pure
+            if self.in_lambda() {
+                self.mark_lambda_has_side_effects();
+            }
             for arg in &call.args {
                 self.check_expr(arg, interner)?;
             }

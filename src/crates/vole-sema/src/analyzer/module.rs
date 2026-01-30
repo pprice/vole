@@ -490,6 +490,11 @@ impl Analyzer {
             module_key.clone(),
             sub_analyzer.method_resolutions.into_inner(),
         );
+        // Store module-specific is_check_results (NodeIds are per-program)
+        self.ctx
+            .module_is_check_results
+            .borrow_mut()
+            .insert(module_key.clone(), sub_analyzer.is_check_results.clone());
 
         // Now resolve deferred function types after sub-analysis has registered record/class types
         for (name_id, f) in deferred_functions {
@@ -646,6 +651,8 @@ impl Analyzer {
             constant_globals: self.constant_globals.clone(),
             // Inherit parent_modules chain
             parent_modules: self.parent_modules.clone(),
+            // Inherit generic prelude functions so tests can call generic functions like print/println
+            generic_prelude_functions: self.generic_prelude_functions.clone(),
             ..Default::default()
         };
         // Carry over the type_param_stack so type params from parent scope are visible

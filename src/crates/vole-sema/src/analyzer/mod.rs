@@ -325,6 +325,9 @@ pub struct AnalyzerContext {
     /// Stored separately since NodeIds are per-program and can't be merged into main method_resolutions.
     /// Shared across sub-analyzers so prelude modules' method resolutions accumulate without cloning.
     pub module_method_resolutions: RefCell<FxHashMap<String, FxHashMap<NodeId, ResolvedMethod>>>,
+    /// Per-module is_check_results (keyed by module path -> NodeId -> IsCheckResult).
+    /// Stored separately since NodeIds are per-program and can't be merged into main is_check_results.
+    pub module_is_check_results: RefCell<FxHashMap<String, FxHashMap<NodeId, IsCheckResult>>>,
     /// Optional shared cache for module analysis results.
     /// When set, modules are cached after analysis and reused across Analyzer instances.
     pub module_cache: Option<Rc<RefCell<ModuleCache>>>,
@@ -339,6 +342,7 @@ impl AnalyzerContext {
             module_programs: RefCell::new(FxHashMap::default()),
             module_expr_types: RefCell::new(FxHashMap::default()),
             module_method_resolutions: RefCell::new(FxHashMap::default()),
+            module_is_check_results: RefCell::new(FxHashMap::default()),
             module_cache: cache,
         }
     }
@@ -358,6 +362,8 @@ pub struct Analyzer {
     functions: FxHashMap<Symbol, FunctionType>,
     /// Functions registered by string name (for prelude functions that cross interner boundaries)
     functions_by_name: FxHashMap<String, FunctionType>,
+    /// Generic prelude functions by string name -> NameId (for cross-interner generic function lookup)
+    generic_prelude_functions: FxHashMap<String, NameId>,
     globals: FxHashMap<Symbol, ArenaTypeId>,
     /// Globals with constant initializers (for constant expression checking)
     constant_globals: HashSet<Symbol>,
@@ -553,6 +559,7 @@ impl Analyzer {
     pub fn into_analysis_results(self) -> AnalysisOutput {
         let module_expr_types = self.ctx.module_expr_types.borrow().clone();
         let module_method_resolutions = self.ctx.module_method_resolutions.borrow().clone();
+        let module_is_check_results = self.ctx.module_is_check_results.borrow().clone();
         let expression_data = ExpressionData::from_analysis(
             self.expr_types,
             self.method_resolutions.into_inner(),
@@ -561,6 +568,7 @@ impl Analyzer {
             self.static_method_calls,
             module_expr_types,
             module_method_resolutions,
+            module_is_check_results,
             self.substituted_return_types,
             self.lambda_defaults,
             self.tests_virtual_modules,
@@ -602,8 +610,10 @@ impl Analyzer {
                 .last_segment_str(param.name_id)
                 .unwrap_or_else(|| format!("__T{}", param.name.0 - 0x8000_0000))
         } else {
-            // Use normal interner resolution
-            interner.resolve(param.name).to_string()
+            // Try name_id first (cross-interner safe), fall back to interner
+            self.name_table()
+                .last_segment_str(param.name_id)
+                .unwrap_or_else(|| interner.resolve(param.name).to_string())
         }
     }
 
@@ -1035,6 +1045,7 @@ impl Default for Analyzer {
             scope: Scope::new(),
             functions: FxHashMap::default(),
             functions_by_name: FxHashMap::default(),
+            generic_prelude_functions: FxHashMap::default(),
             globals: FxHashMap::default(),
             constant_globals: HashSet::new(),
             current_function_return: None,

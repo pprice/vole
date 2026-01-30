@@ -40,6 +40,8 @@ pub struct ExpressionData {
     module_types: FxHashMap<String, FxHashMap<NodeId, TypeId>>,
     /// Per-module method resolutions (for multi-module compilation)
     module_methods: FxHashMap<String, FxHashMap<NodeId, ResolvedMethod>>,
+    /// Per-module is_check_results (for multi-module compilation)
+    module_is_check_results: FxHashMap<String, FxHashMap<NodeId, IsCheckResult>>,
     /// Substituted return types for generic method calls.
     /// When sema resolves a call like `list.head()` on `List<i32>`, the generic
     /// return type `T` is substituted to `i32`. This map stores the concrete type
@@ -76,6 +78,7 @@ impl ExpressionData {
         static_method_generics: FxHashMap<NodeId, StaticMethodMonomorphKey>,
         module_types: FxHashMap<String, FxHashMap<NodeId, TypeId>>,
         module_methods: FxHashMap<String, FxHashMap<NodeId, ResolvedMethod>>,
+        module_is_check_results: FxHashMap<String, FxHashMap<NodeId, IsCheckResult>>,
         substituted_return_types: FxHashMap<NodeId, TypeId>,
         lambda_defaults: FxHashMap<NodeId, LambdaDefaults>,
         tests_virtual_modules: FxHashMap<Span, ModuleId>,
@@ -90,6 +93,7 @@ impl ExpressionData {
             static_method_generics,
             module_types,
             module_methods,
+            module_is_check_results,
             substituted_return_types,
             lambda_defaults,
             tests_virtual_modules,
@@ -316,6 +320,21 @@ impl ExpressionData {
 
     /// Get the IsCheckResult for a type check node (is expression or type pattern)
     pub fn get_is_check_result(&self, node: NodeId) -> Option<IsCheckResult> {
+        self.is_check_results.get(&node).copied()
+    }
+
+    /// Get the IsCheckResult for a type check node, checking module-specific results first
+    pub fn get_is_check_result_in_module(
+        &self,
+        node: NodeId,
+        current_module: Option<&str>,
+    ) -> Option<IsCheckResult> {
+        if let Some(module) = current_module
+            && let Some(module_results) = self.module_is_check_results.get(module)
+            && let Some(result) = module_results.get(&node)
+        {
+            return Some(*result);
+        }
         self.is_check_results.get(&node).copied()
     }
 

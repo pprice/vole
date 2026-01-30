@@ -6,42 +6,42 @@ func get_value() -> i32 {
 
 // Error: function call is not a constant expression
 func with_call(x: i32 = get_value()) {
-    print(x)
+    let _ = x
 }
 
 // Error: mutable variable reference is not a constant expression
 let mut mutable_global = 100
 func with_mut_var(x: i32 = mutable_global) {
-    print(x)
+    let _ = x
 }
 
 // Valid: immutable global with constant initializer IS a constant expression
 let immutable_global = 100
 func with_immutable_var(x: i32 = immutable_global) {
-    print(x)
+    let _ = x
 }
 
 // Valid: literal is constant
 func with_literal(x: i32 = 42) {
-    print(x)
+    let _ = x
 }
 
 // Valid: unary operator on constant
 func with_unary(x: i32 = -5) {
-    print(x)
+    let _ = x
 }
 
 // Valid: binary operator on constants
 func with_binary(x: i32 = 3 + 4) {
-    print(x)
+    let _ = x
 }
 
 // Valid: array literal with constants
 func with_array(x: [i64] = [1, 2, 3]) {
-    print(x)
+    let _ = x
 }
 
 // Valid: expression using immutable global
 func with_global_expr(x: i32 = immutable_global + 1) {
-    print(x)
+    let _ = x
 }

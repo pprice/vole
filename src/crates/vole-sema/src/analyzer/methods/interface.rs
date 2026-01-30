@@ -230,17 +230,36 @@ impl Analyzer {
             && expected.return_type_id == found.return_type_id
     }
 
-    /// Check if a TypeId satisfies an interface (TypeId version)
+    /// Check if a TypeId satisfies an interface by Symbol (used in tests).
+    #[cfg(test)]
     pub(crate) fn satisfies_interface_id(
         &mut self,
         ty_id: ArenaTypeId,
         interface_name: Symbol,
         interner: &Interner,
     ) -> bool {
-        // Look up interface via Resolver with interface fallback
         let type_def_id = self
             .resolver(interner)
             .resolve_type_or_interface(interface_name, &self.entity_registry());
+
+        let Some(type_def_id) = type_def_id else {
+            return false;
+        };
+
+        self.satisfies_interface_by_type_def_id_typeid(ty_id, type_def_id, interner)
+    }
+
+    /// Check if a type satisfies an interface, looked up by string name.
+    /// Used for cross-interner constraint checking (e.g., prelude generic functions).
+    pub(crate) fn satisfies_interface_by_name(
+        &mut self,
+        ty_id: ArenaTypeId,
+        interface_name_str: &str,
+        interner: &Interner,
+    ) -> bool {
+        let type_def_id = self
+            .resolver(interner)
+            .resolve_type_str_or_interface(interface_name_str, &self.entity_registry());
 
         let Some(type_def_id) = type_def_id else {
             return false;

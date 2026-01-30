@@ -229,8 +229,8 @@ impl Analyzer {
             }
         };
 
-        let constraint_interfaces: Vec<Symbol> = match constraint {
-            crate::generic::TypeConstraint::Interface(symbols) => symbols.clone(),
+        let constraint_interfaces: Vec<String> = match constraint {
+            crate::generic::TypeConstraint::Interface(names) => names.clone(),
             other => {
                 tracing::trace!(?param_name_id, constraint = ?other, "constraint is not interface-based");
                 return None; // Union/Structural constraints don't support method calls this way
@@ -243,24 +243,26 @@ impl Analyzer {
         );
 
         // Try to find the method in one of the constraint interfaces
-        for interface_sym in &constraint_interfaces {
-            let interface_name = interner.resolve(*interface_sym);
-            tracing::trace!(%interface_name, "checking interface");
+        for interface_name_str in &constraint_interfaces {
+            tracing::trace!(interface_name = %interface_name_str, "checking interface");
 
-            // Use resolve_type_or_interface to handle prelude interfaces like Hashable
-            // Get interface_type_id first to drop the ResolverGuard before type_arena_mut
+            // Resolve interface by string name (cross-interner safe)
             let interface_type_id = self
                 .resolver(interner)
-                .resolve_type_or_interface(*interface_sym, &self.entity_registry());
+                .resolve_type_str_or_interface(interface_name_str, &self.entity_registry());
 
             let Some(interface_type_id) = interface_type_id else {
-                tracing::trace!(%interface_name, "could not resolve interface");
+                tracing::trace!(interface_name = %interface_name_str, "could not resolve interface");
                 continue;
             };
 
+            // Get the Symbol for this interface name in the current interner
+            // (needed for downstream ResolvedMethod::InterfaceMethod)
+            let interface_sym = interner.lookup(interface_name_str).unwrap_or(Symbol(0));
+
             if let Some(resolved) = self.find_method_in_constraint_interface(
                 interface_type_id,
-                *interface_sym,
+                interface_sym,
                 method_name,
                 method_name_id,
                 param_name_id,

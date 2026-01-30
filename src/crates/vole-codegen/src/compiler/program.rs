@@ -344,6 +344,10 @@ impl Compiler<'_> {
             // Declare pure Vole functions
             for decl in &program.declarations {
                 if let Decl::Function(func) = decl {
+                    // Skip generic functions - they're declared via monomorphized instances
+                    if !func.type_params.is_empty() {
+                        continue;
+                    }
                     let module_id = self.query().module_id_or_main(module_path);
                     let name_id = function_name_id_with_interner(
                         self.analyzed,
@@ -352,6 +356,24 @@ impl Compiler<'_> {
                         func.name,
                     )
                     .expect("module function name_id should be registered");
+
+                    // Check for implicit generics (structural type params)
+                    let has_implicit_generic_info = self
+                        .analyzed
+                        .entity_registry()
+                        .function_by_name(name_id)
+                        .map(|func_id| {
+                            self.analyzed
+                                .entity_registry()
+                                .get_function(func_id)
+                                .generic_info
+                                .is_some()
+                        })
+                        .unwrap_or(false);
+                    if has_implicit_generic_info {
+                        continue;
+                    }
+
                     let display_name = self.query().display_name(name_id);
 
                     // Get FunctionId and build signature from pre-resolved types
@@ -375,12 +397,17 @@ impl Compiler<'_> {
                 }
             }
 
-            // Register static methods from implement blocks (declarations only)
-            for decl in &program.declarations {
-                if let Decl::Implement(impl_block) = decl
-                    && impl_block.statics.is_some()
-                {
-                    self.register_implement_statics_only_with_interner(impl_block, module_interner);
+            // Register implement block methods (both instance and static declarations)
+            {
+                let module_id = self.query().module_id_or_main(module_path);
+                for decl in &program.declarations {
+                    if let Decl::Implement(impl_block) = decl {
+                        self.register_implement_block_with_interner(
+                            impl_block,
+                            module_interner,
+                            module_id,
+                        );
+                    }
                 }
             }
 
@@ -428,6 +455,10 @@ impl Compiler<'_> {
             // Compile pure Vole function bodies
             for decl in &program.declarations {
                 if let Decl::Function(func) = decl {
+                    // Skip generic functions - they're compiled via monomorphized instances
+                    if !func.type_params.is_empty() {
+                        continue;
+                    }
                     let module_id = self.query().module_id_or_main(module_path);
                     let name_id = function_name_id_with_interner(
                         self.analyzed,
@@ -436,6 +467,24 @@ impl Compiler<'_> {
                         func.name,
                     )
                     .expect("module function name_id should be registered");
+
+                    // Check for implicit generics (structural type params)
+                    let has_implicit_generic_info = self
+                        .analyzed
+                        .entity_registry()
+                        .function_by_name(name_id)
+                        .map(|func_id| {
+                            self.analyzed
+                                .entity_registry()
+                                .get_function(func_id)
+                                .generic_info
+                                .is_some()
+                        })
+                        .unwrap_or(false);
+                    if has_implicit_generic_info {
+                        continue;
+                    }
+
                     self.compile_module_function(
                         module_path,
                         name_id,
@@ -446,15 +495,15 @@ impl Compiler<'_> {
                 }
             }
 
-            // Compile implement block static methods
+            // Compile implement block methods (both instance and static)
+            let module_id = self.query().module_id_or_main(module_path);
             for decl in &program.declarations {
-                if let Decl::Implement(impl_block) = decl
-                    && impl_block.statics.is_some()
-                {
-                    self.compile_implement_statics_only(
+                if let Decl::Implement(impl_block) = decl {
+                    self.compile_module_implement_block(
                         impl_block,
-                        Some(module_path),
                         module_interner,
+                        module_id,
+                        Some(module_path),
                     )?;
                 }
             }
@@ -534,13 +583,15 @@ impl Compiler<'_> {
                 }
             }
 
-            // Import implement block statics (using Linkage::Import for pre-compiled modules)
-            // Note: Instance methods are handled through external dispatch, only statics need importing
+            // Import implement block methods (both instance and static, using Linkage::Import)
+            let module_id_for_impl = self.query().module_id_or_main(module_path);
             for decl in &program.declarations {
-                if let Decl::Implement(impl_block) = decl
-                    && impl_block.statics.is_some()
-                {
-                    self.import_implement_statics_only_with_interner(impl_block, module_interner);
+                if let Decl::Implement(impl_block) = decl {
+                    self.import_module_implement_block(
+                        impl_block,
+                        module_interner,
+                        module_id_for_impl,
+                    );
                 }
             }
 
@@ -1307,20 +1358,116 @@ impl Compiler<'_> {
                 continue;
             }
 
-            let func = generic_func_asts
-                .get(&instance.original_name)
-                .ok_or_else(|| {
-                    let func_name = self.query().display_name(instance.original_name);
-                    format!(
-                        "Internal error: generic function AST not found for {}",
-                        func_name
-                    )
-                })?;
+            // First try the main program's generic functions
+            if let Some(func) = generic_func_asts.get(&instance.original_name) {
+                self.compile_monomorphized_function(func, &instance)?;
+                continue;
+            }
 
-            self.compile_monomorphized_function(func, &instance)?;
+            // Then try module programs (for prelude generic functions like print/println)
+            let found = self.compile_monomorphized_module_function(&instance)?;
+            if !found {
+                let func_name = self.query().display_name(instance.original_name);
+                return Err(format!(
+                    "Internal error: generic function AST not found for {}",
+                    func_name
+                ));
+            }
         }
 
         Ok(())
+    }
+
+    /// Compile a monomorphized instance of a module function.
+    /// Searches module programs for the generic function AST.
+    fn compile_monomorphized_module_function(
+        &mut self,
+        instance: &MonomorphInstance,
+    ) -> Result<bool, String> {
+        // Find which module contains this function
+        let module_id = self.analyzed.name_table().module_of(instance.original_name);
+        let module_path = self
+            .analyzed
+            .name_table()
+            .module_path(module_id)
+            .to_string();
+
+        let Some((module_program, module_interner)) =
+            self.analyzed.module_programs.get(&module_path)
+        else {
+            return Ok(false);
+        };
+
+        // Find the generic function in the module
+        let func = module_program.declarations.iter().find_map(|decl| {
+            if let Decl::Function(func) = decl {
+                let name_id = function_name_id_with_interner(
+                    self.analyzed,
+                    module_interner,
+                    module_id,
+                    func.name,
+                );
+                if name_id == Some(instance.original_name) {
+                    return Some(func);
+                }
+            }
+            None
+        });
+
+        let Some(func) = func else {
+            return Ok(false);
+        };
+
+        // Compile with the module's interner and context
+        let mangled_name = self.query().display_name(instance.mangled_name);
+        let func_key = self.func_registry.intern_name_id(instance.mangled_name);
+        let func_id = self
+            .func_registry
+            .func_id(func_key)
+            .ok_or_else(|| format!("Monomorphized function {} not declared", mangled_name))?;
+
+        let param_type_ids: Vec<TypeId> = instance.func_type.params_id.to_vec();
+        let return_type_id = instance.func_type.return_type_id;
+        let param_cranelift_types = self.type_ids_to_cranelift(&param_type_ids);
+        let params: Vec<_> = func
+            .params
+            .iter()
+            .zip(param_type_ids.iter())
+            .zip(param_cranelift_types.iter())
+            .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
+            .collect();
+
+        let ret = self.return_type_to_cranelift(return_type_id);
+        let sig = self.jit.create_signature(&param_cranelift_types, ret);
+        self.jit.ctx.func.signature = sig;
+
+        let source_file_ptr = self.source_file_ptr();
+        let no_global_inits = FxHashMap::default();
+        let mut builder_ctx = FunctionBuilderContext::new();
+        {
+            let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
+            let env = compile_env!(
+                self,
+                module_interner,
+                &no_global_inits,
+                source_file_ptr,
+                module_id
+            );
+            let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
+
+            let config = FunctionCompileConfig::top_level(&func.body, params, Some(return_type_id));
+            compile_function_inner_with_params(
+                builder,
+                &mut codegen_ctx,
+                &env,
+                config,
+                Some(module_id),
+                Some(&instance.substitutions),
+            )?;
+        }
+
+        self.finalize_function(func_id)?;
+        Ok(true)
     }
 
     /// Compile a single monomorphized function instance

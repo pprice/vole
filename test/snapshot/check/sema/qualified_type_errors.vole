@@ -4,7 +4,7 @@ let time = import "std:time"
 
 // Error: Unknown type in module
 func unknown_type(x: time.UnknownType) {
-    print(x)
+    let _ = x
 }
 
 // Error: Module doesn't have this type

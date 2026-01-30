@@ -7,7 +7,7 @@
  8 | func with_call(x: i32 = get_value()) {
    :                         ^^^^^|^^^^^
    :                              `-- non-constant expression
- 9 |     print(x)
+ 9 |     let _ = x
    `----
   help: use literals, operators on constants, or array/tuple literals with constant elements
   x [E2089]: default value for 'x' must be a constant expression
@@ -16,6 +16,6 @@
  14 | func with_mut_var(x: i32 = mutable_global) {
     :                            ^^^^^^^|^^^^^^
     :                                   `-- non-constant expression
- 15 |     print(x)
+ 15 |     let _ = x
     `----
   help: use literals, operators on constants, or array/tuple literals with constant elements

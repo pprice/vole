@@ -7,6 +7,7 @@ use cranelift::prelude::*;
 use crate::RuntimeFn;
 use crate::errors::CodegenError;
 use vole_frontend::{self, ExprKind, LetInit, Pattern, PatternKind, RaiseStmt, Stmt, Symbol};
+use vole_sema::IsCheckResult;
 use vole_sema::type_arena::TypeId;
 
 use super::context::Cg;
@@ -328,6 +329,26 @@ impl Cg<'_, '_, '_> {
             }
 
             Stmt::If(if_stmt) => {
+                // Check for statically known `is` condition (dead branch elimination
+                // for monomorphized generics where sema didn't analyze the body).
+                if let ExprKind::Is(is) = &if_stmt.condition.kind
+                    && let Some(static_result) = self.try_static_is_check(is, if_stmt.condition.id)
+                {
+                    match static_result {
+                        IsCheckResult::AlwaysTrue => {
+                            return self.block(&if_stmt.then_branch);
+                        }
+                        IsCheckResult::AlwaysFalse => {
+                            return if let Some(else_branch) = &if_stmt.else_branch {
+                                self.block(else_branch)
+                            } else {
+                                Ok(false)
+                            };
+                        }
+                        _ => {} // Runtime check needed, fall through
+                    }
+                }
+
                 let cond = self.expr(&if_stmt.condition)?;
                 let cond_i32 = self.cond_to_i32(cond.value);
 
