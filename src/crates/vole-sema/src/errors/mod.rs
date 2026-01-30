@@ -666,6 +666,32 @@ pub enum SemanticError {
         #[label("trailing expression not allowed in block")]
         span: SourceSpan,
     },
+
+    #[error("struct type '{name}' cannot be used as a union variant")]
+    #[diagnostic(
+        code(E2101),
+        help(
+            "structs are value types and cannot participate in unions; use a record or class instead"
+        )
+    )]
+    StructInUnion {
+        name: String,
+        #[label("struct type not allowed in union")]
+        span: SourceSpan,
+    },
+
+    #[error("struct type '{name}' cannot be used as a generic type argument")]
+    #[diagnostic(
+        code(E2102),
+        help(
+            "structs are value types and cannot be used as generic type parameters; use a record or class instead"
+        )
+    )]
+    StructAsTypeArg {
+        name: String,
+        #[label("struct type not allowed as type argument")]
+        span: SourceSpan,
+    },
 }
 
 /// Semantic warnings (W3xxx) - these don't prevent compilation but indicate potential issues

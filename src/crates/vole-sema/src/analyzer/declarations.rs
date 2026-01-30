@@ -652,6 +652,24 @@ impl Analyzer {
                 // Validate type arguments
                 for arg in args {
                     self.validate_type_annotation(arg, span, interner, type_param_scope);
+                    // Check if type argument is a struct type (not allowed as generic args)
+                    if let TypeExpr::Named(sym) = arg {
+                        let resolved = self
+                            .resolver(interner)
+                            .resolve_type(*sym, &self.entity_registry());
+                        if let Some(type_def_id) = resolved {
+                            let kind = self.entity_registry().type_kind(type_def_id);
+                            if kind == TypeDefKind::Struct {
+                                self.add_error(
+                                    SemanticError::StructAsTypeArg {
+                                        name: interner.resolve(*sym).to_string(),
+                                        span: span.into(),
+                                    },
+                                    span,
+                                );
+                            }
+                        }
+                    }
                 }
             }
             TypeExpr::Array(elem) | TypeExpr::Optional(elem) => {
@@ -668,6 +686,24 @@ impl Analyzer {
             TypeExpr::Union(variants) => {
                 for variant in variants {
                     self.validate_type_annotation(variant, span, interner, type_param_scope);
+                    // Check if variant is a struct type (not allowed in unions)
+                    if let TypeExpr::Named(sym) = variant {
+                        let resolved = self
+                            .resolver(interner)
+                            .resolve_type(*sym, &self.entity_registry());
+                        if let Some(type_def_id) = resolved {
+                            let kind = self.entity_registry().type_kind(type_def_id);
+                            if kind == TypeDefKind::Struct {
+                                self.add_error(
+                                    SemanticError::StructInUnion {
+                                        name: interner.resolve(*sym).to_string(),
+                                        span: span.into(),
+                                    },
+                                    span,
+                                );
+                            }
+                        }
+                    }
                 }
             }
             TypeExpr::Function {

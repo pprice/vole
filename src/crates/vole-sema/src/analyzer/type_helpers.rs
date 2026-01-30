@@ -409,4 +409,31 @@ impl Analyzer {
             NumericSuffix::F64 => "f64 range".to_string(),
         }
     }
+
+    /// Check if a type is a union containing struct variants, and emit errors if so.
+    /// Structs cannot participate in unions because they are value types.
+    pub(crate) fn check_struct_in_union(&mut self, type_id: ArenaTypeId, span: Span) {
+        let variants = self.type_arena().unwrap_union(type_id).cloned();
+        let Some(variants) = variants else {
+            return;
+        };
+        for &variant_id in &variants {
+            let is_struct = {
+                let arena = self.type_arena();
+                arena
+                    .unwrap_nominal(variant_id)
+                    .is_some_and(|(_, _, kind)| kind == crate::type_arena::NominalKind::Struct)
+            };
+            if is_struct {
+                let name = self.type_display_id(variant_id);
+                self.add_error(
+                    SemanticError::StructInUnion {
+                        name,
+                        span: span.into(),
+                    },
+                    span,
+                );
+            }
+        }
+    }
 }

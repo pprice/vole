@@ -371,6 +371,29 @@ impl Analyzer {
     ) {
         use crate::compatibility::types_compatible_core_id;
 
+        // First check: reject struct types as generic type arguments
+        for param in type_params {
+            let Some(&found_id) = inferred.get(&param.name_id) else {
+                continue;
+            };
+            let is_struct = {
+                let arena = self.type_arena();
+                arena
+                    .unwrap_nominal(found_id)
+                    .is_some_and(|(_, _, kind)| kind == crate::type_arena::NominalKind::Struct)
+            };
+            if is_struct {
+                let name = self.type_display_id(found_id);
+                self.add_error(
+                    SemanticError::StructAsTypeArg {
+                        name,
+                        span: span.into(),
+                    },
+                    span,
+                );
+            }
+        }
+
         for param in type_params {
             let Some(constraint) = &param.constraint else {
                 continue;

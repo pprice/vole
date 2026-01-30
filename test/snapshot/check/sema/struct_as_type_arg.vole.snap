@@ -1,0 +1,12 @@
+[stdout]
+
+[stderr]
+  x [E2102]: struct type 'main::Point' cannot be used as a generic type argument
+    ,-[<path>/struct_as_type_arg.vole:13:13]
+ 12 |     let p = Point { x: 1, y: 2 }
+ 13 |     let _ = identity(p)
+    :             ^^^^^|^^^^^
+    :                  `-- struct type not allowed as type argument
+ 14 | }
+    `----
+  help: structs are value types and cannot be used as generic type parameters; use a record or class instead

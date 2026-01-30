@@ -1,0 +1,18 @@
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+// Good: struct literal with all fields
+func make_point() -> Point {
+    return Point { x: 1, y: 2 }
+}
+
+// Good: field access on struct
+func get_x(p: Point) -> i64 {
+    return p.x
+}
+
+func get_y(p: Point) -> i64 {
+    return p.y
+}

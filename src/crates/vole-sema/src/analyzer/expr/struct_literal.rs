@@ -151,76 +151,54 @@ impl Analyzer {
                 .collect()
         };
 
-        let (type_name, fields, field_has_default, result_type_id) = if let Some(type_id) =
-            type_id_opt
-        {
-            // Extract type info before doing mutable operations
-            // If this is an alias, resolve through to the underlying type
-            let (resolved_type_id, kind, generic_info, is_class_valid, is_record_valid) = {
-                let registry = self.entity_registry();
-                let type_def = registry.get_type(type_id);
+        let (type_name, fields, field_has_default, result_type_id) =
+            if let Some(type_id) = type_id_opt {
+                // Extract type info before doing mutable operations
+                // If this is an alias, resolve through to the underlying type
+                let (resolved_type_id, kind, generic_info) = {
+                    let registry = self.entity_registry();
+                    let type_def = registry.get_type(type_id);
 
-                if type_def.kind == TypeDefKind::Alias {
-                    // Follow alias to get underlying type
-                    if let Some(aliased_type_id) = type_def.aliased_type {
-                        let arena = self.type_arena();
-                        // Get the underlying TypeDefId from the aliased type (class or record only)
-                        let underlying = arena
-                            .unwrap_nominal(aliased_type_id)
-                            .filter(|(_, _, kind)| kind.is_class_or_record())
-                            .map(|(def_id, _, kind)| (def_id, kind.to_type_def_kind()));
+                    if type_def.kind == TypeDefKind::Alias {
+                        // Follow alias to get underlying type
+                        if let Some(aliased_type_id) = type_def.aliased_type {
+                            let arena = self.type_arena();
+                            // Get the underlying TypeDefId from the aliased type (class, record, or struct)
+                            let underlying = arena
+                                .unwrap_nominal(aliased_type_id)
+                                .filter(|(_, _, kind)| kind.is_class_or_record())
+                                .map(|(def_id, _, kind)| (def_id, kind.to_type_def_kind()));
 
-                        if let Some((underlying_def_id, underlying_kind)) = underlying {
-                            let registry = self.entity_registry();
-                            let underlying_def = registry.get_type(underlying_def_id);
-                            (
-                                underlying_def_id,
-                                underlying_kind,
-                                underlying_def.generic_info.clone(),
-                                registry.build_class_type(underlying_def_id).is_some(),
-                                registry.build_record_type(underlying_def_id).is_some(),
-                            )
+                            if let Some((underlying_def_id, underlying_kind)) = underlying {
+                                let registry = self.entity_registry();
+                                let underlying_def = registry.get_type(underlying_def_id);
+                                (
+                                    underlying_def_id,
+                                    underlying_kind,
+                                    underlying_def.generic_info.clone(),
+                                )
+                            } else {
+                                // Alias points to something that's not a class/record/struct
+                                (type_id, type_def.kind, type_def.generic_info.clone())
+                            }
                         } else {
-                            // Alias points to something that's not a class/record
-                            (
-                                type_id,
-                                type_def.kind,
-                                type_def.generic_info.clone(),
-                                false,
-                                false,
-                            )
+                            // Alias with no aliased_type
+                            (type_id, type_def.kind, type_def.generic_info.clone())
                         }
                     } else {
-                        // Alias with no aliased_type
-                        (
-                            type_id,
-                            type_def.kind,
-                            type_def.generic_info.clone(),
-                            false,
-                            false,
-                        )
+                        (type_id, type_def.kind, type_def.generic_info.clone())
                     }
-                } else {
-                    (
-                        type_id,
-                        type_def.kind,
-                        type_def.generic_info.clone(),
-                        registry.build_class_type(type_id).is_some(),
-                        registry.build_record_type(type_id).is_some(),
-                    )
-                }
-            };
-            let fields = generic_info
-                .as_ref()
-                .map(get_fields_from_generic_info)
-                .unwrap_or_default();
-            let field_defaults = generic_info
-                .as_ref()
-                .map(|gi| gi.field_has_default.clone())
-                .unwrap_or_default();
-            match kind {
-                TypeDefKind::Class => {
-                    if is_class_valid {
+                };
+                let fields = generic_info
+                    .as_ref()
+                    .map(get_fields_from_generic_info)
+                    .unwrap_or_default();
+                let field_defaults = generic_info
+                    .as_ref()
+                    .map(|gi| gi.field_has_default.clone())
+                    .unwrap_or_default();
+                match kind {
+                    TypeDefKind::Class => {
                         let result_id = self.type_arena_mut().class(resolved_type_id, vec![]);
                         (
                             Self::format_struct_literal_path(&struct_lit.path, interner),
@@ -228,19 +206,8 @@ impl Analyzer {
                             field_defaults,
                             result_id,
                         )
-                    } else {
-                        self.add_error(
-                            SemanticError::UnknownType {
-                                name: Self::format_struct_literal_path(&struct_lit.path, interner),
-                                span: expr.span.into(),
-                            },
-                            expr.span,
-                        );
-                        return Ok(self.ty_invalid_id());
                     }
-                }
-                TypeDefKind::Record => {
-                    if is_record_valid {
+                    TypeDefKind::Record => {
                         let result_id = self.type_arena_mut().record(resolved_type_id, vec![]);
                         (
                             Self::format_struct_literal_path(&struct_lit.path, interner),
@@ -248,7 +215,17 @@ impl Analyzer {
                             field_defaults,
                             result_id,
                         )
-                    } else {
+                    }
+                    TypeDefKind::Struct => {
+                        let result_id = self.type_arena_mut().struct_type(resolved_type_id, vec![]);
+                        (
+                            Self::format_struct_literal_path(&struct_lit.path, interner),
+                            fields,
+                            field_defaults,
+                            result_id,
+                        )
+                    }
+                    _ => {
                         self.add_error(
                             SemanticError::UnknownType {
                                 name: Self::format_struct_literal_path(&struct_lit.path, interner),
@@ -259,27 +236,16 @@ impl Analyzer {
                         return Ok(self.ty_invalid_id());
                     }
                 }
-                _ => {
-                    self.add_error(
-                        SemanticError::UnknownType {
-                            name: Self::format_struct_literal_path(&struct_lit.path, interner),
-                            span: expr.span.into(),
-                        },
-                        expr.span,
-                    );
-                    return Ok(self.ty_invalid_id());
-                }
-            }
-        } else {
-            self.add_error(
-                SemanticError::UnknownType {
-                    name: Self::format_struct_literal_path(&struct_lit.path, interner),
-                    span: expr.span.into(),
-                },
-                expr.span,
-            );
-            return Ok(self.ty_invalid_id());
-        };
+            } else {
+                self.add_error(
+                    SemanticError::UnknownType {
+                        name: Self::format_struct_literal_path(&struct_lit.path, interner),
+                        span: expr.span.into(),
+                    },
+                    expr.span,
+                );
+                return Ok(self.ty_invalid_id());
+            };
 
         // Check that all required fields are present (fields without defaults)
         let provided_fields: HashSet<String> = struct_lit

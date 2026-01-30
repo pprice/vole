@@ -117,15 +117,18 @@ impl Analyzer {
         }
 
         let struct_info = {
-            use crate::type_arena::NominalKind;
             let arena = self.type_arena();
             arena
                 .unwrap_nominal(object_type_id)
                 .filter(|(_, _, kind)| kind.is_class_or_record())
-                .map(|(id, args, kind)| (id, args.clone(), kind == NominalKind::Class))
+                .map(|(id, args, kind)| (id, args.clone(), kind))
         };
-        let Some((type_def_id, type_args_id, is_class)) = struct_info else {
-            self.type_error_id("class or record", object_type_id, field_access.object.span);
+        let Some((type_def_id, type_args_id, nominal_kind)) = struct_info else {
+            self.type_error_id(
+                "class, record, or struct",
+                object_type_id,
+                field_access.object.span,
+            );
             return Ok(self.ty_invalid_traced_id("field_access_non_struct"));
         };
 
@@ -164,10 +167,15 @@ impl Analyzer {
             },
             field_access.field_span,
         );
+        let kind_str = match nominal_kind {
+            crate::type_arena::NominalKind::Class => "class",
+            crate::type_arena::NominalKind::Struct => "struct",
+            _ => "record",
+        };
         let context = format!(
             "field '{}' not found on {} '{}' (available: {})",
             field_name,
-            if is_class { "class" } else { "record" },
+            kind_str,
             type_name,
             if available_fields.is_empty() {
                 "none".to_string()

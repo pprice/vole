@@ -1,0 +1,11 @@
+[stdout]
+
+[stderr]
+  x [E2101]: struct type 'main::Point' cannot be used as a union variant
+   ,-[<path>/struct_in_union.vole:7:1]
+ 6 | // Error: struct type cannot be used as a union variant
+ 7 | let Shape = i64 | Point
+   : ^^^^^^^^^^^|^^^^^^^^^^^
+   :            `-- struct type not allowed in union
+   `----
+  help: structs are value types and cannot participate in unions; use a record or class instead

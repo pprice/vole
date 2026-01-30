@@ -1,0 +1,19 @@
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+// Error: missing field 'y'
+func missing_field() -> Point {
+    return Point { x: 1 }
+}
+
+// Error: unknown field 'z'
+func extra_field() -> Point {
+    return Point { x: 1, y: 2, z: 3 }
+}
+
+// Error: field type mismatch (string instead of i64)
+func wrong_field_type() -> Point {
+    return Point { x: "hello", y: 2 }
+}
