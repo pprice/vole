@@ -275,6 +275,9 @@ fn resolve_named_type_to_id(sym: Symbol, ctx: &mut TypeResolutionContext<'_>) ->
                 aliased_type.unwrap_or_else(|| ctx.type_arena_mut().invalid())
             }
             TypeDefKind::Record => ctx.type_arena_mut().record(type_def_id, TypeIdVec::new()),
+            TypeDefKind::Struct => ctx
+                .type_arena_mut()
+                .struct_type(type_def_id, TypeIdVec::new()),
             TypeDefKind::Class => ctx.type_arena_mut().class(type_def_id, TypeIdVec::new()),
             TypeDefKind::Interface => ctx
                 .type_arena_mut()
@@ -387,7 +390,7 @@ fn resolve_generic_type_to_id(
                 // Already handled above
                 ctx.type_arena_mut().invalid()
             }
-            TypeDefKind::ErrorType | TypeDefKind::Primitive => {
+            TypeDefKind::Struct | TypeDefKind::ErrorType | TypeDefKind::Primitive => {
                 // These types don't support type parameters
                 ctx.type_arena_mut().invalid()
             }

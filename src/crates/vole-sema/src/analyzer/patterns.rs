@@ -480,7 +480,12 @@ impl Analyzer {
             let arena = self.type_arena();
             arena
                 .unwrap_nominal(scrutinee_type_id)
-                .filter(|(_, _, kind)| matches!(kind, NominalKind::Class | NominalKind::Record))
+                .filter(|(_, _, kind)| {
+                    matches!(
+                        kind,
+                        NominalKind::Class | NominalKind::Record | NominalKind::Struct
+                    )
+                })
                 .map(|(id, _, _)| id)
         };
 

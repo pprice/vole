@@ -16,6 +16,7 @@ pub enum TypeDefKind {
     Interface,
     Class,
     Record,
+    Struct,
     ErrorType,
     Primitive,
     /// Type alias (e.g., `type Numeric = i32 | i64`)

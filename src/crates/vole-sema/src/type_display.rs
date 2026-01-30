@@ -165,6 +165,24 @@ fn display_sema_type(
             }
         }
 
+        SemaType::Struct {
+            type_def_id,
+            type_args,
+        } => {
+            let type_def = entity_registry.get_type(*type_def_id);
+            let base = names.display(type_def.name_id);
+            if type_args.is_empty() {
+                base
+            } else {
+                let args = type_args
+                    .iter()
+                    .map(|&a| display_sema_type(a, arena, names, entity_registry))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}<{}>", base, args)
+            }
+        }
+
         SemaType::Error { type_def_id } => names.display(entity_registry.name_id(*type_def_id)),
 
         SemaType::Fallible { success, error } => format!(

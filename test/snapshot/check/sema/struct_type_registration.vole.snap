@@ -1,0 +1,22 @@
+[stdout]
+
+[stderr]
+  x [E2083]: missing return statement in function 'make_point'
+    ,-[<path>/struct_type_registration.vole:7:1]
+  6 |     // Struct type can be used in function signatures
+  7 | ,-> func make_point(x: i64, y: i64) -> Point {
+  8 | |       panic("not yet implemented")
+  9 | |-> }
+    : `---- function expects to return main::Point
+ 10 |     
+    `----
+  help: did you mean to add `return` before the last expression?
+  x [E2083]: missing return statement in function 'get_x'
+    ,-[<path>/struct_type_registration.vole:11:1]
+ 10 |     
+ 11 | ,-> func get_x(p: Point) -> i64 {
+ 12 | |       panic("not yet implemented")
+ 13 | |-> }
+    : `---- function expects to return i64
+    `----
+  help: did you mean to add `return` before the last expression?

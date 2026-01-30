@@ -617,7 +617,7 @@ impl Analyzer {
         let is_interface_type = nominal_kind == Some(NominalKind::Interface);
         let is_class_or_record = matches!(
             nominal_kind,
-            Some(NominalKind::Class) | Some(NominalKind::Record)
+            Some(NominalKind::Class) | Some(NominalKind::Record) | Some(NominalKind::Struct)
         );
 
         // For external default methods on CONCRETE types (not interface types)

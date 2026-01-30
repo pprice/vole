@@ -1,0 +1,13 @@
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+// Struct type can be used in function signatures
+func make_point(x: i64, y: i64) -> Point {
+    panic("not yet implemented")
+}
+
+func get_x(p: Point) -> i64 {
+    panic("not yet implemented")
+}

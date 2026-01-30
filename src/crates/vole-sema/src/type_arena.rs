@@ -184,6 +184,7 @@ pub type TypeIdVec = SmallVec<[TypeId; 4]>;
 pub enum NominalKind {
     Class,
     Record,
+    Struct,
     Interface,
     Error,
 }
@@ -195,14 +196,18 @@ impl NominalKind {
         match self {
             NominalKind::Class => TypeDefKind::Class,
             NominalKind::Record => TypeDefKind::Record,
+            NominalKind::Struct => TypeDefKind::Struct,
             NominalKind::Interface => TypeDefKind::Interface,
             NominalKind::Error => TypeDefKind::ErrorType,
         }
     }
 
-    /// Check if this is a class or record (types with fields).
+    /// Check if this is a class, record, or struct (types with fields).
     pub fn is_class_or_record(self) -> bool {
-        matches!(self, NominalKind::Class | NominalKind::Record)
+        matches!(
+            self,
+            NominalKind::Class | NominalKind::Record | NominalKind::Struct
+        )
     }
 }
 
@@ -295,6 +300,10 @@ pub enum SemaType {
         type_args: TypeIdVec,
     },
     Record {
+        type_def_id: TypeDefId,
+        type_args: TypeIdVec,
+    },
+    Struct {
         type_def_id: TypeDefId,
         type_args: TypeIdVec,
     },
@@ -607,6 +616,7 @@ impl TypeArena {
             // Nominal types sorted by TypeDefId (descending) within category
             SemaType::Class { type_def_id, .. } => (50, type_def_id.index() as u64),
             SemaType::Record { type_def_id, .. } => (50, type_def_id.index() as u64),
+            SemaType::Struct { type_def_id, .. } => (50, type_def_id.index() as u64),
             SemaType::Interface { type_def_id, .. } => (50, type_def_id.index() as u64),
             SemaType::Error { type_def_id } => (50, type_def_id.index() as u64),
             // Type params
@@ -780,6 +790,22 @@ impl TypeArena {
             return self.invalid();
         }
         self.intern(SemaType::Interface {
+            type_def_id,
+            type_args,
+        })
+    }
+
+    /// Create a struct type
+    pub fn struct_type(
+        &mut self,
+        type_def_id: TypeDefId,
+        type_args: impl Into<TypeIdVec>,
+    ) -> TypeId {
+        let type_args = type_args.into();
+        if type_args.iter().any(|&a| self.is_invalid(a)) {
+            return self.invalid();
+        }
+        self.intern(SemaType::Struct {
             type_def_id,
             type_args,
         })
@@ -1135,6 +1161,10 @@ impl TypeArena {
                 type_def_id,
                 type_args,
             } => Some((*type_def_id, type_args, NominalKind::Record)),
+            SemaType::Struct {
+                type_def_id,
+                type_args,
+            } => Some((*type_def_id, type_args, NominalKind::Struct)),
             SemaType::Interface {
                 type_def_id,
                 type_args,
@@ -1290,6 +1320,18 @@ impl TypeArena {
                     let args: Vec<String> =
                         type_args.iter().map(|&a| self.display_basic(a)).collect();
                     format!("interface#{}<{}>", type_def_id.index(), args.join(", "))
+                }
+            }
+            SemaType::Struct {
+                type_def_id,
+                type_args,
+            } => {
+                if type_args.is_empty() {
+                    format!("struct#{}", type_def_id.index())
+                } else {
+                    let args: Vec<String> =
+                        type_args.iter().map(|&a| self.display_basic(a)).collect();
+                    format!("struct#{}<{}>", type_def_id.index(), args.join(", "))
                 }
             }
             SemaType::Error { type_def_id } => format!("error#{}", type_def_id.index()),
@@ -1465,6 +1507,7 @@ impl TypeArena {
             | SemaType::Unknown
             | SemaType::Invalid { .. }
             | SemaType::Error { .. }
+            | SemaType::Struct { .. }
             | SemaType::Module(_)
             | SemaType::Placeholder(_) => ty,
         }
@@ -1690,6 +1733,7 @@ impl TypeArena {
             | SemaType::Unknown
             | SemaType::Invalid { .. }
             | SemaType::Error { .. }
+            | SemaType::Struct { .. }
             | SemaType::Module(_)
             | SemaType::Placeholder(_) => Some(ty),
         }
@@ -1826,6 +1870,7 @@ impl TypeArena {
             | SemaType::Unknown
             | SemaType::Invalid { .. }
             | SemaType::Error { .. }
+            | SemaType::Struct { .. }
             | SemaType::Module(_)
             | SemaType::Placeholder(PlaceholderKind::Inference)
             | SemaType::Placeholder(PlaceholderKind::TypeParam(_))

@@ -862,7 +862,11 @@ impl Analyzer {
             use crate::type_arena::NominalKind;
             let arena = self.type_arena();
             arena.unwrap_nominal(ty_id).and_then(|(id, _, kind)| {
-                matches!(kind, NominalKind::Class | NominalKind::Record).then_some(id)
+                matches!(
+                    kind,
+                    NominalKind::Class | NominalKind::Record | NominalKind::Struct
+                )
+                .then_some(id)
             })
         };
 

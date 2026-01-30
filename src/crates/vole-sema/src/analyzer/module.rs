@@ -276,6 +276,7 @@ impl Analyzer {
         // Interfaces and records are collected separately for post-analysis lookup
         let mut interface_names: Vec<(NameId, Symbol)> = Vec::new();
         let mut record_names: Vec<(NameId, Symbol)> = Vec::new();
+        let mut struct_names: Vec<(NameId, Symbol)> = Vec::new();
         let mut class_names: Vec<(NameId, Symbol)> = Vec::new();
         let mut error_names: Vec<(NameId, Symbol)> = Vec::new();
         // Functions and external functions are collected for post-analysis type resolution
@@ -364,6 +365,15 @@ impl Analyzer {
                         self.name_table_mut()
                             .intern(module_id, &[record.name], &module_interner);
                     record_names.push((name_id, record.name));
+                }
+                Decl::Struct(struct_decl) => {
+                    // Export structs so they can be used as types from the module
+                    let name_id = self.name_table_mut().intern(
+                        module_id,
+                        &[struct_decl.name],
+                        &module_interner,
+                    );
+                    struct_names.push((name_id, struct_decl.name));
                 }
                 Decl::Class(class) => {
                     // Export classes so they can be used as types from the module
@@ -568,6 +578,21 @@ impl Analyzer {
                     .type_arena_mut()
                     .record(type_def_id, smallvec::smallvec![]);
                 exports.insert(name_id, record_type_id);
+            }
+        }
+
+        // Now populate struct exports after sub-analysis has registered them
+        for (name_id, struct_sym) in struct_names {
+            let type_def_id = {
+                let struct_str = module_interner.resolve(struct_sym);
+                self.resolver_for_module(&module_interner, module_id)
+                    .resolve_type_str_or_interface(struct_str, &self.entity_registry())
+            };
+            if let Some(type_def_id) = type_def_id {
+                let struct_type_id = self
+                    .type_arena_mut()
+                    .struct_type(type_def_id, smallvec::smallvec![]);
+                exports.insert(name_id, struct_type_id);
             }
         }
 

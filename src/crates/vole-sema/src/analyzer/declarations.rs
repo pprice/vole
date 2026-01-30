@@ -173,6 +173,9 @@ impl Analyzer {
                 Decl::Record(r) => {
                     self.register_type_shell(r.name, TypeDefKind::Record, interner);
                 }
+                Decl::Struct(s) => {
+                    self.register_type_shell(s.name, TypeDefKind::Struct, interner);
+                }
                 Decl::Interface(i) => {
                     self.register_type_shell(i.name, TypeDefKind::Interface, interner);
                 }
@@ -208,6 +211,9 @@ impl Analyzer {
                 }
                 Decl::Record(record) => {
                     self.collect_record_signature(record, interner);
+                }
+                Decl::Struct(struct_decl) => {
+                    self.collect_struct_signature(struct_decl, interner);
                 }
                 Decl::Interface(interface_decl) => {
                     self.collect_interface_def(interface_decl, interner);
@@ -1388,6 +1394,60 @@ impl Analyzer {
                 }
             }
         }
+    }
+
+    /// Collect the signature for a struct declaration (non-generic, no methods).
+    fn collect_struct_signature(&mut self, struct_decl: &StructDecl, interner: &Interner) {
+        let name_id =
+            self.name_table_mut()
+                .intern(self.current_module, &[struct_decl.name], interner);
+
+        let entity_type_id = self
+            .entity_registry_mut()
+            .type_by_name(name_id)
+            .expect("struct shell registered in register_all_type_shells");
+
+        // Skip if already processed (shared cache scenario)
+        if self
+            .entity_registry()
+            .get_type(entity_type_id)
+            .generic_info
+            .is_some()
+        {
+            return;
+        }
+
+        // Collect field info (name interning + type resolution + never checks)
+        let (field_names, field_type_ids) =
+            self.collect_field_info(&struct_decl.fields, interner, None);
+
+        // Set generic_info (with empty type_params for non-generic structs)
+        self.entity_registry_mut().set_generic_info(
+            entity_type_id,
+            GenericTypeInfo {
+                type_params: vec![],
+                field_names: field_names.clone(),
+                field_types: field_type_ids.clone(),
+                field_has_default: vec![false; struct_decl.fields.len()],
+            },
+        );
+
+        // Register fields in EntityRegistry
+        self.register_type_fields(
+            entity_type_id,
+            struct_decl.name,
+            &struct_decl.fields,
+            &field_names,
+            &field_type_ids,
+            interner,
+        );
+
+        // Register the struct's base TypeId
+        let self_type_id = self
+            .type_arena_mut()
+            .struct_type(entity_type_id, TypeIdVec::new());
+        self.entity_registry_mut()
+            .set_base_type_id(entity_type_id, self_type_id);
     }
 
     /// Validate and register interface implementations for a type.
