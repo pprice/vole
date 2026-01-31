@@ -1,0 +1,378 @@
+struct Point { x: i64, y: i64 }
+struct Rectangle { top_left: Point, bottom_right: Point }
+struct Line { start: Point, end: Point }
+struct Named { name: string, pos: Point }
+struct Box3D { origin: Point, size: Point, label: string }
+
+func make_point(x: i64, y: i64) -> Point {
+    return Point { x: x, y: y }
+}
+
+func make_rectangle(x1: i64, y1: i64, x2: i64, y2: i64) -> Rectangle {
+    return Rectangle {
+        top_left: Point { x: x1, y: y1 },
+        bottom_right: Point { x: x2, y: y2 },
+    }
+}
+
+func make_line(x1: i64, y1: i64, x2: i64, y2: i64) -> Line {
+    return Line {
+        start: Point { x: x1, y: y1 },
+        end: Point { x: x2, y: y2 },
+    }
+}
+
+func rect_width(r: Rectangle) -> i64 {
+    return r.bottom_right.x - r.top_left.x
+}
+
+func rect_height(r: Rectangle) -> i64 {
+    return r.bottom_right.y - r.top_left.y
+}
+
+func rect_area(r: Rectangle) -> i64 {
+    return rect_width(r) * rect_height(r)
+}
+
+func line_dx(l: Line) -> i64 {
+    return l.end.x - l.start.x
+}
+
+func line_dy(l: Line) -> i64 {
+    return l.end.y - l.start.y
+}
+
+func translate_point(p: Point, dx: i64, dy: i64) -> Point {
+    return Point { x: p.x + dx, y: p.y + dy }
+}
+
+func translate_rect(r: Rectangle, dx: i64, dy: i64) -> Rectangle {
+    return Rectangle {
+        top_left: translate_point(r.top_left, dx, dy),
+        bottom_right: translate_point(r.bottom_right, dx, dy),
+    }
+}
+
+func make_named(name: string, x: i64, y: i64) -> Named {
+    return Named { name: name, pos: Point { x: x, y: y } }
+}
+
+func get_named_x(n: Named) -> i64 {
+    return n.pos.x
+}
+
+func get_named_y(n: Named) -> i64 {
+    return n.pos.y
+}
+
+tests {
+    // ===== Basic nested struct creation and field access =====
+
+    test "nested struct literal and field access" {
+        let rect = Rectangle {
+            top_left: Point { x: 0, y: 0 },
+            bottom_right: Point { x: 10, y: 5 },
+        }
+        assert(rect.top_left.x == 0)
+        assert(rect.top_left.y == 0)
+        assert(rect.bottom_right.x == 10)
+        assert(rect.bottom_right.y == 5)
+    }
+
+    test "nested struct: access inner struct as whole" {
+        let rect = Rectangle {
+            top_left: Point { x: 3, y: 7 },
+            bottom_right: Point { x: 13, y: 17 },
+        }
+        let tl = rect.top_left
+        let br = rect.bottom_right
+        assert(tl.x == 3)
+        assert(tl.y == 7)
+        assert(br.x == 13)
+        assert(br.y == 17)
+    }
+
+    // ===== Nested fields in expressions =====
+
+    test "nested struct field in arithmetic expression" {
+        let rect = Rectangle {
+            top_left: Point { x: 2, y: 3 },
+            bottom_right: Point { x: 12, y: 8 },
+        }
+        let width = rect.bottom_right.x - rect.top_left.x
+        let height = rect.bottom_right.y - rect.top_left.y
+        assert(width == 10)
+        assert(height == 5)
+    }
+
+    test "nested struct field: sum of all coordinates" {
+        let rect = Rectangle {
+            top_left: Point { x: 1, y: 2 },
+            bottom_right: Point { x: 3, y: 4 },
+        }
+        let sum = rect.top_left.x + rect.top_left.y + rect.bottom_right.x + rect.bottom_right.y
+        assert(sum == 10)
+    }
+
+    // ===== Pass nested struct to function =====
+
+    test "pass nested struct to function: width" {
+        let rect = Rectangle {
+            top_left: Point { x: 5, y: 10 },
+            bottom_right: Point { x: 25, y: 30 },
+        }
+        assert(rect_width(rect) == 20)
+    }
+
+    test "pass nested struct to function: height" {
+        let rect = Rectangle {
+            top_left: Point { x: 5, y: 10 },
+            bottom_right: Point { x: 25, y: 30 },
+        }
+        assert(rect_height(rect) == 20)
+    }
+
+    test "pass nested struct to function: area (literal)" {
+        let rect = Rectangle {
+            top_left: Point { x: 0, y: 0 },
+            bottom_right: Point { x: 10, y: 5 },
+        }
+        assert(rect_area(rect) == 50)
+    }
+
+    test "pass nested struct to function: line delta" {
+        let l = Line {
+            start: Point { x: 1, y: 2 },
+            end: Point { x: 4, y: 6 },
+        }
+        assert(line_dx(l) == 3)
+        assert(line_dy(l) == 4)
+    }
+
+    // ===== Return nested struct from function =====
+
+    test "return nested struct from function" {
+        let rect = make_rectangle(0, 0, 100, 50)
+        assert(rect.top_left.x == 0)
+        assert(rect.top_left.y == 0)
+        assert(rect.bottom_right.x == 100)
+        assert(rect.bottom_right.y == 50)
+    }
+
+    test "return nested struct from function: line" {
+        let l = make_line(10, 20, 30, 40)
+        assert(l.start.x == 10)
+        assert(l.start.y == 20)
+        assert(l.end.x == 30)
+        assert(l.end.y == 40)
+    }
+
+    test "return nested struct from function: then access fields" {
+        let rect = make_rectangle(5, 10, 15, 20)
+        let width = rect.bottom_right.x - rect.top_left.x
+        let height = rect.bottom_right.y - rect.top_left.y
+        assert(width == 10)
+        assert(height == 10)
+    }
+
+    test "return nested struct: pass to single-use function" {
+        let rect = make_rectangle(5, 10, 25, 30)
+        assert(rect_width(rect) == 20)
+    }
+
+    // ===== Copy semantics with nested structs =====
+
+    test "nested struct copy semantics: modify copy, original unchanged" {
+        let rect1 = Rectangle {
+            top_left: Point { x: 0, y: 0 },
+            bottom_right: Point { x: 10, y: 10 },
+        }
+        let rect2 = rect1
+        // rect2 is a copy; verify both have same values
+        assert(rect2.top_left.x == 0)
+        assert(rect2.top_left.y == 0)
+        assert(rect2.bottom_right.x == 10)
+        assert(rect2.bottom_right.y == 10)
+        // original is still the same
+        assert(rect1.top_left.x == 0)
+        assert(rect1.bottom_right.x == 10)
+    }
+
+    test "nested struct copy semantics: extract inner struct" {
+        let rect = Rectangle {
+            top_left: Point { x: 5, y: 15 },
+            bottom_right: Point { x: 25, y: 35 },
+        }
+        let tl = rect.top_left
+        // tl is a copy of the inner struct
+        assert(tl.x == 5)
+        assert(tl.y == 15)
+        // original nested field is unchanged
+        assert(rect.top_left.x == 5)
+        assert(rect.top_left.y == 15)
+    }
+
+    // ===== Transform nested struct (pass and return) =====
+
+    test "translate nested struct" {
+        let rect = Rectangle {
+            top_left: Point { x: 0, y: 0 },
+            bottom_right: Point { x: 10, y: 5 },
+        }
+        let moved = translate_rect(rect, 100, 200)
+        assert(moved.top_left.x == 100)
+        assert(moved.top_left.y == 200)
+        assert(moved.bottom_right.x == 110)
+        assert(moved.bottom_right.y == 205)
+    }
+
+    test "translate nested struct: original unchanged" {
+        let rect = Rectangle {
+            top_left: Point { x: 0, y: 0 },
+            bottom_right: Point { x: 10, y: 5 },
+        }
+        let moved = translate_rect(rect, 50, 50)
+        // Original should be unchanged (copy semantics)
+        assert(rect.top_left.x == 0)
+        assert(rect.top_left.y == 0)
+        assert(rect.bottom_right.x == 10)
+        assert(rect.bottom_right.y == 5)
+        // Moved should have new values
+        assert(moved.top_left.x == 50)
+        assert(moved.top_left.y == 50)
+    }
+
+    // ===== Nested struct with string field =====
+
+    test "nested struct with string field: create and access" {
+        let n = Named { name: "origin", pos: Point { x: 0, y: 0 } }
+        assert(n.name == "origin")
+        assert(n.pos.x == 0)
+        assert(n.pos.y == 0)
+    }
+
+    test "nested struct with string field: non-zero coords" {
+        let n = Named { name: "target", pos: Point { x: 42, y: 99 } }
+        assert(n.name == "target")
+        assert(n.pos.x == 42)
+        assert(n.pos.y == 99)
+    }
+
+    test "nested struct with string field: return from function (name only)" {
+        let n = make_named("center", 50, 50)
+        assert(n.name == "center")
+    }
+
+    test "nested struct with string field: return from function (pos only)" {
+        let n = make_named("center", 50, 50)
+        assert(n.pos.x == 50)
+        assert(n.pos.y == 50)
+    }
+
+    // NOTE: accessing both n.name and n.pos from a make_named result in the same
+    // scope triggers bug v-b241 (sret nested struct corruption)
+
+    test "nested struct with string field: pass to function" {
+        let n = Named { name: "test", pos: Point { x: 7, y: 8 } }
+        assert(get_named_x(n) == 7)
+        assert(get_named_y(n) == 8)
+    }
+
+    test "nested struct with string field: string operations on field" {
+        let n = Named { name: "point", pos: Point { x: 3, y: 4 } }
+        let label = n.name + "(" + n.pos.x + "," + n.pos.y + ")"
+        assert(label == "point(3,4)")
+    }
+
+    // ===== Multiple nested struct instances =====
+
+    test "multiple nested struct instances" {
+        let r1 = Rectangle {
+            top_left: Point { x: 0, y: 0 },
+            bottom_right: Point { x: 5, y: 5 },
+        }
+        let r2 = Rectangle {
+            top_left: Point { x: 10, y: 10 },
+            bottom_right: Point { x: 20, y: 20 },
+        }
+        assert(rect_area(r1) == 25)
+        assert(rect_area(r2) == 100)
+    }
+
+    // ===== Nested struct with computed inner fields =====
+
+    test "nested struct: inner struct from function" {
+        let rect = Rectangle {
+            top_left: make_point(1, 2),
+            bottom_right: make_point(11, 12),
+        }
+        assert(rect.top_left.x == 1)
+        assert(rect.top_left.y == 2)
+        assert(rect.bottom_right.x == 11)
+        assert(rect.bottom_right.y == 12)
+    }
+
+    test "nested struct: inner struct from expression" {
+        let x_offset = 5
+        let y_offset = 10
+        let rect = Rectangle {
+            top_left: Point { x: x_offset, y: y_offset },
+            bottom_right: Point { x: x_offset + 20, y: y_offset + 30 },
+        }
+        assert(rect.top_left.x == 5)
+        assert(rect.top_left.y == 10)
+        assert(rect.bottom_right.x == 25)
+        assert(rect.bottom_right.y == 40)
+    }
+
+    // ===== Chained function calls with nested structs =====
+
+    test "chained: make then compute width" {
+        let width = rect_width(make_rectangle(3, 0, 13, 0))
+        assert(width == 10)
+    }
+
+    // NOTE: rect_area(make_rectangle(...)) triggers bug v-b241
+    // (sret return passed to function that forwards param to multiple sub-calls)
+
+    // ===== Three levels of nesting =====
+
+    test "three-level nesting: Box3D creation and access" {
+        let b = Box3D {
+            origin: Point { x: 1, y: 2 },
+            size: Point { x: 10, y: 20 },
+            label: "box",
+        }
+        assert(b.origin.x == 1)
+        assert(b.origin.y == 2)
+        assert(b.size.x == 10)
+        assert(b.size.y == 20)
+        assert(b.label == "box")
+    }
+
+    test "Box3D: arithmetic on nested fields" {
+        let b = Box3D {
+            origin: Point { x: 5, y: 10 },
+            size: Point { x: 100, y: 200 },
+            label: "region",
+        }
+        let end_x = b.origin.x + b.size.x
+        let end_y = b.origin.y + b.size.y
+        assert(end_x == 105)
+        assert(end_y == 210)
+    }
+
+    test "Box3D: extract inner struct" {
+        let b = Box3D {
+            origin: Point { x: 0, y: 0 },
+            size: Point { x: 50, y: 50 },
+            label: "square",
+        }
+        let o = b.origin
+        let s = b.size
+        assert(o.x == 0)
+        assert(o.y == 0)
+        assert(s.x == 50)
+        assert(s.y == 50)
+    }
+}
