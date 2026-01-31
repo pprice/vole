@@ -680,24 +680,7 @@ impl Analyzer {
             TypeExpr::Union(variants) => {
                 for variant in variants {
                     self.validate_type_annotation(variant, span, interner, type_param_scope);
-                    // Check if variant is a struct type (not allowed in unions)
-                    if let TypeExpr::Named(sym) = variant {
-                        let resolved = self
-                            .resolver(interner)
-                            .resolve_type(*sym, &self.entity_registry());
-                        if let Some(type_def_id) = resolved {
-                            let kind = self.entity_registry().type_kind(type_def_id);
-                            if kind == TypeDefKind::Struct {
-                                self.add_error(
-                                    SemanticError::StructInUnion {
-                                        name: interner.resolve(*sym).to_string(),
-                                        span: span.into(),
-                                    },
-                                    span,
-                                );
-                            }
-                        }
-                    }
+                    // Structs are allowed in unions via auto-boxing (v-7d4b)
                 }
             }
             TypeExpr::Function {

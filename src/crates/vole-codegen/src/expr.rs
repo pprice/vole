@@ -1357,23 +1357,12 @@ impl Cg<'_, '_, '_> {
                             };
 
                         // Extract and bind fields
-                        for field_pattern in fields {
-                            let field_name = self.interner().resolve(field_pattern.field_name);
-                            let (slot, field_type_id) = get_field_slot_and_type_id_cg(
-                                field_source_type_id,
-                                field_name,
-                                self,
-                            )?;
-                            let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
-                            let result_raw = self.call_runtime(
-                                RuntimeFn::InstanceGetField,
-                                &[field_source, slot_val],
-                            )?;
-                            let converted = self.convert_field_value(result_raw, field_type_id);
-                            let var = self.builder.declare_var(converted.ty);
-                            self.builder.def_var(var, converted.value);
-                            arm_variables.insert(field_pattern.binding, (var, field_type_id));
-                        }
+                        self.extract_record_fields(
+                            fields,
+                            field_source,
+                            field_source_type_id,
+                            &mut arm_variables,
+                        )?;
 
                         // extract_block continues to guard/body logic
                         // We stay in extract_block - it becomes the effective "arm block"
@@ -1400,23 +1389,12 @@ impl Cg<'_, '_, '_> {
                             };
 
                         // Extract and bind fields
-                        for field_pattern in fields {
-                            let field_name = self.interner().resolve(field_pattern.field_name);
-                            let (slot, field_type_id) = get_field_slot_and_type_id_cg(
-                                field_source_type_id,
-                                field_name,
-                                self,
-                            )?;
-                            let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
-                            let result_raw = self.call_runtime(
-                                RuntimeFn::InstanceGetField,
-                                &[field_source, slot_val],
-                            )?;
-                            let converted = self.convert_field_value(result_raw, field_type_id);
-                            let var = self.builder.declare_var(converted.ty);
-                            self.builder.def_var(var, converted.value);
-                            arm_variables.insert(field_pattern.binding, (var, field_type_id));
-                        }
+                        self.extract_record_fields(
+                            fields,
+                            field_source,
+                            field_source_type_id,
+                            &mut arm_variables,
+                        )?;
 
                         pattern_check
                     }
@@ -2118,6 +2096,42 @@ impl Cg<'_, '_, '_> {
 
         let is_this_error = self.builder.ins().icmp_imm(IntCC::Equal, tag, error_tag);
         Ok(Some(is_this_error))
+    }
+
+    /// Extract and bind fields from a record pattern source.
+    ///
+    /// For class/instance types, uses `InstanceGetField` runtime call.
+    /// For struct types (auto-boxed in unions), uses `struct_field_load` since the
+    /// source pointer is a raw heap pointer, not an `RcInstance`.
+    fn extract_record_fields(
+        &mut self,
+        fields: &[RecordFieldPattern],
+        field_source: Value,
+        field_source_type_id: TypeId,
+        arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
+    ) -> Result<(), String> {
+        let is_struct = self.arena().is_struct(field_source_type_id);
+        for field_pattern in fields {
+            let field_name = self.interner().resolve(field_pattern.field_name);
+            let (slot, field_type_id) =
+                get_field_slot_and_type_id_cg(field_source_type_id, field_name, self)?;
+
+            let converted = if is_struct {
+                // Struct was auto-boxed: field_source is a raw heap pointer
+                // with fields at flat offsets, same layout as stack structs
+                self.struct_field_load(field_source, slot, field_type_id, field_source_type_id)?
+            } else {
+                // Class/instance: use runtime InstanceGetField
+                let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
+                let result_raw =
+                    self.call_runtime(RuntimeFn::InstanceGetField, &[field_source, slot_val])?;
+                self.convert_field_value(result_raw, field_type_id)
+            };
+            let var = self.builder.declare_var(converted.ty);
+            self.builder.def_var(var, converted.value);
+            arm_variables.insert(field_pattern.binding, (var, field_type_id));
+        }
+        Ok(())
     }
 
     /// Compile a record pattern inside an error pattern (e.g., error Overflow { value, max }).

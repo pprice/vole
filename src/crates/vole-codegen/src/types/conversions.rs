@@ -212,7 +212,14 @@ pub(crate) fn type_id_size(
         ArenaType::Union(variants) => {
             let max_payload = variants
                 .iter()
-                .map(|&t| type_id_size(t, pointer_type, entity_registry, arena))
+                .map(|&t| {
+                    // Struct variants are auto-boxed, so their payload is a pointer
+                    if matches!(arena.get(t), ArenaType::Struct { .. }) {
+                        pointer_type.bytes()
+                    } else {
+                        type_id_size(t, pointer_type, entity_registry, arena)
+                    }
+                })
                 .max()
                 .unwrap_or(0);
             8 + max_payload.div_ceil(8) * 8

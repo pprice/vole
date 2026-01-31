@@ -193,9 +193,16 @@ impl Cg<'_, '_, '_> {
                 .load(inner_cranelift_type, MemFlags::new(), obj.value, 8);
 
         // Get field from the inner object
-        let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
-        let field_raw = self.call_runtime(RuntimeFn::InstanceGetField, &[inner_obj, slot_val])?;
-        let field_compiled = self.convert_field_value(field_raw, field_type_id);
+        let is_struct = self.arena().is_struct(inner_type_id);
+        let field_compiled = if is_struct {
+            // Struct was auto-boxed: inner_obj is a raw heap pointer
+            self.struct_field_load(inner_obj, slot, field_type_id, inner_type_id)?
+        } else {
+            let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
+            let field_raw =
+                self.call_runtime(RuntimeFn::InstanceGetField, &[inner_obj, slot_val])?;
+            self.convert_field_value(field_raw, field_type_id)
+        };
 
         // Wrap the field value in an optional (using construct_union_id)
         // But if field type is already optional, it's already a union - just use it directly

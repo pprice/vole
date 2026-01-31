@@ -826,6 +826,13 @@ impl Cg<'_, '_, '_> {
             return Ok(value);
         }
 
+        // If the value is a struct, box it first (auto-boxing for union storage)
+        let value = if self.arena().is_struct(value.type_id) {
+            self.copy_struct_to_heap(value)?
+        } else {
+            value
+        };
+
         // Find the position of value's type in variants
         let (tag, actual_value, actual_type_id) =
             if let Some(pos) = variants.iter().position(|&v| v == value.type_id) {

@@ -1,0 +1,77 @@
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+func maybe_point(flag: bool) -> Point | nil {
+    if flag {
+        return Point { x: 10, y: 20 }
+    }
+    return nil
+}
+
+tests {
+    test "struct in union literal" {
+        let v: Point | nil = Point { x: 10, y: 20 }
+        let result = match v {
+            Point { x, y } => x + y
+            nil => -1
+        }
+        assert(result == 30)
+    }
+
+    test "struct from function true" {
+        let v = maybe_point(true)
+        let result = match v {
+            Point { x, y } => x
+            nil => -1
+        }
+        assert(result == 10)
+    }
+
+    test "struct from function false" {
+        let v = maybe_point(false)
+        let result = match v {
+            Point => 1
+            nil => 0
+        }
+        assert(result == 0)
+    }
+
+    test "struct in union assignment" {
+        let mut v: Point | nil = nil
+        v = Point { x: 42, y: 99 }
+        let result = match v {
+            Point { x, y } => x + y
+            nil => -1
+        }
+        assert(result == 141)
+    }
+
+    test "struct or i64 union" {
+        let v: Point | i64 = Point { x: 1, y: 2 }
+        let result = match v {
+            Point { x, y } => x + y
+            i64 => -1
+        }
+        assert(result == 3)
+    }
+
+    test "i64 in struct or i64 union" {
+        let v: Point | i64 = 42
+        let result = match v {
+            Point => -1
+            i64 => 1
+        }
+        assert(result == 1)
+    }
+
+    test "struct partial destructure" {
+        let v: Point | nil = Point { x: 7, y: 8 }
+        let result = match v {
+            Point { x } => x
+            nil => -1
+        }
+        assert(result == 7)
+    }
+}

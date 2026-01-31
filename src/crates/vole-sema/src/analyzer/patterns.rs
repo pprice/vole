@@ -70,6 +70,28 @@ impl Analyzer {
 
                             Some(pattern_type_id)
                         }
+                        TypeDefKind::Struct => {
+                            // Structs participate in unions via auto-boxing (v-7d4b)
+                            let pattern_type_id = {
+                                let mut arena = self.type_arena_mut();
+                                arena.struct_type(type_def_id, vec![])
+                            };
+                            self.check_type_pattern_compatibility_id(
+                                pattern_type_id,
+                                scrutinee_type_id,
+                                span,
+                                interner,
+                            );
+
+                            // Compute IsCheckResult for codegen
+                            let is_check_result = self.compute_type_pattern_check_result(
+                                pattern_type_id,
+                                scrutinee_type_id,
+                            );
+                            self.record_is_check_result(pattern.id, is_check_result);
+
+                            Some(pattern_type_id)
+                        }
                         _ => {
                             // Regular identifier binding pattern for other type kinds
                             self.scope.define(
@@ -263,6 +285,16 @@ impl Analyzer {
                                 } else {
                                     (None, vec![])
                                 }
+                            }
+                            TypeDefKind::Struct => {
+                                // Struct destructuring in match (auto-boxed in unions)
+                                let fields_ref = generic_info
+                                    .as_ref()
+                                    .map(get_fields_from_info)
+                                    .unwrap_or_default();
+                                let struct_type_id =
+                                    self.type_arena_mut().struct_type(type_id, Vec::new());
+                                (Some(struct_type_id), fields_ref)
                             }
                             TypeDefKind::ErrorType => {
                                 // Error type destructuring: error Overflow { value, max }
@@ -703,6 +735,10 @@ impl Analyzer {
                         TypeDefKind::Class => {
                             self.type_arena_mut().class(type_def_id, vec![]).into()
                         }
+                        TypeDefKind::Struct => self
+                            .type_arena_mut()
+                            .struct_type(type_def_id, vec![])
+                            .into(),
                         _ => None,
                     }
                 })
@@ -722,6 +758,10 @@ impl Analyzer {
                         TypeDefKind::Class => {
                             self.type_arena_mut().class(type_def_id, vec![]).into()
                         }
+                        TypeDefKind::Struct => self
+                            .type_arena_mut()
+                            .struct_type(type_def_id, vec![])
+                            .into(),
                         _ => None,
                     }
                 })

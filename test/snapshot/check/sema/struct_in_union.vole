@@ -1,7 +1,0 @@
-struct Point {
-    x: i64,
-    y: i64,
-}
-
-// Error: struct type cannot be used as a union variant
-let Shape = i64 | Point
