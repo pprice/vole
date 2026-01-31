@@ -142,6 +142,7 @@ pub struct StructDecl {
     pub type_params: Vec<TypeParam>,
     pub fields: Vec<FieldDef>,
     pub methods: Vec<FuncDecl>,
+    pub statics: Option<StaticsBlock>, // Static methods
     pub span: Span,
 }
 

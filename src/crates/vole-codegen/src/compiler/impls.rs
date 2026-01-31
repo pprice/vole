@@ -71,7 +71,7 @@ impl Compiler<'_> {
             TypeMethodsData {
                 name: struct_decl.name,
                 methods: &struct_decl.methods,
-                statics: None,
+                statics: struct_decl.statics.as_ref(),
                 type_kind: "struct",
             },
             program,

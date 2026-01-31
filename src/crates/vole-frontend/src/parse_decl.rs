@@ -222,9 +222,20 @@ impl<'src> Parser<'src> {
 
         let mut fields = Vec::new();
         let mut methods = Vec::new();
+        let mut statics: Option<StaticsBlock> = None;
 
         while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
-            if self.check(TokenType::KwFunc) {
+            if self.check(TokenType::KwStatics) {
+                if statics.is_some() {
+                    return Err(ParseError::new(
+                        ParserError::DuplicateStaticsBlock {
+                            span: self.current.span.into(),
+                        },
+                        self.current.span,
+                    ));
+                }
+                statics = Some(self.parse_statics_block()?);
+            } else if self.check(TokenType::KwFunc) {
                 // Parse method
                 if let Decl::Function(func) = self.function_decl()? {
                     methods.push(func);
@@ -277,6 +288,7 @@ impl<'src> Parser<'src> {
             type_params,
             fields,
             methods,
+            statics,
             span,
         }))
     }

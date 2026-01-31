@@ -306,7 +306,7 @@ impl Compiler<'_> {
                     self.compile_implement_block(impl_block)?;
                 }
                 Decl::Struct(struct_decl) => {
-                    if !struct_decl.methods.is_empty() {
+                    if !struct_decl.methods.is_empty() || struct_decl.statics.is_some() {
                         self.compile_struct_methods(struct_decl, program)?;
                     }
                 }

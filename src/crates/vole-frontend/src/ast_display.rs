@@ -183,6 +183,17 @@ impl<'a> AstPrinter<'a> {
         for method in &struct_decl.methods {
             inner.write_func_decl(out, method);
         }
+
+        if let Some(ref statics) = struct_decl.statics {
+            inner.write_indent(out);
+            out.push_str("statics:\n");
+            let statics_inner = inner.indented();
+            for method in &statics.methods {
+                statics_inner.write_indent(out);
+                let method_name = self.interner.resolve(method.name);
+                writeln!(out, "StaticMethod \"{}\"", method_name).unwrap();
+            }
+        }
     }
 
     fn write_test_case(&self, out: &mut String, test: &TestCase) {

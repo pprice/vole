@@ -339,6 +339,11 @@ impl Compiler<'_> {
                 .insert((type_name_id, method_name_id), func_key);
         }
 
+        // Register static methods from statics block
+        if let Some(ref statics) = struct_decl.statics {
+            self.register_static_methods(statics, struct_decl.name);
+        }
+
         let vole_type_id = self
             .state
             .type_metadata

@@ -1292,6 +1292,21 @@ impl Analyzer {
                 Some(self_type_id),
             );
         }
+
+        // Register static methods
+        if let Some(ref statics) = struct_decl.statics {
+            for method in &statics.methods {
+                let method_type_params = self.build_method_type_params(method, None, interner);
+                self.register_static_method_helper(
+                    entity_type_id,
+                    struct_decl.name,
+                    method,
+                    interner,
+                    None, // no type_param_scope for non-generic structs
+                    method_type_params,
+                );
+            }
+        }
     }
 
     /// Validate and register interface implementations for a type.
