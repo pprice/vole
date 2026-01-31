@@ -404,6 +404,13 @@ impl Analyzer {
         // Resolve type aliases (uses resolver which searches parent_modules)
         sub.collect_type_aliases(&synthetic_program, interner);
 
+        // Process module imports so they're available within the tests block.
+        // This must run under the parent module (saved_module) so that relative
+        // import paths resolve against the actual file, not the virtual module.
+        sub.current_module = saved_module;
+        sub.process_module_imports(&synthetic_program, interner);
+        sub.current_module = virtual_module_id;
+
         // Collect type signatures (records, classes, interfaces, implement blocks) under
         // the virtual module so they match the shells registered above.
         sub.collect_type_signatures(&synthetic_program, interner);

@@ -1,0 +1,77 @@
+// Test imports inside tests blocks (not at top level)
+// Verifies that process_module_imports works within virtual test modules
+
+// No top-level imports
+
+tests "stdlib import inside tests block" {
+    let math = import "std:math"
+
+    test "module import works inside tests block" {
+        assert(math.sqrt(16.0) == 4.0)
+        assert(math.PI > 3.14)
+    }
+
+    test "module functions available from tests-scoped import" {
+        assert(math.min(3.0, 5.0) == 3.0)
+        assert(math.max(3.0, 5.0) == 5.0)
+    }
+}
+
+tests "destructured import inside tests block" {
+    let { sqrt, min, max } = import "std:math"
+
+    test "destructured functions work inside tests block" {
+        assert(sqrt(25.0) == 5.0)
+        assert(min(1.0, 2.0) == 1.0)
+        assert(max(1.0, 2.0) == 2.0)
+    }
+}
+
+tests "relative import inside tests block" {
+    let utils = import "../imports/utils"
+
+    test "relative module import works inside tests block" {
+        assert(utils.VERSION == 42)
+        assert(utils.add(10, 20) == 30)
+    }
+
+    test "relative module functions work" {
+        assert(utils.multiply(4, 5) == 20)
+    }
+}
+
+tests "destructured relative import inside tests block" {
+    let { add, multiply } = import "../imports/utils"
+
+    test "destructured relative import functions work" {
+        assert(add(3, 7) == 10)
+        assert(multiply(6, 7) == 42)
+    }
+}
+
+tests "import does not leak to other tests blocks" {
+    test "can still use prelude types without leaked imports" {
+        let x: i64 = 42
+        assert(x == 42)
+    }
+
+    test "basic arithmetic still works" {
+        assert(1 + 1 == 2)
+    }
+}
+
+tests "mixed imports and scoped declarations" {
+    let math = import "std:math"
+
+    func double(x: f64) -> f64 => x * 2.0
+
+    test "import and scoped function coexist" {
+        assert(math.sqrt(4.0) == 2.0)
+        assert(double(5.0) == 10.0)
+    }
+
+    test "combine import and scoped function" {
+        let result = double(math.sqrt(9.0))
+        assert(result == 6.0)
+    }
+}

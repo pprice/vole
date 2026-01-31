@@ -15,8 +15,8 @@ use crate::FunctionKey;
 use crate::context::Cg;
 use crate::types::{CodegenCtx, CompileEnv, function_name_id_with_interner, type_id_to_cranelift};
 use vole_frontend::{
-    Block, Decl, Expr, ExprKind, FuncDecl, InterfaceMethod, Interner, LetInit, LetStmt,
-    LetTupleStmt, PatternKind, Program, Span, Stmt, Symbol, TestCase, TestsDecl,
+    Block, Decl, Expr, ExprKind, FuncDecl, InterfaceMethod, Interner, LetInit, LetTupleStmt,
+    PatternKind, Program, Span, Stmt, Symbol, TestCase, TestsDecl,
 };
 use vole_identity::{ModuleId, NameId};
 use vole_sema::generic::{
@@ -828,16 +828,14 @@ impl Compiler<'_> {
         // Phase 1: Compile scoped function/class bodies (and nested tests)
         self.compile_tests_scoped_bodies(tests_decl, program, test_count)?;
 
-        // Collect scoped let declarations for compiling in each test
-        let scoped_lets: Vec<&LetStmt> = tests_decl
+        // Collect scoped let declarations (Let and LetTuple) for compiling in each test
+        let scoped_let_stmts: Vec<Stmt> = tests_decl
             .decls
             .iter()
-            .filter_map(|d| {
-                if let Decl::Let(let_stmt) = d {
-                    Some(let_stmt)
-                } else {
-                    None
-                }
+            .filter_map(|d| match d {
+                Decl::Let(let_stmt) => Some(Stmt::Let(let_stmt.clone())),
+                Decl::LetTuple(let_tuple) => Some(Stmt::LetTuple(let_tuple.clone())),
+                _ => None,
             })
             .collect();
 
@@ -873,13 +871,10 @@ impl Compiler<'_> {
                 // Compile scoped let declarations and test body
                 let mut cg = Cg::new(&mut builder, &mut codegen_ctx, &env);
 
-                if !scoped_lets.is_empty() {
+                if !scoped_let_stmts.is_empty() {
                     // Create a synthetic block with the let statements
                     let let_block = Block {
-                        stmts: scoped_lets
-                            .iter()
-                            .map(|s| Stmt::Let((*s).clone()))
-                            .collect(),
+                        stmts: scoped_let_stmts.clone(),
                         span: Span::default(),
                     };
                     cg.block(&let_block)?;

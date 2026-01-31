@@ -73,9 +73,10 @@ impl<'a> Resolver<'a> {
 
         // 1b. Priority module (for type shadowing in tests blocks)
         if let Some(priority) = self.priority_module
-            && let Some(id) = self.table.name_id_raw(priority, &[name]) {
-                return Some(id);
-            }
+            && let Some(id) = self.table.name_id_raw(priority, &[name])
+        {
+            return Some(id);
+        }
 
         // 2. Current module
         if let Some(id) = self.table.name_id_raw(self.current_module, &[name]) {

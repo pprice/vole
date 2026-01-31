@@ -867,7 +867,14 @@ impl Analyzer {
         // caches ensures each main program analysis starts fresh while still benefiting
         // from cached prelude analysis (prelude modules don't have generic classes that
         // get monomorphized in the main program).
-        self.entity_registry_mut().clear_monomorph_caches();
+        //
+        // Only clear when this is the main program analysis (loading_prelude == false).
+        // Sub-analyzers for imported modules (loading_prelude == true) share the parent's
+        // entity registry via ctx, so clearing here would destroy monomorph instances
+        // created by earlier tests blocks that have already been analyzed.
+        if !self.loading_prelude {
+            self.entity_registry_mut().clear_monomorph_caches();
+        }
 
         // Populate well-known types after prelude has registered all interfaces
         self.name_table_mut().populate_well_known();
