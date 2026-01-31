@@ -10,6 +10,7 @@ use crate::context::Cg;
 use crate::errors::CodegenError;
 use crate::types::CompiledValue;
 use cranelift::prelude::*;
+use cranelift_codegen::ir::StackSlot;
 use vole_frontend::{Decl, Expr, FieldDef, Program, StructLiteralExpr, Symbol};
 use vole_sema::entity_defs::TypeDefKind;
 use vole_sema::type_arena::TypeId;
@@ -107,7 +108,13 @@ impl Cg<'_, '_, '_> {
         if is_struct_type {
             let result_type_id = self.get_expr_type(&expr.id).unwrap_or(metadata.vole_type);
             let field_slots = metadata.field_slots.clone();
-            return self.struct_value_literal(sl, &field_slots, result_type_id, &path_str);
+            return self.struct_value_literal(
+                sl,
+                &field_slots,
+                result_type_id,
+                &path_str,
+                type_def_id,
+            );
         }
 
         let type_id = metadata.type_id;
@@ -392,6 +399,7 @@ impl Cg<'_, '_, '_> {
         field_slots: &FxHashMap<String, usize>,
         result_type_id: TypeId,
         path_str: &str,
+        type_def_id: vole_identity::TypeDefId,
     ) -> Result<CompiledValue, String> {
         // Use flat total size to account for nested struct fields
         let total_size = {
@@ -404,14 +412,13 @@ impl Cg<'_, '_, '_> {
         // Allocate stack slot for the struct
         let slot = self.alloc_stack(total_size);
 
-        // Compile and store each field
+        // Compile and store each explicitly provided field
         for init in &sl.fields {
             let init_name = self.interner().resolve(init.name);
             let field_slot = *field_slots
                 .get(init_name)
                 .ok_or_else(|| format!("Unknown field: {} in type {}", init_name, path_str))?;
 
-            // Compute byte offset accounting for nested struct sizes
             let offset = {
                 let arena = self.arena();
                 let entities = self.query().registry();
@@ -425,28 +432,47 @@ impl Cg<'_, '_, '_> {
             };
 
             let value = self.expr(&init.value)?;
+            self.store_struct_field(value, slot, offset)?;
+        }
 
-            // If the field value is itself a struct, copy its flat data inline
-            let field_flat_slots = {
+        // Handle omitted fields with default values
+        let provided_fields: HashSet<String> = sl
+            .fields
+            .iter()
+            .map(|init| self.interner().resolve(init.name).to_string())
+            .collect();
+
+        let type_name = sl.path.last().copied();
+        let field_default_ptrs = if let Some(type_name) = type_name {
+            self.collect_field_default_ptrs(type_name, &provided_fields, type_def_id)
+        } else {
+            Vec::new()
+        };
+
+        for (field_name, default_expr_ptr) in field_default_ptrs {
+            let field_slot = *field_slots.get(&field_name).ok_or_else(|| {
+                format!(
+                    "Unknown field: {} in type {} (default)",
+                    field_name, path_str
+                )
+            })?;
+
+            let offset = {
                 let arena = self.arena();
                 let entities = self.query().registry();
-                super::helpers::struct_flat_slot_count(value.type_id, arena, entities)
+                super::helpers::struct_field_byte_offset(
+                    result_type_id,
+                    field_slot,
+                    arena,
+                    entities,
+                )
+                .unwrap_or((field_slot as i32) * 8)
             };
-            if let Some(nested_flat) = field_flat_slots {
-                // Copy all flat slots from the nested struct into our allocation
-                for i in 0..nested_flat {
-                    let src_off = (i as i32) * 8;
-                    let dst_off = offset + src_off;
-                    let val =
-                        self.builder
-                            .ins()
-                            .load(types::I64, MemFlags::new(), value.value, src_off);
-                    self.builder.ins().stack_store(val, slot, dst_off);
-                }
-            } else {
-                let store_value = convert_to_i64_for_storage(self.builder, &value);
-                self.builder.ins().stack_store(store_value, slot, offset);
-            }
+
+            // SAFETY: See collect_field_default_ptrs documentation
+            let default_expr: &Expr = unsafe { &*default_expr_ptr };
+            let value = self.expr(default_expr)?;
+            self.store_struct_field(value, slot, offset)?;
         }
 
         // Return pointer to the struct
@@ -458,5 +484,34 @@ impl Cg<'_, '_, '_> {
             ty: ptr_type,
             type_id: result_type_id,
         })
+    }
+
+    /// Store a value into a struct field's stack slot, handling nested structs.
+    fn store_struct_field(
+        &mut self,
+        value: CompiledValue,
+        slot: StackSlot,
+        offset: i32,
+    ) -> Result<(), String> {
+        let field_flat_slots = {
+            let arena = self.arena();
+            let entities = self.query().registry();
+            super::helpers::struct_flat_slot_count(value.type_id, arena, entities)
+        };
+        if let Some(nested_flat) = field_flat_slots {
+            for i in 0..nested_flat {
+                let src_off = (i as i32) * 8;
+                let dst_off = offset + src_off;
+                let val =
+                    self.builder
+                        .ins()
+                        .load(types::I64, MemFlags::new(), value.value, src_off);
+                self.builder.ins().stack_store(val, slot, dst_off);
+            }
+        } else {
+            let store_value = convert_to_i64_for_storage(self.builder, &value);
+            self.builder.ins().stack_store(store_value, slot, offset);
+        }
+        Ok(())
     }
 }

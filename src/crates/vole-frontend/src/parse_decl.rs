@@ -228,6 +228,13 @@ impl<'src> Parser<'src> {
             self.consume(TokenType::Colon, "expected ':' after field name")?;
             let ty = self.parse_type()?;
 
+            // Parse optional default value: field: Type = expr
+            let default_value = if self.match_token(TokenType::Eq) {
+                Some(Box::new(self.expression(0)?))
+            } else {
+                None
+            };
+
             // Allow optional comma
             if self.check(TokenType::Comma) {
                 self.advance();
@@ -236,7 +243,7 @@ impl<'src> Parser<'src> {
             fields.push(FieldDef {
                 name: field_name,
                 ty,
-                default_value: None,
+                default_value,
                 span: field_span.merge(self.previous.span),
             });
             self.skip_newlines();

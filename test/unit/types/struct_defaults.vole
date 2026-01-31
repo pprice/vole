@@ -1,0 +1,45 @@
+struct Config {
+    debug: bool = false,
+    count: i64 = 10,
+    name: string = "default",
+}
+
+struct Point {
+    x: i64,
+    y: i64 = 0,
+}
+
+tests {
+    test "struct with all defaults omitted" {
+        let c = Config {}
+        assert(c.debug == false)
+        assert(c.count == 10)
+        assert(c.name == "default")
+    }
+
+    test "struct with some defaults overridden" {
+        let c = Config { debug: true, count: 42 }
+        assert(c.debug == true)
+        assert(c.count == 42)
+        assert(c.name == "default")
+    }
+
+    test "struct with all fields explicit" {
+        let c = Config { debug: true, count: 99, name: "custom" }
+        assert(c.debug == true)
+        assert(c.count == 99)
+        assert(c.name == "custom")
+    }
+
+    test "struct with partial defaults - required and optional" {
+        let p = Point { x: 5 }
+        assert(p.x == 5)
+        assert(p.y == 0)
+    }
+
+    test "struct with partial defaults - all provided" {
+        let p = Point { x: 5, y: 10 }
+        assert(p.x == 5)
+        assert(p.y == 10)
+    }
+}

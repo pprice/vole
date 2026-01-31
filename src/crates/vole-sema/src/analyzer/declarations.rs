@@ -1248,7 +1248,8 @@ impl Analyzer {
             return;
         }
 
-        // Collect field info (name interning + type resolution + never checks)
+        // Validate field defaults and collect field info
+        let field_has_default = self.validate_field_defaults(&struct_decl.fields, interner);
         let (field_names, field_type_ids) =
             self.collect_field_info(&struct_decl.fields, interner, None);
 
@@ -1259,7 +1260,7 @@ impl Analyzer {
                 type_params: vec![],
                 field_names: field_names.clone(),
                 field_types: field_type_ids.clone(),
-                field_has_default: vec![false; struct_decl.fields.len()],
+                field_has_default,
             },
         );
 
