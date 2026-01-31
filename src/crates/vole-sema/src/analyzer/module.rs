@@ -273,9 +273,8 @@ impl Analyzer {
         let mut exports = FxHashMap::default();
         let mut constants = FxHashMap::default();
         let mut external_funcs = FxHashSet::default();
-        // Interfaces and records are collected separately for post-analysis lookup
+        // Interfaces are collected separately for post-analysis lookup
         let mut interface_names: Vec<(NameId, Symbol)> = Vec::new();
-        let mut record_names: Vec<(NameId, Symbol)> = Vec::new();
         let mut struct_names: Vec<(NameId, Symbol)> = Vec::new();
         let mut class_names: Vec<(NameId, Symbol)> = Vec::new();
         let mut error_names: Vec<(NameId, Symbol)> = Vec::new();
@@ -358,13 +357,6 @@ impl Analyzer {
                             .intern(module_id, &[iface.name], &module_interner);
                     // Store interface name for post-analysis lookup
                     interface_names.push((name_id, iface.name));
-                }
-                Decl::Record(record) => {
-                    // Export records so they can be used as types from the module
-                    let name_id =
-                        self.name_table_mut()
-                            .intern(module_id, &[record.name], &module_interner);
-                    record_names.push((name_id, record.name));
                 }
                 Decl::Struct(struct_decl) => {
                     // Export structs so they can be used as types from the module
@@ -561,23 +553,6 @@ impl Analyzer {
                     .type_arena_mut()
                     .interface(type_def_id, smallvec::smallvec![]);
                 exports.insert(name_id, iface_type_id);
-            }
-        }
-
-        // Now populate record exports after sub-analysis has registered them
-        for (name_id, record_sym) in record_names {
-            let type_def_id = {
-                let record_str = module_interner.resolve(record_sym);
-                // Use resolve_type_str_or_interface which has fallback to record_by_short_name
-                // Use resolver_for_module with the module's ID, not self.current_module
-                self.resolver_for_module(&module_interner, module_id)
-                    .resolve_type_str_or_interface(record_str, &self.entity_registry())
-            };
-            if let Some(type_def_id) = type_def_id {
-                let record_type_id = self
-                    .type_arena_mut()
-                    .record(type_def_id, smallvec::smallvec![]);
-                exports.insert(name_id, record_type_id);
             }
         }
 

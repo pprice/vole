@@ -66,8 +66,8 @@ impl<'a> AstPrinter<'a> {
             Decl::LetTuple(_) => {
                 // TODO: implement let tuple display
             }
-            Decl::Class(_) | Decl::Record(_) => {
-                // TODO: implement class/record display
+            Decl::Class(_) => {
+                // TODO: implement class display
             }
             Decl::Struct(s) => self.write_struct_decl(out, s),
             Decl::Interface(_) | Decl::Implement(_) => {

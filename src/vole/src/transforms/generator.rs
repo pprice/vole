@@ -119,7 +119,7 @@ impl<'a> GeneratorTransformer<'a> {
                 // Add implement block FIRST (will be inserted second = comes after record)
                 new_declarations.push((idx, Decl::Implement(impl_block)));
                 // Add record declaration SECOND (will be inserted first = comes before impl)
-                new_declarations.push((idx, Decl::Record(record_decl)));
+                new_declarations.push((idx, Decl::Class(record_decl)));
                 // Replace original function
                 program.declarations[idx] = Decl::Function(new_func);
             }
@@ -277,7 +277,7 @@ impl<'a> GeneratorTransformer<'a> {
     fn transform_generator(
         &mut self,
         func: &FuncDecl,
-    ) -> Option<(RecordDecl, ImplementBlock, FuncDecl)> {
+    ) -> Option<(ClassDecl, ImplementBlock, FuncDecl)> {
         // Extract the element type from Iterator<T>
         let element_type = match &func.return_type {
             Some(TypeExpr::Generic { name, args })
@@ -347,7 +347,7 @@ impl<'a> GeneratorTransformer<'a> {
             name: iterator_sym,
             args: vec![element_type.clone()],
         };
-        let record_decl = RecordDecl {
+        let record_decl = ClassDecl {
             name: record_name,
             type_params: Vec::new(),
             implements: vec![iterator_type.clone()],
@@ -1123,7 +1123,7 @@ mod tests {
         assert_eq!(program.declarations.len(), 3);
 
         // First should be the record
-        assert!(matches!(program.declarations[0], Decl::Record(_)));
+        assert!(matches!(program.declarations[0], Decl::Class(_)));
 
         // Second should be the implement block
         assert!(matches!(program.declarations[1], Decl::Implement(_)));

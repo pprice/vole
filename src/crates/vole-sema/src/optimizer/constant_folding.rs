@@ -141,16 +141,6 @@ impl<'a> ConstantFolder<'a> {
                     self.fold_func(method);
                 }
             }
-            Decl::Record(record) => {
-                for field in &mut record.fields {
-                    if let Some(ref mut default) = field.default_value {
-                        self.fold_expr(default);
-                    }
-                }
-                for method in &mut record.methods {
-                    self.fold_func(method);
-                }
-            }
             Decl::Struct(_)
             | Decl::Interface(_)
             | Decl::Implement(_)

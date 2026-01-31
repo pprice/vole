@@ -928,9 +928,6 @@ impl Analyzer {
                 Decl::Class(class) => {
                     self.check_type_body(class, interner)?;
                 }
-                Decl::Record(record) => {
-                    self.check_type_body(record, interner)?;
-                }
                 Decl::Interface(interface_decl) => {
                     // Check static method default bodies
                     if let Some(ref statics) = interface_decl.statics {

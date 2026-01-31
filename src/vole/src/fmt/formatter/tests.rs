@@ -341,19 +341,19 @@ fn test_class_with_method() {
     assert_eq!(fmt(source), expected);
 }
 
-// === Record declarations ===
+// === Record declarations (record keyword now produces class) ===
 
 #[test]
 fn test_record_simple() {
     let source = "record Point { x: i32, y: i32, }";
-    let expected = "record Point {\n    x: i32,\n    y: i32,\n}\n";
+    let expected = "class Point {\n    x: i32,\n    y: i32,\n}\n";
     assert_eq!(fmt(source), expected);
 }
 
 #[test]
 fn test_record_with_implements() {
     let source = "record User implements Hashable { id: i64, }";
-    let expected = "record User implements Hashable {\n    id: i64,\n}\n";
+    let expected = "class User implements Hashable {\n    id: i64,\n}\n";
     assert_eq!(fmt(source), expected);
 }
 

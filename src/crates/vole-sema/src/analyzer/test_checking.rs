@@ -7,7 +7,7 @@
 
 use super::*;
 
-/// Trait for type declarations (Class or Record) that share common checking logic.
+/// Trait for type declarations (Class) that share common checking logic.
 /// This allows unified handling of field defaults, methods, statics, and interface validation.
 pub(crate) trait TypeBodyDecl {
     fn name(&self) -> Symbol;
@@ -19,27 +19,6 @@ pub(crate) trait TypeBodyDecl {
 }
 
 impl TypeBodyDecl for ClassDecl {
-    fn name(&self) -> Symbol {
-        self.name
-    }
-    fn type_params(&self) -> &[TypeParam] {
-        &self.type_params
-    }
-    fn fields(&self) -> &[FieldDef] {
-        &self.fields
-    }
-    fn methods(&self) -> &[FuncDecl] {
-        &self.methods
-    }
-    fn statics(&self) -> Option<&StaticsBlock> {
-        self.statics.as_ref()
-    }
-    fn span(&self) -> Span {
-        self.span
-    }
-}
-
-impl TypeBodyDecl for RecordDecl {
     fn name(&self) -> Symbol {
         self.name
     }

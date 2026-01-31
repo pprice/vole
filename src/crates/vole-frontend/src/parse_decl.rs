@@ -14,7 +14,7 @@ impl<'src> Parser<'src> {
             TokenType::KwTests => self.tests_decl(),
             TokenType::KwLet => self.let_decl(),
             TokenType::KwClass => self.class_decl(),
-            TokenType::KwRecord => self.record_decl(),
+            TokenType::KwRecord => self.class_decl(),
             TokenType::KwStruct => self.struct_decl(),
             TokenType::KwInterface => self.interface_decl(false),
             TokenType::KwStatic => self.static_interface_decl(),
@@ -195,40 +195,6 @@ impl<'src> Parser<'src> {
         let span = start_span.merge(self.previous.span);
 
         Ok(Decl::Class(ClassDecl {
-            name,
-            type_params,
-            implements,
-            fields,
-            external,
-            methods,
-            statics,
-            span,
-        }))
-    }
-
-    fn record_decl(&mut self) -> Result<Decl, ParseError> {
-        let start_span = self.current.span;
-        self.advance(); // consume 'record'
-
-        let name_token = self.current.clone();
-        self.consume(TokenType::Identifier, "expected record name")?;
-        let name = self.interner.intern(&name_token.lexeme);
-
-        // Parse optional type parameters: record Box<T>
-        let type_params = self.parse_type_params()?;
-
-        // Parse optional implements clause
-        let implements = self.parse_implements_clause()?;
-
-        self.consume(TokenType::LBrace, "expected '{' after record name")?;
-        self.skip_newlines();
-
-        let (fields, external, methods, statics) = self.parse_class_body()?;
-
-        self.consume(TokenType::RBrace, "expected '}' to close record")?;
-        let span = start_span.merge(self.previous.span);
-
-        Ok(Decl::Record(RecordDecl {
             name,
             type_params,
             implements,

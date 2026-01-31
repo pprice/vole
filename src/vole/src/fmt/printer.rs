@@ -41,7 +41,6 @@ fn print_decl<'a>(
         Decl::LetTuple(_) => todo!("let tuple decl printing"),
         Decl::Tests(tests) => print_tests_decl(arena, tests, interner),
         Decl::Class(class) => print_class_decl(arena, class, interner),
-        Decl::Record(record) => print_record_decl(arena, record, interner),
         Decl::Struct(struct_decl) => print_struct_decl(arena, struct_decl, interner),
         Decl::Interface(iface) => print_interface_decl(arena, iface, interner),
         Decl::Implement(impl_block) => print_implement_block(arena, impl_block, interner),
@@ -1347,39 +1346,6 @@ fn print_class_decl<'a>(
     )
 }
 
-/// Print a record declaration.
-fn print_record_decl<'a>(
-    arena: &'a Arena<'a>,
-    record: &RecordDecl,
-    interner: &Interner,
-) -> DocBuilder<'a, Arena<'a>> {
-    let name = interner.resolve(record.name).to_string();
-
-    let implements = if record.implements.is_empty() {
-        arena.nil()
-    } else {
-        let impl_types: Vec<_> = record
-            .implements
-            .iter()
-            .map(|ty| print_type_expr(arena, ty, interner))
-            .collect();
-        arena
-            .text(" implements ")
-            .append(arena.intersperse(impl_types, arena.text(", ")))
-    };
-
-    print_class_like_body(
-        arena,
-        &name,
-        implements,
-        &record.fields,
-        record.external.as_ref(),
-        &record.methods,
-        interner,
-        "record",
-    )
-}
-
 fn print_struct_decl<'a>(
     arena: &'a Arena<'a>,
     struct_decl: &StructDecl,
@@ -1433,7 +1399,7 @@ fn print_error_decl<'a>(
     }
 }
 
-/// Print the body of a class-like declaration (class or record).
+/// Print the body of a class-like declaration.
 #[allow(clippy::too_many_arguments)]
 fn print_class_like_body<'a>(
     arena: &'a Arena<'a>,

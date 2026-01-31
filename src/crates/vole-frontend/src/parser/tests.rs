@@ -863,11 +863,11 @@ record Point {
     let program = parser.parse_program().unwrap();
     assert_eq!(program.declarations.len(), 1);
     match &program.declarations[0] {
-        Decl::Record(record) => {
-            assert_eq!(record.fields.len(), 2);
-            assert_eq!(record.methods.len(), 0);
+        Decl::Class(class) => {
+            assert_eq!(class.fields.len(), 2);
+            assert_eq!(class.methods.len(), 0);
         }
-        _ => panic!("expected record declaration"),
+        _ => panic!("expected class declaration (record parses as class)"),
     }
 }
 
@@ -1013,10 +1013,10 @@ fn test_parse_generic_record() {
     let mut parser = Parser::new(source);
     let program = parser.parse_program().expect("should parse");
 
-    if let Decl::Record(r) = &program.declarations[0] {
-        assert_eq!(r.type_params.len(), 1);
+    if let Decl::Class(c) = &program.declarations[0] {
+        assert_eq!(c.type_params.len(), 1);
     } else {
-        panic!("expected record");
+        panic!("expected class (record parses as class)");
     }
 }
 

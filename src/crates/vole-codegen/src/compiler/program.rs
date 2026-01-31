@@ -149,22 +149,19 @@ impl Compiler<'_> {
         // Count total tests to assign unique IDs
         let mut test_count = 0usize;
 
-        // Pre-pass: Register all record/class names first so they're available for field type resolution
-        // This allows records to reference each other (e.g., Company.ceo: Person?)
+        // Pre-pass: Register all class names first so they're available for field type resolution
+        // This allows classes to reference each other (e.g., Company.ceo: Person?)
         for decl in &program.declarations {
             match decl {
                 Decl::Class(class) => {
                     self.pre_register_class(class);
-                }
-                Decl::Record(record) => {
-                    self.pre_register_record(record);
                 }
                 Decl::Struct(s) => {
                     self.pre_register_struct(s);
                 }
                 Decl::Tests(_) if self.skip_tests => {}
                 Decl::Tests(_) => {
-                    // Scoped types use finalize_module_class/record in pass 1
+                    // Scoped types use finalize_module_class in pass 1
                 }
                 _ => {}
             }
@@ -231,9 +228,6 @@ impl Compiler<'_> {
                 }
                 Decl::Class(class) => {
                     self.finalize_class(class, program);
-                }
-                Decl::Record(record) => {
-                    self.finalize_record(record, program);
                 }
                 Decl::Interface(_) => {
                     // Interface declarations don't generate code directly
@@ -304,9 +298,6 @@ impl Compiler<'_> {
                 }
                 Decl::Class(class) => {
                     self.compile_class_methods(class, program)?;
-                }
-                Decl::Record(record) => {
-                    self.compile_record_methods(record, program)?;
                 }
                 Decl::Interface(_) => {
                     // Interface methods are compiled when used via implement blocks
@@ -429,13 +420,6 @@ impl Compiler<'_> {
                     self.finalize_module_class(class, module_interner, module_id);
                 }
             }
-
-            // Finalize module records (register type metadata, declare methods)
-            for decl in &program.declarations {
-                if let Decl::Record(record) = decl {
-                    self.finalize_module_record(record, module_interner, module_id);
-                }
-            }
         }
 
         // ============================================
@@ -529,19 +513,6 @@ impl Compiler<'_> {
                     )?;
                 }
             }
-
-            // Compile module record methods (both instance and static)
-            for decl in &program.declarations {
-                if let Decl::Record(record) = decl {
-                    tracing::debug!(record_name = %module_interner.resolve(record.name), "Compiling module record methods");
-                    self.compile_module_record_methods(
-                        record,
-                        module_interner,
-                        module_path,
-                        &module_global_inits,
-                    )?;
-                }
-            }
         }
 
         tracing::debug!("compile_module_functions complete");
@@ -611,13 +582,6 @@ impl Compiler<'_> {
                     self.import_module_class(class, module_interner, module_id);
                 }
             }
-
-            // Finalize module records (register type metadata, import methods)
-            for decl in &program.declarations {
-                if let Decl::Record(record) = decl {
-                    self.import_module_record(record, module_interner, module_id);
-                }
-            }
         }
 
         Ok(())
@@ -641,20 +605,6 @@ impl Compiler<'_> {
 
     /// Import a module record - register metadata and import methods.
     /// Used when modules are already compiled in a shared cache.
-    fn import_module_record(
-        &mut self,
-        record: &vole_frontend::RecordDecl,
-        module_interner: &Interner,
-        module_id: ModuleId,
-    ) {
-        // First finalize to get type metadata registered (including static methods in method_func_keys)
-        self.finalize_module_record(record, module_interner, module_id);
-
-        // The methods are already compiled - they'll be linked via external symbols
-        // No additional work needed here since method calls go through func_registry
-        // which will find the imported function IDs
-    }
-
     /// Compile a single module function with its own interner
     fn compile_module_function(
         &mut self,
@@ -819,7 +769,7 @@ impl Compiler<'_> {
         program: &Program,
         test_count: &mut usize,
     ) -> Result<(), String> {
-        // Phase 1: Compile scoped function/class/record bodies (and nested tests)
+        // Phase 1: Compile scoped function/class bodies (and nested tests)
         self.compile_tests_scoped_bodies(tests_decl, program, test_count)?;
 
         // Collect scoped let declarations for compiling in each test
@@ -956,12 +906,6 @@ impl Compiler<'_> {
                         self.finalize_module_class(class, interner, vm_id);
                     }
                 }
-                Decl::Record(record) => {
-                    // Scoped records are registered under the virtual module
-                    if let Some(vm_id) = virtual_module_id {
-                        self.finalize_module_record(record, interner, vm_id);
-                    }
-                }
                 Decl::Implement(impl_block) => {
                     // Scoped implement blocks target types under the virtual module
                     if let Some(vm_id) = virtual_module_id {
@@ -1037,9 +981,6 @@ impl Compiler<'_> {
                 }
                 Decl::Class(class) => {
                     self.compile_class_methods_in_module(class, program, virtual_module_id)?;
-                }
-                Decl::Record(record) => {
-                    self.compile_record_methods_in_module(record, program, virtual_module_id)?;
                 }
                 Decl::Implement(impl_block) => {
                     self.compile_implement_block_in_module(impl_block, virtual_module_id)?;
@@ -1566,7 +1507,7 @@ impl Compiler<'_> {
         &mut self,
         program: &Program,
     ) -> Result<(), String> {
-        let (class_asts, record_asts) = self.build_generic_type_asts(program);
+        let class_asts = self.build_generic_type_asts(program);
 
         // Collect instances to avoid borrow issues
         let instances = self
@@ -1599,23 +1540,10 @@ impl Compiler<'_> {
                 "looking for method to compile"
             );
 
-            // Try to find the method in a class first
+            // Try to find the method in a class
             if let Some(class) = class_asts.get(&instance.class_name) {
                 let method_name_str = self.query().display_name(instance.method_name);
                 let method = class
-                    .methods
-                    .iter()
-                    .find(|m| self.query().resolve_symbol(m.name) == method_name_str);
-                if let Some(method) = method {
-                    self.compile_monomorphized_class_method(method, &instance)?;
-                    continue;
-                }
-            }
-
-            // Try records
-            if let Some(record) = record_asts.get(&instance.class_name) {
-                let method_name_str = self.query().display_name(instance.method_name);
-                let method = record
                     .methods
                     .iter()
                     .find(|m| self.query().resolve_symbol(m.name) == method_name_str);
@@ -1629,7 +1557,7 @@ impl Compiler<'_> {
             let class_name = self.query().display_name(instance.class_name);
             let method_name = self.query().display_name(instance.method_name);
             return Err(format!(
-                "Internal error: method {} not found in class/record {}",
+                "Internal error: method {} not found in class {}",
                 method_name, class_name
             ));
         }
@@ -1731,7 +1659,7 @@ impl Compiler<'_> {
         &mut self,
         program: &Program,
     ) -> Result<(), String> {
-        let (class_asts, record_asts) = self.build_generic_type_asts(program);
+        let class_asts = self.build_generic_type_asts(program);
 
         // Collect instances to avoid borrow issues
         let instances = self
@@ -1754,24 +1682,9 @@ impl Compiler<'_> {
                 "looking for static method to compile"
             );
 
-            // Try to find the static method in a class first
+            // Try to find the static method in a class
             if let Some(class) = class_asts.get(&instance.class_name)
                 && let Some(ref statics) = class.statics
-            {
-                let method_name_str = self.query().display_name(instance.method_name);
-                let method = statics
-                    .methods
-                    .iter()
-                    .find(|m| self.query().resolve_symbol(m.name) == method_name_str);
-                if let Some(method) = method {
-                    self.compile_monomorphized_static_method(method, &instance)?;
-                    continue;
-                }
-            }
-
-            // Try records
-            if let Some(record) = record_asts.get(&instance.class_name)
-                && let Some(ref statics) = record.statics
             {
                 let method_name_str = self.query().display_name(instance.method_name);
                 let method = statics
@@ -1788,7 +1701,7 @@ impl Compiler<'_> {
             let class_name = self.query().display_name(instance.class_name);
             let method_name = self.query().display_name(instance.method_name);
             return Err(format!(
-                "Internal error: static method {} not found in class/record {}",
+                "Internal error: static method {} not found in class {}",
                 method_name, class_name
             ));
         }
@@ -1857,16 +1770,13 @@ impl Compiler<'_> {
         Ok(())
     }
 
-    /// Build maps of generic class/record NameIds to their AST declarations.
+    /// Build maps of generic class NameIds to their AST declarations.
     /// Used by both class method and static method monomorphization.
     fn build_generic_type_asts<'a>(
         &self,
         program: &'a Program,
-    ) -> (
-        FxHashMap<NameId, &'a vole_frontend::ClassDecl>,
-        FxHashMap<NameId, &'a vole_frontend::RecordDecl>,
-    ) {
-        let class_asts = program
+    ) -> FxHashMap<NameId, &'a vole_frontend::ClassDecl> {
+        program
             .declarations
             .iter()
             .filter_map(|decl| {
@@ -1880,25 +1790,7 @@ impl Compiler<'_> {
                 }
                 None
             })
-            .collect();
-
-        let record_asts = program
-            .declarations
-            .iter()
-            .filter_map(|decl| {
-                if let Decl::Record(record) = decl
-                    && !record.type_params.is_empty()
-                {
-                    let query = self.query();
-                    let program_module = self.program_module();
-                    let name_id = query.try_name_id(program_module, &[record.name])?;
-                    return Some((name_id, record));
-                }
-                None
-            })
-            .collect();
-
-        (class_asts, record_asts)
+            .collect()
     }
 
     // ═══════════════════════════════════════════════════════════════════════

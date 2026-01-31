@@ -58,7 +58,7 @@ pub enum Decl {
     Let(LetStmt),
     LetTuple(LetTupleStmt), // Top-level destructuring: let { a, b } = import "..."
     Class(ClassDecl),
-    Record(RecordDecl),
+
     Struct(StructDecl),
     Interface(InterfaceDecl),
     Implement(ImplementBlock),
@@ -90,7 +90,7 @@ pub enum FuncBody {
 #[derive(Debug, Clone)]
 pub struct TestsDecl {
     pub label: Option<String>,
-    /// Scoped declarations (func, let, record, etc.) and nested tests blocks
+    /// Scoped declarations (func, let, class, etc.) and nested tests blocks
     pub decls: Vec<Decl>,
     pub tests: Vec<TestCase>,
     pub span: Span,
@@ -113,7 +113,7 @@ pub struct Param {
     pub span: Span,
 }
 
-/// Field definition in a class or record
+/// Field definition in a class
 #[derive(Debug, Clone)]
 pub struct FieldDef {
     pub name: Symbol,
@@ -128,19 +128,6 @@ pub struct ClassDecl {
     pub name: Symbol,
     pub type_params: Vec<TypeParam>,
     pub implements: Vec<TypeExpr>, // Interfaces this class implements (may include generics)
-    pub fields: Vec<FieldDef>,
-    pub external: Option<ExternalBlock>, // External methods from native code
-    pub methods: Vec<FuncDecl>,
-    pub statics: Option<StaticsBlock>, // Static methods
-    pub span: Span,
-}
-
-/// Record declaration (immutable class)
-#[derive(Debug, Clone)]
-pub struct RecordDecl {
-    pub name: Symbol,
-    pub type_params: Vec<TypeParam>,
-    pub implements: Vec<TypeExpr>, // Interfaces this record implements (may include generics)
     pub fields: Vec<FieldDef>,
     pub external: Option<ExternalBlock>, // External methods from native code
     pub methods: Vec<FuncDecl>,

@@ -20,7 +20,6 @@ fn find_type_fields(program: &Program, type_name: Symbol) -> Option<&[FieldDef]>
     for decl in &program.declarations {
         match decl {
             Decl::Class(class) if class.name == type_name => return Some(&class.fields),
-            Decl::Record(record) if record.name == type_name => return Some(&record.fields),
             Decl::Struct(s) if s.name == type_name => return Some(&s.fields),
             _ => {}
         }
