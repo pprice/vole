@@ -1701,6 +1701,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .builder
             .ins()
             .call_indirect(sig_ref, func_ptr_val, args);
+        self.field_cache.clear(); // External calls may mutate instance fields
         let results = self.builder.inst_results(call_inst);
 
         if results.is_empty() {

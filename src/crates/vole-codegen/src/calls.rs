@@ -778,6 +778,7 @@ impl Cg<'_, '_, '_> {
         }
 
         let call_inst = self.builder.ins().call(func_ref, &args);
+        self.field_cache.clear(); // Callee may mutate instance fields
 
         // For sret, the returned value is the sret pointer we passed in
         if sret_slot.is_some() {
@@ -876,6 +877,7 @@ impl Cg<'_, '_, '_> {
         }
 
         let call_inst = self.builder.ins().call(func_ref, &args);
+        self.field_cache.clear(); // Callee may mutate instance fields
 
         if sret_slot.is_some() {
             let results = self.builder.inst_results(call_inst);
@@ -1279,6 +1281,7 @@ impl Cg<'_, '_, '_> {
         }
 
         let call_inst = self.builder.ins().call_indirect(sig_ref, func_ptr, &args);
+        self.field_cache.clear(); // Callee may mutate instance fields
         let results = self.builder.inst_results(call_inst);
 
         if results.is_empty() {
@@ -1373,9 +1376,12 @@ impl Cg<'_, '_, '_> {
         let sig_ref = self.builder.import_signature(sig);
         let ptr_type = self.ptr_type();
         let func_ptr_val = self.builder.ins().iconst(ptr_type, native_func.ptr as i64);
-        self.builder
+        let inst = self
+            .builder
             .ins()
-            .call_indirect(sig_ref, func_ptr_val, args)
+            .call_indirect(sig_ref, func_ptr_val, args);
+        self.field_cache.clear(); // Native calls may mutate instance fields
+        inst
     }
 
     /// Emit a native call that returns a C-ABI struct.
@@ -1409,9 +1415,12 @@ impl Cg<'_, '_, '_> {
 
             let sig_ref = self.builder.import_signature(sig);
             let func_ptr_val = self.builder.ins().iconst(ptr_type, native_func.ptr as i64);
-            self.builder
+            let inst = self
+                .builder
                 .ins()
-                .call_indirect(sig_ref, func_ptr_val, args)
+                .call_indirect(sig_ref, func_ptr_val, args);
+            self.field_cache.clear(); // Native calls may mutate instance fields
+            inst
         } else {
             // Large struct: sret convention
             // Add hidden sret pointer as first parameter
@@ -1435,9 +1444,12 @@ impl Cg<'_, '_, '_> {
 
             let sig_ref = self.builder.import_signature(sig);
             let func_ptr_val = self.builder.ins().iconst(ptr_type, native_func.ptr as i64);
-            self.builder
+            let inst = self
+                .builder
                 .ins()
-                .call_indirect(sig_ref, func_ptr_val, &sret_args)
+                .call_indirect(sig_ref, func_ptr_val, &sret_args);
+            self.field_cache.clear(); // Native calls may mutate instance fields
+            inst
         }
     }
 

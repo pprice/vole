@@ -1,0 +1,78 @@
+// Bug: Class field access as function argument prevents subsequent mutation visibility
+// When a class field is passed as an argument to a function, subsequent mutations
+// to that field are not visible (the old value is used instead of the new one).
+
+func identity(x: i32) -> i32 => x
+
+class Counter {
+    value: i32,
+
+    func get() -> i32 => self.value
+
+    func set(v: i32) {
+        self.value = v
+    }
+
+    func increment() {
+        self.value = self.value + 1
+    }
+}
+
+tests "field mutation visibility" {
+    test "field mutation visible after function call with field arg" {
+        let c = Counter { value: 1 }
+        let _ = identity(c.value)  // pass field as function argument
+        c.value = 42
+        assert(c.value == 42)  // should see mutated value
+    }
+
+    test "field mutation visible after method call" {
+        let c = Counter { value: 1 }
+        let _ = identity(c.value)
+        c.increment()
+        assert(c.value == 2)
+    }
+
+    test "field mutation visible after set method" {
+        let c = Counter { value: 1 }
+        let _ = identity(c.value)
+        c.set(99)
+        assert(c.value == 99)
+    }
+
+    test "multiple field reads and mutations" {
+        let c = Counter { value: 10 }
+        let a = identity(c.value)
+        assert(a == 10)
+        c.value = 20
+        let b = identity(c.value)
+        assert(b == 20)
+        c.value = 30
+        assert(c.value == 30)
+    }
+
+    test "multiple increments after field read" {
+        let c = Counter { value: 0 }
+        let _ = identity(c.value)
+        c.increment()
+        c.increment()
+        c.increment()
+        assert(c.value == 3)
+    }
+
+    test "method getter after mutation" {
+        let c = Counter { value: 5 }
+        let _ = identity(c.value)
+        c.set(42)
+        assert(c.get() == 42)
+    }
+
+    test "field read between method calls" {
+        let c = Counter { value: 0 }
+        let _ = identity(c.value)
+        c.increment()
+        assert(c.value == 1)
+        c.increment()
+        assert(c.value == 2)
+    }
+}

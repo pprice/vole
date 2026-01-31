@@ -179,6 +179,7 @@ impl Cg<'_, '_, '_> {
                     .jit_module()
                     .declare_func_in_func(func_id, self.builder.func);
                 let call_inst = self.builder.ins().call(func_ref, &args);
+                self.field_cache.clear(); // Callee may mutate instance fields
                 return Ok(self.call_result(call_inst, return_type_id));
             } else {
                 return Err(CodegenError::not_found(
@@ -546,6 +547,7 @@ impl Cg<'_, '_, '_> {
         }
 
         let call = self.builder.ins().call(method_func_ref, &args);
+        self.field_cache.clear(); // Methods may mutate fields via self
 
         if is_sret {
             // Sret: result[0] is the sret pointer we passed in
@@ -1088,6 +1090,7 @@ impl Cg<'_, '_, '_> {
             .builder
             .ins()
             .call_indirect(sig_ref, func_ptr, &call_args);
+        self.field_cache.clear(); // Interface methods may mutate fields
         let results = self.builder.inst_results(call);
 
         if is_void_return {
