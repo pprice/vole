@@ -869,14 +869,14 @@ impl Analyzer {
         };
 
         let Some(type_def_id) = type_def_id else {
-            self.type_error_id("record, class, or module", ty_id, init_span);
+            self.type_error_id("class, struct, or module", ty_id, init_span);
             return;
         };
 
         // Look up fields from entity_registry - clone to avoid borrow conflicts
         let generic_info_opt = self.entity_registry().type_generic_info(type_def_id);
         let Some(generic_info) = generic_info_opt else {
-            self.type_error_id("record or class with fields", ty_id, init_span);
+            self.type_error_id("class or struct with fields", ty_id, init_span);
             return;
         };
 

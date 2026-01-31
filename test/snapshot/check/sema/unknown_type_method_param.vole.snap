@@ -6,7 +6,7 @@
  4 | class Processor {
  5 |     func process(x: BadType) -> i64 {
    :                  |
-   :                  `-- not a known class or record
+   :                  `-- not a known class
  6 |         return 0
    `----
   x [E2023]: unknown method 'process' on type 'main::Processor'

@@ -362,7 +362,10 @@ impl<'src> Parser<'src> {
         }
 
         let end_span = self.current.span;
-        self.consume(TokenType::RBrace, "expected '}' after record pattern")?;
+        self.consume(
+            TokenType::RBrace,
+            "expected '}' after destructuring pattern",
+        )?;
 
         let span = start_span.merge(end_span);
         Ok(Pattern {

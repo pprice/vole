@@ -6,6 +6,6 @@
  13 | func main() {
  14 |     let s = ScopedOnly { value: 42 }
     :             ^^^^^^^^^^^^|^^^^^^^^^^^
-    :                         `-- not a known class or record
+    :                         `-- not a known class
  15 | }
     `----

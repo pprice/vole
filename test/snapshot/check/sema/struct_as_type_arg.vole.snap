@@ -9,4 +9,4 @@
     :                  `-- struct type not allowed as type argument
  14 | }
     `----
-  help: structs are value types and cannot be used as generic type parameters; use a record or class instead
+  help: structs are value types and cannot be used as generic type parameters; use a class instead

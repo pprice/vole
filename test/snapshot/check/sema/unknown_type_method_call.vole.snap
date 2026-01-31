@@ -7,7 +7,7 @@
   7 | ,->     func get() -> BadType {
   8 | |           return self.value
   9 | |->     }
-    : `---- not a known class or record
+    : `---- not a known class
  10 |     }
     `----
   x [E2023]: unknown method 'get' on type 'main::Counter'

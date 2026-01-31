@@ -283,7 +283,7 @@ impl Analyzer {
                             _ => {
                                 self.add_error(
                                     SemanticError::PatternTypeMismatch {
-                                        expected: "record, class, or error".to_string(),
+                                        expected: "class, struct, or error".to_string(),
                                         found: interner.resolve(*name).to_string(),
                                         span: (span).into(),
                                     },
@@ -421,7 +421,7 @@ impl Analyzer {
                 // Unknown field in pattern
                 self.add_error(
                     SemanticError::UnknownField {
-                        ty: "record".to_string(),
+                        ty: "class".to_string(),
                         field: field_name_str.to_string(),
                         span: span.into(),
                     },
@@ -475,7 +475,7 @@ impl Analyzer {
             let found = self.type_display_id(scrutinee_type_id);
             self.add_error(
                 SemanticError::PatternTypeMismatch {
-                    expected: "record or class".to_string(),
+                    expected: "class or struct".to_string(),
                     found,
                     span: span.into(),
                 },

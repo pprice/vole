@@ -44,7 +44,7 @@ external("std:time") {
 // Duration - represents a time span in nanoseconds
 // =============================================================================
 
-record Duration {
+class Duration {
     nanos: i64,
 
     statics {
@@ -161,7 +161,7 @@ record Duration {
 // Timestamp - represents a point in time
 // =============================================================================
 
-record Timestamp {
+class Timestamp {
     nanos: i64,
     offset_mins: i64,
 

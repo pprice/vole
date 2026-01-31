@@ -7,6 +7,6 @@
  5 | ,->         func create() -> BadType {
  6 | |               return 0
  7 | |->         }
-   : `---- not a known class or record
+   : `---- not a known class
  8 |         }
    `----

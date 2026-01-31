@@ -7,7 +7,7 @@
  11 | ,->     func get() -> BadType {
  12 | |           return self.value
  13 | |->     }
-    : `---- not a known class or record
+    : `---- not a known class
  14 |     }
     `----
   x [E2001]: expected main::Getter, found main::Counter

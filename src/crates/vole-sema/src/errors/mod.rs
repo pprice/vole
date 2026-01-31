@@ -171,7 +171,7 @@ pub enum SemanticError {
     #[diagnostic(code(E2020))]
     UnknownType {
         name: String,
-        #[label("not a known class or record")]
+        #[label("not a known class")]
         span: SourceSpan,
     },
 
@@ -661,9 +661,7 @@ pub enum SemanticError {
     #[error("struct type '{name}' cannot be used as a union variant")]
     #[diagnostic(
         code(E2101),
-        help(
-            "structs are value types and cannot participate in unions; use a record or class instead"
-        )
+        help("structs are value types and cannot participate in unions; use a class instead")
     )]
     StructInUnion {
         name: String,
@@ -675,7 +673,7 @@ pub enum SemanticError {
     #[diagnostic(
         code(E2102),
         help(
-            "structs are value types and cannot be used as generic type parameters; use a record or class instead"
+            "structs are value types and cannot be used as generic type parameters; use a class instead"
         )
     )]
     StructAsTypeArg {

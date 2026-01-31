@@ -124,11 +124,7 @@ impl Analyzer {
                 .map(|(id, args, kind)| (id, args.clone(), kind))
         };
         let Some((type_def_id, type_args_id, nominal_kind)) = struct_info else {
-            self.type_error_id(
-                "class, record, or struct",
-                object_type_id,
-                field_access.object.span,
-            );
+            self.type_error_id("class or struct", object_type_id, field_access.object.span);
             return Ok(self.ty_invalid_traced_id("field_access_non_struct"));
         };
 
@@ -170,7 +166,7 @@ impl Analyzer {
         let kind_str = match nominal_kind {
             crate::type_arena::NominalKind::Class => "class",
             crate::type_arena::NominalKind::Struct => "struct",
-            _ => "record",
+            _ => "class",
         };
         let context = format!(
             "field '{}' not found on {} '{}' (available: {})",
@@ -223,7 +219,7 @@ impl Analyzer {
         };
         let Some((type_def_id, type_args_id)) = struct_info else {
             self.type_error_id(
-                "optional class or record",
+                "optional class or struct",
                 object_type_id,
                 opt_chain.object.span,
             );

@@ -7,6 +7,6 @@
   8 | ,->     func get() -> Int {
   9 | |           return self.value
  10 | |->     }
-    : `---- not a known class or record
+    : `---- not a known class
  11 |     }
     `----
