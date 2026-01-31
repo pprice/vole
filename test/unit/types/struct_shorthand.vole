@@ -1,0 +1,94 @@
+struct Point { x: i64, y: i64 }
+struct Color { r: i64, g: i64, b: i64 }
+struct Pair { first: string, second: i64 }
+struct Single { value: i64 }
+
+tests {
+    test "basic shorthand two fields" {
+        let x: i64 = 10
+        let y: i64 = 20
+        let p = Point { x, y }
+        assert(p.x == 10)
+        assert(p.y == 20)
+    }
+
+    test "shorthand three fields" {
+        let r: i64 = 255
+        let g: i64 = 128
+        let b: i64 = 0
+        let c = Color { r, g, b }
+        assert(c.r == 255)
+        assert(c.g == 128)
+        assert(c.b == 0)
+    }
+
+    test "shorthand single field" {
+        let value: i64 = 42
+        let s = Single { value }
+        assert(s.value == 42)
+    }
+
+    test "mixed shorthand and explicit" {
+        let x: i64 = 5
+        let p = Point { x, y: 99 }
+        assert(p.x == 5)
+        assert(p.y == 99)
+    }
+
+    test "mixed explicit and shorthand" {
+        let y: i64 = 77
+        let p = Point { x: 33, y }
+        assert(p.x == 33)
+        assert(p.y == 77)
+    }
+
+    test "shorthand with string field" {
+        let first: string = "hello"
+        let second: i64 = 42
+        let p = Pair { first, second }
+        assert(p.first == "hello")
+        assert(p.second == 42)
+    }
+
+    test "shorthand from function params" {
+        let p = make_point(100, 200)
+        assert(p.x == 100)
+        assert(p.y == 200)
+    }
+
+    test "shorthand from computed values" {
+        let x: i64 = 3 * 4
+        let y: i64 = 5 + 6
+        let p = Point { x, y }
+        assert(p.x == 12)
+        assert(p.y == 11)
+    }
+
+    test "shorthand used in function call" {
+        let x: i64 = 7
+        let y: i64 = 8
+        let sum = sum_point(Point { x, y })
+        assert(sum == 15)
+    }
+
+    test "shorthand in variable reassignment context" {
+        let x: i64 = 1
+        let y: i64 = 2
+        let p1 = Point { x, y }
+        let x: i64 = 10
+        let y: i64 = 20
+        let p2 = Point { x, y }
+        assert(p1.x == 1)
+        assert(p1.y == 2)
+        assert(p2.x == 10)
+        assert(p2.y == 20)
+    }
+}
+
+func make_point(x: i64, y: i64) -> Point {
+    return Point { x, y }
+}
+
+func sum_point(p: Point) -> i64 {
+    return p.x + p.y
+}

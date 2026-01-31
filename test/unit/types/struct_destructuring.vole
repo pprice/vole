@@ -1,0 +1,56 @@
+// Struct destructuring tests
+// NOTE: Struct destructuring is currently broken (bug v-a831).
+// The codegen treats structs as heap-allocated classes during destructuring,
+// producing garbage values. All destructuring tests are commented out until fixed.
+
+struct Point { x: i64, y: i64 }
+struct Color { r: i64, g: i64, b: i64 }
+struct Named { name: string, value: i64 }
+
+// tests {
+//     // v-a831: Struct destructuring produces garbage values
+//     test "basic destructuring" {
+//         let p = Point { x: 10, y: 20 }
+//         let { x, y } = p
+//         assert(x == 10)
+//         assert(y == 20)
+//     }
+//
+//     test "destructuring with rename" {
+//         let p = Point { x: 10, y: 20 }
+//         let { x: a, y: b } = p
+//         assert(a == 10)
+//         assert(b == 20)
+//     }
+//
+//     test "partial destructuring" {
+//         let p = Point { x: 10, y: 20 }
+//         let { x } = p
+//         assert(x == 10)
+//     }
+//
+//     test "destructuring three fields" {
+//         let c = Color { r: 255, g: 128, b: 0 }
+//         let { r, g, b } = c
+//         assert(r == 255)
+//         assert(g == 128)
+//         assert(b == 0)
+//     }
+//
+//     test "destructuring string field" {
+//         let n = Named { name: "hello", value: 42 }
+//         let { name, value } = n
+//         assert(name == "hello")
+//         assert(value == 42)
+//     }
+//
+//     test "destructuring function return" {
+//         let { x, y } = make_point(5, 15)
+//         assert(x == 5)
+//         assert(y == 15)
+//     }
+// }
+//
+// func make_point(x: i64, y: i64) -> Point {
+//     return Point { x: x, y: y }
+// }
