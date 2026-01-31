@@ -53,9 +53,6 @@ impl Analyzer {
             ExprKind::StringLiteral(_) => Ok(ArenaTypeId::STRING),
             ExprKind::InterpolatedString(_) => Ok(ArenaTypeId::STRING),
             ExprKind::TypeLiteral(_) => Ok(ArenaTypeId::METATYPE),
-            ExprKind::Nil => Ok(ArenaTypeId::NIL),
-            ExprKind::Done => Ok(ArenaTypeId::DONE),
-
             // Identifier and variable access
             ExprKind::Identifier(sym) => self.check_identifier_expr(expr, *sym, interner),
 
@@ -177,10 +174,9 @@ impl Analyzer {
                     self.ty_f64_id() // Default
                 }
             }
-            // Bool, String, and Nil have only one possible type
+            // Bool and String have only one possible type
             ExprKind::BoolLiteral(_) => self.ty_bool_id(),
             ExprKind::StringLiteral(_) => self.ty_string_id(),
-            ExprKind::Nil => self.ty_nil_id(),
             // Not a literal - this shouldn't happen if is_literal() was checked
             _ => self.ty_invalid_traced_id("fallback"),
         }

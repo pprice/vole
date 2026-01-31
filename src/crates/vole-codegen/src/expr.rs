@@ -68,8 +68,6 @@ impl Cg<'_, '_, '_> {
             }
             ExprKind::Index(idx) => self.index(&idx.object, &idx.index),
             ExprKind::Match(match_expr) => self.match_expr(match_expr),
-            ExprKind::Nil => Ok(self.nil_value()),
-            ExprKind::Done => Ok(self.done_value()),
             ExprKind::Is(is_expr) => self.is_expr(is_expr, expr.id),
             ExprKind::NullCoalesce(nc) => self.null_coalesce(nc),
             ExprKind::Lambda(lambda) => self.lambda(lambda, expr.id),
@@ -108,6 +106,24 @@ impl Cg<'_, '_, '_> {
 
     /// Compile an identifier lookup
     fn identifier(&mut self, sym: Symbol, expr: &Expr) -> Result<CompiledValue, String> {
+        // Well-known sentinel values: nil and Done are always available as i8(0)
+        {
+            let name = self.interner().resolve(sym);
+            if name == "nil" || name == "Done" {
+                let sentinel_type_id = if name == "nil" {
+                    TypeId::NIL
+                } else {
+                    TypeId::DONE
+                };
+                let value = self.builder.ins().iconst(types::I8, 0);
+                return Ok(CompiledValue {
+                    value,
+                    ty: types::I8,
+                    type_id: sentinel_type_id,
+                });
+            }
+        }
+
         if let Some((var, type_id)) = self.vars.get(&sym) {
             let val = self.builder.use_var(*var);
             let ty = self.builder.func.dfg.value_type(val);
@@ -816,15 +832,12 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Resolve a simple TypeExpr to a TypeId (for monomorphized generic fallback).
-    /// Only handles primitive types, nil, done, never, unknown.
-    /// Only handles primitive types, nil, done, never, unknown — enough for `is` checks
-    /// in generic function bodies that sema didn't analyze.
+    /// Handles primitive types, named types (nil, Done, etc.), never, unknown - enough
+    /// for `is` checks in generic function bodies that sema didn't analyze.
     fn resolve_simple_type_expr(&self, type_expr: &vole_frontend::TypeExpr) -> Option<TypeId> {
         use vole_frontend::{PrimitiveType, TypeExpr as TE};
         let arena = self.arena();
         match type_expr {
-            TE::Nil => Some(TypeId::NIL),
-            TE::Done => Some(arena.done()),
             TE::Never => Some(TypeId::NEVER),
             TE::Unknown => Some(TypeId::UNKNOWN),
             TE::Primitive(p) => Some(match p {
@@ -842,6 +855,15 @@ impl Cg<'_, '_, '_> {
                 PrimitiveType::F64 => arena.f64(),
                 PrimitiveType::String => arena.string(),
             }),
+            TE::Named(sym) => {
+                // Resolve well-known named types (sentinels like nil, Done)
+                let name = self.interner().resolve(*sym);
+                match name {
+                    "nil" => Some(TypeId::NIL),
+                    "Done" => Some(TypeId::DONE),
+                    _ => None,
+                }
+            }
             _ => None,
         }
     }
@@ -1173,21 +1195,10 @@ impl Cg<'_, '_, '_> {
             let pattern_matches = match &arm.pattern.kind {
                 PatternKind::Wildcard => None,
                 PatternKind::Identifier { name } => {
-                    // Check if this identifier is a type name (class)
-                    // Need to look up TypeDefId from Symbol first
-                    let query = self.query();
-                    let module_id = self
-                        .current_module_id()
-                        .unwrap_or(self.env.analyzed.module_id);
-
-                    let type_def_id = query
-                        .try_name_id(module_id, &[*name])
-                        .and_then(|name_id| query.try_type_def_id(name_id));
-
-                    if type_def_id
-                        .and_then(|id| self.type_meta().get(&id))
-                        .is_some()
-                    {
+                    // Check if sema recognized this as a type pattern by looking for
+                    // a pre-computed IsCheckResult. This handles all type patterns
+                    // including sentinel types (Done, nil) from prelude modules.
+                    if self.get_is_check_result(arm.pattern.id).is_some() {
                         // Type pattern - compare against union variant tag
                         self.compile_type_pattern_check(&scrutinee, arm.pattern.id)?
                     } else {

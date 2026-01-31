@@ -993,8 +993,7 @@ impl Analyzer {
             ExprKind::IntLiteral(..)
             | ExprKind::FloatLiteral(..)
             | ExprKind::BoolLiteral(_)
-            | ExprKind::StringLiteral(_)
-            | ExprKind::Nil => true,
+            | ExprKind::StringLiteral(_) => true,
 
             // Identifier: constant if it's an immutable global with a constant initializer
             ExprKind::Identifier(sym) => self.constant_globals.contains(sym),

@@ -814,16 +814,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.builder.ins().icmp(IntCC::NotEqual, tag, expected)
     }
 
-    /// Create a Done value (iterator termination sentinel)
-    pub fn done_value(&mut self) -> CompiledValue {
-        let value = self.builder.ins().iconst(types::I8, 0);
-        CompiledValue {
-            value,
-            ty: types::I8,
-            type_id: TypeId::DONE,
-        }
-    }
-
     /// Wrap a Cranelift value as a String CompiledValue
     pub fn string_value(&self, value: Value) -> CompiledValue {
         CompiledValue {

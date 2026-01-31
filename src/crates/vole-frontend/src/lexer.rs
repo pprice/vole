@@ -441,7 +441,6 @@ impl<'src> Lexer<'src> {
             "in" => Some(TokenType::KwIn),
             "continue" => Some(TokenType::KwContinue),
             "match" => Some(TokenType::KwMatch),
-            "nil" => Some(TokenType::KwNil),
             "is" => Some(TokenType::KwIs),
             "class" => Some(TokenType::KwClass),
             "struct" => Some(TokenType::KwStruct),
@@ -459,7 +458,6 @@ impl<'src> Lexer<'src> {
             "external" => Some(TokenType::KwExternal),
             "as" => Some(TokenType::KwAs),
             "import" => Some(TokenType::KwImport),
-            "Done" => Some(TokenType::KwDone),
             "yield" => Some(TokenType::KwYield),
             "default" => Some(TokenType::KwDefault),
             "statics" => Some(TokenType::KwStatics),
@@ -1079,8 +1077,10 @@ mod tests {
 
     #[test]
     fn lex_nil_is_optional() {
+        // nil and Done are no longer keywords - they lex as identifiers
+        // (they are prelude-defined sentinels)
         let mut lexer = Lexer::new("nil is i32? ?? 0");
-        assert_eq!(lexer.next_token().ty, TokenType::KwNil);
+        assert_eq!(lexer.next_token().ty, TokenType::Identifier);
         assert_eq!(lexer.next_token().ty, TokenType::KwIs);
         assert_eq!(lexer.next_token().ty, TokenType::KwI32);
         assert_eq!(lexer.next_token().ty, TokenType::Question);

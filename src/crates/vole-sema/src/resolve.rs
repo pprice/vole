@@ -39,11 +39,24 @@ pub trait ResolverEntityExt {
 
 impl ResolverEntityExt for Resolver<'_> {
     fn resolve_type(&self, sym: Symbol, registry: &EntityRegistry) -> Option<TypeDefId> {
+        let name = self.interner().resolve(sym);
+        // Well-known sentinel types (nil, Done) are defined in the prelude but need to be
+        // resolvable from any module. Look them up by short name to find the sentinel TypeDef
+        // rather than the legacy primitive TypeDef.
+        if (name == "nil" || name == "Done")
+            && let Some(type_def_id) = registry.sentinel_by_short_name(name, self.table()) {
+                return Some(type_def_id);
+            }
         self.resolve(sym)
             .and_then(|name_id| registry.type_by_name(name_id))
     }
 
     fn resolve_type_str(&self, name: &str, registry: &EntityRegistry) -> Option<TypeDefId> {
+        // Well-known sentinel types (nil, Done) - see resolve_type for explanation
+        if (name == "nil" || name == "Done")
+            && let Some(type_def_id) = registry.sentinel_by_short_name(name, self.table()) {
+                return Some(type_def_id);
+            }
         self.resolve_str(name)
             .and_then(|name_id| registry.type_by_name(name_id))
     }
@@ -63,6 +76,11 @@ impl ResolverEntityExt for Resolver<'_> {
         registry: &EntityRegistry,
     ) -> Option<TypeDefId> {
         tracing::trace!(name, "resolve_type_str_or_interface");
+        // Well-known sentinel types (nil, Done) - check sentinel first
+        if (name == "nil" || name == "Done")
+            && let Some(type_def_id) = registry.sentinel_by_short_name(name, self.table()) {
+                return Some(type_def_id);
+            }
         let result = self
             .resolve_str(name)
             .and_then(|name_id| registry.type_by_name(name_id))
@@ -179,8 +197,6 @@ pub fn resolve_type_to_id(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) ->
             let elem_id = resolve_type_to_id(elem, ctx);
             ctx.type_arena_mut().array(elem_id)
         }
-        TypeExpr::Nil => ctx.type_arena_mut().nil(),
-        TypeExpr::Done => ctx.type_arena_mut().done(),
         TypeExpr::Never => ctx.type_arena_mut().never(),
         TypeExpr::Unknown => ctx.type_arena_mut().unknown(),
         TypeExpr::Optional(inner) => {
@@ -247,10 +263,16 @@ pub fn resolve_type_to_id(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) ->
 
 /// Resolve a named type (non-generic) to TypeId
 fn resolve_named_type_to_id(sym: Symbol, ctx: &mut TypeResolutionContext<'_>) -> TypeId {
-    // Handle "void" as a special case
+    // Handle well-known special types that resolve to reserved TypeId slots
     let name_str = ctx.interner.resolve(sym);
     if name_str == "void" {
         return ctx.type_arena_mut().void();
+    }
+    if name_str == "nil" {
+        return TypeId::NIL;
+    }
+    if name_str == "Done" {
+        return TypeId::DONE;
     }
 
     // Check if it's a type parameter in scope first
@@ -570,14 +592,6 @@ mod tests {
                 resolve_type_to_id(&TypeExpr::Primitive(FrontendPrimitiveType::String), ctx),
                 TypeId::STRING
             );
-        });
-    }
-
-    #[test]
-    fn resolve_nil_type() {
-        let interner = Interner::new();
-        with_empty_context(&interner, |ctx| {
-            assert_eq!(resolve_type_to_id(&TypeExpr::Nil, ctx), TypeId::NIL);
         });
     }
 

@@ -264,8 +264,6 @@ impl<'a> GeneratorTransformer<'a> {
             | ExprKind::BoolLiteral(_)
             | ExprKind::StringLiteral(_)
             | ExprKind::Identifier(_)
-            | ExprKind::Nil
-            | ExprKind::Done
             | ExprKind::Unreachable
             | ExprKind::TypeLiteral(_)
             | ExprKind::Import(_) => false,
@@ -551,8 +549,6 @@ impl<'a> GeneratorTransformer<'a> {
             | ExprKind::BoolLiteral(_)
             | ExprKind::StringLiteral(_)
             | ExprKind::Identifier(_)
-            | ExprKind::Nil
-            | ExprKind::Done
             | ExprKind::Unreachable
             | ExprKind::TypeLiteral(_)
             | ExprKind::Import(_) => {}
@@ -618,9 +614,8 @@ impl<'a> GeneratorTransformer<'a> {
                 TypeExpr::Primitive(PrimitiveType::String),
                 "string".to_string(),
             )),
-            ExprKind::Nil => Some((TypeExpr::Nil, "nil".to_string())),
-            ExprKind::Done => Some((TypeExpr::Done, "Done".to_string())),
-            // For non-literals, we can't infer the type without full semantic analysis
+            // For non-literals (including identifiers like nil/Done), we can't infer
+            // the type without full semantic analysis
             _ => None,
         }
     }
@@ -629,8 +624,6 @@ impl<'a> GeneratorTransformer<'a> {
     fn type_expr_matches(&self, actual: &TypeExpr, expected: &TypeExpr) -> bool {
         match (actual, expected) {
             (TypeExpr::Primitive(a), TypeExpr::Primitive(b)) => a == b,
-            (TypeExpr::Nil, TypeExpr::Nil) => true,
-            (TypeExpr::Done, TypeExpr::Done) => true,
             (TypeExpr::Named(a), TypeExpr::Named(b)) => a == b,
             // For complex types or optionals, assume compatible and let sema handle it
             _ => true,
@@ -656,8 +649,6 @@ impl<'a> GeneratorTransformer<'a> {
                 PrimitiveType::String => "string".to_string(),
             },
             TypeExpr::Named(sym) => self.interner.resolve(*sym).to_string(),
-            TypeExpr::Nil => "nil".to_string(),
-            TypeExpr::Done => "Done".to_string(),
             TypeExpr::Never => "never".to_string(),
             TypeExpr::Unknown => "unknown".to_string(),
             TypeExpr::Optional(inner) => format!("{}?", self.type_expr_to_string(inner)),
@@ -914,7 +905,7 @@ impl<'a> GeneratorTransformer<'a> {
         let done_return = Stmt::Return(ReturnStmt {
             value: Some(Expr {
                 id: self.next_id(),
-                kind: ExprKind::Done,
+                kind: ExprKind::Identifier(self.interner.intern("Done")),
                 span: dummy_span,
             }),
             span: dummy_span,
@@ -922,7 +913,8 @@ impl<'a> GeneratorTransformer<'a> {
         stmts.push(done_return);
 
         // Return type: T | Done
-        let return_type = TypeExpr::Union(vec![element_type.clone(), TypeExpr::Done]);
+        let done_sym = self.interner.intern("Done");
+        let return_type = TypeExpr::Union(vec![element_type.clone(), TypeExpr::Named(done_sym)]);
 
         FuncDecl {
             name: next_sym,

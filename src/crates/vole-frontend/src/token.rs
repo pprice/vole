@@ -30,7 +30,6 @@ pub enum TokenType {
     KwIn,
     KwContinue,
     KwMatch,
-    KwNil,         // nil keyword (literal and type)
     KwIs,          // is keyword (type test)
     KwClass,       // class keyword
     KwStruct,      // struct keyword
@@ -48,7 +47,6 @@ pub enum TokenType {
     KwExternal,    // external keyword
     KwAs,          // as keyword (for external func mapping)
     KwImport,      // import keyword
-    KwDone,        // Done keyword (iterator termination sentinel)
     KwYield,       // yield keyword (generator yield expression)
     KwDefault,     // default keyword (interface default methods)
     KwStatics,     // statics keyword (static method blocks)
@@ -158,7 +156,6 @@ impl TokenType {
             Self::KwIn => "in",
             Self::KwContinue => "continue",
             Self::KwMatch => "match",
-            Self::KwNil => "nil",
             Self::KwIs => "is",
             Self::KwClass => "class",
             Self::KwStruct => "struct",
@@ -176,7 +173,6 @@ impl TokenType {
             Self::KwExternal => "external",
             Self::KwAs => "as",
             Self::KwImport => "import",
-            Self::KwDone => "Done",
             Self::KwYield => "yield",
             Self::KwDefault => "default",
             Self::KwStatics => "statics",

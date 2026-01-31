@@ -570,9 +570,11 @@ fn parse_bitwise_vs_logical_precedence() {
 
 #[test]
 fn parse_nil_literal() {
+    // nil is no longer a keyword; it parses as an identifier
+    // (resolved to the prelude sentinel during semantic analysis)
     let mut parser = Parser::new("nil");
     let expr = parser.parse_expression().unwrap();
-    assert!(matches!(expr.kind, ExprKind::Nil));
+    assert!(matches!(expr.kind, ExprKind::Identifier(_)));
 }
 
 #[test]
@@ -613,10 +615,12 @@ fn parse_is_expression() {
 
 #[test]
 fn parse_nil_type() {
+    // nil is no longer a keyword; it parses as a Named type
+    // (resolved to the prelude sentinel during semantic analysis)
     let mut parser = Parser::new("func foo(x: nil) {}");
     let program = parser.parse_program().unwrap();
     if let Decl::Function(f) = &program.declarations[0] {
-        assert!(matches!(&f.params[0].ty, TypeExpr::Nil));
+        assert!(matches!(&f.params[0].ty, TypeExpr::Named(_)));
     } else {
         panic!("Expected function declaration");
     }

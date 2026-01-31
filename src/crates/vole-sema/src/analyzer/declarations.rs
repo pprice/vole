@@ -609,8 +609,8 @@ impl Analyzer {
         match type_expr {
             TypeExpr::Named(sym) => {
                 let name_str = interner.resolve(*sym);
-                // Skip primitive types and "void"
-                if name_str == "void" {
+                // Skip primitive types, "void", and well-known sentinel types
+                if matches!(name_str, "void" | "nil" | "Done") {
                     return;
                 }
                 // Check if it's a type parameter in scope
@@ -705,7 +705,7 @@ impl Analyzer {
                 self.validate_type_annotation(success_type, span, interner, type_param_scope);
                 self.validate_type_annotation(error_type, span, interner, type_param_scope);
             }
-            // Primitives, SelfType, Done, Nil, etc. don't need validation
+            // Primitives, SelfType, etc. don't need validation
             _ => {}
         }
     }

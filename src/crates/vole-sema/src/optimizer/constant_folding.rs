@@ -393,8 +393,6 @@ impl<'a> ConstantFolder<'a> {
             | ExprKind::BoolLiteral(_)
             | ExprKind::StringLiteral(_)
             | ExprKind::Identifier(_)
-            | ExprKind::Nil
-            | ExprKind::Done
             | ExprKind::Unreachable
             | ExprKind::TypeLiteral(_)
             | ExprKind::Import(_) => {}

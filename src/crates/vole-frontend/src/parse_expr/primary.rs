@@ -136,26 +136,6 @@ impl<'src> Parser<'src> {
                     span: token.span,
                 })
             }
-            TokenType::KwNil => {
-                self.advance();
-                Ok(Expr {
-                    id: self.next_id(),
-                    kind: ExprKind::Nil,
-                    span: token.span,
-                })
-            }
-            TokenType::KwDone => {
-                let start_span = token.span;
-                self.advance(); // consume 'Done'
-                self.consume(TokenType::LBrace, "expected '{' after Done")?;
-                let end_span = self.current.span;
-                self.consume(TokenType::RBrace, "expected '}' after Done")?;
-                Ok(Expr {
-                    id: self.next_id(),
-                    kind: ExprKind::Done,
-                    span: start_span.merge(end_span),
-                })
-            }
             TokenType::KwUnreachable => {
                 self.advance();
                 Ok(Expr {

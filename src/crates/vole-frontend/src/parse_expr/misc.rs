@@ -54,8 +54,6 @@ impl<'src> Parser<'src> {
             TokenType::KwF64 => Some(TypeExpr::Primitive(PrimitiveType::F64)),
             TokenType::KwBool => Some(TypeExpr::Primitive(PrimitiveType::Bool)),
             TokenType::KwString => Some(TypeExpr::Primitive(PrimitiveType::String)),
-            TokenType::KwNil => Some(TypeExpr::Nil),
-            TokenType::KwDone => Some(TypeExpr::Done),
             _ => None,
         }
     }

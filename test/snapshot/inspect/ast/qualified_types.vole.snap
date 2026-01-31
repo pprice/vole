@@ -23,11 +23,11 @@ Program
       Let "x"
         type: mod.Type
         init:
-          Nil
+          Ident "nil"
       Let "y"
         type: mod.Generic<string>
         init:
-          Nil
+          Ident "nil"
 
 [stderr]
 // <path>/qualified_types.vole

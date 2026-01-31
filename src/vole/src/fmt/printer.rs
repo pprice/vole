@@ -377,8 +377,6 @@ fn print_expr<'a>(
             .append(arena.text("]")),
         ExprKind::Index(index) => print_index_expr(arena, index, interner),
         ExprKind::Match(match_expr) => print_match_expr(arena, match_expr, interner),
-        ExprKind::Nil => arena.text("nil"),
-        ExprKind::Done => arena.text("Done {}"),
         ExprKind::NullCoalesce(nc) => print_null_coalesce_expr(arena, nc, interner),
         ExprKind::Is(is_expr) => print_is_expr(arena, is_expr, interner),
         ExprKind::Lambda(lambda) => print_lambda_expr(arena, lambda, interner),
@@ -1053,8 +1051,6 @@ fn print_type_expr<'a>(
                 .collect();
             arena.intersperse(type_docs, arena.text(" | "))
         }
-        TypeExpr::Nil => arena.text("nil"),
-        TypeExpr::Done => arena.text("Done"),
         TypeExpr::Never => arena.text("never"),
         TypeExpr::Unknown => arena.text("unknown"),
         TypeExpr::Function {

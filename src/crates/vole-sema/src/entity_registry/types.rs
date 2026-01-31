@@ -141,6 +141,25 @@ impl EntityRegistry {
         None
     }
 
+    /// Look up a sentinel type by its short name (string-based, cross-module).
+    /// Used to resolve well-known sentinel types (nil, Done) from any module.
+    pub fn sentinel_by_short_name(
+        &self,
+        short_name: &str,
+        name_table: &vole_identity::NameTable,
+    ) -> Option<TypeDefId> {
+        for type_def in &self.type_defs {
+            if type_def.kind == TypeDefKind::Sentinel
+                && name_table
+                    .last_segment_str(type_def.name_id)
+                    .is_some_and(|last_segment| last_segment == short_name)
+            {
+                return Some(type_def.id);
+            }
+        }
+        None
+    }
+
     /// Look up any type by its short name (string-based, cross-module)
     /// This searches through all registered types to find one matching the short name,
     /// regardless of kind. Useful for resolving error types and other types by name.

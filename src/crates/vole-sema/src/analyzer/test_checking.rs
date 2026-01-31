@@ -125,21 +125,25 @@ impl Analyzer {
                         // Sentinel types are excluded because bare-name construction is valid.
                         if let ExprKind::Identifier(ident_sym) = &init_expr.kind {
                             let ident_name = interner.resolve(*ident_sym);
-                            let resolved = self
-                                .resolver(interner)
-                                .resolve_type(*ident_sym, &self.entity_registry());
-                            if let Some(type_def_id) = resolved {
-                                let kind = self.entity_registry().type_kind(type_def_id);
-                                if !kind.is_sentinel() {
-                                    let let_name = interner.resolve(let_stmt.name);
-                                    self.add_error(
-                                        SemanticError::AmbiguousTypeAlias {
-                                            name: let_name.to_string(),
-                                            type_name: ident_name.to_string(),
-                                            span: init_expr.span.into(),
-                                        },
-                                        init_expr.span,
-                                    );
+                            // Well-known sentinel values (nil, Done) are valid bare-name
+                            // constructions and should not trigger the ambiguity warning.
+                            if !matches!(ident_name, "nil" | "Done") {
+                                let resolved = self
+                                    .resolver(interner)
+                                    .resolve_type(*ident_sym, &self.entity_registry());
+                                if let Some(type_def_id) = resolved {
+                                    let kind = self.entity_registry().type_kind(type_def_id);
+                                    if !kind.is_sentinel() {
+                                        let let_name = interner.resolve(let_stmt.name);
+                                        self.add_error(
+                                            SemanticError::AmbiguousTypeAlias {
+                                                name: let_name.to_string(),
+                                                type_name: ident_name.to_string(),
+                                                span: init_expr.span.into(),
+                                            },
+                                            init_expr.span,
+                                        );
+                                    }
                                 }
                             }
                         }

@@ -268,8 +268,6 @@ pub enum TypeExpr {
     Optional(Box<TypeExpr>),    // T? syntax (desugars to Union with Nil)
     Union(Vec<TypeExpr>),       // A | B | C
     Combination(Vec<TypeExpr>), // A + B + C (must satisfy all constraints)
-    Nil,                        // nil type
-    Done,                       // Done type (iterator termination sentinel)
     Never,                      // never type (bottom type - no values)
     Unknown,                    // unknown type (top type - any value)
     Function {
@@ -461,7 +459,7 @@ pub struct Expr {
 }
 
 impl Expr {
-    /// Returns true if this expression is a literal value (int, float, bool, string, nil)
+    /// Returns true if this expression is a literal value (int, float, bool, string)
     pub fn is_literal(&self) -> bool {
         matches!(
             self.kind,
@@ -469,7 +467,6 @@ impl Expr {
                 | ExprKind::FloatLiteral(..)
                 | ExprKind::BoolLiteral(_)
                 | ExprKind::StringLiteral(_)
-                | ExprKind::Nil
         )
     }
 
@@ -488,9 +485,7 @@ impl Expr {
             ExprKind::IntLiteral(..)
             | ExprKind::FloatLiteral(..)
             | ExprKind::BoolLiteral(_)
-            | ExprKind::StringLiteral(_)
-            | ExprKind::Nil
-            | ExprKind::Done => true,
+            | ExprKind::StringLiteral(_) => true,
 
             // Simple identifier lookups are selectable
             ExprKind::Identifier(_) => true,
@@ -668,12 +663,6 @@ pub enum ExprKind {
 
     /// Match expression
     Match(Box<MatchExpr>),
-
-    /// Nil literal
-    Nil,
-
-    /// Done literal (iterator termination sentinel)
-    Done,
 
     /// Unreachable expression (never type / bottom type)
     Unreachable,

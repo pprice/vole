@@ -171,14 +171,6 @@ impl<'src> Parser<'src> {
                     }
                 }
             }
-            TokenType::KwNil => {
-                self.advance();
-                Ok(TypeExpr::Nil)
-            }
-            TokenType::KwDone => {
-                self.advance();
-                Ok(TypeExpr::Done)
-            }
             TokenType::KwNever => {
                 self.advance();
                 Ok(TypeExpr::Never)

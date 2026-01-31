@@ -438,6 +438,13 @@ impl Compiler<'_> {
                     self.finalize_module_struct(struct_decl, module_interner, module_id);
                 }
             }
+
+            // Register module sentinels (zero-field struct types like Done, nil)
+            for decl in &program.declarations {
+                if let Decl::Sentinel(sentinel_decl) = decl {
+                    self.finalize_module_sentinel(sentinel_decl, module_interner, module_id);
+                }
+            }
         }
 
         // ============================================

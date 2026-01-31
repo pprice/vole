@@ -61,8 +61,6 @@ fn display_sema_type(
     match arena.get(type_id) {
         SemaType::Primitive(prim) => prim.name().to_string(),
         SemaType::Void => "void".to_string(),
-        SemaType::Nil => "nil".to_string(),
-        SemaType::Done => "done".to_string(),
         SemaType::Range => "range".to_string(),
         SemaType::MetaType => "type".to_string(),
         SemaType::Never => "never".to_string(),

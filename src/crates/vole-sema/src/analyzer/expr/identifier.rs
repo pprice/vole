@@ -10,8 +10,18 @@ impl Analyzer {
         sym: Symbol,
         interner: &Interner,
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
-        // Check for 'self' usage in static method
         let name_str = interner.resolve(sym);
+
+        // Well-known sentinel values: nil and Done are always available
+        // (defined in prelude but accessed by name without explicit import)
+        if name_str == "nil" {
+            return Ok(ArenaTypeId::NIL);
+        }
+        if name_str == "Done" {
+            return Ok(ArenaTypeId::DONE);
+        }
+
+        // Check for 'self' usage in static method
         if name_str == "self"
             && let Some(ref method_name) = self.current_static_method
         {

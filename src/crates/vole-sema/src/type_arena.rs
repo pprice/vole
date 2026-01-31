@@ -258,8 +258,6 @@ pub enum SemaType {
 
     // Special types
     Void,
-    Nil,
-    Done,
     Range,
     MetaType, // metatype - the type of types
 
@@ -448,9 +446,16 @@ impl TypeArena {
 
         arena.primitives.void = arena.intern(SemaType::Void);
         debug_assert_eq!(arena.primitives.void, TypeId::VOID);
-        arena.primitives.nil = arena.intern(SemaType::Nil);
+        // Nil and Done are placeholder slots that get rebound to sentinel struct types
+        // when the prelude loads. We use a unique Invalid variant for each so they don't
+        // collide with each other or with Void in the intern map.
+        arena.primitives.nil = arena.intern(SemaType::Invalid {
+            kind: "nil_placeholder",
+        });
         debug_assert_eq!(arena.primitives.nil, TypeId::NIL);
-        arena.primitives.done = arena.intern(SemaType::Done);
+        arena.primitives.done = arena.intern(SemaType::Invalid {
+            kind: "done_placeholder",
+        });
         debug_assert_eq!(arena.primitives.done, TypeId::DONE);
         arena.primitives.range = arena.intern(SemaType::Range);
         debug_assert_eq!(arena.primitives.range, TypeId::RANGE);
@@ -644,9 +649,6 @@ impl TypeArena {
             SemaType::TypeParam(_) | SemaType::TypeParamRef(_) => (40, type_id.0 as u64),
             // Module types
             SemaType::Module(_) => (35, type_id.0 as u64),
-            // Sentinel types
-            SemaType::Done => (20, 0),
-            SemaType::Nil => (10, 0),
             SemaType::Void => (5, 0),
             SemaType::Range => (4, 0),
             SemaType::MetaType => (3, 0),
@@ -1277,8 +1279,6 @@ impl TypeArena {
         match self.get(id) {
             SemaType::Primitive(p) => p.name().to_string(),
             SemaType::Void => "void".to_string(),
-            SemaType::Nil => "nil".to_string(),
-            SemaType::Done => "Done".to_string(),
             SemaType::Range => "range".to_string(),
             SemaType::MetaType => "type".to_string(),
             SemaType::Never => "never".to_string(),
@@ -1504,8 +1504,6 @@ impl TypeArena {
             // Types without nested type parameters - return unchanged
             SemaType::Primitive(_)
             | SemaType::Void
-            | SemaType::Nil
-            | SemaType::Done
             | SemaType::Range
             | SemaType::MetaType
             | SemaType::Never
@@ -1711,8 +1709,6 @@ impl TypeArena {
             // Types without nested type parameters - return unchanged
             SemaType::Primitive(_)
             | SemaType::Void
-            | SemaType::Nil
-            | SemaType::Done
             | SemaType::Range
             | SemaType::MetaType
             | SemaType::Never
@@ -1837,8 +1833,6 @@ impl TypeArena {
             | SemaType::TypeParam(_)
             | SemaType::TypeParamRef(_)
             | SemaType::Void
-            | SemaType::Nil
-            | SemaType::Done
             | SemaType::Range
             | SemaType::MetaType
             | SemaType::Never

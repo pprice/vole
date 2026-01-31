@@ -315,6 +315,50 @@ impl Compiler<'_> {
         );
     }
 
+    /// Register a module sentinel type in codegen.
+    /// Sentinels from imported modules (like prelude's Done and nil) need metadata
+    /// registered so that struct literal codegen can find them.
+    pub(super) fn finalize_module_sentinel(
+        &mut self,
+        sentinel_decl: &SentinelDecl,
+        module_interner: &Interner,
+        module_id: ModuleId,
+    ) {
+        let type_name_str = module_interner.resolve(sentinel_decl.name);
+        tracing::debug!(type_name = %type_name_str, "finalize_module_sentinel called");
+
+        // Look up the TypeDefId using the sentinel name via full resolution chain
+        let query = self.query();
+        let Some(type_def_id) = query.resolve_type_def_by_str(module_id, type_name_str) else {
+            tracing::warn!(type_name = %type_name_str, "Could not find TypeDefId for module sentinel");
+            return;
+        };
+
+        // Skip if already registered
+        if self.state.type_metadata.contains_key(&type_def_id) {
+            tracing::debug!(type_name = %type_name_str, "Skipping - already registered in type_metadata");
+            return;
+        }
+
+        let vole_type_id = self
+            .query()
+            .get_type(type_def_id)
+            .base_type_id
+            .expect("sema should pre-compute base_type_id for module sentinels");
+
+        // Sentinels are zero-field structs, use type_id 0 as a placeholder.
+        self.state.type_metadata.insert(
+            type_def_id,
+            TypeMetadata {
+                type_id: 0,
+                field_slots: FxHashMap::default(),
+                vole_type: vole_type_id,
+                type_def_id,
+                method_infos: FxHashMap::default(),
+            },
+        );
+    }
+
     /// Finalize a struct type: fill in field slots and register instance methods.
     pub(super) fn finalize_struct(&mut self, struct_decl: &StructDecl) {
         let module_id = self.program_module();

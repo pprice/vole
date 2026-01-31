@@ -725,6 +725,15 @@ impl Analyzer {
         match &pattern.kind {
             PatternKind::Type { type_expr } => Some(self.resolve_type_id(type_expr, interner)),
             PatternKind::Identifier { name } => {
+                // Well-known sentinel values resolve directly to their reserved TypeIds
+                let name_str = interner.resolve(*name);
+                if name_str == "nil" {
+                    return Some(ArenaTypeId::NIL);
+                }
+                if name_str == "Done" {
+                    return Some(ArenaTypeId::DONE);
+                }
+
                 // Look up via Resolver - get type_def_id first to drop ResolverGuard
                 let type_def_id = self
                     .resolver(interner)

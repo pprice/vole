@@ -260,12 +260,6 @@ impl<'a> AstPrinter<'a> {
                     self.write_type_inline(out, ty);
                 }
             }
-            TypeExpr::Nil => {
-                out.push_str("nil");
-            }
-            TypeExpr::Done => {
-                out.push_str("Done");
-            }
             TypeExpr::Never => {
                 out.push_str("never");
             }
@@ -710,16 +704,6 @@ impl<'a> AstPrinter<'a> {
                 }
             }
 
-            ExprKind::Nil => {
-                self.write_indent(out);
-                writeln!(out, "Nil").unwrap();
-            }
-
-            ExprKind::Done => {
-                self.write_indent(out);
-                writeln!(out, "Done").unwrap();
-            }
-
             ExprKind::Unreachable => {
                 self.write_indent(out);
                 writeln!(out, "Unreachable").unwrap();
@@ -984,8 +968,6 @@ impl<'a> AstPrinter<'a> {
                     self.write_type_expr_inline(out, t);
                 }
             }
-            TypeExpr::Nil => out.push_str("nil"),
-            TypeExpr::Done => out.push_str("Done"),
             TypeExpr::Never => out.push_str("never"),
             TypeExpr::Unknown => out.push_str("unknown"),
             TypeExpr::Function {

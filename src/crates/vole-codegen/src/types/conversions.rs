@@ -174,8 +174,6 @@ pub(crate) fn type_id_to_cranelift(ty: TypeId, arena: &TypeArena, pointer_type: 
         ArenaType::Primitive(PrimitiveType::Bool) => types::I8,
         ArenaType::Primitive(PrimitiveType::String) => pointer_type,
         ArenaType::Interface { .. } => pointer_type,
-        ArenaType::Nil => types::I8,
-        ArenaType::Done => types::I8,
         ArenaType::Union(_) => pointer_type,
         ArenaType::Fallible { .. } => pointer_type,
         ArenaType::Function { .. } => pointer_type,
@@ -217,7 +215,7 @@ pub(crate) fn type_id_size(
         ArenaType::Primitive(PrimitiveType::I128) => 16,
         ArenaType::Primitive(PrimitiveType::String) | ArenaType::Array(_) => pointer_type.bytes(),
         ArenaType::Interface { .. } => pointer_type.bytes(),
-        ArenaType::Nil | ArenaType::Done | ArenaType::Void => 0,
+        ArenaType::Void => 0,
         ArenaType::Range => 16,
         ArenaType::Union(variants) => {
             let max_payload = variants
