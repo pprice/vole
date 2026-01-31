@@ -38,11 +38,11 @@ class Wrapper<T> {
 }
 
 // Record forward reference
-record Config {
+class Config {
     settings: Settings
 }
 
-record Settings {
+class Settings {
     name: string,
     value: i32
 }
@@ -66,7 +66,7 @@ tests {
         assert(container.getWrapped() == 123)
     }
 
-    test "record forward reference" {
+    test "class forward reference" {
         let settings = Settings { name: "test", value: 99 }
         let config = Config { settings: settings }
         assert(config.settings.name == "test")

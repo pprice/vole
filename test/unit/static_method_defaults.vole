@@ -1,4 +1,4 @@
-record Counter {
+class Counter {
     value: i64,
 }
 

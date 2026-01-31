@@ -48,9 +48,9 @@ tests {
     // Generic static methods via module qualification
     // -------------------------------------------------------------------------
 
-    // NOTE: Generic record methods from imported modules have a known codegen issue.
+    // NOTE: Generic class methods from imported modules have a known codegen issue.
     // For now we comment these out - the feature works for non-generic types.
-    // The issue is that instance methods on generic records from external modules
+    // The issue is that instance methods on generic classes from external modules
     // fail with "method unwrap not found" at codegen time.
 
     // test "module qualified - generic TestBox.wrap i64" {

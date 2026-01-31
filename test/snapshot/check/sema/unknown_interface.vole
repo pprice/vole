@@ -1,4 +1,4 @@
-record Point implements UnknownTrait {
+class Point implements UnknownTrait {
     x: i64,
     y: i64
 }

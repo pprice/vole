@@ -3,7 +3,7 @@
 
 let Disposable: type = { func dispose() -> void }
 
-record Resource {
+class Resource {
     id: i64,
     func dispose() -> void { print("Disposing " + self.id.to_string()) }
 }

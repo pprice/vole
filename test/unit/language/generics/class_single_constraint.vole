@@ -16,7 +16,7 @@ class HashWrapper<T: Hashable> {
 }
 
 // Concrete implementation
-record MyInt implements Hashable {
+class MyInt implements Hashable {
     n: i64,
 }
 

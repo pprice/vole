@@ -17,15 +17,15 @@ tests "scoped declarations" {
 }
 
 tests "scoped types" {
-    record TestData { value: i64 }
-    test "use scoped record" {
+    class TestData { value: i64 }
+    test "use scoped class" {
         let d = TestData { value: 5 }
         assert(d.value == 5)
     }
 }
 
-tests "scoped record with fields and construction" {
-    record ScopedPoint {
+tests "scoped class with fields and construction" {
+    class ScopedPoint {
         x: i64,
         y: i64,
     }
@@ -44,8 +44,8 @@ tests "scoped record with fields and construction" {
     }
 }
 
-tests "scoped record with methods" {
-    record ScopedVec2 {
+tests "scoped class with methods" {
+    class ScopedVec2 {
         x: i64,
         y: i64,
 
@@ -56,12 +56,12 @@ tests "scoped record with methods" {
         func sum() -> i64 => self.x + self.y
     }
 
-    test "call method on scoped record" {
+    test "call method on scoped class" {
         let v = ScopedVec2 { x: 3, y: 4 }
         assert(v.magnitude_squared() == 25)
     }
 
-    test "expression-bodied method on scoped record" {
+    test "expression-bodied method on scoped class" {
         let v = ScopedVec2 { x: 10, y: 20 }
         assert(v.sum() == 30)
     }
@@ -116,7 +116,7 @@ tests "scoped interface and implement block" {
         func describe() -> string
     }
 
-    record ScopedItem {
+    class ScopedItem {
         name: string,
     }
 
@@ -126,7 +126,7 @@ tests "scoped interface and implement block" {
         }
     }
 
-    test "implement block method on scoped record" {
+    test "implement block method on scoped class" {
         let item = ScopedItem { name: "widget" }
         assert(item.describe() == "widget")
     }
@@ -138,7 +138,7 @@ tests "scoped interface and implement block" {
 }
 
 // Parent module types used by scoped tests
-record Pair {
+class Pair {
     a: i64,
     b: i64,
 }
@@ -148,13 +148,13 @@ tests "scoped types referencing parent module types" {
         return Pair { a: x, b: y }
     }
 
-    test "scoped function returns parent record type" {
+    test "scoped function returns parent class type" {
         let p = make_pair(3, 7)
         assert(p.a == 3)
         assert(p.b == 7)
     }
 
-    test "use parent module record directly" {
+    test "use parent module class directly" {
         let p = Pair { a: 100, b: 200 }
         assert(p.a + p.b == 300)
     }
@@ -187,7 +187,7 @@ tests "mixed ordering: test then decl then test" {
 
     func compute(a: i64, b: i64) -> i64 => a * b + 1
 
-    record ScopedResult {
+    class ScopedResult {
         value: i64,
     }
 

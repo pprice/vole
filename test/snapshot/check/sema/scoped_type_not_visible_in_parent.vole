@@ -1,7 +1,7 @@
 // Error: Parent module cannot access types scoped within a tests block
 
 tests "defines a scoped type" {
-    record ScopedOnly { value: i64 }
+    class ScopedOnly { value: i64 }
 
     test "can use scoped type" {
         let s = ScopedOnly { value: 1 }

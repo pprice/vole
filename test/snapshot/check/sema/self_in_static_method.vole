@@ -1,6 +1,6 @@
 // Test that self usage in static methods is an error
 
-record Point {
+class Point {
     x: i64,
     y: i64,
 

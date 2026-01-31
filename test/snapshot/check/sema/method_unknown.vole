@@ -1,5 +1,5 @@
-// Error: unknown method on record
-record Point {
+// Error: unknown method on class
+class Point {
     x: i64,
     y: i64,
 }

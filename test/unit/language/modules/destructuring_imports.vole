@@ -50,8 +50,8 @@ tests {
         assert(rad < 3.15)
     }
 
-    // Test destructured record types are usable as type names
-    test "destructured record type in variable annotation" {
+    // Test destructured class types are usable as type names
+    test "destructured class type in variable annotation" {
         let time = import "std:time"
         let { Duration } = import "std:time"
         // Use Duration in a variable type annotation
@@ -60,14 +60,14 @@ tests {
         assert(d.as_nanos() == 4000)
     }
 
-    test "destructured record type as type name in record literal" {
+    test "destructured class type as type name in class literal" {
         let { Duration } = import "std:time"
-        // Use Duration as a type name in a record literal
+        // Use Duration as a type name in a class literal
         let d = Duration { nanos: 1000 }
         assert(d.as_nanos() == 1000)
     }
 
-    test "destructured record type in function parameter annotation" {
+    test "destructured class type in function parameter annotation" {
         let { Duration } = import "std:time"
         // Use Duration as a type annotation for a function parameter
         func get_nanos(d: Duration) -> i64 {
@@ -77,7 +77,7 @@ tests {
         assert(get_nanos(d) == 2000)
     }
 
-    test "destructured record type in function return annotation" {
+    test "destructured class type in function return annotation" {
         let time = import "std:time"
         let { Duration } = import "std:time"
         // Use Duration as a return type annotation
@@ -89,7 +89,7 @@ tests {
         assert(d.nanos == 3000)
     }
 
-    test "destructured record with renamed type binding" {
+    test "destructured class with renamed type binding" {
         let { Duration as Dur } = import "std:time"
         // Use the renamed type as a type name
         let d = Dur { nanos: 5000 }
@@ -102,7 +102,7 @@ tests {
         assert(get_nanos(d) == 5000)
     }
 
-    test "multiple destructured record types" {
+    test "multiple destructured class types" {
         let { Duration, Timestamp } = import "std:time"
         // Both Duration and Timestamp are usable as type names
         let d = Duration { nanos: 1000 }

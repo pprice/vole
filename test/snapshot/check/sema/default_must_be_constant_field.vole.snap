@@ -3,7 +3,7 @@
 [stderr]
   x [E2089]: default value for 'a' must be a constant expression
     ,-[<path>/default_must_be_constant_field.vole:12:14]
- 11 | record BadConfig {
+ 11 | class BadConfig {
  12 |     a: i32 = get_value(),     // Error: function call
     :              ^^^^^|^^^^^
     :                   `-- non-constant expression

@@ -8,7 +8,7 @@ interface Extended extends Base {
 }
 
 // Missing base_method from parent interface
-record Partial implements Extended {
+class Partial implements Extended {
     value: i64,
 
     func extended_method() -> i64 {

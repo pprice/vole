@@ -1,11 +1,11 @@
-// Tests for module-qualified record literals
+// Tests for module-qualified class literals
 // This tests the ability to use `module.RecordType { fields }` syntax
 //
 // Note: These tests are intentionally isolated from std:time function tests
 // to avoid module type identity issues when both test files run together.
 
 // Define a local module for testing to avoid conflicts with std:time tests
-record LocalRecord {
+class LocalRecord {
     x: i64,
     y: i64
 }
@@ -18,13 +18,13 @@ func local_sum(r: LocalRecord) -> i64 {
 let time = import "std:time"
 
 tests {
-    test "module-qualified record literal - Duration" {
+    test "module-qualified class literal - Duration" {
         // Create a Duration using module-qualified syntax
         let d = time.Duration { nanos: 1000000 }  // 1ms in nanoseconds
         assert(d.nanos == 1000000)
     }
 
-    test "module-qualified record literal - Timestamp" {
+    test "module-qualified class literal - Timestamp" {
         // Create a Timestamp using module-qualified syntax
         let t = time.Timestamp { nanos: 0, offset_mins: 60 }  // Unix epoch with +1hr offset
         assert(t.nanos == 0)
@@ -37,15 +37,15 @@ tests {
         assert(n == 42)
     }
 
-    test "local record literal works" {
-        // Test that local (non-qualified) record literals still work
+    test "local class literal works" {
+        // Test that local (non-qualified) class literals still work
         let r = LocalRecord { x: 10, y: 20 }
         assert(r.x == 10)
         assert(r.y == 20)
     }
 
-    test "local record with function" {
-        // Test local records work with functions
+    test "local class with function" {
+        // Test local classes work with functions
         let r = LocalRecord { x: 5, y: 7 }
         assert(local_sum(r) == 12)
     }

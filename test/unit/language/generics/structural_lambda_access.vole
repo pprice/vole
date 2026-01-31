@@ -1,8 +1,8 @@
 // Test field access on structurally constrained generic types inside lambdas
 // Bug: v-807b - field access inside lambdas loses structural constraint info
 
-record Thing { name: string, value: i64 }
-record Point { x: i64, y: i64 }
+class Thing { name: string, value: i64 }
+class Point { x: i64, y: i64 }
 
 // These work fine (no map):
 func get_name<T: { name: string }>(x: T) -> string {
@@ -49,7 +49,7 @@ func to_strings(items: [i64]) -> [string] {
     return items.iter().map((x) => "" + x).collect()
 }
 
-// Map on Point record fields
+// Map on Point class fields
 func get_x_values(items: [Point]) -> [i64] {
     return items.iter().map((p) => p.x).collect()
 }
@@ -120,7 +120,7 @@ tests "structural constraint field access in lambdas" {
         assert(strs[2] == "3")
     }
 
-    test "map record field access" {
+    test "map class field access" {
         let points = [Point { x: 10, y: 20 }, Point { x: 30, y: 40 }]
         let xs = get_x_values(points)
         assert(xs[0] == 10)

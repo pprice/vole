@@ -29,7 +29,7 @@ func describe<T: HashEqStr>(x: T) -> string {
     return x.to_string()
 }
 
-record Point {
+class Point {
     x: i64
     y: i64
 }

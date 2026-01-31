@@ -46,7 +46,7 @@ static interface Counter {
 // Implementations
 // =============================================================================
 
-record MyNumber {
+class MyNumber {
     value: i64,
 }
 

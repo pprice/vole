@@ -2,7 +2,7 @@
 // Previously this caused a panic: 'method should have function signature'
 // Now it should emit a proper error message
 
-record Point { x: i64, y: i64 }
+class Point { x: i64, y: i64 }
 
 implement Point {
     func getX() -> Int {

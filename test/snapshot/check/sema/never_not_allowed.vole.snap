@@ -3,7 +3,7 @@
 [stderr]
   x [E2098]: the `never` type can only be used as a return type
     ,-[<path>/never_not_allowed.vole:12:5]
- 11 | record BadRecord {
+ 11 | class BadRecord {
  12 |     f: never,
     :     ^^^^|^^^^
     :         `-- cannot use `never` here

@@ -14,7 +14,7 @@ func greeting() => "hello"
 // Record with expression syntax static methods
 // =============================================================================
 
-record Point {
+class Point {
     x: i64,
     y: i64,
 
@@ -64,7 +64,7 @@ interface Numeric {
     default func negate() -> i64 => -self.value()
 }
 
-record Number implements Numeric {
+class Number implements Numeric {
     n: i64,
 
     func value() -> i64 => self.n
@@ -78,7 +78,7 @@ interface Describable {
     default func has_name() -> bool => self.name() != ""
 }
 
-record Item implements Describable {
+class Item implements Describable {
     title: string,
 
     func name() -> string => self.title
@@ -88,7 +88,7 @@ record Item implements Describable {
 // Mixed block and expression syntax
 // =============================================================================
 
-record Mixed {
+class Mixed {
     a: i64,
     b: i64,
 
@@ -161,7 +161,7 @@ tests "expression syntax - static methods" {
         assert(p.y == 20)
     }
 
-    test "static expression method - record params" {
+    test "static expression method - class params" {
         let p1 = Point.create(1, 2)
         let p2 = Point.create(3, 4)
         let sum = Point.sum(p1, p2)
@@ -186,12 +186,12 @@ tests "expression syntax - static methods" {
 }
 
 tests "expression syntax - instance methods" {
-    test "record instance expression method" {
+    test "class instance expression method" {
         let p = Point.create(3, 4)
         assert(p.magnitude_squared() == 25)
     }
 
-    test "record instance expression method returning bool" {
+    test "class instance expression method returning bool" {
         let origin = Point.origin()
         let other = Point.create(1, 0)
         assert(origin.is_origin() == true)

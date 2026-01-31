@@ -7,7 +7,7 @@ let x: never = 0
 func bad_param(a: never) {
 }
 
-// Error: record field with never type
-record BadRecord {
+// Error: class field with never type
+class BadRecord {
     f: never,
 }

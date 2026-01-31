@@ -13,12 +13,12 @@ interface Transformer<T, U> {
     func transform(input: T) -> U
 }
 
-record IntProducer {
+class IntProducer {
     value: i64,
     func produce() -> i64 { return self.value }
 }
 
-record IntToString {
+class IntToString {
     func transform(input: i64) -> string { return input.to_string() }
 }
 

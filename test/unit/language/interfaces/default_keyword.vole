@@ -19,7 +19,7 @@ interface Counter {
     func reset() -> i64
 }
 
-record SimpleCounter implements Counter {
+class SimpleCounter implements Counter {
     current: i64,
 
     func value() -> i64 {
@@ -32,7 +32,7 @@ record SimpleCounter implements Counter {
 }
 
 // Counter that overrides a default method
-record CustomCounter implements Counter {
+class CustomCounter implements Counter {
     current: i64,
 
     func value() -> i64 {

@@ -1,18 +1,18 @@
-// Test: Generic record field access
-// This tests field access on generic record types returned from functions
+// Test: Generic class field access
+// This tests field access on generic class types returned from functions
 // Bug: vole-1yz9 - field access on GenericInstance types was not working
 
-record Container<T> {
+class Container<T> {
     value: T
 }
 
-// Function returning generic record
+// Function returning generic class
 func make_container<T>(v: T) -> Container<T> {
     return Container { value: v }
 }
 
-// Test with nested generic records
-record Wrapper<T> {
+// Test with nested generic classes
+class Wrapper<T> {
     inner: Container<T>
 }
 
@@ -21,7 +21,7 @@ func make_wrapper<T>(v: T) -> Wrapper<T> {
 }
 
 // Multi-param generic
-record Pair<A, B> {
+class Pair<A, B> {
     first: A,
     second: B
 }
@@ -31,7 +31,7 @@ func make_pair<X, Y>(x: X, y: Y) -> Pair<X, Y> {
 }
 
 tests {
-    test "field access on generic record returned from function" {
+    test "field access on generic class returned from function" {
         let c = make_container(42)
         assert(c.value == 42)
     }

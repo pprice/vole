@@ -97,7 +97,7 @@ class Pair<K, V> {
 // Record with static methods
 // =============================================================================
 
-record Point<T> {
+class Point<T> {
     x: T,
     y: T,
 
@@ -237,25 +237,25 @@ tests {
     // Record with statics
     // -------------------------------------------------------------------------
 
-    test "static - record origin i64" {
+    test "static - class origin i64" {
         let p = Point.origin(0)
         assert(p.x == 0)
         assert(p.y == 0)
     }
 
-    test "static - record origin f64" {
+    test "static - class origin f64" {
         let p = Point.origin(0.0)
         assert(p.x == 0.0)
         assert(p.y == 0.0)
     }
 
-    test "static - record create i64" {
+    test "static - class create i64" {
         let p = Point.create(3, 4)
         assert(p.x == 3)
         assert(p.y == 4)
     }
 
-    test "static - record create f64" {
+    test "static - class create f64" {
         let p = Point.create(1.5, 2.5)
         assert(p.x == 1.5)
         assert(p.y == 2.5)
@@ -333,17 +333,17 @@ tests {
     }
 
     // -------------------------------------------------------------------------
-    // Record static with record result
+    // Record static with class result
     // -------------------------------------------------------------------------
 
-    test "static - record point arithmetic" {
+    test "static - class point arithmetic" {
         let p1 = Point.create(3, 4)
         let p2 = Point.create(1, 2)
         assert(p1.x + p2.x == 4)
         assert(p1.y + p2.y == 6)
     }
 
-    test "static - record multiple origins" {
+    test "static - class multiple origins" {
         let intOrigin = Point.origin(0)
         let floatOrigin = Point.origin(0.0)
         assert(intOrigin.x == 0)
@@ -424,10 +424,10 @@ class RichBox<T: Hashable + Eq + Stringable> {
 }
 
 // =============================================================================
-// Generic record with multiple constraints
+// Generic class with multiple constraints
 // =============================================================================
 
-record ConstrainedPoint<T: Hashable> {
+class ConstrainedPoint<T: Hashable> {
     x: T,
     y: T,
 
@@ -488,7 +488,7 @@ class KeyValue<K: Hashable, V: Stringable> {
 // Test types implementing interfaces
 // =============================================================================
 
-record Id implements Hashable, Eq, Stringable {
+class Id implements Hashable, Eq, Stringable {
     n: i64,
 }
 
@@ -504,7 +504,7 @@ implement Stringable for Id {
     func str() -> string { return "Id" }
 }
 
-record Label implements Stringable {
+class Label implements Stringable {
     text: string,
 }
 
@@ -578,22 +578,22 @@ tests {
     }
 
     // -------------------------------------------------------------------------
-    // Constrained generic record statics
+    // Constrained generic class statics
     // -------------------------------------------------------------------------
 
-    test "static - constrained record origin" {
+    test "static - constrained class origin" {
         let p = ConstrainedPoint.origin(42)
         assert(p.x == 42)
         assert(p.y == 42)
     }
 
-    test "static - constrained record create" {
+    test "static - constrained class create" {
         let p = ConstrainedPoint.create(10, 20)
         assert(p.x == 10)
         assert(p.y == 20)
     }
 
-    test "static - constrained record hash sum" {
+    test "static - constrained class hash sum" {
         let p = ConstrainedPoint.create(3, 4)
         let h = ConstrainedPoint.hashSum(p)
         assert(h == 3.hash() + 4.hash())  // hash(3) + hash(4)
@@ -653,7 +653,7 @@ tests {
         assert(outer.get().get().n == 5)
     }
 
-    test "static - pair of constrained records" {
+    test "static - pair of constrained classes" {
         let p1 = ConstrainedPoint.create(1, 2)
         let p2 = ConstrainedPoint.create(3, 4)
         let pair = Pair.create(p1, p2)

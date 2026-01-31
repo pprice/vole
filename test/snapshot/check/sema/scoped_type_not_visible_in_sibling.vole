@@ -1,7 +1,7 @@
 // Error: Sibling tests blocks cannot see each other's scoped types
 
 tests "first block" {
-    record FirstOnly { value: i64 }
+    class FirstOnly { value: i64 }
 
     test "can use own type" {
         let f = FirstOnly { value: 1 }

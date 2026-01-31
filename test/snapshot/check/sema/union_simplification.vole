@@ -11,6 +11,6 @@ func with_let() {
     _ = x
 }
 
-record Foo {
+class Foo {
     value: i64 | never,
 }

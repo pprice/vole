@@ -1,7 +1,7 @@
-// Tests for struct/class/record field default values
+// Tests for struct/class/class field default values
 
 // Record with default field values
-record Config {
+class Config {
     debug: bool = false,
     timeout: i64 = 30,
     name: string = "default",
@@ -30,21 +30,21 @@ class Point {
 }
 
 tests "field default values" {
-    test "record all defaults" {
+    test "class all defaults" {
         let cfg = Config {}
         assert(cfg.debug == false)
         assert(cfg.timeout == 30)
         assert(cfg.name == "default")
     }
 
-    test "record some defaults" {
+    test "class some defaults" {
         let cfg = Config { debug: true }
         assert(cfg.debug == true)
         assert(cfg.timeout == 30)
         assert(cfg.name == "default")
     }
 
-    test "record override all defaults" {
+    test "class override all defaults" {
         let cfg = Config { debug: true, timeout: 60, name: "custom" }
         assert(cfg.debug == true)
         assert(cfg.timeout == 60)

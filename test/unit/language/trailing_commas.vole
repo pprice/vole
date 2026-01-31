@@ -1,6 +1,6 @@
 // Trailing commas in various contexts
 
-record Point {
+class Point {
     x: i32,
     y: i32,
 }
@@ -31,7 +31,7 @@ tests "trailing commas" {
         assert(add(1, 2,) == 3)
     }
 
-    test "record instantiation" {
+    test "class instantiation" {
         let p = Point { x: 1, y: 2, }
         assert(p.x == 1)
         assert(p.y == 2)

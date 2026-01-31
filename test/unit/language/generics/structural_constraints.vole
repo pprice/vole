@@ -79,42 +79,42 @@ func sum_values<T: { value: i64 }>(items: [T]) -> i64 {
 // Test types
 // ============================================================================
 
-record Person { name: string, age: i64, email: string }
-record Pet { name: string, species: string }
-record Company { name: string, employees: i64 }
-record Counter { value: i64 }
-record Score { value: i64, player: string }
-record User { active: bool, name: string }
-record Named { name: string }
-record Valued { value: i64 }
-record Item { value: i64 }
+class Person { name: string, age: i64, email: string }
+class Pet { name: string, species: string }
+class Company { name: string, employees: i64 }
+class Counter { value: i64 }
+class Score { value: i64, player: string }
+class User { active: bool, name: string }
+class Named { name: string }
+class Valued { value: i64 }
+class Item { value: i64 }
 
-record CounterWithGet {
+class CounterWithGet {
     value: i64,
     func get() -> i64 { return self.value }
 }
 
-record ItemWithLabel {
+class ItemWithLabel {
     name: string,
     func label() -> string { return "Item: " + self.name }
 }
 
-record Point {
+class Point {
     x: i64, y: i64,
     func label() -> string { return "point" }
 }
 
-record Color {
+class Color {
     r: i64, g: i64, b: i64,
     func label() -> string { return "color" }
 }
 
-record ValidUser {
+class ValidUser {
     name: string,
     func validate() -> bool { return true }
 }
 
-record InvalidUser {
+class InvalidUser {
     name: string,
     func validate() -> bool { return false }
 }
@@ -158,7 +158,7 @@ tests "field constraints - multiple fields" {
 }
 
 tests "field constraints - duck typing across types" {
-    test "different records same constraint" {
+    test "different classes same constraint" {
         assert(get_name(Person { name: "Alice", age: 30, email: "a@b.c" }) == "Alice")
         assert(get_name(Pet { name: "Fluffy", species: "cat" }) == "Fluffy")
         assert(get_name(Company { name: "Acme", employees: 100 }) == "Acme")
@@ -236,32 +236,32 @@ let Validatable: type = { func validate() -> bool }
 let NamedValidatable: type = { name: string, func validate() -> bool }
 
 // Test types
-record Employee { name: string, department: string }
-record Product { name: string, price: f64 }
-record Stock { name: string, value: i64, ticker: string }
+class Employee { name: string, department: string }
+class Product { name: string, price: f64 }
+class Stock { name: string, value: i64, ticker: string }
 
-record FileHandle {
+class FileHandle {
     path: string,
     func dispose() -> void { }
 }
 
-record Connection {
+class Connection {
     host: string,
     func dispose() -> void { }
 }
 
-record Widget {
+class Widget {
     id: i64,
     func label() -> string { return "Widget-" + self.id.to_string() }
 }
 
-record Document {
+class Document {
     title: string,
     valid: bool,
     func validate() -> bool { return self.valid }
 }
 
-record Form {
+class Form {
     name: string,
     submitted: bool,
     func validate() -> bool { return self.submitted }
@@ -384,22 +384,22 @@ interface IValidatable {
 }
 
 // Records that satisfy interfaces WITHOUT explicit "implements"
-record Resource {
+class Resource {
     name: string,
     func dispose() -> void { }
 }
 
-record DatabaseConnection {
+class DatabaseConnection {
     url: string,
     func dispose() -> void { }
 }
 
-record Tag {
+class Tag {
     text: string,
     func label() -> string { return self.text }
 }
 
-record Submission {
+class Submission {
     complete: bool,
     func validate() -> bool { return self.complete }
 }
@@ -458,12 +458,12 @@ tests "interface vs structural type alias - both work" {
 let HasId: type = { id: i64 }
 let HasIdAndName: type = { id: i64, name: string }
 
-record NamedEntity {
+class NamedEntity {
     id: i64,
     name: string,
 }
 
-record SimpleId {
+class SimpleId {
     id: i64,
 }
 
@@ -516,13 +516,13 @@ tests "multiple constrained type parameters" {
 
 let Processable: type = { id: i64, func process() -> string }
 
-record Task {
+class Task {
     id: i64,
     desc: string,
     func process() -> string { return "Task " + self.id.to_string() + ": " + self.desc }
 }
 
-record Job {
+class Job {
     id: i64,
     priority: i64,
     func process() -> string { return "Job " + self.id.to_string() + " (p=" + self.priority.to_string() + ")" }

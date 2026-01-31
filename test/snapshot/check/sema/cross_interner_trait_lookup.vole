@@ -4,7 +4,7 @@
 // from prelude was "Equatable", causing false matches.
 
 // This should correctly error - "FakePreludeTrait" doesn't exist
-record Point {
+class Point {
     x: i64,
     y: i64,
 }

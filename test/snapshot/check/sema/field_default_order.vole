@@ -1,6 +1,6 @@
 // Error: required field after field with default value
 
-record BadConfig {
+class BadConfig {
     debug: bool = false,
     name: string,  // Error: required field after defaulted field
 }

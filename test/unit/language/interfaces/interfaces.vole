@@ -4,7 +4,7 @@ interface Named {
     name: string
 }
 
-record Person {
+class Person {
     name: string,
     age: i64,
 }
@@ -13,7 +13,7 @@ interface Hashable {
     func hash() -> i64
 }
 
-record User implements Hashable {
+class User implements Hashable {
     id: i64,
 
     func hash() -> i64 {
@@ -26,7 +26,7 @@ interface Serializable {
     func toJson() -> string
 }
 
-record Entity implements Hashable, Serializable {
+class Entity implements Hashable, Serializable {
     id: i64,
     name: string,
 
@@ -43,7 +43,7 @@ interface Describable {
     func describe() -> string
 }
 
-// Implement for existing record
+// Implement for existing class
 implement Describable for Person {
     func describe() -> string {
         return self.name
@@ -51,7 +51,7 @@ implement Describable for Person {
 }
 
 tests "interfaces" {
-    test "record with matching field satisfies interface structurally" {
+    test "class with matching field satisfies interface structurally" {
         let p = Person { name: "Alice", age: 30 }
         assert(p.name == "Alice")
     }
@@ -111,7 +111,7 @@ interface Extended extends Base {
     func extended_method() -> i64
 }
 
-record ExtendedImpl implements Extended {
+class ExtendedImpl implements Extended {
     value: i64,
 
     func base_method() -> i64 {
@@ -124,7 +124,7 @@ record ExtendedImpl implements Extended {
 }
 
 tests "interface extends" {
-    test "record implements extended interface with both methods" {
+    test "class implements extended interface with both methods" {
         let e = ExtendedImpl { value: 10 }
         assert(e.base_method() == 10)
         assert(e.extended_method() == 20)
@@ -141,7 +141,7 @@ interface Printable {
     func print_value() -> string
 }
 
-record Counter {
+class Counter {
     count: i64
 }
 
@@ -157,7 +157,7 @@ interface Incrementable {
     func increment() -> i64
 }
 
-record Score implements Incrementable {
+class Score implements Incrementable {
     value: i64
 }
 
@@ -184,7 +184,7 @@ interface Doubler {
     func double() -> i64
 }
 
-record Amount implements Doubler {
+class Amount implements Doubler {
     value: i64,
 
     // Expression-bodied inline method
@@ -195,7 +195,7 @@ interface Tripler {
     func triple() -> i64
 }
 
-record Quantity {
+class Quantity {
     n: i64
 }
 

@@ -8,7 +8,7 @@ func get_value() -> i32 {
 let mut mutable_global = 100
 
 // Error: function call is not constant, mutable variable reference is not constant
-record BadConfig {
+class BadConfig {
     a: i32 = get_value(),     // Error: function call
     b: i32 = mutable_global,  // Error: mutable variable reference
 }
@@ -16,13 +16,13 @@ record BadConfig {
 // Valid: immutable global with constant initializer IS a constant expression
 let immutable_global = 42
 
-record ConfigWithGlobal {
+class ConfigWithGlobal {
     value: i32 = immutable_global,      // Valid: immutable constant global
     doubled: i32 = immutable_global * 2, // Valid: expression using constant global
 }
 
 // Valid: all constant expressions
-record GoodConfig {
+class GoodConfig {
     count: i32 = 10,
     enabled: bool = true,
     name: string = "default",

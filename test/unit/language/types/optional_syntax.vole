@@ -1,11 +1,11 @@
 // Test optional type syntax and operators
 
-record Person {
+class Person {
     name: string,
     age: i32,
 }
 
-record Company {
+class Company {
     name: string,
     ceo: Person?,
 }
@@ -49,14 +49,14 @@ tests {
         assert(result == 42)
     }
 
-    test "optional chaining on record - non-nil" {
+    test "optional chaining on class - non-nil" {
         let p: Person? = Person { name: "Alice", age: 30 }
         let name = p?.name
         // name is string?, so use ?? to unwrap for comparison
         assert((name ?? "") == "Alice")
     }
 
-    test "optional chaining on record - nil" {
+    test "optional chaining on class - nil" {
         let p: Person? = nil
         let name = p?.name
         assert(name is nil)

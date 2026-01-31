@@ -1,6 +1,6 @@
 // Test that generic classes can call methods on constrained type parameters
 
-record Person {
+class Person {
     name: string,
     age: i32,
 }

@@ -538,7 +538,7 @@ fn satisfies_interface_with_field() {
             name: string
         }
 
-        record Person {
+        class Person {
             name: string,
             age: i64,
         }
@@ -572,7 +572,7 @@ fn satisfies_interface_missing_field() {
             name: string
         }
 
-        record Point {
+        class Point {
             x: i64,
             y: i64,
         }
@@ -605,7 +605,7 @@ fn satisfies_interface_with_method() {
             func hash() -> i64
         }
 
-        record User {
+        class User {
             id: i64,
             func hash() -> i64 {
                 return self.id

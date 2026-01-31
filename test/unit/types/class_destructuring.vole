@@ -1,30 +1,30 @@
 // Record destructuring tests
 
-record Point { x: i64, y: i64 }
-record Person { name: string, age: i64 }
+class Point { x: i64, y: i64 }
+class Person { name: string, age: i64 }
 
 tests {
-    test "basic record destructuring" {
+    test "basic class destructuring" {
         let p = Point { x: 10, y: 20 }
         let { x, y } = p
         assert(x == 10)
         assert(y == 20)
     }
 
-    test "record destructuring with rename" {
+    test "class destructuring with rename" {
         let p = Point { x: 5, y: 15 }
         let { x: a, y: b } = p
         assert(a == 5)
         assert(b == 15)
     }
 
-    test "partial record destructuring" {
+    test "partial class destructuring" {
         let p = Point { x: 100, y: 200 }
         let { x } = p
         assert(x == 100)
     }
 
-    test "mutable record destructuring" {
+    test "mutable class destructuring" {
         let p = Point { x: 1, y: 2 }
         let mut { x, y } = p
         x = 99
@@ -32,7 +32,7 @@ tests {
         assert(y == 2)
     }
 
-    test "record with string field" {
+    test "class with string field" {
         let person = Person { name: "Alice", age: 30 }
         let { name, age } = person
         assert(name == "Alice")

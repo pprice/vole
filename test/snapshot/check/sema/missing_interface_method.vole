@@ -3,7 +3,7 @@ interface Greeting {
     func farewell() -> string
 }
 
-record Greeter implements Greeting {
+class Greeter implements Greeting {
     name: string,
 
     func greet() -> string {

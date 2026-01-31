@@ -1,6 +1,6 @@
-// Module that exports records with static methods for testing module-qualified access
+// Module that exports classes with static methods for testing module-qualified access
 
-record TestDuration {
+class TestDuration {
     nanos: i64,
 
     statics {
@@ -18,7 +18,7 @@ record TestDuration {
     }
 }
 
-record TestPoint {
+class TestPoint {
     x: i64,
     y: i64,
 
@@ -37,8 +37,8 @@ record TestPoint {
     }
 }
 
-// Generic record with static methods
-record TestBox<T> {
+// Generic class with static methods
+class TestBox<T> {
     value: T,
 
     statics {

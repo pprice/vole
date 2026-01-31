@@ -3,7 +3,7 @@
 [stderr]
   x [W3004]: union with `never` will be simplified
     ,-[<path>/union_simplification.vole:15:5]
- 14 | record Foo {
+ 14 | class Foo {
  15 |     value: i64 | never,
     :     ^^^^^^^^^|^^^^^^^^^
     :              `-- `never` in union will be removed

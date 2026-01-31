@@ -1,5 +1,5 @@
 // Error: field default value has wrong type
 
-record Config {
+class Config {
     count: i32 = "hello",  // Error: expected i32, found string
 }

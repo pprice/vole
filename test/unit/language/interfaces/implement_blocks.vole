@@ -1,4 +1,4 @@
-// Test that implement blocks work for primitives and records
+// Test that implement blocks work for primitives and classes
 
 interface Describable {
     func describe() -> string

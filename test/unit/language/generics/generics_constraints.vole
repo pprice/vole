@@ -1,12 +1,12 @@
 // Generic Structural Constraint Tests
 
 // Types that satisfy HasName constraint
-record Person {
+class Person {
     name: string,
     age: i32,
 }
 
-record Animal {
+class Animal {
     name: string,
     species: string,
 }

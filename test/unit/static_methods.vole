@@ -1,11 +1,11 @@
-// Test static methods on records and classes
+// Test static methods on classes and classes
 // Comprehensive tests for non-generic static methods
 
 // =============================================================================
 // Basic Record with Static Methods
 // =============================================================================
 
-record Point {
+class Point {
     x: i64,
     y: i64,
 
@@ -56,7 +56,7 @@ record Point {
 // Record with Multiple Field Types
 // =============================================================================
 
-record Rectangle {
+class Rectangle {
     x: i64,
     y: i64,
     width: i64,
@@ -246,7 +246,7 @@ class Person {
 // Record with Boolean Logic
 // =============================================================================
 
-record Flags {
+class Flags {
     a: bool,
     b: bool,
     c: bool,
@@ -310,31 +310,31 @@ tests {
     // Point - Basic Static Methods
     // -------------------------------------------------------------------------
 
-    test "record static method - origin" {
+    test "class static method - origin" {
         let p = Point.origin()
         assert(p.x == 0)
         assert(p.y == 0)
     }
 
-    test "record static method with params - from_x" {
+    test "class static method with params - from_x" {
         let p = Point.from_x(42)
         assert(p.x == 42)
         assert(p.y == 0)
     }
 
-    test "record static method with params - from_y" {
+    test "class static method with params - from_y" {
         let p = Point.from_y(42)
         assert(p.x == 0)
         assert(p.y == 42)
     }
 
-    test "record static method with multiple params" {
+    test "class static method with multiple params" {
         let p = Point.create(10, 20)
         assert(p.x == 10)
         assert(p.y == 20)
     }
 
-    test "record static method calling another static" {
+    test "class static method calling another static" {
         let ux = Point.unit_x()
         let uy = Point.unit_y()
         assert(ux.x == 1)
@@ -343,7 +343,7 @@ tests {
         assert(uy.y == 1)
     }
 
-    test "record static method with record params" {
+    test "class static method with class params" {
         let p1 = Point.create(0, 0)
         let p2 = Point.create(10, 20)
         let mid = Point.midpoint(p1, p2)
@@ -351,19 +351,19 @@ tests {
         assert(mid.y == 10)
     }
 
-    test "record static method returning primitive" {
+    test "class static method returning primitive" {
         let p1 = Point.create(0, 0)
         let p2 = Point.create(3, 4)
         let dist_sq = Point.distance_squared(p1, p2)
         assert(dist_sq == 25)  // 3^2 + 4^2
     }
 
-    test "record static method result in expression" {
+    test "class static method result in expression" {
         let sum = Point.origin().x + Point.create(5, 10).y
         assert(sum == 10)
     }
 
-    test "record static method chained access" {
+    test "class static method chained access" {
         assert(Point.create(7, 11).x == 7)
         assert(Point.create(7, 11).y == 11)
     }

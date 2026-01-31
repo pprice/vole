@@ -2,8 +2,8 @@
 // Bug: vole-p0nv - field extraction happened before type check, causing
 // crashes when destructuring patterns didn't match (e.g., nil case)
 
-record Point { x: i64, y: i64 }
-record Circle { radius: f64 }
+class Point { x: i64, y: i64 }
+class Circle { radius: f64 }
 
 tests {
     test "optional with destructure - some case" {
@@ -24,7 +24,7 @@ tests {
         assert(result == -1)
     }
 
-    test "union of records with destructure" {
+    test "union of classes with destructure" {
         let shape: Point | Circle = Point { x: 10, y: 20 }
         let result = match shape {
             Point { x, y } => x + y
@@ -33,7 +33,7 @@ tests {
         assert(result == 30)
     }
 
-    test "union of records - second variant" {
+    test "union of classes - second variant" {
         let shape: Point | Circle = Circle { radius: 5.0 }
         let result = match shape {
             Point { x, y } => x + y

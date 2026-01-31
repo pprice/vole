@@ -5,8 +5,8 @@
 
 let HasId: type = { id: i64 }
 
-record SimpleId { id: i64 }
-record NamedId { id: i64, name: string }
+class SimpleId { id: i64 }
+class NamedId { id: i64, name: string }
 
 func double_id<T: HasId>(x: T) -> i64 {
     return x.id * 2

@@ -23,7 +23,7 @@ func needs_all<T: Hashable + Eq + Stringable>(x: T) -> string {
     return x.to_string()
 }
 
-record Point {
+class Point {
     x: i64
     y: i64
 }

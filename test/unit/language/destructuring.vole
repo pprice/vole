@@ -1,11 +1,11 @@
 // Destructuring tests
 
-record Point {
+class Point {
     x: i32,
     y: i32,
 }
 
-record Person {
+class Person {
     name: string,
     age: i32,
 }

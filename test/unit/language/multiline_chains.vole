@@ -1,6 +1,6 @@
 // Test multi-line method chaining
 
-record Counter {
+class Counter {
     value: i64,
 
     func add(n: i64) -> Counter {
@@ -16,7 +16,7 @@ record Counter {
     }
 }
 
-record Wrapper {
+class Wrapper {
     inner: Counter,
 }
 

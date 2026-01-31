@@ -22,25 +22,25 @@ func get_value<T: Hashable>(a: { value: T }) -> T {
 }
 
 // Records for testing
-record StringNamed {
+class StringNamed {
     name: string
 }
 
-record IntNamed {
+class IntNamed {
     name: i64
 }
 
-record Pair {
+class Pair {
     first: string,
     second: i64
 }
 
-record SecondString {
+class SecondString {
     first: i64,
     second: string
 }
 
-record HashValue {
+class HashValue {
     value: string
 }
 

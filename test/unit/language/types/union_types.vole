@@ -8,12 +8,12 @@ class Cat {
     name: string,
 }
 
-record Point {
+class Point {
     x: i32,
     y: i32,
 }
 
-record Circle {
+class Circle {
     radius: f64,
 }
 
@@ -143,7 +143,7 @@ tests "match expressions" {
         assert(result == 2)
     }
 
-    test "match - record types" {
+    test "match - class types" {
         let shape: Point | Circle = Point { x: 10, y: 20 }
         let result = match shape {
             Point => 1
@@ -152,7 +152,7 @@ tests "match expressions" {
         assert(result == 1)
     }
 
-    test "match - record types circle" {
+    test "match - class types circle" {
         let shape: Point | Circle = Circle { radius: 5.0 }
         let result = match shape {
             Point => 1

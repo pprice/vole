@@ -12,7 +12,7 @@ interface Comparable {
     }
 }
 
-record Score implements Comparable {
+class Score implements Comparable {
     value: i64,
 
     func compare(other: i64) -> i64 {
@@ -21,7 +21,7 @@ record Score implements Comparable {
 }
 
 // Override a default method with custom implementation
-record Rating implements Comparable {
+class Rating implements Comparable {
     stars: i64,
 
     func compare(other: i64) -> i64 {

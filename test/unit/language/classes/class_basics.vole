@@ -1,6 +1,6 @@
-// Record tests
+// Class basics tests
 
-record Point {
+class Point {
     x: i32,
     y: i32,
 
@@ -15,7 +15,7 @@ record Point {
     func doubled() => Point { x: self.x * 2, y: self.y * 2 }
 }
 
-tests "records" {
+tests "classes" {
     test "basic instantiation" {
         let p = Point { x: 10, y: 20 }
         assert(p.x == 10)
@@ -37,13 +37,31 @@ tests "records" {
         assert(p.product() == 12)
     }
 
-    test "expression-bodied method returning record" {
+    test "expression-bodied method returning class" {
         let p = Point { x: 5, y: 7 }
         let d = p.doubled()
         assert(d.x == 10)
         assert(d.y == 14)
     }
 
-    // Note: Record immutability is tested via expect-error in sema tests
-    // Records cannot have their fields mutated after creation
+    test "class fields are mutable" {
+        let p = Point { x: 1, y: 2 }
+        p.x = 10
+        assert(p.x == 10)
+        assert(p.y == 2)
+    }
+
+    test "class multiple field mutations" {
+        let p = Point { x: 1, y: 2 }
+        p.x = 100
+        p.y = 200
+        assert(p.x == 100)
+        assert(p.y == 200)
+    }
+
+    test "class field mutation preserves methods" {
+        let p = Point { x: 3, y: 4 }
+        p.x = 10
+        assert(p.sum() == 14)
+    }
 }

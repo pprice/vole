@@ -1,7 +1,7 @@
 // Generic Record Tests
 
-// Simple generic wrapper record
-record Wrapper<T> {
+// Simple generic wrapper class
+class Wrapper<T> {
     data: T,
 
     func unwrap() -> T {
@@ -9,8 +9,8 @@ record Wrapper<T> {
     }
 }
 
-// Generic key-value record
-record KeyValue<K, V> {
+// Generic key-value class
+class KeyValue<K, V> {
     key: K,
     value: V,
 
@@ -25,55 +25,55 @@ record KeyValue<K, V> {
 
 tests {
 
-    test "generics::records::wrapper with int" {
+    test "generics::classes::wrapper with int" {
         let w = Wrapper { data: 100 }
         assert(w.data == 100)
         assert(w.unwrap() == 100)
     }
 
-    test "generics::records::wrapper with string" {
+    test "generics::classes::wrapper with string" {
         let w = Wrapper { data: "wrapped" }
         assert(w.data == "wrapped")
         assert(w.unwrap() == "wrapped")
     }
 
-    test "generics::records::keyvalue different types" {
+    test "generics::classes::keyvalue different types" {
         let kv = KeyValue { key: "name", value: 42 }
         assert(kv.getKey() == "name")
         assert(kv.getValue() == 42)
     }
 
-    test "generics::records::keyvalue same types" {
+    test "generics::classes::keyvalue same types" {
         let kv = KeyValue { key: 1, value: 2 }
         assert(kv.getKey() == 1)
         assert(kv.getValue() == 2)
     }
 
-    test "generics::records::nested generic" {
+    test "generics::classes::nested generic" {
         let inner = Wrapper { data: 5 }
         let outer = Wrapper { data: inner }
         assert(outer.data.data == 5)
     }
 
-    test "generics::records::wrapper with f64" {
+    test "generics::classes::wrapper with f64" {
         let w = Wrapper { data: 3.14 }
         assert(w.data == 3.14)
         assert(w.unwrap() == 3.14)
     }
 
-    test "generics::records::wrapper with bool" {
+    test "generics::classes::wrapper with bool" {
         let w = Wrapper { data: true }
         assert(w.data == true)
         assert(w.unwrap() == true)
     }
 
-    test "generics::records::keyvalue with f64 value" {
+    test "generics::classes::keyvalue with f64 value" {
         let kv = KeyValue { key: "pi", value: 3.14159 }
         assert(kv.getKey() == "pi")
         assert(kv.getValue() == 3.14159)
     }
 
-    test "generics::records::keyvalue with bool value" {
+    test "generics::classes::keyvalue with bool value" {
         let kv = KeyValue { key: 1, value: false }
         assert(kv.getKey() == 1)
         assert(kv.getValue() == false)

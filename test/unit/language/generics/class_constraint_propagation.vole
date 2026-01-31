@@ -26,7 +26,7 @@ class Manager<T: Disposable> {
     }
 }
 
-record Resource implements Disposable {
+class Resource implements Disposable {
     id: i64,
 }
 

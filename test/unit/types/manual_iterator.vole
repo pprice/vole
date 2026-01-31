@@ -1,8 +1,8 @@
 // Manual Iterator implementation tests
-// Test that records can implement Iterator<T> directly
+// Test that classes can implement Iterator<T> directly
 
 // A manually implemented iterator that counts from 0 to max
-record Counter implements Iterator<i64> {
+class Counter implements Iterator<i64> {
     current: i64,
     max: i64,
 }
@@ -23,7 +23,7 @@ func count_to(n: i64) -> Iterator<i64> {
 }
 
 // A range iterator for testing different patterns
-record Range implements Iterator<i64> {
+class Range implements Iterator<i64> {
     start: i64,
     end: i64,
     step: i64,

@@ -4,8 +4,8 @@
 // Create a simple module with an interface
 let traits = import "std:prelude/traits"
 
-// Simple record to implement interfaces on
-record Point {
+// Simple class to implement interfaces on
+class Point {
     x: i64,
     y: i64,
 }

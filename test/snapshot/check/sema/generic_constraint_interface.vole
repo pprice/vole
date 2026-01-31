@@ -3,7 +3,7 @@ interface Runnable {
     func run() -> i64
 }
 
-record Foo {
+class Foo {
     value: i64,
 }
 

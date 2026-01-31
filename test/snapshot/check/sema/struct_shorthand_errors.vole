@@ -1,7 +1,7 @@
 // Struct field init shorthand error tests
 // Tests that undefined variable errors in shorthand syntax are clear
 
-record Point { x: i64, y: i64 }
+class Point { x: i64, y: i64 }
 
 // Test 1: undefined variable with shorthand
 func test_undefined_shorthand() {

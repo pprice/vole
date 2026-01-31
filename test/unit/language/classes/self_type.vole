@@ -29,7 +29,7 @@ interface Subtractable {
 
 // === Implementations ===
 
-record Point implements Comparable {
+class Point implements Comparable {
     x: i32,
     y: i32,
 
@@ -38,7 +38,7 @@ record Point implements Comparable {
     }
 }
 
-record Position implements Clonable {
+class Position implements Clonable {
     x: i32,
     y: i32,
 
@@ -55,7 +55,7 @@ class Counter implements Comparable {
     }
 }
 
-record Builder implements Chainable {
+class Builder implements Chainable {
     count: i32,
 
     func chain() -> Self {
@@ -63,7 +63,7 @@ record Builder implements Chainable {
     }
 }
 
-record Vector implements BinaryOp {
+class Vector implements BinaryOp {
     x: i32,
     y: i32,
 
@@ -72,7 +72,7 @@ record Vector implements BinaryOp {
     }
 }
 
-record Number implements Addable, Subtractable {
+class Number implements Addable, Subtractable {
     value: i32,
 
     func add(other: Self) -> Self {

@@ -28,32 +28,32 @@ func add_coords(p: { x: i64, y: i64 }) -> i64 {
     return p.x + p.y
 }
 
-// Compatible record type
-record Person { name: string }
+// Compatible class type
+class Person { name: string }
 
-// Another compatible record with extra fields
-record Employee { name: string, id: i64 }
+// Another compatible class with extra fields
+class Employee { name: string, id: i64 }
 
 // Record with coordinates
-record Point { x: i64, y: i64, label: string }
+class Point { x: i64, y: i64, label: string }
 
 tests {
-    test "inline structural type accepts compatible record" {
+    test "inline structural type accepts compatible class" {
         let p = Person { name: "Alice" }
         assert(greet(p) == "Alice")
     }
 
-    test "inline structural type accepts record with extra fields" {
+    test "inline structural type accepts class with extra fields" {
         let e = Employee { name: "Bob", id: 42 }
         assert(greet(e) == "Bob")
     }
 
-    test "type alias structural accepts compatible record" {
+    test "type alias structural accepts compatible class" {
         let p = Person { name: "Charlie" }
         assert(get_name(p) == "Charlie")
     }
 
-    test "type alias structural accepts record with extra fields" {
+    test "type alias structural accepts class with extra fields" {
         let e = Employee { name: "Diana", id: 99 }
         assert(get_name(e) == "Diana")
     }

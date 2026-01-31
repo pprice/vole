@@ -20,7 +20,7 @@ interface Converter {
 
 // Custom implementation only needs to implement the abstract method
 // since format has a default external binding
-record CustomConverter implements Converter {
+class CustomConverter implements Converter {
     prefix: string,
 
     func convert(value: i64) -> string {

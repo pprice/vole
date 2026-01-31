@@ -1,8 +1,8 @@
-// Test: Generic class/record with type parameter constraints (sema-only)
+// Test: Generic class/class with type parameter constraints (sema-only)
 // This tests that sema correctly resolves constraint methods on type parameters.
 //
 // NOTE: Full codegen support for constraint method calls on type parameters
-// requires class/record monomorphization, which is not yet implemented.
+// requires class/class monomorphization, which is not yet implemented.
 // This is a check-only test that verifies sema analysis passes.
 
 interface Printable {
@@ -19,7 +19,7 @@ class Holder<T: Printable> {
 }
 
 // Record with constraint
-record Wrapper<T: Printable> {
+class Wrapper<T: Printable> {
     item: T,
 
     func display() -> string {

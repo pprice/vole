@@ -17,7 +17,7 @@ interface Greeter {
 }
 
 // SimpleGreeter only implements the abstract method
-record SimpleGreeter implements Greeter {
+class SimpleGreeter implements Greeter {
     person_name: string,
 
     func name() -> string {
@@ -26,7 +26,7 @@ record SimpleGreeter implements Greeter {
 }
 
 tests "default external" {
-    test "record implementing interface with default external" {
+    test "class implementing interface with default external" {
         let g = SimpleGreeter { person_name: "Alice" }
         assert(g.name() == "Alice")
         // greet() and formal_greet() should resolve to interface defaults

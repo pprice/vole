@@ -1,8 +1,8 @@
 // Field init shorthand tests
 // Tests for the shorthand syntax: `Point { x, y }` equivalent to `Point { x: x, y: y }`
 
-// Basic record with two fields
-record Point {
+// Basic class with two fields
+class Point {
     x: i32,
     y: i32,
 
@@ -12,7 +12,7 @@ record Point {
 }
 
 // Record with three fields for testing multiple shorthand
-record Vector3D {
+class Vector3D {
     x: f64,
     y: f64,
     z: f64,
@@ -29,8 +29,8 @@ class Counter {
     }
 }
 
-// Generic record to test shorthand with generics
-record Box<T> {
+// Generic class to test shorthand with generics
+class Box<T> {
     value: T,
 
     func unwrap() -> T {
@@ -38,28 +38,28 @@ record Box<T> {
     }
 }
 
-// Generic record with multiple fields
-record Pair<A, B> {
+// Generic class with multiple fields
+class Pair<A, B> {
     first: A,
     second: B,
 }
 
 // Record for nested struct testing
-record Rectangle {
+class Rectangle {
     top_left: Point,
     width: i32,
     height: i32,
 }
 
 // Record with different types to test mixed shorthand
-record Config {
+class Config {
     name: string,
     count: i32,
     enabled: bool,
 }
 
 tests "struct init shorthand" {
-    test "basic shorthand with record" {
+    test "basic shorthand with class" {
         let x: i32 = 10
         let y: i32 = 20
         let p = Point { x, y }
@@ -118,14 +118,14 @@ tests "struct init shorthand" {
         assert(c.increment() == 60)
     }
 
-    test "generic record shorthand" {
+    test "generic class shorthand" {
         let value = 42
         let b = Box { value }
         assert(b.value == 42)
         assert(b.unwrap() == 42)
     }
 
-    test "generic record shorthand with string" {
+    test "generic class shorthand with string" {
         let value = "hello"
         let b = Box { value }
         assert(b.value == "hello")

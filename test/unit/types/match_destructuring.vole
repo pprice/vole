@@ -1,10 +1,10 @@
 // Match arm destructuring tests
 
-record Point { x: i64, y: i64 }
-record Person { name: string, age: i64 }
+class Point { x: i64, y: i64 }
+class Person { name: string, age: i64 }
 
 tests {
-    test "basic typed record pattern in match" {
+    test "basic typed class pattern in match" {
         let p = Point { x: 10, y: 20 }
         let result = match p {
             Point { x, y } => x + y
@@ -12,7 +12,7 @@ tests {
         assert(result == 30)
     }
 
-    test "typed record pattern with rename" {
+    test "typed class pattern with rename" {
         let p = Point { x: 5, y: 15 }
         let result = match p {
             Point { x: a, y: b } => a * b
@@ -20,7 +20,7 @@ tests {
         assert(result == 75)
     }
 
-    test "partial typed record pattern" {
+    test "partial typed class pattern" {
         let p = Point { x: 100, y: 200 }
         let result = match p {
             Point { x } => x
@@ -28,7 +28,7 @@ tests {
         assert(result == 100)
     }
 
-    test "typed record pattern with string field" {
+    test "typed class pattern with string field" {
         let person = Person { name: "Alice", age: 30 }
         let result = match person {
             Person { name, age } => age

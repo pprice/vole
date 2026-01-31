@@ -20,7 +20,7 @@ func mixed_defaults(a: i64 = DEFAULT_VALUE, b: i64 = 10, c: i64 = DOUBLED_DEFAUL
 }
 
 // Record using constant global defaults
-record ConfigWithGlobalDefaults {
+class ConfigWithGlobalDefaults {
     value: i64 = DEFAULT_VALUE,
     doubled: i64 = DOUBLED_DEFAULT,
     computed: i64 = DEFAULT_VALUE + 100,
@@ -53,7 +53,7 @@ tests {
         assert(mixed_defaults(1, 2, 3) == 6)
     }
 
-    test "record with constant global defaults" {
+    test "class with constant global defaults" {
         let config = ConfigWithGlobalDefaults {}
         assert(config.value == 42)
         assert(config.doubled == 84)

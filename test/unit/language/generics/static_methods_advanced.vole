@@ -13,7 +13,7 @@ interface Stringable { func str() -> string }
 // Test types implementing interfaces
 // =============================================================================
 
-record Id implements Hashable, Eq, Stringable {
+class Id implements Hashable, Eq, Stringable {
     n: i64,
 }
 
@@ -29,7 +29,7 @@ implement Stringable for Id {
     func str() -> string { return "Id" }
 }
 
-record Label implements Stringable {
+class Label implements Stringable {
     text: string,
 }
 
