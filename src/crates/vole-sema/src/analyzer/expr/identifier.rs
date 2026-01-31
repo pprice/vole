@@ -48,6 +48,18 @@ impl Analyzer {
                 true, // Always closure when used as a value
             ))
         } else {
+            // Check if the identifier resolves to a sentinel type (bare-name construction)
+            let sentinel_def = {
+                let guard = self.resolver(interner);
+                let type_def_id = guard.resolve_type(sym, &self.entity_registry());
+                type_def_id.filter(|&id| self.entity_registry().type_kind(id).is_sentinel())
+            };
+
+            if let Some(type_def_id) = sentinel_def {
+                // Bare identifier resolves to a sentinel type - treat as sentinel construction
+                return Ok(self.type_arena_mut().struct_type(type_def_id, vec![]));
+            }
+
             let name = interner.resolve(sym);
             self.add_error(
                 SemanticError::UndefinedVariable {

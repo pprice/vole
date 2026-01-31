@@ -116,23 +116,26 @@ impl Analyzer {
                 match &let_stmt.init {
                     LetInit::Expr(init_expr) => {
                         // Check for ambiguous type alias: let Alias = TypeName
-                        // where TypeName is a type but syntax is ambiguous
+                        // where TypeName is a type but syntax is ambiguous.
+                        // Sentinel types are excluded because bare-name construction is valid.
                         if let ExprKind::Identifier(ident_sym) = &init_expr.kind {
                             let ident_name = interner.resolve(*ident_sym);
-                            if self
+                            let resolved = self
                                 .resolver(interner)
-                                .resolve_type(*ident_sym, &self.entity_registry())
-                                .is_some()
-                            {
-                                let let_name = interner.resolve(let_stmt.name);
-                                self.add_error(
-                                    SemanticError::AmbiguousTypeAlias {
-                                        name: let_name.to_string(),
-                                        type_name: ident_name.to_string(),
-                                        span: init_expr.span.into(),
-                                    },
-                                    init_expr.span,
-                                );
+                                .resolve_type(*ident_sym, &self.entity_registry());
+                            if let Some(type_def_id) = resolved {
+                                let kind = self.entity_registry().type_kind(type_def_id);
+                                if !kind.is_sentinel() {
+                                    let let_name = interner.resolve(let_stmt.name);
+                                    self.add_error(
+                                        SemanticError::AmbiguousTypeAlias {
+                                            name: let_name.to_string(),
+                                            type_name: ident_name.to_string(),
+                                            span: init_expr.span.into(),
+                                        },
+                                        init_expr.span,
+                                    );
+                                }
                             }
                         }
 

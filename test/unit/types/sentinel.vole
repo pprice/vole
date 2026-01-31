@@ -10,6 +10,17 @@ func make_ready() -> Ready {
     return Ready {}
 }
 
+func make_ready_bare() -> Ready {
+    return Ready
+}
+
+func maybe_value(flag: bool) -> i64 | Empty {
+    if flag {
+        return 42
+    }
+    return Empty
+}
+
 func status_message(s: Ready | Waiting | string) -> i64 {
     return match s {
         Ready => 1
@@ -99,5 +110,80 @@ tests {
             i64 => 0
         }
         assert(result == 1)
+    }
+
+    // Bare-name construction tests (no braces)
+
+    test "bare sentinel construction" {
+        let e = Empty
+        assert(true) // compiles and runs
+    }
+
+    test "bare sentinel in union type annotation" {
+        let v: Ready | Waiting = Ready
+        assert(v is Ready)
+    }
+
+    test "bare sentinel in union - second variant" {
+        let v: Ready | Waiting = Waiting
+        assert(v is Waiting)
+    }
+
+    test "bare sentinel from function return" {
+        let r = make_ready()
+        assert(r is Ready)
+    }
+
+    test "bare sentinel in union with i64" {
+        let v: Empty | i64 = Empty
+        let result = match v {
+            Empty => 0
+            i64 => 1
+        }
+        assert(result == 0)
+    }
+
+    test "bare sentinel in match arm body" {
+        let v: Empty | i64 = Empty
+        let result = match v {
+            Empty => 10
+            i64 => 20
+        }
+        assert(result == 10)
+    }
+
+    test "bare and braced sentinel are interchangeable" {
+        let a: Ready | i64 = Ready
+        let b: Ready | i64 = Ready {}
+        assert(a is Ready)
+        assert(b is Ready)
+    }
+
+    test "bare sentinel return from function" {
+        let r = make_ready_bare()
+        assert(r is Ready)
+    }
+
+    test "bare sentinel return in union function" {
+        let v = maybe_value(false)
+        let result = match v {
+            i64 => 0
+            Empty => 1
+        }
+        assert(result == 1)
+    }
+
+    test "bare sentinel return in union function - value branch" {
+        let v = maybe_value(true)
+        let result = match v {
+            i64 => 1
+            Empty => 0
+        }
+        assert(result == 1)
+    }
+
+    test "variable shadows sentinel" {
+        let Empty = 42
+        assert(Empty == 42)
     }
 }

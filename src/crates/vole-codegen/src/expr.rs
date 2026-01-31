@@ -169,6 +169,17 @@ impl Cg<'_, '_, '_> {
         {
             // Identifier refers to a named function - create a closure wrapper
             self.function_reference(sym, func_type_id)
+        } else if let Some(sentinel_type_id) = self.get_expr_type(&expr.id)
+            && let Some((type_def_id, _)) = self.arena().unwrap_struct(sentinel_type_id)
+            && self.query().registry().type_kind(type_def_id).is_sentinel()
+        {
+            // Bare identifier refers to a sentinel type - emit i8(0)
+            let value = self.builder.ins().iconst(types::I8, 0);
+            Ok(CompiledValue {
+                value,
+                ty: types::I8,
+                type_id: sentinel_type_id,
+            })
         } else {
             Err(CodegenError::not_found("variable", self.interner().resolve(sym)).into())
         }
