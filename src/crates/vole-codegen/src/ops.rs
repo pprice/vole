@@ -521,6 +521,10 @@ impl Cg<'_, '_, '_> {
             {
                 return self.optional_value_compare(right, left, op);
             }
+            // Check if both operands are structs
+            if self.arena().is_struct(left.type_id) && self.arena().is_struct(right.type_id) {
+                return self.struct_equality(left, right, op);
+            }
         }
 
         let left_type_id = left.type_id;
@@ -695,6 +699,44 @@ impl Cg<'_, '_, '_> {
         } else {
             Ok(self.builder.ins().icmp(IntCC::Equal, left, right))
         }
+    }
+
+    /// Struct equality: compare all flat slots field-by-field.
+    /// For Eq, returns true iff all slots are equal; for Ne, returns true iff any slot differs.
+    fn struct_equality(
+        &mut self,
+        left: CompiledValue,
+        right: CompiledValue,
+        op: BinaryOp,
+    ) -> Result<CompiledValue, String> {
+        let flat_count = self
+            .struct_flat_slot_count(left.type_id)
+            .ok_or_else(|| "struct_equality: expected struct type".to_string())?;
+
+        // Start with true (1) - all fields equal so far
+        let mut result = self.builder.ins().iconst(types::I8, 1);
+
+        for i in 0..flat_count {
+            let offset = (i as i32) * 8;
+            let left_slot =
+                self.builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), left.value, offset);
+            let right_slot =
+                self.builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), right.value, offset);
+            let eq = self.builder.ins().icmp(IntCC::Equal, left_slot, right_slot);
+            result = self.builder.ins().band(result, eq);
+        }
+
+        // For NotEq, negate the result
+        if op == BinaryOp::Ne {
+            let one = self.builder.ins().iconst(types::I8, 1);
+            result = self.builder.ins().bxor(result, one);
+        }
+
+        Ok(self.bool_value(result))
     }
 
     /// Compare an optional value with nil
