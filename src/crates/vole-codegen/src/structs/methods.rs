@@ -531,7 +531,41 @@ impl Cg<'_, '_, '_> {
             }
         }
 
+        // Handle struct return conventions: sret (large structs) or multi-value (small structs)
+        let is_sret = self.is_sret_struct_return(return_type_id);
+        if is_sret {
+            // Large struct: allocate return buffer and prepend sret pointer as first arg
+            let ptr_type = self.ptr_type();
+            let flat_count = self
+                .struct_flat_slot_count(return_type_id)
+                .expect("sret struct must have flat slot count");
+            let total_size = (flat_count as u32) * 8;
+            let slot = self.alloc_stack(total_size);
+            let sret_ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+            args.insert(0, sret_ptr);
+        }
+
         let call = self.builder.ins().call(method_func_ref, &args);
+
+        if is_sret {
+            // Sret: result[0] is the sret pointer we passed in
+            let results = self.builder.inst_results(call);
+            return Ok(CompiledValue {
+                value: results[0],
+                ty: self.ptr_type(),
+                type_id: return_type_id,
+            });
+        }
+
+        // Small struct multi-value return: reconstruct from registers
+        if self.is_small_struct_return(return_type_id) {
+            let results = self.builder.inst_results(call);
+            if results.len() == 2 {
+                let results_vec: Vec<Value> = results.to_vec();
+                return Ok(self.reconstruct_struct_from_regs(&results_vec, return_type_id));
+            }
+        }
+
         let results = self.builder.inst_results(call);
 
         if results.is_empty() {

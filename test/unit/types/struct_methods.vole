@@ -17,6 +17,16 @@ struct Point {
     func weighted_sum(wx: i64, wy: i64) -> i64 {
         return self.x * wx + self.y * wy
     }
+
+    func doubled() -> Point {
+        return Point { x: self.x * 2, y: self.y * 2 }
+    }
+
+    func add(other: Point) -> Point {
+        return Point { x: self.x + other.x, y: self.y + other.y }
+    }
+
+    func scaled(factor: i64) -> Point => Point { x: self.x * factor, y: self.y * factor }
 }
 
 struct Counter {
@@ -76,5 +86,47 @@ tests "struct methods" {
         assert(p.sum() == 8)
         assert(p.product() == 15)
         assert(p.add_to_x(10) == 15)
+    }
+
+    test "method returning struct" {
+        let p = Point { x: 3, y: 4 }
+        let p2 = p.doubled()
+        assert(p2.x == 6)
+        assert(p2.y == 8)
+    }
+
+    test "method with struct param returning struct" {
+        let p1 = Point { x: 1, y: 2 }
+        let p2 = Point { x: 10, y: 20 }
+        let p3 = p1.add(p2)
+        assert(p3.x == 11)
+        assert(p3.y == 22)
+    }
+
+    test "chained struct method calls" {
+        let p = Point { x: 1, y: 1 }
+        let p2 = p.doubled().doubled()
+        assert(p2.x == 4)
+        assert(p2.y == 4)
+    }
+
+    test "expression-bodied method returning struct" {
+        let p = Point { x: 3, y: 4 }
+        let p2 = p.scaled(5)
+        assert(p2.x == 15)
+        assert(p2.y == 20)
+    }
+
+    test "method returning struct then accessing field" {
+        assert(Point { x: 5, y: 10 }.doubled().sum() == 30)
+    }
+
+    test "chained add methods" {
+        let a = Point { x: 1, y: 2 }
+        let b = Point { x: 3, y: 4 }
+        let c = Point { x: 5, y: 6 }
+        let result = a.add(b).add(c)
+        assert(result.x == 9)
+        assert(result.y == 12)
     }
 }
