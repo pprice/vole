@@ -1,0 +1,244 @@
+// Test error type declarations inside tests blocks
+// Exercises: error declaration, field access, fallible functions, raise, try, match patterns
+
+tests "basic error declaration in tests block" {
+    error TestError {
+        message: string,
+    }
+
+    func mayFailWithMessage(x: i64) -> fallible(i64, TestError) {
+        if x < 0 {
+            raise TestError { message: "negative input" }
+        }
+        return x * 2
+    }
+
+    test "success case" {
+        let result = match mayFailWithMessage(5) {
+            success x => x
+            error => -999
+            _ => -888
+        }
+        assert(result == 10)
+    }
+
+    test "error case" {
+        let result = match mayFailWithMessage(-1) {
+            success x => x
+            error => -999
+            _ => -888
+        }
+        assert(result == -999)
+    }
+
+    test "specific error pattern" {
+        let result = match mayFailWithMessage(-1) {
+            success x => x
+            error TestError => -1
+            error => -999
+            _ => -888
+        }
+        assert(result == -1)
+    }
+}
+
+tests "error with fields in tests block" {
+    error Overflow { value: i64, max: i64 }
+
+    func checkRange(x: i64, max: i64) -> fallible(i64, Overflow) {
+        if x > max {
+            raise Overflow { value: x, max: max }
+        }
+        return x
+    }
+
+    test "within range succeeds" {
+        let result = match checkRange(50, 100) {
+            success x => x
+            error => -999
+            _ => -888
+        }
+        assert(result == 50)
+    }
+
+    test "out of range raises error" {
+        let result = match checkRange(150, 100) {
+            success x => x
+            error Overflow => -1
+            error => -999
+            _ => -888
+        }
+        assert(result == -1)
+    }
+}
+
+tests "error with destructuring in tests block" {
+    error NotFound { key: string }
+
+    func lookup(key: string) -> fallible(string, NotFound) {
+        if key == "missing" {
+            raise NotFound { key: key }
+        }
+        return "found: " + key
+    }
+
+    test "lookup success" {
+        let result = match lookup("hello") {
+            success x => x
+            error => "error"
+            _ => "unknown"
+        }
+        assert(result == "found: hello")
+    }
+
+    test "lookup error" {
+        let result = match lookup("missing") {
+            success x => x
+            error NotFound => "not found"
+            error => "other error"
+            _ => "unknown"
+        }
+        assert(result == "not found")
+    }
+
+    test "error destructuring" {
+        let result = match lookup("missing") {
+            success x => x
+            error NotFound { key } => "missing: " + key
+            error => "other"
+            _ => "unknown"
+        }
+        assert(result == "missing: missing")
+    }
+}
+
+tests "try propagation with scoped error" {
+    error DivError {}
+
+    func safeDivide(a: i64, b: i64) -> fallible(i64, DivError) {
+        if b == 0 {
+            raise DivError {}
+        }
+        return a / b
+    }
+
+    func chainedDivide(a: i64, b: i64, c: i64) -> fallible(i64, DivError) {
+        let step1 = try safeDivide(a, b)
+        let step2 = try safeDivide(step1, c)
+        return step2
+    }
+
+    test "try propagation success" {
+        let result = match chainedDivide(100, 2, 5) {
+            success x => x
+            error => -999
+            _ => -888
+        }
+        assert(result == 10)
+    }
+
+    test "try propagation first error" {
+        let result = match chainedDivide(100, 0, 5) {
+            success x => x
+            error DivError => -1
+            error => -999
+            _ => -888
+        }
+        assert(result == -1)
+    }
+
+    test "try propagation second error" {
+        let result = match chainedDivide(100, 2, 0) {
+            success x => x
+            error DivError => -1
+            error => -999
+            _ => -888
+        }
+        assert(result == -1)
+    }
+}
+
+tests "multiple error types in tests block" {
+    error BadInput {}
+    error RangeOverflow { value: i64, max: i64 }
+
+    func complexOp(x: i64) -> fallible(i64, BadInput | RangeOverflow) {
+        if x < 0 {
+            raise BadInput {}
+        }
+        if x > 100 {
+            raise RangeOverflow { value: x, max: 100 }
+        }
+        return x * 2
+    }
+
+    test "success path" {
+        let result = match complexOp(25) {
+            success x => x
+            error => -999
+            _ => -888
+        }
+        assert(result == 50)
+    }
+
+    test "first error type" {
+        let result = match complexOp(-5) {
+            success x => x
+            error BadInput => -1
+            error RangeOverflow => -2
+            error => -999
+            _ => -888
+        }
+        assert(result == -1)
+    }
+
+    test "second error type" {
+        let result = match complexOp(150) {
+            success x => x
+            error BadInput => -1
+            error RangeOverflow => -2
+            error => -999
+            _ => -888
+        }
+        assert(result == -2)
+    }
+
+    test "error catchall" {
+        let result = match complexOp(-5) {
+            success x => x
+            error => -1
+            _ => -888
+        }
+        assert(result == -1)
+    }
+}
+
+tests "empty error in tests block" {
+    error SimpleError {}
+
+    func mayFailSimple(flag: bool) -> fallible(i64, SimpleError) {
+        if flag {
+            raise SimpleError {}
+        }
+        return 42
+    }
+
+    test "no fields error success" {
+        let result = match mayFailSimple(false) {
+            success x => x
+            error => -999
+            _ => -888
+        }
+        assert(result == 42)
+    }
+
+    test "no fields error failure" {
+        let result = match mayFailSimple(true) {
+            success x => x
+            error SimpleError => -1
+            error => -999
+            _ => -888
+        }
+        assert(result == -1)
+    }
+}
