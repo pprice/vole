@@ -1,0 +1,103 @@
+// Sentinel type tests - user-defined zero-field struct types via `sentinel` keyword
+
+sentinel Empty
+
+sentinel Ready
+
+sentinel Waiting
+
+func make_ready() -> Ready {
+    return Ready {}
+}
+
+func status_message(s: Ready | Waiting | string) -> i64 {
+    return match s {
+        Ready => 1
+        Waiting => 2
+        string => 3
+    }
+}
+
+tests {
+    test "sentinel literal construction" {
+        let e = Empty {}
+        assert(true) // compiles and runs
+    }
+
+    test "sentinel in union type annotation" {
+        let v: Ready | Waiting = Ready {}
+        assert(true)
+    }
+
+    test "sentinel from function" {
+        let r = make_ready()
+        assert(true)
+    }
+
+    test "sentinel is check in union" {
+        let v: Ready | Waiting = Ready {}
+        assert(v is Ready)
+    }
+
+    test "sentinel is check negative" {
+        let v: Ready | Waiting = Waiting {}
+        assert(!(v is Ready))
+    }
+
+    test "sentinel match in union" {
+        let v: Ready | Waiting = Ready {}
+        let result = match v {
+            Ready => 1
+            Waiting => 2
+        }
+        assert(result == 1)
+    }
+
+    test "sentinel match second variant" {
+        let v: Ready | Waiting = Waiting {}
+        let result = match v {
+            Ready => 1
+            Waiting => 2
+        }
+        assert(result == 2)
+    }
+
+    test "sentinel in three-way union" {
+        let v: Ready | Waiting | string = Ready {}
+        let result = status_message(v)
+        assert(result == 1)
+    }
+
+    test "sentinel in three-way union - string" {
+        let v: Ready | Waiting | string = "hello"
+        let result = status_message(v)
+        assert(result == 3)
+    }
+
+    test "sentinel in union with i64" {
+        let v: Empty | i64 = Empty {}
+        let result = match v {
+            Empty => 0
+            i64 => 1
+        }
+        assert(result == 0)
+    }
+
+    test "sentinel in union with i64 - i64 branch" {
+        let v: Empty | i64 = 42
+        let result = match v {
+            Empty => 0
+            i64 => 1
+        }
+        assert(result == 1)
+    }
+
+    test "sentinel record pattern in match" {
+        let v: Ready | i64 = Ready {}
+        let result = match v {
+            Ready {} => 1
+            i64 => 0
+        }
+        assert(result == 1)
+    }
+}

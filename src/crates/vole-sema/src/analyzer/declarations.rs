@@ -176,6 +176,9 @@ impl Analyzer {
                 Decl::Interface(i) => {
                     self.register_type_shell(i.name, TypeDefKind::Interface, interner);
                 }
+                Decl::Sentinel(s) => {
+                    self.register_type_shell(s.name, TypeDefKind::Sentinel, interner);
+                }
                 Decl::Let(l) => {
                     // Handle both new syntax (let T = SomeType) and legacy (let T: type = SomeType)
                     let is_type_alias = match &l.init {
@@ -217,6 +220,9 @@ impl Analyzer {
                 }
                 Decl::Error(decl) => {
                     self.analyze_error_decl(decl, interner);
+                }
+                Decl::Sentinel(sentinel_decl) => {
+                    self.collect_sentinel_signature(sentinel_decl, interner);
                 }
                 _ => {}
             }
@@ -653,7 +659,7 @@ impl Analyzer {
                             .resolve_type(*sym, &self.entity_registry());
                         if let Some(type_def_id) = resolved {
                             let kind = self.entity_registry().type_kind(type_def_id);
-                            if kind == TypeDefKind::Struct {
+                            if kind == TypeDefKind::Struct || kind == TypeDefKind::Sentinel {
                                 self.add_error(
                                     SemanticError::StructAsTypeArg {
                                         name: interner.resolve(*sym).to_string(),
@@ -1290,6 +1296,46 @@ impl Analyzer {
                 );
             }
         }
+    }
+
+    /// Collect the signature for a sentinel declaration (zero-field struct).
+    fn collect_sentinel_signature(&mut self, sentinel_decl: &SentinelDecl, interner: &Interner) {
+        let name_id =
+            self.name_table_mut()
+                .intern(self.current_module, &[sentinel_decl.name], interner);
+
+        let entity_type_id = self
+            .entity_registry_mut()
+            .type_by_name(name_id)
+            .expect("sentinel shell registered in register_all_type_shells");
+
+        // Skip if already processed (shared cache scenario)
+        if self
+            .entity_registry()
+            .get_type(entity_type_id)
+            .generic_info
+            .is_some()
+        {
+            return;
+        }
+
+        // Set generic_info with empty everything (zero-field struct)
+        self.entity_registry_mut().set_generic_info(
+            entity_type_id,
+            GenericTypeInfo {
+                type_params: vec![],
+                field_names: vec![],
+                field_types: vec![],
+                field_has_default: vec![],
+            },
+        );
+
+        // Register the sentinel's base TypeId (as a struct type with no type args)
+        let self_type_id = self
+            .type_arena_mut()
+            .struct_type(entity_type_id, TypeIdVec::new());
+        self.entity_registry_mut()
+            .set_base_type_id(entity_type_id, self_type_id);
     }
 
     /// Validate and register interface implementations for a type.

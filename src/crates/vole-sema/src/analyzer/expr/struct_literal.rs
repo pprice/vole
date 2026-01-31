@@ -200,7 +200,7 @@ impl Analyzer {
                             result_id,
                         )
                     }
-                    TypeDefKind::Struct => {
+                    TypeDefKind::Struct | TypeDefKind::Sentinel => {
                         let result_id = self.type_arena_mut().struct_type(resolved_type_id, vec![]);
                         (
                             Self::format_struct_literal_path(&struct_lit.path, interner),

@@ -3,7 +3,8 @@ use rustc_hash::FxHashMap;
 use super::{Compiler, SelfParam};
 use crate::types::{MethodInfo, TypeMetadata, method_name_id_with_interner};
 use vole_frontend::{
-    ClassDecl, Decl, InterfaceDecl, Interner, Program, StaticsBlock, StructDecl, Symbol,
+    ClassDecl, Decl, InterfaceDecl, Interner, Program, SentinelDecl, StaticsBlock, StructDecl,
+    Symbol,
 };
 use vole_identity::ModuleId;
 use vole_runtime::type_registry::{FieldTypeTag, register_instance_type};
@@ -271,6 +272,37 @@ impl Compiler<'_> {
         // Structs don't need a runtime type_id since they're stack-allocated,
         // but we still need type_metadata for field slot lookup during codegen.
         // Use type_id 0 as a sentinel since it won't be used at runtime.
+        self.state.type_metadata.insert(
+            type_def_id,
+            TypeMetadata {
+                type_id: 0,
+                field_slots: FxHashMap::default(),
+                vole_type: vole_type_id,
+                type_def_id,
+                method_infos: FxHashMap::default(),
+            },
+        );
+    }
+
+    /// Pre-register a sentinel type in codegen.
+    /// Sentinels are zero-field structs, so they need minimal metadata.
+    pub(super) fn pre_register_sentinel(&mut self, sentinel_decl: &SentinelDecl) {
+        let query = self.query();
+        let module_id = self.program_module();
+        let name_id = query.name_id(module_id, &[sentinel_decl.name]);
+
+        let type_def_id = self
+            .query()
+            .try_type_def_id(name_id)
+            .expect("sentinel should be registered in entity registry");
+
+        let vole_type_id = self
+            .query()
+            .get_type(type_def_id)
+            .base_type_id
+            .expect("sema should pre-compute base_type_id for sentinels");
+
+        // Sentinels are zero-field structs, use type_id 0 as a placeholder.
         self.state.type_metadata.insert(
             type_def_id,
             TypeMetadata {

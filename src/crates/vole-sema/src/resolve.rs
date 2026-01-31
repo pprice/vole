@@ -274,7 +274,7 @@ fn resolve_named_type_to_id(sym: Symbol, ctx: &mut TypeResolutionContext<'_>) ->
                 // Return aliased type directly
                 aliased_type.unwrap_or_else(|| ctx.type_arena_mut().invalid())
             }
-            TypeDefKind::Struct => ctx
+            TypeDefKind::Struct | TypeDefKind::Sentinel => ctx
                 .type_arena_mut()
                 .struct_type(type_def_id, TypeIdVec::new()),
             TypeDefKind::Class => ctx.type_arena_mut().class(type_def_id, TypeIdVec::new()),
@@ -374,7 +374,10 @@ fn resolve_generic_type_to_id(
                 // Already handled above
                 ctx.type_arena_mut().invalid()
             }
-            TypeDefKind::Struct | TypeDefKind::ErrorType | TypeDefKind::Primitive => {
+            TypeDefKind::Struct
+            | TypeDefKind::Sentinel
+            | TypeDefKind::ErrorType
+            | TypeDefKind::Primitive => {
                 // These types don't support type parameters
                 ctx.type_arena_mut().invalid()
             }

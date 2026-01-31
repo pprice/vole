@@ -159,6 +159,9 @@ impl Compiler<'_> {
                 Decl::Struct(s) => {
                     self.pre_register_struct(s);
                 }
+                Decl::Sentinel(s) => {
+                    self.pre_register_sentinel(s);
+                }
                 Decl::Tests(_) if self.skip_tests => {}
                 Decl::Tests(_) => {
                     // Scoped types use finalize_module_class in pass 1

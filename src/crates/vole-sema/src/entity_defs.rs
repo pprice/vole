@@ -20,6 +20,23 @@ pub enum TypeDefKind {
     Primitive,
     /// Type alias (e.g., `type Numeric = i32 | i64`)
     Alias,
+    /// Sentinel type (zero-field struct, e.g., `sentinel Done`)
+    Sentinel,
+}
+
+impl TypeDefKind {
+    /// Check if this is a sentinel type.
+    pub fn is_sentinel(self) -> bool {
+        matches!(self, TypeDefKind::Sentinel)
+    }
+
+    /// Check if this is a class, struct, or sentinel (types that use struct-like infrastructure).
+    pub fn is_class_struct_or_sentinel(self) -> bool {
+        matches!(
+            self,
+            TypeDefKind::Class | TypeDefKind::Struct | TypeDefKind::Sentinel
+        )
+    }
 }
 
 /// Generic type information for classes and structs.

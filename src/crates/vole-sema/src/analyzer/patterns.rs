@@ -70,8 +70,8 @@ impl Analyzer {
 
                             Some(pattern_type_id)
                         }
-                        TypeDefKind::Struct => {
-                            // Structs participate in unions via auto-boxing (v-7d4b)
+                        TypeDefKind::Struct | TypeDefKind::Sentinel => {
+                            // Structs/sentinels participate in unions via auto-boxing (v-7d4b)
                             let pattern_type_id = {
                                 let mut arena = self.type_arena_mut();
                                 arena.struct_type(type_def_id, vec![])
@@ -286,8 +286,8 @@ impl Analyzer {
                                     (None, vec![])
                                 }
                             }
-                            TypeDefKind::Struct => {
-                                // Struct destructuring in match (auto-boxed in unions)
+                            TypeDefKind::Struct | TypeDefKind::Sentinel => {
+                                // Struct/sentinel destructuring in match (auto-boxed in unions)
                                 let fields_ref = generic_info
                                     .as_ref()
                                     .map(get_fields_from_info)
@@ -735,7 +735,7 @@ impl Analyzer {
                         TypeDefKind::Class => {
                             self.type_arena_mut().class(type_def_id, vec![]).into()
                         }
-                        TypeDefKind::Struct => self
+                        TypeDefKind::Struct | TypeDefKind::Sentinel => self
                             .type_arena_mut()
                             .struct_type(type_def_id, vec![])
                             .into(),
@@ -758,7 +758,7 @@ impl Analyzer {
                         TypeDefKind::Class => {
                             self.type_arena_mut().class(type_def_id, vec![]).into()
                         }
-                        TypeDefKind::Struct => self
+                        TypeDefKind::Struct | TypeDefKind::Sentinel => self
                             .type_arena_mut()
                             .struct_type(type_def_id, vec![])
                             .into(),

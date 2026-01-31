@@ -575,8 +575,8 @@ impl Analyzer {
                 return_type_id,
                 interner,
             ),
-            TypeDefKind::Class | TypeDefKind::Struct => {
-                // Direct method on class or struct
+            TypeDefKind::Class | TypeDefKind::Struct | TypeDefKind::Sentinel => {
+                // Direct method on class, struct, or sentinel
                 Some(ResolvedMethod::Direct {
                     type_def_id: Some(type_def_id),
                     method_name_id,
