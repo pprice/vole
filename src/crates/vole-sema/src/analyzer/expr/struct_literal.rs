@@ -105,10 +105,10 @@ impl Analyzer {
         struct_lit: &StructLiteralExpr,
         interner: &Interner,
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
-        // Look up the type (class or record) via path resolution
+        // Look up the type (class) via path resolution
         let type_id_opt = self.resolve_struct_literal_path(&struct_lit.path, interner);
 
-        // Check if this is a generic type (record or class with type parameters)
+        // Check if this is a generic type (class with type parameters)
         // Non-generic types have generic_info for field storage but empty type_params
         if let Some(type_id) = type_id_opt {
             let kind = self.entity_registry().type_kind(type_id);
@@ -156,7 +156,7 @@ impl Analyzer {
                         // Follow alias to get underlying type
                         if let Some(aliased_type_id) = type_def.aliased_type {
                             let arena = self.type_arena();
-                            // Get the underlying TypeDefId from the aliased type (class, record, or struct)
+                            // Get the underlying TypeDefId from the aliased type (class or struct)
                             let underlying = arena
                                 .unwrap_nominal(aliased_type_id)
                                 .filter(|(_, _, kind)| kind.is_class_or_struct())
@@ -171,7 +171,7 @@ impl Analyzer {
                                     underlying_def.generic_info.clone(),
                                 )
                             } else {
-                                // Alias points to something that's not a class/record/struct
+                                // Alias points to something that's not a class/struct
                                 (type_id, type_def.kind, type_def.generic_info.clone())
                             }
                         } else {

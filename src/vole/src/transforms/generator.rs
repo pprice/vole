@@ -2,7 +2,7 @@
 //! Generator-to-state-machine transformation.
 //!
 //! Transforms generator functions (functions containing `yield`) into
-//! state machine records with a `next()` method.
+//! state machine classes with a `next()` method.
 //!
 //! ## Example transformation
 //!
@@ -17,7 +17,7 @@
 //!
 //! Output (conceptual):
 //! ```vole
-//! record __Generator_simple {
+//! class __Generator_simple {
 //!     __state: i64,
 //! }
 //!
@@ -53,9 +53,9 @@ use crate::sema::TypeError;
 ///
 /// This function:
 /// 1. Identifies functions with `yield` expressions
-/// 2. Generates a state machine record for each generator
+/// 2. Generates a state machine class for each generator
 /// 3. Generates an implement block with a `next()` method
-/// 4. Replaces the original function body with record instantiation
+/// 4. Replaces the original function body with class instantiation
 ///
 /// Returns the number of generators transformed and any type errors found.
 pub fn transform_generators(
@@ -114,11 +114,11 @@ impl<'a> GeneratorTransformer<'a> {
         let mut new_declarations = Vec::new();
 
         for (idx, func) in generators_info {
-            // Generate state machine record and implement block
+            // Generate state machine class and implement block
             if let Some((record_decl, impl_block, new_func)) = self.transform_generator(&func) {
-                // Add implement block FIRST (will be inserted second = comes after record)
+                // Add implement block FIRST (will be inserted second = comes after class)
                 new_declarations.push((idx, Decl::Implement(impl_block)));
-                // Add record declaration SECOND (will be inserted first = comes before impl)
+                // Add class declaration SECOND (will be inserted first = comes before impl)
                 new_declarations.push((idx, Decl::Class(record_decl)));
                 // Replace original function
                 program.declarations[idx] = Decl::Function(new_func);
@@ -128,7 +128,7 @@ impl<'a> GeneratorTransformer<'a> {
         // Insert new declarations before their corresponding functions
         // We need to insert in reverse order to preserve indices
         // Since we insert at the same index, later inserts come before earlier ones
-        // So we push Implement first, Record second -> Record comes before Implement
+        // So we push Implement first, Class second -> Class comes before Implement
         new_declarations.sort_by_key(|(idx, _)| std::cmp::Reverse(*idx));
         for (idx, decl) in new_declarations {
             program.declarations.insert(idx, decl);
@@ -273,7 +273,7 @@ impl<'a> GeneratorTransformer<'a> {
     }
 
     /// Transform a generator function into a state machine.
-    /// Returns (record declaration, implement block, new function declaration).
+    /// Returns (class declaration, implement block, new function declaration).
     fn transform_generator(
         &mut self,
         func: &FuncDecl,
@@ -288,7 +288,7 @@ impl<'a> GeneratorTransformer<'a> {
             _ => return None, // Not a generator function (should have been caught earlier)
         };
 
-        // Generate unique name for the state machine record
+        // Generate unique name for the state machine class
         let record_name = self.interner.intern_with_prefix("__Generator_", func.name);
         self.generator_count += 1;
 
@@ -301,10 +301,10 @@ impl<'a> GeneratorTransformer<'a> {
         // Validate yield types against the expected element type
         self.validate_yield_types(&yields, &element_type);
 
-        // Find local variables that need to be hoisted to the record
+        // Find local variables that need to be hoisted to the class
         let hoisted_locals = self.find_hoisted_locals(func);
 
-        // Create record fields:
+        // Create class fields:
         // - __state: i64 (state machine state)
         // - captured parameters
         // - hoisted local variables
@@ -340,7 +340,7 @@ impl<'a> GeneratorTransformer<'a> {
             });
         }
 
-        // Create the record declaration
+        // Create the class declaration
         // Note: implements uses TypeExpr - for Iterator<T>, we use the element type
         let iterator_sym = self.interner.intern("Iterator");
         let iterator_type = TypeExpr::Generic {
@@ -377,7 +377,7 @@ impl<'a> GeneratorTransformer<'a> {
             span: func.span,
         };
 
-        // Create the new function that returns the record
+        // Create the new function that returns the class instance
         let new_func = self.create_wrapper_function(func, record_name, &hoisted_locals);
 
         Some((record_decl, impl_block, new_func))
@@ -1007,7 +1007,7 @@ impl<'a> GeneratorTransformer<'a> {
             name: original.name,
             type_params: Vec::new(),
             params: original.params.clone(),
-            // Return type is the original Iterator<T> - codegen will box the record
+            // Return type is the original Iterator<T> - codegen will box the class instance
             return_type: original.return_type.clone(),
             body: FuncBody::Block(Block {
                 stmts: vec![return_stmt],
@@ -1119,10 +1119,10 @@ mod tests {
         assert!(errors.is_empty(), "unexpected errors: {:?}", errors);
         assert_eq!(count, 1);
 
-        // Should have: record, implement, function (3 declarations total)
+        // Should have: class, implement, function (3 declarations total)
         assert_eq!(program.declarations.len(), 3);
 
-        // First should be the record
+        // First should be the class
         assert!(matches!(program.declarations[0], Decl::Class(_)));
 
         // Second should be the implement block

@@ -89,7 +89,7 @@ impl Compiler<'_> {
             None => return, // Not a module type
         };
 
-        // Extract bindings from the record pattern
+        // Extract bindings from the destructure pattern
         if let PatternKind::Record { fields, .. } = &let_tuple.pattern.kind {
             for field_pattern in fields {
                 let export_name = field_pattern.field_name;

@@ -61,7 +61,7 @@ impl Analyzer {
             return;
         }
 
-        // Nominal types (class/record/interface): unify type args if same definition and kind
+        // Nominal types (class/interface): unify type args if same definition and kind
         if let (Some((p_def_id, p_args, p_kind)), Some((a_def_id, a_args, a_kind))) = (
             arena.unwrap_nominal(pattern_id),
             arena.unwrap_nominal(actual_id),
@@ -132,7 +132,7 @@ impl Analyzer {
     /// Unify a structural type pattern with an actual type by matching field types.
     /// For each field in the structural pattern, find the corresponding field in the
     /// actual type and unify their types. This allows inferring type parameters like
-    /// `T` from `{ name: T }` when passed a record with a `name: string` field.
+    /// `T` from `{ name: T }` when passed a class with a `name: string` field.
     fn unify_structural_type(
         &self,
         structural: &InternedStructural,
@@ -155,14 +155,14 @@ impl Analyzer {
         // For now, we only handle fields.
     }
 
-    /// Get the type of a field from a record or class type by NameId.
+    /// Get the type of a field from a class type by NameId.
     /// Returns None if the type doesn't have such a field.
     fn get_field_type_by_name_id(
         &self,
         ty_id: ArenaTypeId,
         field_name_id: NameId,
     ) -> Option<ArenaTypeId> {
-        // Get type_def_id and type_args from TypeId using arena queries (class or record only)
+        // Get type_def_id and type_args from TypeId using arena queries (class only)
         let (type_def_id, type_args_id) = {
             use crate::type_arena::NominalKind;
             let arena = self.type_arena();

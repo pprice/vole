@@ -15,7 +15,7 @@ use vole_frontend::{Decl, Expr, FieldDef, Program, StructLiteralExpr, Symbol};
 use vole_sema::entity_defs::TypeDefKind;
 use vole_sema::type_arena::TypeId;
 
-/// Find the field definitions for a type by looking up the class/record declaration in the program.
+/// Find the field definitions for a type by looking up the class declaration in the program.
 /// For qualified paths, only the last segment (the type name) is used to find the declaration.
 fn find_type_fields(program: &Program, type_name: Symbol) -> Option<&[FieldDef]> {
     for decl in &program.declarations {
@@ -180,7 +180,7 @@ impl Cg<'_, '_, '_> {
             let value = self.expr(&init.value)?;
 
             // If field type is optional (union) and value type is not a union, wrap it
-            // Use heap allocation for unions stored in class/record fields since stack slots
+            // Use heap allocation for unions stored in class fields since stack slots
             // don't persist beyond the current function's stack frame
             let final_value = if let Some(&field_type_id) = field_types.get(init_name) {
                 let arena = self.arena();
@@ -333,7 +333,7 @@ impl Cg<'_, '_, '_> {
         defaults
     }
 
-    /// Construct a union value on the heap (for storing in class/record fields).
+    /// Construct a union value on the heap (for storing in class fields).
     /// Unlike the stack-based construct_union_id, this allocates on the heap so the
     /// union persists beyond the current function's stack frame.
     fn construct_union_heap_id(

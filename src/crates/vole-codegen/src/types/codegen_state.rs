@@ -26,7 +26,7 @@ pub type TypeMetadataMap = FxHashMap<TypeDefId, TypeMetadata>;
 /// Fields using interior mutability (RefCell, Cell) can be mutated through
 /// shared references during compilation.
 pub struct CodegenState {
-    /// Class and record metadata for struct literals, field access, and method calls.
+    /// Class metadata for struct literals, field access, and method calls.
     pub type_metadata: TypeMetadataMap,
     /// Unified method function key lookup: (type_name_id, method_name_id) -> FunctionKey
     /// Uses NameId for both to ensure stable lookup across different analyzer instances.

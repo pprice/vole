@@ -3,7 +3,7 @@ use crate::type_arena::TypeId as ArenaTypeId;
 use vole_frontend::PatternKind;
 
 impl Analyzer {
-    /// Check if a pattern is a type pattern (matches a class/record/primitive type name)
+    /// Check if a pattern is a type pattern (matches a class/primitive type name)
     fn is_type_pattern(&self, pattern: &Pattern, interner: &Interner) -> bool {
         match &pattern.kind {
             PatternKind::Identifier { name } => {

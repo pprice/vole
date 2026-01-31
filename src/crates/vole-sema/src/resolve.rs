@@ -68,7 +68,7 @@ impl ResolverEntityExt for Resolver<'_> {
             .and_then(|name_id| registry.type_by_name(name_id))
             .or_else(|| registry.interface_by_short_name(name, self.table()))
             .or_else(|| registry.class_by_short_name(name, self.table()))
-            .or_else(|| registry.record_by_short_name(name, self.table()));
+            .or_else(|| registry.class_by_short_name(name, self.table()));
         tracing::trace!(?result, "resolve_type_str_or_interface result");
         result
     }
@@ -385,7 +385,7 @@ fn resolve_generic_type_to_id(
     }
 }
 
-/// Pre-compute substituted field types for a generic class/record instantiation.
+/// Pre-compute substituted field types for a generic class instantiation.
 ///
 /// When creating a type like Box<String>, this ensures that the substituted field
 /// types (e.g., String for a field of type T) exist in the arena. This allows

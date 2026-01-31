@@ -37,14 +37,14 @@ impl CompiledValue {
     }
 }
 
-/// Metadata about a class or record type for code generation
+/// Metadata about a class type for code generation
 #[derive(Debug, Clone)]
 pub(crate) struct TypeMetadata {
     /// Unique type ID for runtime
     pub type_id: u32,
     /// Map from field name to slot index
     pub field_slots: FxHashMap<String, usize>,
-    /// The Vole type (Class or Record) - interned TypeId handle
+    /// The Vole type (Class) - interned TypeId handle
     pub vole_type: TypeId,
     /// TypeDefId for sema lookups (method return types, etc.)
     pub type_def_id: TypeDefId,
@@ -60,7 +60,7 @@ pub(crate) struct MethodInfo {
 }
 
 /// Look up TypeMetadata by NameId (cross-interner safe)
-/// Returns the TypeMetadata for a class/record with the given name_id
+/// Returns the TypeMetadata for a class with the given name_id
 pub(crate) fn type_metadata_by_name_id<'a>(
     type_metadata: &'a TypeMetadataMap,
     name_id: NameId,

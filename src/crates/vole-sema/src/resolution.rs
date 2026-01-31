@@ -11,7 +11,7 @@ use vole_identity::{MethodId, NameId, TypeDefId};
 /// eliminating the need for `arena.unwrap_function(func_type_id)` in codegen.
 #[derive(Debug, Clone)]
 pub enum ResolvedMethod {
-    /// Direct method on class/record
+    /// Direct method on class
     Direct {
         type_def_id: Option<TypeDefId>,
         method_name_id: NameId,

@@ -79,7 +79,7 @@ struct VtableMethod {
 /// Target-specific data for vtable method resolution.
 /// Direct and Implemented are combined since they have identical structure.
 enum VtableMethodTarget {
-    /// Direct method call on class/record (includes both direct methods and explicit implementations)
+    /// Direct method call on class (includes both direct methods and explicit implementations)
     Method(MethodInfo),
     /// External/native function binding
     External(ExternalMethodInfo),
@@ -960,7 +960,7 @@ fn resolve_vtable_target<C: VtableCtx>(
         });
     }
 
-    // Check direct methods on class/record using TypeId-based lookup
+    // Check direct methods on class using TypeId-based lookup
     // Returns (method_info, param_type_ids, return_type_id)
     let direct_method_result: Option<(MethodInfo, Vec<TypeId>, TypeId)> = (|| {
         let method_name_id = method_name_id?;

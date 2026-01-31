@@ -5,7 +5,7 @@
 // # Special Types Overview
 //
 // The Type enum contains several "special" variants that don't fit the categories
-// of primitives, nominal types (class/record/interface), or compound types (array/union):
+// of primitives, nominal types (class/interface), or compound types (array/union):
 //
 // ## Control Flow Types
 // - `Void` - Return type for functions with no value (like `print`)

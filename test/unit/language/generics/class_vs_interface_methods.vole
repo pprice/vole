@@ -1,7 +1,7 @@
 // Regression test: Ensure generic class methods get monomorphized
 // while generic interface methods (with external defaults) do not.
 //
-// Bug fix: record_class_method_monomorph now skips interfaces because
+// Bug fix: class method monomorphization now skips interfaces because
 // interface methods use external default implementations, not inline code.
 
 class Box<T> {

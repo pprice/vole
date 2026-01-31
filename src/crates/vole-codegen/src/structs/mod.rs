@@ -1,6 +1,6 @@
 // src/codegen/structs/mod.rs
 //
-// Struct/class/record operations for code generation.
+// Struct/class operations for code generation.
 
 mod access;
 mod helpers;

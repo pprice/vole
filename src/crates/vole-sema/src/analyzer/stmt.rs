@@ -841,7 +841,7 @@ impl Analyzer {
         false
     }
 
-    /// Check record destructuring and bind variables (TypeId version)
+    /// Check destructuring and bind variables (TypeId version)
     fn check_record_destructuring_id(
         &mut self,
         ty_id: ArenaTypeId,
@@ -859,7 +859,7 @@ impl Analyzer {
             return;
         }
 
-        // Get type_def_id from the type using arena (record or class only)
+        // Get type_def_id from the type using arena (class only)
         let type_def_id = {
             use crate::type_arena::NominalKind;
             let arena = self.type_arena();
@@ -984,7 +984,7 @@ impl Analyzer {
                         .set_function_generic_info(new_func_id, generic_info);
                 }
 
-                // Check if the export type is a record, class, or interface type
+                // Check if the export type is a class or interface type
                 // If so, register a type alias so it's usable as a type name
                 self.maybe_register_type_binding(field_pattern.binding, *export_type_id, interner);
 
@@ -1021,7 +1021,7 @@ impl Analyzer {
         }
     }
 
-    /// Check if a type is a record, class, or interface type and if so,
+    /// Check if a type is a class or interface type and if so,
     /// register a type alias so it's usable as a type name in the current module.
     ///
     /// This enables patterns like:
@@ -1038,7 +1038,7 @@ impl Analyzer {
     ) {
         use crate::entity_defs::TypeDefKind;
 
-        // Check if the type is a record, class, or interface
+        // Check if the type is a class or interface
         let type_def_id = {
             let arena = self.type_arena();
             arena
@@ -1047,7 +1047,7 @@ impl Analyzer {
         };
 
         let Some(original_type_def_id) = type_def_id else {
-            return; // Not a record/class/interface type, nothing to register
+            return; // Not a class/interface type, nothing to register
         };
 
         // Don't create type aliases for generic types - they need proper handling
@@ -1086,7 +1086,7 @@ impl Analyzer {
             self.current_module,
         );
 
-        // Set the aliased type to the original record/class/interface type
+        // Set the aliased type to the original class/interface type
         self.entity_registry_mut()
             .set_aliased_type(alias_type_def_id, type_id);
     }

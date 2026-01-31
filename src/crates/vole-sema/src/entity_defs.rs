@@ -63,7 +63,7 @@ pub struct Implementation {
     pub method_bindings: Vec<MethodBinding>,
 }
 
-/// A type definition (interface, class, record, etc.)
+/// A type definition (interface, class, struct, etc.)
 #[derive(Debug, Clone)]
 pub struct TypeDef {
     pub id: TypeDefId,

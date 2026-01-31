@@ -209,7 +209,7 @@ impl Analyzer {
             return Ok(ArenaTypeId::INVALID);
         }
 
-        // Get type_def_id and type_args from inner type using arena queries (class or record only)
+        // Get type_def_id and type_args from inner type using arena queries (class only)
         let struct_info = {
             let arena = self.type_arena();
             arena
@@ -822,10 +822,10 @@ impl Analyzer {
 
             // Store the substituted return type for codegen so it doesn't need to recompute.
             // The resolved method already has the substituted return type in most cases
-            // (InterfaceMethod, DefaultMethod), but we also handle class/record methods
+            // (InterfaceMethod, DefaultMethod), but we also handle class methods
             // where we need to compute the substitution.
             let final_return_id = {
-                // Check if this is a generic class/record with type args that need substitution
+                // Check if this is a generic class with type args that need substitution
                 let type_args_and_def = {
                     let arena = self.type_arena();
                     arena
@@ -944,7 +944,7 @@ impl Analyzer {
                     .find(|(n, _)| *n == type_name_id)
                     .map(|&(_, type_id)| type_id)?;
 
-                // Extract TypeDefId from the export type (class or record only)
+                // Extract TypeDefId from the export type (class only)
                 let arena = self.type_arena();
                 let type_def_id = arena
                     .unwrap_nominal(export_type_id)
@@ -1017,7 +1017,7 @@ impl Analyzer {
                 );
             }
 
-            // Get type params from the generic class/record definition
+            // Get type params from the generic class definition
             let generic_info = self.entity_registry().type_generic_info(type_def_id);
 
             // First pass: type-check arguments to get their types (as TypeId)
@@ -1175,7 +1175,7 @@ impl Analyzer {
         Ok(ArenaTypeId::INVALID)
     }
 
-    /// Record a class method monomorphization for generic class/record method calls.
+    /// Record a class method monomorphization for generic class method calls.
     /// Creates or retrieves a monomorphized instance and records the call site.
     fn record_class_method_monomorph(
         &mut self,
@@ -1187,7 +1187,7 @@ impl Analyzer {
         interner: &Interner,
     ) {
         // Extract type_def_id and type_args_id using arena queries
-        // Note: We only record monomorphs for concrete types (Class/Record) that have
+        // Note: We only record monomorphs for concrete types (Class) that have
         // method bodies to compile. Interface types use vtable dispatch and don't need monomorphs.
         tracing::debug!(object_type_id = ?object_type_id, "record_class_method_monomorph called");
         let generic_info = {
@@ -1198,7 +1198,7 @@ impl Analyzer {
                 .map(|(id, args, _)| (id, args.clone()))
         };
         let Some((class_type_def_id, type_args_id)) = generic_info else {
-            tracing::debug!("returning early - not a generic class/record");
+            tracing::debug!("returning early - not a generic class");
             return;
         };
 
@@ -1279,7 +1279,7 @@ impl Analyzer {
         self.class_method_calls.insert(expr.id, key);
     }
 
-    /// Record a static method monomorphization for generic class/record static method calls.
+    /// Record a static method monomorphization for generic class static method calls.
     /// Creates or retrieves a monomorphized instance and records the call site.
     #[allow(clippy::too_many_arguments)]
     fn record_static_method_monomorph(

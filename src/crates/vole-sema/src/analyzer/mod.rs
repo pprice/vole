@@ -854,7 +854,7 @@ impl Analyzer {
         // When using a shared ModuleCache across multiple test files, the entity_registry
         // accumulates monomorph instances from previous files. These instances reference
         // class/method definitions that exist only in those previous files, causing
-        // "method X not found in class/record Y" errors during codegen. Clearing these
+        // "method X not found in class Y" errors during codegen. Clearing these
         // caches ensures each main program analysis starts fresh while still benefiting
         // from cached prelude analysis (prelude modules don't have generic classes that
         // get monomorphized in the main program).

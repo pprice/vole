@@ -279,7 +279,7 @@ impl Analyzer {
         let mut class_names: Vec<(NameId, Symbol)> = Vec::new();
         let mut error_names: Vec<(NameId, Symbol)> = Vec::new();
         // Functions and external functions are collected for post-analysis type resolution
-        // (needed for types that reference record/class/error types defined in the same module,
+        // (needed for types that reference class/error types defined in the same module,
         // e.g. fallible return types that reference module-local error types)
         let mut deferred_functions: Vec<(NameId, &FuncDecl)> = Vec::new();
         let mut deferred_externals: Vec<(NameId, &ExternalFunc)> = Vec::new();
@@ -300,7 +300,7 @@ impl Analyzer {
             match decl {
                 Decl::Function(f) => {
                     // Defer function type resolution until after sub_analyzer.analyze() runs.
-                    // This allows functions to reference record/class types defined in the same module.
+                    // This allows functions to reference class types defined in the same module.
                     let name_id =
                         self.name_table_mut()
                             .intern(module_id, &[f.name], &module_interner);
@@ -417,7 +417,7 @@ impl Analyzer {
             .borrow_mut()
             .insert(module_key.clone(), sub_analyzer.is_check_results.clone());
 
-        // Now resolve deferred function types after sub-analysis has registered record/class types
+        // Now resolve deferred function types after sub-analysis has registered class types
         for (name_id, f) in deferred_functions {
             let func_type_id = {
                 let mut ctx = TypeResolutionContext {

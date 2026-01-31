@@ -82,7 +82,7 @@ impl EntityRegistry {
         self.get_type(id).name_id
     }
 
-    /// Set the base_type_id for a class/record type.
+    /// Set the base_type_id for a class type.
     /// This stores the TypeId for the type with empty type args (e.g., `Foo` for `class Foo<T>`).
     pub fn set_base_type_id(
         &mut self,
@@ -127,29 +127,6 @@ impl EntityRegistry {
         name_table: &vole_identity::NameTable,
     ) -> Option<TypeDefId> {
         tracing::trace!(short_name, "class_by_short_name searching");
-        for type_def in &self.type_defs {
-            if type_def.kind == TypeDefKind::Class {
-                let last_seg = name_table.last_segment_str(type_def.name_id);
-                tracing::trace!(?type_def.name_id, ?last_seg, "checking class");
-                if last_seg.is_some_and(|last_segment| last_segment == short_name) {
-                    tracing::trace!(?type_def.id, "found class by short name");
-                    return Some(type_def.id);
-                }
-            }
-        }
-        tracing::trace!("class not found by short name");
-        None
-    }
-
-    /// Look up a record by its short name (string-based, cross-module)
-    /// This searches through all registered types to find one matching the short name
-    /// and of kind Record. Used for module records like Duration and Timestamp.
-    pub fn record_by_short_name(
-        &self,
-        short_name: &str,
-        name_table: &vole_identity::NameTable,
-    ) -> Option<TypeDefId> {
-        tracing::trace!(short_name, "record_by_short_name searching");
         for type_def in &self.type_defs {
             if type_def.kind == TypeDefKind::Class {
                 let last_seg = name_table.last_segment_str(type_def.name_id);

@@ -723,7 +723,7 @@ impl Analyzer {
     }
 
     /// Register an instance method from a FuncDecl.
-    /// Used for class and record instance methods.
+    /// Used for class instance methods.
     fn register_instance_method(
         &mut self,
         entity_type_id: TypeDefId,
@@ -772,7 +772,7 @@ impl Analyzer {
     }
 
     /// Register a static method from an InterfaceMethod.
-    /// Used for class and record static methods.
+    /// Used for class static methods.
     fn register_static_method_helper(
         &mut self,
         entity_type_id: TypeDefId,
@@ -1088,7 +1088,7 @@ impl Analyzer {
         );
     }
 
-    /// Collect field names and types for a class or record.
+    /// Collect field names and types for a class.
     /// If type_param_scope is provided, resolves types with type params in scope.
     fn collect_field_info(
         &mut self,
@@ -1123,7 +1123,7 @@ impl Analyzer {
                 .collect()
         };
 
-        // Check that never is not used in record/class fields
+        // Check that never is not used in class fields
         for (field, &type_id) in fields.iter().zip(&field_type_ids) {
             self.check_never_not_allowed(type_id, field.span);
             self.check_union_simplification(&field.ty, field.span);
@@ -1132,7 +1132,7 @@ impl Analyzer {
         (field_names, field_type_ids)
     }
 
-    /// Register fields in the EntityRegistry for a class or record.
+    /// Register fields in the EntityRegistry for a class.
     fn register_type_fields(
         &mut self,
         entity_type_id: TypeDefId,

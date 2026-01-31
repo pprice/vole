@@ -7,12 +7,12 @@ use crate::value::RcHeader;
 use std::alloc::{Layout, alloc, dealloc};
 use std::ptr;
 
-/// Reference-counted class/record instance
+/// Reference-counted class instance
 /// Layout: RcHeader, then n slots of 64-bit values
 #[repr(C)]
 pub struct RcInstance {
     pub header: RcHeader,
-    pub type_id: u32, // Type identifier for this class/record
+    pub type_id: u32, // Type identifier for this class
     pub field_count: u32, // Number of fields
                       // Fields follow inline as 64-bit slots
 }

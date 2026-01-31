@@ -461,7 +461,7 @@ impl Analyzer {
         })
     }
 
-    /// Resolve a method on a nominal type (class, record, or interface)
+    /// Resolve a method on a nominal type (class or interface)
     fn resolve_method_on_nominal_type(
         &mut self,
         object_type_id: ArenaTypeId,
@@ -700,7 +700,7 @@ impl Analyzer {
         })
     }
 
-    /// Resolve a non-external default method on a class or record
+    /// Resolve a non-external default method on a class
     #[allow(clippy::too_many_arguments)]
     fn resolve_non_external_default_method(
         &self,

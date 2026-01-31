@@ -3,7 +3,7 @@
 //! These types provide type-safe identifiers for types, methods, fields, and functions,
 //! eliminating string-based lookups and preventing mix-ups between different entity kinds.
 
-/// Identity for a type definition (interface, class, record, error type, primitive)
+/// Identity for a type definition (interface, class, struct, error type, primitive)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TypeDefId(u32);
 

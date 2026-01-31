@@ -643,7 +643,7 @@ impl Analyzer {
         // Mark that we're in a static method (for self-usage detection)
         self.current_static_method = Some(interner.resolve(method.name).to_string());
 
-        // Push method-level type params onto the stack (merged with any class/record type params)
+        // Push method-level type params onto the stack (merged with any class type params)
         let has_method_type_params = !method_type_params.is_empty();
         if has_method_type_params {
             self.type_param_stack.push_merged(method_type_params);

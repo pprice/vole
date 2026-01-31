@@ -37,7 +37,7 @@ fn primitive_type_name(p: AstPrimitive) -> &'static str {
     }
 }
 
-/// Data needed to compile methods for a type (class or record)
+/// Data needed to compile methods for a type (class or struct)
 struct TypeMethodsData<'a> {
     /// Type name symbol
     name: Symbol,
@@ -45,7 +45,7 @@ struct TypeMethodsData<'a> {
     methods: &'a [FuncDecl],
     /// Optional static methods block
     statics: Option<&'a StaticsBlock>,
-    /// Type kind for error messages ("class" or "record")
+    /// Type kind for error messages ("class" or "struct")
     type_kind: &'static str,
 }
 
@@ -102,7 +102,7 @@ impl Compiler<'_> {
         )
     }
 
-    /// Core implementation for compiling methods of a class or record
+    /// Core implementation for compiling methods of a class or struct
     fn compile_type_methods(
         &mut self,
         data: TypeMethodsData<'_>,

@@ -233,7 +233,7 @@ impl Cg<'_, '_, '_> {
             }
 
             Stmt::LetTuple(let_tuple) => {
-                // Compile the initializer - should be a tuple, fixed array, or record
+                // Compile the initializer - should be a tuple, fixed array, or class
                 let init = self.expr(&let_tuple.init)?;
 
                 // Recursively compile the destructuring pattern

@@ -94,7 +94,7 @@ impl ImplTypeId {
         }
     }
 
-    /// Get the string name for method mangling (e.g., "i32" or record name)
+    /// Get the string name for method mangling (e.g., "i32" or class name)
     pub fn type_name(&self, names: &vole_identity::NameTable) -> String {
         names.display(self.0)
     }

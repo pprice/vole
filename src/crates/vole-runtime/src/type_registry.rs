@@ -38,7 +38,7 @@ impl FieldTypeTag {
     }
 }
 
-/// Type info for an instance type (class or record)
+/// Type info for an instance type (class or struct)
 #[derive(Debug, Clone)]
 pub struct InstanceTypeInfo {
     /// Field types in slot order
@@ -64,7 +64,7 @@ pub fn init_type_registry() {
 }
 
 /// Register field types for an instance type
-/// Called from JIT compilation when a class/record is registered
+/// Called from JIT compilation when a class is registered
 pub fn register_instance_type(type_id: u32, field_types: Vec<FieldTypeTag>) {
     let mut guard = TYPE_REGISTRY.write().unwrap();
     let registry = guard.get_or_insert_with(FxHashMap::default);

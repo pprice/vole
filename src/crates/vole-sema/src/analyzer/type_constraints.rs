@@ -124,7 +124,7 @@ fn constraint_satisfied(
 }
 
 impl Analyzer {
-    /// Pre-compute substituted field types for a generic class/record instantiation.
+    /// Pre-compute substituted field types for a generic class instantiation.
     ///
     /// When creating a type like Box<String>, this ensures that the substituted field
     /// types (e.g., String for a field of type T) exist in the arena. This allows
@@ -596,7 +596,7 @@ impl Analyzer {
     }
 
     /// Type-check field default expressions against their declared types.
-    /// Called during class/record analysis.
+    /// Called during class analysis.
     pub(super) fn check_field_defaults(
         &mut self,
         fields: &[FieldDef],

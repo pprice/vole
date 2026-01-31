@@ -40,7 +40,7 @@ impl Analyzer {
             }
             PatternKind::Identifier { name } => {
                 let span = pattern.span;
-                // Check if this identifier is a known class or record type via Resolver
+                // Check if this identifier is a known class type via Resolver
                 let type_id_opt = self
                     .resolver(interner)
                     .resolve_type(*name, &self.entity_registry());
@@ -471,7 +471,7 @@ impl Analyzer {
         span: Span,
         interner: &Interner,
     ) {
-        // Try to get fields from the scrutinee type (record or class)
+        // Try to get fields from the scrutinee type (class or struct)
         let type_def_info = {
             use crate::type_arena::NominalKind;
             let arena = self.type_arena();
@@ -503,7 +503,7 @@ impl Analyzer {
 
             self.check_record_pattern_fields_id(pattern_fields, &type_fields, span, interner);
         } else {
-            // Not a record/class type
+            // Not a class/struct type
             let found = self.type_display_id(scrutinee_type_id);
             self.add_error(
                 SemanticError::PatternTypeMismatch {

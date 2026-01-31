@@ -35,7 +35,7 @@ pub enum TokenType {
     KwClass,       // class keyword
     KwStruct,      // struct keyword
     KwInterface,   // interface keyword
-    KwImplements,  // implements keyword (record implements Trait)
+    KwImplements,  // implements keyword (class implements Trait)
     KwImplement,   // implement keyword (implement Trait for Type)
     KwExtends,     // extends keyword (interface inheritance)
     KwSelfType,    // Self keyword (implementing type in interface)

@@ -95,7 +95,7 @@ impl Analyzer {
         expected_type_id: ArenaTypeId,
         interner: &Interner,
     ) -> bool {
-        // Get type_def_id and type_args from TypeId using arena queries (class or record only)
+        // Get type_def_id and type_args from TypeId using arena queries (class only)
         let (type_def_id, type_args_id) = {
             let arena = self.type_arena();
             let Some((id, args, kind)) = arena.unwrap_nominal(ty_id) else {
@@ -150,7 +150,7 @@ impl Analyzer {
         expected_sig: &FunctionType,
         interner: &Interner,
     ) -> bool {
-        // Get type_def_id from TypeId using arena queries (class or record only)
+        // Get type_def_id from TypeId using arena queries (class only)
         let type_def_id = {
             let arena = self.type_arena();
             arena

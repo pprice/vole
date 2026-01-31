@@ -1162,7 +1162,7 @@ impl Cg<'_, '_, '_> {
             let pattern_matches = match &arm.pattern.kind {
                 PatternKind::Wildcard => None,
                 PatternKind::Identifier { name } => {
-                    // Check if this identifier is a type name (class/record)
+                    // Check if this identifier is a type name (class)
                     // Need to look up TypeDefId from Symbol first
                     let query = self.query();
                     let module_id = self
@@ -1291,9 +1291,9 @@ impl Cg<'_, '_, '_> {
                     None // Tuple patterns always match (type checked in sema)
                 }
                 PatternKind::Record { type_name, fields } => {
-                    // Record destructuring in match - TypeName { x, y } or { x, y }
+                    // Destructuring in match - TypeName { x, y } or { x, y }
                     let (pattern_check, pattern_type_id) = if let Some(name) = type_name {
-                        // Typed record pattern - need to check type first
+                        // Typed destructure pattern - need to check type first
                         // Look up TypeDefId from Symbol
                         let query = self.query();
                         let module_id = self
@@ -1316,7 +1316,7 @@ impl Cg<'_, '_, '_> {
                             (Some(self.builder.ins().iconst(types::I8, 0)), None)
                         }
                     } else {
-                        // Untyped record pattern - always matches (type checked in sema)
+                        // Untyped destructure pattern - always matches (type checked in sema)
                         (None, None)
                     };
 
@@ -2098,7 +2098,7 @@ impl Cg<'_, '_, '_> {
         Ok(Some(is_this_error))
     }
 
-    /// Extract and bind fields from a record pattern source.
+    /// Extract and bind fields from a destructure pattern source.
     ///
     /// For class/instance types, uses `InstanceGetField` runtime call.
     /// For struct types (auto-boxed in unions), uses `struct_field_load` since the
@@ -2134,7 +2134,7 @@ impl Cg<'_, '_, '_> {
         Ok(())
     }
 
-    /// Compile a record pattern inside an error pattern (e.g., error Overflow { value, max }).
+    /// Compile a destructure pattern inside an error pattern (e.g., error Overflow { value, max }).
     fn compile_error_record_pattern(
         &mut self,
         name: Symbol,

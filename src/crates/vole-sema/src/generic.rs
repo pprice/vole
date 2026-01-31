@@ -275,7 +275,7 @@ impl Clone for TypeParamRegistry {
 }
 
 /// Merge two type parameter lists into one.
-/// This is useful for combining class/record type params with method type params.
+/// This is useful for combining class type params with method type params.
 pub fn merge_type_params(
     base: &[TypeParamInfo],
     additional: &[TypeParamInfo],
@@ -350,7 +350,7 @@ impl TypeParamScope {
     }
 
     /// Create a new scope that combines this scope's params with additional params.
-    /// This is useful for method type checking where class/record type params need
+    /// This is useful for method type checking where class type params need
     /// to be merged with method-specific type params.
     pub fn merge_with(&self, additional: &[TypeParamInfo]) -> TypeParamScope {
         let mut merged = self.clone();
