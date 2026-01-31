@@ -374,3 +374,49 @@ tests "Timestamp comparisons" {
         assert(ts1.equals(ts2) == false)
     }
 }
+
+// =============================================================================
+// Struct equality tests (structs support == natively)
+// =============================================================================
+
+tests "Duration struct equality" {
+    test "equal durations compare equal" {
+        assert(time.Duration.seconds(5) == time.Duration.seconds(5))
+    }
+
+    test "different durations compare not equal" {
+        assert(time.Duration.seconds(5) != time.Duration.seconds(10))
+    }
+
+    test "zero equals nanos(0)" {
+        assert(time.Duration.zero() == time.Duration.nanos(0))
+    }
+
+    test "millis equality" {
+        assert(time.Duration.ms(100) == time.Duration.ms(100))
+    }
+
+    test "different units same value" {
+        assert(time.Duration.seconds(1) == time.Duration.ms(1000))
+    }
+}
+
+tests "Timestamp struct equality" {
+    test "same epoch timestamps compare equal" {
+        assert(time.Timestamp.epoch() == time.Timestamp.from_unix(0))
+    }
+
+    test "same unix timestamps compare equal" {
+        assert(time.Timestamp.from_unix(1000) == time.Timestamp.from_unix(1000))
+    }
+
+    test "different timestamps compare not equal" {
+        assert(time.Timestamp.from_unix(1000) != time.Timestamp.from_unix(2000))
+    }
+
+    test "same time different offset not equal" {
+        let ts1 = time.Timestamp.from_unix(1000)
+        let ts2 = ts1.with_offset(60)
+        assert(ts1 != ts2)
+    }
+}

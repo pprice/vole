@@ -422,6 +422,13 @@ impl Compiler<'_> {
                     self.finalize_module_class(class, module_interner, module_id);
                 }
             }
+
+            // Finalize module structs (register type metadata, declare methods)
+            for decl in &program.declarations {
+                if let Decl::Struct(struct_decl) = decl {
+                    self.finalize_module_struct(struct_decl, module_interner, module_id);
+                }
+            }
         }
 
         // ============================================
@@ -515,6 +522,21 @@ impl Compiler<'_> {
                     )?;
                 }
             }
+
+            // Compile module struct methods (both instance and static)
+            for decl in &program.declarations {
+                if let Decl::Struct(struct_decl) = decl
+                    && (!struct_decl.methods.is_empty() || struct_decl.statics.is_some())
+                {
+                    tracing::debug!(struct_name = %module_interner.resolve(struct_decl.name), "Compiling module struct methods");
+                    self.compile_module_struct_methods(
+                        struct_decl,
+                        module_interner,
+                        module_path,
+                        &module_global_inits,
+                    )?;
+                }
+            }
         }
 
         tracing::debug!("compile_module_functions complete");
@@ -584,6 +606,13 @@ impl Compiler<'_> {
                     self.import_module_class(class, module_interner, module_id);
                 }
             }
+
+            // Finalize module structs (register type metadata, import methods)
+            for decl in &program.declarations {
+                if let Decl::Struct(struct_decl) = decl {
+                    self.import_module_struct(struct_decl, module_interner, module_id);
+                }
+            }
         }
 
         Ok(())
@@ -605,8 +634,17 @@ impl Compiler<'_> {
         // which will find the imported function IDs
     }
 
-    /// Import a module record - register metadata and import methods.
+    /// Import a module struct - register metadata and import methods.
     /// Used when modules are already compiled in a shared cache.
+    fn import_module_struct(
+        &mut self,
+        struct_decl: &vole_frontend::StructDecl,
+        module_interner: &Interner,
+        module_id: ModuleId,
+    ) {
+        self.finalize_module_struct(struct_decl, module_interner, module_id);
+    }
+
     /// Compile a single module function with its own interner
     fn compile_module_function(
         &mut self,

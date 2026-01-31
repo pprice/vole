@@ -53,7 +53,7 @@ impl TypeBodyDecl for StructDecl {
         &self.methods
     }
     fn statics(&self) -> Option<&StaticsBlock> {
-        None
+        self.statics.as_ref()
     }
     fn span(&self) -> Span {
         self.span

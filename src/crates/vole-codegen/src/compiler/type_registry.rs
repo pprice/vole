@@ -586,4 +586,159 @@ impl Compiler<'_> {
             }
         }
     }
+
+    /// Register and finalize a module struct (uses module interner).
+    ///
+    /// This handles:
+    /// 1. Type metadata registration (fields, methods)
+    /// 2. Static method registration
+    ///
+    /// Structs are stack-allocated value types, so no runtime type registration is needed.
+    pub(super) fn finalize_module_struct(
+        &mut self,
+        struct_decl: &StructDecl,
+        module_interner: &Interner,
+        module_id: ModuleId,
+    ) {
+        let type_name_str = module_interner.resolve(struct_decl.name);
+        tracing::debug!(type_name = %type_name_str, "finalize_module_struct called");
+
+        // Look up the TypeDefId using the struct name via full resolution chain
+        let query = self.query();
+        let Some(type_def_id) = query.resolve_type_def_by_str(module_id, type_name_str) else {
+            tracing::warn!(type_name = %type_name_str, "Could not find TypeDefId for module struct");
+            return;
+        };
+        tracing::debug!(type_name = %type_name_str, ?type_def_id, "Found TypeDefId for module struct");
+
+        // Skip if already registered
+        if self.state.type_metadata.contains_key(&type_def_id) {
+            tracing::debug!(type_name = %type_name_str, "Skipping - already registered in type_metadata");
+            return;
+        }
+
+        // Build field slots map using sema's pre-resolved field types
+        let mut field_slots = FxHashMap::default();
+        let field_ids: Vec<_> = self
+            .analyzed
+            .entity_registry()
+            .fields_on_type(type_def_id)
+            .collect();
+        for field_id in field_ids {
+            let (field_name, field_slot) = {
+                let field_def = self.analyzed.entity_registry().get_field(field_id);
+                let name = self
+                    .query()
+                    .last_segment(field_def.name_id)
+                    .expect("field should have a name");
+                (name, field_def.slot)
+            };
+            field_slots.insert(field_name, field_slot);
+        }
+
+        // Collect method info and declare methods
+        let mut method_infos = FxHashMap::default();
+
+        for method in &struct_decl.methods {
+            let method_name_str = module_interner.resolve(method.name);
+
+            let method_name_id =
+                method_name_id_with_interner(self.analyzed, module_interner, method.name)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "module struct method name not found in name_table: {}::{}",
+                            type_name_str, method_name_str
+                        )
+                    });
+
+            let semantic_method_id = self
+                .analyzed
+                .entity_registry()
+                .find_method_on_type(type_def_id, method_name_id)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "module struct method not registered in entity_registry: {}::{} (type_def_id={:?}, method_name_id={:?})",
+                        type_name_str, method_name_str, type_def_id, method_name_id
+                    )
+                });
+
+            let sig = self.build_signature_for_method(semantic_method_id, SelfParam::Pointer);
+            let method_def = self
+                .analyzed
+                .entity_registry()
+                .get_method(semantic_method_id);
+            let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
+            let display_name = self.func_registry.display(func_key);
+            let jit_func_id = self.jit.declare_function(&display_name, &sig);
+            self.func_registry.set_func_id(func_key, jit_func_id);
+
+            method_infos.insert(method_name_id, MethodInfo { func_key });
+            let type_name_id = self.query().get_type(type_def_id).name_id;
+            self.state
+                .method_func_keys
+                .insert((type_name_id, method_name_id), func_key);
+        }
+
+        // Register type metadata (structs use type_id 0 since they're stack-allocated)
+        let vole_type_id = self
+            .query()
+            .get_type(type_def_id)
+            .base_type_id
+            .expect("sema should pre-compute base_type_id for module structs");
+        self.state.type_metadata.insert(
+            type_def_id,
+            TypeMetadata {
+                type_id: 0,
+                field_slots,
+                vole_type: vole_type_id,
+                type_def_id,
+                method_infos,
+            },
+        );
+
+        // Register static methods
+        if let Some(ref statics) = struct_decl.statics {
+            for method in &statics.methods {
+                if method.body.is_none() {
+                    continue;
+                }
+
+                let method_name_str = module_interner.resolve(method.name);
+                let method_name_id =
+                    method_name_id_with_interner(self.analyzed, module_interner, method.name)
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "module struct static method name not found in name_table: {}::{}",
+                                type_name_str, method_name_str
+                            )
+                        });
+
+                let semantic_method_id = self
+                    .analyzed
+                    .entity_registry()
+                    .find_static_method_on_type(type_def_id, method_name_id)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "module struct static method not registered in entity_registry: {}::{} (type_def_id={:?}, method_name_id={:?})",
+                            type_name_str, method_name_str, type_def_id, method_name_id
+                        )
+                    });
+
+                let sig = self.build_signature_for_method(semantic_method_id, SelfParam::None);
+                let method_def = self
+                    .analyzed
+                    .entity_registry()
+                    .get_method(semantic_method_id);
+                let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
+                let display_name = self.func_registry.display(func_key);
+                let jit_func_id = self.jit.declare_function(&display_name, &sig);
+                self.func_registry.set_func_id(func_key, jit_func_id);
+
+                let type_name_id = self.query().get_type(type_def_id).name_id;
+                self.state
+                    .method_func_keys
+                    .insert((type_name_id, method_name_id), func_key);
+            }
+        }
+    }
 }
