@@ -1,0 +1,121 @@
+// Tests for structs in fixed-size arrays
+
+struct Point { x: i64, y: i64 }
+struct Color { r: i64, g: i64, b: i64 }
+struct Named { name: string, value: i64 }
+
+func make_fixed_points() -> [Point; 3] {
+    let p = Point { x: 5, y: 10 }
+    return [p; 3]
+}
+
+func make_fixed_colors() -> [Color; 2] {
+    return [Color { r: 255, g: 128, b: 0 }; 2]
+}
+
+func sum_fixed_points(points: [Point; 3]) -> i64 {
+    return points[0].x + points[0].y + points[1].x + points[1].y + points[2].x + points[2].y
+}
+
+tests {
+    test "fixed array of structs: basic creation and access" {
+        let p = Point { x: 1, y: 2 }
+        let arr: [Point; 3] = [p; 3]
+        assert(arr[0].x == 1)
+        assert(arr[0].y == 2)
+        assert(arr[1].x == 1)
+        assert(arr[1].y == 2)
+        assert(arr[2].x == 1)
+        assert(arr[2].y == 2)
+    }
+
+    test "fixed array of structs: non-zero values" {
+        let p = Point { x: 42, y: 99 }
+        let arr: [Point; 2] = [p; 2]
+        assert(arr[0].x == 42)
+        assert(arr[0].y == 99)
+        assert(arr[1].x == 42)
+        assert(arr[1].y == 99)
+    }
+
+    test "fixed array of structs: returned from function" {
+        let arr = make_fixed_points()
+        assert(arr[0].x == 5)
+        assert(arr[0].y == 10)
+        assert(arr[1].x == 5)
+        assert(arr[1].y == 10)
+        assert(arr[2].x == 5)
+        assert(arr[2].y == 10)
+    }
+
+    test "fixed array of large structs (sret)" {
+        let c = Color { r: 255, g: 128, b: 0 }
+        let arr: [Color; 2] = [c; 2]
+        assert(arr[0].r == 255)
+        assert(arr[0].g == 128)
+        assert(arr[0].b == 0)
+        assert(arr[1].r == 255)
+        assert(arr[1].g == 128)
+        assert(arr[1].b == 0)
+    }
+
+    test "fixed array of large structs: returned from function" {
+        let arr = make_fixed_colors()
+        assert(arr[0].r == 255)
+        assert(arr[0].g == 128)
+        assert(arr[0].b == 0)
+        assert(arr[1].r == 255)
+        assert(arr[1].g == 128)
+        assert(arr[1].b == 0)
+    }
+
+    test "fixed array of structs: index mutation" {
+        let p = Point { x: 0, y: 0 }
+        let mut arr: [Point; 2] = [p; 2]
+        arr[0] = Point { x: 10, y: 20 }
+        assert(arr[0].x == 10)
+        assert(arr[0].y == 20)
+        assert(arr[1].x == 0)
+        assert(arr[1].y == 0)
+    }
+
+    test "fixed array of structs: mutation does not affect other elements" {
+        let p = Point { x: 5, y: 5 }
+        let mut arr: [Point; 3] = [p; 3]
+        arr[1] = Point { x: 99, y: 99 }
+        assert(arr[0].x == 5)
+        assert(arr[0].y == 5)
+        assert(arr[1].x == 99)
+        assert(arr[1].y == 99)
+        assert(arr[2].x == 5)
+        assert(arr[2].y == 5)
+    }
+
+    test "fixed array of structs: passed to function" {
+        let p = Point { x: 1, y: 2 }
+        let arr: [Point; 3] = [p; 3]
+        let total = sum_fixed_points(arr)
+        assert(total == 9)
+    }
+
+    test "fixed array of structs: string fields" {
+        let n = Named { name: "hello", value: 42 }
+        let arr: [Named; 2] = [n; 2]
+        assert(arr[0].name == "hello")
+        assert(arr[0].value == 42)
+        assert(arr[1].name == "hello")
+        assert(arr[1].value == 42)
+    }
+
+    test "fixed array of structs: single element" {
+        let arr: [Point; 1] = [Point { x: 7, y: 8 }; 1]
+        assert(arr[0].x == 7)
+        assert(arr[0].y == 8)
+    }
+
+    test "fixed array of structs: field in expression" {
+        let arr: [Point; 2] = [Point { x: 10, y: 20 }; 2]
+        let sum = arr[0].x + arr[1].y
+        assert(sum == 30)
+    }
+}
