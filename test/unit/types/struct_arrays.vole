@@ -1,0 +1,105 @@
+// Tests for structs in arrays
+
+struct Point { x: i64, y: i64 }
+struct Named { name: string, value: i64 }
+
+func sum_points(points: [Point]) -> i64 {
+    let mut sum = 0
+    for p in points {
+        sum = sum + p.x + p.y
+    }
+    return sum
+}
+
+func make_points() -> [Point] {
+    return [Point { x: 10, y: 20 }, Point { x: 30, y: 40 }]
+}
+
+tests {
+    test "create array of structs" {
+        let points = [Point { x: 1, y: 2 }, Point { x: 3, y: 4 }]
+        assert(points[0].x == 1)
+        assert(points[0].y == 2)
+        assert(points[1].x == 3)
+        assert(points[1].y == 4)
+    }
+
+    test "access struct from array by index" {
+        let points = [Point { x: 1, y: 2 }, Point { x: 3, y: 4 }]
+        assert(points[0].x == 1)
+        assert(points[1].x == 3)
+        assert(points[0].y == 2)
+        assert(points[1].y == 4)
+    }
+
+    test "array length with structs" {
+        let points = [Point { x: 1, y: 2 }, Point { x: 3, y: 4 }]
+        assert(points.length() == 2)
+    }
+
+    test "iterate over array of structs with for loop" {
+        let points = [Point { x: 1, y: 2 }, Point { x: 3, y: 4 }, Point { x: 5, y: 6 }]
+        let mut sum_x = 0
+        for p in points {
+            sum_x = sum_x + p.x
+        }
+        assert(sum_x == 9)
+    }
+
+    test "map over array of structs" {
+        let points = [Point { x: 10, y: 20 }, Point { x: 30, y: 40 }]
+        let xs = points.iter().map((p) => p.x).collect()
+        assert(xs[0] == 10)
+        assert(xs[1] == 30)
+    }
+
+    test "filter array of structs" {
+        let points = [Point { x: 1, y: 2 }, Point { x: 5, y: 6 }, Point { x: 3, y: 4 }]
+        let big = points.iter().filter((p) => p.x > 2).collect()
+        assert(big.length() == 2)
+        assert(big[0].x == 5)
+        assert(big[1].x == 3)
+    }
+
+    test "array of structs passed to function" {
+        let points = [Point { x: 1, y: 2 }, Point { x: 3, y: 4 }]
+        let total = sum_points(points)
+        assert(total == 10)
+    }
+
+    // BUG(v-937d): returning [StructType] from function corrupts struct field data.
+    // The array length is correct but field values are wrong.
+    // test "array of structs returned from function" {
+    //     let points = make_points()
+    //     assert(points[0].x == 10)
+    //     assert(points[0].y == 20)
+    //     assert(points[1].x == 30)
+    //     assert(points[1].y == 40)
+    // }
+
+    test "single-element struct array" {
+        let points = [Point { x: 1, y: 2 }]
+        assert(points.length() == 1)
+        assert(points[0].x == 1)
+        assert(points[0].y == 2)
+    }
+
+    test "empty operations on struct arrays" {
+        let points: [Point] = []
+        assert(points.length() == 0)
+    }
+
+    test "array of structs with string fields" {
+        let items = [Named { name: "a", value: 1 }, Named { name: "b", value: 2 }]
+        assert(items[0].name == "a")
+        assert(items[0].value == 1)
+        assert(items[1].name == "b")
+        assert(items[1].value == 2)
+    }
+
+    test "struct array element in expression" {
+        let points = [Point { x: 1, y: 2 }, Point { x: 3, y: 4 }]
+        let result = points[0].x + points[1].y
+        assert(result == 5)
+    }
+}
