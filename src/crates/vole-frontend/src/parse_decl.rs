@@ -214,45 +214,71 @@ impl<'src> Parser<'src> {
         self.consume(TokenType::Identifier, "expected struct name")?;
         let name = self.interner.intern(&name_token.lexeme);
 
+        // Parse optional type parameters: struct Foo<T>
+        let type_params = self.parse_type_params()?;
+
         self.consume(TokenType::LBrace, "expected '{' after struct name")?;
         self.skip_newlines();
 
         let mut fields = Vec::new();
+        let mut methods = Vec::new();
+
         while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
-            // Parse field: name: Type
-            let field_span = self.current.span;
-            let field_name_token = self.current.clone();
-            self.consume(TokenType::Identifier, "expected field name")?;
-            let field_name = self.interner.intern(&field_name_token.lexeme);
-
-            self.consume(TokenType::Colon, "expected ':' after field name")?;
-            let ty = self.parse_type()?;
-
-            // Parse optional default value: field: Type = expr
-            let default_value = if self.match_token(TokenType::Eq) {
-                Some(Box::new(self.expression(0)?))
-            } else {
-                None
-            };
-
-            // Allow optional comma
-            if self.check(TokenType::Comma) {
+            if self.check(TokenType::KwFunc) {
+                // Parse method
+                if let Decl::Function(func) = self.function_decl()? {
+                    methods.push(func);
+                }
+            } else if self.check(TokenType::Identifier) {
+                // Parse field: name: Type
+                let field_span = self.current.span;
+                let field_name_token = self.current.clone();
                 self.advance();
-            }
+                let field_name = self.interner.intern(&field_name_token.lexeme);
 
-            fields.push(FieldDef {
-                name: field_name,
-                ty,
-                default_value,
-                span: field_span.merge(self.previous.span),
-            });
+                self.consume(TokenType::Colon, "expected ':' after field name")?;
+                let ty = self.parse_type()?;
+
+                // Parse optional default value: field: Type = expr
+                let default_value = if self.match_token(TokenType::Eq) {
+                    Some(Box::new(self.expression(0)?))
+                } else {
+                    None
+                };
+
+                // Allow optional comma
+                if self.check(TokenType::Comma) {
+                    self.advance();
+                }
+
+                fields.push(FieldDef {
+                    name: field_name,
+                    ty,
+                    default_value,
+                    span: field_span.merge(self.previous.span),
+                });
+            } else {
+                return Err(ParseError::new(
+                    ParserError::UnexpectedToken {
+                        token: self.current.ty.as_str().to_string(),
+                        span: self.current.span.into(),
+                    },
+                    self.current.span,
+                ));
+            }
             self.skip_newlines();
         }
 
         self.consume(TokenType::RBrace, "expected '}' to close struct")?;
         let span = start_span.merge(self.previous.span);
 
-        Ok(Decl::Struct(StructDecl { name, fields, span }))
+        Ok(Decl::Struct(StructDecl {
+            name,
+            type_params,
+            fields,
+            methods,
+            span,
+        }))
     }
 
     fn error_decl(&mut self) -> Result<Decl, ParseError> {

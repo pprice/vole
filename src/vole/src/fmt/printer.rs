@@ -1359,7 +1359,7 @@ fn print_struct_decl<'a>(
         arena.nil(),
         &struct_decl.fields,
         None,
-        &[],
+        &struct_decl.methods,
         interner,
         "struct",
     )

@@ -139,7 +139,9 @@ pub struct ClassDecl {
 #[derive(Debug, Clone)]
 pub struct StructDecl {
     pub name: Symbol,
+    pub type_params: Vec<TypeParam>,
     pub fields: Vec<FieldDef>,
+    pub methods: Vec<FuncDecl>,
     pub span: Span,
 }
 

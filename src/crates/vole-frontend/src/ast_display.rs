@@ -163,8 +163,9 @@ impl<'a> AstPrinter<'a> {
         let name = self.interner.resolve(struct_decl.name);
         writeln!(out, "StructDecl \"{}\"", name).unwrap();
 
+        let inner = self.indented();
+
         if !struct_decl.fields.is_empty() {
-            let inner = self.indented();
             inner.write_indent(out);
             out.push_str("fields: [");
             for (i, field) in struct_decl.fields.iter().enumerate() {
@@ -177,6 +178,10 @@ impl<'a> AstPrinter<'a> {
                 out.push(')');
             }
             out.push_str("]\n");
+        }
+
+        for method in &struct_decl.methods {
+            inner.write_func_decl(out, method);
         }
     }
 
