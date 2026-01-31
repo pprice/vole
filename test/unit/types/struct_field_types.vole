@@ -1,0 +1,372 @@
+// Tests for structs with diverse field types (not just i64)
+
+struct Named { name: string }
+struct Toggle { on: bool }
+struct Measurement { value: f64 }
+struct Tags { items: [string] }
+struct Numbers { values: [i64] }
+struct Config { name: string, count: i64, enabled: bool, rate: f64 }
+
+// Helper functions for string field structs
+func make_named(n: string) -> Named {
+    return Named { name: n }
+}
+
+func get_name(n: Named) -> string {
+    return n.name
+}
+
+func pass_named(n: Named) -> Named {
+    return Named { name: n.name }
+}
+
+// Helper functions for bool field structs
+func make_toggle(b: bool) -> Toggle {
+    return Toggle { on: b }
+}
+
+func flip_toggle(t: Toggle) -> Toggle {
+    return Toggle { on: !t.on }
+}
+
+// Helper functions for f64 field structs
+func make_measurement(v: f64) -> Measurement {
+    return Measurement { value: v }
+}
+
+func scale_measurement(m: Measurement, factor: f64) -> Measurement {
+    return Measurement { value: m.value * factor }
+}
+
+// Helper functions for array field structs
+func make_tags(t: [string]) -> Tags {
+    return Tags { items: t }
+}
+
+func make_numbers(n: [i64]) -> Numbers {
+    return Numbers { values: n }
+}
+
+// Helper functions for mixed type struct
+func make_config(name: string, count: i64, enabled: bool, rate: f64) -> Config {
+    return Config { name: name, count: count, enabled: enabled, rate: rate }
+}
+
+func describe_config(c: Config) -> string {
+    return c.name + ": count=" + c.count + " enabled=" + c.enabled + " rate=" + c.rate
+}
+
+tests {
+    // ===== String fields =====
+
+    test "string field: create and access" {
+        let n = Named { name: "alice" }
+        assert(n.name == "alice")
+    }
+
+    test "string field: empty string" {
+        let n = Named { name: "" }
+        assert(n.name == "")
+        assert(n.name.length() == 0)
+    }
+
+    test "string field: pass to function" {
+        let n = Named { name: "bob" }
+        let result = get_name(n)
+        assert(result == "bob")
+    }
+
+    test "string field: return from function" {
+        let n = make_named("charlie")
+        assert(n.name == "charlie")
+    }
+
+    test "string field: round-trip through function" {
+        let n = Named { name: "diana" }
+        let n2 = pass_named(n)
+        assert(n2.name == "diana")
+    }
+
+    test "string field: concatenation on field" {
+        let n = Named { name: "hello" }
+        let greeting = n.name + " world"
+        assert(greeting == "hello world")
+    }
+
+    test "string field: length on field" {
+        let n = Named { name: "vole" }
+        assert(n.name.length() == 4)
+    }
+
+    // ===== Bool fields =====
+
+    test "bool field: create and access true" {
+        let t = Toggle { on: true }
+        assert(t.on == true)
+    }
+
+    test "bool field: create and access false" {
+        let t = Toggle { on: false }
+        assert(t.on == false)
+    }
+
+    test "bool field: use in if conditional" {
+        let t = Toggle { on: true }
+        let mut result = 0
+        if t.on {
+            result = 1
+        } else {
+            result = 2
+        }
+        assert(result == 1)
+    }
+
+    test "bool field: false in if conditional" {
+        let t = Toggle { on: false }
+        let mut result = 0
+        if t.on {
+            result = 1
+        } else {
+            result = 2
+        }
+        assert(result == 2)
+    }
+
+    test "bool field: pass to function" {
+        let t = Toggle { on: true }
+        let t2 = flip_toggle(t)
+        assert(t2.on == false)
+    }
+
+    test "bool field: return from function" {
+        let t = make_toggle(true)
+        assert(t.on == true)
+    }
+
+    test "bool field: double flip" {
+        let t = Toggle { on: true }
+        let t2 = flip_toggle(flip_toggle(t))
+        assert(t2.on == true)
+    }
+
+    test "bool field: negation" {
+        let t = Toggle { on: true }
+        assert(!t.on == false)
+    }
+
+    // ===== f64 fields =====
+
+    test "f64 field: create and access" {
+        let m = Measurement { value: 3.14 }
+        assert(m.value > 3.13)
+        assert(m.value < 3.15)
+    }
+
+    test "f64 field: zero" {
+        let m = Measurement { value: 0.0 }
+        assert(m.value == 0.0)
+    }
+
+    test "f64 field: negative" {
+        let m = Measurement { value: -2.5 }
+        assert(m.value < 0.0)
+        assert(m.value == -2.5)
+    }
+
+    test "f64 field: arithmetic on field" {
+        let m = Measurement { value: 10.5 }
+        let result = m.value + 1.5
+        assert(result == 12.0)
+    }
+
+    test "f64 field: subtraction on field" {
+        let m = Measurement { value: 10.0 }
+        let result = m.value - 3.5
+        assert(result == 6.5)
+    }
+
+    test "f64 field: multiplication on field" {
+        let m = Measurement { value: 2.5 }
+        let result = m.value * 4.0
+        assert(result == 10.0)
+    }
+
+    test "f64 field: division on field" {
+        let m = Measurement { value: 7.0 }
+        let result = m.value / 2.0
+        assert(result == 3.5)
+    }
+
+    test "f64 field: pass to function and scale" {
+        let m = Measurement { value: 5.0 }
+        let m2 = scale_measurement(m, 3.0)
+        assert(m2.value == 15.0)
+    }
+
+    test "f64 field: return from function" {
+        let m = make_measurement(42.5)
+        assert(m.value == 42.5)
+    }
+
+    test "f64 field: chained function calls" {
+        let m = scale_measurement(scale_measurement(Measurement { value: 2.0 }, 3.0), 4.0)
+        assert(m.value == 24.0)
+    }
+
+    // ===== Array of strings field =====
+
+    test "string array field: create and access" {
+        let t = Tags { items: ["hello", "world"] }
+        assert(t.items[0] == "hello")
+        assert(t.items[1] == "world")
+    }
+
+    test "string array field: length" {
+        let t = Tags { items: ["a", "b", "c"] }
+        assert(t.items.length() == 3)
+    }
+
+    test "string array field: empty array" {
+        let t = Tags { items: [] }
+        assert(t.items.length() == 0)
+    }
+
+    test "string array field: single element" {
+        let t = Tags { items: ["only"] }
+        assert(t.items[0] == "only")
+        assert(t.items.length() == 1)
+    }
+
+    test "string array field: return from function" {
+        let t = make_tags(["foo", "bar", "baz"])
+        assert(t.items[0] == "foo")
+        assert(t.items[1] == "bar")
+        assert(t.items[2] == "baz")
+    }
+
+    // ===== Array of i64 field =====
+
+    test "i64 array field: create and access" {
+        let n = Numbers { values: [10, 20, 30] }
+        assert(n.values[0] == 10)
+        assert(n.values[1] == 20)
+        assert(n.values[2] == 30)
+    }
+
+    test "i64 array field: length" {
+        let n = Numbers { values: [1, 2, 3, 4, 5] }
+        assert(n.values.length() == 5)
+    }
+
+    test "i64 array field: empty" {
+        let n = Numbers { values: [] }
+        assert(n.values.length() == 0)
+    }
+
+    test "i64 array field: single element" {
+        let n = Numbers { values: [42] }
+        assert(n.values[0] == 42)
+        assert(n.values.length() == 1)
+    }
+
+    test "i64 array field: return from function" {
+        let n = make_numbers([100, 200, 300])
+        assert(n.values[0] == 100)
+        assert(n.values[1] == 200)
+        assert(n.values[2] == 300)
+    }
+
+    test "i64 array field: arithmetic on element" {
+        let n = Numbers { values: [10, 20, 30] }
+        let sum = n.values[0] + n.values[1] + n.values[2]
+        assert(sum == 60)
+    }
+
+    // ===== Array field iteration =====
+
+    test "i64 array field: for loop iteration" {
+        let n = Numbers { values: [1, 2, 3, 4] }
+        let mut sum = 0
+        for v in n.values {
+            sum = sum + v
+        }
+        assert(sum == 10)
+    }
+
+    test "string array field: for loop iteration" {
+        let t = Tags { items: ["a", "b", "c"] }
+        let mut result = ""
+        for item in t.items {
+            result = result + item
+        }
+        assert(result == "abc")
+    }
+
+    // ===== Mixed type struct =====
+
+    test "mixed struct: create and access all fields" {
+        let c = Config { name: "app", count: 5, enabled: true, rate: 0.75 }
+        assert(c.name == "app")
+        assert(c.count == 5)
+        assert(c.enabled == true)
+        assert(c.rate == 0.75)
+    }
+
+    test "mixed struct: return from function" {
+        let c = make_config("server", 10, false, 3.14)
+        assert(c.name == "server")
+        assert(c.count == 10)
+        assert(c.enabled == false)
+        assert(c.rate > 3.13)
+        assert(c.rate < 3.15)
+    }
+
+    test "mixed struct: use fields in expressions" {
+        let c = Config { name: "test", count: 3, enabled: true, rate: 2.5 }
+        let label = c.name + "_v" + c.count
+        assert(label == "test_v3")
+        let doubled_rate = c.rate * 2.0
+        assert(doubled_rate == 5.0)
+    }
+
+    test "mixed struct: bool field in conditional" {
+        let c = Config { name: "feature", count: 1, enabled: true, rate: 1.0 }
+        let mut status = "off"
+        if c.enabled {
+            status = "on"
+        }
+        assert(status == "on")
+    }
+
+    test "mixed struct: disabled config conditional" {
+        let c = Config { name: "feature", count: 0, enabled: false, rate: 0.0 }
+        let mut status = "off"
+        if c.enabled {
+            status = "on"
+        }
+        assert(status == "off")
+    }
+
+    test "mixed struct: describe config" {
+        let c = Config { name: "db", count: 42, enabled: true, rate: 9.5 }
+        let desc = describe_config(c)
+        assert(desc == "db: count=42 enabled=true rate=9.5")
+    }
+
+    test "mixed struct: multiple instances" {
+        let c1 = Config { name: "alpha", count: 1, enabled: true, rate: 1.0 }
+        let c2 = Config { name: "beta", count: 2, enabled: false, rate: 2.0 }
+        assert(c1.name != c2.name)
+        assert(c1.count + c2.count == 3)
+        assert(c1.enabled != c2.enabled)
+        assert(c1.rate + c2.rate == 3.0)
+    }
+
+    test "mixed struct: field arithmetic combined" {
+        let c = Config { name: "calc", count: 10, enabled: true, rate: 2.5 }
+        let int_val = c.count * 2
+        let float_val = c.rate + 0.5
+        assert(int_val == 20)
+        assert(float_val == 3.0)
+    }
+}
