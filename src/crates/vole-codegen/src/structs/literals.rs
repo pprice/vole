@@ -48,40 +48,12 @@ impl Cg<'_, '_, '_> {
         // - Generic instantiation
         let path_str = format_path(&sl.path, self.interner());
 
-        // Resolve the TypeDefId based on path length:
-        // - Single-segment paths (e.g., `Duration`): Use string-based resolution like the original code
-        //   to maintain consistency across multiple file compilations
-        // - Multi-segment paths (e.g., `time.Duration`): Use semantic analysis types which have
-        //   already resolved the module-qualified path
-        let type_def_id = if sl.path.len() == 1 {
-            // Simple type name - use string-based resolution for consistency
-            let type_name = self.interner().resolve(sl.path[0]);
-            let query = self.query();
-            // Use current module (for imported modules) or program module (for main program)
-            let module_id = self
-                .current_module_id()
-                .unwrap_or(self.env.analyzed.module_id);
-            let mut resolved_id = query.resolve_type_def_by_str(module_id, type_name);
-
-            // If this is a type alias, resolve through to the underlying type
-            if let Some(def_id) = resolved_id {
-                let type_def = query.registry().get_type(def_id);
-                if type_def.kind == TypeDefKind::Alias
-                    && let Some(aliased_type_id) = type_def.aliased_type
-                {
-                    let arena = self.arena();
-                    // Get the underlying TypeDefId from the aliased type
-                    if let Some((underlying_id, _)) = arena.unwrap_class(aliased_type_id) {
-                        resolved_id = Some(underlying_id);
-                    } else if let Some((underlying_id, _)) = arena.unwrap_struct(aliased_type_id) {
-                        resolved_id = Some(underlying_id);
-                    }
-                }
-            }
-            resolved_id
-        } else {
-            // Qualified path - extract TypeDefId from semantic analysis
-            self.get_expr_type(&expr.id).and_then(|expr_type_id| {
+        // Resolve the TypeDefId. Prefer the semantic analysis type (handles shadowing,
+        // generic instantiation, module-qualified paths). Fall back to string-based
+        // resolution for consistency across multiple file compilations.
+        let type_def_id = self
+            .get_expr_type(&expr.id)
+            .and_then(|expr_type_id| {
                 let arena = self.arena();
                 if let Some((id, _)) = arena.unwrap_class(expr_type_id) {
                     Some(id)
@@ -91,8 +63,40 @@ impl Cg<'_, '_, '_> {
                     None
                 }
             })
-        }
-        .ok_or_else(|| format!("Unknown type: {} (not in entity registry)", path_str))?;
+            .or_else(|| {
+                if sl.path.len() == 1 {
+                    // Simple type name - use string-based resolution as fallback
+                    let type_name = self.interner().resolve(sl.path[0]);
+                    let query = self.query();
+                    // Use current module (for imported modules) or program module (for main program)
+                    let module_id = self
+                        .current_module_id()
+                        .unwrap_or(self.env.analyzed.module_id);
+                    let mut resolved_id = query.resolve_type_def_by_str(module_id, type_name);
+
+                    // If this is a type alias, resolve through to the underlying type
+                    if let Some(def_id) = resolved_id {
+                        let type_def = query.registry().get_type(def_id);
+                        if type_def.kind == TypeDefKind::Alias
+                            && let Some(aliased_type_id) = type_def.aliased_type
+                        {
+                            let arena = self.arena();
+                            // Get the underlying TypeDefId from the aliased type
+                            if let Some((underlying_id, _)) = arena.unwrap_class(aliased_type_id) {
+                                resolved_id = Some(underlying_id);
+                            } else if let Some((underlying_id, _)) =
+                                arena.unwrap_struct(aliased_type_id)
+                            {
+                                resolved_id = Some(underlying_id);
+                            }
+                        }
+                    }
+                    resolved_id
+                } else {
+                    None
+                }
+            })
+            .ok_or_else(|| format!("Unknown type: {} (not in entity registry)", path_str))?;
 
         // Sentinels (e.g. Done, nil) are zero-field structs represented as i8(0).
         // They may not be in type_metadata if they come from prelude modules,

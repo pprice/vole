@@ -60,6 +60,7 @@ pub struct ResolverGuard<'a> {
     interner: &'a Interner,
     module_id: ModuleId,
     imports: &'a [ModuleId],
+    priority_module: Option<ModuleId>,
 }
 
 impl<'a> ResolverGuard<'a> {
@@ -68,6 +69,7 @@ impl<'a> ResolverGuard<'a> {
         interner: &'a Interner,
         module_id: ModuleId,
         imports: &'a [ModuleId],
+        priority_module: Option<ModuleId>,
     ) -> Self {
         let guard = db.borrow();
         Self {
@@ -75,6 +77,7 @@ impl<'a> ResolverGuard<'a> {
             interner,
             module_id,
             imports,
+            priority_module,
         }
     }
 
@@ -83,6 +86,7 @@ impl<'a> ResolverGuard<'a> {
         // SAFETY: We hold the guard, so the borrow is valid
         let names = unsafe { &*(&self._guard.names as *const NameTable) };
         Resolver::new(self.interner, names, self.module_id, self.imports)
+            .with_priority_module(self.priority_module)
     }
 
     /// Resolve a Symbol to a TypeDefId through the resolution chain.
@@ -433,6 +437,10 @@ pub struct Analyzer {
     /// that need to see parent module types). These are searched after the current
     /// module but before the builtin module, providing scope inheritance for types.
     parent_modules: Vec<ModuleId>,
+    /// Priority module for type resolution in tests blocks. When set, this module
+    /// is checked BEFORE current_module during type resolution, enabling types
+    /// defined in tests blocks to shadow parent module types of the same name.
+    type_priority_module: Option<ModuleId>,
     /// When true, skip processing of `Decl::Tests` in all analysis passes.
     /// Set by `vole run` to avoid sema/codegen cost for tests blocks in production.
     skip_tests: bool,
@@ -532,6 +540,7 @@ impl Analyzer {
             interner,
             self.current_module,
             &self.parent_modules,
+            self.type_priority_module,
         )
     }
 
@@ -542,7 +551,7 @@ impl Analyzer {
         interner: &'a Interner,
         module_id: ModuleId,
     ) -> ResolverGuard<'a> {
-        ResolverGuard::new(&self.ctx.db, interner, module_id, &[])
+        ResolverGuard::new(&self.ctx.db, interner, module_id, &[], None)
     }
 
     /// Take ownership of the expression types (consuming self)
@@ -1077,6 +1086,7 @@ impl Default for Analyzer {
             type_param_stack: TypeParamScopeStack::new(),
             current_file_path: None,
             parent_modules: Vec::new(),
+            type_priority_module: None,
             skip_tests: false,
         }
     }

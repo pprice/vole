@@ -395,6 +395,12 @@ impl Analyzer {
         // types registered under the virtual module.
         sub.parent_modules.push(virtual_module_id);
 
+        // Set the virtual module as the priority module for type resolution.
+        // This ensures that types defined in the tests block shadow parent types
+        // of the same name during type resolution (while current_module stays as
+        // the parent for function name interning).
+        sub.type_priority_module = Some(virtual_module_id);
+
         // Resolve type aliases (uses resolver which searches parent_modules)
         sub.collect_type_aliases(&synthetic_program, interner);
 

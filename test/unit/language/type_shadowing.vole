@@ -1,0 +1,140 @@
+// Test type shadowing in tests blocks
+// When a tests block defines a type with the same name as a parent module type,
+// the tests block's type should shadow the parent's type within that block.
+
+class Foo {
+    x: i64,
+}
+
+tests "type shadowing" {
+    // Define a different Foo inside the tests block
+    class Foo {
+        x: i64,
+        y: i64,
+    }
+
+    test "local Foo has two fields" {
+        let f = Foo { x: 1, y: 2 }
+        assert(f.x == 1)
+        assert(f.y == 2)
+    }
+}
+
+// Outer Foo should still be usable in a separate tests block
+tests "outer type" {
+    test "outer Foo has one field" {
+        let f = Foo { x: 42 }
+        assert(f.x == 42)
+    }
+}
+
+// Test shadowing with methods
+class Bar {
+    value: i64,
+
+    func get() -> i64 => self.value
+}
+
+tests "shadow class with methods" {
+    class Bar {
+        value: i64,
+        extra: i64,
+
+        func get() -> i64 => self.value + self.extra
+    }
+
+    test "shadowed Bar method uses extra field" {
+        let b = Bar { value: 10, extra: 5 }
+        assert(b.get() == 15)
+    }
+}
+
+tests "original Bar still works" {
+    test "original Bar method" {
+        let b = Bar { value: 99 }
+        assert(b.get() == 99)
+    }
+}
+
+// Test shadowing with scoped helper function referencing shadowed type
+class Point {
+    x: i64,
+}
+
+tests "shadow with helper functions" {
+    class Point {
+        x: i64,
+        y: i64,
+    }
+
+    func make_point(a: i64, b: i64) -> Point {
+        return Point { x: a, y: b }
+    }
+
+    test "helper function uses shadowed type" {
+        let p = make_point(3, 7)
+        assert(p.x == 3)
+        assert(p.y == 7)
+    }
+}
+
+// Test shadowing with static methods
+class Widget {
+    id: i64,
+
+    statics {
+        func create(n: i64) -> Widget => Widget { id: n }
+    }
+}
+
+tests "shadow class with statics" {
+    class Widget {
+        id: i64,
+        label: string,
+
+        statics {
+            func create(n: i64, s: string) -> Widget => Widget { id: n, label: s }
+        }
+    }
+
+    test "shadowed Widget static constructor" {
+        let w = Widget.create(1, "test")
+        assert(w.id == 1)
+        assert(w.label == "test")
+    }
+}
+
+tests "original Widget statics" {
+    test "original Widget static constructor" {
+        let w = Widget.create(42)
+        assert(w.id == 42)
+    }
+}
+
+// Test interface shadowing
+interface Describable {
+    func describe() -> string
+}
+
+tests "shadow interface" {
+    interface Describable {
+        func describe() -> string
+        func short() -> string
+    }
+
+    class Thing {
+        name: string,
+    }
+
+    implement Describable for Thing {
+        func describe() -> string => self.name
+        func short() -> string => "t"
+    }
+
+    test "shadowed interface has extra method" {
+        let t = Thing { name: "widget" }
+        let d: Describable = t
+        assert(d.describe() == "widget")
+        assert(d.short() == "t")
+    }
+}

@@ -427,6 +427,7 @@ impl Analyzer {
                     type_params: None,
                     self_type: None,
                     imports: &[],
+                    priority_module: None,
                 };
                 let param_ids: crate::type_arena::TypeIdVec = f
                     .params
@@ -454,6 +455,7 @@ impl Analyzer {
                     type_params: None,
                     self_type: None,
                     imports: &[],
+                    priority_module: None,
                 };
                 let param_ids: crate::type_arena::TypeIdVec = func
                     .params

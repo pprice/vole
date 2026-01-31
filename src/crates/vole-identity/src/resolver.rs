@@ -19,6 +19,9 @@ pub struct Resolver<'a> {
     table: &'a NameTable,
     current_module: ModuleId,
     imports: &'a [ModuleId],
+    /// Optional priority module checked before current_module during resolution.
+    /// Used by tests blocks to let scoped types shadow parent module types.
+    priority_module: Option<ModuleId>,
 }
 
 impl<'a> Resolver<'a> {
@@ -33,7 +36,15 @@ impl<'a> Resolver<'a> {
             table,
             current_module,
             imports,
+            priority_module: None,
         }
+    }
+
+    /// Set a priority module that is checked before current_module during resolution.
+    /// This enables type shadowing in tests blocks.
+    pub fn with_priority_module(mut self, module: Option<ModuleId>) -> Self {
+        self.priority_module = module;
+        self
     }
 
     /// Get the NameTable this resolver uses.
@@ -59,6 +70,12 @@ impl<'a> Resolver<'a> {
         if let Some(id) = self.table.primitives.by_name(name) {
             return Some(id);
         }
+
+        // 1b. Priority module (for type shadowing in tests blocks)
+        if let Some(priority) = self.priority_module
+            && let Some(id) = self.table.name_id_raw(priority, &[name]) {
+                return Some(id);
+            }
 
         // 2. Current module
         if let Some(id) = self.table.name_id_raw(self.current_module, &[name]) {

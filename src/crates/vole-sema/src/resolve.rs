@@ -107,6 +107,8 @@ pub struct TypeResolutionContext<'a> {
     pub self_type: Option<TypeId>,
     /// Parent module IDs for hierarchical resolution (virtual test modules).
     pub imports: &'a [ModuleId],
+    /// Priority module checked before module_id during resolution (for type shadowing).
+    pub priority_module: Option<ModuleId>,
 }
 
 impl<'a> TypeResolutionContext<'a> {
@@ -124,6 +126,7 @@ impl<'a> TypeResolutionContext<'a> {
             type_params: Some(type_params),
             self_type: None,
             imports: &[],
+            priority_module: None,
         }
     }
 
@@ -140,6 +143,7 @@ impl<'a> TypeResolutionContext<'a> {
             type_params: None,
             self_type: None,
             imports: &[],
+            priority_module: None,
         }
     }
 
@@ -172,7 +176,8 @@ impl<'a> TypeResolutionContext<'a> {
     /// This borrows db for the duration of the call.
     pub fn resolve_type_or_interface(&self, sym: Symbol) -> Option<TypeDefId> {
         let db = self.db.borrow();
-        let resolver = Resolver::new(self.interner, &db.names, self.module_id, self.imports);
+        let resolver = Resolver::new(self.interner, &db.names, self.module_id, self.imports)
+            .with_priority_module(self.priority_module);
         resolver.resolve_type_or_interface(sym, &db.entities)
     }
 
@@ -180,7 +185,8 @@ impl<'a> TypeResolutionContext<'a> {
     /// This borrows db for the duration of the call.
     pub fn resolve_type_str_or_interface(&self, name: &str) -> Option<TypeDefId> {
         let db = self.db.borrow();
-        let resolver = Resolver::new(self.interner, &db.names, self.module_id, self.imports);
+        let resolver = Resolver::new(self.interner, &db.names, self.module_id, self.imports)
+            .with_priority_module(self.priority_module);
         resolver.resolve_type_str_or_interface(name, &db.entities)
     }
 }
