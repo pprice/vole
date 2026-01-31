@@ -467,6 +467,7 @@ impl<'src> Lexer<'src> {
             "when" => Some(TokenType::KwWhen),
             "where" => Some(TokenType::KwWhere),
             "unreachable" => Some(TokenType::KwUnreachable),
+            "sentinel" => Some(TokenType::KwSentinel),
             "i8" => Some(TokenType::KwI8),
             "i16" => Some(TokenType::KwI16),
             "i32" => Some(TokenType::KwI32),
@@ -1119,6 +1120,15 @@ mod tests {
         let mut lexer = Lexer::new("never unknown");
         assert_eq!(lexer.next_token().ty, TokenType::KwNever);
         assert_eq!(lexer.next_token().ty, TokenType::KwUnknown);
+        assert_eq!(lexer.next_token().ty, TokenType::Eof);
+    }
+
+    #[test]
+    fn lex_sentinel_keyword() {
+        let mut lexer = Lexer::new("sentinel");
+        let token = lexer.next_token();
+        assert_eq!(token.ty, TokenType::KwSentinel);
+        assert_eq!(token.lexeme, "sentinel");
         assert_eq!(lexer.next_token().ty, TokenType::Eof);
     }
 

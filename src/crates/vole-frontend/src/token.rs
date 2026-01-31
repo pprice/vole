@@ -56,6 +56,7 @@ pub enum TokenType {
     KwWhen,        // when keyword (conditional expressions)
     KwWhere,       // where keyword (generic type mappings)
     KwUnreachable, // unreachable keyword (bottom type expression)
+    KwSentinel,    // sentinel keyword (sentinel type declarations)
 
     // Type keywords
     KwI8,
@@ -183,6 +184,7 @@ impl TokenType {
             Self::KwWhen => "when",
             Self::KwWhere => "where",
             Self::KwUnreachable => "unreachable",
+            Self::KwSentinel => "sentinel",
             Self::KwI8 => "i8",
             Self::KwI16 => "i16",
             Self::KwI32 => "i32",
