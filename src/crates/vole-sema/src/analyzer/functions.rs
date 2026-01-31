@@ -441,7 +441,6 @@ impl Analyzer {
         };
         let self_type_id = match kind {
             TypeDefKind::Class => self.type_arena_mut().class(type_def_id, type_args),
-            TypeDefKind::Record => self.type_arena_mut().record(type_def_id, type_args),
             _ => self.type_arena().invalid(),
         };
         self.scope.define(

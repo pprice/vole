@@ -70,9 +70,7 @@ impl Cg<'_, '_, '_> {
                 {
                     let arena = self.arena();
                     // Get the underlying TypeDefId from the aliased type
-                    if let Some((underlying_id, _)) = arena.unwrap_record(aliased_type_id) {
-                        resolved_id = Some(underlying_id);
-                    } else if let Some((underlying_id, _)) = arena.unwrap_class(aliased_type_id) {
+                    if let Some((underlying_id, _)) = arena.unwrap_class(aliased_type_id) {
                         resolved_id = Some(underlying_id);
                     } else if let Some((underlying_id, _)) = arena.unwrap_struct(aliased_type_id) {
                         resolved_id = Some(underlying_id);
@@ -84,9 +82,7 @@ impl Cg<'_, '_, '_> {
             // Qualified path - extract TypeDefId from semantic analysis
             self.get_expr_type(&expr.id).and_then(|expr_type_id| {
                 let arena = self.arena();
-                if let Some((id, _)) = arena.unwrap_record(expr_type_id) {
-                    Some(id)
-                } else if let Some((id, _)) = arena.unwrap_class(expr_type_id) {
+                if let Some((id, _)) = arena.unwrap_class(expr_type_id) {
                     Some(id)
                 } else if let Some((id, _)) = arena.unwrap_struct(expr_type_id) {
                     Some(id)
@@ -134,10 +130,7 @@ impl Cg<'_, '_, '_> {
         // Get field types for wrapping optional values using arena methods
         let field_types: HashMap<String, TypeId> = {
             let arena = self.arena();
-            let type_def_id = arena
-                .unwrap_record(result_type_id)
-                .map(|(id, _)| id)
-                .or_else(|| arena.unwrap_class(result_type_id).map(|(id, _)| id));
+            let type_def_id = arena.unwrap_class(result_type_id).map(|(id, _)| id);
 
             if let Some(type_def_id) = type_def_id {
                 let type_def = self.query().get_type(type_def_id);

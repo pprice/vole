@@ -15,7 +15,7 @@ fn type_id_to_field_tag(ty: TypeId, arena: &vole_sema::type_arena::TypeArena) ->
         FieldTypeTag::String
     } else if arena.is_array(ty) {
         FieldTypeTag::Array
-    } else if arena.is_class(ty) || arena.is_record(ty) {
+    } else if arena.is_class(ty) {
         FieldTypeTag::Instance
     } else if let Some(variants) = arena.unwrap_union(ty) {
         // If any variant is a reference type, mark as needing cleanup

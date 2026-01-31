@@ -27,10 +27,9 @@ pub(crate) fn get_field_slot_and_type_id(
         type_id
     };
 
-    // Try class first, then record, then struct
+    // Try class first, then struct
     let (type_def_id, type_args) = arena
         .unwrap_class(resolved_type_id)
-        .or_else(|| arena.unwrap_record(resolved_type_id))
         .or_else(|| arena.unwrap_struct(resolved_type_id))
         .ok_or_else(|| {
             CodegenError::type_mismatch("field access", "class, record, or struct", "other type")
@@ -112,10 +111,9 @@ pub(crate) fn get_field_slot_and_type_id_cg(
         "field access: resolved type"
     );
 
-    // Try class first, then record, then struct
+    // Try class first, then struct
     let (type_def_id, type_args) = arena
         .unwrap_class(resolved_type_id)
-        .or_else(|| arena.unwrap_record(resolved_type_id))
         .or_else(|| arena.unwrap_struct(resolved_type_id))
         .ok_or_else(|| {
             CodegenError::type_mismatch("field access", "class, record, or struct", "other type")
@@ -198,8 +196,7 @@ pub(crate) fn convert_field_value_id(
         }
         ArenaType::Primitive(PrimitiveType::String)
         | ArenaType::Array(_)
-        | ArenaType::Class { .. }
-        | ArenaType::Record { .. } => {
+        | ArenaType::Class { .. } => {
             // Pointers stay as i64
             (raw_value, types::I64)
         }

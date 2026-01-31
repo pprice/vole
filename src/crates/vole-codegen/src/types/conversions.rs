@@ -73,15 +73,11 @@ pub(crate) fn type_metadata_by_name_id<'a>(
         "type_metadata_by_name_id lookup"
     );
     let result = type_metadata.values().find(|meta| {
-        // Use arena queries to check if this is a class or record with matching name_id
+        // Use arena queries to check if this is a class with matching name_id
         if let Some((type_def_id, _)) = arena.unwrap_class(meta.vole_type) {
             let class_name_id = entity_registry.get_type(type_def_id).name_id;
             tracing::trace!(target_name_id = ?name_id, class_name_id = ?class_name_id, "comparing class name_id");
             return class_name_id == name_id;
-        }
-        if let Some((type_def_id, _)) = arena.unwrap_record(meta.vole_type) {
-            let record_name_id = entity_registry.get_type(type_def_id).name_id;
-            return record_name_id == name_id;
         }
         false
     });
@@ -685,7 +681,7 @@ pub(crate) fn unknown_type_tag(ty: TypeId, arena: &TypeArena) -> u64 {
         ArenaType::Primitive(PrimitiveType::Bool) => unknown_tags::TAG_BOOL,
         ArenaType::Array(_) | ArenaType::FixedArray { .. } => unknown_tags::TAG_ARRAY,
         ArenaType::Function { .. } => unknown_tags::TAG_CLOSURE,
-        ArenaType::Class { .. } | ArenaType::Record { .. } => unknown_tags::TAG_INSTANCE,
+        ArenaType::Class { .. } => unknown_tags::TAG_INSTANCE,
         // For other types (nil, done, tuples, unions, etc.), default to I64 representation
         _ => unknown_tags::TAG_I64,
     }

@@ -1,6 +1,6 @@
 // src/sema/types/nominal.rs
 //
-// Nominal type enum consolidating Class, Record, Interface, and Error types.
+// Nominal type enum consolidating Class, Interface, and Error types.
 // These are types that have a type definition identity (TypeDefId) and optional
 // type arguments for generic instantiation.
 
@@ -20,8 +20,6 @@ pub type ExtendsVec = SmallVec<[TypeDefId; 2]>;
 pub enum NominalType {
     /// Class instance type
     Class(ClassType),
-    /// Record instance type
-    Record(RecordType),
     /// Interface type
     Interface(InterfaceType),
     /// Error type (e.g., DivByZero)
@@ -33,7 +31,6 @@ impl NominalType {
     pub fn type_def_id(&self) -> TypeDefId {
         match self {
             NominalType::Class(c) => c.type_def_id,
-            NominalType::Record(r) => r.type_def_id,
             NominalType::Interface(i) => i.type_def_id,
             NominalType::Error(e) => e.type_def_id,
         }
@@ -44,7 +41,6 @@ impl NominalType {
     pub fn type_args_id(&self) -> &[TypeId] {
         match self {
             NominalType::Class(c) => &c.type_args_id,
-            NominalType::Record(r) => &r.type_args_id,
             NominalType::Interface(i) => &i.type_args_id,
             NominalType::Error(_) => &[],
         }
@@ -53,11 +49,6 @@ impl NominalType {
     /// Check if this is a class type.
     pub fn is_class(&self) -> bool {
         matches!(self, NominalType::Class(_))
-    }
-
-    /// Check if this is a record type.
-    pub fn is_record(&self) -> bool {
-        matches!(self, NominalType::Record(_))
     }
 
     /// Check if this is an interface type.
@@ -70,16 +61,15 @@ impl NominalType {
         matches!(self, NominalType::Error(_))
     }
 
-    /// Check if this is a struct-like type (class or record - things with fields).
+    /// Check if this is a struct-like type (class - things with fields).
     pub fn is_struct_like(&self) -> bool {
-        matches!(self, NominalType::Class(_) | NominalType::Record(_))
+        matches!(self, NominalType::Class(_))
     }
 
     /// Get the type name for error messages.
     pub fn name(&self) -> &'static str {
         match self {
             NominalType::Class(_) => "class",
-            NominalType::Record(_) => "record",
             NominalType::Interface(_) => "interface",
             NominalType::Error(_) => "error",
         }
@@ -89,14 +79,6 @@ impl NominalType {
     pub fn as_class(&self) -> Option<&ClassType> {
         match self {
             NominalType::Class(c) => Some(c),
-            _ => None,
-        }
-    }
-
-    /// Get as RecordType if this is a record.
-    pub fn as_record(&self) -> Option<&RecordType> {
-        match self {
-            NominalType::Record(r) => Some(r),
             _ => None,
         }
     }
@@ -143,37 +125,6 @@ impl std::hash::Hash for ClassType {
 }
 
 impl ClassType {
-    /// Get interned type argument IDs.
-    pub fn type_args_id(&self) -> &TypeIdVec {
-        &self.type_args_id
-    }
-}
-
-/// Record type information
-#[derive(Debug, Clone, Eq)]
-pub struct RecordType {
-    /// Reference to the type definition in EntityRegistry
-    pub type_def_id: TypeDefId,
-    /// Interned type arguments (empty for non-generic records)
-    pub type_args_id: TypeIdVec,
-}
-
-impl PartialEq for RecordType {
-    fn eq(&self, other: &Self) -> bool {
-        // Use type_args_id (TypeId) for equality - it's the canonical source
-        self.type_def_id == other.type_def_id && self.type_args_id == other.type_args_id
-    }
-}
-
-impl std::hash::Hash for RecordType {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        // Use type_args_id (TypeId) for hashing - it's the canonical source
-        self.type_def_id.hash(state);
-        self.type_args_id.hash(state);
-    }
-}
-
-impl RecordType {
     /// Get interned type argument IDs.
     pub fn type_args_id(&self) -> &TypeIdVec {
         &self.type_args_id
@@ -239,7 +190,7 @@ pub struct InterfaceMethodType {
 /// Error type definition (e.g., DivByZero, OutOfRange { value: i32 })
 ///
 /// Fields are not stored here - they are looked up from EntityRegistry using
-/// the type_def_id, just like class and record fields.
+/// the type_def_id, just like class fields.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ErrorTypeInfo {
     pub type_def_id: TypeDefId,
@@ -257,13 +208,6 @@ mod tests {
 
     fn make_class(id: u32) -> NominalType {
         NominalType::Class(ClassType {
-            type_def_id: TypeDefId::new(id),
-            type_args_id: TypeIdVec::new(),
-        })
-    }
-
-    fn make_record(id: u32) -> NominalType {
-        NominalType::Record(RecordType {
             type_def_id: TypeDefId::new(id),
             type_args_id: TypeIdVec::new(),
         })
@@ -287,12 +231,10 @@ mod tests {
     #[test]
     fn test_type_def_id() {
         let class = make_class(1);
-        let record = make_record(2);
         let interface = make_interface(3);
         let error = make_error(4);
 
         assert_eq!(class.type_def_id(), TypeDefId::new(1));
-        assert_eq!(record.type_def_id(), TypeDefId::new(2));
         assert_eq!(interface.type_def_id(), TypeDefId::new(3));
         assert_eq!(error.type_def_id(), TypeDefId::new(4));
     }
@@ -300,17 +242,11 @@ mod tests {
     #[test]
     fn test_is_methods() {
         let class = make_class(1);
-        let record = make_record(2);
         let interface = make_interface(3);
         let error = make_error(4);
 
         assert!(class.is_class());
-        assert!(!class.is_record());
         assert!(class.is_struct_like());
-
-        assert!(record.is_record());
-        assert!(!record.is_class());
-        assert!(record.is_struct_like());
 
         assert!(interface.is_interface());
         assert!(!interface.is_struct_like());
@@ -322,19 +258,13 @@ mod tests {
     #[test]
     fn test_as_methods() {
         let class = make_class(1);
-        let record = make_record(2);
 
         assert!(class.as_class().is_some());
-        assert!(class.as_record().is_none());
-
-        assert!(record.as_record().is_some());
-        assert!(record.as_class().is_none());
     }
 
     #[test]
     fn test_name() {
         assert_eq!(make_class(1).name(), "class");
-        assert_eq!(make_record(1).name(), "record");
         assert_eq!(make_interface(1).name(), "interface");
         assert_eq!(make_error(1).name(), "error");
     }

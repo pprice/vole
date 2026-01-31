@@ -90,9 +90,6 @@ impl ImplTypeId {
             ArenaType::Class { type_def_id, .. } => {
                 Some(ImplTypeId(entity_registry.get_type(*type_def_id).name_id))
             }
-            ArenaType::Record { type_def_id, .. } => {
-                Some(ImplTypeId(entity_registry.get_type(*type_def_id).name_id))
-            }
             _ => None,
         }
     }

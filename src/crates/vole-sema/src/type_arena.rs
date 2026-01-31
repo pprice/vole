@@ -19,7 +19,7 @@ use vole_identity::{ModuleId, NameId, TypeDefId, TypeParamId};
 /// `TypeId` identifies a concrete instantiated type (like `Option<i32>`).
 ///
 /// - Primitives, arrays, unions: have TypeId, no TypeDefId
-/// - Classes, records, interfaces: have both (TypeId contains TypeDefId + type_args)
+/// - Classes, structs, interfaces: have both (TypeId contains TypeDefId + type_args)
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub struct TypeId(u32);
 
@@ -179,11 +179,10 @@ impl TypeId {
 /// SmallVec for type children - inline up to 4 (covers most unions, tuples, params)
 pub type TypeIdVec = SmallVec<[TypeId; 4]>;
 
-/// Nominal type kind for Class/Record/Interface/Error discrimination
+/// Nominal type kind for Class/Struct/Interface/Error discrimination
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NominalKind {
     Class,
-    Record,
     Struct,
     Interface,
     Error,
@@ -195,19 +194,15 @@ impl NominalKind {
         use crate::entity_defs::TypeDefKind;
         match self {
             NominalKind::Class => TypeDefKind::Class,
-            NominalKind::Record => TypeDefKind::Record,
             NominalKind::Struct => TypeDefKind::Struct,
             NominalKind::Interface => TypeDefKind::Interface,
             NominalKind::Error => TypeDefKind::ErrorType,
         }
     }
 
-    /// Check if this is a class, record, or struct (types with fields).
-    pub fn is_class_or_record(self) -> bool {
-        matches!(
-            self,
-            NominalKind::Class | NominalKind::Record | NominalKind::Struct
-        )
+    /// Check if this is a class or struct (types with fields).
+    pub fn is_class_or_struct(self) -> bool {
+        matches!(self, NominalKind::Class | NominalKind::Struct)
     }
 }
 
@@ -294,12 +289,8 @@ pub enum SemaType {
         is_closure: bool,
     },
 
-    // Nominal types (class, record, interface, error)
+    // Nominal types (class, struct, interface, error)
     Class {
-        type_def_id: TypeDefId,
-        type_args: TypeIdVec,
-    },
-    Record {
         type_def_id: TypeDefId,
         type_args: TypeIdVec,
     },
@@ -615,7 +606,6 @@ impl TypeArena {
             SemaType::Structural(_) => (65, type_id.0 as u64),
             // Nominal types sorted by TypeDefId (descending) within category
             SemaType::Class { type_def_id, .. } => (50, type_def_id.index() as u64),
-            SemaType::Record { type_def_id, .. } => (50, type_def_id.index() as u64),
             SemaType::Struct { type_def_id, .. } => (50, type_def_id.index() as u64),
             SemaType::Interface { type_def_id, .. } => (50, type_def_id.index() as u64),
             SemaType::Error { type_def_id } => (50, type_def_id.index() as u64),
@@ -766,18 +756,6 @@ impl TypeArena {
             return self.invalid();
         }
         self.intern(SemaType::Class {
-            type_def_id,
-            type_args,
-        })
-    }
-
-    /// Create a record type
-    pub fn record(&mut self, type_def_id: TypeDefId, type_args: impl Into<TypeIdVec>) -> TypeId {
-        let type_args = type_args.into();
-        if type_args.iter().any(|&a| self.is_invalid(a)) {
-            return self.invalid();
-        }
-        self.intern(SemaType::Record {
             type_def_id,
             type_args,
         })
@@ -982,11 +960,10 @@ impl TypeArena {
         }
     }
 
-    /// Get TypeDefId for nominal types (class, record, interface, error)
+    /// Get TypeDefId for nominal types (class, struct, interface, error)
     pub fn type_def_id(&self, id: TypeId) -> Option<TypeDefId> {
         match self.get(id) {
             SemaType::Class { type_def_id, .. } => Some(*type_def_id),
-            SemaType::Record { type_def_id, .. } => Some(*type_def_id),
             SemaType::Interface { type_def_id, .. } => Some(*type_def_id),
             SemaType::Error { type_def_id } => Some(*type_def_id),
             _ => None,
@@ -997,7 +974,6 @@ impl TypeArena {
     pub fn type_args(&self, id: TypeId) -> &[TypeId] {
         match self.get(id) {
             SemaType::Class { type_args, .. } => type_args,
-            SemaType::Record { type_args, .. } => type_args,
             SemaType::Interface { type_args, .. } => type_args,
             _ => &[],
         }
@@ -1036,11 +1012,6 @@ impl TypeArena {
     /// Check if this is a class type
     pub fn is_class(&self, id: TypeId) -> bool {
         matches!(self.get(id), SemaType::Class { .. })
-    }
-
-    /// Check if this is a record type
-    pub fn is_record(&self, id: TypeId) -> bool {
-        matches!(self.get(id), SemaType::Record { .. })
     }
 
     /// Check if this is a struct type (stack-allocated value type)
@@ -1130,17 +1101,6 @@ impl TypeArena {
         }
     }
 
-    /// Unwrap a record type, returning (type_def_id, type_args)
-    pub fn unwrap_record(&self, id: TypeId) -> Option<(TypeDefId, &TypeIdVec)> {
-        match self.get(id) {
-            SemaType::Record {
-                type_def_id,
-                type_args,
-            } => Some((*type_def_id, type_args)),
-            _ => None,
-        }
-    }
-
     /// Unwrap a struct type, returning (type_def_id, type_args)
     pub fn unwrap_struct(&self, id: TypeId) -> Option<(TypeDefId, &TypeIdVec)> {
         match self.get(id) {
@@ -1163,20 +1123,16 @@ impl TypeArena {
         }
     }
 
-    /// Unwrap any nominal type (class, record, or interface), returning (type_def_id, type_args, kind).
+    /// Unwrap any nominal type (class, struct, or interface), returning (type_def_id, type_args, kind).
     ///
-    /// This is a convenience helper that combines unwrap_class, unwrap_record, and unwrap_interface
-    /// into a single call. Use this when you need to handle all three nominal types uniformly.
+    /// This is a convenience helper that combines unwrap_class, unwrap_struct, and unwrap_interface
+    /// into a single call. Use this when you need to handle all nominal types uniformly.
     pub fn unwrap_nominal(&self, id: TypeId) -> Option<(TypeDefId, &TypeIdVec, NominalKind)> {
         match self.get(id) {
             SemaType::Class {
                 type_def_id,
                 type_args,
             } => Some((*type_def_id, type_args, NominalKind::Class)),
-            SemaType::Record {
-                type_def_id,
-                type_args,
-            } => Some((*type_def_id, type_args, NominalKind::Record)),
             SemaType::Struct {
                 type_def_id,
                 type_args,
@@ -1314,18 +1270,6 @@ impl TypeArena {
                     format!("class#{}<{}>", type_def_id.index(), args.join(", "))
                 }
             }
-            SemaType::Record {
-                type_def_id,
-                type_args,
-            } => {
-                if type_args.is_empty() {
-                    format!("record#{}", type_def_id.index())
-                } else {
-                    let args: Vec<String> =
-                        type_args.iter().map(|&a| self.display_basic(a)).collect();
-                    format!("record#{}<{}>", type_def_id.index(), args.join(", "))
-                }
-            }
             SemaType::Interface {
                 type_def_id,
                 type_args,
@@ -1454,17 +1398,6 @@ impl TypeArena {
                     .map(|&a| self.substitute(a, subs))
                     .collect();
                 self.class(type_def_id, new_args)
-            }
-
-            SemaType::Record {
-                type_def_id,
-                type_args,
-            } => {
-                let new_args: TypeIdVec = type_args
-                    .iter()
-                    .map(|&a| self.substitute(a, subs))
-                    .collect();
-                self.record(type_def_id, new_args)
             }
 
             SemaType::Interface {
@@ -1626,25 +1559,6 @@ impl TypeArena {
                     return Some(ty);
                 }
                 let result_ty = SemaType::Class {
-                    type_def_id: *type_def_id,
-                    type_args: new_args,
-                };
-                self.intern_map.get(&result_ty).copied()
-            }
-
-            SemaType::Record {
-                type_def_id,
-                type_args,
-            } => {
-                let new_args: Option<TypeIdVec> = type_args
-                    .iter()
-                    .map(|&a| self.lookup_substitute(a, subs))
-                    .collect();
-                let new_args = new_args?;
-                if new_args == *type_args {
-                    return Some(ty);
-                }
-                let result_ty = SemaType::Record {
                     type_def_id: *type_def_id,
                     type_args: new_args,
                 };
@@ -1833,17 +1747,6 @@ impl TypeArena {
                     .map(|&a| self.substitute_self(a, self_type))
                     .collect();
                 self.class(type_def_id, new_args)
-            }
-
-            SemaType::Record {
-                type_def_id,
-                type_args,
-            } => {
-                let new_args: TypeIdVec = type_args
-                    .iter()
-                    .map(|&a| self.substitute_self(a, self_type))
-                    .collect();
-                self.record(type_def_id, new_args)
             }
 
             SemaType::Interface {

@@ -41,43 +41,22 @@ impl Analyzer {
                 let field_name = interner.resolve(*field);
 
                 let struct_info = {
-                    use crate::type_arena::NominalKind;
                     let arena = self.type_arena();
                     arena
                         .unwrap_nominal(obj_ty_id)
-                        .filter(|(_, _, kind)| kind.is_class_or_record())
-                        .map(|(id, args, kind)| {
-                            let is_class = kind == NominalKind::Class;
-                            // For records, use empty type args (immutable fields)
-                            let args = if is_class {
-                                args.clone()
-                            } else {
-                                crate::type_arena::TypeIdVec::new()
-                            };
-                            (id, args, is_class)
-                        })
+                        .filter(|(_, _, kind)| kind.is_class_or_struct())
+                        .map(|(id, args, _kind)| (id, args.clone()))
                 };
 
-                if let Some((type_def_id, type_args_id, is_class)) = struct_info {
+                if let Some((type_def_id, type_args_id)) = struct_info {
                     let name_id = self.entity_registry().name_id(type_def_id);
                     let generic_info = self.entity_registry().type_generic_info(type_def_id);
                     let type_name = self
                         .name_table()
                         .last_segment_str(name_id)
-                        .unwrap_or_else(|| if is_class { "class" } else { "record" }.to_string());
+                        .unwrap_or_else(|| "class".to_string());
 
-                    if !is_class {
-                        // Records are immutable - reject field assignment
-                        self.add_error(
-                            SemanticError::RecordFieldMutation {
-                                record: type_name,
-                                field: field_name.to_string(),
-                                span: (*field_span).into(),
-                            },
-                            *field_span,
-                        );
-                        (ArenaTypeId::INVALID, false, false)
-                    } else if let Some(ref generic_info) = generic_info {
+                    if let Some(ref generic_info) = generic_info {
                         if let Some(idx) = generic_info.field_names.iter().position(|name_id| {
                             self.name_table().last_segment_str(*name_id).as_deref()
                                 == Some(field_name)
@@ -311,43 +290,22 @@ impl Analyzer {
                 let field_name = interner.resolve(*field);
 
                 let struct_info = {
-                    use crate::type_arena::NominalKind;
                     let arena = self.type_arena();
                     arena
                         .unwrap_nominal(obj_ty_id)
-                        .filter(|(_, _, kind)| kind.is_class_or_record())
-                        .map(|(id, args, kind)| {
-                            let is_class = kind == NominalKind::Class;
-                            // For records, use empty type args (immutable fields)
-                            let args = if is_class {
-                                args.clone()
-                            } else {
-                                crate::type_arena::TypeIdVec::new()
-                            };
-                            (id, args, is_class)
-                        })
+                        .filter(|(_, _, kind)| kind.is_class_or_struct())
+                        .map(|(id, args, _kind)| (id, args.clone()))
                 };
 
-                if let Some((type_def_id, type_args_id, is_class)) = struct_info {
+                if let Some((type_def_id, type_args_id)) = struct_info {
                     let name_id = self.entity_registry().name_id(type_def_id);
                     let generic_info = self.entity_registry().type_generic_info(type_def_id);
                     let type_name = self
                         .name_table()
                         .last_segment_str(name_id)
-                        .unwrap_or_else(|| if is_class { "class" } else { "record" }.to_string());
+                        .unwrap_or_else(|| "class".to_string());
 
-                    if !is_class {
-                        // Records are immutable - reject field assignment
-                        self.add_error(
-                            SemanticError::RecordFieldMutation {
-                                record: type_name,
-                                field: field_name.to_string(),
-                                span: (*field_span).into(),
-                            },
-                            *field_span,
-                        );
-                        ArenaTypeId::INVALID
-                    } else if let Some(ref generic_info) = generic_info {
+                    if let Some(ref generic_info) = generic_info {
                         if let Some(idx) = generic_info.field_names.iter().position(|name_id| {
                             self.name_table().last_segment_str(*name_id).as_deref()
                                 == Some(field_name)

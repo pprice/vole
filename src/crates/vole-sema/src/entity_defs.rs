@@ -15,7 +15,6 @@ use vole_identity::{FieldId, FunctionId, GlobalId, MethodId, ModuleId, NameId, T
 pub enum TypeDefKind {
     Interface,
     Class,
-    Record,
     Struct,
     ErrorType,
     Primitive,
@@ -23,7 +22,7 @@ pub enum TypeDefKind {
     Alias,
 }
 
-/// Generic type information for records and classes.
+/// Generic type information for classes and structs.
 /// Stores the type parameters and field types needed for type inference
 /// when instantiating generic types.
 #[derive(Debug, Clone)]
@@ -87,7 +86,7 @@ pub struct TypeDef {
     pub error_info: Option<crate::ErrorTypeInfo>,
     /// Interface implementations for this type
     pub implements: Vec<Implementation>,
-    /// For Class/Record types - the base TypeId (with empty type args).
+    /// For Class/Struct types - the base TypeId (with empty type args).
     /// Pre-computed by sema so codegen can look up without mutable arena access.
     pub base_type_id: Option<TypeId>,
 }

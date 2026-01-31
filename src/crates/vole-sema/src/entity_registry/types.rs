@@ -151,16 +151,16 @@ impl EntityRegistry {
     ) -> Option<TypeDefId> {
         tracing::trace!(short_name, "record_by_short_name searching");
         for type_def in &self.type_defs {
-            if type_def.kind == TypeDefKind::Record {
+            if type_def.kind == TypeDefKind::Class {
                 let last_seg = name_table.last_segment_str(type_def.name_id);
-                tracing::trace!(?type_def.name_id, ?last_seg, "checking record");
+                tracing::trace!(?type_def.name_id, ?last_seg, "checking class");
                 if last_seg.is_some_and(|last_segment| last_segment == short_name) {
-                    tracing::trace!(?type_def.id, "found record by short name");
+                    tracing::trace!(?type_def.id, "found class by short name");
                     return Some(type_def.id);
                 }
             }
         }
-        tracing::trace!("record not found by short name");
+        tracing::trace!("class not found by short name");
         None
     }
 

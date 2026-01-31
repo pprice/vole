@@ -23,7 +23,6 @@ pub(crate) fn get_type_def_id_from_type_id(
     // For Class, Record, and Interface, extract TypeDefId directly
     match arena.get(type_id) {
         SemaType::Class { type_def_id, .. } => Some(*type_def_id),
-        SemaType::Record { type_def_id, .. } => Some(*type_def_id),
         SemaType::Interface { type_def_id, .. } => Some(*type_def_id),
         SemaType::Primitive(prim) => {
             let name_table = analyzed.name_table();

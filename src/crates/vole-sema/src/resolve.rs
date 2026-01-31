@@ -274,7 +274,6 @@ fn resolve_named_type_to_id(sym: Symbol, ctx: &mut TypeResolutionContext<'_>) ->
                 // Return aliased type directly
                 aliased_type.unwrap_or_else(|| ctx.type_arena_mut().invalid())
             }
-            TypeDefKind::Record => ctx.type_arena_mut().record(type_def_id, TypeIdVec::new()),
             TypeDefKind::Struct => ctx
                 .type_arena_mut()
                 .struct_type(type_def_id, TypeIdVec::new()),
@@ -335,13 +334,6 @@ fn resolve_generic_type_to_id(
                             precompute_field_substitutions(ctx, underlying_def_id, &type_args_id);
                             result
                         }
-                        TypeDefKind::Record => {
-                            let result = ctx
-                                .type_arena_mut()
-                                .record(underlying_def_id, type_args_id.clone());
-                            precompute_field_substitutions(ctx, underlying_def_id, &type_args_id);
-                            result
-                        }
                         TypeDefKind::Interface => {
                             let result = ctx
                                 .type_arena_mut()
@@ -366,14 +358,6 @@ fn resolve_generic_type_to_id(
                 let result = ctx
                     .type_arena_mut()
                     .class(type_def_id, type_args_id.clone());
-                // Pre-compute substituted field types so codegen can use lookup_substitute
-                precompute_field_substitutions(ctx, type_def_id, &type_args_id);
-                result
-            }
-            TypeDefKind::Record => {
-                let result = ctx
-                    .type_arena_mut()
-                    .record(type_def_id, type_args_id.clone());
                 // Pre-compute substituted field types so codegen can use lookup_substitute
                 precompute_field_substitutions(ctx, type_def_id, &type_args_id);
                 result

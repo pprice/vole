@@ -84,27 +84,6 @@ pub fn types_compatible_core_id(from: TypeId, to: TypeId, arena: &TypeArena) -> 
         return true;
     }
 
-    // Record compatibility: compare by type_def_id and type_args
-    if let (
-        SemaType::Record {
-            type_def_id: from_def,
-            type_args: from_args,
-        },
-        SemaType::Record {
-            type_def_id: to_def,
-            type_args: to_args,
-        },
-    ) = (from_ty, to_ty)
-        && from_def == to_def
-        && from_args.len() == to_args.len()
-        && from_args
-            .iter()
-            .zip(to_args.iter())
-            .all(|(&f, &t)| types_compatible_core_id(f, t, arena))
-    {
-        return true;
-    }
-
     // Struct compatibility: nominal (same type_def_id)
     if let (
         SemaType::Struct {

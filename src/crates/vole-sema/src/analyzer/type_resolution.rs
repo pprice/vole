@@ -187,7 +187,6 @@ impl Analyzer {
             let arena = self.type_arena();
             if let Some((type_def_id, _, kind)) = arena.unwrap_nominal(base_type_id) {
                 return match kind {
-                    NominalKind::Record => self.type_arena_mut().record(type_def_id, type_args),
                     NominalKind::Struct => {
                         self.type_arena_mut().struct_type(type_def_id, type_args)
                     }

@@ -966,10 +966,7 @@ fn resolve_vtable_target<C: VtableCtx>(
         let method_name_id = method_name_id?;
         // Get type_def_id from concrete_type_id using arena unwraps
         let arena = ctx.arena();
-        let type_def_id = arena
-            .unwrap_class(concrete_type_id)
-            .map(|(id, _)| id)
-            .or_else(|| arena.unwrap_record(concrete_type_id).map(|(id, _)| id))?;
+        let type_def_id = arena.unwrap_class(concrete_type_id).map(|(id, _)| id)?;
 
         let type_name_id = ctx.query().get_type(type_def_id).name_id;
         let meta = type_metadata_by_name_id(

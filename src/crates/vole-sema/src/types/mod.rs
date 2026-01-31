@@ -4,7 +4,7 @@
 //
 // This module is organized into submodules by type category:
 // - `primitive` - PrimitiveType enum (i8-i128, u8-u64, f32, f64, bool, string)
-// - `nominal` - NominalType enum (Class, Record, Interface, Error) with TypeDefIds
+// - `nominal` - NominalType enum (Class, Interface, Error) with TypeDefIds
 // - `special` - Supporting types for special Type variants (Placeholder, Invalid, etc.)
 
 pub mod nominal;
@@ -12,7 +12,6 @@ pub mod primitive;
 pub mod special;
 pub use nominal::{
     ClassType, ErrorTypeInfo, ExtendsVec, InterfaceMethodType, InterfaceType, NominalType,
-    RecordType,
 };
 pub use primitive::PrimitiveType;
 pub use special::{AnalysisError, ConstantValue, PlaceholderKind};
@@ -32,7 +31,7 @@ pub struct FunctionType {
     pub return_type_id: TypeId,
 }
 
-/// Field information for a class/record (TypeId version)
+/// Field information for a class (TypeId version)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StructFieldId {
     pub name_id: NameId,

@@ -287,29 +287,9 @@ impl EntityRegistry {
         })
     }
 
-    /// Build a RecordType from a TypeDefId (for types registered as Record)
-    pub fn build_record_type(&self, type_id: TypeDefId) -> Option<crate::RecordType> {
-        use crate::RecordType;
-
-        let type_def = self.get_type(type_id);
-        if type_def.kind != TypeDefKind::Record {
-            return None;
-        }
-
-        Some(RecordType {
-            type_def_id: type_id,
-            type_args_id: TypeIdVec::new(),
-        })
-    }
-
     /// Get the name_id for a ClassType
     pub fn class_name_id(&self, class_type: &crate::ClassType) -> NameId {
         self.get_type(class_type.type_def_id).name_id
-    }
-
-    /// Get the name_id for a RecordType
-    pub fn record_name_id(&self, record_type: &crate::RecordType) -> NameId {
-        self.get_type(record_type.type_def_id).name_id
     }
 
     // ===== Alias Management =====
@@ -577,11 +557,11 @@ mod tests {
         let name_id = names.intern_raw(names.main_module(), &["TestType"]);
 
         let mut registry = EntityRegistry::new();
-        let type_id = registry.register_type(name_id, TypeDefKind::Record, names.main_module());
+        let type_id = registry.register_type(name_id, TypeDefKind::Class, names.main_module());
 
         assert_eq!(registry.type_by_name(name_id), Some(type_id));
         assert_eq!(registry.get_type(type_id).name_id, name_id);
-        assert_eq!(registry.get_type(type_id).kind, TypeDefKind::Record);
+        assert_eq!(registry.get_type(type_id).kind, TypeDefKind::Class);
     }
 
     #[test]
@@ -625,7 +605,7 @@ mod tests {
         let full_field_name = names.intern_raw(main_mod, &["Point", "x"]);
 
         let mut registry = EntityRegistry::new();
-        let type_id = registry.register_type(type_name, TypeDefKind::Record, main_mod);
+        let type_id = registry.register_type(type_name, TypeDefKind::Class, main_mod);
 
         let field_type_id = arena.i32();
 

@@ -120,7 +120,7 @@ impl Analyzer {
             let arena = self.type_arena();
             arena
                 .unwrap_nominal(object_type_id)
-                .filter(|(_, _, kind)| kind.is_class_or_record())
+                .filter(|(_, _, kind)| kind.is_class_or_struct())
                 .map(|(id, args, kind)| (id, args.clone(), kind))
         };
         let Some((type_def_id, type_args_id, nominal_kind)) = struct_info else {
@@ -218,7 +218,7 @@ impl Analyzer {
             let arena = self.type_arena();
             arena
                 .unwrap_nominal(inner_type_id)
-                .filter(|(_, _, kind)| kind.is_class_or_record())
+                .filter(|(_, _, kind)| kind.is_class_or_struct())
                 .map(|(id, args, _)| (id, args.clone()))
         };
         let Some((type_def_id, type_args_id)) = struct_info else {
@@ -834,7 +834,7 @@ impl Analyzer {
                     let arena = self.type_arena();
                     arena
                         .unwrap_nominal(object_type_id)
-                        .filter(|(_, _, kind)| kind.is_class_or_record())
+                        .filter(|(_, _, kind)| kind.is_class_or_struct())
                         .map(|(id, args, _)| (id, args.clone()))
                 };
                 if let Some((type_def_id, type_args)) = type_args_and_def
@@ -952,7 +952,7 @@ impl Analyzer {
                 let arena = self.type_arena();
                 let type_def_id = arena
                     .unwrap_nominal(export_type_id)
-                    .filter(|(_, _, kind)| kind.is_class_or_record())
+                    .filter(|(_, _, kind)| kind.is_class_or_struct())
                     .map(|(id, _, _)| id)?;
 
                 tracing::trace!(
@@ -1198,7 +1198,7 @@ impl Analyzer {
             let arena = self.type_arena();
             arena
                 .unwrap_nominal(object_type_id)
-                .filter(|(_, args, kind)| kind.is_class_or_record() && !args.is_empty())
+                .filter(|(_, args, kind)| kind.is_class_or_struct() && !args.is_empty())
                 .map(|(id, args, _)| (id, args.clone()))
         };
         let Some((class_type_def_id, type_args_id)) = generic_info else {

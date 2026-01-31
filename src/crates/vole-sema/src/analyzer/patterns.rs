@@ -70,28 +70,6 @@ impl Analyzer {
 
                             Some(pattern_type_id)
                         }
-                        TypeDefKind::Record => {
-                            // Build record type as TypeId directly
-                            let pattern_type_id = {
-                                let mut arena = self.type_arena_mut();
-                                arena.record(type_def_id, vec![])
-                            };
-                            self.check_type_pattern_compatibility_id(
-                                pattern_type_id,
-                                scrutinee_type_id,
-                                span,
-                                interner,
-                            );
-
-                            // Compute IsCheckResult for codegen
-                            let is_check_result = self.compute_type_pattern_check_result(
-                                pattern_type_id,
-                                scrutinee_type_id,
-                            );
-                            self.record_is_check_result(pattern.id, is_check_result);
-
-                            Some(pattern_type_id)
-                        }
                         _ => {
                             // Regular identifier binding pattern for other type kinds
                             self.scope.define(
@@ -273,19 +251,6 @@ impl Analyzer {
                             };
 
                         let (pattern_type_id, type_fields) = match kind {
-                            TypeDefKind::Record => {
-                                if self.entity_registry().build_record_type(type_id).is_some() {
-                                    let fields_ref = generic_info
-                                        .as_ref()
-                                        .map(get_fields_from_info)
-                                        .unwrap_or_default();
-                                    let record_type_id =
-                                        self.type_arena_mut().record(type_id, Vec::new());
-                                    (Some(record_type_id), fields_ref)
-                                } else {
-                                    (None, vec![])
-                                }
-                            }
                             TypeDefKind::Class => {
                                 if self.entity_registry().build_class_type(type_id).is_some() {
                                     let fields_ref = generic_info
@@ -480,12 +445,7 @@ impl Analyzer {
             let arena = self.type_arena();
             arena
                 .unwrap_nominal(scrutinee_type_id)
-                .filter(|(_, _, kind)| {
-                    matches!(
-                        kind,
-                        NominalKind::Class | NominalKind::Record | NominalKind::Struct
-                    )
-                })
+                .filter(|(_, _, kind)| matches!(kind, NominalKind::Class | NominalKind::Struct))
                 .map(|(id, _, _)| id)
         };
 
@@ -743,9 +703,6 @@ impl Analyzer {
                         TypeDefKind::Class => {
                             self.type_arena_mut().class(type_def_id, vec![]).into()
                         }
-                        TypeDefKind::Record => {
-                            self.type_arena_mut().record(type_def_id, vec![]).into()
-                        }
                         _ => None,
                     }
                 })
@@ -764,9 +721,6 @@ impl Analyzer {
                     match kind {
                         TypeDefKind::Class => {
                             self.type_arena_mut().class(type_def_id, vec![]).into()
-                        }
-                        TypeDefKind::Record => {
-                            self.type_arena_mut().record(type_def_id, vec![]).into()
                         }
                         _ => None,
                     }

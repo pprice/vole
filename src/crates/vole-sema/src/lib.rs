@@ -35,7 +35,7 @@ pub use infer::{InferCtx, InferType, InferVarId, UnifyError};
 pub use query::ProgramQuery;
 pub use resolution::{MethodResolutions, ResolvedMethod};
 pub use resolve::ResolverEntityExt;
-pub use types::{ClassType, ErrorTypeInfo, FunctionType, PrimitiveType, RecordType};
+pub use types::{ClassType, ErrorTypeInfo, FunctionType, PrimitiveType};
 pub use well_known::{WellKnownMethods, WellKnownTypes};
 
 // TypeArena for interned type representation

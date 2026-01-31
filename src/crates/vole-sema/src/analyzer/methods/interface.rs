@@ -101,7 +101,7 @@ impl Analyzer {
             let Some((id, args, kind)) = arena.unwrap_nominal(ty_id) else {
                 return false;
             };
-            if !kind.is_class_or_record() {
+            if !kind.is_class_or_struct() {
                 return false;
             }
             (id, args.clone())
@@ -155,7 +155,7 @@ impl Analyzer {
             let arena = self.type_arena();
             arena
                 .unwrap_nominal(ty_id)
-                .filter(|(_, _, kind)| kind.is_class_or_record())
+                .filter(|(_, _, kind)| kind.is_class_or_struct())
                 .map(|(id, _, _)| id)
         };
 
@@ -288,10 +288,6 @@ impl Analyzer {
                 TypeDefKind::Class => Some(
                     self.type_arena_mut()
                         .class(type_id, crate::type_arena::TypeIdVec::new()),
-                ),
-                TypeDefKind::Record => Some(
-                    self.type_arena_mut()
-                        .record(type_id, crate::type_arena::TypeIdVec::new()),
                 ),
                 _ => None,
             }

@@ -575,8 +575,8 @@ impl Analyzer {
                 return_type_id,
                 interner,
             ),
-            TypeDefKind::Class | TypeDefKind::Record => {
-                // Direct method on class/record
+            TypeDefKind::Class => {
+                // Direct method on class
                 Some(ResolvedMethod::Direct {
                     type_def_id: Some(type_def_id),
                     method_name_id,
@@ -615,9 +615,9 @@ impl Analyzer {
                 .map(|(_, _, kind)| kind)
         };
         let is_interface_type = nominal_kind == Some(NominalKind::Interface);
-        let is_class_or_record = matches!(
+        let is_class_or_struct = matches!(
             nominal_kind,
-            Some(NominalKind::Class) | Some(NominalKind::Record) | Some(NominalKind::Struct)
+            Some(NominalKind::Class) | Some(NominalKind::Struct)
         );
 
         // For external default methods on CONCRETE types (not interface types)
@@ -640,7 +640,7 @@ impl Analyzer {
 
         // For non-external default methods on concrete types (Class/Record)
         if method_has_default
-            && is_class_or_record
+            && is_class_or_struct
             && let Some(resolved) = self.resolve_non_external_default_method(
                 type_def_id,
                 defining_type_name_id,

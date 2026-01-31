@@ -559,7 +559,7 @@ fn satisfies_interface_with_field() {
         .unwrap();
     let ty_id = analyzer
         .type_arena_mut()
-        .record(type_def_id, smallvec::smallvec![]);
+        .class(type_def_id, smallvec::smallvec![]);
 
     // Check if Person satisfies Named
     assert!(analyzer.satisfies_interface_id(ty_id, named_sym, &interner));
@@ -592,7 +592,7 @@ fn satisfies_interface_missing_field() {
         .unwrap();
     let ty_id = analyzer
         .type_arena_mut()
-        .record(type_def_id, smallvec::smallvec![]);
+        .class(type_def_id, smallvec::smallvec![]);
 
     // Point does NOT satisfy Named (missing name field)
     assert!(!analyzer.satisfies_interface_id(ty_id, named_sym, &interner));
@@ -627,7 +627,7 @@ fn satisfies_interface_with_method() {
         .unwrap();
     let ty_id = analyzer
         .type_arena_mut()
-        .record(type_def_id, smallvec::smallvec![]);
+        .class(type_def_id, smallvec::smallvec![]);
 
     assert!(analyzer.satisfies_interface_id(ty_id, hashable_sym, &interner));
 }

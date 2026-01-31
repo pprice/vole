@@ -202,15 +202,6 @@ pub enum SemanticError {
         span: SourceSpan,
     },
 
-    #[error("cannot assign to field '{field}' of immutable record '{record}'")]
-    #[diagnostic(code(E2024))]
-    RecordFieldMutation {
-        record: String,
-        field: String,
-        #[label("record fields are immutable")]
-        span: SourceSpan,
-    },
-
     #[error("unknown interface '{name}'")]
     #[diagnostic(code(E2050))]
     UnknownInterface {
