@@ -1,6 +1,6 @@
 // src/frontend/parse_decl.rs
 //
-// Declaration parsing: functions, tests, classes, records, interfaces, implement blocks
+// Declaration parsing: functions, tests, classes, interfaces, implement blocks
 
 use super::ast::*;
 use super::parser::{ParseError, Parser};
@@ -14,7 +14,6 @@ impl<'src> Parser<'src> {
             TokenType::KwTests => self.tests_decl(),
             TokenType::KwLet => self.let_decl(),
             TokenType::KwClass => self.class_decl(),
-            TokenType::KwRecord => self.class_decl(),
             TokenType::KwStruct => self.struct_decl(),
             TokenType::KwInterface => self.interface_decl(false),
             TokenType::KwStatic => self.static_interface_decl(),

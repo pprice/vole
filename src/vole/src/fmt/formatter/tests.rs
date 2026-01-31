@@ -341,22 +341,6 @@ fn test_class_with_method() {
     assert_eq!(fmt(source), expected);
 }
 
-// === Record declarations (record keyword now produces class) ===
-
-#[test]
-fn test_record_simple() {
-    let source = "record Point { x: i32, y: i32, }";
-    let expected = "class Point {\n    x: i32,\n    y: i32,\n}\n";
-    assert_eq!(fmt(source), expected);
-}
-
-#[test]
-fn test_record_with_implements() {
-    let source = "record User implements Hashable { id: i64, }";
-    let expected = "class User implements Hashable {\n    id: i64,\n}\n";
-    assert_eq!(fmt(source), expected);
-}
-
 // === Interface declarations ===
 
 #[test]
@@ -515,11 +499,6 @@ fn test_idempotent_function() {
 #[test]
 fn test_idempotent_class() {
     assert_idempotent("class Point {\n    x: i64,\n    y: i64,\n}\n");
-}
-
-#[test]
-fn test_idempotent_record() {
-    assert_idempotent("record User {\n    id: i64,\n    name: string,\n}\n");
 }
 
 #[test]

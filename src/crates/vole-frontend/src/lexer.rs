@@ -444,7 +444,6 @@ impl<'src> Lexer<'src> {
             "nil" => Some(TokenType::KwNil),
             "is" => Some(TokenType::KwIs),
             "class" => Some(TokenType::KwClass),
-            "record" => Some(TokenType::KwRecord),
             "struct" => Some(TokenType::KwStruct),
             "interface" => Some(TokenType::KwInterface),
             "implements" => Some(TokenType::KwImplements),
@@ -1099,10 +1098,20 @@ mod tests {
     }
 
     #[test]
-    fn lex_class_record_keywords() {
-        let mut lexer = Lexer::new("class record");
+    fn lex_class_keyword() {
+        let mut lexer = Lexer::new("class");
         assert_eq!(lexer.next_token().ty, TokenType::KwClass);
-        assert_eq!(lexer.next_token().ty, TokenType::KwRecord);
+        assert_eq!(lexer.next_token().ty, TokenType::Eof);
+    }
+
+    #[test]
+    fn lex_record_is_identifier() {
+        // "record" is no longer a keyword; it should lex as an identifier
+        let mut lexer = Lexer::new("record");
+        let token = lexer.next_token();
+        assert_eq!(token.ty, TokenType::Identifier);
+        assert_eq!(token.lexeme, "record");
+        assert_eq!(lexer.next_token().ty, TokenType::Eof);
     }
 
     #[test]

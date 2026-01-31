@@ -852,26 +852,6 @@ class Point {
 }
 
 #[test]
-fn parse_record_declaration() {
-    let source = r#"
-record Point {
-    x: i32,
-    y: i32,
-}
-"#;
-    let mut parser = Parser::new(source);
-    let program = parser.parse_program().unwrap();
-    assert_eq!(program.declarations.len(), 1);
-    match &program.declarations[0] {
-        Decl::Class(class) => {
-            assert_eq!(class.fields.len(), 2);
-            assert_eq!(class.methods.len(), 0);
-        }
-        _ => panic!("expected class declaration (record parses as class)"),
-    }
-}
-
-#[test]
 fn parse_struct_literal() {
     let mut parser = Parser::new("Point { x: 10, y: 20 }");
     let expr = parser.parse_expression().unwrap();
@@ -1004,19 +984,6 @@ fn test_parse_generic_function_multiple_params() {
         assert!(f.type_params[1].constraint.is_none());
     } else {
         panic!("expected function");
-    }
-}
-
-#[test]
-fn test_parse_generic_record() {
-    let source = "record Box<T> { value: T }";
-    let mut parser = Parser::new(source);
-    let program = parser.parse_program().expect("should parse");
-
-    if let Decl::Class(c) = &program.declarations[0] {
-        assert_eq!(c.type_params.len(), 1);
-    } else {
-        panic!("expected class (record parses as class)");
     }
 }
 
