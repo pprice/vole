@@ -187,3 +187,587 @@ tests {
         assert(Empty == 42)
     }
 }
+
+// --- User-defined sentinel tests ---
+
+sentinel Timeout
+
+sentinel NotFound
+
+sentinel Closed
+
+sentinel Pending
+
+// Sentinel as sole function return type
+func get_timeout() -> Timeout {
+    return Timeout
+}
+
+func get_timeout_braced() -> Timeout {
+    return Timeout {}
+}
+
+// Multiple sentinels in a union with primitive
+func classify_result(x: i64 | Timeout | NotFound) -> string {
+    return match x {
+        i64 => "value"
+        Timeout => "timeout"
+        NotFound => "not_found"
+    }
+}
+
+// Sentinel as function parameter (single sentinel type)
+func is_timeout(x: Timeout) -> bool {
+    return true
+}
+
+// Sentinel returned from conditional
+func maybe_timeout(flag: bool) -> i64 | Timeout {
+    if flag {
+        return Timeout
+    }
+    return 42
+}
+
+tests "custom sentinel declarations" {
+    test "declare and use Timeout" {
+        let t = Timeout
+        assert(true)
+    }
+
+    test "declare and use NotFound" {
+        let nf = NotFound
+        assert(true)
+    }
+
+    test "declare and use Closed" {
+        let c = Closed
+        assert(true)
+    }
+
+    test "declare and use Pending" {
+        let p = Pending
+        assert(true)
+    }
+
+    test "braced construction Timeout" {
+        let t = Timeout {}
+        assert(true)
+    }
+
+    test "braced construction NotFound" {
+        let nf = NotFound {}
+        assert(true)
+    }
+}
+
+tests "multiple sentinels in one union" {
+    test "i64 | Timeout | NotFound - i64 branch" {
+        let x: i64 | Timeout | NotFound = 99
+        assert(classify_result(x) == "value")
+    }
+
+    test "i64 | Timeout | NotFound - Timeout branch" {
+        let x: i64 | Timeout | NotFound = Timeout
+        assert(classify_result(x) == "timeout")
+    }
+
+    test "i64 | Timeout | NotFound - NotFound branch" {
+        let x: i64 | Timeout | NotFound = NotFound
+        assert(classify_result(x) == "not_found")
+    }
+
+    test "four variant union inline match - i64" {
+        let x: i64 | Timeout | NotFound | Closed = 42
+        let result = match x {
+            i64 => 0
+            Timeout => 1
+            NotFound => 2
+            Closed => 3
+        }
+        assert(result == 0)
+    }
+
+    test "four variant union inline match - Timeout" {
+        let x: i64 | Timeout | NotFound | Closed = Timeout
+        let result = match x {
+            i64 => 0
+            Timeout => 1
+            NotFound => 2
+            Closed => 3
+        }
+        assert(result == 1)
+    }
+
+    test "four variant union inline match - NotFound" {
+        let x: i64 | Timeout | NotFound | Closed = NotFound
+        let result = match x {
+            i64 => 0
+            Timeout => 1
+            NotFound => 2
+            Closed => 3
+        }
+        assert(result == 2)
+    }
+
+    test "four variant union inline match - Closed" {
+        let x: i64 | Timeout | NotFound | Closed = Closed
+        let result = match x {
+            i64 => 0
+            Timeout => 1
+            NotFound => 2
+            Closed => 3
+        }
+        assert(result == 3)
+    }
+
+    test "inline match on multi-sentinel union" {
+        let x: Timeout | NotFound | Closed = Closed
+        let result = match x {
+            Timeout => "t"
+            NotFound => "nf"
+            Closed => "c"
+        }
+        assert(result == "c")
+    }
+
+    test "all-sentinel union match first" {
+        let x: Timeout | NotFound | Closed = Timeout
+        let result = match x {
+            Timeout => 1
+            NotFound => 2
+            Closed => 3
+        }
+        assert(result == 1)
+    }
+
+    test "all-sentinel union match middle" {
+        let x: Timeout | NotFound | Closed = NotFound
+        let result = match x {
+            Timeout => 1
+            NotFound => 2
+            Closed => 3
+        }
+        assert(result == 2)
+    }
+}
+
+tests "sentinel as sole function return type" {
+    test "function returning sentinel bare" {
+        let t = get_timeout()
+        assert(true)
+    }
+
+    test "function returning sentinel braced" {
+        let t = get_timeout_braced()
+        assert(true)
+    }
+
+    test "sentinel return is correct type" {
+        let t: Timeout = get_timeout()
+        assert(true)
+    }
+
+    test "sentinel parameter" {
+        assert(is_timeout(Timeout))
+    }
+}
+
+tests "sentinel equality" {
+    test "same sentinel equals itself" {
+        let a = Timeout
+        let b = Timeout
+        assert(a == b)
+    }
+
+    test "braced sentinel equals bare" {
+        let a = Timeout
+        let b = Timeout {}
+        assert(a == b)
+    }
+
+    test "same sentinel from function equals literal" {
+        let a = get_timeout()
+        let b = Timeout
+        assert(a == b)
+    }
+
+    test "Done equals Done" {
+        let a = Done
+        let b = Done {}
+        assert(a == b)
+    }
+
+    test "nil equals nil" {
+        let a = nil
+        let b = nil
+        assert(a == b)
+    }
+}
+
+tests "bare and braced construction both work" {
+    test "bare Timeout in union" {
+        let x: Timeout | i64 = Timeout
+        assert(x is Timeout)
+    }
+
+    test "braced Timeout in union" {
+        let x: Timeout | i64 = Timeout {}
+        assert(x is Timeout)
+    }
+
+    test "bare NotFound in union" {
+        let x: NotFound | string = NotFound
+        assert(x is NotFound)
+    }
+
+    test "braced NotFound in union" {
+        let x: NotFound | string = NotFound {}
+        assert(x is NotFound)
+    }
+
+    test "bare Done in union" {
+        let x: Done | i64 = Done
+        assert(x is Done)
+    }
+
+    test "braced Done in union" {
+        let x: Done | i64 = Done {}
+        assert(x is Done)
+    }
+}
+
+tests "sentinel match exhaustiveness" {
+    test "two sentinels exhaustive" {
+        let x: Timeout | NotFound = Timeout
+        let result = match x {
+            Timeout => "t"
+            NotFound => "nf"
+        }
+        assert(result == "t")
+    }
+
+    test "three sentinels exhaustive" {
+        let x: Timeout | NotFound | Closed = NotFound
+        let result = match x {
+            Timeout => 1
+            NotFound => 2
+            Closed => 3
+        }
+        assert(result == 2)
+    }
+
+    test "sentinel plus primitive exhaustive" {
+        let x: i64 | Timeout = Timeout
+        let result = match x {
+            i64 => "num"
+            Timeout => "timeout"
+        }
+        assert(result == "timeout")
+    }
+
+    test "sentinel plus string exhaustive" {
+        let x: string | NotFound = "hello"
+        let result = match x {
+            string => "str"
+            NotFound => "nf"
+        }
+        assert(result == "str")
+    }
+
+    test "sentinel plus bool exhaustive" {
+        let x: bool | Closed = true
+        let result = match x {
+            bool => "b"
+            Closed => "c"
+        }
+        assert(result == "b")
+    }
+
+    test "function returns one of two sentinels" {
+        func pick_sentinel(flag: bool) -> Timeout | NotFound {
+            if flag {
+                return Timeout
+            }
+            return NotFound
+        }
+        let result = pick_sentinel(true)
+        assert(result is Timeout)
+        let result2 = pick_sentinel(false)
+        assert(result2 is NotFound)
+    }
+}
+
+tests "prelude sentinels mixed with user-defined" {
+    test "Done and Timeout in union" {
+        let x: Done | Timeout = Done
+        let result = match x {
+            Done => "done"
+            Timeout => "timeout"
+        }
+        assert(result == "done")
+    }
+
+    test "Done and Timeout in union - Timeout branch" {
+        let x: Done | Timeout = Timeout
+        let result = match x {
+            Done => "done"
+            Timeout => "timeout"
+        }
+        assert(result == "timeout")
+    }
+
+    test "Done, nil, Timeout, i64 inline match - Done" {
+        let x: Done | nil | Timeout | i64 = Done
+        let result = match x {
+            Done => "done"
+            nil => "nil"
+            Timeout => "timeout"
+            i64 => "number"
+        }
+        assert(result == "done")
+    }
+
+    test "Done, nil, Timeout, i64 inline match - nil" {
+        let x: Done | nil | Timeout | i64 = nil
+        let result = match x {
+            Done => "done"
+            nil => "nil"
+            Timeout => "timeout"
+            i64 => "number"
+        }
+        assert(result == "nil")
+    }
+
+    test "Done, nil, Timeout, i64 inline match - Timeout" {
+        let x: Done | nil | Timeout | i64 = Timeout
+        let result = match x {
+            Done => "done"
+            nil => "nil"
+            Timeout => "timeout"
+            i64 => "number"
+        }
+        assert(result == "timeout")
+    }
+
+    test "Done, nil, Timeout, i64 inline match - i64" {
+        let x: Done | nil | Timeout | i64 = 42
+        let result = match x {
+            Done => "done"
+            nil => "nil"
+            Timeout => "timeout"
+            i64 => "number"
+        }
+        assert(result == "number")
+    }
+
+    test "Done in user match" {
+        let x: Done | Timeout = Done
+        let result = match x {
+            Done => 1
+            Timeout => 2
+        }
+        assert(result == 1)
+    }
+
+    test "nil in user match" {
+        let x: nil | NotFound = nil
+        let result = match x {
+            nil => 1
+            NotFound => 2
+        }
+        assert(result == 1)
+    }
+
+    test "nil and Done and user sentinel" {
+        let x: nil | Done | Timeout = Timeout
+        let result = match x {
+            nil => "nil"
+            Done => "done"
+            Timeout => "timeout"
+        }
+        assert(result == "timeout")
+    }
+}
+
+tests "sentinel is check negative cases" {
+    test "i64 value is not Timeout" {
+        let x: i64 | Timeout = 42
+        assert(!(x is Timeout))
+    }
+
+    test "i64 value is i64 in sentinel union" {
+        let x: i64 | Timeout = 42
+        assert(x is i64)
+    }
+
+    test "Timeout is not i64" {
+        let x: i64 | Timeout = Timeout
+        assert(!(x is i64))
+    }
+
+    test "string is not NotFound" {
+        let x: string | NotFound = "hello"
+        assert(!(x is NotFound))
+    }
+
+    test "NotFound is not string" {
+        let x: string | NotFound = NotFound
+        assert(!(x is string))
+    }
+
+    test "Timeout is not NotFound in three-way" {
+        let x: i64 | Timeout | NotFound = Timeout
+        assert(!(x is NotFound))
+        assert(!(x is i64))
+        assert(x is Timeout)
+    }
+
+    test "i64 is not any sentinel in three-way" {
+        let x: i64 | Timeout | NotFound = 100
+        assert(!(x is Timeout))
+        assert(!(x is NotFound))
+        assert(x is i64)
+    }
+}
+
+tests "sentinel in when expressions" {
+    test "when with is Timeout" {
+        let x: i64 | Timeout = Timeout
+        let result = when { x is Timeout => "timed_out", _ => "ok" }
+        assert(result == "timed_out")
+    }
+
+    test "when with is i64 not Timeout" {
+        let x: i64 | Timeout = 42
+        let result = when { x is Timeout => "timed_out", _ => "ok" }
+        assert(result == "ok")
+    }
+
+    test "when with multiple is checks" {
+        let x: i64 | Timeout | NotFound = NotFound
+        let result = when {
+            x is i64 => "number"
+            x is Timeout => "timeout"
+            x is NotFound => "not_found"
+            _ => "unknown"
+        }
+        assert(result == "not_found")
+    }
+
+    test "when with is check - integer" {
+        let x: i64 | Timeout | NotFound = 42
+        let result = when {
+            x is i64 => "integer"
+            x is Timeout => "timed_out"
+            _ => "missing"
+        }
+        assert(result == "integer")
+    }
+
+    test "when with is check - Timeout" {
+        let x: i64 | Timeout | NotFound = Timeout
+        let result = when {
+            x is i64 => "integer"
+            x is Timeout => "timed_out"
+            _ => "missing"
+        }
+        assert(result == "timed_out")
+    }
+
+    test "when with is check - NotFound falls to wildcard" {
+        let x: i64 | Timeout | NotFound = NotFound
+        let result = when {
+            x is i64 => "integer"
+            x is Timeout => "timed_out"
+            _ => "missing"
+        }
+        assert(result == "missing")
+    }
+
+    test "when with sentinel and narrowing" {
+        let x: i64 | Timeout = 10
+        let result = when {
+            x is i64 => x + 5
+            _ => 0
+        }
+        assert(result == 15)
+    }
+}
+
+tests "sentinel conditional returns" {
+    test "maybe_timeout returns sentinel" {
+        let x = maybe_timeout(true)
+        assert(x is Timeout)
+    }
+
+    test "maybe_timeout returns i64" {
+        let x = maybe_timeout(false)
+        assert(x is i64)
+    }
+
+    test "maybe_timeout match both branches" {
+        let a = maybe_timeout(true)
+        let result_a = match a {
+            i64 => 0
+            Timeout => 1
+        }
+        assert(result_a == 1)
+
+        let b = maybe_timeout(false)
+        let result_b = match b {
+            i64 => 0
+            Timeout => 1
+        }
+        assert(result_b == 0)
+    }
+}
+
+tests "sentinel narrowing in if" {
+    test "if is sentinel narrows to sentinel" {
+        let x: i64 | Timeout = Timeout
+        if x is Timeout {
+            assert(true)
+        } else {
+            assert(false)
+        }
+    }
+
+    test "if is sentinel else narrows to other type" {
+        let x: i64 | Timeout = 42
+        if x is Timeout {
+            assert(false)
+        } else {
+            let n = x + 1
+            assert(n == 43)
+        }
+    }
+
+    test "if is sentinel in three-way union - direct check" {
+        let x: i64 | Timeout | NotFound = NotFound
+        if x is NotFound {
+            assert(true)
+        } else {
+            assert(false)
+        }
+    }
+
+    test "if is not i64 in three-way union" {
+        let x: i64 | Timeout | NotFound = NotFound
+        if x is i64 {
+            assert(false)
+        } else {
+            assert(true) // x is Timeout | NotFound
+        }
+    }
+
+    test "match on sentinel union after narrowing" {
+        let x: i64 | Timeout | NotFound = NotFound
+        let result = match x {
+            i64 => "num"
+            Timeout => "timeout"
+            NotFound => "not_found"
+        }
+        assert(result == "not_found")
+    }
+}

@@ -44,9 +44,10 @@ impl ResolverEntityExt for Resolver<'_> {
         // resolvable from any module. Look them up by short name to find the sentinel TypeDef
         // rather than the legacy primitive TypeDef.
         if (name == "nil" || name == "Done")
-            && let Some(type_def_id) = registry.sentinel_by_short_name(name, self.table()) {
-                return Some(type_def_id);
-            }
+            && let Some(type_def_id) = registry.sentinel_by_short_name(name, self.table())
+        {
+            return Some(type_def_id);
+        }
         self.resolve(sym)
             .and_then(|name_id| registry.type_by_name(name_id))
     }
@@ -54,9 +55,10 @@ impl ResolverEntityExt for Resolver<'_> {
     fn resolve_type_str(&self, name: &str, registry: &EntityRegistry) -> Option<TypeDefId> {
         // Well-known sentinel types (nil, Done) - see resolve_type for explanation
         if (name == "nil" || name == "Done")
-            && let Some(type_def_id) = registry.sentinel_by_short_name(name, self.table()) {
-                return Some(type_def_id);
-            }
+            && let Some(type_def_id) = registry.sentinel_by_short_name(name, self.table())
+        {
+            return Some(type_def_id);
+        }
         self.resolve_str(name)
             .and_then(|name_id| registry.type_by_name(name_id))
     }
@@ -78,9 +80,10 @@ impl ResolverEntityExt for Resolver<'_> {
         tracing::trace!(name, "resolve_type_str_or_interface");
         // Well-known sentinel types (nil, Done) - check sentinel first
         if (name == "nil" || name == "Done")
-            && let Some(type_def_id) = registry.sentinel_by_short_name(name, self.table()) {
-                return Some(type_def_id);
-            }
+            && let Some(type_def_id) = registry.sentinel_by_short_name(name, self.table())
+        {
+            return Some(type_def_id);
+        }
         let result = self
             .resolve_str(name)
             .and_then(|name_id| registry.type_by_name(name_id))

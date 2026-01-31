@@ -1,0 +1,2 @@
+// Error: sentinel cannot have a body
+sentinel Foo { }
