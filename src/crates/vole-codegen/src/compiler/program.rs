@@ -1313,37 +1313,14 @@ impl Compiler<'_> {
         // Build a map of generic function names to their ASTs
         // Include both explicit generics (type_params in AST) and implicit generics
         // (structural type params that create generic_info in entity registry)
-        let generic_func_asts: FxHashMap<NameId, &FuncDecl> = program
-            .declarations
-            .iter()
-            .filter_map(|decl| {
-                if let Decl::Function(func) = decl {
-                    let query = self.query();
-                    let program_module = self.program_module();
-                    let name_id = query.function_name_id(program_module, func.name);
-
-                    // Check if function has explicit type params OR implicit generic_info
-                    let has_explicit_type_params = !func.type_params.is_empty();
-                    let has_implicit_generic_info = self
-                        .analyzed
-                        .entity_registry()
-                        .function_by_name(name_id)
-                        .map(|func_id| {
-                            self.analyzed
-                                .entity_registry()
-                                .get_function(func_id)
-                                .generic_info
-                                .is_some()
-                        })
-                        .unwrap_or(false);
-
-                    if has_explicit_type_params || has_implicit_generic_info {
-                        return Some((name_id, func));
-                    }
-                }
-                None
-            })
-            .collect();
+        // Recursively walks into tests blocks to find scoped generic functions.
+        let mut generic_func_asts: FxHashMap<NameId, &FuncDecl> = FxHashMap::default();
+        let program_module = self.program_module();
+        self.collect_generic_func_asts(
+            &program.declarations,
+            program_module,
+            &mut generic_func_asts,
+        );
 
         // Collect instances to avoid borrow issues
         let instances = self
@@ -1823,25 +1800,87 @@ impl Compiler<'_> {
 
     /// Build maps of generic class NameIds to their AST declarations.
     /// Used by both class method and static method monomorphization.
+    /// Recursively walks into tests blocks to find generic classes declared there.
     fn build_generic_type_asts<'a>(
         &self,
         program: &'a Program,
     ) -> FxHashMap<NameId, &'a vole_frontend::ClassDecl> {
-        program
-            .declarations
-            .iter()
-            .filter_map(|decl| {
-                if let Decl::Class(class) = decl
-                    && !class.type_params.is_empty()
-                {
+        let mut result = FxHashMap::default();
+        let program_module = self.program_module();
+        self.collect_generic_class_asts(&program.declarations, program_module, &mut result);
+        result
+    }
+
+    /// Recursively collect generic class ASTs from declarations, including tests blocks.
+    fn collect_generic_class_asts<'a>(
+        &self,
+        decls: &'a [Decl],
+        module_id: ModuleId,
+        result: &mut FxHashMap<NameId, &'a vole_frontend::ClassDecl>,
+    ) {
+        for decl in decls {
+            match decl {
+                Decl::Class(class) if !class.type_params.is_empty() => {
                     let query = self.query();
-                    let program_module = self.program_module();
-                    let name_id = query.try_name_id(program_module, &[class.name])?;
-                    return Some((name_id, class));
+                    if let Some(name_id) = query.try_name_id(module_id, &[class.name]) {
+                        result.insert(name_id, class);
+                    }
                 }
-                None
-            })
-            .collect()
+                Decl::Tests(tests_decl) => {
+                    // Use the virtual module for tests-block-scoped types
+                    let vm_id = self
+                        .query()
+                        .tests_virtual_module(tests_decl.span)
+                        .unwrap_or(module_id);
+                    self.collect_generic_class_asts(&tests_decl.decls, vm_id, result);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Recursively collect generic function ASTs from declarations, including tests blocks.
+    /// Generic functions inside tests blocks are registered under the program module
+    /// (not the virtual module), but their ASTs are only reachable by walking into tests blocks.
+    fn collect_generic_func_asts<'a>(
+        &self,
+        decls: &'a [Decl],
+        module_id: ModuleId,
+        result: &mut FxHashMap<NameId, &'a FuncDecl>,
+    ) {
+        for decl in decls {
+            match decl {
+                Decl::Function(func) => {
+                    let query = self.query();
+                    let name_id = query.function_name_id(module_id, func.name);
+
+                    // Check if function has explicit type params OR implicit generic_info
+                    let has_explicit_type_params = !func.type_params.is_empty();
+                    let has_implicit_generic_info = self
+                        .analyzed
+                        .entity_registry()
+                        .function_by_name(name_id)
+                        .map(|func_id| {
+                            self.analyzed
+                                .entity_registry()
+                                .get_function(func_id)
+                                .generic_info
+                                .is_some()
+                        })
+                        .unwrap_or(false);
+
+                    if has_explicit_type_params || has_implicit_generic_info {
+                        result.insert(name_id, func);
+                    }
+                }
+                Decl::Tests(tests_decl) => {
+                    // Functions in tests blocks are registered under the program module
+                    // (not the virtual module), so keep using the same module_id.
+                    self.collect_generic_func_asts(&tests_decl.decls, module_id, result);
+                }
+                _ => {}
+            }
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════

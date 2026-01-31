@@ -1,0 +1,190 @@
+// Test generic types declared inside tests blocks
+// Exercises monomorphization path for virtual-module-scoped generics
+
+tests "generic class in tests block" {
+    class TbgBox<T> {
+        value: T,
+    }
+
+    test "generic class with i64" {
+        let b = TbgBox { value: 42 }
+        assert(b.value == 42)
+    }
+
+    test "generic class with string" {
+        let b = TbgBox { value: "hello" }
+        assert(b.value == "hello")
+    }
+
+    test "generic class with bool" {
+        let b = TbgBox { value: true }
+        assert(b.value)
+    }
+
+    test "generic class with f64" {
+        let b = TbgBox { value: 3.14 }
+        assert(b.value == 3.14)
+    }
+}
+
+tests "generic class with methods in tests block" {
+    class TbgContainer<T> {
+        item: T,
+
+        func get() -> T {
+            return self.item
+        }
+
+        func set(v: T) {
+            self.item = v
+        }
+    }
+
+    test "generic method returns value" {
+        let c = TbgContainer { item: 99 }
+        assert(c.get() == 99)
+    }
+
+    test "generic method sets value" {
+        let c = TbgContainer { item: 10 }
+        c.set(20)
+        assert(c.get() == 20)
+    }
+
+    test "generic method with string" {
+        let c = TbgContainer { item: "start" }
+        assert(c.get() == "start")
+        c.set("end")
+        assert(c.get() == "end")
+    }
+}
+
+tests "multiple type parameters in tests block" {
+    class TbgPair<A, B> {
+        first: A,
+        second: B,
+
+        func getFirst() -> A {
+            return self.first
+        }
+
+        func getSecond() -> B {
+            return self.second
+        }
+    }
+
+    test "pair with i64 and string" {
+        let p = TbgPair { first: 42, second: "answer" }
+        assert(p.getFirst() == 42)
+        assert(p.getSecond() == "answer")
+    }
+
+    test "pair with bool and f64" {
+        let p = TbgPair { first: true, second: 2.718 }
+        assert(p.getFirst())
+        assert(p.getSecond() == 2.718)
+    }
+
+    test "pair with same types" {
+        let p = TbgPair { first: 1, second: 2 }
+        assert(p.getFirst() + p.getSecond() == 3)
+    }
+}
+
+tests "generic class with static methods in tests block" {
+    class TbgWrapper<T> {
+        data: T,
+
+        func unwrap() -> T {
+            return self.data
+        }
+
+        statics {
+            func create(v: T) -> TbgWrapper<T> {
+                return TbgWrapper { data: v }
+            }
+        }
+    }
+
+    test "static constructor with i64" {
+        let w = TbgWrapper.create(100)
+        assert(w.unwrap() == 100)
+    }
+
+    test "static constructor with string" {
+        let w = TbgWrapper.create("wrapped")
+        assert(w.unwrap() == "wrapped")
+    }
+}
+
+tests "generic function in tests block" {
+    class TbgHolder<T> {
+        value: T,
+    }
+
+    func tbg_wrap<T>(x: T) -> TbgHolder<T> {
+        return TbgHolder { value: x }
+    }
+
+    test "generic function with i64" {
+        let b = tbg_wrap(42)
+        assert(b.value == 42)
+    }
+
+    test "generic function with string" {
+        let b = tbg_wrap("hello")
+        assert(b.value == "hello")
+    }
+
+    test "generic function with bool" {
+        let b = tbg_wrap(true)
+        assert(b.value)
+    }
+}
+
+tests "nested generic types in tests block" {
+    class TbgNested<T> {
+        value: T,
+
+        func get() -> T {
+            return self.value
+        }
+    }
+
+    test "nested generic instantiation" {
+        let inner = TbgNested { value: 5 }
+        let outer = TbgNested { value: inner }
+        assert(outer.get().get() == 5)
+    }
+
+    test "generic with different nesting types" {
+        let inner = TbgNested { value: "nested" }
+        let outer = TbgNested { value: inner }
+        assert(outer.value.value == "nested")
+    }
+}
+
+tests "multiple generic classes in same tests block" {
+    class TbgFirst<T> {
+        value: T,
+        func get() -> T => self.value
+    }
+
+    class TbgSecond<U> {
+        data: U,
+        func get() -> U => self.data
+    }
+
+    test "use both generic classes" {
+        let f = TbgFirst { value: 10 }
+        let s = TbgSecond { data: "hello" }
+        assert(f.get() == 10)
+        assert(s.get() == "hello")
+    }
+
+    test "cross-reference generic classes" {
+        let f = TbgFirst { value: "inner" }
+        let s = TbgSecond { data: f }
+        assert(s.get().get() == "inner")
+    }
+}

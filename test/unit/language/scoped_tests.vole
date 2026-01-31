@@ -225,3 +225,49 @@ tests "mixed scoped and expression" {
         assert(result == 30)
     }
 }
+
+tests "scoped generic class" {
+    class ScopedGeneric<T> {
+        value: T,
+
+        func get() -> T {
+            return self.value
+        }
+
+        func set(v: T) {
+            self.value = v
+        }
+    }
+
+    test "generic class with i64 in tests block" {
+        let g = ScopedGeneric { value: 42 }
+        assert(g.get() == 42)
+        g.set(100)
+        assert(g.get() == 100)
+    }
+
+    test "generic class with string in tests block" {
+        let g = ScopedGeneric { value: "hello" }
+        assert(g.get() == "hello")
+    }
+}
+
+tests "scoped generic function" {
+    class ScopedHolder<T> {
+        data: T,
+    }
+
+    func scoped_wrap<T>(x: T) -> ScopedHolder<T> {
+        return ScopedHolder { data: x }
+    }
+
+    test "generic function in tests block" {
+        let h = scoped_wrap(42)
+        assert(h.data == 42)
+    }
+
+    test "generic function with string in tests block" {
+        let h = scoped_wrap("world")
+        assert(h.data == "world")
+    }
+}
