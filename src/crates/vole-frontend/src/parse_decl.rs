@@ -19,6 +19,7 @@ impl<'src> Parser<'src> {
             TokenType::KwStatic => self.static_interface_decl(),
             TokenType::KwImplement => self.implement_block(),
             TokenType::KwError => self.error_decl(),
+            TokenType::KwSentinel => self.sentinel_decl(),
             TokenType::KwExternal => {
                 let block = self.parse_external_block()?;
                 Ok(Decl::External(block))
@@ -339,6 +340,43 @@ impl<'src> Parser<'src> {
         let span = start_span.merge(self.previous.span);
 
         Ok(Decl::Error(ErrorDecl { name, fields, span }))
+    }
+
+    fn sentinel_decl(&mut self) -> Result<Decl, ParseError> {
+        let start_span = self.current.span;
+        self.advance(); // consume 'sentinel'
+
+        // Accept identifiers and keyword tokens as sentinel names.
+        // Keywords like Done and nil are valid sentinel names since
+        // the whole point is to declare new sentinel types.
+        let name_token = self.current.clone();
+        if !self.current.lexeme.is_empty()
+            && self.current.lexeme.chars().next().unwrap().is_alphabetic()
+        {
+            self.advance();
+        } else {
+            return Err(ParseError::new(
+                ParserError::ExpectedIdentifier {
+                    span: self.current.span.into(),
+                },
+                self.current.span,
+            ));
+        }
+        let name = self.interner.intern(&name_token.lexeme);
+
+        let span = start_span.merge(self.previous.span);
+
+        // Error if someone tries to add a body
+        if self.check(TokenType::LBrace) {
+            return Err(ParseError::new(
+                ParserError::SentinelCannotHaveBody {
+                    span: self.current.span.into(),
+                },
+                self.current.span,
+            ));
+        }
+
+        Ok(Decl::Sentinel(SentinelDecl { name, span }))
     }
 
     /// Parse: implements Interface1, Interface2<T>, ...

@@ -138,4 +138,14 @@ pub enum ParserError {
         #[label("reserved prefix")]
         span: SourceSpan,
     },
+
+    #[error("sentinel declarations cannot have a body")]
+    #[diagnostic(
+        code(E1030),
+        help("sentinel declarations are body-less: just `sentinel Name`")
+    )]
+    SentinelCannotHaveBody {
+        #[label("unexpected body")]
+        span: SourceSpan,
+    },
 }

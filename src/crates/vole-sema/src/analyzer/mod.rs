@@ -971,6 +971,9 @@ impl Analyzer {
                 Decl::Error(_) => {
                     // Error declarations fully processed in first pass
                 }
+                Decl::Sentinel(_) => {
+                    // Sentinel declarations are processed in the first pass
+                }
                 Decl::External(_) => {
                     // External blocks are processed during code generation
                 }

@@ -5,8 +5,8 @@ use std::fmt::Write;
 
 use crate::{
     AssignTarget, BinaryOp, Block, CompoundOp, Decl, ErrorDecl, Expr, ExprKind, FuncBody, FuncDecl,
-    Interner, LetInit, LetStmt, Param, PrimitiveType, Program, Stmt, StringPart, TestCase,
-    TestsDecl, TypeExpr, UnaryOp,
+    Interner, LetInit, LetStmt, Param, PrimitiveType, Program, SentinelDecl, Stmt, StringPart,
+    TestCase, TestsDecl, TypeExpr, UnaryOp,
 };
 
 /// Pretty-printer for AST nodes that resolves symbols via an Interner.
@@ -74,6 +74,7 @@ impl<'a> AstPrinter<'a> {
                 // TODO: implement interface/implement display
             }
             Decl::Error(e) => self.write_error_decl(out, e),
+            Decl::Sentinel(s) => self.write_sentinel_decl(out, s),
             Decl::External(_) => {
                 // TODO: implement external decl display
             }
@@ -156,6 +157,12 @@ impl<'a> AstPrinter<'a> {
             }
             out.push_str("]\n");
         }
+    }
+
+    fn write_sentinel_decl(&self, out: &mut String, sentinel_decl: &SentinelDecl) {
+        self.write_indent(out);
+        let name = self.interner.resolve(sentinel_decl.name);
+        writeln!(out, "SentinelDecl \"{}\"", name).unwrap();
     }
 
     fn write_struct_decl(&self, out: &mut String, struct_decl: &crate::StructDecl) {

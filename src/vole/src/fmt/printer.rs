@@ -45,6 +45,7 @@ fn print_decl<'a>(
         Decl::Interface(iface) => print_interface_decl(arena, iface, interner),
         Decl::Implement(impl_block) => print_implement_block(arena, impl_block, interner),
         Decl::Error(error_decl) => print_error_decl(arena, error_decl, interner),
+        Decl::Sentinel(sentinel_decl) => print_sentinel_decl(arena, sentinel_decl, interner),
         Decl::External(_) => todo!("external decl printing"),
     }
 }
@@ -1397,6 +1398,16 @@ fn print_error_decl<'a>(
             .append(body)
             .append("}")
     }
+}
+
+/// Print a sentinel declaration.
+fn print_sentinel_decl<'a>(
+    arena: &'a Arena<'a>,
+    sentinel_decl: &SentinelDecl,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    let name = interner.resolve(sentinel_decl.name).to_string();
+    arena.text("sentinel ").append(arena.text(name))
 }
 
 /// Print the body of a class-like declaration.

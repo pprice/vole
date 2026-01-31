@@ -241,6 +241,9 @@ impl Compiler<'_> {
                 Decl::Error(_) => {
                     // Error declarations don't generate code in pass 1
                 }
+                Decl::Sentinel(_) => {
+                    // Sentinel declarations don't generate code in pass 1
+                }
                 Decl::External(_) => {
                     // External blocks don't generate code in pass 1
                 }
@@ -312,6 +315,9 @@ impl Compiler<'_> {
                 }
                 Decl::Error(_) => {
                     // Error declarations don't generate code in pass 2
+                }
+                Decl::Sentinel(_) => {
+                    // Sentinel declarations don't generate code in pass 2
                 }
                 Decl::External(_) => {
                     // External blocks don't generate code in pass 2

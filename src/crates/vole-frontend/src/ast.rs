@@ -63,6 +63,7 @@ pub enum Decl {
     Interface(InterfaceDecl),
     Implement(ImplementBlock),
     Error(ErrorDecl),
+    Sentinel(SentinelDecl),
     External(ExternalBlock), // Top-level external block
 }
 
@@ -230,6 +231,14 @@ pub struct ExternalFunc {
 pub struct ErrorDecl {
     pub name: Symbol,
     pub fields: Vec<FieldDef>,
+    pub span: Span,
+}
+
+/// Sentinel type declaration: sentinel Name
+/// Body-less declaration for unique marker types (e.g., Done, None).
+#[derive(Debug, Clone)]
+pub struct SentinelDecl {
+    pub name: Symbol,
     pub span: Span,
 }
 

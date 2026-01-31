@@ -145,6 +145,7 @@ impl<'a> ConstantFolder<'a> {
             | Decl::Interface(_)
             | Decl::Implement(_)
             | Decl::Error(_)
+            | Decl::Sentinel(_)
             | Decl::External(_) => {}
         }
     }

@@ -1359,3 +1359,59 @@ fn test_parse_multiple_params_with_defaults() {
         panic!("expected function declaration");
     }
 }
+
+#[test]
+fn parse_sentinel_decl() {
+    let source = "sentinel Done";
+    let mut parser = Parser::new(source);
+    let program = parser.parse_program().unwrap();
+    assert_eq!(program.declarations.len(), 1);
+    match &program.declarations[0] {
+        Decl::Sentinel(s) => {
+            let name = parser.interner().resolve(s.name);
+            assert_eq!(name, "Done");
+        }
+        _ => panic!("expected Sentinel declaration"),
+    }
+}
+
+#[test]
+fn parse_sentinel_decl_lowercase() {
+    let source = "sentinel nil";
+    let mut parser = Parser::new(source);
+    let program = parser.parse_program().unwrap();
+    assert_eq!(program.declarations.len(), 1);
+    match &program.declarations[0] {
+        Decl::Sentinel(s) => {
+            let name = parser.interner().resolve(s.name);
+            assert_eq!(name, "nil");
+        }
+        _ => panic!("expected Sentinel declaration"),
+    }
+}
+
+#[test]
+fn parse_sentinel_cannot_have_body() {
+    let source = "sentinel Foo { }";
+    let mut parser = Parser::new(source);
+    let result = parser.parse_program();
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(matches!(
+        err.error,
+        ParserError::SentinelCannotHaveBody { .. }
+    ));
+}
+
+#[test]
+fn parse_sentinel_with_function() {
+    let source = r#"
+sentinel Done
+func main() {}
+"#;
+    let mut parser = Parser::new(source);
+    let program = parser.parse_program().unwrap();
+    assert_eq!(program.declarations.len(), 2);
+    assert!(matches!(&program.declarations[0], Decl::Sentinel(_)));
+    assert!(matches!(&program.declarations[1], Decl::Function(_)));
+}
