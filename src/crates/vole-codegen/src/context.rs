@@ -939,27 +939,24 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         ))
     }
 
-    /// Get the number of fields in a struct type.
-    /// Returns None if the type is not a struct.
-    pub fn struct_field_count(&self, type_id: TypeId) -> Option<usize> {
+    /// Get the flat slot count for a struct (recursively counts leaf fields).
+    /// This is the number of 8-byte slots needed to store the struct inline,
+    /// accounting for nested struct fields.
+    pub fn struct_flat_slot_count(&self, type_id: TypeId) -> Option<usize> {
         let arena = self.arena();
-        let (type_def_id, _) = arena.unwrap_struct(type_id)?;
-        let type_def = self.query().get_type(type_def_id);
-        type_def
-            .generic_info
-            .as_ref()
-            .map(|gi| gi.field_names.len())
+        let entities = self.query().registry();
+        super::structs::struct_flat_slot_count(type_id, arena, entities)
     }
 
-    /// Check if a struct type uses small return convention (1-2 fields, returned in registers).
+    /// Check if a struct type uses small return convention (1-2 flat slots).
     pub fn is_small_struct_return(&self, type_id: TypeId) -> bool {
-        self.struct_field_count(type_id)
+        self.struct_flat_slot_count(type_id)
             .is_some_and(|count| count <= 2)
     }
 
-    /// Check if a struct type uses sret convention (3+ fields, caller-allocated buffer).
+    /// Check if a struct type uses sret convention (3+ flat slots).
     pub fn is_sret_struct_return(&self, type_id: TypeId) -> bool {
-        self.struct_field_count(type_id)
+        self.struct_flat_slot_count(type_id)
             .is_some_and(|count| count > 2)
     }
 
@@ -970,13 +967,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         values: &[Value],
         type_id: TypeId,
     ) -> CompiledValue {
-        let field_count = self
-            .struct_field_count(type_id)
+        let flat_count = self
+            .struct_flat_slot_count(type_id)
             .expect("reconstruct_struct_from_regs: expected struct type");
-        let total_size = (field_count as u32) * 8;
+        let total_size = (flat_count as u32) * 8;
         let slot = self.alloc_stack(total_size);
 
-        for (i, &val) in values.iter().enumerate().take(field_count) {
+        for (i, &val) in values.iter().enumerate().take(flat_count) {
             let offset = (i as i32) * 8;
             self.builder.ins().stack_store(val, slot, offset);
         }
@@ -992,24 +989,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Copy a struct value to a new stack slot (value semantics).
-    /// Struct fields are 8 bytes each at offset field_index * 8.
+    /// Copies all flat slots (8 bytes each), accounting for nested structs.
     pub fn copy_struct_value(&mut self, src: CompiledValue) -> Result<CompiledValue, String> {
-        let arena = self.arena();
-        let (type_def_id, _) = arena
-            .unwrap_struct(src.type_id)
+        let flat_count = self
+            .struct_flat_slot_count(src.type_id)
             .ok_or_else(|| "copy_struct_value: expected struct type".to_string())?;
-        let type_def = self.query().get_type(type_def_id);
-        let field_count = type_def
-            .generic_info
-            .as_ref()
-            .map(|gi| gi.field_names.len())
-            .unwrap_or(0);
 
-        let total_size = (field_count as u32) * 8;
+        let total_size = (flat_count as u32) * 8;
         let dst_slot = self.alloc_stack(total_size);
 
-        // Copy each field (8 bytes each)
-        for i in 0..field_count {
+        // Copy all flat slots (8 bytes each)
+        for i in 0..flat_count {
             let offset = (i as i32) * 8;
             let val = self
                 .builder
@@ -1031,18 +1021,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Copy a struct value to a heap allocation.
     /// Used when storing structs into arrays so the data survives the current stack frame.
     pub fn copy_struct_to_heap(&mut self, src: CompiledValue) -> Result<CompiledValue, String> {
-        let arena = self.arena();
-        let (type_def_id, _) = arena
-            .unwrap_struct(src.type_id)
+        let flat_count = self
+            .struct_flat_slot_count(src.type_id)
             .ok_or_else(|| "copy_struct_to_heap: expected struct type".to_string())?;
-        let type_def = self.query().get_type(type_def_id);
-        let field_count = type_def
-            .generic_info
-            .as_ref()
-            .map(|gi| gi.field_names.len())
-            .unwrap_or(0);
 
-        let total_size = (field_count as u32) * 8;
+        let total_size = (flat_count as u32) * 8;
         let ptr_type = self.ptr_type();
 
         // Heap-allocate storage
@@ -1051,8 +1034,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let alloc_call = self.builder.ins().call(heap_alloc_ref, &[size_val]);
         let heap_ptr = self.builder.inst_results(alloc_call)[0];
 
-        // Copy each field (8 bytes each) from stack to heap
-        for i in 0..field_count {
+        // Copy all flat slots (8 bytes each) from stack to heap
+        for i in 0..flat_count {
             let offset = (i as i32) * 8;
             let val = self
                 .builder

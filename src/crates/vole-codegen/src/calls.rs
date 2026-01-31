@@ -726,10 +726,10 @@ impl Cg<'_, '_, '_> {
         let ptr_type = self.ptr_type();
         let mut args = Vec::new();
         let sret_slot = if is_sret {
-            let field_count = self
-                .struct_field_count(return_type_id)
-                .expect("sret struct must have field count");
-            let total_size = (field_count as u32) * 8;
+            let flat_count = self
+                .struct_flat_slot_count(return_type_id)
+                .expect("sret struct must have flat slot count");
+            let total_size = (flat_count as u32) * 8;
             let slot = self.alloc_stack(total_size);
             let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
             args.push(ptr);
@@ -824,10 +824,10 @@ impl Cg<'_, '_, '_> {
         let ptr_type = self.ptr_type();
         let mut args = Vec::new();
         let sret_slot = if is_sret {
-            let field_count = self
-                .struct_field_count(return_type_id)
-                .expect("sret struct must have field count");
-            let total_size = (field_count as u32) * 8;
+            let flat_count = self
+                .struct_flat_slot_count(return_type_id)
+                .expect("sret struct must have flat slot count");
+            let total_size = (flat_count as u32) * 8;
             let slot = self.alloc_stack(total_size);
             let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
             args.push(ptr);

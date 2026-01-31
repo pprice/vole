@@ -105,7 +105,7 @@ impl Cg<'_, '_, '_> {
         // Struct types are stack-allocated: load field directly from pointer + offset
         let is_struct = self.arena().is_struct(obj.type_id);
         if is_struct {
-            return self.struct_field_load(obj.value, slot, field_type_id);
+            return self.struct_field_load(obj.value, slot, field_type_id, obj.type_id);
         }
 
         let result_raw = self.get_field_cached(obj.value, slot as u32)?;
@@ -236,11 +236,37 @@ impl Cg<'_, '_, '_> {
         // Struct types: store directly to pointer + offset
         let is_struct = self.arena().is_struct(obj.type_id);
         if is_struct {
-            let offset = (slot as i32) * 8;
-            let store_value = convert_to_i64_for_storage(self.builder, &value);
-            self.builder
-                .ins()
-                .store(MemFlags::new(), store_value, obj.value, offset);
+            let offset = {
+                let arena = self.arena();
+                let entities = self.query().registry();
+                super::helpers::struct_field_byte_offset(obj.type_id, slot, arena, entities)
+                    .unwrap_or((slot as i32) * 8)
+            };
+
+            // If assigning a nested struct, copy all flat slots inline
+            let nested_flat = {
+                let arena = self.arena();
+                let entities = self.query().registry();
+                super::helpers::struct_flat_slot_count(value.type_id, arena, entities)
+            };
+            if let Some(nested_flat) = nested_flat {
+                for i in 0..nested_flat {
+                    let src_off = (i as i32) * 8;
+                    let dst_off = offset + src_off;
+                    let val =
+                        self.builder
+                            .ins()
+                            .load(types::I64, MemFlags::new(), value.value, src_off);
+                    self.builder
+                        .ins()
+                        .store(MemFlags::new(), val, obj.value, dst_off);
+                }
+            } else {
+                let store_value = convert_to_i64_for_storage(self.builder, &value);
+                self.builder
+                    .ins()
+                    .store(MemFlags::new(), store_value, obj.value, offset);
+            }
             return Ok(value);
         }
 
@@ -263,15 +289,41 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Load a field from a struct pointer at the given slot.
-    /// Structs are stack-allocated with 8-byte fields at offset slot * 8.
+    /// Uses flat layout: nested struct fields are stored inline and
+    /// field offsets account for variable-size preceding fields.
     pub fn struct_field_load(
         &mut self,
         struct_ptr: Value,
         slot: usize,
         field_type_id: TypeId,
+        parent_type_id: TypeId,
     ) -> Result<CompiledValue, String> {
-        let offset = (slot as i32) * 8;
-        // Load as i64, then convert to proper type
+        // Compute byte offset accounting for nested struct sizes
+        let offset = {
+            let arena = self.arena();
+            let entities = self.query().registry();
+            super::helpers::struct_field_byte_offset(parent_type_id, slot, arena, entities)
+                .unwrap_or((slot as i32) * 8)
+        };
+
+        // If the field is itself a struct, return a pointer into the parent data
+        let is_nested_struct = self.arena().is_struct(field_type_id);
+        if is_nested_struct {
+            let ptr_type = self.ptr_type();
+            // iadd_imm to compute pointer into the parent struct's inline data
+            let field_ptr = if offset == 0 {
+                struct_ptr
+            } else {
+                self.builder.ins().iadd_imm(struct_ptr, offset as i64)
+            };
+            return Ok(CompiledValue {
+                value: field_ptr,
+                ty: ptr_type,
+                type_id: field_type_id,
+            });
+        }
+
+        // Non-struct field: load as i64, then convert to proper type
         let raw_value = self
             .builder
             .ins()

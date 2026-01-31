@@ -241,13 +241,13 @@ pub fn compile_function_body_with_cg(
         } else if let Some(ret_type_id) = cg.return_type
             && cg.is_small_struct_return(ret_type_id)
         {
-            // Small struct: return field values in registers
-            let field_count = cg
-                .struct_field_count(ret_type_id)
-                .expect("small struct return must have field count");
+            // Small struct (1-2 flat slots): return field values in registers
+            let flat_count = cg
+                .struct_flat_slot_count(ret_type_id)
+                .expect("small struct return must have flat slot count");
             let struct_ptr = value.value;
             let mut return_vals = Vec::with_capacity(2);
-            for i in 0..field_count {
+            for i in 0..flat_count {
                 let offset = (i as i32) * 8;
                 let val = cg
                     .builder
@@ -262,14 +262,14 @@ pub fn compile_function_body_with_cg(
         } else if let Some(ret_type_id) = cg.return_type
             && cg.is_sret_struct_return(ret_type_id)
         {
-            // Large struct: copy fields into sret buffer
+            // Large struct (3+ flat slots): copy all flat slots into sret buffer
             let entry_block = cg.builder.func.layout.entry_block().unwrap();
             let sret_ptr = cg.builder.block_params(entry_block)[0];
-            let field_count = cg
-                .struct_field_count(ret_type_id)
-                .expect("sret struct return must have field count");
+            let flat_count = cg
+                .struct_flat_slot_count(ret_type_id)
+                .expect("sret struct return must have flat slot count");
             let struct_ptr = value.value;
-            for i in 0..field_count {
+            for i in 0..flat_count {
                 let offset = (i as i32) * 8;
                 let val = cg
                     .builder
@@ -323,18 +323,15 @@ pub fn compile_function_inner_with_params<'ctx>(
     module_id: Option<vole_identity::ModuleId>,
     substitutions: Option<&FxHashMap<vole_identity::NameId, TypeId>>,
 ) -> Result<(), String> {
-    // Auto-detect sret convention: if return type is a large struct (3+ fields),
+    // Auto-detect sret convention: if return type is a large struct (3+ flat slots),
     // the signature has a hidden sret pointer as the first parameter.
     let config = if let Some(ret_type_id) = config.return_type_id {
         let arena = env.analyzed.type_arena();
-        if let Some((type_def_id, _)) = arena.unwrap_struct(ret_type_id) {
-            let type_def = env.analyzed.query().get_type(type_def_id);
-            let field_count = type_def
-                .generic_info
-                .as_ref()
-                .map(|gi| gi.field_names.len())
-                .unwrap_or(0);
-            if field_count > 2 {
+        let entities = env.analyzed.query().registry();
+        if let Some(flat_count) =
+            crate::structs::struct_flat_slot_count(ret_type_id, arena, entities)
+        {
+            if flat_count > 2 {
                 config.with_sret()
             } else {
                 config

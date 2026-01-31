@@ -5,8 +5,8 @@ use rustc_hash::FxHashMap;
 
 use crate::errors::CodegenError;
 use crate::types::{CompiledValue, FunctionCtx, TypeCtx};
-use vole_sema::PrimitiveType;
 use vole_sema::type_arena::{SemaType as ArenaType, TypeArena, TypeId};
+use vole_sema::{EntityRegistry, PrimitiveType};
 
 /// Get field slot and type for a field access (new context API).
 #[allow(dead_code)]
@@ -224,4 +224,81 @@ pub(crate) fn convert_to_i64_for_storage(
         types::I64 => value.value,
         _ => value.value,
     }
+}
+
+// ============================================================================
+// Struct flat layout helpers
+//
+// Structs store all data inline, including nested structs. Each leaf field
+// occupies one 8-byte "slot". The "flat slot count" recursively counts all
+// leaf slots so that a struct like:
+//
+//   struct Point { x: i64, y: i64 }            // 2 flat slots
+//   struct Rect { tl: Point, br: Point }        // 4 flat slots
+//
+// allocates enough space for all nested data. Field byte offsets are computed
+// by summing the flat sizes of all preceding fields.
+// ============================================================================
+
+/// Compute the number of flat 8-byte slots a struct type occupies,
+/// recursively expanding nested struct fields.
+/// Returns None if the type is not a struct.
+pub(crate) fn struct_flat_slot_count(
+    type_id: TypeId,
+    arena: &TypeArena,
+    entities: &EntityRegistry,
+) -> Option<usize> {
+    let (type_def_id, _) = arena.unwrap_struct(type_id)?;
+    let type_def = entities.get_type(type_def_id);
+    let generic_info = type_def.generic_info.as_ref()?;
+
+    let mut total = 0usize;
+    for field_type in &generic_info.field_types {
+        total += field_flat_slots(*field_type, arena, entities);
+    }
+    Some(total)
+}
+
+/// Compute the number of flat 8-byte slots a single field occupies.
+/// Nested struct fields are recursively expanded; all other types use 1 slot.
+pub(crate) fn field_flat_slots(
+    type_id: TypeId,
+    arena: &TypeArena,
+    entities: &EntityRegistry,
+) -> usize {
+    struct_flat_slot_count(type_id, arena, entities).unwrap_or(1)
+}
+
+/// Compute the byte offset of field `slot` within a struct, accounting
+/// for nested struct fields that occupy more than one 8-byte slot.
+/// Returns None if the type is not a struct or `slot` is out of range.
+pub(crate) fn struct_field_byte_offset(
+    type_id: TypeId,
+    slot: usize,
+    arena: &TypeArena,
+    entities: &EntityRegistry,
+) -> Option<i32> {
+    let (type_def_id, _) = arena.unwrap_struct(type_id)?;
+    let type_def = entities.get_type(type_def_id);
+    let generic_info = type_def.generic_info.as_ref()?;
+
+    if slot > generic_info.field_types.len() {
+        return None;
+    }
+
+    let mut offset = 0i32;
+    for field_type in generic_info.field_types.iter().take(slot) {
+        let slots = field_flat_slots(*field_type, arena, entities);
+        offset += (slots as i32) * 8;
+    }
+    Some(offset)
+}
+
+/// Total byte size of a struct, accounting for nested struct fields.
+pub(crate) fn struct_total_byte_size(
+    type_id: TypeId,
+    arena: &TypeArena,
+    entities: &EntityRegistry,
+) -> Option<u32> {
+    struct_flat_slot_count(type_id, arena, entities).map(|n| (n as u32) * 8)
 }

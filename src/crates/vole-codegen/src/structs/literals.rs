@@ -385,7 +385,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile a struct literal to a stack-allocated value.
-    /// Each field occupies 8 bytes at offset field_slot * 8.
+    /// Nested struct fields are stored inline (all leaf fields flattened).
     fn struct_value_literal(
         &mut self,
         sl: &StructLiteralExpr,
@@ -393,8 +393,13 @@ impl Cg<'_, '_, '_> {
         result_type_id: TypeId,
         path_str: &str,
     ) -> Result<CompiledValue, String> {
-        let field_count = field_slots.len();
-        let total_size = (field_count as u32) * 8;
+        // Use flat total size to account for nested struct fields
+        let total_size = {
+            let arena = self.arena();
+            let entities = self.query().registry();
+            super::helpers::struct_total_byte_size(result_type_id, arena, entities)
+                .unwrap_or_else(|| (field_slots.len() as u32) * 8)
+        };
 
         // Allocate stack slot for the struct
         let slot = self.alloc_stack(total_size);
@@ -405,11 +410,43 @@ impl Cg<'_, '_, '_> {
             let field_slot = *field_slots
                 .get(init_name)
                 .ok_or_else(|| format!("Unknown field: {} in type {}", init_name, path_str))?;
-            let offset = (field_slot as i32) * 8;
+
+            // Compute byte offset accounting for nested struct sizes
+            let offset = {
+                let arena = self.arena();
+                let entities = self.query().registry();
+                super::helpers::struct_field_byte_offset(
+                    result_type_id,
+                    field_slot,
+                    arena,
+                    entities,
+                )
+                .unwrap_or((field_slot as i32) * 8)
+            };
 
             let value = self.expr(&init.value)?;
-            let store_value = convert_to_i64_for_storage(self.builder, &value);
-            self.builder.ins().stack_store(store_value, slot, offset);
+
+            // If the field value is itself a struct, copy its flat data inline
+            let field_flat_slots = {
+                let arena = self.arena();
+                let entities = self.query().registry();
+                super::helpers::struct_flat_slot_count(value.type_id, arena, entities)
+            };
+            if let Some(nested_flat) = field_flat_slots {
+                // Copy all flat slots from the nested struct into our allocation
+                for i in 0..nested_flat {
+                    let src_off = (i as i32) * 8;
+                    let dst_off = offset + src_off;
+                    let val =
+                        self.builder
+                            .ins()
+                            .load(types::I64, MemFlags::new(), value.value, src_off);
+                    self.builder.ins().stack_store(val, slot, dst_off);
+                }
+            } else {
+                let store_value = convert_to_i64_for_storage(self.builder, &value);
+                self.builder.ins().stack_store(store_value, slot, offset);
+            }
         }
 
         // Return pointer to the struct

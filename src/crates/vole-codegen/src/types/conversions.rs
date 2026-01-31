@@ -268,10 +268,9 @@ pub(crate) fn type_id_size(
                 type_id_size(*element, pointer_type, entity_registry, arena).div_ceil(8) * 8;
             elem_size * (*size as u32)
         }
-        // Struct types: each field is 8 bytes
-        ArenaType::Struct { type_def_id, .. } => {
-            let field_count = entity_registry.fields_on_type(*type_def_id).count() as u32;
-            field_count * 8
+        // Struct types: use flat slot count to account for nested struct fields
+        ArenaType::Struct { .. } => {
+            crate::structs::struct_total_byte_size(ty, arena, entity_registry).unwrap_or(8) // fallback: shouldn't happen for valid struct types
         }
         // Unknown type uses TaggedValue representation: 8-byte tag + 8-byte value = 16 bytes
         ArenaType::Unknown => 16,

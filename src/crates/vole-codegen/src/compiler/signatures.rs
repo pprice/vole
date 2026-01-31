@@ -124,16 +124,13 @@ impl Compiler<'_> {
         self.jit.create_signature(&cranelift_params, ret)
     }
 
-    /// Get the number of fields in a struct type.
+    /// Get the flat slot count for a struct (recursively counts leaf fields).
+    /// Used by signature building to decide small-return vs sret convention.
     /// Returns None if the type is not a struct.
     pub fn struct_field_count(&self, type_id: TypeId) -> Option<usize> {
         let arena = self.analyzed.type_arena();
-        let (type_def_id, _) = arena.unwrap_struct(type_id)?;
-        let type_def = self.query().get_type(type_def_id);
-        type_def
-            .generic_info
-            .as_ref()
-            .map(|gi| gi.field_names.len())
+        let entities = self.query().registry();
+        crate::structs::struct_flat_slot_count(type_id, arena, entities)
     }
 
     /// Build a Cranelift signature directly from a FunctionId.

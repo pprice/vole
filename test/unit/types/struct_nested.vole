@@ -269,8 +269,15 @@ tests {
         assert(n.pos.y == 50)
     }
 
-    // NOTE: accessing both n.name and n.pos from a make_named result in the same
-    // scope triggers bug v-b241 (sret nested struct corruption)
+    // v-b241: accessing both n.name and n.pos from a make_named result in the same
+    // scope previously triggered sret nested struct corruption. Now fixed.
+
+    test "nested struct with string field: return from function (all fields)" {
+        let n = make_named("center", 50, 50)
+        assert(n.name == "center")
+        assert(n.pos.x == 50)
+        assert(n.pos.y == 50)
+    }
 
     test "nested struct with string field: pass to function" {
         let n = Named { name: "test", pos: Point { x: 7, y: 8 } }
@@ -332,8 +339,18 @@ tests {
         assert(width == 10)
     }
 
-    // NOTE: rect_area(make_rectangle(...)) triggers bug v-b241
-    // (sret return passed to function that forwards param to multiple sub-calls)
+    // v-b241: rect_area(make_rectangle(...)) previously triggered sret corruption
+    // when the sret-returned struct was forwarded to multiple sub-calls. Now fixed.
+
+    test "chained: make then compute area (sret forward to multi-call)" {
+        let area = rect_area(make_rectangle(0, 0, 5, 10))
+        assert(area == 50)
+    }
+
+    test "returned nested struct: area via variable" {
+        let rect = make_rectangle(0, 0, 5, 10)
+        assert(rect_area(rect) == 50)
+    }
 
     // ===== Three levels of nesting =====
 
