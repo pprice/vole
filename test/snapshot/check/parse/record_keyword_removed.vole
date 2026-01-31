@@ -1,0 +1,2 @@
+// Test that 'record' keyword is no longer accepted (use 'class' instead)
+record Foo { x: i64 }

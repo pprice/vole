@@ -1,0 +1,10 @@
+[stdout]
+
+[stderr]
+  x [E1003]: unexpected token 'identifier'
+   ,-[<path>/record_keyword_removed.vole:2:1]
+ 1 | // Test that 'record' keyword is no longer accepted (use 'class' instead)
+ 2 | record Foo { x: i64 }
+   : ^^^|^^
+   :    `-- unexpected
+   `----
