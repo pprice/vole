@@ -1280,6 +1280,18 @@ impl Analyzer {
             .struct_type(entity_type_id, TypeIdVec::new());
         self.entity_registry_mut()
             .set_base_type_id(entity_type_id, self_type_id);
+
+        // Register instance methods
+        for method in &struct_decl.methods {
+            self.register_instance_method(
+                entity_type_id,
+                struct_decl.name,
+                method,
+                interner,
+                None, // no type_param_scope for non-generic structs
+                Some(self_type_id),
+            );
+        }
     }
 
     /// Validate and register interface implementations for a type.

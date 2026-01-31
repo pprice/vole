@@ -1,0 +1,80 @@
+// Struct instance method tests
+
+struct Point {
+    x: i64,
+    y: i64,
+
+    func sum() -> i64 {
+        return self.x + self.y
+    }
+
+    func product() -> i64 => self.x * self.y
+
+    func add_to_x(dx: i64) -> i64 {
+        return self.x + dx
+    }
+
+    func weighted_sum(wx: i64, wy: i64) -> i64 {
+        return self.x * wx + self.y * wy
+    }
+}
+
+struct Counter {
+    value: i64,
+
+    func get() -> i64 => self.value
+
+    func is_zero() -> bool => self.value == 0
+
+    func offset(n: i64) -> i64 => self.value + n
+}
+
+tests "struct methods" {
+    test "basic method call" {
+        let p = Point { x: 3, y: 7 }
+        assert(p.sum() == 10)
+    }
+
+    test "expression-bodied method" {
+        let p = Point { x: 4, y: 5 }
+        assert(p.product() == 20)
+    }
+
+    test "method with parameter" {
+        let p = Point { x: 2, y: 3 }
+        assert(p.add_to_x(10) == 12)
+    }
+
+    test "method with multiple parameters" {
+        let p = Point { x: 3, y: 4 }
+        assert(p.weighted_sum(2, 3) == 18)
+    }
+
+    test "method on different struct" {
+        let c = Counter { value: 42 }
+        assert(c.get() == 42)
+    }
+
+    test "method returning bool" {
+        let c1 = Counter { value: 0 }
+        let c2 = Counter { value: 5 }
+        assert(c1.is_zero())
+        assert(!c2.is_zero())
+    }
+
+    test "method with parameter on different struct" {
+        let c = Counter { value: 10 }
+        assert(c.offset(5) == 15)
+    }
+
+    test "method on literal" {
+        assert(Point { x: 10, y: 20 }.sum() == 30)
+    }
+
+    test "multiple method calls" {
+        let p = Point { x: 5, y: 3 }
+        assert(p.sum() == 8)
+        assert(p.product() == 15)
+        assert(p.add_to_x(10) == 15)
+    }
+}

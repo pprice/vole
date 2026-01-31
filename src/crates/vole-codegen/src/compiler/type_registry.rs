@@ -283,8 +283,7 @@ impl Compiler<'_> {
         );
     }
 
-    /// Finalize a struct type: fill in field slots
-    /// Structs are stack-allocated value types with no methods or runtime allocation.
+    /// Finalize a struct type: fill in field slots and register instance methods.
     pub(super) fn finalize_struct(&mut self, struct_decl: &StructDecl) {
         let module_id = self.program_module();
 
@@ -313,6 +312,33 @@ impl Compiler<'_> {
             field_slots.insert(field_name, field_slot);
         }
 
+        // Register instance methods
+        let mut method_infos = FxHashMap::default();
+        for method in &struct_decl.methods {
+            let method_name_id = self.method_name_id(method.name);
+            let method_id = self
+                .analyzed
+                .entity_registry()
+                .find_method_on_type(type_def_id, method_name_id)
+                .expect("method should be registered in entity registry");
+            let sig = self.build_signature_for_method(method_id, SelfParam::Pointer);
+            let full_name_id = self
+                .analyzed
+                .entity_registry()
+                .get_method(method_id)
+                .full_name_id;
+            let func_key = self.func_registry.intern_name_id(full_name_id);
+            let display_name = self.func_registry.display(func_key);
+            let jit_func_id = self.jit.declare_function(&display_name, &sig);
+            self.func_registry.set_func_id(func_key, jit_func_id);
+            method_infos.insert(method_name_id, MethodInfo { func_key });
+            // Populate method_func_keys for codegen lookup
+            let type_name_id = self.query().get_type(type_def_id).name_id;
+            self.state
+                .method_func_keys
+                .insert((type_name_id, method_name_id), func_key);
+        }
+
         let vole_type_id = self
             .state
             .type_metadata
@@ -326,7 +352,7 @@ impl Compiler<'_> {
                 field_slots,
                 vole_type: vole_type_id,
                 type_def_id,
-                method_infos: FxHashMap::default(),
+                method_infos,
             },
         );
     }

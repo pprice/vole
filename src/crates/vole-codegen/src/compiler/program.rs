@@ -305,8 +305,10 @@ impl Compiler<'_> {
                 Decl::Implement(impl_block) => {
                     self.compile_implement_block(impl_block)?;
                 }
-                Decl::Struct(_) => {
-                    // Struct declarations don't generate code in pass 2
+                Decl::Struct(struct_decl) => {
+                    if !struct_decl.methods.is_empty() {
+                        self.compile_struct_methods(struct_decl, program)?;
+                    }
                 }
                 Decl::Error(_) => {
                     // Error declarations don't generate code in pass 2

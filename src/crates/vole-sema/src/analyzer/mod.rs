@@ -965,8 +965,8 @@ impl Analyzer {
                         }
                     }
                 }
-                Decl::Struct(_) => {
-                    // Struct declarations handled in later passes
+                Decl::Struct(struct_decl) => {
+                    self.check_type_body(struct_decl, interner)?;
                 }
                 Decl::Error(_) => {
                     // Error declarations fully processed in first pass

@@ -39,6 +39,27 @@ impl TypeBodyDecl for ClassDecl {
     }
 }
 
+impl TypeBodyDecl for StructDecl {
+    fn name(&self) -> Symbol {
+        self.name
+    }
+    fn type_params(&self) -> &[TypeParam] {
+        &self.type_params
+    }
+    fn fields(&self) -> &[FieldDef] {
+        &self.fields
+    }
+    fn methods(&self) -> &[FuncDecl] {
+        &self.methods
+    }
+    fn statics(&self) -> Option<&StaticsBlock> {
+        None
+    }
+    fn span(&self) -> Span {
+        self.span
+    }
+}
+
 impl Analyzer {
     pub(crate) fn collect_type_aliases(&mut self, program: &Program, interner: &Interner) {
         for decl in &program.declarations {

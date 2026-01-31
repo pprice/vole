@@ -12,8 +12,8 @@ use crate::types::{
 };
 use vole_frontend::ast::PrimitiveType as AstPrimitive;
 use vole_frontend::{
-    ClassDecl, Expr, FuncDecl, ImplementBlock, InterfaceMethod, Interner, StaticsBlock, Symbol,
-    TypeExpr,
+    ClassDecl, Expr, FuncDecl, ImplementBlock, InterfaceMethod, Interner, StaticsBlock, StructDecl,
+    Symbol, TypeExpr,
 };
 use vole_identity::ModuleId;
 use vole_sema::type_arena::TypeId;
@@ -58,6 +58,25 @@ impl Compiler<'_> {
     ) -> Result<(), String> {
         let module_id = self.program_module();
         self.compile_class_methods_in_module(class, program, module_id)
+    }
+
+    /// Compile instance methods for a struct type.
+    pub(super) fn compile_struct_methods(
+        &mut self,
+        struct_decl: &StructDecl,
+        program: &vole_frontend::Program,
+    ) -> Result<(), String> {
+        let module_id = self.program_module();
+        self.compile_type_methods(
+            TypeMethodsData {
+                name: struct_decl.name,
+                methods: &struct_decl.methods,
+                statics: None,
+                type_kind: "struct",
+            },
+            program,
+            module_id,
+        )
     }
 
     /// Compile methods for a class using a specific module for type lookups.
