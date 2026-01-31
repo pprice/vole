@@ -368,6 +368,10 @@ pub struct TypeArena {
     /// Module metadata (constants, external_funcs) keyed by ModuleId.
     /// This data is not part of the type identity, but needed by codegen.
     module_metadata: FxHashMap<ModuleId, ModuleMetadata>,
+    /// TypeIds that are sentinel types (e.g., nil, Done, user-defined sentinels).
+    /// Sentinels are zero-field struct types that should not be treated as regular structs
+    /// for codegen purposes (auto-boxing, field access, etc.).
+    sentinel_ids: FxHashSet<TypeId>,
 }
 
 impl std::fmt::Debug for TypeArena {
@@ -385,6 +389,7 @@ impl TypeArena {
             types: Vec::new(),
             intern_map: FxHashMap::default(),
             module_metadata: FxHashMap::default(),
+            sentinel_ids: FxHashSet::default(),
             primitives: PrimitiveTypes {
                 // Temporary placeholders - will be filled in below
                 i8: TypeId(0),
@@ -623,14 +628,8 @@ impl TypeArena {
     /// Uses numeric TypeDefId comparison instead of string-based Debug formatting,
     /// avoiding issues when TypeDefId indices cross digit boundaries (e.g., 99 vs 100).
     fn union_sort_key(&self, type_id: TypeId) -> (u32, u64) {
-        // Well-known sentinel types keep their canonical sort positions,
-        // regardless of whether they've been rebound to SemaType::Struct.
-        if type_id == TypeId::DONE {
-            return (20, 0);
-        }
-        if type_id == TypeId::NIL {
-            return (10, 0);
-        }
+        // No special sorting for sentinels - they are SemaType::Struct internally and sort
+        // alongside other nominal types using (50, type_def_id.index()).
         match self.get(type_id) {
             // Value types get highest category
             SemaType::Primitive(_) => (100, type_id.0 as u64),
@@ -1047,11 +1046,30 @@ impl TypeArena {
         matches!(self.get(id), SemaType::Class { .. })
     }
 
+    /// Mark a TypeId as a sentinel type.
+    ///
+    /// Called during sentinel signature collection to register both well-known
+    /// (nil, Done) and user-defined sentinels. Sentinel types are zero-field struct
+    /// types that should not be treated as regular structs for codegen purposes.
+    pub fn mark_sentinel(&mut self, id: TypeId) {
+        self.sentinel_ids.insert(id);
+    }
+
+    /// Check if this TypeId is a sentinel type (e.g., nil, Done, or user-defined sentinels).
+    ///
+    /// Sentinel types are zero-field struct types that get special treatment:
+    /// they are not treated as regular structs for codegen (auto-boxing, field access, etc.),
+    /// they are represented as i8 in Cranelift, and they have zero logical size.
+    #[inline]
+    pub fn is_sentinel(&self, id: TypeId) -> bool {
+        self.sentinel_ids.contains(&id)
+    }
+
     /// Check if this is a struct type (stack-allocated value type)
     pub fn is_struct(&self, id: TypeId) -> bool {
-        // Well-known sentinel types (Done, nil) are not treated as structs for codegen
-        // purposes (e.g., auto-boxing in unions), even after being rebound to SemaType::Struct.
-        if id == TypeId::NIL || id == TypeId::DONE {
+        // Sentinel types are not treated as structs for codegen purposes
+        // (e.g., auto-boxing in unions), even though they are SemaType::Struct internally.
+        if self.is_sentinel(id) {
             return false;
         }
         matches!(self.get(id), SemaType::Struct { .. })
@@ -1141,11 +1159,11 @@ impl TypeArena {
 
     /// Unwrap a struct type, returning (type_def_id, type_args).
     ///
-    /// Returns `None` for well-known sentinel types (Done, nil) even after they've been
-    /// rebound to `SemaType::Struct`, since they should not be treated as regular structs
-    /// for codegen purposes (signatures, auto-boxing, field access, etc.).
+    /// Returns `None` for sentinel types (e.g., nil, Done, user-defined sentinels) even
+    /// after they've been rebound to `SemaType::Struct`, since they should not be treated
+    /// as regular structs for codegen purposes (signatures, auto-boxing, field access, etc.).
     pub fn unwrap_struct(&self, id: TypeId) -> Option<(TypeDefId, &TypeIdVec)> {
-        if id == TypeId::NIL || id == TypeId::DONE {
+        if self.is_sentinel(id) {
             return None;
         }
         match self.get(id) {
@@ -1173,9 +1191,9 @@ impl TypeArena {
     /// This is a convenience helper that combines unwrap_class, unwrap_struct, and unwrap_interface
     /// into a single call. Use this when you need to handle all nominal types uniformly.
     ///
-    /// Returns `None` for well-known sentinel types (Done, nil) even after rebinding.
+    /// Returns `None` for sentinel types (e.g., nil, Done, user-defined sentinels) even after rebinding.
     pub fn unwrap_nominal(&self, id: TypeId) -> Option<(TypeDefId, &TypeIdVec, NominalKind)> {
-        if id == TypeId::NIL || id == TypeId::DONE {
+        if self.is_sentinel(id) {
             return None;
         }
         match self.get(id) {
@@ -1268,13 +1286,12 @@ impl TypeArena {
 
     /// Display a type for error messages (basic version without name resolution)
     pub fn display_basic(&self, id: TypeId) -> String {
-        // Well-known sentinel types always display with their canonical names,
-        // regardless of whether they've been rebound to SemaType::Struct.
-        if id == TypeId::NIL {
-            return "nil".to_string();
-        }
-        if id == TypeId::DONE {
-            return "Done".to_string();
+        // Sentinel types display as "sentinel#N" using their TypeDefId index.
+        // For full name display, use display_type() which has access to entity_registry.
+        if self.is_sentinel(id)
+            && let SemaType::Struct { type_def_id, .. } = self.get(id)
+        {
+            return format!("sentinel#{}", type_def_id.index());
         }
         match self.get(id) {
             SemaType::Primitive(p) => p.name().to_string(),
@@ -2143,7 +2160,11 @@ mod tests {
         assert_eq!(arena.display_basic(arena.i32()), "i32");
         assert_eq!(arena.display_basic(arena.string()), "string");
         assert_eq!(arena.display_basic(arena.bool()), "bool");
-        assert_eq!(arena.display_basic(arena.nil()), "nil");
+        // Before prelude loads, nil is a placeholder Invalid type
+        assert_eq!(
+            arena.display_basic(arena.nil()),
+            "<invalid: nil_placeholder>"
+        );
         assert_eq!(arena.display_basic(arena.void()), "void");
     }
 

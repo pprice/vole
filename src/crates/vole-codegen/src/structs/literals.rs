@@ -101,18 +101,12 @@ impl Cg<'_, '_, '_> {
             let kind = self.query().registry().type_kind(type_def_id);
             if kind == TypeDefKind::Sentinel {
                 let sentinel_type_id = self.get_expr_type(&expr.id).unwrap_or_else(|| {
-                    // Fall back to the well-known TypeId based on name
-                    if path_str == "nil" {
-                        TypeId::NIL
-                    } else if path_str == "Done" {
-                        TypeId::DONE
-                    } else {
-                        // For other sentinels, try type_metadata
-                        self.type_metadata()
-                            .get(&type_def_id)
-                            .map(|m| m.vole_type)
-                            .unwrap_or(TypeId::NIL)
-                    }
+                    // Fall back to the base TypeId from entity registry, or type_metadata
+                    self.registry()
+                        .get_type(type_def_id)
+                        .base_type_id
+                        .or_else(|| self.type_metadata().get(&type_def_id).map(|m| m.vole_type))
+                        .unwrap_or(TypeId::NIL)
                 });
                 let value = self.builder.ins().iconst(types::I8, 0);
                 return Ok(CompiledValue {
@@ -375,7 +369,6 @@ impl Cg<'_, '_, '_> {
             CodegenError::type_mismatch("union construction", "union type", "non-union").to_string()
         })?;
         let variants = variants.clone();
-        let nil_id = arena.nil();
 
         // If the value is already the same union type, just return it
         if value.type_id == union_type_id {
@@ -406,8 +399,8 @@ impl Cg<'_, '_, '_> {
             .ins()
             .store(MemFlags::new(), tag_val, heap_ptr, 0);
 
-        // Store payload at offset 8 (if not nil)
-        if value.type_id != nil_id {
+        // Sentinel types (nil, Done, user-defined) have no payload - only the tag matters
+        if !self.arena().is_sentinel(value.type_id) {
             self.builder
                 .ins()
                 .store(MemFlags::new(), value.value, heap_ptr, 8);

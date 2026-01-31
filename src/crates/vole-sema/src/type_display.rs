@@ -50,13 +50,15 @@ fn display_sema_type(
     names: &NameTable,
     entity_registry: &EntityRegistry,
 ) -> String {
-    // Well-known sentinel types always display with their canonical names,
-    // regardless of whether they've been rebound to SemaType::Struct.
-    if type_id == TypeId::NIL {
-        return "nil".to_string();
-    }
-    if type_id == TypeId::DONE {
-        return "done".to_string();
+    // Sentinel types display with their short name (e.g., "nil", "Done"),
+    // not the fully-qualified module path.
+    if arena.is_sentinel(type_id)
+        && let SemaType::Struct { type_def_id, .. } = arena.get(type_id)
+    {
+        let type_def = entity_registry.get_type(*type_def_id);
+        if let Some(name) = names.last_segment_str(type_def.name_id) {
+            return name;
+        }
     }
     match arena.get(type_id) {
         SemaType::Primitive(prim) => prim.name().to_string(),

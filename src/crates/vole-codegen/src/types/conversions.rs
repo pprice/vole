@@ -149,9 +149,9 @@ pub(crate) fn function_name_id_with_interner(
 
 /// Convert a TypeId to a Cranelift type.
 pub(crate) fn type_id_to_cranelift(ty: TypeId, arena: &TypeArena, pointer_type: Type) -> Type {
-    // Well-known sentinel types (Done, nil) are always represented as i8,
+    // Sentinel types are always represented as i8 (zero-field struct tag),
     // regardless of whether they've been rebound to SemaType::Struct by the prelude.
-    if ty == TypeId::NIL || ty == TypeId::DONE {
+    if arena.is_sentinel(ty) {
         return types::I8;
     }
     use vole_sema::type_arena::SemaType as ArenaType;
@@ -195,9 +195,9 @@ pub(crate) fn type_id_size(
     entity_registry: &EntityRegistry,
     arena: &TypeArena,
 ) -> u32 {
-    // Well-known sentinel types (Done, nil) are zero-sized,
+    // Sentinel types are zero-sized,
     // regardless of whether they've been rebound to SemaType::Struct by the prelude.
-    if ty == TypeId::NIL || ty == TypeId::DONE {
+    if arena.is_sentinel(ty) {
         return 0;
     }
     use vole_sema::type_arena::SemaType as ArenaType;

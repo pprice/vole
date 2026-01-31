@@ -819,7 +819,6 @@ impl Cg<'_, '_, '_> {
             CodegenError::type_mismatch("union construction", "union type", "non-union").to_string()
         })?;
         let variants = variants.clone();
-        let nil_id = arena.nil();
 
         // If the value is already the same union type, just return it
         if value.type_id == union_type_id {
@@ -881,7 +880,8 @@ impl Cg<'_, '_, '_> {
         let tag_val = self.builder.ins().iconst(types::I8, tag as i64);
         self.builder.ins().stack_store(tag_val, slot, 0);
 
-        if actual_type_id != nil_id {
+        // Sentinel types (nil, Done, user-defined) have no payload - only the tag matters
+        if !self.arena().is_sentinel(actual_type_id) {
             self.builder.ins().stack_store(actual_value, slot, 8);
         }
 

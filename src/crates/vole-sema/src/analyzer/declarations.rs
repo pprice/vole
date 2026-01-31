@@ -1351,6 +1351,7 @@ impl Analyzer {
                     type_args: TypeIdVec::new(),
                 },
             );
+            self.type_arena_mut().mark_sentinel(reserved_id);
             self.entity_registry_mut()
                 .set_base_type_id(entity_type_id, reserved_id);
         } else {
@@ -1358,6 +1359,7 @@ impl Analyzer {
             let self_type_id = self
                 .type_arena_mut()
                 .struct_type(entity_type_id, TypeIdVec::new());
+            self.type_arena_mut().mark_sentinel(self_type_id);
             self.entity_registry_mut()
                 .set_base_type_id(entity_type_id, self_type_id);
         }

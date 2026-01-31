@@ -106,20 +106,29 @@ impl Cg<'_, '_, '_> {
 
     /// Compile an identifier lookup
     fn identifier(&mut self, sym: Symbol, expr: &Expr) -> Result<CompiledValue, String> {
-        // Well-known sentinel values: nil and Done are always available as i8(0)
+        // Sentinel values (nil, Done, user-defined) are always available as i8(0).
+        // First try the sema-provided type, then fall back to name resolution.
         {
-            let name = self.interner().resolve(sym);
-            if name == "nil" || name == "Done" {
-                let sentinel_type_id = if name == "nil" {
-                    TypeId::NIL
-                } else {
-                    TypeId::DONE
-                };
+            let sentinel_type_id = self
+                .get_expr_type(&expr.id)
+                .filter(|&tid| self.arena().is_sentinel(tid))
+                .or_else(|| {
+                    let name = self.interner().resolve(sym);
+                    let module_id = self.current_module.unwrap_or(self.env.analyzed.module_id);
+                    let type_def_id = self.query().resolve_type_def_by_str(module_id, name)?;
+                    let kind = self.registry().get_type(type_def_id).kind;
+                    if kind == TypeDefKind::Sentinel {
+                        self.registry().get_type(type_def_id).base_type_id
+                    } else {
+                        None
+                    }
+                });
+            if let Some(type_id) = sentinel_type_id {
                 let value = self.builder.ins().iconst(types::I8, 0);
                 return Ok(CompiledValue {
                     value,
                     ty: types::I8,
-                    type_id: sentinel_type_id,
+                    type_id,
                 });
             }
         }
@@ -856,13 +865,13 @@ impl Cg<'_, '_, '_> {
                 PrimitiveType::String => arena.string(),
             }),
             TE::Named(sym) => {
-                // Resolve well-known named types (sentinels like nil, Done)
+                // Resolve named types (sentinels, structs, classes, etc.) through the
+                // name resolution system. Uses current module context or main module.
                 let name = self.interner().resolve(*sym);
-                match name {
-                    "nil" => Some(TypeId::NIL),
-                    "Done" => Some(TypeId::DONE),
-                    _ => None,
-                }
+                let module_id = self.current_module.unwrap_or(self.env.analyzed.module_id);
+                let query = self.query();
+                let type_def_id = query.resolve_type_def_by_str(module_id, name)?;
+                self.registry().get_type(type_def_id).base_type_id
             }
             _ => None,
         }
