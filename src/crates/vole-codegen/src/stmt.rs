@@ -947,15 +947,24 @@ impl Cg<'_, '_, '_> {
                     return Ok(());
                 }
 
-                // Record destructuring - extract fields via runtime
+                // Record destructuring - extract fields
+                let is_struct = self.arena().is_struct(ty_id);
                 for field_pattern in fields {
                     let field_name = self.interner().resolve(field_pattern.field_name);
                     let (slot, field_type_id) =
                         get_field_slot_and_type_id_cg(ty_id, field_name, self)?;
-                    let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
-                    let result_raw =
-                        self.call_runtime(RuntimeFn::InstanceGetField, &[value, slot_val])?;
-                    let converted = self.convert_field_value(result_raw, field_type_id);
+
+                    let converted = if is_struct {
+                        // Structs are stack-allocated: load field directly from pointer + offset
+                        self.struct_field_load(value, slot, field_type_id, ty_id)?
+                    } else {
+                        // Classes are heap-allocated: use runtime field access
+                        let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
+                        let result_raw =
+                            self.call_runtime(RuntimeFn::InstanceGetField, &[value, slot_val])?;
+                        self.convert_field_value(result_raw, field_type_id)
+                    };
+
                     let var = self.builder.declare_var(converted.ty);
                     self.builder.def_var(var, converted.value);
                     self.vars
