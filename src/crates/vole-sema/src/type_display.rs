@@ -50,6 +50,14 @@ fn display_sema_type(
     names: &NameTable,
     entity_registry: &EntityRegistry,
 ) -> String {
+    // Well-known sentinel types always display with their canonical names,
+    // regardless of whether they've been rebound to SemaType::Struct.
+    if type_id == TypeId::NIL {
+        return "nil".to_string();
+    }
+    if type_id == TypeId::DONE {
+        return "done".to_string();
+    }
     match arena.get(type_id) {
         SemaType::Primitive(prim) => prim.name().to_string(),
         SemaType::Void => "void".to_string(),

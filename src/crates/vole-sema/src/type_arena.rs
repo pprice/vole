@@ -475,6 +475,29 @@ impl TypeArena {
         })
     }
 
+    /// Replace the SemaType at a reserved TypeId slot.
+    ///
+    /// Used during prelude loading to rebind well-known types (Done, nil) from their
+    /// initial placeholder SemaType variants to actual sentinel struct types. This ensures
+    /// the reserved TypeId constants (e.g., TypeId::DONE, TypeId::NIL) point to the
+    /// sentinel's struct type after prelude loading.
+    ///
+    /// Updates both the type storage and intern map to maintain consistency.
+    pub fn rebind(&mut self, type_id: TypeId, new_type: SemaType) {
+        let idx = type_id.0 as usize;
+        assert!(idx < self.types.len(), "rebind: TypeId out of range");
+
+        // Remove the old type from the intern map
+        let old_type = self.types[idx].clone();
+        self.intern_map.remove(&old_type);
+
+        // Insert the new type into the intern map pointing to the same TypeId
+        self.intern_map.insert(new_type.clone(), type_id);
+
+        // Replace the type in the storage
+        self.types[idx] = new_type;
+    }
+
     /// Get the SemaType for a TypeId
     pub fn get(&self, id: TypeId) -> &SemaType {
         &self.types[id.0 as usize]
@@ -595,6 +618,14 @@ impl TypeArena {
     /// Uses numeric TypeDefId comparison instead of string-based Debug formatting,
     /// avoiding issues when TypeDefId indices cross digit boundaries (e.g., 99 vs 100).
     fn union_sort_key(&self, type_id: TypeId) -> (u32, u64) {
+        // Well-known sentinel types keep their canonical sort positions,
+        // regardless of whether they've been rebound to SemaType::Struct.
+        if type_id == TypeId::DONE {
+            return (20, 0);
+        }
+        if type_id == TypeId::NIL {
+            return (10, 0);
+        }
         match self.get(type_id) {
             // Value types get highest category
             SemaType::Primitive(_) => (100, type_id.0 as u64),
@@ -1016,6 +1047,11 @@ impl TypeArena {
 
     /// Check if this is a struct type (stack-allocated value type)
     pub fn is_struct(&self, id: TypeId) -> bool {
+        // Well-known sentinel types (Done, nil) are not treated as structs for codegen
+        // purposes (e.g., auto-boxing in unions), even after being rebound to SemaType::Struct.
+        if id == TypeId::NIL || id == TypeId::DONE {
+            return false;
+        }
         matches!(self.get(id), SemaType::Struct { .. })
     }
 
@@ -1101,8 +1137,15 @@ impl TypeArena {
         }
     }
 
-    /// Unwrap a struct type, returning (type_def_id, type_args)
+    /// Unwrap a struct type, returning (type_def_id, type_args).
+    ///
+    /// Returns `None` for well-known sentinel types (Done, nil) even after they've been
+    /// rebound to `SemaType::Struct`, since they should not be treated as regular structs
+    /// for codegen purposes (signatures, auto-boxing, field access, etc.).
     pub fn unwrap_struct(&self, id: TypeId) -> Option<(TypeDefId, &TypeIdVec)> {
+        if id == TypeId::NIL || id == TypeId::DONE {
+            return None;
+        }
         match self.get(id) {
             SemaType::Struct {
                 type_def_id,
@@ -1127,7 +1170,12 @@ impl TypeArena {
     ///
     /// This is a convenience helper that combines unwrap_class, unwrap_struct, and unwrap_interface
     /// into a single call. Use this when you need to handle all nominal types uniformly.
+    ///
+    /// Returns `None` for well-known sentinel types (Done, nil) even after rebinding.
     pub fn unwrap_nominal(&self, id: TypeId) -> Option<(TypeDefId, &TypeIdVec, NominalKind)> {
+        if id == TypeId::NIL || id == TypeId::DONE {
+            return None;
+        }
         match self.get(id) {
             SemaType::Class {
                 type_def_id,
@@ -1218,6 +1266,14 @@ impl TypeArena {
 
     /// Display a type for error messages (basic version without name resolution)
     pub fn display_basic(&self, id: TypeId) -> String {
+        // Well-known sentinel types always display with their canonical names,
+        // regardless of whether they've been rebound to SemaType::Struct.
+        if id == TypeId::NIL {
+            return "nil".to_string();
+        }
+        if id == TypeId::DONE {
+            return "Done".to_string();
+        }
         match self.get(id) {
             SemaType::Primitive(p) => p.name().to_string(),
             SemaType::Void => "void".to_string(),

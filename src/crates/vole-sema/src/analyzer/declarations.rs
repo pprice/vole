@@ -1330,12 +1330,37 @@ impl Analyzer {
             },
         );
 
-        // Register the sentinel's base TypeId (as a struct type with no type args)
-        let self_type_id = self
-            .type_arena_mut()
-            .struct_type(entity_type_id, TypeIdVec::new());
-        self.entity_registry_mut()
-            .set_base_type_id(entity_type_id, self_type_id);
+        // Check if this is a well-known sentinel (Done or nil) that has a reserved TypeId.
+        // If so, rebind the reserved slot to point to the sentinel's struct type instead
+        // of creating a new TypeId. This ensures TypeId::DONE and TypeId::NIL remain the
+        // canonical identifiers for these types.
+        let sentinel_name = interner.resolve(sentinel_decl.name);
+        let well_known_type_id = match sentinel_name {
+            "Done" => Some(ArenaTypeId::DONE),
+            "nil" => Some(ArenaTypeId::NIL),
+            _ => None,
+        };
+
+        if let Some(reserved_id) = well_known_type_id {
+            use crate::type_arena::SemaType;
+            // Rebind the reserved TypeId slot to point to the sentinel's struct type
+            self.type_arena_mut().rebind(
+                reserved_id,
+                SemaType::Struct {
+                    type_def_id: entity_type_id,
+                    type_args: TypeIdVec::new(),
+                },
+            );
+            self.entity_registry_mut()
+                .set_base_type_id(entity_type_id, reserved_id);
+        } else {
+            // Non-well-known sentinel: create a new TypeId as usual
+            let self_type_id = self
+                .type_arena_mut()
+                .struct_type(entity_type_id, TypeIdVec::new());
+            self.entity_registry_mut()
+                .set_base_type_id(entity_type_id, self_type_id);
+        }
     }
 
     /// Validate and register interface implementations for a type.

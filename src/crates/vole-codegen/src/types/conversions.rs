@@ -149,6 +149,11 @@ pub(crate) fn function_name_id_with_interner(
 
 /// Convert a TypeId to a Cranelift type.
 pub(crate) fn type_id_to_cranelift(ty: TypeId, arena: &TypeArena, pointer_type: Type) -> Type {
+    // Well-known sentinel types (Done, nil) are always represented as i8,
+    // regardless of whether they've been rebound to SemaType::Struct by the prelude.
+    if ty == TypeId::NIL || ty == TypeId::DONE {
+        return types::I8;
+    }
     use vole_sema::type_arena::SemaType as ArenaType;
     match arena.get(ty) {
         ArenaType::Primitive(PrimitiveType::I8) | ArenaType::Primitive(PrimitiveType::U8) => {
@@ -192,6 +197,11 @@ pub(crate) fn type_id_size(
     entity_registry: &EntityRegistry,
     arena: &TypeArena,
 ) -> u32 {
+    // Well-known sentinel types (Done, nil) are zero-sized,
+    // regardless of whether they've been rebound to SemaType::Struct by the prelude.
+    if ty == TypeId::NIL || ty == TypeId::DONE {
+        return 0;
+    }
     use vole_sema::type_arena::SemaType as ArenaType;
     match arena.get(ty) {
         ArenaType::Primitive(PrimitiveType::I8)
@@ -213,8 +223,9 @@ pub(crate) fn type_id_size(
             let max_payload = variants
                 .iter()
                 .map(|&t| {
-                    // Struct variants are auto-boxed, so their payload is a pointer
-                    if matches!(arena.get(t), ArenaType::Struct { .. }) {
+                    // Struct variants are auto-boxed, so their payload is a pointer.
+                    // Use arena.is_struct() which excludes well-known sentinels (Done, nil).
+                    if arena.is_struct(t) {
                         pointer_type.bytes()
                     } else {
                         type_id_size(t, pointer_type, entity_registry, arena)
