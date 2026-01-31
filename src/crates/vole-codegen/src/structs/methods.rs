@@ -732,6 +732,14 @@ impl Cg<'_, '_, '_> {
         // Compile the argument
         let value = self.expr(&mc.args[0])?;
 
+        // Structs are stack-allocated; copy to heap so the data survives
+        // if the array escapes the current stack frame.
+        let value = if self.arena().is_struct(value.type_id) {
+            self.copy_struct_to_heap(value)?
+        } else {
+            value
+        };
+
         // Get the runtime function reference
         let push_ref = self.runtime_func_ref(RuntimeFn::ArrayPush)?;
 

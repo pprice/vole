@@ -1028,6 +1028,48 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         })
     }
 
+    /// Copy a struct value to a heap allocation.
+    /// Used when storing structs into arrays so the data survives the current stack frame.
+    pub fn copy_struct_to_heap(&mut self, src: CompiledValue) -> Result<CompiledValue, String> {
+        let arena = self.arena();
+        let (type_def_id, _) = arena
+            .unwrap_struct(src.type_id)
+            .ok_or_else(|| "copy_struct_to_heap: expected struct type".to_string())?;
+        let type_def = self.query().get_type(type_def_id);
+        let field_count = type_def
+            .generic_info
+            .as_ref()
+            .map(|gi| gi.field_names.len())
+            .unwrap_or(0);
+
+        let total_size = (field_count as u32) * 8;
+        let ptr_type = self.ptr_type();
+
+        // Heap-allocate storage
+        let heap_alloc_ref = self.runtime_func_ref(RuntimeFn::HeapAlloc)?;
+        let size_val = self.builder.ins().iconst(ptr_type, total_size as i64);
+        let alloc_call = self.builder.ins().call(heap_alloc_ref, &[size_val]);
+        let heap_ptr = self.builder.inst_results(alloc_call)[0];
+
+        // Copy each field (8 bytes each) from stack to heap
+        for i in 0..field_count {
+            let offset = (i as i32) * 8;
+            let val = self
+                .builder
+                .ins()
+                .load(types::I64, MemFlags::new(), src.value, offset);
+            self.builder
+                .ins()
+                .store(MemFlags::new(), val, heap_ptr, offset);
+        }
+
+        Ok(CompiledValue {
+            value: heap_ptr,
+            ty: ptr_type,
+            type_id: src.type_id,
+        })
+    }
+
     // ========== Saturating arithmetic helpers ==========
 
     /// Signed saturating multiplication.

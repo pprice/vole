@@ -67,15 +67,13 @@ tests {
         assert(total == 10)
     }
 
-    // BUG(v-937d): returning [StructType] from function corrupts struct field data.
-    // The array length is correct but field values are wrong.
-    // test "array of structs returned from function" {
-    //     let points = make_points()
-    //     assert(points[0].x == 10)
-    //     assert(points[0].y == 20)
-    //     assert(points[1].x == 30)
-    //     assert(points[1].y == 40)
-    // }
+    test "array of structs returned from function" {
+        let points = make_points()
+        assert(points[0].x == 10)
+        assert(points[0].y == 20)
+        assert(points[1].x == 30)
+        assert(points[1].y == 40)
+    }
 
     test "single-element struct array" {
         let points = [Point { x: 1, y: 2 }]

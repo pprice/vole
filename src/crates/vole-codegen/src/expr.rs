@@ -471,6 +471,14 @@ impl Cg<'_, '_, '_> {
         for elem in elements.iter() {
             let compiled = self.expr(elem)?;
 
+            // Structs are stack-allocated; copy to heap so the data survives
+            // if the array escapes the current stack frame (e.g. returned from a function).
+            let compiled = if self.arena().is_struct(compiled.type_id) {
+                self.copy_struct_to_heap(compiled)?
+            } else {
+                compiled
+            };
+
             // Compute tag before using builder to avoid borrow conflict
             let tag = {
                 let arena = self.arena();
