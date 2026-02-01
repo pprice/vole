@@ -248,6 +248,13 @@ impl Cg<'_, '_, '_> {
                     }
                     let drop_flag = self.register_rc_local(var, final_type_id);
                     crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
+                } else if self.rc_scopes.has_active_scope() {
+                    // Check for composite types (struct, fixed array, tuple) with RC fields.
+                    // These need element-level cleanup on scope exit.
+                    if let Some(offsets) = self.composite_rc_field_offsets(final_type_id) {
+                        let drop_flag = self.register_composite_rc_local(var, offsets);
+                        crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
+                    }
                 }
 
                 Ok(false)

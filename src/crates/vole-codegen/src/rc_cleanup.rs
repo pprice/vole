@@ -7,7 +7,7 @@
 // Cranelift's SSA construction handles phi nodes when initialization is
 // conditional (e.g., variable set in one branch of an if but not the other).
 
-use cranelift::prelude::{FunctionBuilder, InstBuilder, IntCC, Variable, types};
+use cranelift::prelude::{FunctionBuilder, InstBuilder, IntCC, MemFlags, Variable, types};
 use vole_sema::type_arena::TypeId;
 
 /// A single RC local variable with its drop flag.
@@ -22,12 +22,25 @@ pub(crate) struct RcLocal {
     pub type_id: TypeId,
 }
 
+/// A composite local (struct, fixed array, tuple) that contains RC fields.
+/// At scope exit, each RC field/element is loaded from the base pointer and rc_dec'd.
+#[derive(Debug, Clone)]
+pub(crate) struct CompositeRcLocal {
+    /// The Cranelift Variable holding the base pointer (struct/array/tuple).
+    pub variable: Variable,
+    /// Drop flag: 1 = live, 0 = not yet initialized.
+    pub drop_flag: Variable,
+    /// Byte offsets of RC fields within the composite, relative to base pointer.
+    pub rc_field_offsets: Vec<i32>,
+}
+
 /// A scope that tracks RC locals introduced within it.
 ///
 /// Pushed when entering a block, popped when leaving.
 #[derive(Debug, Default)]
 pub(crate) struct RcScope {
     pub locals: Vec<RcLocal>,
+    pub composites: Vec<CompositeRcLocal>,
 }
 
 /// Stack of RC scopes. The outermost scope is index 0.
@@ -110,6 +123,40 @@ impl RcScopeStack {
             .map(|s| s.locals.as_slice())
             .unwrap_or(&[])
     }
+
+    /// Register a composite RC local in the current scope.
+    pub fn register_composite(
+        &mut self,
+        variable: Variable,
+        drop_flag: Variable,
+        rc_field_offsets: Vec<i32>,
+    ) {
+        let scope = self
+            .scopes
+            .last_mut()
+            .expect("register_composite called with no active RC scope");
+        scope.composites.push(CompositeRcLocal {
+            variable,
+            drop_flag,
+            rc_field_offsets,
+        });
+    }
+
+    /// Iterate all composite RC locals from all active scopes (innermost first).
+    pub fn all_composites_innermost_first(&self) -> impl Iterator<Item = &CompositeRcLocal> {
+        self.scopes.iter().rev().flat_map(|s| s.composites.iter())
+    }
+
+    /// Iterate composite RC locals from scopes at or above the given depth.
+    pub fn composites_from_depth(
+        &self,
+        target_depth: usize,
+    ) -> impl Iterator<Item = &CompositeRcLocal> {
+        self.scopes[target_depth..]
+            .iter()
+            .rev()
+            .flat_map(|s| s.composites.iter())
+    }
 }
 
 /// Emit cleanup code for a slice of RC locals.
@@ -162,4 +209,41 @@ pub(crate) fn alloc_drop_flag(builder: &mut FunctionBuilder) -> Variable {
 pub(crate) fn set_drop_flag_live(builder: &mut FunctionBuilder, drop_flag: Variable) {
     let one = builder.ins().iconst(types::I8, 1);
     builder.def_var(drop_flag, one);
+}
+
+/// Emit cleanup code for composite RC locals.
+///
+/// For each composite, checks the drop flag, then loads and rc_dec's each
+/// RC field at its byte offset from the base pointer.
+pub(crate) fn emit_composite_rc_cleanup(
+    builder: &mut FunctionBuilder,
+    composites: &[CompositeRcLocal],
+    rc_dec_ref: cranelift::codegen::ir::FuncRef,
+) {
+    for composite in composites {
+        let flag_val = builder.use_var(composite.drop_flag);
+        let is_live = builder.ins().icmp_imm(IntCC::NotEqual, flag_val, 0);
+
+        let cleanup_block = builder.create_block();
+        let after_block = builder.create_block();
+
+        builder
+            .ins()
+            .brif(is_live, cleanup_block, &[], after_block, &[]);
+
+        builder.switch_to_block(cleanup_block);
+        builder.seal_block(cleanup_block);
+
+        let base_ptr = builder.use_var(composite.variable);
+        for &offset in &composite.rc_field_offsets {
+            let field_val = builder
+                .ins()
+                .load(types::I64, MemFlags::new(), base_ptr, offset);
+            builder.ins().call(rc_dec_ref, &[field_val]);
+        }
+        builder.ins().jump(after_block, &[]);
+
+        builder.switch_to_block(after_block);
+        builder.seal_block(after_block);
+    }
 }

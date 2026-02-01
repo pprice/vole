@@ -458,6 +458,14 @@ impl Cg<'_, '_, '_> {
             };
 
             let value = self.expr(&init.value)?;
+            // RC: inc borrowed field values (e.g., reading from another struct's field)
+            // so the new struct gets its own reference.
+            if self.rc_scopes.has_active_scope()
+                && self.needs_rc_cleanup(value.type_id)
+                && self.expr_needs_rc_inc(&init.value)
+            {
+                self.emit_rc_inc(value.value)?;
+            }
             self.store_struct_field(value, slot, offset)?;
         }
 

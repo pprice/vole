@@ -600,6 +600,16 @@ impl Cg<'_, '_, '_> {
             let compiled = self.expr(elem)?;
             let offset = offsets[i];
 
+            // RC: inc borrowed RC elements so the tuple gets its own reference.
+            // Without this, the element's original binding and the tuple would
+            // share a single refcount, causing double-free on scope exit.
+            if self.rc_scopes.has_active_scope()
+                && self.needs_rc_cleanup(compiled.type_id)
+                && self.expr_needs_rc_inc(elem)
+            {
+                self.emit_rc_inc(compiled.value)?;
+            }
+
             // Store the value at its offset in the tuple
             self.builder.ins().stack_store(compiled.value, slot, offset);
         }
@@ -633,8 +643,15 @@ impl Cg<'_, '_, '_> {
         // Create stack slot for the fixed array
         let slot = self.alloc_stack(total_size);
 
-        // Store the element value at each position
+        // Store the element value at each position.
+        // For RC elements, each copy beyond the first needs rc_inc since
+        // multiple slots share the same pointer.
+        let needs_rc =
+            self.rc_scopes.has_active_scope() && self.needs_rc_cleanup(elem_value.type_id);
         for i in 0..count {
+            if needs_rc && i > 0 {
+                self.emit_rc_inc(elem_value.value)?;
+            }
             let offset = (i as i32) * (elem_size as i32);
             self.builder
                 .ins()
@@ -810,7 +827,7 @@ impl Cg<'_, '_, '_> {
         let fixed_array_info = arena.unwrap_fixed_array(arr.type_id);
         let is_dynamic_array = arena.is_array(arr.type_id);
 
-        if let Some((_elem_type_id, size)) = fixed_array_info {
+        if let Some((elem_type_id, size)) = fixed_array_info {
             // Fixed array assignment - store directly at offset
             let elem_size = 8i32; // All elements aligned to 8 bytes
 
@@ -845,9 +862,31 @@ impl Cg<'_, '_, '_> {
             };
 
             let elem_ptr = self.builder.ins().iadd(arr.value, offset);
+
+            // RC bookkeeping for fixed array element overwrite:
+            // 1. Load old element value
+            // 2. rc_inc new if it's a borrow
+            // 3. Store new value
+            // 4. rc_dec old (after store, in case old == new)
+            let rc_old = if self.rc_scopes.has_active_scope() && self.needs_rc_cleanup(elem_type_id)
+            {
+                Some(
+                    self.builder
+                        .ins()
+                        .load(types::I64, MemFlags::new(), elem_ptr, 0),
+                )
+            } else {
+                None
+            };
+            if rc_old.is_some() && self.expr_needs_rc_inc(value) {
+                self.emit_rc_inc(val.value)?;
+            }
             self.builder
                 .ins()
                 .store(MemFlags::new(), val.value, elem_ptr, 0);
+            if let Some(old_val) = rc_old {
+                self.emit_rc_dec(old_val)?;
+            }
 
             Ok(val)
         } else if is_dynamic_array {

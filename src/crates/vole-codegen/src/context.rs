@@ -223,8 +223,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Check if a type needs RC cleanup in codegen.
     ///
-    /// Currently conservative: only String variables get scope-exit cleanup.
-    /// Other RC types (Array, Iterator, Instance, Closure) have their lifetimes
+    /// Currently conservative: only String and Array variables get scope-exit cleanup.
+    /// Other RC types (Iterator, Instance, Closure) have their lifetimes
     /// managed by the runtime (e.g., collect() decs the iterator). Emitting
     /// scope-exit rc_dec for those would cause double-frees.
     ///
@@ -241,8 +241,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // NOT yet enabled for:
         // - Class instances: instance_drop already decs RC fields, so scope-exit
         //   dec would double-free. Needs field-level rc_inc first (v-17c5).
-        // - Closures: don't have RcHeader at all (different allocation).
-        // - Functions: closure wrappers, same issue as closures.
+        // - Closures: now have RcHeader with closure_drop, but scope-exit tracking
+        //   would double-free since callers take ownership. Closure cleanup happens
+        //   via closure_drop when refcount reaches zero.
+        // - Functions: closure wrappers, same lifecycle as closures.
         // - Iterators: complex lifecycle managed by the runtime (collect, etc.).
         // - Interfaces: boxed values (fat pointers), not raw RC pointers.
         // - Structs: stack-allocated value types.
@@ -250,12 +252,25 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         arena.is_string(type_id) || arena.is_array(type_id)
     }
 
+    /// Check if a captured variable type is RC-managed and needs rc_inc/rc_dec.
+    ///
+    /// This is used by closure compilation to set capture_kinds. A capture is
+    /// considered RC if its runtime representation is a pointer to an RcHeader-
+    /// managed heap object (string, array, function/closure, class instance).
+    pub fn is_capture_rc(&self, type_id: TypeId) -> bool {
+        let arena = self.arena();
+        arena.is_string(type_id)
+            || arena.is_array(type_id)
+            || arena.is_function(type_id)
+            || arena.is_class(type_id)
+    }
+
     /// Push a new RC scope (called when entering a block).
     pub fn push_rc_scope(&mut self) {
         self.rc_scopes.push_scope();
     }
 
-    /// Pop the current RC scope and emit cleanup for its RC locals.
+    /// Pop the current RC scope and emit cleanup for its RC locals and composites.
     /// `skip_var` optionally specifies a variable whose ownership is being
     /// transferred out (e.g., the block result) and should NOT be dec'd.
     pub fn pop_rc_scope_with_cleanup(&mut self, skip_var: Option<Variable>) -> Result<(), String> {
@@ -263,6 +278,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         if let Some(scope) = scope {
             let rc_dec_ref = self.runtime_func_ref(RuntimeFn::RcDec)?;
             self.emit_rc_locals_cleanup(&scope.locals, skip_var, rc_dec_ref);
+            if !scope.composites.is_empty() {
+                super::rc_cleanup::emit_composite_rc_cleanup(
+                    self.builder,
+                    &scope.composites,
+                    rc_dec_ref,
+                );
+            }
         }
         Ok(())
     }
@@ -275,9 +297,18 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .all_locals_innermost_first()
             .copied()
             .collect();
-        if !locals.is_empty() {
+        let composites: Vec<_> = self
+            .rc_scopes
+            .all_composites_innermost_first()
+            .cloned()
+            .collect();
+        let has_work = !locals.is_empty() || !composites.is_empty();
+        if has_work {
             let rc_dec_ref = self.runtime_func_ref(RuntimeFn::RcDec)?;
             self.emit_rc_locals_cleanup(&locals, skip_var, rc_dec_ref);
+            if !composites.is_empty() {
+                super::rc_cleanup::emit_composite_rc_cleanup(self.builder, &composites, rc_dec_ref);
+            }
         }
         Ok(())
     }
@@ -290,9 +321,18 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .locals_from_depth(target_depth)
             .copied()
             .collect();
-        if !locals.is_empty() {
+        let composites: Vec<_> = self
+            .rc_scopes
+            .composites_from_depth(target_depth)
+            .cloned()
+            .collect();
+        let has_work = !locals.is_empty() || !composites.is_empty();
+        if has_work {
             let rc_dec_ref = self.runtime_func_ref(RuntimeFn::RcDec)?;
             self.emit_rc_locals_cleanup(&locals, None, rc_dec_ref);
+            if !composites.is_empty() {
+                super::rc_cleanup::emit_composite_rc_cleanup(self.builder, &composites, rc_dec_ref);
+            }
         }
         Ok(())
     }
@@ -343,11 +383,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             ExprKind::Identifier(sym) => self.vars.contains_key(sym),
             // Array/tuple index reads borrow from the container.
             ExprKind::Index(_) => true,
-            // FieldAccess on structs (stack-allocated) is an ownership transfer,
-            // not a borrow, because the struct won't dec its fields.
-            // Once class-instance RC is enabled (v-17c5), instance field access
-            // WILL need inc. For now, all relevant field accesses are on structs.
-            ExprKind::FieldAccess(_) => false,
+            // FieldAccess borrows from the parent struct/instance.
+            // If the field value is RC (string, array), the caller must inc
+            // to balance the scope-exit dec on the new binding.
+            ExprKind::FieldAccess(_) => true,
             // Transparent wrappers: look through them.
             ExprKind::Grouping(inner) => self.expr_needs_rc_inc(inner),
             // Everything else produces a fresh +1 reference (calls, literals,
@@ -363,6 +402,75 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let drop_flag = super::rc_cleanup::alloc_drop_flag(self.builder);
         self.rc_scopes
             .register_rc_local(variable, drop_flag, type_id);
+        drop_flag
+    }
+
+    /// Compute the byte offsets of RC fields within a composite type.
+    /// Returns None if the type has no RC fields needing cleanup, or Some(offsets).
+    pub fn composite_rc_field_offsets(&self, type_id: TypeId) -> Option<Vec<i32>> {
+        let arena = self.arena();
+
+        // Struct: iterate fields, collect offsets of RC-typed fields
+        if let Some((type_def_id, _)) = arena.unwrap_struct(type_id) {
+            let entities = self.query().registry();
+            let type_def = entities.get_type(type_def_id);
+            let generic_info = type_def.generic_info.as_ref()?;
+            let field_types = &generic_info.field_types;
+            let mut offsets = Vec::new();
+            let mut byte_offset = 0i32;
+            for field_type in field_types {
+                let slots = super::structs::field_flat_slots(*field_type, arena, entities);
+                if self.needs_rc_cleanup(*field_type) {
+                    offsets.push(byte_offset);
+                }
+                byte_offset += (slots as i32) * 8;
+            }
+            if offsets.is_empty() {
+                return None;
+            }
+            return Some(offsets);
+        }
+
+        // Fixed array: if element type is RC, all elements need cleanup
+        if let Some((elem_type_id, size)) = arena.unwrap_fixed_array(type_id) {
+            if self.needs_rc_cleanup(elem_type_id) {
+                let offsets: Vec<i32> = (0..size).map(|i| (i as i32) * 8).collect();
+                return Some(offsets);
+            }
+            return None;
+        }
+
+        // Tuple: use tuple_layout_id to get correct offsets, then filter RC elements
+        if let Some(elem_types) = arena.unwrap_tuple(type_id).cloned() {
+            let entities = self.query().registry();
+            let ptr_type = self.ptr_type();
+            let (_total, all_offsets) =
+                super::types::tuple_layout_id(&elem_types, ptr_type, entities, arena);
+            let mut rc_offsets = Vec::new();
+            for (i, elem_type) in elem_types.iter().enumerate() {
+                if self.needs_rc_cleanup(*elem_type) {
+                    rc_offsets.push(all_offsets[i]);
+                }
+            }
+            if rc_offsets.is_empty() {
+                return None;
+            }
+            return Some(rc_offsets);
+        }
+
+        None
+    }
+
+    /// Register a composite RC local (struct/fixed-array/tuple with RC fields)
+    /// in the current scope. Returns the drop flag Variable.
+    pub fn register_composite_rc_local(
+        &mut self,
+        variable: Variable,
+        rc_field_offsets: Vec<i32>,
+    ) -> Variable {
+        let drop_flag = super::rc_cleanup::alloc_drop_flag(self.builder);
+        self.rc_scopes
+            .register_composite(variable, drop_flag, rc_field_offsets);
         drop_flag
     }
 

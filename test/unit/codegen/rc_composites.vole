@@ -1,0 +1,159 @@
+// RC for composite value types containing RC elements.
+//
+// Tests: struct field read/write, tuples with strings, fixed arrays of strings.
+// These exercise codegen's handling of RC ops for non-trivial value types.
+
+struct Named { name: string, value: i64 }
+
+struct Pair { first: string, second: string }
+
+struct Nested { inner: Named, tag: string }
+
+func read_named_name(s: Named) -> string {
+    return s.name
+}
+
+func make_named(n: string, v: i64) -> Named {
+    return Named { name: n, value: v }
+}
+
+func read_pair_first(p: Pair) -> string {
+    return p.first
+}
+
+func extract_nested_name(n: Nested) -> string {
+    return n.inner.name
+}
+
+func extract_nested_tag(n: Nested) -> string {
+    return n.tag
+}
+
+tests "struct field read" {
+    test "read string field from struct" {
+        let s = Named { name: "hello", value: 42 }
+        let n = s.name
+        assert(n == "hello")
+        assert(s.name == "hello")
+    }
+
+    test "read string field via function" {
+        let s = Named { name: "captured", value: 1 }
+        let n = read_named_name(s)
+        assert(n == "captured")
+    }
+
+    test "read both string fields" {
+        let p = Pair { first: "a", second: "b" }
+        let f = p.first
+        let s = p.second
+        assert(f == "a")
+        assert(s == "b")
+    }
+
+    test "read string field multiple times" {
+        let s = Named { name: "shared", value: 0 }
+        let a = s.name
+        let b = s.name
+        let c = s.name
+        assert(a == "shared")
+        assert(b == "shared")
+        assert(c == "shared")
+    }
+}
+
+tests "struct field assignment" {
+    test "overwrite string field" {
+        let mut s = Named { name: "old", value: 1 }
+        s.name = "new"
+        assert(s.name == "new")
+    }
+
+    test "overwrite string field with variable" {
+        let mut s = Named { name: "old", value: 1 }
+        let replacement = "new"
+        s.name = replacement
+        assert(s.name == "new")
+    }
+
+    test "overwrite both string fields" {
+        let mut p = Pair { first: "a", second: "b" }
+        p.first = "x"
+        p.second = "y"
+        assert(p.first == "x")
+        assert(p.second == "y")
+    }
+
+    test "overwrite string field in loop" {
+        let mut s = Named { name: "start", value: 0 }
+        let names = ["one", "two", "three"]
+        for n in names {
+            s.name = n
+        }
+        assert(s.name == "three")
+    }
+}
+
+tests "tuple with strings" {
+    test "tuple with string element" {
+        let t = ["hello", 42]
+        assert(t[0] == "hello")
+        assert(t[1] == 42)
+    }
+
+    test "tuple of two strings" {
+        let t = ["first", "second"]
+        let a = t[0]
+        let b = t[1]
+        assert(a == "first")
+        assert(b == "second")
+    }
+
+    test "tuple string destructuring" {
+        let [a, b] = ["alpha", 99]
+        assert(a == "alpha")
+        assert(b == 99)
+    }
+}
+
+tests "fixed array of strings" {
+    test "fixed array string repeat" {
+        let arr: [string; 3] = ["hello"; 3]
+        assert(arr[0] == "hello")
+        assert(arr[1] == "hello")
+        assert(arr[2] == "hello")
+    }
+
+    test "fixed array of strings read into locals" {
+        let arr: [string; 2] = ["test"; 2]
+        let x = arr[0]
+        let y = arr[1]
+        assert(x == "test")
+        assert(y == "test")
+    }
+
+    test "fixed array string element overwrite" {
+        let mut arr: [string; 2] = ["old"; 2]
+        arr[0] = "new"
+        assert(arr[0] == "new")
+        assert(arr[1] == "old")
+    }
+}
+
+tests "nested struct with strings" {
+    test "nested struct field read" {
+        let inner = Named { name: "deep", value: 10 }
+        let n = Nested { inner: inner, tag: "outer" }
+        assert(n.inner.name == "deep")
+        assert(n.tag == "outer")
+    }
+
+    test "nested struct field into local" {
+        let inner = Named { name: "deep", value: 10 }
+        let n = Nested { inner: inner, tag: "outer" }
+        let name = n.inner.name
+        let tag = n.tag
+        assert(name == "deep")
+        assert(tag == "outer")
+    }
+}

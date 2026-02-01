@@ -275,10 +275,32 @@ impl Cg<'_, '_, '_> {
                         .store(MemFlags::new(), val, obj.value, dst_off);
                 }
             } else {
+                // RC bookkeeping for struct field overwrite:
+                // 1. Load old value (before store)
+                // 2. rc_inc new if it's a borrow
+                // 3. Store new value
+                // 4. rc_dec old (after store, in case old == new)
+                let rc_old = if self.rc_scopes.has_active_scope()
+                    && self.needs_rc_cleanup(field_type_id)
+                {
+                    Some(
+                        self.builder
+                            .ins()
+                            .load(types::I64, MemFlags::new(), obj.value, offset),
+                    )
+                } else {
+                    None
+                };
+                if rc_old.is_some() && self.expr_needs_rc_inc(value_expr) {
+                    self.emit_rc_inc(value.value)?;
+                }
                 let store_value = convert_to_i64_for_storage(self.builder, &value);
                 self.builder
                     .ins()
                     .store(MemFlags::new(), store_value, obj.value, offset);
+                if let Some(old_val) = rc_old {
+                    self.emit_rc_dec(old_val)?;
+                }
             }
             return Ok(value);
         }
