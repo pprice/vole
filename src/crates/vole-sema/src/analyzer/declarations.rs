@@ -353,6 +353,7 @@ impl Analyzer {
                     let type_id = self.resolve_type_id(&p.ty, interner);
                     self.check_never_not_allowed(type_id, p.span);
                     self.check_union_simplification(&p.ty, p.span);
+                    self.check_combination_not_allowed(&p.ty, p.span);
                     type_id
                 })
                 .collect();
@@ -363,6 +364,7 @@ impl Analyzer {
                 .unwrap_or_else(|| self.type_arena().void());
             if let Some(rt) = &func.return_type {
                 self.check_union_simplification(rt, func.span);
+                self.check_combination_not_allowed(rt, func.span);
             }
 
             let signature = FunctionType::from_ids(&params_id, return_type_id, false);
@@ -452,6 +454,10 @@ impl Analyzer {
             for (param, &type_id) in func.params.iter().zip(&param_type_ids) {
                 self.check_never_not_allowed(type_id, param.span);
                 self.check_union_simplification(&param.ty, param.span);
+                self.check_combination_not_allowed(&param.ty, param.span);
+            }
+            if let Some(rt) = &func.return_type {
+                self.check_combination_not_allowed(rt, func.span);
             }
 
             // Create a FunctionType from TypeIds
@@ -570,6 +576,7 @@ impl Analyzer {
         for (param, &type_id) in params.iter().zip(&params_id) {
             self.check_never_not_allowed(type_id, param.span);
             self.check_union_simplification(&param.ty, param.span);
+            self.check_combination_not_allowed(&param.ty, param.span);
         }
 
         let return_type_id = return_type
@@ -1133,6 +1140,7 @@ impl Analyzer {
         for (field, &type_id) in fields.iter().zip(&field_type_ids) {
             self.check_never_not_allowed(type_id, field.span);
             self.check_union_simplification(&field.ty, field.span);
+            self.check_combination_not_allowed(&field.ty, field.span);
         }
 
         (field_names, field_type_ids)

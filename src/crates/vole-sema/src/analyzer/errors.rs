@@ -157,6 +157,58 @@ impl Analyzer {
         }
     }
 
+    /// Check if a type expression is or contains a `Combination` (intersection type `A + B`)
+    /// and emit E2103. Intersection types are only valid in type constraints, not type positions.
+    pub(crate) fn check_combination_not_allowed(&mut self, ty: &TypeExpr, span: Span) {
+        match ty {
+            TypeExpr::Combination(_) => {
+                self.add_error(
+                    SemanticError::CombinationTypeNotAllowed { span: span.into() },
+                    span,
+                );
+            }
+            // Recurse into container types
+            TypeExpr::Array(inner) | TypeExpr::Optional(inner) => {
+                self.check_combination_not_allowed(inner, span);
+            }
+            TypeExpr::FixedArray { element, .. } => {
+                self.check_combination_not_allowed(element, span);
+            }
+            TypeExpr::Tuple(elements) => {
+                for elem in elements {
+                    self.check_combination_not_allowed(elem, span);
+                }
+            }
+            TypeExpr::Union(variants) => {
+                for variant in variants {
+                    self.check_combination_not_allowed(variant, span);
+                }
+            }
+            TypeExpr::Function {
+                params,
+                return_type,
+            } => {
+                for param in params {
+                    self.check_combination_not_allowed(param, span);
+                }
+                self.check_combination_not_allowed(return_type, span);
+            }
+            TypeExpr::Fallible {
+                success_type,
+                error_type,
+            } => {
+                self.check_combination_not_allowed(success_type, span);
+                self.check_combination_not_allowed(error_type, span);
+            }
+            TypeExpr::Generic { args, .. } => {
+                for arg in args {
+                    self.check_combination_not_allowed(arg, span);
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// Check if a type expression contains a union with `never` or `unknown` and emit W3004.
     /// This walks the type expression tree to catch nested unions like `[i32 | never]`.
     pub(crate) fn check_union_simplification(&mut self, ty: &TypeExpr, span: Span) {

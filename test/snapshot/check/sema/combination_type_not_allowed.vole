@@ -1,0 +1,25 @@
+// Test that intersection types (A + B) are not allowed in type positions
+
+interface Foo {
+    func foo() -> string
+}
+
+interface Bar {
+    func bar() -> i32
+}
+
+// Error: intersection type in parameter position
+func bad_param(x: Foo + Bar) {
+}
+
+// Error: intersection type in return type position
+func bad_return() -> Foo + Bar {
+}
+
+// Error: intersection type in variable declaration
+let x: Foo + Bar = 0
+
+// Error: intersection type in class field
+class Bad {
+    f: Foo + Bar,
+}

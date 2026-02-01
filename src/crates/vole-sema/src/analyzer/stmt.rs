@@ -153,6 +153,7 @@ impl Analyzer {
                         }
                         if let Some(ty) = &let_stmt.ty {
                             self.check_union_simplification(ty, let_stmt.span);
+                            self.check_combination_not_allowed(ty, let_stmt.span);
                         }
 
                         // Store declared type for codegen (keyed by init expression id)

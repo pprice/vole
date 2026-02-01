@@ -1,0 +1,56 @@
+[stdout]
+
+[stderr]
+  x [E2103]: intersection types (`A + B`) are not supported in type positions
+    ,-[<path>/combination_type_not_allowed.vole:24:5]
+ 23 | class Bad {
+ 24 |     f: Foo + Bar,
+    :     ^^^^^^|^^^^^^
+    :           `-- intersection type not allowed here
+ 25 | }
+    `----
+  help: use type constraints instead: `<T: A + B>`
+  x [E2103]: intersection types (`A + B`) are not supported in type positions
+    ,-[<path>/combination_type_not_allowed.vole:12:16]
+ 11 | // Error: intersection type in parameter position
+ 12 | func bad_param(x: Foo + Bar) {
+    :                |
+    :                `-- intersection type not allowed here
+ 13 | }
+    `----
+  help: use type constraints instead: `<T: A + B>`
+  x [E2103]: intersection types (`A + B`) are not supported in type positions
+    ,-[<path>/combination_type_not_allowed.vole:16:1]
+ 15 |     // Error: intersection type in return type position
+ 16 | ,-> func bad_return() -> Foo + Bar {
+ 17 | |-> }
+    : `---- intersection type not allowed here
+ 18 |     
+    `----
+  help: use type constraints instead: `<T: A + B>`
+  x [E2103]: intersection types (`A + B`) are not supported in type positions
+    ,-[<path>/combination_type_not_allowed.vole:20:1]
+ 19 | // Error: intersection type in variable declaration
+ 20 | let x: Foo + Bar = 0
+    : ^^^^^^^^^^|^^^^^^^^^
+    :           `-- intersection type not allowed here
+ 21 | 
+    `----
+  help: use type constraints instead: `<T: A + B>`
+  x [E2001]: expected <invalid>, found integer literal
+    ,-[<path>/combination_type_not_allowed.vole:20:20]
+ 19 | // Error: intersection type in variable declaration
+ 20 | let x: Foo + Bar = 0
+    :                    |
+    :                    `-- type mismatch
+ 21 | 
+    `----
+  x [E2083]: missing return statement in function 'bad_return'
+    ,-[<path>/combination_type_not_allowed.vole:16:1]
+ 15 |     // Error: intersection type in return type position
+ 16 | ,-> func bad_return() -> Foo + Bar {
+ 17 | |-> }
+    : `---- function expects to return <invalid>
+ 18 |     
+    `----
+  help: add a return statement, or change return type to void

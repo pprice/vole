@@ -681,6 +681,13 @@ pub enum SemanticError {
         #[label("struct type not allowed as type argument")]
         span: SourceSpan,
     },
+
+    #[error("intersection types (`A + B`) are not supported in type positions")]
+    #[diagnostic(code(E2103), help("use type constraints instead: `<T: A + B>`"))]
+    CombinationTypeNotAllowed {
+        #[label("intersection type not allowed here")]
+        span: SourceSpan,
+    },
 }
 
 /// Semantic warnings (W3xxx) - these don't prevent compilation but indicate potential issues
