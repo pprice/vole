@@ -26,9 +26,9 @@ impl CompiledModules {
     /// Create a new CompiledModules from a finalized JitContext.
     /// Extracts function pointers for all declared functions.
     /// `module_paths` is the list of module paths that were processed.
-    pub fn new(mut jit: JitContext, module_paths: Vec<String>) -> Self {
+    pub fn new(mut jit: JitContext, module_paths: Vec<String>) -> Result<Self, String> {
         // Finalize to get function pointers
-        let _ = jit.finalize();
+        jit.finalize()?;
 
         // Extract all function pointers
         let functions: FxHashMap<String, *const u8> = jit
@@ -40,11 +40,11 @@ impl CompiledModules {
             })
             .collect();
 
-        Self {
+        Ok(Self {
             jit,
             functions,
             compiled_module_paths: module_paths.into_iter().collect(),
-        }
+        })
     }
 
     /// Check if a function by name is present in the compiled modules
@@ -1161,7 +1161,7 @@ mod tests {
         builder.finalize();
 
         jit.define_function(func_id).unwrap();
-        let _ = jit.finalize();
+        jit.finalize().expect("finalization should succeed");
 
         // Get and call the function
         let fn_ptr = jit.get_function_ptr("answer").unwrap();
@@ -1195,7 +1195,7 @@ mod tests {
         builder.finalize();
 
         jit.define_function(func_id).unwrap();
-        let _ = jit.finalize();
+        jit.finalize().expect("finalization should succeed");
 
         let fn_ptr = jit.get_function_ptr("add").unwrap();
         let add: extern "C" fn(i64, i64) -> i64 = unsafe { std::mem::transmute(fn_ptr) };

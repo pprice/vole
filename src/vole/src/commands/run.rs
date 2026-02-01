@@ -71,7 +71,7 @@ fn execute(path: &Path, project_root: Option<&Path>, release: bool) -> Result<()
                 .compile_program(&analyzed.program)
                 .map_err(|e| format!("compilation error: {}", e))?;
         }
-        let _ = jit.finalize();
+        jit.finalize()?;
         tracing::debug!("compilation complete");
         jit
     };

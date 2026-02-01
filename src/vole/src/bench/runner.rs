@@ -169,7 +169,7 @@ fn compile_with_timing(source: &str, file_path: &str) -> Result<CompileTiming, S
 
     // Finalize phase
     let finalize_start = Instant::now();
-    let _ = jit.finalize();
+    jit.finalize()?;
     let finalize_ns = finalize_start.elapsed().as_nanos() as u64;
 
     let total_ns = total_start.elapsed().as_nanos() as u64;
@@ -216,7 +216,7 @@ fn compile_to_jit(source: &str, file_path: &str) -> Result<JitContext, String> {
             .compile_program(&analyzed.program)
             .map_err(|e| format!("codegen error: {}", e))?;
     }
-    let _ = jit.finalize();
+    jit.finalize()?;
 
     Ok(jit)
 }

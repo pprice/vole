@@ -496,7 +496,10 @@ pub fn run_captured<W: Write + Send + 'static>(
             return Err(());
         }
     }
-    let _ = jit.finalize();
+    if let Err(e) = jit.finalize() {
+        let _ = writeln!(stderr, "finalization error: {}", e);
+        return Err(());
+    }
 
     // Execute with captured stdout
     let fn_ptr = match jit.get_function_ptr("main") {

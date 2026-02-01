@@ -481,7 +481,12 @@ fn run_source_tests_with_modules(
                 Ok(()) => {
                     let module_paths: Vec<String> =
                         analyzed.module_programs.keys().cloned().collect();
-                    *compiled_modules = Some(CompiledModules::new(modules_jit, module_paths));
+                    match CompiledModules::new(modules_jit, module_paths) {
+                        Ok(modules) => *compiled_modules = Some(modules),
+                        Err(e) => {
+                            tracing::warn!("Modules finalization failed: {}", e);
+                        }
+                    }
                 }
                 Err(e) => {
                     tracing::warn!("Modules compilation failed: {}", e);
@@ -516,7 +521,7 @@ fn run_source_tests_with_modules(
 
     // Finalize only on successful compilation
     let mut jit = jit;
-    let _ = jit.finalize();
+    jit.finalize()?;
 
     // Filter tests if a filter is provided
     let tests = if let Some(pattern) = filter {
@@ -652,7 +657,7 @@ fn run_source_tests_with_progress(
     }
 
     // Finalize only on successful compilation
-    let _ = jit.finalize();
+    jit.finalize()?;
 
     // Filter tests if a filter is provided
     let tests = if let Some(pattern) = filter {
