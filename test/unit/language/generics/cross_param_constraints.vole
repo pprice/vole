@@ -1,0 +1,108 @@
+// Cross-parameter constraint references (v-5a80)
+// Type parameters referencing other type parameters in constraints
+
+interface Producer<T> {
+    func produce() -> T
+}
+
+interface Consumer<T> {
+    func consume(value: T) -> string
+}
+
+interface Transformer<A, B> {
+    func transform(input: A) -> B
+}
+
+interface Wrapper<T> {
+    func unwrap() -> T
+}
+
+class IntProducer {
+    value: i64,
+    func produce() -> i64 { return self.value }
+}
+
+class IntConsumer {
+    func consume(value: i64) -> string { return value.to_string() }
+}
+
+class IntWrapper {
+    value: i64,
+    func unwrap() -> i64 { return self.value }
+}
+
+class IntToString {
+    func transform(input: i64) -> string { return input.to_string() }
+}
+
+class SelfProducer {
+    value: i64,
+    func produce() -> SelfProducer { return SelfProducer { value: self.value + 1 } }
+}
+
+// Multiple params referencing the same type param T
+func pipe<T, P: Producer<T>, C: Consumer<T>>(producer: P, consumer: C) -> string {
+    return consumer.consume(producer.produce())
+}
+
+// Forward reference: B's constraint references A
+func forward<A, B: Producer<A>>(b: B) -> A {
+    return b.produce()
+}
+
+// Chained references across multiple params
+func chain<A, B, W: Wrapper<A>, T: Transformer<A, B>>(w: W, t: T) -> B {
+    return t.transform(w.unwrap())
+}
+
+// Self-referencing constraint: A: Producer<A>
+func self_ref<A: Producer<A>>(a: A) -> A {
+    return a.produce()
+}
+
+// Circular constraint references: A: Producer<B>, B: Producer<A>
+class FooProducer {
+    func produce() -> BarProducer { return BarProducer {} }
+}
+
+class BarProducer {
+    func produce() -> FooProducer { return FooProducer {} }
+}
+
+func circular<A: Producer<B>, B: Producer<A>>(a: A, b: B) -> A {
+    return b.produce()
+}
+
+tests "cross-parameter constraint references" {
+    test "multiple params referencing same type param" {
+        let p = IntProducer { value: 42 }
+        let c = IntConsumer {}
+        let result = pipe(p, c)
+        assert(result == "42")
+    }
+
+    test "forward reference: B references A" {
+        let p = IntProducer { value: 77 }
+        let result = forward(p)
+        assert(result == 77)
+    }
+
+    test "chained references: W refs A, T refs A and B" {
+        let w = IntWrapper { value: 99 }
+        let t = IntToString {}
+        let result = chain(w, t)
+        assert(result == "99")
+    }
+
+    test "self-referencing constraint: A: Producer<A>" {
+        let s = SelfProducer { value: 10 }
+        let result = self_ref(s)
+        assert(result.value == 11)
+    }
+
+    test "circular constraints: A: Producer<B>, B: Producer<A>" {
+        let a = FooProducer {}
+        let b = BarProducer {}
+        let result = circular(a, b)
+    }
+}

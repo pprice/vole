@@ -1,0 +1,27 @@
+// Error: cross-parameter constraint mismatch when T unifies inconsistently
+interface Producer<T> {
+    func produce() -> T
+}
+
+interface Consumer<T> {
+    func consume(value: T) -> string
+}
+
+class IntProducer {
+    value: i64,
+    func produce() -> i64 { return self.value }
+}
+
+class StringConsumer {
+    func consume(value: string) -> string { return value }
+}
+
+func pipe<T, P: Producer<T>, C: Consumer<T>>(producer: P, consumer: C) -> string {
+    return consumer.consume(producer.produce())
+}
+
+func main() {
+    let p = IntProducer { value: 42 }
+    let c = StringConsumer {}
+    pipe(p, c)
+}

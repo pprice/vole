@@ -1,5 +1,4 @@
-// FAILING TEST - see ticket v-2dfb
-// Parameterized interface constraints don't work (e.g., P: Producer<T>)
+// Parameterized interface constraints (e.g., P: Producer<T>)
 
 interface Producer<T> {
     func produce() -> T
