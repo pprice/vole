@@ -352,6 +352,23 @@ impl<'src> Parser<'src> {
         })
     }
 
+    /// Parse a structural method parameter: either `name: Type` or bare `Type`.
+    /// In both cases, only the type is kept (parameter names are discarded).
+    fn parse_structural_method_param(&mut self) -> Result<TypeExpr, ParseError> {
+        // Check for `name: Type` pattern (identifier followed by colon)
+        if self.check(TokenType::Identifier) {
+            let next = self.peek_token();
+            if next.ty == TokenType::Colon {
+                // Skip the parameter name and colon, parse just the type
+                self.advance(); // consume identifier (param name)
+                self.advance(); // consume ':'
+                return self.parse_type();
+            }
+        }
+        // Otherwise parse as bare type
+        self.parse_type()
+    }
+
     /// Parse a structural type: { name: Type, func method() -> Type }
     fn parse_structural_type(&mut self) -> Result<TypeExpr, ParseError> {
         let mut fields = Vec::new();
@@ -376,12 +393,12 @@ impl<'src> Parser<'src> {
                 self.consume(TokenType::LParen, "expected '(' after method name")?;
                 let mut params = Vec::new();
                 if !self.check(TokenType::RParen) {
-                    params.push(self.parse_type()?);
+                    params.push(self.parse_structural_method_param()?);
                     while self.match_token(TokenType::Comma) {
                         if self.check(TokenType::RParen) {
                             break; // trailing comma
                         }
-                        params.push(self.parse_type()?);
+                        params.push(self.parse_structural_method_param()?);
                     }
                 }
                 self.consume(TokenType::RParen, "expected ')' after method parameters")?;

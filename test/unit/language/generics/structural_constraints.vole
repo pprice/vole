@@ -6,7 +6,6 @@
 // - Type compatibility with structural types (e.g., assigning Record to { field: type })
 //
 // NOT YET SUPPORTED (see tickets):
-// - Method constraints with params: <T: { func add(n: i64) -> i64 }> (v-218a)
 // - Field access in lambdas with constrained types (v-807b)
 // - Structural type function parameters with field/method access (v-5e8a)
 //   (e.g., func f(x: { name: string }) -> x.name - requires implicit generification)
@@ -45,6 +44,23 @@ func get_label<T: { func label() -> string }>(x: T) -> string {
 
 func call_validate<T: { func validate() -> bool }>(x: T) -> bool {
     return x.validate()
+}
+
+// ============================================================================
+// Method constraint functions (with parameters)
+// ============================================================================
+
+func call_add<T: { func add(n: i64) -> i64 }>(x: T) -> i64 {
+    return x.add(5)
+}
+
+func call_combine<T: { func combine(a: string, b: string) -> string }>(x: T) -> string {
+    return x.combine("hello", "world")
+}
+
+func call_mixed_methods<T: { func get() -> i64, func set(v: i64) -> void }>(x: T) -> i64 {
+    x.set(99)
+    return x.get()
 }
 
 // ============================================================================
@@ -121,12 +137,28 @@ class InvalidUser {
 
 class Entity {
     id: i64,
-    
+
     statics {
         func new(id: i64) -> Entity {
             return Entity { id: id }
         }
     }
+}
+
+class Accumulator {
+    value: i64,
+    func add(n: i64) -> i64 { return self.value + n }
+}
+
+class StringJoiner {
+    sep: string,
+    func combine(a: string, b: string) -> string { return a + self.sep + b }
+}
+
+class MutableCounter {
+    count: i64,
+    func get() -> i64 { return self.count }
+    func set(v: i64) -> void { self.count = v }
 }
 
 // ============================================================================
@@ -193,6 +225,23 @@ tests "method constraints - no parameters" {
     }
 }
 
+tests "method constraints - with parameters" {
+    test "single parameter method" {
+        let a = Accumulator { value: 10 }
+        assert(call_add(a) == 15)
+    }
+
+    test "multiple parameter method" {
+        let j = StringJoiner { sep: " " }
+        assert(call_combine(j) == "hello world")
+    }
+
+    test "mixed methods with and without params" {
+        let c = MutableCounter { count: 0 }
+        assert(call_mixed_methods(c) == 99)
+    }
+}
+
 tests "mixed field and method constraints" {
     test "field and method together" {
         assert(process(ValidUser { name: "Alice" }) == "Alice")
@@ -233,6 +282,7 @@ let HasValue: type = { value: i64 }
 let Disposable: type = { func dispose() -> void }
 let Labeled: type = { func label() -> string }
 let Validatable: type = { func validate() -> bool }
+let Addable: type = { func add(n: i64) -> i64 }
 let NamedValidatable: type = { name: string, func validate() -> bool }
 
 // Test types
@@ -293,6 +343,10 @@ func is_valid<T: Validatable>(x: T) -> bool {
     return x.validate()
 }
 
+func add_alias<T: Addable>(x: T, n: i64) -> i64 {
+    return x.add(n)
+}
+
 // Mixed field + method constraint via type alias
 func validate_named<T: NamedValidatable>(x: T) -> string {
     if x.validate() {
@@ -341,6 +395,13 @@ tests "type alias as method constraint" {
         assert(!is_valid(Document { title: "Doc", valid: false }))
         assert(is_valid(Form { name: "Form", submitted: true }))
         assert(!is_valid(Form { name: "Form", submitted: false }))
+    }
+}
+
+tests "type alias as method constraint with params" {
+    test "Addable alias constraint" {
+        let a = Accumulator { value: 10 }
+        assert(add_alias(a, 32) == 42)
     }
 }
 

@@ -94,10 +94,11 @@ impl Analyzer {
             for iface_id in impls {
                 let name_id = registry.name_id(iface_id);
                 if let Some(name) = self.name_table().last_segment_str(name_id)
-                    && name == iface_item.name {
-                        found = Some(iface_id);
-                        break;
-                    }
+                    && name == iface_item.name
+                {
+                    found = Some(iface_id);
+                    break;
+                }
             }
             found
         };
@@ -204,12 +205,13 @@ impl Analyzer {
         let arena = self.type_arena();
         // Check if iface_type is an interface type param
         if let Some(name_id) = arena.unwrap_type_param(iface_type)
-            && let Some(&constraint_arg) = iface_param_to_constraint.get(&name_id) {
-                drop(arena);
-                // constraint_arg is the type param in the calling function's scope
-                // Unify it with the concrete type
-                self.unify_types_id(constraint_arg, concrete_type, type_params, inferred);
-            }
+            && let Some(&constraint_arg) = iface_param_to_constraint.get(&name_id)
+        {
+            drop(arena);
+            // constraint_arg is the type param in the calling function's scope
+            // Unify it with the concrete type
+            self.unify_types_id(constraint_arg, concrete_type, type_params, inferred);
+        }
         // For non-type-param types, could recurse for complex types but skip for now
     }
 
