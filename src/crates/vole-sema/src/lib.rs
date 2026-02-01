@@ -11,6 +11,7 @@ pub mod expression_data;
 pub mod generic;
 pub mod implement_registry;
 pub mod infer;
+pub mod memory_kind;
 pub mod module;
 pub mod optimizer;
 pub mod query;
@@ -41,6 +42,7 @@ pub use well_known::{WellKnownMethods, WellKnownTypes};
 // TypeArena for interned type representation
 // SemaType is the canonical type representation - use TypeId handles for O(1) equality
 // Note: type_arena::TypeId is accessed via module path to avoid conflict with implement_registry::TypeId
+pub use memory_kind::MemoryKind;
 pub use type_arena::{SemaType, TypeArena};
 
 // Error types
