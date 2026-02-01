@@ -1374,7 +1374,8 @@ impl Cg<'_, '_, '_> {
                         let extract_block = self.builder.create_block();
 
                         // Branch: if pattern matches -> extract_block, else -> next_block
-                        let cond = pattern_check.unwrap();
+                        let cond = pattern_check
+                            .expect("pattern_check must be Some for conditional extraction");
                         let cond_i32 = self.cond_to_i32(cond);
                         self.builder
                             .ins()
@@ -1685,7 +1686,12 @@ impl Cg<'_, '_, '_> {
 
         // Compile both branches (they're pure, so order doesn't matter)
         let then_result = self.expr(&if_expr.then_branch)?;
-        let else_result = self.expr(if_expr.else_branch.as_ref().unwrap())?;
+        let else_result = self.expr(
+            if_expr
+                .else_branch
+                .as_ref()
+                .expect("select-style if must have else branch"),
+        )?;
 
         let result_cranelift_type =
             type_id_to_cranelift(result_type_id, self.arena(), self.ptr_type());
@@ -1872,7 +1878,12 @@ impl Cg<'_, '_, '_> {
         result_type_id: TypeId,
     ) -> Result<CompiledValue, String> {
         // Compile condition (first arm)
-        let condition = self.expr(when_expr.arms[0].condition.as_ref().unwrap())?;
+        let condition = self.expr(
+            when_expr.arms[0]
+                .condition
+                .as_ref()
+                .expect("first when arm must have a condition"),
+        )?;
 
         // Compile both bodies (they're pure, so order doesn't matter)
         let then_result = self.expr(&when_expr.arms[0].body)?;
@@ -1953,7 +1964,11 @@ impl Cg<'_, '_, '_> {
             }
 
             // Evaluate condition in current block
-            let cond_result = self.expr(arm.condition.as_ref().unwrap())?;
+            let cond_result = self.expr(
+                arm.condition
+                    .as_ref()
+                    .expect("non-wildcard when arm must have a condition"),
+            )?;
 
             // Determine "else" target (where to go if condition is false)
             let else_target = if i + 1 < when_expr.arms.len() {

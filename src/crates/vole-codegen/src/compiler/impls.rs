@@ -264,8 +264,20 @@ impl Compiler<'_> {
                 impl_type_id.and_then(|impl_id| self.query().try_type_def_id(impl_id.name_id()));
 
             let (sig, semantic_method_id) = {
-                let tdef_id = type_def_id.unwrap();
-                let name_id = method_name_id.unwrap();
+                let tdef_id = type_def_id.unwrap_or_else(|| {
+                    panic!(
+                        "import: type_def_id missing for {}.{}",
+                        type_name,
+                        interner.resolve(method.name)
+                    )
+                });
+                let name_id = method_name_id.unwrap_or_else(|| {
+                    panic!(
+                        "import: method_name_id missing for {}.{}",
+                        type_name,
+                        interner.resolve(method.name)
+                    )
+                });
                 let method_id = self
                     .analyzed
                     .entity_registry()
@@ -322,8 +334,20 @@ impl Compiler<'_> {
             }
             let method_name_id = method_name_id_with_interner(self.analyzed, interner, method.name);
             let (sig, semantic_method_id) = {
-                let tdef_id = type_def_id.unwrap();
-                let name_id = method_name_id.unwrap();
+                let tdef_id = type_def_id.unwrap_or_else(|| {
+                    panic!(
+                        "import: type_def_id missing for static {}.{}",
+                        type_name,
+                        interner.resolve(method.name)
+                    )
+                });
+                let name_id = method_name_id.unwrap_or_else(|| {
+                    panic!(
+                        "import: method_name_id missing for static {}.{}",
+                        type_name,
+                        interner.resolve(method.name)
+                    )
+                });
                 let method_id = self
                     .query()
                     .registry()
@@ -347,10 +371,18 @@ impl Compiler<'_> {
             let jit_func_id = self.jit.import_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, jit_func_id);
 
-            let type_name_id = self.query().get_type(type_def_id.unwrap()).name_id;
-            self.state
-                .method_func_keys
-                .insert((type_name_id, method_name_id.unwrap()), func_key);
+            let type_name_id = self
+                .query()
+                .get_type(type_def_id.expect("type_def_id must exist for static method lookup"))
+                .name_id;
+            self.state.method_func_keys.insert(
+                (
+                    type_name_id,
+                    method_name_id
+                        .expect("method_name_id must exist for static method registration"),
+                ),
+                func_key,
+            );
         }
     }
 
@@ -557,10 +589,20 @@ impl Compiler<'_> {
                 self.func_registry.set_func_id(func_key, func_id);
 
                 // Register in method_func_keys for codegen lookup using type's NameId for stable lookup
-                let type_name_id = self.query().get_type(type_def_id.unwrap()).name_id;
-                self.state
-                    .method_func_keys
-                    .insert((type_name_id, method_name_id.unwrap()), func_key);
+                let type_name_id = self
+                    .query()
+                    .get_type(
+                        type_def_id.expect("type_def_id must exist for static method registration"),
+                    )
+                    .name_id;
+                self.state.method_func_keys.insert(
+                    (
+                        type_name_id,
+                        method_name_id
+                            .expect("method_name_id must exist for static method registration"),
+                    ),
+                    func_key,
+                );
             }
         }
     }

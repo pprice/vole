@@ -269,7 +269,12 @@ pub fn compile_function_body_with_cg(
             && cg.is_sret_struct_return(ret_type_id)
         {
             // Large struct (3+ flat slots): copy all flat slots into sret buffer
-            let entry_block = cg.builder.func.layout.entry_block().unwrap();
+            let entry_block = cg
+                .builder
+                .func
+                .layout
+                .entry_block()
+                .expect("function must have an entry block");
             let sret_ptr = cg.builder.block_params(entry_block)[0];
             let flat_count = cg
                 .struct_flat_slot_count(ret_type_id)

@@ -88,8 +88,16 @@ pub(crate) fn analyze_switch(
     }
 
     // Check density: range_size / arm_count <= MAX_DENSITY_RATIO
-    let min_val = arm_values.iter().map(|(_, v)| *v).min().unwrap();
-    let max_val = arm_values.iter().map(|(_, v)| *v).max().unwrap();
+    let min_val = arm_values
+        .iter()
+        .map(|(_, v)| *v)
+        .min()
+        .expect("arm_values must be non-empty after MIN_SWITCH_ARMS check");
+    let max_val = arm_values
+        .iter()
+        .map(|(_, v)| *v)
+        .max()
+        .expect("arm_values must be non-empty after MIN_SWITCH_ARMS check");
     let range_size = (max_val - min_val + 1) as f64;
     let arm_count = arm_values.len() as f64;
 

@@ -151,20 +151,28 @@ impl JitContext {
     ) -> Self {
         // Build JIT module with native ISA
         let mut flag_builder = settings::builder();
-        flag_builder.set("use_colocated_libcalls", "false").unwrap();
-        flag_builder.set("is_pic", "false").unwrap();
+        flag_builder
+            .set("use_colocated_libcalls", "false")
+            .expect("Cranelift flag 'use_colocated_libcalls' should be valid");
+        flag_builder
+            .set("is_pic", "false")
+            .expect("Cranelift flag 'is_pic' should be valid");
         // Enable LLVM ABI extensions for i128 support in function signatures
         flag_builder
             .set("enable_llvm_abi_extensions", "true")
-            .unwrap();
+            .expect("Cranelift flag 'enable_llvm_abi_extensions' should be valid");
 
         // Always enable speed optimizations for better codegen
-        flag_builder.set("opt_level", "speed").unwrap();
+        flag_builder
+            .set("opt_level", "speed")
+            .expect("Cranelift flag 'opt_level' should be valid");
 
         // Apply release mode settings
         if options.release {
             // Disable IR verifier for faster compilation
-            flag_builder.set("enable_verifier", "false").unwrap();
+            flag_builder
+                .set("enable_verifier", "false")
+                .expect("Cranelift flag 'enable_verifier' should be valid");
         }
 
         let isa_builder = cranelift_native::builder().unwrap_or_else(|msg| {
@@ -173,7 +181,7 @@ impl JitContext {
 
         let isa = isa_builder
             .finish(settings::Flags::new(flag_builder))
-            .unwrap();
+            .expect("failed to build Cranelift ISA from native target");
 
         let mut builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
 
@@ -1019,7 +1027,7 @@ impl JitContext {
         let func_id = self
             .module
             .declare_function(name, Linkage::Export, sig)
-            .unwrap();
+            .unwrap_or_else(|e| panic!("failed to declare function '{}': {:?}", name, e));
         self.func_ids.insert(name.to_string(), func_id);
         func_id
     }
@@ -1031,7 +1039,7 @@ impl JitContext {
         let func_id = self
             .module
             .declare_function(name, Linkage::Import, sig)
-            .unwrap();
+            .unwrap_or_else(|e| panic!("failed to import function '{}': {:?}", name, e));
         self.imported_func_ids.insert(name.to_string(), func_id);
         func_id
     }

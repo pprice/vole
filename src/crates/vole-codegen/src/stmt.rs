@@ -312,7 +312,12 @@ impl Cg<'_, '_, '_> {
                         && self.is_sret_struct_return(ret_type_id)
                     {
                         // Large struct (3+ flat slots): copy all flat slots into sret buffer
-                        let entry_block = self.builder.func.layout.entry_block().unwrap();
+                        let entry_block = self
+                            .builder
+                            .func
+                            .layout
+                            .entry_block()
+                            .expect("function must have an entry block");
                         let sret_ptr = self.builder.block_params(entry_block)[0];
                         let flat_count = self
                             .struct_flat_slot_count(ret_type_id)
@@ -436,7 +441,9 @@ impl Cg<'_, '_, '_> {
                 // If both branches terminated, the merge block is unreachable.
                 // Cranelift still requires it to be filled, so emit a trap.
                 if then_terminated && else_terminated {
-                    self.builder.ins().trap(TrapCode::user(1).unwrap());
+                    self.builder
+                        .ins()
+                        .trap(TrapCode::user(1).expect("trap code 1 must be valid"));
                 }
 
                 self.builder.seal_block(then_block);
