@@ -3,10 +3,14 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 
 /// Reference counting header for heap-allocated objects
+///
+/// Layout: [ref_count: u32] [type_id: u32] [drop_fn: Option<fn(*mut u8)>]
+/// Total size: 16 bytes (4 + 4 + 8)
 #[repr(C)]
 pub struct RcHeader {
     pub ref_count: AtomicU32,
     pub type_id: u32,
+    pub drop_fn: Option<unsafe extern "C" fn(*mut u8)>,
 }
 
 impl RcHeader {
@@ -14,6 +18,15 @@ impl RcHeader {
         Self {
             ref_count: AtomicU32::new(1),
             type_id,
+            drop_fn: None,
+        }
+    }
+
+    pub fn with_drop_fn(type_id: u32, drop_fn: unsafe extern "C" fn(*mut u8)) -> Self {
+        Self {
+            ref_count: AtomicU32::new(1),
+            type_id,
+            drop_fn: Some(drop_fn),
         }
     }
 
@@ -25,6 +38,48 @@ impl RcHeader {
     #[inline]
     pub fn dec(&self) -> u32 {
         self.ref_count.fetch_sub(1, Ordering::AcqRel)
+    }
+}
+
+/// Increment the reference count of an RC-managed object.
+///
+/// # Safety
+/// `ptr` must be null or point to a valid allocation starting with an `RcHeader`.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn rc_inc(ptr: *mut u8) {
+    if ptr.is_null() {
+        return;
+    }
+    unsafe {
+        let header = &*(ptr as *const RcHeader);
+        header.inc();
+    }
+}
+
+/// Decrement the reference count of an RC-managed object.
+/// If the count reaches zero, calls the `drop_fn` if one was set.
+///
+/// # Safety
+/// `ptr` must be null or point to a valid allocation starting with an `RcHeader`.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn rc_dec(ptr: *mut u8) {
+    if ptr.is_null() {
+        return;
+    }
+    unsafe {
+        let header = &*(ptr as *const RcHeader);
+        let prev = header.dec();
+        if prev == 1 {
+            // Refcount was 1, now 0 — time to drop
+            let drop_fn = (*ptr.cast::<RcHeader>()).drop_fn;
+            if let Some(f) = drop_fn {
+                f(ptr);
+            }
+            // If drop_fn is None, the caller is using legacy type-specific
+            // dec_ref (e.g. RcString::dec_ref) — nothing to do here.
+        }
     }
 }
 
@@ -108,6 +163,8 @@ impl Default for Context {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::alloc::{Layout, alloc, dealloc};
+    use std::sync::atomic::AtomicBool;
 
     #[test]
     fn rc_header_inc_dec() {
@@ -120,5 +177,100 @@ mod tests {
         let prev = header.dec();
         assert_eq!(prev, 2);
         assert_eq!(header.ref_count.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn rc_header_layout_is_16_bytes() {
+        assert_eq!(size_of::<RcHeader>(), 16);
+        assert_eq!(align_of::<RcHeader>(), 8);
+    }
+
+    #[test]
+    fn rc_header_with_drop_fn() {
+        let header = RcHeader::with_drop_fn(TYPE_STRING, dummy_drop);
+        assert_eq!(header.ref_count.load(Ordering::Relaxed), 1);
+        assert!(header.drop_fn.is_some());
+
+        let header_none = RcHeader::new(TYPE_STRING);
+        assert!(header_none.drop_fn.is_none());
+    }
+
+    #[test]
+    fn rc_header_new_has_none_drop_fn() {
+        let header = RcHeader::new(TYPE_ARRAY);
+        assert!(header.drop_fn.is_none());
+        assert_eq!(header.type_id, TYPE_ARRAY);
+    }
+
+    static DROP_CALLED: AtomicBool = AtomicBool::new(false);
+
+    unsafe extern "C" fn dummy_drop(_ptr: *mut u8) {
+        DROP_CALLED.store(true, Ordering::SeqCst);
+    }
+
+    /// Allocate an RcHeader on the heap so rc_inc/rc_dec can operate on it
+    /// the same way they will in real usage (via raw pointer).
+    unsafe fn alloc_rc_header(drop_fn: Option<unsafe extern "C" fn(*mut u8)>) -> *mut u8 {
+        let layout = Layout::new::<RcHeader>();
+        let ptr = unsafe { alloc(layout) };
+        assert!(!ptr.is_null());
+        let header = RcHeader {
+            ref_count: AtomicU32::new(1),
+            type_id: TYPE_STRING,
+            drop_fn,
+        };
+        unsafe { std::ptr::write(ptr as *mut RcHeader, header) };
+        ptr
+    }
+
+    #[test]
+    fn rc_inc_dec_extern_c_basic() {
+        unsafe {
+            let ptr = alloc_rc_header(None);
+
+            rc_inc(ptr);
+            let header = &*(ptr as *const RcHeader);
+            assert_eq!(header.ref_count.load(Ordering::Relaxed), 2);
+
+            rc_dec(ptr);
+            assert_eq!(header.ref_count.load(Ordering::Relaxed), 1);
+
+            // Final dec with no drop_fn — should not crash
+            rc_dec(ptr);
+            // Memory is now logically freed; don't access it
+        }
+    }
+
+    #[test]
+    fn rc_dec_calls_drop_fn_at_zero() {
+        DROP_CALLED.store(false, Ordering::SeqCst);
+
+        // We need a custom drop_fn that also deallocates, since rc_dec
+        // delegates deallocation to the drop_fn.
+        unsafe extern "C" fn test_drop(ptr: *mut u8) {
+            DROP_CALLED.store(true, Ordering::SeqCst);
+            let layout = Layout::new::<RcHeader>();
+            unsafe { dealloc(ptr, layout) };
+        }
+
+        unsafe {
+            let ptr = alloc_rc_header(Some(test_drop));
+
+            rc_inc(ptr);
+            assert_eq!(DROP_CALLED.load(Ordering::SeqCst), false);
+
+            rc_dec(ptr);
+            assert_eq!(DROP_CALLED.load(Ordering::SeqCst), false);
+
+            rc_dec(ptr);
+            assert_eq!(DROP_CALLED.load(Ordering::SeqCst), true);
+        }
+    }
+
+    #[test]
+    fn rc_inc_dec_null_is_noop() {
+        // Should not crash
+        rc_inc(std::ptr::null_mut());
+        rc_dec(std::ptr::null_mut());
     }
 }

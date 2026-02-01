@@ -585,6 +585,10 @@ impl JitContext {
     }
 
     fn register_runtime_symbols(builder: &mut JITBuilder) {
+        // Unified RC functions
+        builder.symbol("rc_inc", vole_runtime::value::rc_inc as *const u8);
+        builder.symbol("rc_dec", vole_runtime::value::rc_dec as *const u8);
+
         // String functions
         builder.symbol(
             "vole_string_new",
