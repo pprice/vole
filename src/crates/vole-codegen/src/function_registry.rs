@@ -97,6 +97,8 @@ runtime_fns! {
     InstanceNew => "vole_instance_new",
     InstanceGetField => "vole_instance_get_field",
     InstanceSetField => "vole_instance_set_field",
+    RcInc => "rc_inc",
+    RcDec => "rc_dec",
 }
 
 #[derive(Debug, Clone)]

@@ -100,6 +100,11 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile a block of statements. Returns true if terminated (return/break).
+    ///
+    /// Note: This does NOT push/pop RC scopes. Statement blocks (if/while/for bodies)
+    /// do not introduce new variable scopes in Vole — variables declared inside are
+    /// visible to the enclosing scope. RC cleanup for these variables happens when
+    /// their enclosing function or block_expr scope exits.
     pub fn block(&mut self, block: &vole_frontend::Block) -> Result<bool, String> {
         let mut terminated = false;
         for stmt in &block.stmts {
@@ -220,15 +225,24 @@ impl Cg<'_, '_, '_> {
                 }
 
                 // Use preregistered var for recursive lambdas, otherwise declare new
-                if let Some(var) = preregistered_var {
+                let var = if let Some(var) = preregistered_var {
                     self.builder.def_var(var, final_value);
                     // vars already has the entry from preregistration
+                    var
                 } else {
                     let cranelift_ty = self.cranelift_type(final_type_id);
                     let var = self.builder.declare_var(cranelift_ty);
                     self.builder.def_var(var, final_value);
                     self.vars.insert(let_stmt.name, (var, final_type_id));
+                    var
+                };
+
+                // Register RC locals for drop-flag tracking
+                if self.rc_scopes.has_active_scope() && self.needs_rc_cleanup(final_type_id) {
+                    let drop_flag = self.register_rc_local(var, final_type_id);
+                    crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
                 }
+
                 Ok(false)
             }
 
@@ -259,6 +273,18 @@ impl Cg<'_, '_, '_> {
                 let return_type_id = self.return_type;
                 if let Some(value) = &ret.value {
                     let compiled = self.expr(value)?;
+
+                    // Emit RC cleanup for all active scopes before returning.
+                    // If the return expression is a local variable, skip its cleanup
+                    // (ownership transfers to the caller).
+                    let skip_var = if let ExprKind::Identifier(sym) = &value.kind
+                        && let Some((var, _)) = self.vars.get(sym)
+                    {
+                        Some(*var)
+                    } else {
+                        None
+                    };
+                    self.emit_rc_cleanup_all_scopes(skip_var)?;
 
                     // Box concrete types to interface representation if needed
                     // But skip boxing for RuntimeIterator - it's the raw representation of Iterator
@@ -357,6 +383,8 @@ impl Cg<'_, '_, '_> {
                         self.builder.ins().return_(&[return_value]);
                     }
                 } else {
+                    // Void return — cleanup all RC locals
+                    self.emit_rc_cleanup_all_scopes(None)?;
                     self.builder.ins().return_(&[]);
                 }
                 Ok(true)
@@ -474,6 +502,10 @@ impl Cg<'_, '_, '_> {
 
             Stmt::Break(_) => {
                 if let Some(exit_block) = self.cf.loop_exit() {
+                    // Clean up RC locals from scopes inside the loop
+                    if let Some(depth) = self.cf.loop_rc_depth() {
+                        self.emit_rc_cleanup_from_depth(depth)?;
+                    }
                     self.builder.ins().jump(exit_block, &[]);
                 }
                 Ok(true)
@@ -481,6 +513,10 @@ impl Cg<'_, '_, '_> {
 
             Stmt::Continue(_) => {
                 if let Some(continue_block) = self.cf.loop_continue() {
+                    // Clean up RC locals from scopes inside the loop
+                    if let Some(depth) = self.cf.loop_rc_depth() {
+                        self.emit_rc_cleanup_from_depth(depth)?;
+                    }
                     self.builder.ins().jump(continue_block, &[]);
                     let unreachable = self.builder.create_block();
                     self.builder.switch_to_block(unreachable);
@@ -559,7 +595,8 @@ impl Cg<'_, '_, '_> {
         // Body: compile loop body, then increment and loop back
         self.builder.switch_to_block(body_block);
         // Register loop context - continue jumps to header (but there's no continue in this path)
-        self.cf.push_loop(exit_block, header);
+        let rc_depth = self.rc_scope_depth();
+        self.cf.push_loop(exit_block, header, rc_depth);
         let terminated = self.block(&for_stmt.body)?;
         self.cf.pop_loop();
 

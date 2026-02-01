@@ -575,10 +575,10 @@ fn compile_external_wrapper<C: VtableCtx>(
     param_type_ids: &[TypeId],
     return_type_id: TypeId,
 ) -> Result<Vec<Value>, String> {
-    // For Iterator interface, wrap the boxed interface in a UnifiedIterator
+    // For Iterator interface, wrap the boxed interface in a RcIterator
     // so external functions like vole_iter_collect can iterate via vtable.
     let self_val = if interface_name == "Iterator" {
-        // Call vole_interface_iter(box_ptr) to create UnifiedIterator adapter
+        // Call vole_interface_iter(box_ptr) to create RcIterator adapter
         // Extract just the pointer value to end the borrow before jit_module() call
         let interface_iter_ptr = ctx
             .native_registry()
@@ -639,7 +639,7 @@ fn compile_external_wrapper<C: VtableCtx>(
         .ptr;
 
     let mut native_sig = ctx.jit_module().make_signature();
-    // For Iterator, the self param is now *mut UnifiedIterator (pointer)
+    // For Iterator, the self param is now *mut RcIterator (pointer)
     let arena = ctx.arena();
     let self_param_type = if interface_name == "Iterator" {
         ctx.ptr_type()

@@ -25,6 +25,7 @@ use vole_sema::implement_registry::ExternalMethodInfo;
 use vole_sema::type_arena::{SemaType as ArenaType, TypeId};
 
 use super::lambda::CaptureBinding;
+use super::rc_cleanup::RcScopeStack;
 use super::types::{
     CodegenCtx, CompileEnv, CompiledValue, TypeMetadataMap, native_type_to_cranelift, type_id_size,
     type_id_to_cranelift,
@@ -36,6 +37,8 @@ pub(crate) struct ControlFlow {
     loop_exits: Vec<cranelift::prelude::Block>,
     /// Stack of loop continue blocks for continue statements
     loop_continues: Vec<cranelift::prelude::Block>,
+    /// RC scope depth at loop entry, for break/continue cleanup
+    loop_rc_depths: Vec<usize>,
 }
 
 impl ControlFlow {
@@ -43,17 +46,25 @@ impl ControlFlow {
         Self {
             loop_exits: Vec::new(),
             loop_continues: Vec::new(),
+            loop_rc_depths: Vec::new(),
         }
     }
 
-    pub fn push_loop(&mut self, exit: cranelift::prelude::Block, cont: cranelift::prelude::Block) {
+    pub fn push_loop(
+        &mut self,
+        exit: cranelift::prelude::Block,
+        cont: cranelift::prelude::Block,
+        rc_scope_depth: usize,
+    ) {
         self.loop_exits.push(exit);
         self.loop_continues.push(cont);
+        self.loop_rc_depths.push(rc_scope_depth);
     }
 
     pub fn pop_loop(&mut self) {
         self.loop_exits.pop();
         self.loop_continues.pop();
+        self.loop_rc_depths.pop();
     }
 
     pub fn loop_exit(&self) -> Option<cranelift::prelude::Block> {
@@ -62,6 +73,11 @@ impl ControlFlow {
 
     pub fn loop_continue(&self) -> Option<cranelift::prelude::Block> {
         self.loop_continues.last().copied()
+    }
+
+    /// Get the RC scope depth at the current loop entry (for break/continue cleanup).
+    pub fn loop_rc_depth(&self) -> Option<usize> {
+        self.loop_rc_depths.last().copied()
     }
 }
 
@@ -119,6 +135,8 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     substitution_cache: RefCell<FxHashMap<TypeId, TypeId>>,
     /// Module export bindings from destructuring imports: local_name -> (module_id, export_name, type_id)
     pub module_bindings: FxHashMap<Symbol, ModuleExportBinding>,
+    /// RC scope stack for drop flag tracking and cleanup emission
+    pub rc_scopes: RcScopeStack,
 
     // ========== Shared context fields ==========
     /// Mutable JIT infrastructure (module, func_registry)
@@ -154,6 +172,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             substitution_cache: RefCell::new(FxHashMap::default()),
             // Initialize with global module bindings from top-level destructuring imports
             module_bindings: env.global_module_bindings.clone(),
+            rc_scopes: RcScopeStack::new(),
             codegen_ctx,
             env,
         }
@@ -198,6 +217,95 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Check if we're in a closure context with captures
     pub fn has_captures(&self) -> bool {
         self.captures.is_some()
+    }
+
+    // ========== RC scope tracking ==========
+
+    /// Check if a type needs RC cleanup in codegen.
+    ///
+    /// Currently conservative: only String variables get scope-exit cleanup.
+    /// Other RC types (Array, Iterator, Instance, Closure) have their lifetimes
+    /// managed by the runtime (e.g., collect() decs the iterator). Emitting
+    /// scope-exit rc_dec for those would cause double-frees.
+    ///
+    /// Future tickets will add proper move semantics so all RC types can be
+    /// cleaned up at scope exit (clearing the drop flag when a value is moved/consumed).
+    pub fn needs_rc_cleanup(&self, type_id: TypeId) -> bool {
+        use vole_sema::MemoryKind;
+        let arena = self.arena();
+        if arena.memory_kind(type_id) != MemoryKind::Rc {
+            return false;
+        }
+        // Structs are stack-allocated in codegen (value semantics).
+        if arena.is_struct(type_id) {
+            return false;
+        }
+        // Sentinels (Done, etc.) are i8 zero values, not heap pointers.
+        if arena.is_sentinel(type_id) {
+            return false;
+        }
+        // Interfaces are boxed values (fat pointers), not raw RC pointers.
+        if arena.is_interface(type_id) {
+            return false;
+        }
+        true
+    }
+
+    /// Push a new RC scope (called when entering a block).
+    pub fn push_rc_scope(&mut self) {
+        self.rc_scopes.push_scope();
+    }
+
+    /// Pop the current RC scope and emit cleanup for its RC locals.
+    /// `skip_var` optionally specifies a variable whose ownership is being
+    /// transferred out (e.g., the block result) and should NOT be dec'd.
+    ///
+    /// NOTE: Actual rc_dec emission is gated until rc_inc on copy/extract is
+    /// implemented (v-37ea). Without paired rc_inc, scope-exit rc_dec causes
+    /// double-frees. The scope tracking and drop flag infrastructure is active
+    /// so it can be tested and validated structurally.
+    pub fn pop_rc_scope_with_cleanup(&mut self, _skip_var: Option<Variable>) -> Result<(), String> {
+        // Pop scope to keep tracking balanced, but don't emit rc_dec yet.
+        self.rc_scopes.pop_scope();
+        Ok(())
+    }
+
+    /// Emit cleanup for ALL active RC scopes (for return statements).
+    /// `skip_var` optionally specifies a variable being returned.
+    ///
+    /// NOTE: Gated until rc_inc on copy/extract (v-37ea). See pop_rc_scope_with_cleanup.
+    pub fn emit_rc_cleanup_all_scopes(
+        &mut self,
+        _skip_var: Option<Variable>,
+    ) -> Result<(), String> {
+        // Infrastructure is active (scope tracking, drop flags), but actual
+        // rc_dec emission requires rc_inc on copy/extract (v-37ea).
+        Ok(())
+    }
+
+    /// Emit cleanup for scopes from the given depth upward (for break/continue).
+    /// `target_depth` is the depth of the loop scope.
+    ///
+    /// NOTE: Gated until rc_inc on copy/extract (v-37ea). See pop_rc_scope_with_cleanup.
+    pub fn emit_rc_cleanup_from_depth(&mut self, _target_depth: usize) -> Result<(), String> {
+        // Infrastructure is active (scope tracking, drop flags), but actual
+        // rc_dec emission requires rc_inc on copy/extract (v-37ea).
+        Ok(())
+    }
+
+    /// Register an RC local in the current scope. Allocates a drop flag,
+    /// initializes it to 0, and adds it to the current scope.
+    /// Returns the drop flag Variable so the caller can set it to 1 after assignment.
+    pub fn register_rc_local(&mut self, variable: Variable, type_id: TypeId) -> Variable {
+        let drop_flag = super::rc_cleanup::alloc_drop_flag(self.builder);
+        self.rc_scopes
+            .register_rc_local(variable, drop_flag, type_id);
+        drop_flag
+    }
+
+    /// Get the current RC scope depth (for break/continue target tracking).
+    pub fn rc_scope_depth(&self) -> usize {
+        self.rc_scopes.depth()
     }
 
     // ========== Context accessors ==========
@@ -891,7 +999,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         exit_block: cranelift::prelude::Block,
         continue_block: cranelift::prelude::Block,
     ) -> Result<bool, String> {
-        self.cf.push_loop(exit_block, continue_block);
+        let rc_depth = self.rc_scope_depth();
+        self.cf.push_loop(exit_block, continue_block, rc_depth);
         let terminated = self.block(body)?;
         self.cf.pop_loop();
         if !terminated {

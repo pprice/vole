@@ -206,6 +206,9 @@ pub fn compile_function_body_with_cg(
     body: &FuncBody,
     default_return: DefaultReturn,
 ) -> Result<(), String> {
+    // Push function-level RC scope for tracking RC locals
+    cg.push_rc_scope();
+
     // Compile function body
     let (terminated, expr_value) = match body {
         FuncBody::Block(block) => {
@@ -217,6 +220,17 @@ pub fn compile_function_body_with_cg(
             (true, Some(value))
         }
     };
+
+    // Emit RC cleanup for function-level scope before implicit returns.
+    // Explicit returns are handled in stmt.rs (Stmt::Return).
+    // If the function terminated (via explicit return/break), cleanup was already
+    // emitted at that point, so we only clean up for non-terminated paths.
+    if !terminated || expr_value.is_some() {
+        cg.pop_rc_scope_with_cleanup(None)?;
+    } else {
+        // Just pop the scope marker (cleanup was emitted by the return/break)
+        cg.rc_scopes.pop_scope();
+    }
 
     // Add implicit return if no explicit return
     if let Some(value) = expr_value {

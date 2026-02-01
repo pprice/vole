@@ -1,0 +1,82 @@
+// RC cleanup infrastructure test
+//
+// Exercises RC scope tracking and drop flags across various scoping
+// constructs. Actual rc_dec emission is gated until rc_inc on copy
+// is implemented (v-37ea), but the tracking infrastructure is active.
+
+tests {
+    test "string locals in function scope" {
+        let s1 = "hello"
+        let s2 = "world"
+        let s3 = s1 + " " + s2
+        assert(s3 == "hello world")
+    }
+
+    test "multiple RC types in one scope" {
+        let s = "a string"
+        let arr = [1, 2, 3]
+        let arr2 = ["x", "y"]
+        assert(s.length() == 8)
+        assert(arr.length() == 3)
+        assert(arr2.length() == 2)
+    }
+
+    test "RC locals in loops with break" {
+        let mut found = ""
+        let items = ["alpha", "beta", "gamma"]
+        for item in items {
+            if item == "beta" {
+                found = item
+                break
+            }
+        }
+        assert(found == "beta")
+    }
+
+    test "RC locals in loops with continue" {
+        let mut count = 0
+        let items = [1, 0, 2, 0, 3]
+        for item in items {
+            if item == 0 {
+                continue
+            }
+            count = count + item
+        }
+        assert(count == 6)
+    }
+
+    test "iterator chains with RC temporaries" {
+        let result = repeat(5).take(3).map((x) => x * 2).collect()
+        assert(result.length() == 3)
+        assert(result[0] == 10)
+    }
+
+    test "array locals with operations" {
+        let arr1 = [10, 20, 30]
+        let arr2 = [40, 50]
+        assert(arr1.length() == 3)
+        assert(arr2.length() == 2)
+        assert(arr1[0] + arr2[1] == 60)
+    }
+
+    test "string concat in loop" {
+        let mut result = ""
+        let parts = ["hello", " ", "world"]
+        for p in parts {
+            result = result + p
+        }
+        assert(result == "hello world")
+    }
+
+    test "when expression with RC locals" {
+        let a = "outer"
+        let x = 42
+        let b = when {
+            x > 100 => "big"
+            x > 10 => "medium"
+            _ => "small"
+        }
+        assert(a == "outer")
+        assert(b == "medium")
+    }
+}

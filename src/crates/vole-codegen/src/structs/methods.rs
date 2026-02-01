@@ -1073,7 +1073,7 @@ impl Cg<'_, '_, '_> {
 
         // Pass the full boxed interface pointer (not just data_word) so wrappers can
         // access both data and vtable. This is needed for Iterator methods that create
-        // UnifiedIterator adapters via vole_interface_iter.
+        // RcIterator adapters via vole_interface_iter.
         let mut call_args: ArgVec = smallvec![obj.value];
         for arg in args {
             let compiled = self.expr(arg)?;

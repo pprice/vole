@@ -871,6 +871,9 @@ impl Compiler<'_> {
                 // Compile scoped let declarations and test body
                 let mut cg = Cg::new(&mut builder, &mut codegen_ctx, &env);
 
+                // Push function-level RC scope for test body
+                cg.push_rc_scope();
+
                 if !scoped_let_stmts.is_empty() {
                     // Create a synthetic block with the let statements
                     let let_block = Block {
@@ -889,6 +892,14 @@ impl Compiler<'_> {
                 // Tests always return 0. Add return if block didn't explicitly terminate
                 // or if it's an expression body.
                 let terminated = block_terminated && expr_value.is_none();
+
+                // Emit RC cleanup for test-level scope
+                if !terminated {
+                    cg.pop_rc_scope_with_cleanup(None)?;
+                } else {
+                    cg.rc_scopes.pop_scope();
+                }
+
                 finalize_function_body(builder, None, terminated, DefaultReturn::ZeroI64);
             }
 

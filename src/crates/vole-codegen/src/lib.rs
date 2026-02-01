@@ -17,6 +17,7 @@ pub mod loop_param_opt;
 mod match_switch;
 mod method_resolution;
 mod ops;
+mod rc_cleanup;
 mod stmt;
 mod structs;
 mod types;

@@ -352,115 +352,115 @@ impl JitContext {
         let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
         self.import_function("vole_map_iter_collect", &sig);
 
-        // vole_filter_iter(source: *mut UnifiedIterator, predicate: *const Closure) -> *mut FilterIterator
+        // vole_filter_iter(source: *mut RcIterator, predicate: *const Closure) -> *mut RcIterator
         let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(ptr_ty));
         self.import_function("vole_filter_iter", &sig);
 
-        // vole_filter_iter_next(iter: *mut FilterIterator, out_value: *mut i64) -> i64
+        // vole_filter_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64
         let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I64));
         self.import_function("vole_filter_iter_next", &sig);
 
-        // vole_filter_iter_collect(iter: *mut FilterIterator) -> *mut RcArray
+        // vole_filter_iter_collect(iter: *mut RcIterator) -> *mut RcArray
         let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
         self.import_function("vole_filter_iter_collect", &sig);
 
-        // vole_iter_count(iter: *mut UnifiedIterator) -> i64
+        // vole_iter_count(iter: *mut RcIterator) -> i64
         let sig = self.create_signature(&[ptr_ty], Some(types::I64));
         self.import_function("vole_iter_count", &sig);
 
-        // vole_iter_sum(iter: *mut UnifiedIterator) -> i64
+        // vole_iter_sum(iter: *mut RcIterator) -> i64
         let sig = self.create_signature(&[ptr_ty], Some(types::I64));
         self.import_function("vole_iter_sum", &sig);
 
-        // vole_iter_for_each(iter: *mut UnifiedIterator, callback: *const Closure)
+        // vole_iter_for_each(iter: *mut RcIterator, callback: *const Closure)
         let sig = self.create_signature(&[ptr_ty, ptr_ty], None);
         self.import_function("vole_iter_for_each", &sig);
 
-        // vole_iter_reduce(iter: *mut UnifiedIterator, init: i64, reducer: *const Closure) -> i64
+        // vole_iter_reduce(iter: *mut RcIterator, init: i64, reducer: *const Closure) -> i64
         let sig = self.create_signature(&[ptr_ty, types::I64, ptr_ty], Some(types::I64));
         self.import_function("vole_iter_reduce", &sig);
 
-        // vole_iter_first(iter: *mut UnifiedIterator) -> *mut u8 (optional: [tag:1][pad:7][payload:8])
+        // vole_iter_first(iter: *mut RcIterator) -> *mut u8 (optional: [tag:1][pad:7][payload:8])
         let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
         self.import_function("vole_iter_first", &sig);
 
-        // vole_iter_last(iter: *mut UnifiedIterator) -> *mut u8 (optional: [tag:1][pad:7][payload:8])
+        // vole_iter_last(iter: *mut RcIterator) -> *mut u8 (optional: [tag:1][pad:7][payload:8])
         let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
         self.import_function("vole_iter_last", &sig);
 
-        // vole_iter_nth(iter: *mut UnifiedIterator, n: i64) -> *mut u8 (optional: [tag:1][pad:7][payload:8])
+        // vole_iter_nth(iter: *mut RcIterator, n: i64) -> *mut u8 (optional: [tag:1][pad:7][payload:8])
         let sig = self.create_signature(&[ptr_ty, types::I64], Some(ptr_ty));
         self.import_function("vole_iter_nth", &sig);
 
-        // vole_take_iter(source: *mut UnifiedIterator, count: i64) -> *mut TakeIterator
+        // vole_take_iter(source: *mut RcIterator, count: i64) -> *mut RcIterator
         let sig = self.create_signature(&[ptr_ty, types::I64], Some(ptr_ty));
         self.import_function("vole_take_iter", &sig);
 
-        // vole_take_iter_next(iter: *mut TakeIterator, out_value: *mut i64) -> i64
+        // vole_take_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64
         let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I64));
         self.import_function("vole_take_iter_next", &sig);
 
-        // vole_take_iter_collect(iter: *mut TakeIterator) -> *mut RcArray
+        // vole_take_iter_collect(iter: *mut RcIterator) -> *mut RcArray
         let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
         self.import_function("vole_take_iter_collect", &sig);
 
-        // vole_skip_iter(source: *mut UnifiedIterator, count: i64) -> *mut SkipIterator
+        // vole_skip_iter(source: *mut RcIterator, count: i64) -> *mut RcIterator
         let sig = self.create_signature(&[ptr_ty, types::I64], Some(ptr_ty));
         self.import_function("vole_skip_iter", &sig);
 
-        // vole_skip_iter_next(iter: *mut SkipIterator, out_value: *mut i64) -> i64
+        // vole_skip_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64
         let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I64));
         self.import_function("vole_skip_iter_next", &sig);
 
-        // vole_skip_iter_collect(iter: *mut SkipIterator) -> *mut RcArray
+        // vole_skip_iter_collect(iter: *mut RcIterator) -> *mut RcArray
         let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
         self.import_function("vole_skip_iter_collect", &sig);
 
-        // vole_chain_iter(first: *mut UnifiedIterator, second: *mut UnifiedIterator) -> *mut ChainIterator
+        // vole_chain_iter(first: *mut RcIterator, second: *mut RcIterator) -> *mut RcIterator
         let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(ptr_ty));
         self.import_function("vole_chain_iter", &sig);
 
-        // vole_chain_iter_next(iter: *mut ChainIterator, out_value: *mut i64) -> i64
+        // vole_chain_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64
         let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I64));
         self.import_function("vole_chain_iter_next", &sig);
 
-        // vole_chain_iter_collect(iter: *mut ChainIterator) -> *mut RcArray
+        // vole_chain_iter_collect(iter: *mut RcIterator) -> *mut RcArray
         let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
         self.import_function("vole_chain_iter_collect", &sig);
 
-        // vole_flatten_iter(source: *mut UnifiedIterator) -> *mut FlattenIterator
+        // vole_flatten_iter(source: *mut RcIterator) -> *mut RcIterator
         let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
         self.import_function("vole_flatten_iter", &sig);
 
-        // vole_flatten_iter_next(iter: *mut FlattenIterator, out_value: *mut i64) -> i64
+        // vole_flatten_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64
         let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I64));
         self.import_function("vole_flatten_iter_next", &sig);
 
-        // vole_flatten_iter_collect(iter: *mut FlattenIterator) -> *mut RcArray
+        // vole_flatten_iter_collect(iter: *mut RcIterator) -> *mut RcArray
         let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
         self.import_function("vole_flatten_iter_collect", &sig);
 
-        // vole_flat_map_iter(source: *mut UnifiedIterator, transform: *const Closure) -> *mut FlatMapIterator
+        // vole_flat_map_iter(source: *mut RcIterator, transform: *const Closure) -> *mut RcIterator
         let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(ptr_ty));
         self.import_function("vole_flat_map_iter", &sig);
 
-        // vole_flat_map_iter_next(iter: *mut FlatMapIterator, out_value: *mut i64) -> i64
+        // vole_flat_map_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64
         let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I64));
         self.import_function("vole_flat_map_iter_next", &sig);
 
-        // vole_flat_map_iter_collect(iter: *mut FlatMapIterator) -> *mut RcArray
+        // vole_flat_map_iter_collect(iter: *mut RcIterator) -> *mut RcArray
         let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
         self.import_function("vole_flat_map_iter_collect", &sig);
 
-        // vole_reverse_iter(iter: *mut UnifiedIterator) -> *mut UnifiedIterator
+        // vole_reverse_iter(iter: *mut RcIterator) -> *mut RcIterator
         let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
         self.import_function("vole_reverse_iter", &sig);
 
-        // vole_sorted_iter(iter: *mut UnifiedIterator) -> *mut UnifiedIterator
+        // vole_sorted_iter(iter: *mut RcIterator) -> *mut RcIterator
         let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
         self.import_function("vole_sorted_iter", &sig);
 
-        // vole_unique_iter(iter: *mut UnifiedIterator) -> *mut UnifiedIterator
+        // vole_unique_iter(iter: *mut RcIterator) -> *mut RcIterator
         let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
         self.import_function("vole_unique_iter", &sig);
 
@@ -468,27 +468,27 @@ impl JitContext {
         let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I64));
         self.import_function("vole_unique_iter_next", &sig);
 
-        // vole_chunks_iter(source: *mut UnifiedIterator, chunk_size: i64) -> *mut ChunksIterator
+        // vole_chunks_iter(source: *mut RcIterator, chunk_size: i64) -> *mut RcIterator
         let sig = self.create_signature(&[ptr_ty, types::I64], Some(ptr_ty));
         self.import_function("vole_chunks_iter", &sig);
 
-        // vole_chunks_iter_next(iter: *mut ChunksIterator, out_value: *mut i64) -> i64
+        // vole_chunks_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64
         let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I64));
         self.import_function("vole_chunks_iter_next", &sig);
 
-        // vole_chunks_iter_collect(iter: *mut ChunksIterator) -> *mut RcArray
+        // vole_chunks_iter_collect(iter: *mut RcIterator) -> *mut RcArray
         let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
         self.import_function("vole_chunks_iter_collect", &sig);
 
-        // vole_windows_iter(source: *mut UnifiedIterator, window_size: i64) -> *mut WindowsIterator
+        // vole_windows_iter(source: *mut RcIterator, window_size: i64) -> *mut RcIterator
         let sig = self.create_signature(&[ptr_ty, types::I64], Some(ptr_ty));
         self.import_function("vole_windows_iter", &sig);
 
-        // vole_windows_iter_next(iter: *mut WindowsIterator, out_value: *mut i64) -> i64
+        // vole_windows_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64
         let sig = self.create_signature(&[ptr_ty, ptr_ty], Some(types::I64));
         self.import_function("vole_windows_iter_next", &sig);
 
-        // vole_windows_iter_collect(iter: *mut WindowsIterator) -> *mut RcArray
+        // vole_windows_iter_collect(iter: *mut RcIterator) -> *mut RcArray
         let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
         self.import_function("vole_windows_iter_collect", &sig);
 
@@ -582,6 +582,15 @@ impl JitContext {
         // vole_instance_set_field(ptr: *mut RcInstance, slot: u32, value: u64)
         let sig = self.create_signature(&[ptr_ty, types::I32, types::I64], None);
         self.import_function("vole_instance_set_field", &sig);
+
+        // Unified RC functions
+        // rc_inc(ptr: *mut u8)
+        let sig = self.create_signature(&[ptr_ty], None);
+        self.import_function("rc_inc", &sig);
+
+        // rc_dec(ptr: *mut u8)
+        let sig = self.create_signature(&[ptr_ty], None);
+        self.import_function("rc_dec", &sig);
     }
 
     fn register_runtime_symbols(builder: &mut JITBuilder) {

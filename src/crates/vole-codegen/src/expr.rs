@@ -1603,17 +1603,33 @@ impl Cg<'_, '_, '_> {
 
     /// Compile a block expression: { stmts; trailing_expr }
     fn block_expr(&mut self, block: &BlockExpr) -> Result<CompiledValue, String> {
+        self.push_rc_scope();
+
         // Compile statements
         for stmt in &block.stmts {
             self.stmt(stmt)?;
         }
 
         // Compile trailing expression if present, otherwise return void
-        if let Some(ref trailing) = block.trailing_expr {
-            self.expr(trailing)
+        let result = if let Some(ref trailing) = block.trailing_expr {
+            self.expr(trailing)?
         } else {
-            Ok(self.void_value())
-        }
+            self.void_value()
+        };
+
+        // If the trailing expression is a local variable being returned from this
+        // scope, skip its cleanup — ownership transfers to the caller.
+        let skip_var = if let Some(ref trailing) = block.trailing_expr
+            && let ExprKind::Identifier(sym) = &trailing.kind
+            && let Some((var, _)) = self.vars.get(sym)
+        {
+            Some(*var)
+        } else {
+            None
+        };
+
+        self.pop_rc_scope_with_cleanup(skip_var)?;
+        Ok(result)
     }
 
     /// Compile an if expression: if cond { then } else { else }
