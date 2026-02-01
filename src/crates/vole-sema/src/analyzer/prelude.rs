@@ -132,6 +132,10 @@ impl Analyzer {
                 .module_method_resolutions
                 .borrow_mut()
                 .insert(import_path.to_string(), cached.method_resolutions.clone());
+            self.ctx
+                .module_is_check_results
+                .borrow_mut()
+                .insert(import_path.to_string(), cached.is_check_results.clone());
             return;
         }
 
