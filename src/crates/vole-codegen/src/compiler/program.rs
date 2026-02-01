@@ -1056,6 +1056,9 @@ impl Compiler<'_> {
         writer: &mut W,
         include_tests: bool,
     ) -> Result<(), String> {
+        // Compile module functions first (prelude, imports) so module variables are available
+        self.compile_module_functions()?;
+
         let program_module = self.program_module();
         // First pass: declare all functions so they can reference each other
         let mut test_count = 0usize;
@@ -1091,6 +1094,19 @@ impl Compiler<'_> {
                         self.func_registry.set_return_type(func_key, i64_type_id);
                         self.func_registry.set_func_id(func_key, func_id);
                         test_count += 1;
+                    }
+                }
+                Decl::Let(let_stmt) => {
+                    // Store global initializer expressions so module variables are available
+                    if let LetInit::Expr(expr) = &let_stmt.init {
+                        self.global_inits
+                            .insert(let_stmt.name, Rc::new(expr.clone()));
+                    }
+                }
+                Decl::LetTuple(let_tuple) => {
+                    // Handle top-level destructuring imports
+                    if let ExprKind::Import(import_path) = &let_tuple.init.kind {
+                        self.register_global_module_bindings(let_tuple, import_path);
                     }
                 }
                 _ => {}
@@ -1167,12 +1183,11 @@ impl Compiler<'_> {
         let mut builder_ctx = FunctionBuilderContext::new();
         {
             let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-            let empty_global_inits: FxHashMap<Symbol, Rc<Expr>> = FxHashMap::default();
             let env = CompileEnv {
                 analyzed: self.analyzed,
                 state: &self.state,
                 interner: &self.analyzed.interner,
-                global_inits: &empty_global_inits,
+                global_inits: &self.global_inits,
                 source_file_ptr,
                 current_module: None,
                 global_module_bindings: &self.global_module_bindings,
@@ -1223,12 +1238,11 @@ impl Compiler<'_> {
             builder.switch_to_block(entry_block);
 
             // Compile test body (no parameters, no return type)
-            let empty_global_inits: FxHashMap<Symbol, Rc<Expr>> = FxHashMap::default();
             let env = CompileEnv {
                 analyzed: self.analyzed,
                 state: &self.state,
                 interner: &self.analyzed.interner,
-                global_inits: &empty_global_inits,
+                global_inits: &self.global_inits,
                 source_file_ptr,
                 current_module: None,
                 global_module_bindings: &self.global_module_bindings,
