@@ -12,6 +12,9 @@ pub struct Parser<'src> {
     /// Tracks when we've consumed half of a '>>' token while parsing generics.
     /// When true, the next check/consume for '>' should succeed without advancing.
     pending_gt: bool,
+    /// When true, tests block bodies are skipped (brace-matched) rather than fully parsed.
+    /// This avoids building AST nodes for test suites in production builds.
+    pub(super) skip_tests: bool,
 }
 
 /// A parse error wrapping a miette-enabled ParserError
@@ -42,6 +45,7 @@ impl<'src> Parser<'src> {
             interner,
             next_node_id: 0,
             pending_gt: false,
+            skip_tests: false,
         }
     }
 
@@ -59,7 +63,14 @@ impl<'src> Parser<'src> {
             interner,
             next_node_id: 0,
             pending_gt: false,
+            skip_tests: false,
         }
+    }
+
+    /// Set whether to skip parsing tests block bodies.
+    /// When enabled, tests blocks are brace-matched but their contents are not parsed.
+    pub fn set_skip_tests(&mut self, skip: bool) {
+        self.skip_tests = skip;
     }
 
     /// Generate a unique node ID

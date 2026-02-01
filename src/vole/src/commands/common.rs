@@ -80,6 +80,7 @@ pub fn compile_source(
     let (mut program, mut interner) = {
         let _span = tracing::info_span!("parse", file = %file_path).entered();
         let mut parser = Parser::with_file(source, file_path);
+        parser.set_skip_tests(skip_tests);
         let program = match parser.parse_program() {
             Ok(prog) => prog,
             Err(e) => {

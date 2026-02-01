@@ -106,6 +106,34 @@ impl<'src> Parser<'src> {
         };
 
         self.consume(TokenType::LBrace, "expected '{' after 'tests'")?;
+
+        // In skip_tests mode, brace-match to find the closing } without parsing the body.
+        // Since the lexer already tokenized everything (including strings as single tokens),
+        // we just count LBrace/RBrace tokens.
+        if self.skip_tests {
+            let mut depth: u32 = 1;
+            while depth > 0 && !self.check(TokenType::Eof) {
+                if self.check(TokenType::LBrace) {
+                    depth += 1;
+                } else if self.check(TokenType::RBrace) {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                self.advance();
+            }
+            self.consume(TokenType::RBrace, "expected '}' to close tests block")?;
+            let span = start_span.merge(self.previous.span);
+
+            return Ok(Decl::Tests(TestsDecl {
+                label,
+                decls: Vec::new(),
+                tests: Vec::new(),
+                span,
+            }));
+        }
+
         self.skip_newlines();
 
         // Parse declarations and test cases in any order
