@@ -6,6 +6,7 @@
 //! - random_seeded(seed: i64) -> *mut RcRng - creates a seeded RNG instance
 //! - rng_float(rng: *mut RcRng) -> f64 - get next float from seeded RNG
 
+use crate::alloc_track;
 use crate::native_registry::{NativeModule, NativeSignature, NativeType};
 use crate::value::{RcHeader, TYPE_RNG};
 use rand::rngs::StdRng;
@@ -28,6 +29,7 @@ pub struct RcRng {
 /// # Safety
 /// `ptr` must point to a valid `RcRng` allocation with refcount already at zero.
 unsafe extern "C" fn rng_drop(ptr: *mut u8) {
+    alloc_track::track_dealloc(TYPE_RNG);
     unsafe {
         let rng_ptr = ptr as *mut RcRng;
         // Drop the StdRng in place, then deallocate
@@ -138,6 +140,7 @@ pub extern "C" fn random_seeded(seed: i64) -> *mut RcRng {
             RcHeader::with_drop_fn(TYPE_RNG, rng_drop),
         );
         std::ptr::write(&mut (*ptr).rng, rng);
+        alloc_track::track_alloc(TYPE_RNG);
         ptr
     }
 }

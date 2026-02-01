@@ -1,0 +1,18 @@
+[package]
+name = "vole-leak"
+version = "0.1.0"
+edition = "2024"
+description = "Leak detection for Vole test suites"
+
+[dependencies]
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Vole library crate (for compilation and test execution)
+vole = { path = "../../vole" }
+
+# File globbing for default test suite
+glob = "0.3"
+
+[lints]
+workspace = true

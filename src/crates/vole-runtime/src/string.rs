@@ -1,5 +1,6 @@
 // src/runtime/string.rs
 
+use crate::alloc_track;
 use crate::value::{RcHeader, TYPE_STRING, rc_dec, rc_inc};
 use std::alloc::{Layout, alloc, dealloc};
 use std::ptr;
@@ -42,6 +43,7 @@ impl RcString {
             let data_ptr = (ptr as *mut u8).add(size_of::<RcString>());
             ptr::copy_nonoverlapping(s.as_ptr(), data_ptr, len);
 
+            alloc_track::track_alloc(TYPE_STRING);
             ptr
         }
     }
@@ -108,6 +110,7 @@ impl RcString {
 /// # Safety
 /// `ptr` must point to a valid `RcString` allocation with refcount already at zero.
 unsafe extern "C" fn string_drop(ptr: *mut u8) {
+    alloc_track::track_dealloc(TYPE_STRING);
     unsafe {
         let s = ptr as *mut RcString;
         let len = (*s).len;

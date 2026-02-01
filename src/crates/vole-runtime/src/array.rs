@@ -1,5 +1,6 @@
 // src/runtime/array.rs
 
+use crate::alloc_track;
 use crate::value::{RcHeader, TYPE_ARRAY, TaggedValue, rc_dec, rc_inc};
 use std::alloc::{Layout, alloc, dealloc, realloc};
 use std::ptr;
@@ -44,6 +45,7 @@ impl RcArray {
             ptr::write(&mut (*ptr).capacity, capacity);
             ptr::write(&mut (*ptr).data, data);
 
+            alloc_track::track_alloc(TYPE_ARRAY);
             ptr
         }
     }
@@ -158,6 +160,7 @@ impl RcArray {
 /// # Safety
 /// `ptr` must point to a valid `RcArray` allocation with refcount already at zero.
 unsafe extern "C" fn array_drop(ptr: *mut u8) {
+    alloc_track::track_dealloc(TYPE_ARRAY);
     unsafe {
         let arr = ptr as *mut RcArray;
         let len = (*arr).len;

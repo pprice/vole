@@ -17,6 +17,7 @@ use std::alloc::{Layout, dealloc};
 
 use hashbrown::HashTable;
 
+use crate::alloc_track;
 use crate::array::RcArray;
 use crate::iterator::{ArraySource, IteratorKind, IteratorSource, RcIterator};
 use crate::value::{RcHeader, TYPE_MAP, TYPE_SET, TaggedValue, rc_dec_raw, rc_inc_raw};
@@ -348,6 +349,7 @@ pub struct RcMap {
 /// # Safety
 /// `ptr` must point to a valid `RcMap` allocation with refcount already at zero.
 unsafe extern "C" fn map_drop(ptr: *mut u8) {
+    alloc_track::track_dealloc(TYPE_MAP);
     unsafe {
         let map_ptr = ptr as *mut RcMap;
         // Dec all contained RC keys/values before freeing the table
@@ -372,6 +374,7 @@ fn alloc_rc_map(map: VoleMap) -> *mut RcMap {
             RcHeader::with_drop_fn(TYPE_MAP, map_drop),
         );
         std::ptr::write(&mut (*ptr).map, map);
+        alloc_track::track_alloc(TYPE_MAP);
         ptr
     }
 }
@@ -698,6 +701,7 @@ pub struct RcSet {
 /// # Safety
 /// `ptr` must point to a valid `RcSet` allocation with refcount already at zero.
 unsafe extern "C" fn set_drop(ptr: *mut u8) {
+    alloc_track::track_dealloc(TYPE_SET);
     unsafe {
         let set_ptr = ptr as *mut RcSet;
         // Dec all contained RC elements before freeing the table
@@ -722,6 +726,7 @@ fn alloc_rc_set(set: VoleSet) -> *mut RcSet {
             RcHeader::with_drop_fn(TYPE_SET, set_drop),
         );
         std::ptr::write(&mut (*ptr).set, set);
+        alloc_track::track_alloc(TYPE_SET);
         ptr
     }
 }

@@ -1,7 +1,8 @@
 // src/runtime/instance.rs
 
+use crate::alloc_track;
 use crate::type_registry::get_instance_type_info;
-use crate::value::{RcHeader, rc_dec, rc_inc};
+use crate::value::{RcHeader, TYPE_INSTANCE, rc_dec, rc_inc};
 use std::alloc::{Layout, alloc, dealloc};
 use std::ptr;
 
@@ -39,6 +40,7 @@ impl RcInstance {
                 ptr::write(fields_ptr.add(i), 0u64);
             }
 
+            alloc_track::track_alloc(TYPE_INSTANCE);
             ptr
         }
     }
@@ -117,6 +119,7 @@ impl RcInstance {
 /// # Safety
 /// `ptr` must point to a valid `RcInstance` allocation with refcount already at zero.
 unsafe extern "C" fn instance_drop(ptr: *mut u8) {
+    alloc_track::track_dealloc(TYPE_INSTANCE);
     unsafe {
         let inst = ptr as *mut RcInstance;
         let type_id = (*inst).type_id;

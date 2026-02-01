@@ -19,6 +19,7 @@
 use std::alloc::{Layout, alloc, dealloc};
 use std::ptr;
 
+use crate::alloc_track;
 use crate::value::{RcHeader, TYPE_CLOSURE, rc_dec};
 
 /// Capture kind constants
@@ -117,6 +118,7 @@ impl Closure {
             for i in 0..num_captures {
                 *captures.add(i) = ptr::null_mut();
             }
+            alloc_track::track_alloc(TYPE_CLOSURE);
             ptr
         }
     }
@@ -210,6 +212,7 @@ impl Closure {
 /// # Safety
 /// `ptr` must point to a valid `Closure` allocation with refcount at zero.
 unsafe extern "C" fn closure_drop(ptr: *mut u8) {
+    alloc_track::track_dealloc(TYPE_CLOSURE);
     unsafe {
         let closure = ptr as *mut Closure;
         let num = (*closure).num_captures;

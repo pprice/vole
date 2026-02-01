@@ -3,6 +3,7 @@
 //! Provides runtime representation for iterators.
 //! Uses a unified IteratorSource enum to support chaining (e.g., map().map()).
 
+use crate::alloc_track;
 use crate::array::RcArray;
 use crate::closure::Closure;
 use crate::string::RcString;
@@ -345,6 +346,7 @@ impl RcIterator {
             );
             ptr::write(&mut (*ptr).iter.kind, kind);
             ptr::write(&mut (*ptr).iter.source, source);
+            alloc_track::track_alloc(TYPE_ITERATOR);
             ptr
         }
     }
@@ -429,6 +431,7 @@ pub extern "C" fn vole_interface_iter(boxed_interface: *const u8) -> *mut RcIter
 /// # Safety
 /// `ptr` must point to a valid `RcIterator` allocation.
 unsafe extern "C" fn iterator_drop(ptr: *mut u8) {
+    alloc_track::track_dealloc(TYPE_ITERATOR);
     unsafe {
         let rc_iter = ptr as *mut RcIterator;
         let iter_ref = &(*rc_iter).iter;

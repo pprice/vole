@@ -1,4 +1,5 @@
 //! Vole runtime: values, builtins, and standard library support.
+pub mod alloc_track;
 pub mod array;
 pub mod assert;
 pub mod builtins;
