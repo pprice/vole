@@ -16,7 +16,7 @@ use crate::context::Cg;
 use crate::types::{CodegenCtx, CompileEnv, function_name_id_with_interner, type_id_to_cranelift};
 use vole_frontend::{
     Block, Decl, Expr, ExprKind, FuncDecl, InterfaceMethod, Interner, LetInit, LetTupleStmt,
-    PatternKind, Program, Span, Stmt, Symbol, TestCase, TestsDecl,
+    PatternKind, Program, Span, Stmt, Symbol, TestCase, TestsDecl, TypeExpr,
 };
 use vole_identity::{ModuleId, NameId};
 use vole_sema::generic::{
@@ -1569,8 +1569,8 @@ impl Compiler<'_> {
             );
 
             // Try to find the method in a class
+            let method_name_str = self.query().display_name(instance.method_name);
             if let Some(class) = class_asts.get(&instance.class_name) {
-                let method_name_str = self.query().display_name(instance.method_name);
                 let method = class
                     .methods
                     .iter()
@@ -1581,12 +1581,23 @@ impl Compiler<'_> {
                 }
             }
 
+            // Fallback: search implement blocks for methods on generic classes
+            let program_module = self.program_module();
+            if let Some(method) = self.find_implement_block_method(
+                &program.declarations,
+                instance.class_name,
+                &method_name_str,
+                program_module,
+            ) {
+                self.compile_monomorphized_class_method(method, &instance)?;
+                continue;
+            }
+
             // Method not found - this shouldn't happen if sema was correct
             let class_name = self.query().display_name(instance.class_name);
-            let method_name = self.query().display_name(instance.method_name);
             return Err(format!(
                 "Internal error: method {} not found in class {}",
-                method_name, class_name
+                method_name_str, class_name
             ));
         }
 
@@ -1837,6 +1848,69 @@ impl Compiler<'_> {
                 _ => {}
             }
         }
+    }
+
+    /// Find a method in implement blocks targeting a generic class.
+    /// Searches through all declarations (including tests blocks) for implement blocks
+    /// whose target type matches the given class NameId and returns the matching method.
+    fn find_implement_block_method<'a>(
+        &self,
+        decls: &'a [Decl],
+        class_name_id: NameId,
+        method_name_str: &str,
+        module_id: ModuleId,
+    ) -> Option<&'a FuncDecl> {
+        for decl in decls {
+            match decl {
+                Decl::Implement(impl_block) => {
+                    // Get the base type name from the target type
+                    let target_sym = match &impl_block.target_type {
+                        TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => Some(*sym),
+                        _ => None,
+                    };
+                    if let Some(sym) = target_sym {
+                        let query = self.query();
+                        if let Some(name_id) = query.try_name_id(module_id, &[sym])
+                            && name_id == class_name_id {
+                                // Found matching implement block - search its methods
+                                if let Some(method) = impl_block.methods.iter().find(|m| {
+                                    self.query().resolve_symbol(m.name) == method_name_str
+                                }) {
+                                    return Some(method);
+                                }
+                            }
+                    }
+                }
+                Decl::Tests(tests_decl) => {
+                    let vm_id = self
+                        .query()
+                        .tests_virtual_module(tests_decl.span)
+                        .unwrap_or(module_id);
+                    // Search both the parent module and virtual module for implement blocks
+                    if let Some(method) = self.find_implement_block_method(
+                        &tests_decl.decls,
+                        class_name_id,
+                        method_name_str,
+                        vm_id,
+                    ) {
+                        return Some(method);
+                    }
+                    // Also try with the parent module_id (implement blocks may target
+                    // types from the parent module)
+                    if vm_id != module_id
+                        && let Some(method) = self.find_implement_block_method(
+                            &tests_decl.decls,
+                            class_name_id,
+                            method_name_str,
+                            module_id,
+                        ) {
+                            return Some(method);
+                        }
+                }
+                _ => {}
+            }
+        }
+        None
     }
 
     /// Recursively collect generic function ASTs from declarations, including tests blocks.

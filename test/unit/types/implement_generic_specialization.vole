@@ -1,0 +1,20 @@
+interface Describable {
+    func describe() -> string
+}
+
+class Tagged<T> {
+    value: T
+}
+
+tests {
+    implement Describable for Tagged<i64> {
+        func describe() -> string {
+            return "tagged"
+        }
+    }
+
+    test "implement on concrete specialization" {
+        let t = Tagged { value: 42 }
+        assert(t.describe() == "tagged")
+    }
+}

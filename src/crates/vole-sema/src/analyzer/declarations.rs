@@ -2043,7 +2043,9 @@ impl Analyzer {
                 if let Some(entity_type_id) = entity_type_id {
                     // Build full method name for entity registry
                     let type_name_str = match &impl_block.target_type {
-                        TypeExpr::Named(sym) => interner.resolve(*sym).to_string(),
+                        TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => {
+                            interner.resolve(*sym).to_string()
+                        }
                         TypeExpr::Primitive(prim) => {
                             let name_id = self.name_table().primitives.from_ast(*prim);
                             self.name_table().display(name_id)
@@ -2100,7 +2102,9 @@ impl Analyzer {
 
                 if let Some(entity_type_id) = entity_type_id {
                     let type_name_str = match &impl_block.target_type {
-                        TypeExpr::Named(sym) => interner.resolve(*sym).to_string(),
+                        TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => {
+                            interner.resolve(*sym).to_string()
+                        }
                         TypeExpr::Primitive(prim) => {
                             let name_id = self.name_table().primitives.from_ast(*prim);
                             self.name_table_mut().display(name_id)

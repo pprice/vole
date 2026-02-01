@@ -183,11 +183,14 @@ impl Compiler<'_> {
         Ok(())
     }
 
-    /// Get the type name string from a TypeExpr (works for primitives and named types)
+    /// Get the type name string from a TypeExpr (works for primitives, named types,
+    /// and generic specializations like `Tagged<i64>`)
     fn get_type_name_from_expr(&self, ty: &TypeExpr) -> Option<String> {
         match ty {
             TypeExpr::Primitive(p) => Some(primitive_type_name(*p).to_string()),
-            TypeExpr::Named(sym) => Some(self.query().resolve_symbol(*sym).to_string()),
+            TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => {
+                Some(self.query().resolve_symbol(*sym).to_string())
+            }
             _ => None,
         }
     }
@@ -229,7 +232,7 @@ impl Compiler<'_> {
                     let impl_id = self.impl_type_id_from_type_id(type_id);
                     (type_id, impl_id)
                 }
-                TypeExpr::Named(sym) => {
+                TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => {
                     let type_def_id = self
                         .query()
                         .try_name_id(module_id, &[*sym])
@@ -373,12 +376,24 @@ impl Compiler<'_> {
                     let impl_id = self.impl_type_id_from_type_id(type_id);
                     (type_id, impl_id)
                 }
-                TypeExpr::Named(sym) => {
-                    // Look up TypeDefId from Symbol
+                TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => {
+                    // Look up TypeDefId from Symbol (for Generic, uses the base class name)
+                    // Try given module first, then fall back to program module
+                    // (implement blocks in tests blocks may target parent-scope types)
                     let type_def_id = self
                     .query()
                     .try_name_id(module_id, &[*sym])
                     .and_then(|name_id| self.query().try_type_def_id(name_id))
+                    .or_else(|| {
+                        let prog_mod = self.program_module();
+                        if prog_mod != module_id {
+                            self.query()
+                                .try_name_id(prog_mod, &[*sym])
+                                .and_then(|name_id| self.query().try_type_def_id(name_id))
+                        } else {
+                            None
+                        }
+                    })
                     .unwrap_or_else(|| {
                         panic!(
                             "INTERNAL ERROR: implement block target type not in entity registry\n\
@@ -401,9 +416,9 @@ impl Compiler<'_> {
                 }
                 _ => {
                     // This branch is unreachable: get_type_name_from_expr() returns None
-                    // for non-Primitive/non-Named types, causing early return at line 384
+                    // for non-Primitive/non-Named/non-Generic types, causing early return above
                     unreachable!(
-                        "target_type was neither Primitive nor Named, \
+                        "target_type was neither Primitive, Named, nor Generic, \
                          but passed get_type_name_from_expr check"
                     )
                 }
@@ -480,7 +495,7 @@ impl Compiler<'_> {
                         let name_id = name_table.primitives.from_ast(*p);
                         self.query().try_type_def_id(name_id)
                     }
-                    TypeExpr::Named(sym) => {
+                    TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => {
                         let name_id = name_table.name_id(self.program_module(), &[*sym], interner);
                         name_id.and_then(|id| self.query().try_type_def_id(id))
                     }
@@ -577,11 +592,22 @@ impl Compiler<'_> {
                 let prim_type = vole_sema::PrimitiveType::from_ast(*p);
                 self.analyzed.type_arena().primitive(prim_type)
             }
-            TypeExpr::Named(sym) => {
+            TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => {
+                // Try given module first, then fall back to program module
                 let type_def_id = self
                     .query()
                     .try_name_id(module_id, &[*sym])
                     .and_then(|name_id| self.query().try_type_def_id(name_id))
+                    .or_else(|| {
+                        let prog_mod = self.program_module();
+                        if prog_mod != module_id {
+                            self.query()
+                                .try_name_id(prog_mod, &[*sym])
+                                .and_then(|name_id| self.query().try_type_def_id(name_id))
+                        } else {
+                            None
+                        }
+                    })
                     .unwrap_or_else(|| {
                         panic!(
                             "INTERNAL ERROR: implement block self type not in entity registry\n\
@@ -602,10 +628,8 @@ impl Compiler<'_> {
                     })
             }
             _ => {
-                // This branch is unreachable: get_type_name_from_expr() returns None
-                // for non-Primitive/non-Named types, causing early return at line 553
                 unreachable!(
-                    "target_type was neither Primitive nor Named, \
+                    "target_type was neither Primitive, Named, nor Generic, \
                      but passed get_type_name_from_expr check"
                 )
             }
@@ -655,7 +679,7 @@ impl Compiler<'_> {
                 let prim_type = vole_sema::PrimitiveType::from_ast(*p);
                 self.analyzed.type_arena().primitive(prim_type)
             }
-            TypeExpr::Named(sym) => {
+            TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => {
                 let type_def_id = self
                     .query()
                     .try_name_id(module_id, &[*sym])
@@ -677,7 +701,7 @@ impl Compiler<'_> {
                         )
                     })
             }
-            _ => unreachable!("target_type was neither Primitive nor Named"),
+            _ => unreachable!("target_type was neither Primitive, Named, nor Generic"),
         };
 
         let impl_type_id = self.impl_type_id_from_type_id(self_type_id);
