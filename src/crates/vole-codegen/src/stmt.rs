@@ -237,8 +237,15 @@ impl Cg<'_, '_, '_> {
                     var
                 };
 
-                // Register RC locals for drop-flag tracking
+                // Register RC locals for drop-flag tracking and emit rc_inc if needed.
+                // Variable copies (let y = x) need rc_inc because we're creating a
+                // new reference to the same heap object. Ownership transfers (let x =
+                // new_string(), let x = "literal") don't need inc — the value is born
+                // with refcount=1 for us.
                 if self.rc_scopes.has_active_scope() && self.needs_rc_cleanup(final_type_id) {
+                    if self.expr_needs_rc_inc(init_expr) {
+                        self.emit_rc_inc(final_value)?;
+                    }
                     let drop_flag = self.register_rc_local(var, final_type_id);
                     crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
                 }
@@ -274,16 +281,24 @@ impl Cg<'_, '_, '_> {
                 if let Some(value) = &ret.value {
                     let compiled = self.expr(value)?;
 
-                    // Emit RC cleanup for all active scopes before returning.
-                    // If the return expression is a local variable, skip its cleanup
-                    // (ownership transfers to the caller).
+                    // RC bookkeeping for return values:
+                    // - RC local variable: skip its cleanup (ownership transfers to caller)
+                    // - Non-RC local / borrow (index, field, loop var): rc_inc for caller
+                    // - Fresh allocation (call, literal): already owned, no action needed
                     let skip_var = if let ExprKind::Identifier(sym) = &value.kind
                         && let Some((var, _)) = self.vars.get(sym)
+                        && self.rc_scopes.is_rc_local(*var)
                     {
                         Some(*var)
                     } else {
                         None
                     };
+                    if skip_var.is_none()
+                        && self.needs_rc_cleanup(compiled.type_id)
+                        && self.expr_needs_rc_inc(value)
+                    {
+                        self.emit_rc_inc(compiled.value)?;
+                    }
                     self.emit_rc_cleanup_all_scopes(skip_var)?;
 
                     // Box concrete types to interface representation if needed
@@ -1167,6 +1182,13 @@ impl Cg<'_, '_, '_> {
                 .ok_or_else(|| format!("Missing field {} in raise statement", &field_name))?;
 
             let field_value = self.expr(&field_init.value)?;
+            // RC: if the field value is a borrow (e.g., a parameter variable),
+            // inc it so the caller gets an owned reference in the error payload.
+            if self.needs_rc_cleanup(field_value.type_id)
+                && self.expr_needs_rc_inc(&field_init.value)
+            {
+                self.emit_rc_inc(field_value.value)?;
+            }
             convert_to_i64_for_storage(self.builder, &field_value)
         } else {
             // Multiple fields - allocate on stack and store field values
@@ -1186,6 +1208,12 @@ impl Cg<'_, '_, '_> {
                     .ok_or_else(|| format!("Missing field {} in raise statement", &field_name))?;
 
                 let field_value = self.expr(&field_init.value)?;
+                // RC: inc borrowed field values for the error payload
+                if self.needs_rc_cleanup(field_value.type_id)
+                    && self.expr_needs_rc_inc(&field_init.value)
+                {
+                    self.emit_rc_inc(field_value.value)?;
+                }
                 let store_value = convert_to_i64_for_storage(self.builder, &field_value);
                 let field_offset = (field_idx as i32) * 8;
                 self.builder
@@ -1196,6 +1224,9 @@ impl Cg<'_, '_, '_> {
             let ptr_type = self.ptr_type();
             self.builder.ins().stack_addr(ptr_type, slot, 0)
         };
+
+        // RC cleanup: like return, clean up all RC locals before exiting.
+        self.emit_rc_cleanup_all_scopes(None)?;
 
         // Return from the function with (tag, payload)
         self.builder.ins().return_(&[tag_val, payload_val]);

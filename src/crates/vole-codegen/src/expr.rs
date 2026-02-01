@@ -453,6 +453,22 @@ impl Cg<'_, '_, '_> {
                 })
             }
             AssignTarget::Variable(sym) => {
+                // Read the old value BEFORE evaluating the new expression,
+                // so we can rc_dec it after the assignment.
+                let rc_old = if self.rc_scopes.has_active_scope() {
+                    if let Some(&(var, type_id)) = self.vars.get(sym) {
+                        if self.needs_rc_cleanup(type_id) {
+                            Some(self.builder.use_var(var))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
                 let mut value = self.expr(&assign.value)?;
 
                 // Check for captured variable assignment
@@ -467,7 +483,19 @@ impl Cg<'_, '_, '_> {
                 let var_type_id = *var_type_id;
 
                 value = self.coerce_to_type(value, var_type_id)?;
+
+                // RC bookkeeping for reassignment:
+                // 1. rc_inc new value if it's a borrow (variable copy)
+                // 2. Store the new value
+                // 3. rc_dec old value (after store, in case old == new)
+                if rc_old.is_some() && self.expr_needs_rc_inc(&assign.value) {
+                    self.emit_rc_inc(value.value)?;
+                }
                 self.builder.def_var(var, value.value);
+                if let Some(old_val) = rc_old {
+                    self.emit_rc_dec(old_val)?;
+                }
+
                 Ok(value)
             }
             AssignTarget::Field { object, field, .. } => {

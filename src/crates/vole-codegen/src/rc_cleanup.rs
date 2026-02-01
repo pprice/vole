@@ -11,7 +11,6 @@ use cranelift::prelude::{FunctionBuilder, InstBuilder, IntCC, Variable, types};
 use vole_sema::type_arena::TypeId;
 
 /// A single RC local variable with its drop flag.
-#[allow(dead_code)] // Fields used when rc_dec emission is enabled (v-37ea)
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct RcLocal {
     /// The Cranelift Variable holding the RC pointer.
@@ -19,6 +18,7 @@ pub(crate) struct RcLocal {
     /// A Cranelift i8 Variable: 1 = live (needs rc_dec), 0 = not yet initialized / moved.
     pub drop_flag: Variable,
     /// The Vole type of this variable (for diagnostics / future use).
+    #[allow(dead_code)]
     pub type_id: TypeId,
 }
 
@@ -73,7 +73,6 @@ impl RcScopeStack {
 
     /// Iterate all RC locals from all active scopes (innermost first).
     /// Used for return statements that must clean up everything.
-    #[allow(dead_code)] // Used when rc_dec emission is enabled (v-37ea)
     pub fn all_locals_innermost_first(&self) -> impl Iterator<Item = &RcLocal> {
         self.scopes.iter().rev().flat_map(|s| s.locals.iter())
     }
@@ -83,7 +82,6 @@ impl RcScopeStack {
     ///
     /// `target_depth` is the scope depth of the loop body. All scopes at
     /// index >= target_depth are cleaned up (innermost first).
-    #[allow(dead_code)] // Used when rc_dec emission is enabled (v-37ea)
     pub fn locals_from_depth(&self, target_depth: usize) -> impl Iterator<Item = &RcLocal> {
         self.scopes[target_depth..]
             .iter()
@@ -96,9 +94,16 @@ impl RcScopeStack {
         self.scopes.len()
     }
 
+    /// Returns true if `variable` is registered as an RC local in any scope.
+    pub fn is_rc_local(&self, variable: Variable) -> bool {
+        self.scopes
+            .iter()
+            .any(|s| s.locals.iter().any(|l| l.variable == variable))
+    }
+
     /// Get RC locals for the current (innermost) scope only.
     /// Used for normal block exit cleanup.
-    #[allow(dead_code)] // Used when rc_dec emission is enabled (v-37ea)
+    #[allow(dead_code)]
     pub fn current_scope_locals(&self) -> &[RcLocal] {
         self.scopes
             .last()
@@ -117,7 +122,6 @@ impl RcScopeStack {
 /// ```
 ///
 /// Each conditional requires its own Cranelift block pair.
-#[allow(dead_code)] // Used when rc_dec emission is enabled (v-37ea)
 pub(crate) fn emit_rc_cleanup(
     builder: &mut FunctionBuilder,
     locals: &[RcLocal],

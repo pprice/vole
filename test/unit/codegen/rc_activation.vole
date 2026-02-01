@@ -1,0 +1,199 @@
+// Tests for RC activation (v-37ea): rc_inc/rc_dec emission for strings and arrays.
+//
+// These tests exercise the key RC patterns:
+// - Variable copies (let y = x)
+// - Array indexing (let item = arr[i])
+// - Reassignment (x = new_value)
+// - Return of borrowed values (return arr[i], return loop_var)
+// - Raise with borrowed field values
+
+// Helper: takes a string array and returns the element at index 0
+func first_element(arr: [string]) -> string {
+    return arr[0]
+}
+
+// Helper: iterates array, returns first element matching predicate
+func find_first(arr: [string], target: string) -> string {
+    for item in arr {
+        if item == target {
+            return item
+        }
+    }
+    return ""
+}
+
+// Helper: uses while loop with array indexing
+func find_at_index(arr: [string], target: string) -> string {
+    let mut i = 0
+    while i < arr.length() {
+        let elem = arr[i]
+        if elem == target {
+            return elem
+        }
+        i = i + 1
+    }
+    return ""
+}
+
+error NotFoundErr { message: string }
+
+func fallible_lookup(items: [string], key: string) -> fallible(string, NotFoundErr) {
+    for item in items {
+        if item == key {
+            return item
+        }
+    }
+    raise NotFoundErr { message: key }
+}
+
+tests "variable copy" {
+    test "let y = x for strings" {
+        let x = "hello"
+        let y = x
+        assert(y == "hello")
+        assert(x == "hello")
+    }
+
+    test "let y = x for arrays" {
+        let x = [1, 2, 3]
+        let y = x
+        assert(y.length() == 3)
+        assert(x.length() == 3)
+    }
+
+    test "multiple copies" {
+        let a = "shared"
+        let b = a
+        let c = a
+        let d = b
+        assert(a == "shared")
+        assert(b == "shared")
+        assert(c == "shared")
+        assert(d == "shared")
+    }
+}
+
+tests "array indexing" {
+    test "index into string array" {
+        let arr = ["hello", "world"]
+        let first = arr[0]
+        let second = arr[1]
+        assert(first == "hello")
+        assert(second == "world")
+    }
+
+    test "index in while loop" {
+        let arr = ["a", "b", "c"]
+        let mut i = 0
+        let mut found = ""
+        while i < arr.length() {
+            let elem = arr[i]
+            if elem == "b" {
+                found = elem
+            }
+            i = i + 1
+        }
+        assert(found == "b")
+    }
+
+    test "return indexed element from function" {
+        let arr = ["first", "second", "third"]
+        let result = first_element(arr)
+        assert(result == "first")
+    }
+}
+
+tests "reassignment" {
+    test "reassign string variable" {
+        let mut x = "old"
+        x = "new"
+        assert(x == "new")
+    }
+
+    test "reassign with variable copy" {
+        let mut x = "old"
+        let y = "other"
+        x = y
+        assert(x == "other")
+        assert(y == "other")
+    }
+
+    test "reassign in loop" {
+        let arr = ["one", "two", "three"]
+        let mut last = ""
+        for item in arr {
+            last = item
+        }
+        assert(last == "three")
+    }
+}
+
+tests "return borrowed" {
+    test "return for-in loop variable" {
+        let arr = ["apple", "banana", "cherry"]
+        let result = find_first(arr, "banana")
+        assert(result == "banana")
+    }
+
+    test "return while loop indexed element" {
+        let arr = ["apple", "banana", "cherry"]
+        let result = find_at_index(arr, "cherry")
+        assert(result == "cherry")
+    }
+
+    test "return not found" {
+        let arr = ["apple", "banana"]
+        let result = find_first(arr, "grape")
+        assert(result == "")
+    }
+}
+
+tests "raise with borrowed fields" {
+    test "raise transfers string field" {
+        let items = ["x", "y", "z"]
+        let result = match fallible_lookup(items, "missing") {
+            success s => s
+            error NotFoundErr { message: m } => m
+            _ => "unexpected"
+        }
+        assert(result == "missing")
+    }
+
+    test "raise after successful lookup" {
+        let items = ["x", "y", "z"]
+        let result = match fallible_lookup(items, "y") {
+            success s => s
+            error NotFoundErr { message: m } => m
+            _ => "unexpected"
+        }
+        assert(result == "y")
+    }
+}
+
+tests "stress" {
+    test "many string variables in sequence" {
+        let a = "one"
+        let b = "two"
+        let c = "three"
+        let d = "four"
+        let e = "five"
+        let f = a
+        let g = b
+        let h = c
+        assert(f == "one")
+        assert(g == "two")
+        assert(h == "three")
+        assert(d == "four")
+        assert(e == "five")
+    }
+
+    test "repeated function calls" {
+        let arr = ["alpha", "beta", "gamma"]
+        let r1 = first_element(arr)
+        let r2 = first_element(arr)
+        let r3 = first_element(arr)
+        assert(r1 == "alpha")
+        assert(r2 == "alpha")
+        assert(r3 == "alpha")
+    }
+}

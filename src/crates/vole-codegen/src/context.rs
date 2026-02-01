@@ -231,24 +231,23 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Future tickets will add proper move semantics so all RC types can be
     /// cleaned up at scope exit (clearing the drop flag when a value is moved/consumed).
     pub fn needs_rc_cleanup(&self, type_id: TypeId) -> bool {
-        use vole_sema::MemoryKind;
         let arena = self.arena();
-        if arena.memory_kind(type_id) != MemoryKind::Rc {
-            return false;
-        }
-        // Structs are stack-allocated in codegen (value semantics).
-        if arena.is_struct(type_id) {
-            return false;
-        }
-        // Sentinels (Done, etc.) are i8 zero values, not heap pointers.
-        if arena.is_sentinel(type_id) {
-            return false;
-        }
-        // Interfaces are boxed values (fat pointers), not raw RC pointers.
-        if arena.is_interface(type_id) {
-            return false;
-        }
-        true
+        // Only enable scope-exit RC cleanup for types with RcHeader whose
+        // drop functions don't recursively free child references.
+        //
+        // Strings: atomic RC values, no child references.
+        // Arrays: drop function handles element cleanup internally.
+        //
+        // NOT yet enabled for:
+        // - Class instances: instance_drop already decs RC fields, so scope-exit
+        //   dec would double-free. Needs field-level rc_inc first (v-17c5).
+        // - Closures: don't have RcHeader at all (different allocation).
+        // - Functions: closure wrappers, same issue as closures.
+        // - Iterators: complex lifecycle managed by the runtime (collect, etc.).
+        // - Interfaces: boxed values (fat pointers), not raw RC pointers.
+        // - Structs: stack-allocated value types.
+        // - Sentinels: i8 zero values, not heap pointers.
+        arena.is_string(type_id) || arena.is_array(type_id)
     }
 
     /// Push a new RC scope (called when entering a block).
@@ -259,38 +258,102 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Pop the current RC scope and emit cleanup for its RC locals.
     /// `skip_var` optionally specifies a variable whose ownership is being
     /// transferred out (e.g., the block result) and should NOT be dec'd.
-    ///
-    /// NOTE: Actual rc_dec emission is gated until rc_inc on copy/extract is
-    /// implemented (v-37ea). Without paired rc_inc, scope-exit rc_dec causes
-    /// double-frees. The scope tracking and drop flag infrastructure is active
-    /// so it can be tested and validated structurally.
-    pub fn pop_rc_scope_with_cleanup(&mut self, _skip_var: Option<Variable>) -> Result<(), String> {
-        // Pop scope to keep tracking balanced, but don't emit rc_dec yet.
-        self.rc_scopes.pop_scope();
+    pub fn pop_rc_scope_with_cleanup(&mut self, skip_var: Option<Variable>) -> Result<(), String> {
+        let scope = self.rc_scopes.pop_scope();
+        if let Some(scope) = scope {
+            let rc_dec_ref = self.runtime_func_ref(RuntimeFn::RcDec)?;
+            self.emit_rc_locals_cleanup(&scope.locals, skip_var, rc_dec_ref);
+        }
         Ok(())
     }
 
     /// Emit cleanup for ALL active RC scopes (for return statements).
     /// `skip_var` optionally specifies a variable being returned.
-    ///
-    /// NOTE: Gated until rc_inc on copy/extract (v-37ea). See pop_rc_scope_with_cleanup.
-    pub fn emit_rc_cleanup_all_scopes(
-        &mut self,
-        _skip_var: Option<Variable>,
-    ) -> Result<(), String> {
-        // Infrastructure is active (scope tracking, drop flags), but actual
-        // rc_dec emission requires rc_inc on copy/extract (v-37ea).
+    pub fn emit_rc_cleanup_all_scopes(&mut self, skip_var: Option<Variable>) -> Result<(), String> {
+        let locals: Vec<_> = self
+            .rc_scopes
+            .all_locals_innermost_first()
+            .copied()
+            .collect();
+        if !locals.is_empty() {
+            let rc_dec_ref = self.runtime_func_ref(RuntimeFn::RcDec)?;
+            self.emit_rc_locals_cleanup(&locals, skip_var, rc_dec_ref);
+        }
         Ok(())
     }
 
     /// Emit cleanup for scopes from the given depth upward (for break/continue).
     /// `target_depth` is the depth of the loop scope.
-    ///
-    /// NOTE: Gated until rc_inc on copy/extract (v-37ea). See pop_rc_scope_with_cleanup.
-    pub fn emit_rc_cleanup_from_depth(&mut self, _target_depth: usize) -> Result<(), String> {
-        // Infrastructure is active (scope tracking, drop flags), but actual
-        // rc_dec emission requires rc_inc on copy/extract (v-37ea).
+    pub fn emit_rc_cleanup_from_depth(&mut self, target_depth: usize) -> Result<(), String> {
+        let locals: Vec<_> = self
+            .rc_scopes
+            .locals_from_depth(target_depth)
+            .copied()
+            .collect();
+        if !locals.is_empty() {
+            let rc_dec_ref = self.runtime_func_ref(RuntimeFn::RcDec)?;
+            self.emit_rc_locals_cleanup(&locals, None, rc_dec_ref);
+        }
         Ok(())
+    }
+
+    /// Emit conditional rc_dec for a list of RC locals, optionally skipping one variable.
+    fn emit_rc_locals_cleanup(
+        &mut self,
+        locals: &[super::rc_cleanup::RcLocal],
+        skip_var: Option<Variable>,
+        rc_dec_ref: cranelift::codegen::ir::FuncRef,
+    ) {
+        let filtered: Vec<_> = if let Some(skip) = skip_var {
+            locals
+                .iter()
+                .filter(|l| l.variable != skip)
+                .copied()
+                .collect()
+        } else {
+            locals.to_vec()
+        };
+        super::rc_cleanup::emit_rc_cleanup(self.builder, &filtered, rc_dec_ref);
+    }
+
+    /// Emit rc_inc(value) to increment the reference count.
+    /// Used when creating a new reference to an existing RC value.
+    pub fn emit_rc_inc(&mut self, value: Value) -> Result<(), String> {
+        self.call_runtime_void(RuntimeFn::RcInc, &[value])
+    }
+
+    /// Emit rc_dec(value) to decrement the reference count.
+    /// Used when destroying a reference (e.g., reassignment).
+    pub fn emit_rc_dec(&mut self, value: Value) -> Result<(), String> {
+        self.call_runtime_void(RuntimeFn::RcDec, &[value])
+    }
+
+    /// Check if storing the result of `expr` into a new binding requires rc_inc.
+    ///
+    /// Returns true when the expression produces a borrowed reference (reading
+    /// from a local variable, indexing a container, accessing a field). Returns
+    /// false for expressions that produce fresh values (literals, calls,
+    /// constructors) — those transfer ownership with refcount already set.
+    pub fn expr_needs_rc_inc(&self, expr: &Expr) -> bool {
+        use vole_frontend::ExprKind;
+        match &expr.kind {
+            // Variable read: borrow if it's a local variable binding.
+            // Function names, globals, module bindings create new RC objects
+            // (closure wrappers, etc.) — ownership transfers, no inc.
+            ExprKind::Identifier(sym) => self.vars.contains_key(sym),
+            // Array/tuple index reads borrow from the container.
+            ExprKind::Index(_) => true,
+            // FieldAccess on structs (stack-allocated) is an ownership transfer,
+            // not a borrow, because the struct won't dec its fields.
+            // Once class-instance RC is enabled (v-17c5), instance field access
+            // WILL need inc. For now, all relevant field accesses are on structs.
+            ExprKind::FieldAccess(_) => false,
+            // Transparent wrappers: look through them.
+            ExprKind::Grouping(inner) => self.expr_needs_rc_inc(inner),
+            // Everything else produces a fresh +1 reference (calls, literals,
+            // constructors, operators, etc.) — no inc needed.
+            _ => false,
+        }
     }
 
     /// Register an RC local in the current scope. Allocates a drop flag,
