@@ -91,6 +91,7 @@ runtime_fns! {
     StringCharsIter => "vole_string_chars_iter",
     ClosureAlloc => "vole_closure_alloc",
     ClosureSetCapture => "vole_closure_set_capture",
+    ClosureSetCaptureKind => "vole_closure_set_capture_kind",
     ClosureGetCapture => "vole_closure_get_capture",
     ClosureGetFunc => "vole_closure_get_func",
     HeapAlloc => "vole_heap_alloc",

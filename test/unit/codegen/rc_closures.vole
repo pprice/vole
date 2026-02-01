@@ -1,0 +1,115 @@
+// RC for closures: captures of RC types should be properly reference-counted.
+//
+// Tests exercise closure capture of strings, arrays, and other RC types,
+// as well as closures passed to higher-order functions.
+
+tests "closure capturing string" {
+    test "capture string and use it" {
+        let greeting = "hello"
+        let greet = (name: string) -> string => greeting + " " + name
+        assert(greet("world") == "hello world")
+    }
+
+    test "capture string in block body" {
+        let prefix = "pre"
+        let prepend = (s: string) -> string => {
+            return prefix + "_" + s
+        }
+        assert(prepend("fix") == "pre_fix")
+    }
+
+    test "capture multiple strings" {
+        let first = "hello"
+        let second = "world"
+        let combine = () -> string => first + " " + second
+        assert(combine() == "hello world")
+    }
+
+    test "capture string and int" {
+        let label = "count"
+        let n = 42
+        let describe = () -> string => label + "=" + n
+        assert(describe() == "count=42")
+    }
+}
+
+tests "closure capturing array" {
+    test "capture array and read element" {
+        let arr = [10, 20, 30]
+        let getFirst = () -> i64 => arr[0]
+        assert(getFirst() == 10)
+    }
+
+    test "capture array of strings" {
+        let words = ["hello", "world"]
+        let getWord = (i: i64) -> string => words[i]
+        assert(getWord(0) == "hello")
+        assert(getWord(1) == "world")
+    }
+}
+
+tests "closure passed to higher-order function" {
+    test "string capture passed to higher-order" {
+        let greeting = "hi"
+        let greet = (name: string) -> string => greeting + " " + name
+
+        func apply(f: (string) -> string, arg: string) -> string {
+            return f(arg)
+        }
+
+        assert(apply(greet, "there") == "hi there")
+    }
+
+    test "int capture used in loop" {
+        let factor = 3
+        let multiply = (x: i64) -> i64 => x * factor
+        assert(multiply(1) == 3)
+        assert(multiply(2) == 6)
+        assert(multiply(3) == 9)
+    }
+
+    test "string capture used multiple times" {
+        let prefix = "item"
+        let label = (x: i64) -> string => prefix + "_" + x
+        assert(label(1) == "item_1")
+        assert(label(2) == "item_2")
+        assert(label(3) == "item_3")
+    }
+}
+
+tests "closure with mixed capture kinds" {
+    test "mix of value and rc captures" {
+        let count = 5
+        let name = "test"
+        let arr = [1, 2, 3]
+        let describe = () -> string => {
+            return name + ": " + count + " items, first=" + arr[0]
+        }
+        assert(describe() == "test: 5 items, first=1")
+    }
+
+    test "closure capturing bool and string" {
+        let flag = true
+        let label = "status"
+        let describe = () -> string => {
+            if flag {
+                return label + "=on"
+            }
+            return label + "=off"
+        }
+        assert(describe() == "status=on")
+    }
+}
+
+tests "mutable capture with rc" {
+    test "mutable int capture with string return" {
+        let mut count = 0
+        let label = "count"
+        let incAndDescribe = () -> string => {
+            count = count + 1
+            return label + "=" + count
+        }
+        assert(incAndDescribe() == "count=1")
+        assert(incAndDescribe() == "count=2")
+    }
+}

@@ -554,6 +554,10 @@ impl JitContext {
         let sig = self.create_signature(&[ptr_ty, types::I64, ptr_ty], None);
         self.import_function("vole_closure_set_capture", &sig);
 
+        // vole_closure_set_capture_kind(closure: *mut Closure, index: usize, kind: u8)
+        let sig = self.create_signature(&[ptr_ty, types::I64, types::I8], None);
+        self.import_function("vole_closure_set_capture_kind", &sig);
+
         // vole_closure_get_func(closure: *const Closure) -> *const u8
         let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
         self.import_function("vole_closure_get_func", &sig);
@@ -957,6 +961,10 @@ impl JitContext {
         builder.symbol(
             "vole_closure_set_capture",
             vole_runtime::closure::vole_closure_set_capture as *const u8,
+        );
+        builder.symbol(
+            "vole_closure_set_capture_kind",
+            vole_runtime::closure::vole_closure_set_capture_kind as *const u8,
         );
         builder.symbol(
             "vole_closure_get_func",

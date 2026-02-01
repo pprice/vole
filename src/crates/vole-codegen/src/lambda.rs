@@ -267,7 +267,9 @@ impl Cg<'_, '_, '_> {
 
         // Set up each capture
         let set_capture_ref = self.runtime_func_ref(RuntimeFn::ClosureSetCapture)?;
+        let set_kind_ref = self.runtime_func_ref(RuntimeFn::ClosureSetCaptureKind)?;
         let heap_alloc_ref = self.runtime_func_ref(RuntimeFn::HeapAlloc)?;
+        let rc_inc_ref = self.runtime_func_ref(RuntimeFn::RcInc)?;
 
         for (i, capture) in captures.iter().enumerate() {
             // For self-captures (recursive lambdas), use the closure pointer itself
@@ -286,6 +288,13 @@ impl Cg<'_, '_, '_> {
                 (self.builder.use_var(*var), *ty)
             };
 
+            let is_rc = self.is_capture_rc(vole_type_id);
+
+            // If the capture is RC, increment its refcount (the closure now shares ownership)
+            if is_rc {
+                self.builder.ins().call(rc_inc_ref, &[current_value]);
+            }
+
             let size = self.type_size(vole_type_id);
             let size_val = self.builder.ins().iconst(types::I64, size as i64);
 
@@ -300,6 +309,12 @@ impl Cg<'_, '_, '_> {
             self.builder
                 .ins()
                 .call(set_capture_ref, &[closure_ptr, index_val, heap_ptr]);
+
+            // Set the capture kind so closure_drop knows which captures need rc_dec
+            let kind_val = self.builder.ins().iconst(types::I8, is_rc as i64);
+            self.builder
+                .ins()
+                .call(set_kind_ref, &[closure_ptr, index_val, kind_val]);
         }
 
         // Use the type ID from sema (already computed during type checking)
