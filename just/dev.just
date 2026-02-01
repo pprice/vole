@@ -131,3 +131,17 @@ disasm addr:
     #!/usr/bin/env bash
     cargo build --bin vole 2>&1
     lldb -b -o "disassemble -s {{addr}} -c 20" ./target/debug/vole 2>&1
+
+# Run leak detection on RC test suite (default)
+leak-check *args:
+    cargo run -p vole-leak -- {{args}}
+
+# Run leak detection on all unit tests
+leak-check-all:
+    cargo run -p vole-leak -- test/unit/
+
+# Run valgrind on a small RC test suite
+valgrind file="test/unit/codegen/rc_cleanup_basic.vole":
+    #!/usr/bin/env bash
+    cargo build --bin vole 2>&1
+    valgrind --leak-check=full --error-exitcode=1 ./target/debug/vole test "{{file}}"
