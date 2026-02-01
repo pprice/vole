@@ -1,0 +1,33 @@
+// Test: interface constraint checking for generic specialization implementations.
+// When `implement Interface for GenericClass<ConcreteType>` is defined,
+// only that specific specialization should satisfy the interface constraint.
+
+interface Describable {
+    func describe() -> string
+}
+
+class Box<T> {
+    value: T
+}
+
+implement Describable for Box<i64> {
+    func describe() -> string {
+        return "boxed int"
+    }
+}
+
+func describe_it<T: Describable>(x: T) -> string {
+    return x.describe()
+}
+
+tests "specialization constraint matching" {
+    test "correct specialization satisfies constraint" {
+        let b = Box { value: 42 }
+        assert(describe_it(b) == "boxed int")
+    }
+
+    test "direct method call on correct specialization" {
+        let b = Box { value: 99 }
+        assert(b.describe() == "boxed int")
+    }
+}

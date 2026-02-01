@@ -1,0 +1,25 @@
+// When an interface is implemented for a specific generic specialization (Box<i64>),
+// other specializations (Box<string>) should NOT satisfy the interface constraint.
+
+interface Describable {
+    func describe() -> string
+}
+
+class Box<T> {
+    value: T
+}
+
+implement Describable for Box<i64> {
+    func describe() -> string {
+        return "boxed int"
+    }
+}
+
+func describe_it<T: Describable>(x: T) -> string {
+    return x.describe()
+}
+
+func main() {
+    let b = Box { value: "hello" }
+    _ = describe_it(b)
+}

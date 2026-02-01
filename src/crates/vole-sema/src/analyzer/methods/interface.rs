@@ -257,15 +257,61 @@ impl Analyzer {
         interface_name_str: &str,
         interner: &Interner,
     ) -> bool {
-        let type_def_id = self
+        let interface_type_def_id = self
             .resolver(interner)
             .resolve_type_str_or_interface(interface_name_str, &self.entity_registry());
 
-        let Some(type_def_id) = type_def_id else {
+        let Some(interface_type_def_id) = interface_type_def_id else {
             return false;
         };
 
-        self.satisfies_interface_by_type_def_id_typeid(ty_id, type_def_id, interner)
+        if !self.satisfies_interface_by_type_def_id_typeid(ty_id, interface_type_def_id, interner) {
+            return false;
+        }
+
+        // Check specialization: if the implementation targets a specific generic
+        // specialization (e.g., `implement Describable for Box<i64>`), verify
+        // that the actual type args match the implementation's target type args.
+        self.check_specialization_match(ty_id, interface_type_def_id)
+    }
+
+    /// Verify that a type's specialization matches any specialization-specific
+    /// implementation. Returns true if there's no specialization constraint or
+    /// if the type args match. Returns false if the implementation targets a
+    /// different specialization than the value's actual type args.
+    fn check_specialization_match(
+        &self,
+        ty_id: ArenaTypeId,
+        interface_type_def_id: TypeDefId,
+    ) -> bool {
+        // Get the base TypeDefId and actual type args from the value's type
+        let (base_type_def_id, actual_type_args) = {
+            let arena = self.type_arena();
+            match arena.unwrap_nominal(ty_id) {
+                Some((td, args, _)) => (td, args.to_vec()),
+                None => return true, // Non-nominal types: no specialization to check
+            }
+        };
+
+        // Look up the implementation's target type args
+        let registry = self.entity_registry();
+        let target_type_args =
+            registry.get_implementation_target_type_args(base_type_def_id, interface_type_def_id);
+
+        // If no target type args, the implementation applies to all specializations
+        if target_type_args.is_empty() {
+            return true;
+        }
+
+        // Compare: the actual type args must match the implementation's target
+        if actual_type_args.len() != target_type_args.len() {
+            return false;
+        }
+
+        actual_type_args
+            .iter()
+            .zip(target_type_args.iter())
+            .all(|(&actual, &target)| actual == target)
     }
 
     /// Check if a type satisfies a parameterized interface with specific type args.

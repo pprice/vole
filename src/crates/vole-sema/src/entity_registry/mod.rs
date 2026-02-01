@@ -175,12 +175,26 @@ impl EntityRegistry {
         interface_id: TypeDefId,
         type_args: Vec<crate::type_arena::TypeId>,
     ) {
+        self.add_implementation_with_target_args(type_id, interface_id, type_args, Vec::new());
+    }
+
+    /// Add an interface implementation to a type with target type specialization args.
+    /// `target_type_args` records the concrete type args of the implementing type
+    /// (e.g., [i64] for `implement Describable for Box<i64>`).
+    pub fn add_implementation_with_target_args(
+        &mut self,
+        type_id: TypeDefId,
+        interface_id: TypeDefId,
+        type_args: Vec<crate::type_arena::TypeId>,
+        target_type_args: Vec<crate::type_arena::TypeId>,
+    ) {
         use crate::entity_defs::Implementation;
         self.type_defs[type_id.index() as usize]
             .implements
             .push(Implementation {
                 interface: interface_id,
                 type_args,
+                target_type_args,
                 method_bindings: Vec::new(),
             });
     }
@@ -205,6 +219,7 @@ impl EntityRegistry {
         type_def.implements.push(Implementation {
             interface: interface_id,
             type_args: Vec::new(),
+            target_type_args: Vec::new(),
             method_bindings: vec![binding],
         });
     }
@@ -220,6 +235,24 @@ impl EntityRegistry {
         for impl_ in &type_def.implements {
             if impl_.interface == interface_id {
                 return &impl_.type_args;
+            }
+        }
+        &[]
+    }
+
+    /// Get the target type args for a specific interface implementation.
+    /// Returns the type args that the implementation targets (e.g., [i64] for
+    /// `implement Describable for Box<i64>`). Empty if non-specialized.
+    #[must_use]
+    pub fn get_implementation_target_type_args(
+        &self,
+        type_id: TypeDefId,
+        interface_id: TypeDefId,
+    ) -> &[crate::type_arena::TypeId] {
+        let type_def = &self.type_defs[type_id.index() as usize];
+        for impl_ in &type_def.implements {
+            if impl_.interface == interface_id {
+                return &impl_.target_type_args;
             }
         }
         &[]

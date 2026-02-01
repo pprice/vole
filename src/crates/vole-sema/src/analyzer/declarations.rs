@@ -2021,17 +2021,28 @@ impl Analyzer {
                 .map(|arg| self.resolve_type_id(arg, interner))
                 .collect();
 
+            // Extract target type args (e.g., [i64] from Box<i64>)
+            let target_type_args: Vec<ArenaTypeId> = {
+                let arena = self.type_arena();
+                arena
+                    .unwrap_nominal(target_type_id)
+                    .map(|(_, args, _)| args.to_vec())
+                    .unwrap_or_default()
+            };
+
             // Pre-register the implementation with type args so they're available
             // for validate_interface_satisfaction's substitution map
             if let Some(entity_type_id) = entity_type_id
                 && let Some(iface_id) = interface_type_id
-                && !interface_type_args.is_empty()
+                && (!interface_type_args.is_empty() || !target_type_args.is_empty())
             {
-                self.entity_registry_mut().add_implementation(
-                    entity_type_id,
-                    iface_id,
-                    interface_type_args,
-                );
+                self.entity_registry_mut()
+                    .add_implementation_with_target_args(
+                        entity_type_id,
+                        iface_id,
+                        interface_type_args,
+                        target_type_args,
+                    );
             }
 
             for method in &impl_block.methods {

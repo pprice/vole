@@ -76,6 +76,9 @@ pub struct Implementation {
     pub interface: TypeDefId,
     /// Type arguments for generic interfaces (e.g., [i64, i64] for MapLike<i64, i64>)
     pub type_args: Vec<TypeId>,
+    /// Type arguments for the target type specialization (e.g., [i64] for Box<i64>).
+    /// Empty if the implementation targets the base type (non-generic or all specializations).
+    pub target_type_args: Vec<TypeId>,
     /// Method bindings for this implementation
     pub method_bindings: Vec<MethodBinding>,
 }
