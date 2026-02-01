@@ -5,7 +5,7 @@
 use crate::errors::ParserError;
 
 use super::TokenType;
-use super::ast::{TypeConstraint, TypeExpr, TypeParam};
+use super::ast::{ConstraintInterface, TypeConstraint, TypeExpr, TypeParam};
 use super::parser::{ParseError, Parser};
 
 impl<'src> Parser<'src> {
@@ -232,38 +232,67 @@ impl<'src> Parser<'src> {
 
         // Check for multiple interface constraints: T: Hashable + Eq
         if self.check(TokenType::Plus) {
-            // First must be a named type (interface)
-            let TypeExpr::Named(first_sym) = first else {
-                return Err(ParseError::new(
-                    ParserError::ExpectedToken {
-                        expected: "interface name before '+'".to_string(),
-                        found: "non-interface type".to_string(),
-                        span: self.current.span.into(),
-                    },
-                    self.current.span,
-                ));
-            };
-            let mut interfaces = vec![first_sym];
-            while self.match_token(TokenType::Plus) {
-                let next = self.parse_base_type()?;
-                let TypeExpr::Named(sym) = next else {
+            // First must be a named type (interface), possibly parameterized
+            let first_iface = match first {
+                TypeExpr::Named(sym) => ConstraintInterface {
+                    name: sym,
+                    type_args: vec![],
+                },
+                TypeExpr::Generic { name, args } => ConstraintInterface {
+                    name,
+                    type_args: args,
+                },
+                _ => {
                     return Err(ParseError::new(
                         ParserError::ExpectedToken {
-                            expected: "interface name after '+'".to_string(),
+                            expected: "interface name before '+'".to_string(),
                             found: "non-interface type".to_string(),
-                            span: self.previous.span.into(),
+                            span: self.current.span.into(),
                         },
-                        self.previous.span,
+                        self.current.span,
                     ));
+                }
+            };
+            let mut interfaces = vec![first_iface];
+            while self.match_token(TokenType::Plus) {
+                let next = self.parse_base_type()?;
+                let iface = match next {
+                    TypeExpr::Named(sym) => ConstraintInterface {
+                        name: sym,
+                        type_args: vec![],
+                    },
+                    TypeExpr::Generic { name, args } => ConstraintInterface {
+                        name,
+                        type_args: args,
+                    },
+                    _ => {
+                        return Err(ParseError::new(
+                            ParserError::ExpectedToken {
+                                expected: "interface name after '+'".to_string(),
+                                found: "non-interface type".to_string(),
+                                span: self.previous.span.into(),
+                            },
+                            self.previous.span,
+                        ));
+                    }
                 };
-                interfaces.push(sym);
+                interfaces.push(iface);
             }
             return Ok(TypeConstraint::Interface(interfaces));
         }
 
         // Check what kind of constraint we have
         match first {
-            TypeExpr::Named(sym) => Ok(TypeConstraint::Interface(vec![sym])),
+            TypeExpr::Named(sym) => Ok(TypeConstraint::Interface(vec![ConstraintInterface {
+                name: sym,
+                type_args: vec![],
+            }])),
+            TypeExpr::Generic { name, args } => {
+                Ok(TypeConstraint::Interface(vec![ConstraintInterface {
+                    name,
+                    type_args: args,
+                }]))
+            }
             TypeExpr::Structural { fields, methods } => {
                 Ok(TypeConstraint::Structural { fields, methods })
             }

@@ -283,12 +283,22 @@ pub fn merge_type_params(
     base.iter().chain(additional.iter()).cloned().collect()
 }
 
+/// A resolved interface constraint item, with optional type arguments.
+/// E.g., `Stringable` (no type args) or `Producer<T>` (with type arg T as ArenaTypeId).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConstraintInterfaceItem {
+    /// Interface name (cross-interner safe)
+    pub name: String,
+    /// Resolved type argument TypeIds (empty for non-parameterized interfaces)
+    pub type_args: Vec<ArenaTypeId>,
+}
+
 /// Resolved constraint for type parameter checking
 #[derive(Debug, Clone)]
 pub enum TypeConstraint {
-    /// Interface constraints: T: Stringable or T: Hashable + Eq
+    /// Interface constraints: T: Stringable or T: Hashable + Eq or T: Producer<U>
     /// Stored as String names (not Symbol) for cross-interner safety.
-    Interface(Vec<String>),
+    Interface(Vec<ConstraintInterfaceItem>),
     /// Union constraint: T: i32 | i64 (TypeId version)
     UnionId(Vec<ArenaTypeId>),
     /// Structural constraint: T: { name: string, func get() -> i32 }

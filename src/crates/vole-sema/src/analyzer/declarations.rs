@@ -1994,13 +1994,37 @@ impl Analyzer {
 
             // Get interface TypeDefId if implementing an interface
             // Use resolved_interface if available, otherwise fall back to trait_name lookup
-            let interface_type_id = resolved_interface.map(|(id, _)| id).or_else(|| {
-                trait_name.and_then(|name| {
+            let (interface_type_id, interface_type_arg_exprs) =
+                if let Some((id, args)) = resolved_interface {
+                    (Some(id), args)
+                } else if let Some(name) = trait_name {
                     let iface_str = interner.resolve(name);
-                    self.resolver(interner)
-                        .resolve_type_str_or_interface(iface_str, &self.entity_registry())
-                })
-            });
+                    let id = self
+                        .resolver(interner)
+                        .resolve_type_str_or_interface(iface_str, &self.entity_registry());
+                    (id, &[] as &[TypeExpr])
+                } else {
+                    (None, &[] as &[TypeExpr])
+                };
+
+            // Resolve interface type arguments (e.g., <i64> from implement Producer<i64>)
+            let interface_type_args: Vec<ArenaTypeId> = interface_type_arg_exprs
+                .iter()
+                .map(|arg| self.resolve_type_id(arg, interner))
+                .collect();
+
+            // Pre-register the implementation with type args so they're available
+            // for validate_interface_satisfaction's substitution map
+            if let Some(entity_type_id) = entity_type_id
+                && let Some(iface_id) = interface_type_id
+                && !interface_type_args.is_empty()
+            {
+                self.entity_registry_mut().add_implementation(
+                    entity_type_id,
+                    iface_id,
+                    interface_type_args,
+                );
+            }
 
             for method in &impl_block.methods {
                 // Validate type annotations to emit errors for unknown types

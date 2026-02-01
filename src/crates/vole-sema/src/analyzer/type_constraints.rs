@@ -225,14 +225,14 @@ impl Analyzer {
     ) -> Option<crate::generic::TypeConstraint> {
         tracing::debug!(?constraint, "resolve_type_param_constraint");
         match constraint {
-            TypeConstraint::Interface(syms) => {
+            TypeConstraint::Interface(ifaces) => {
                 tracing::debug!(
-                    num_interfaces = syms.len(),
+                    num_interfaces = ifaces.len(),
                     "processing interface constraint"
                 );
                 // For single interface, check if it's a type alias first
-                if syms.len() == 1 {
-                    let sym = syms[0];
+                if ifaces.len() == 1 && ifaces[0].type_args.is_empty() {
+                    let sym = ifaces[0].name;
                     if let Some(type_def_id) = self
                         .resolver(interner)
                         .resolve_type(sym, &self.entity_registry())
@@ -273,8 +273,8 @@ impl Analyzer {
                 }
 
                 // Validate all interfaces exist via EntityRegistry using resolver
-                for sym in syms {
-                    let iface_str = interner.resolve(*sym);
+                for iface in ifaces {
+                    let iface_str = interner.resolve(iface.name);
                     let iface_exists = self
                         .resolver(interner)
                         .resolve_type_str_or_interface(iface_str, &self.entity_registry())
@@ -291,9 +291,29 @@ impl Analyzer {
                         return None;
                     }
                 }
+
+                // Resolve interface type arguments within the type param scope
+                let module_id = self.current_module;
                 Some(crate::generic::TypeConstraint::Interface(
-                    syms.iter()
-                        .map(|s| interner.resolve(*s).to_string())
+                    ifaces
+                        .iter()
+                        .map(|iface| {
+                            let name = interner.resolve(iface.name).to_string();
+                            let type_args = iface
+                                .type_args
+                                .iter()
+                                .map(|arg| {
+                                    let mut ctx = TypeResolutionContext::with_type_params(
+                                        &self.ctx.db,
+                                        interner,
+                                        module_id,
+                                        type_param_scope,
+                                    );
+                                    resolve_type_to_id(arg, &mut ctx)
+                                })
+                                .collect();
+                            crate::generic::ConstraintInterfaceItem { name, type_args }
+                        })
                         .collect(),
                 ))
             }
@@ -420,15 +440,36 @@ impl Analyzer {
             }
 
             match constraint {
-                crate::generic::TypeConstraint::Interface(interface_names) => {
+                crate::generic::TypeConstraint::Interface(interface_items) => {
                     // Check each interface constraint by string name (cross-interner safe)
-                    for interface_name in interface_names {
-                        if !self.satisfies_interface_by_name(found_id, interface_name, interner) {
+                    for iface_item in interface_items {
+                        // For parameterized interfaces, substitute inferred type params
+                        // in the type args before checking satisfaction
+                        let substituted_args: Vec<ArenaTypeId> = iface_item
+                            .type_args
+                            .iter()
+                            .map(|&arg| self.type_arena_mut().substitute(arg, inferred))
+                            .collect();
+
+                        let satisfied = if substituted_args.is_empty() {
+                            // Non-parameterized: simple name check
+                            self.satisfies_interface_by_name(found_id, &iface_item.name, interner)
+                        } else {
+                            // Parameterized: check with type args
+                            self.satisfies_parameterized_interface(
+                                found_id,
+                                &iface_item.name,
+                                &substituted_args,
+                                interner,
+                            )
+                        };
+
+                        if !satisfied {
                             let found_display = self.type_display_id(found_id);
                             self.add_error(
                                 SemanticError::TypeParamConstraintMismatch {
                                     type_param: self.get_type_param_display_name(param, interner),
-                                    expected: interface_name.clone(),
+                                    expected: iface_item.name.clone(),
                                     found: found_display,
                                     span: span.into(),
                                 },

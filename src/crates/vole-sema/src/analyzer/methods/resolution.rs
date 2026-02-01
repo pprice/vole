@@ -229,8 +229,8 @@ impl Analyzer {
             }
         };
 
-        let constraint_interfaces: Vec<String> = match constraint {
-            crate::generic::TypeConstraint::Interface(names) => names.clone(),
+        let constraint_interfaces: Vec<crate::generic::ConstraintInterfaceItem> = match constraint {
+            crate::generic::TypeConstraint::Interface(items) => items.clone(),
             other => {
                 tracing::trace!(?param_name_id, constraint = ?other, "constraint is not interface-based");
                 return None; // Union/Structural constraints don't support method calls this way
@@ -243,7 +243,8 @@ impl Analyzer {
         );
 
         // Try to find the method in one of the constraint interfaces
-        for interface_name_str in &constraint_interfaces {
+        for iface_item in &constraint_interfaces {
+            let interface_name_str = &iface_item.name;
             tracing::trace!(interface_name = %interface_name_str, "checking interface");
 
             // Resolve interface by string name (cross-interner safe)

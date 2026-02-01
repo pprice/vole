@@ -268,6 +268,169 @@ impl Analyzer {
         self.satisfies_interface_by_type_def_id_typeid(ty_id, type_def_id, interner)
     }
 
+    /// Check if a type satisfies a parameterized interface with specific type args.
+    /// E.g., does IntProducer satisfy Producer<i64>?
+    /// Resolves the interface, finds the type's implementation, and checks type arg compatibility.
+    pub(crate) fn satisfies_parameterized_interface(
+        &mut self,
+        ty_id: ArenaTypeId,
+        interface_name_str: &str,
+        required_type_args: &[ArenaTypeId],
+        interner: &Interner,
+    ) -> bool {
+        // First, the type must structurally satisfy the base interface
+        let interface_type_def_id = self
+            .resolver(interner)
+            .resolve_type_str_or_interface(interface_name_str, &self.entity_registry());
+
+        let Some(interface_type_def_id) = interface_type_def_id else {
+            return false;
+        };
+
+        // Get the type def id for the concrete type to look up implementations
+        let type_def_id = {
+            let arena = self.type_arena();
+            arena
+                .unwrap_nominal(ty_id)
+                .filter(|(_, _, kind)| kind.is_class_or_struct())
+                .map(|(id, _, _)| id)
+        };
+
+        let Some(type_def_id) = type_def_id else {
+            // For non-nominal types, fall back to structural check
+            return self.satisfies_interface_by_type_def_id_typeid(
+                ty_id,
+                interface_type_def_id,
+                interner,
+            );
+        };
+
+        // Check if this type has an implementation for this interface with matching type args
+        let impl_type_args = self
+            .entity_registry()
+            .get_implementation_type_args(type_def_id, interface_type_def_id)
+            .to_vec();
+
+        if impl_type_args.is_empty() {
+            // No explicit implementation found; do structural check with type arg substitution
+            return self.satisfies_substituted_interface(
+                ty_id,
+                interface_type_def_id,
+                required_type_args,
+                interner,
+            );
+        }
+
+        // Check that the implementation's type args match the required ones
+        if impl_type_args.len() != required_type_args.len() {
+            return false;
+        }
+
+        impl_type_args
+            .iter()
+            .zip(required_type_args.iter())
+            .all(|(&impl_arg, &req_arg)| {
+                // If the required arg is still a type param, accept any impl arg
+                let arena = self.type_arena();
+                if arena.unwrap_type_param(req_arg).is_some()
+                    || arena.unwrap_type_param_ref(req_arg).is_some()
+                {
+                    return true;
+                }
+                impl_arg == req_arg
+            })
+    }
+
+    /// Check if a type structurally satisfies a parameterized interface by substituting
+    /// interface type params with concrete args before comparing method signatures.
+    fn satisfies_substituted_interface(
+        &mut self,
+        ty_id: ArenaTypeId,
+        interface_id: TypeDefId,
+        type_args: &[ArenaTypeId],
+        interner: &Interner,
+    ) -> bool {
+        // Get interface type params for building substitution map
+        let interface_type_params = self.entity_registry().type_params(interface_id);
+        if interface_type_params.len() != type_args.len() {
+            // Mismatched type arg count; fall back to basic structural check
+            return self.satisfies_interface_by_type_def_id_typeid(ty_id, interface_id, interner);
+        }
+
+        // Build substitution map: interface type param NameId -> concrete TypeId
+        let substitutions: FxHashMap<NameId, ArenaTypeId> = interface_type_params
+            .iter()
+            .zip(type_args.iter())
+            .map(|(&param, &arg)| (param, arg))
+            .collect();
+
+        let (is_interface, _field_ids, method_ids, extends) =
+            self.entity_registry().interface_info(interface_id);
+
+        if !is_interface {
+            return false;
+        }
+
+        // Check required methods with substituted signatures
+        for method_id in method_ids {
+            let (has_default, name_id, signature_id) =
+                self.entity_registry().method_default_name_sig(method_id);
+            if has_default {
+                continue;
+            }
+            let signature = {
+                let arena = self.type_arena();
+                let Some((params, ret, is_closure)) = arena.unwrap_function(signature_id) else {
+                    continue;
+                };
+                FunctionType {
+                    is_closure,
+                    params_id: params.clone(),
+                    return_type_id: ret,
+                }
+            };
+
+            // Apply type arg substitution to the interface method signature
+            let subst_sig = if substitutions.is_empty() {
+                signature
+            } else {
+                let (subst_params, subst_ret) = {
+                    let mut arena = self.type_arena_mut();
+                    let params: crate::type_arena::TypeIdVec = signature
+                        .params_id
+                        .iter()
+                        .map(|&p| arena.substitute(p, &substitutions))
+                        .collect();
+                    let ret = arena.substitute(signature.return_type_id, &substitutions);
+                    (params, ret)
+                };
+                FunctionType {
+                    is_closure: signature.is_closure,
+                    params_id: subst_params,
+                    return_type_id: subst_ret,
+                }
+            };
+
+            let method_name_str = self
+                .name_table()
+                .last_segment_str(name_id)
+                .unwrap_or_default();
+
+            if !self.type_has_method_by_str_id(ty_id, &method_name_str, &subst_sig, interner) {
+                return false;
+            }
+        }
+
+        // Check parent interfaces
+        for parent_id in extends {
+            if !self.satisfies_interface_by_type_def_id_typeid(ty_id, parent_id, interner) {
+                return false;
+            }
+        }
+
+        true
+    }
+
     /// Validate that a type satisfies an interface by having all required methods with correct signatures
     pub(crate) fn validate_interface_satisfaction(
         &mut self,

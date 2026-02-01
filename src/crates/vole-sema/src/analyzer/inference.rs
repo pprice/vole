@@ -9,6 +9,8 @@ use vole_identity::NameId;
 impl Analyzer {
     /// Infer type parameters from argument types.
     /// Returns a map from type parameter NameId to inferred TypeId.
+    /// After direct parameter-argument unification, also infers from parameterized
+    /// interface constraints (e.g., `P: Producer<T>` with P=IntProducer -> T=i64).
     pub(crate) fn infer_type_params_id(
         &self,
         type_params: &[TypeParamInfo],
@@ -22,7 +24,236 @@ impl Analyzer {
             self.unify_types_id(param_type_id, arg_type_id, type_params, &mut inferred);
         }
 
+        // Infer remaining type params from parameterized interface constraints
+        self.infer_from_interface_constraints(type_params, &mut inferred);
+
         inferred
+    }
+
+    /// Infer type parameters from parameterized interface constraints.
+    /// E.g., given `P: Producer<T>` and P=IntProducer, find that IntProducer
+    /// implements Producer<i64>, so T=i64.
+    fn infer_from_interface_constraints(
+        &self,
+        type_params: &[TypeParamInfo],
+        inferred: &mut FxHashMap<NameId, ArenaTypeId>,
+    ) {
+        use crate::generic::TypeConstraint;
+
+        for param in type_params {
+            let Some(TypeConstraint::Interface(iface_items)) = &param.constraint else {
+                continue;
+            };
+
+            // Only useful if this param is already inferred to a concrete type
+            let Some(&concrete_type_id) = inferred.get(&param.name_id) else {
+                continue;
+            };
+
+            // Get the type def id for the concrete type
+            let type_def_id = {
+                let arena = self.type_arena();
+                arena
+                    .unwrap_nominal(concrete_type_id)
+                    .filter(|(_, _, kind)| kind.is_class_or_struct())
+                    .map(|(id, _, _)| id)
+            };
+            let Some(type_def_id) = type_def_id else {
+                continue;
+            };
+
+            for iface_item in iface_items {
+                if iface_item.type_args.is_empty() {
+                    continue; // No type params to infer
+                }
+
+                self.infer_from_single_interface_constraint(
+                    type_def_id,
+                    iface_item,
+                    type_params,
+                    inferred,
+                );
+            }
+        }
+    }
+
+    /// Infer type params from a single parameterized interface constraint.
+    /// Handles both Pattern A (explicit implement block) and Pattern B (structural match).
+    fn infer_from_single_interface_constraint(
+        &self,
+        type_def_id: vole_identity::TypeDefId,
+        iface_item: &crate::generic::ConstraintInterfaceItem,
+        type_params: &[TypeParamInfo],
+        inferred: &mut FxHashMap<NameId, ArenaTypeId>,
+    ) {
+        // Find the interface type def id by name
+        let interface_type_def_id = {
+            let registry = self.entity_registry();
+            let impls = registry.get_implemented_interfaces(type_def_id);
+            let mut found = None;
+            for iface_id in impls {
+                let name_id = registry.name_id(iface_id);
+                if let Some(name) = self.name_table().last_segment_str(name_id)
+                    && name == iface_item.name {
+                        found = Some(iface_id);
+                        break;
+                    }
+            }
+            found
+        };
+
+        // Pattern A: explicit implement block with type args
+        if let Some(interface_type_def_id) = interface_type_def_id {
+            let impl_type_args = self
+                .entity_registry()
+                .get_implementation_type_args(type_def_id, interface_type_def_id)
+                .to_vec();
+
+            if impl_type_args.len() == iface_item.type_args.len() && !impl_type_args.is_empty() {
+                for (&constraint_arg, &impl_arg) in
+                    iface_item.type_args.iter().zip(impl_type_args.iter())
+                {
+                    self.unify_types_id(constraint_arg, impl_arg, type_params, inferred);
+                }
+                return;
+            }
+        }
+
+        // Pattern B: structural match - infer from method signatures
+        // Resolve the interface by name to get its methods
+        let resolved_iface_id = self
+            .entity_registry()
+            .interface_by_short_name(&iface_item.name, &self.name_table());
+
+        let Some(resolved_iface_id) = resolved_iface_id else {
+            return;
+        };
+
+        // Get the interface's type params and methods
+        let iface_type_params = self.entity_registry().type_params(resolved_iface_id);
+        if iface_type_params.len() != iface_item.type_args.len() {
+            return;
+        }
+
+        // Build mapping from interface type params to constraint type args
+        let iface_param_to_constraint: FxHashMap<NameId, ArenaTypeId> = iface_type_params
+            .iter()
+            .zip(iface_item.type_args.iter())
+            .map(|(&param, &arg)| (param, arg))
+            .collect();
+
+        // Get interface methods and match against concrete type methods
+        let method_ids = self.entity_registry().type_methods(resolved_iface_id);
+        for method_id in method_ids {
+            let (_, name_id, signature_id) =
+                self.entity_registry().method_default_name_sig(method_id);
+            let method_name = self
+                .name_table()
+                .last_segment_str(name_id)
+                .unwrap_or_default();
+
+            // Get interface method signature
+            let iface_sig = {
+                let arena = self.type_arena();
+                arena
+                    .unwrap_function(signature_id)
+                    .map(|(params, ret, _)| (params.to_vec(), ret))
+            };
+            let Some((iface_params, iface_ret)) = iface_sig else {
+                continue;
+            };
+
+            // Find the matching method on the concrete type
+            let concrete_method = self.find_method_signature_by_name(type_def_id, &method_name);
+            let Some((concrete_params, concrete_ret)) = concrete_method else {
+                continue;
+            };
+
+            // Unify return types: if interface returns T (a constraint arg), unify with concrete
+            self.unify_via_interface_param(
+                iface_ret,
+                concrete_ret,
+                &iface_param_to_constraint,
+                type_params,
+                inferred,
+            );
+
+            // Unify parameter types (skip self param if present)
+            for (&iface_p, &concrete_p) in iface_params.iter().zip(concrete_params.iter()) {
+                self.unify_via_interface_param(
+                    iface_p,
+                    concrete_p,
+                    &iface_param_to_constraint,
+                    type_params,
+                    inferred,
+                );
+            }
+        }
+    }
+
+    /// Unify an interface method's type (which may reference interface type params)
+    /// with a concrete type, mapping through the constraint's type args.
+    fn unify_via_interface_param(
+        &self,
+        iface_type: ArenaTypeId,
+        concrete_type: ArenaTypeId,
+        iface_param_to_constraint: &FxHashMap<NameId, ArenaTypeId>,
+        type_params: &[TypeParamInfo],
+        inferred: &mut FxHashMap<NameId, ArenaTypeId>,
+    ) {
+        let arena = self.type_arena();
+        // Check if iface_type is an interface type param
+        if let Some(name_id) = arena.unwrap_type_param(iface_type)
+            && let Some(&constraint_arg) = iface_param_to_constraint.get(&name_id) {
+                drop(arena);
+                // constraint_arg is the type param in the calling function's scope
+                // Unify it with the concrete type
+                self.unify_types_id(constraint_arg, concrete_type, type_params, inferred);
+            }
+        // For non-type-param types, could recurse for complex types but skip for now
+    }
+
+    /// Find a method's signature on a type by name string.
+    fn find_method_signature_by_name(
+        &self,
+        type_def_id: vole_identity::TypeDefId,
+        method_name: &str,
+    ) -> Option<(Vec<ArenaTypeId>, ArenaTypeId)> {
+        let registry = self.entity_registry();
+        // Check methods defined on the type
+        for method_id in registry.methods_on_type(type_def_id) {
+            let (_, name_id, sig_id) = registry.method_default_name_sig(method_id);
+            let name = self
+                .name_table()
+                .last_segment_str(name_id)
+                .unwrap_or_default();
+            if name == method_name {
+                let arena = self.type_arena();
+                if let Some((params, ret, _)) = arena.unwrap_function(sig_id) {
+                    return Some((params.to_vec(), ret));
+                }
+            }
+        }
+
+        // Check implement registry
+        let name_id = registry.name_id(type_def_id);
+        let impl_type_id = crate::implement_registry::ImplTypeId::from_name_id(name_id);
+        drop(registry);
+        let impl_reg = self.implement_registry();
+        for (method_name_id, method_impl) in impl_reg.get_methods_for_type(&impl_type_id) {
+            let name = self
+                .name_table()
+                .last_segment_str(method_name_id)
+                .unwrap_or_default();
+            if name == method_name {
+                return Some((
+                    method_impl.func_type.params_id.to_vec(),
+                    method_impl.func_type.return_type_id,
+                ));
+            }
+        }
+
+        None
     }
 
     /// Unify a parameter type pattern with an argument type (TypeId version).

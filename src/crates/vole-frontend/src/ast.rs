@@ -27,11 +27,19 @@ pub struct TypeParam {
     pub span: Span,
 }
 
+/// An interface in a constraint, optionally with type arguments.
+/// E.g., `Stringable` or `Producer<T>`.
+#[derive(Debug, Clone)]
+pub struct ConstraintInterface {
+    pub name: Symbol,
+    pub type_args: Vec<TypeExpr>,
+}
+
 /// Constraint on a type parameter
 #[derive(Debug, Clone)]
 pub enum TypeConstraint {
-    /// Interface constraints: T: Stringable or T: Hashable + Eq
-    Interface(Vec<Symbol>),
+    /// Interface constraints: T: Stringable or T: Hashable + Eq or T: Producer<U>
+    Interface(Vec<ConstraintInterface>),
     /// Union of types: T: i32 | i64
     Union(Vec<TypeExpr>),
     /// Structural constraint: T: { name: string, func get() -> i32 }
