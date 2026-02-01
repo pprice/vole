@@ -9,12 +9,12 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::cli::ColorMode;
-use crate::codegen::{Compiler, JitContext};
+use crate::codegen::{Compiler, JitContext, JitOptions};
 use crate::errors::{LexerError, render_to_writer};
 use crate::frontend::{AstPrinter, ParseError, Parser};
 use crate::runtime::{
     JmpBuf, call_setjmp, clear_test_jmp_buf, set_capture_mode, set_stderr_capture,
-    set_stdout_capture, set_test_jmp_buf,
+    set_stdout_capture, set_test_jmp_buf, write_to_stderr_capture,
 };
 use crate::sema::{ModuleCache, TypeError, TypeWarning, optimize_all};
 use crate::transforms;
@@ -164,6 +164,76 @@ pub fn compile_source(
     Ok(AnalyzedProgram::from_analysis(program, interner, output))
 }
 
+/// Options for the compile_and_run codegen+execution pipeline.
+pub struct RunOptions<'a> {
+    pub file_path: &'a str,
+    pub jit_options: JitOptions,
+    pub skip_tests: bool,
+}
+
+/// Compile an analyzed program to machine code and execute it.
+///
+/// Handles: JIT compilation, finalization, main lookup, and execution
+/// with jmp_buf panic recovery. Compilation errors are written to `errors`.
+///
+/// The caller is responsible for setting up stdout/stderr capture (via
+/// `set_stdout_capture`/`set_stderr_capture`) before calling if needed.
+#[allow(clippy::result_unit_err)]
+pub fn compile_and_run(
+    analyzed: &AnalyzedProgram,
+    opts: &RunOptions,
+    errors: &mut dyn Write,
+) -> Result<(), ()> {
+    // Codegen phase
+    let jit = {
+        let _span = tracing::info_span!("codegen").entered();
+        let mut jit = JitContext::with_options(opts.jit_options);
+        {
+            let mut compiler = Compiler::new(&mut jit, analyzed);
+            compiler.set_source_file(opts.file_path);
+            compiler.set_skip_tests(opts.skip_tests);
+            if let Err(e) = compiler.compile_program(&analyzed.program) {
+                let _ = writeln!(errors, "compilation error: {}", e);
+                return Err(());
+            }
+        }
+        if let Err(e) = jit.finalize() {
+            let _ = writeln!(errors, "finalization error: {}", e);
+            return Err(());
+        }
+        tracing::debug!("compilation complete");
+        jit
+    };
+
+    // Execute phase
+    let fn_ptr = match jit.get_function_ptr("main") {
+        Some(ptr) => ptr,
+        None => {
+            let _ = writeln!(errors, "error: no 'main' function found");
+            return Err(());
+        }
+    };
+
+    let _span = tracing::info_span!("execute").entered();
+    let main: extern "C" fn() = unsafe { std::mem::transmute(fn_ptr) };
+
+    // Use jmp_buf for panic recovery — safely handles runtime panics
+    // instead of crashing the host process.
+    let mut jmp_buf = JmpBuf::zeroed();
+    set_test_jmp_buf(&mut jmp_buf);
+
+    unsafe {
+        if call_setjmp(&mut jmp_buf) == 0 {
+            main();
+        }
+        // If longjmp occurred (from panic), we just continue
+    }
+
+    clear_test_jmp_buf();
+
+    Ok(())
+}
+
 /// Check if stdout supports color output.
 pub fn stdout_supports_color() -> bool {
     // Respect NO_COLOR environment variable (https://no-color.org/)
@@ -263,57 +333,32 @@ pub fn run_captured<W: Write + Send + 'static>(
         &mut stderr,
     )?;
 
-    // Compile (skip tests blocks, matching `vole run` behavior)
-    let mut jit = JitContext::new();
-    {
-        let mut compiler = Compiler::new(&mut jit, &analyzed);
-        compiler.set_source_file(file_path);
-        compiler.set_skip_tests(true);
-        if let Err(e) = compiler.compile_program(&analyzed.program) {
-            let _ = writeln!(stderr, "compilation error: {}", e);
-            return Err(());
-        }
-    }
-    if let Err(e) = jit.finalize() {
-        let _ = writeln!(stderr, "finalization error: {}", e);
-        return Err(());
-    }
-
-    // Execute with captured stdout
-    let fn_ptr = match jit.get_function_ptr("main") {
-        Some(ptr) => ptr,
-        None => {
-            let _ = writeln!(stderr, "error: no 'main' function found");
-            return Err(());
-        }
+    let run_opts = RunOptions {
+        file_path,
+        jit_options: JitOptions::default(),
+        skip_tests: true,
     };
 
-    // Set up stdout and stderr capture, and enable capture mode for panic
+    // Set up stdout/stderr capture for the JIT program's print() calls
     set_stdout_capture(Some(Box::new(stdout)));
     set_stderr_capture(Some(Box::new(stderr)));
     set_capture_mode(true);
 
-    // Set up jmp_buf for panic recovery
-    let mut jmp_buf = JmpBuf::zeroed();
-    set_test_jmp_buf(&mut jmp_buf);
+    // Codegen errors go to a buffer (capture has taken ownership of stderr)
+    let mut error_buf = Vec::new();
+    let result = compile_and_run(&analyzed, &run_opts, &mut error_buf);
 
-    let main: extern "C" fn() = unsafe { std::mem::transmute(fn_ptr) };
-
-    unsafe {
-        if call_setjmp(&mut jmp_buf) == 0 {
-            // Normal execution path
-            main();
-        }
-        // If longjmp occurred (from panic), we just continue
+    // Route any codegen errors to the captured stderr before tearing down
+    if !error_buf.is_empty() {
+        write_to_stderr_capture(&error_buf);
     }
 
     // Restore normal stdout and stderr, disable capture mode
-    clear_test_jmp_buf();
     set_stdout_capture(None);
     set_stderr_capture(None);
     set_capture_mode(false);
 
-    Ok(())
+    result
 }
 
 /// Inspect AST with captured stdout and stderr

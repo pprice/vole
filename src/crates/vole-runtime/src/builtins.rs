@@ -59,6 +59,18 @@ fn writeln_stdout(s: &str) {
     });
 }
 
+/// Write bytes to the stderr capture if active, otherwise to real stderr.
+pub fn write_to_stderr_capture(bytes: &[u8]) {
+    STDERR_CAPTURE.with(|cell| {
+        let mut borrow = cell.borrow_mut();
+        if let Some(ref mut writer) = *borrow {
+            let _ = writer.write_all(bytes);
+        } else {
+            let _ = io::stderr().write_all(bytes);
+        }
+    });
+}
+
 fn writeln_stderr(s: &str) {
     STDERR_CAPTURE.with(|cell| {
         let mut borrow = cell.borrow_mut();

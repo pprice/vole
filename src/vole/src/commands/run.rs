@@ -4,8 +4,8 @@ use std::fs;
 use std::path::Path;
 use std::process::ExitCode;
 
-use super::common::{PipelineOptions, compile_source, read_stdin};
-use crate::codegen::{Compiler, JitContext, JitOptions};
+use super::common::{PipelineOptions, RunOptions, compile_and_run, compile_source, read_stdin};
+use crate::codegen::JitOptions;
 use crate::runtime::{push_context, replace_context};
 
 /// Run a Vole source file (or stdin if path is "-")
@@ -62,42 +62,21 @@ fn execute(path: &Path, project_root: Option<&Path>, release: bool) -> Result<()
     )
     .map_err(|()| String::new())?;
 
-    // Codegen phase
+    // Codegen + execute phase
     replace_context(&format!("{} (compiling)", file_path));
-    let options = if release {
+    let jit_options = if release {
         JitOptions::release()
     } else {
         JitOptions::debug()
     };
-    let jit = {
-        let _span = tracing::info_span!("codegen").entered();
-        let mut jit = JitContext::with_options(options);
-        {
-            let mut compiler = Compiler::new(&mut jit, &analyzed);
-            compiler.set_source_file(&file_path);
-            compiler.set_skip_tests(true);
-            compiler
-                .compile_program(&analyzed.program)
-                .map_err(|e| format!("compilation error: {}", e))?;
-        }
-        jit.finalize()?;
-        tracing::debug!("compilation complete");
-        jit
+
+    let run_opts = RunOptions {
+        file_path: &file_path,
+        jit_options,
+        skip_tests: true,
     };
 
-    // Execute phase
     replace_context(&format!("{} (executing main)", file_path));
-    {
-        let _span = tracing::info_span!("execute").entered();
-        let fn_ptr = jit
-            .get_function_ptr("main")
-            .ok_or_else(|| "no 'main' function found".to_string())?;
-
-        // Call main - it may or may not return a value
-        // We use extern "C" fn() since main() in Vole can be void
-        let main: extern "C" fn() = unsafe { std::mem::transmute(fn_ptr) };
-        main();
-    }
-
-    Ok(())
+    let mut errors = std::io::stderr();
+    compile_and_run(&analyzed, &run_opts, &mut errors).map_err(|()| String::new())
 }

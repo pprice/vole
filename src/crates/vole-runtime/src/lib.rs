@@ -20,6 +20,7 @@ pub use assert::{
 pub use builtins::set_capture_mode;
 pub use builtins::set_stderr_capture;
 pub use builtins::set_stdout_capture;
+pub use builtins::write_to_stderr_capture;
 pub use instance::RcInstance;
 pub use native_registry::{
     NativeFunction, NativeModule, NativeRegistry, NativeSignature, NativeType,
