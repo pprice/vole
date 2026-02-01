@@ -1,0 +1,52 @@
+// Test handle primitive type - opaque native pointer
+// handle is a distinct type that cannot be used with arithmetic or comparison operators
+
+class Resource {
+    ptr: handle?
+
+    func get_ptr() -> handle? {
+        return self.ptr
+    }
+}
+
+func pass_through(h: handle?) -> handle? {
+    return h
+}
+
+func accept_optional(h: handle?) -> bool {
+    return h != nil
+}
+
+func return_optional(h: handle?) -> handle? {
+    return h
+}
+
+tests {
+    test "handle can be class field type" {
+        let r = Resource { ptr: nil }
+        let p = r.get_ptr()
+        assert(p == nil)
+    }
+
+    test "handle function parameters and return types" {
+        let h: handle? = nil
+        let result = pass_through(h)
+        assert(result == nil)
+    }
+
+    test "handle optional nil check" {
+        let h: handle? = nil
+        assert(accept_optional(h) == false)
+    }
+
+    test "handle optional return" {
+        let h: handle? = nil
+        let result = return_optional(h)
+        assert(result == nil)
+    }
+
+    test "handle variable declaration" {
+        let h: handle? = nil
+        assert(h == nil)
+    }
+}

@@ -70,6 +70,7 @@ pub enum TokenType {
     KwF64,
     KwBool,
     KwString,
+    KwHandle,  // handle type (opaque native pointer)
     KwNever,   // never type (bottom type - no values)
     KwUnknown, // unknown type (top type - any value)
 
@@ -194,6 +195,7 @@ impl TokenType {
             Self::KwF64 => "f64",
             Self::KwBool => "bool",
             Self::KwString => "string",
+            Self::KwHandle => "handle",
             Self::KwNever => "never",
             Self::KwUnknown => "unknown",
             Self::Plus => "+",

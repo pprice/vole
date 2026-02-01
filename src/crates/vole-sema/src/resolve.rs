@@ -206,6 +206,7 @@ pub fn resolve_type_to_id(ty: &TypeExpr, ctx: &mut TypeResolutionContext<'_>) ->
             let elem_id = resolve_type_to_id(elem, ctx);
             ctx.type_arena_mut().array(elem_id)
         }
+        TypeExpr::Handle => TypeId::HANDLE,
         TypeExpr::Never => ctx.type_arena_mut().never(),
         TypeExpr::Unknown => ctx.type_arena_mut().unknown(),
         TypeExpr::Optional(inner) => {

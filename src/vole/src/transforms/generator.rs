@@ -649,6 +649,7 @@ impl<'a> GeneratorTransformer<'a> {
                 PrimitiveType::String => "string".to_string(),
             },
             TypeExpr::Named(sym) => self.interner.resolve(*sym).to_string(),
+            TypeExpr::Handle => "handle".to_string(),
             TypeExpr::Never => "never".to_string(),
             TypeExpr::Unknown => "unknown".to_string(),
             TypeExpr::Optional(inner) => format!("{}?", self.type_expr_to_string(inner)),

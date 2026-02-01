@@ -231,6 +231,10 @@ impl<'src> Parser<'src> {
                 self.advance();
                 Ok(TypeExpr::Primitive(PrimitiveType::String))
             }
+            TokenType::KwHandle => {
+                self.advance();
+                Ok(TypeExpr::Handle)
+            }
             TokenType::KwSelfType => {
                 self.advance();
                 Ok(TypeExpr::SelfType)

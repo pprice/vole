@@ -1051,6 +1051,7 @@ fn print_type_expr<'a>(
                 .collect();
             arena.intersperse(type_docs, arena.text(" | "))
         }
+        TypeExpr::Handle => arena.text("handle"),
         TypeExpr::Never => arena.text("never"),
         TypeExpr::Unknown => arena.text("unknown"),
         TypeExpr::Function {

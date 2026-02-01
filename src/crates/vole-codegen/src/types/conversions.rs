@@ -173,6 +173,7 @@ pub(crate) fn type_id_to_cranelift(ty: TypeId, arena: &TypeArena, pointer_type: 
         ArenaType::Primitive(PrimitiveType::F64) => types::F64,
         ArenaType::Primitive(PrimitiveType::Bool) => types::I8,
         ArenaType::Primitive(PrimitiveType::String) => pointer_type,
+        ArenaType::Handle => pointer_type,
         ArenaType::Interface { .. } => pointer_type,
         ArenaType::Union(_) => pointer_type,
         ArenaType::Fallible { .. } => pointer_type,
@@ -214,6 +215,7 @@ pub(crate) fn type_id_size(
         | ArenaType::Primitive(PrimitiveType::F64) => 8,
         ArenaType::Primitive(PrimitiveType::I128) => 16,
         ArenaType::Primitive(PrimitiveType::String) | ArenaType::Array(_) => pointer_type.bytes(),
+        ArenaType::Handle => pointer_type.bytes(),
         ArenaType::Interface { .. } => pointer_type.bytes(),
         ArenaType::Void => 0,
         ArenaType::Range => 16,
@@ -719,6 +721,7 @@ pub(crate) fn native_type_to_cranelift(nt: &NativeType, pointer_type: Type) -> T
         NativeType::F64 => types::F64,
         NativeType::Bool => types::I8,
         NativeType::String => pointer_type,
+        NativeType::Handle => pointer_type,
         NativeType::Nil => types::I8, // Nil uses I8 as placeholder
         NativeType::Optional(_) => types::I64, // Optionals are boxed
         NativeType::Array(_) => pointer_type,

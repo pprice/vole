@@ -479,6 +479,7 @@ impl<'src> Lexer<'src> {
             "f64" => Some(TokenType::KwF64),
             "bool" => Some(TokenType::KwBool),
             "string" => Some(TokenType::KwString),
+            "handle" => Some(TokenType::KwHandle),
             "never" => Some(TokenType::KwNever),
             "unknown" => Some(TokenType::KwUnknown),
             _ => None,

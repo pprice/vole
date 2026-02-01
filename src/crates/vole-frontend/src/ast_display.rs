@@ -260,6 +260,9 @@ impl<'a> AstPrinter<'a> {
                     self.write_type_inline(out, ty);
                 }
             }
+            TypeExpr::Handle => {
+                out.push_str("handle");
+            }
             TypeExpr::Never => {
                 out.push_str("never");
             }
@@ -968,6 +971,7 @@ impl<'a> AstPrinter<'a> {
                     self.write_type_expr_inline(out, t);
                 }
             }
+            TypeExpr::Handle => out.push_str("handle"),
             TypeExpr::Never => out.push_str("never"),
             TypeExpr::Unknown => out.push_str("unknown"),
             TypeExpr::Function {

@@ -19,6 +19,7 @@ pub enum NativeType {
     F64,
     Bool,
     String,
+    Handle,
     Nil,
     Optional(Box<NativeType>),
     Array(Box<NativeType>),

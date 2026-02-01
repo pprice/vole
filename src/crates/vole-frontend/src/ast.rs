@@ -276,6 +276,7 @@ pub enum TypeExpr {
     Optional(Box<TypeExpr>),    // T? syntax (desugars to Union with Nil)
     Union(Vec<TypeExpr>),       // A | B | C
     Combination(Vec<TypeExpr>), // A + B + C (must satisfy all constraints)
+    Handle,                     // handle type (opaque native pointer)
     Never,                      // never type (bottom type - no values)
     Unknown,                    // unknown type (top type - any value)
     Function {

@@ -53,19 +53,22 @@ impl TypeId {
     pub const BOOL: TypeId = TypeId(12);
     pub const STRING: TypeId = TypeId(13);
 
+    // Opaque handle type
+    pub const HANDLE: TypeId = TypeId(14);
+
     // Special types
-    pub const VOID: TypeId = TypeId(14);
-    pub const NIL: TypeId = TypeId(15);
-    pub const DONE: TypeId = TypeId(16);
-    pub const RANGE: TypeId = TypeId(17);
-    pub const METATYPE: TypeId = TypeId(18);
+    pub const VOID: TypeId = TypeId(15);
+    pub const NIL: TypeId = TypeId(16);
+    pub const DONE: TypeId = TypeId(17);
+    pub const RANGE: TypeId = TypeId(18);
+    pub const METATYPE: TypeId = TypeId(19);
 
     // Top and bottom types
-    pub const NEVER: TypeId = TypeId(19);
-    pub const UNKNOWN: TypeId = TypeId(20);
+    pub const NEVER: TypeId = TypeId(20);
+    pub const UNKNOWN: TypeId = TypeId(21);
 
     /// First non-reserved TypeId index (for dynamic types)
-    pub const FIRST_DYNAMIC: u32 = 21;
+    pub const FIRST_DYNAMIC: u32 = 22;
 
     /// Get the raw index (for debugging/serialization)
     pub fn index(self) -> u32 {
@@ -256,6 +259,9 @@ pub enum SemaType {
     // Primitives
     Primitive(PrimitiveType),
 
+    // Opaque handle type (native pointer, no arithmetic/comparison)
+    Handle,
+
     // Special types
     Void,
     Range,
@@ -347,6 +353,8 @@ pub struct PrimitiveTypes {
     // Other primitives
     pub bool: TypeId,
     pub string: TypeId,
+    // Opaque handle type
+    pub handle: TypeId,
     // Special types
     pub void: TypeId,
     pub nil: TypeId,
@@ -405,6 +413,7 @@ impl TypeArena {
                 f64: TypeId(0),
                 bool: TypeId(0),
                 string: TypeId(0),
+                handle: TypeId(0),
                 void: TypeId(0),
                 nil: TypeId(0),
                 done: TypeId(0),
@@ -448,6 +457,9 @@ impl TypeArena {
         debug_assert_eq!(arena.primitives.bool, TypeId::BOOL);
         arena.primitives.string = arena.intern(SemaType::Primitive(PrimitiveType::String));
         debug_assert_eq!(arena.primitives.string, TypeId::STRING);
+
+        arena.primitives.handle = arena.intern(SemaType::Handle);
+        debug_assert_eq!(arena.primitives.handle, TypeId::HANDLE);
 
         arena.primitives.void = arena.intern(SemaType::Void);
         debug_assert_eq!(arena.primitives.void, TypeId::VOID);
@@ -648,6 +660,7 @@ impl TypeArena {
             SemaType::TypeParam(_) | SemaType::TypeParamRef(_) => (40, type_id.0 as u64),
             // Module types
             SemaType::Module(_) => (35, type_id.0 as u64),
+            SemaType::Handle => (60, 0),
             SemaType::Void => (5, 0),
             SemaType::Range => (4, 0),
             SemaType::MetaType => (3, 0),
@@ -1096,6 +1109,12 @@ impl TypeArena {
         id == TypeId::STRING
     }
 
+    /// Check if this is a handle type
+    #[inline]
+    pub fn is_handle(&self, id: TypeId) -> bool {
+        id == TypeId::HANDLE
+    }
+
     /// Check if this is nil
     #[inline]
     pub fn is_nil(&self, id: TypeId) -> bool {
@@ -1295,6 +1314,7 @@ impl TypeArena {
         }
         match self.get(id) {
             SemaType::Primitive(p) => p.name().to_string(),
+            SemaType::Handle => "handle".to_string(),
             SemaType::Void => "void".to_string(),
             SemaType::Range => "range".to_string(),
             SemaType::MetaType => "type".to_string(),
@@ -1520,6 +1540,7 @@ impl TypeArena {
 
             // Types without nested type parameters - return unchanged
             SemaType::Primitive(_)
+            | SemaType::Handle
             | SemaType::Void
             | SemaType::Range
             | SemaType::MetaType
@@ -1725,6 +1746,7 @@ impl TypeArena {
 
             // Types without nested type parameters - return unchanged
             SemaType::Primitive(_)
+            | SemaType::Handle
             | SemaType::Void
             | SemaType::Range
             | SemaType::MetaType
@@ -1847,6 +1869,7 @@ impl TypeArena {
 
             // Types that don't contain SelfType placeholders
             SemaType::Primitive(_)
+            | SemaType::Handle
             | SemaType::TypeParam(_)
             | SemaType::TypeParamRef(_)
             | SemaType::Void

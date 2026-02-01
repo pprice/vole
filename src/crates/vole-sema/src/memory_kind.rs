@@ -50,6 +50,10 @@ impl TypeArena {
                 | PrimitiveType::Bool => MemoryKind::Value,
             },
 
+            // Handle is an opaque native pointer. It's a plain value (i64-sized pointer)
+            // with no RC header — cleanup is the responsibility of the native code.
+            SemaType::Handle => MemoryKind::Value,
+
             // Special types — all plain values (zero-size or register-sized).
             SemaType::Void | SemaType::Range | SemaType::MetaType => MemoryKind::Value,
 
