@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 use crate::cli::ColorMode;
 use crate::codegen::{Compiler, JitContext};
-use crate::errors::{LexerError, render_to_stderr, render_to_writer};
+use crate::errors::{LexerError, render_to_writer};
 use crate::frontend::{AstPrinter, ParseError, Parser};
 use crate::runtime::{
     JmpBuf, call_setjmp, clear_test_jmp_buf, set_capture_mode, set_stderr_capture,
@@ -22,75 +22,32 @@ use crate::transforms;
 // Re-export AnalyzedProgram from codegen
 pub use crate::codegen::AnalyzedProgram;
 
-/// Render a lexer error to stderr with source context
-fn render_lexer_error(err: &LexerError, file_path: &str, source: &str) {
+/// Render a lexer error to a writer with source context.
+fn render_lexer_error(err: &LexerError, file_path: &str, source: &str, w: &mut dyn Write) {
     let report = miette::Report::new(err.clone())
         .with_source_code(NamedSource::new(file_path, source.to_string()));
-    render_to_stderr(report.as_ref());
+    let _ = render_to_writer(report.as_ref(), w);
 }
 
-/// Render a parser error to stderr with source context
-fn render_parser_error(err: &ParseError, file_path: &str, source: &str) {
+/// Render a parser error to a writer with source context.
+fn render_parser_error(err: &ParseError, file_path: &str, source: &str, w: &mut dyn Write) {
     let report = miette::Report::new(err.error.clone())
         .with_source_code(NamedSource::new(file_path, source.to_string()));
-    render_to_stderr(report.as_ref());
+    let _ = render_to_writer(report.as_ref(), w);
 }
 
-/// Render a lexer error to a writer (for snapshots)
-fn render_lexer_error_to<W: Write>(
-    err: &LexerError,
-    file_path: &str,
-    source: &str,
-    writer: &mut W,
-) {
-    let report = miette::Report::new(err.clone())
-        .with_source_code(NamedSource::new(file_path, source.to_string()));
-    let _ = render_to_writer(report.as_ref(), writer);
-}
-
-/// Render a parser error to a writer (for snapshots)
-fn render_parser_error_to<W: Write>(
-    err: &ParseError,
-    file_path: &str,
-    source: &str,
-    writer: &mut W,
-) {
+/// Render a semantic error to a writer with source context.
+fn render_sema_error(err: &TypeError, file_path: &str, source: &str, w: &mut dyn Write) {
     let report = miette::Report::new(err.error.clone())
         .with_source_code(NamedSource::new(file_path, source.to_string()));
-    let _ = render_to_writer(report.as_ref(), writer);
+    let _ = render_to_writer(report.as_ref(), w);
 }
 
-/// Render a semantic error to stderr with source context
-fn render_sema_error(err: &TypeError, file_path: &str, source: &str) {
-    let report = miette::Report::new(err.error.clone())
-        .with_source_code(NamedSource::new(file_path, source.to_string()));
-    render_to_stderr(report.as_ref());
-}
-
-/// Render a semantic error to a writer (for snapshots)
-fn render_sema_error_to<W: Write>(err: &TypeError, file_path: &str, source: &str, writer: &mut W) {
-    let report = miette::Report::new(err.error.clone())
-        .with_source_code(NamedSource::new(file_path, source.to_string()));
-    let _ = render_to_writer(report.as_ref(), writer);
-}
-
-/// Render a semantic warning to stderr
-fn render_sema_warning(warn: &TypeWarning, file_path: &str, source: &str) {
+/// Render a semantic warning to a writer with source context.
+fn render_sema_warning(warn: &TypeWarning, file_path: &str, source: &str, w: &mut dyn Write) {
     let report = miette::Report::new(warn.warning.clone())
         .with_source_code(NamedSource::new(file_path, source.to_string()));
-    render_to_stderr(report.as_ref());
-}
-
-/// Render a semantic warning to a writer (for snapshots)
-fn render_sema_warning_to<W: Write>(
-    warn: &TypeWarning,
-    file_path: &str,
-    source: &str,
-    writer: &mut W,
-) {
-    let report = miette::Report::new(warn.warning.clone())
-        .with_source_code(NamedSource::new(file_path, source.to_string()));
-    let _ = render_to_writer(report.as_ref(), writer);
+    let _ = render_to_writer(report.as_ref(), w);
 }
 
 /// Parse and analyze a source file, rendering any diagnostics on error.
@@ -140,10 +97,10 @@ fn parse_and_analyze_opts(
                 let lexer_errors = parser.take_lexer_errors();
                 if !lexer_errors.is_empty() {
                     for err in &lexer_errors {
-                        render_lexer_error(err, file_path, source);
+                        render_lexer_error(err, file_path, source, &mut io::stderr());
                     }
                 } else {
-                    render_parser_error(&e, file_path, source);
+                    render_parser_error(&e, file_path, source, &mut io::stderr());
                 }
                 return Err(());
             }
@@ -153,7 +110,7 @@ fn parse_and_analyze_opts(
         let lexer_errors = parser.take_lexer_errors();
         if !lexer_errors.is_empty() {
             for err in &lexer_errors {
-                render_lexer_error(err, file_path, source);
+                render_lexer_error(err, file_path, source, &mut io::stderr());
             }
             return Err(());
         }
@@ -170,7 +127,7 @@ fn parse_and_analyze_opts(
         let (_, transform_errors) = transforms::transform_generators(&mut program, &mut interner);
         if !transform_errors.is_empty() {
             for err in &transform_errors {
-                render_sema_error(err, file_path, source);
+                render_sema_error(err, file_path, source, &mut io::stderr());
             }
             return Err(());
         }
@@ -183,7 +140,7 @@ fn parse_and_analyze_opts(
         analyzer.set_skip_tests(skip_tests);
         if let Err(errors) = analyzer.analyze(&program, &interner) {
             for err in &errors {
-                render_sema_error(err, file_path, source);
+                render_sema_error(err, file_path, source, &mut io::stderr());
             }
             return Err(());
         }
@@ -193,7 +150,7 @@ fn parse_and_analyze_opts(
 
     // Render any warnings (non-fatal diagnostics)
     for warn in &analyzer.take_warnings() {
-        render_sema_warning(warn, file_path, source);
+        render_sema_warning(warn, file_path, source, &mut io::stderr());
     }
 
     let mut output = analyzer.into_analysis_results();
@@ -232,10 +189,10 @@ pub fn parse_and_analyze_with_cache(
                 let lexer_errors = parser.take_lexer_errors();
                 if !lexer_errors.is_empty() {
                     for err in &lexer_errors {
-                        render_lexer_error(err, file_path, source);
+                        render_lexer_error(err, file_path, source, &mut io::stderr());
                     }
                 } else {
-                    render_parser_error(&e, file_path, source);
+                    render_parser_error(&e, file_path, source, &mut io::stderr());
                 }
                 return Err(());
             }
@@ -244,7 +201,7 @@ pub fn parse_and_analyze_with_cache(
         let lexer_errors = parser.take_lexer_errors();
         if !lexer_errors.is_empty() {
             for err in &lexer_errors {
-                render_lexer_error(err, file_path, source);
+                render_lexer_error(err, file_path, source, &mut io::stderr());
             }
             return Err(());
         }
@@ -261,7 +218,7 @@ pub fn parse_and_analyze_with_cache(
         let (_, transform_errors) = transforms::transform_generators(&mut program, &mut interner);
         if !transform_errors.is_empty() {
             for err in &transform_errors {
-                render_sema_error(err, file_path, source);
+                render_sema_error(err, file_path, source, &mut io::stderr());
             }
             return Err(());
         }
@@ -274,7 +231,7 @@ pub fn parse_and_analyze_with_cache(
             Analyzer::with_cache_and_project_root(file_path, source, cache, project_root);
         if let Err(errors) = analyzer.analyze(&program, &interner) {
             for err in &errors {
-                render_sema_error(err, file_path, source);
+                render_sema_error(err, file_path, source, &mut io::stderr());
             }
             return Err(());
         }
@@ -283,7 +240,7 @@ pub fn parse_and_analyze_with_cache(
     };
 
     for warn in &analyzer.take_warnings() {
-        render_sema_warning(warn, file_path, source);
+        render_sema_warning(warn, file_path, source, &mut io::stderr());
     }
 
     let mut output = analyzer.into_analysis_results();
@@ -378,10 +335,10 @@ pub fn check_captured<W: Write + Send + 'static>(
             let lexer_errors = parser.take_lexer_errors();
             if !lexer_errors.is_empty() {
                 for err in &lexer_errors {
-                    render_lexer_error_to(err, file_path, source, &mut stderr);
+                    render_lexer_error(err, file_path, source, &mut stderr);
                 }
             } else {
-                render_parser_error_to(&e, file_path, source, &mut stderr);
+                render_parser_error(&e, file_path, source, &mut stderr);
             }
             return Err(());
         }
@@ -390,7 +347,7 @@ pub fn check_captured<W: Write + Send + 'static>(
     let lexer_errors = parser.take_lexer_errors();
     if !lexer_errors.is_empty() {
         for err in &lexer_errors {
-            render_lexer_error_to(err, file_path, source, &mut stderr);
+            render_lexer_error(err, file_path, source, &mut stderr);
         }
         return Err(());
     }
@@ -402,7 +359,7 @@ pub fn check_captured<W: Write + Send + 'static>(
     let (_, transform_errors) = transforms::transform_generators(&mut program, &mut interner);
     if !transform_errors.is_empty() {
         for err in &transform_errors {
-            render_sema_error_to(err, file_path, source, &mut stderr);
+            render_sema_error(err, file_path, source, &mut stderr);
         }
         return Err(());
     }
@@ -411,14 +368,14 @@ pub fn check_captured<W: Write + Send + 'static>(
     let mut analyzer = Analyzer::new(file_path, source);
     if let Err(errors) = analyzer.analyze(&program, &interner) {
         for err in &errors {
-            render_sema_error_to(err, file_path, source, &mut stderr);
+            render_sema_error(err, file_path, source, &mut stderr);
         }
         return Err(());
     }
 
     // Render warnings (non-fatal diagnostics)
     for warn in &analyzer.take_warnings() {
-        render_sema_warning_to(warn, file_path, source, &mut stderr);
+        render_sema_warning(warn, file_path, source, &mut stderr);
     }
 
     Ok(())
@@ -440,10 +397,10 @@ pub fn run_captured<W: Write + Send + 'static>(
             let lexer_errors = parser.take_lexer_errors();
             if !lexer_errors.is_empty() {
                 for err in &lexer_errors {
-                    render_lexer_error_to(err, file_path, source, &mut stderr);
+                    render_lexer_error(err, file_path, source, &mut stderr);
                 }
             } else {
-                render_parser_error_to(&e, file_path, source, &mut stderr);
+                render_parser_error(&e, file_path, source, &mut stderr);
             }
             return Err(());
         }
@@ -452,7 +409,7 @@ pub fn run_captured<W: Write + Send + 'static>(
     let lexer_errors = parser.take_lexer_errors();
     if !lexer_errors.is_empty() {
         for err in &lexer_errors {
-            render_lexer_error_to(err, file_path, source, &mut stderr);
+            render_lexer_error(err, file_path, source, &mut stderr);
         }
         return Err(());
     }
@@ -464,7 +421,7 @@ pub fn run_captured<W: Write + Send + 'static>(
     let (_, transform_errors) = transforms::transform_generators(&mut program, &mut interner);
     if !transform_errors.is_empty() {
         for err in &transform_errors {
-            render_sema_error_to(err, file_path, source, &mut stderr);
+            render_sema_error(err, file_path, source, &mut stderr);
         }
         return Err(());
     }
@@ -474,7 +431,7 @@ pub fn run_captured<W: Write + Send + 'static>(
     analyzer.set_skip_tests(true);
     if let Err(errors) = analyzer.analyze(&program, &interner) {
         for err in &errors {
-            render_sema_error_to(err, file_path, source, &mut stderr);
+            render_sema_error(err, file_path, source, &mut stderr);
         }
         return Err(());
     }
@@ -554,10 +511,10 @@ pub fn inspect_ast_captured<W: Write>(
             let lexer_errors = parser.take_lexer_errors();
             if !lexer_errors.is_empty() {
                 for err in &lexer_errors {
-                    render_lexer_error_to(err, file_path, source, &mut stderr);
+                    render_lexer_error(err, file_path, source, &mut stderr);
                 }
             } else {
-                render_parser_error_to(&e, file_path, source, &mut stderr);
+                render_parser_error(&e, file_path, source, &mut stderr);
             }
             return Err(());
         }
@@ -566,7 +523,7 @@ pub fn inspect_ast_captured<W: Write>(
     let lexer_errors = parser.take_lexer_errors();
     if !lexer_errors.is_empty() {
         for err in &lexer_errors {
-            render_lexer_error_to(err, file_path, source, &mut stderr);
+            render_lexer_error(err, file_path, source, &mut stderr);
         }
         return Err(());
     }
