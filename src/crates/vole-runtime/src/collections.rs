@@ -13,14 +13,13 @@
 #![allow(clippy::manual_unwrap_or_default)]
 #![allow(clippy::manual_unwrap_or)]
 
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::alloc::{Layout, dealloc};
 
 use hashbrown::HashTable;
 
 use crate::array::RcArray;
 use crate::iterator::{ArraySource, IteratorKind, IteratorSource, UnifiedIterator};
-use crate::value::TaggedValue;
+use crate::value::{RcHeader, TYPE_MAP, TYPE_SET, TaggedValue};
 
 // =============================================================================
 // Equality function type for generic collections
@@ -208,8 +207,47 @@ impl VoleMap {
     }
 }
 
-/// Reference-counted VoleMap for Vole runtime
-pub type RcMap = Rc<RefCell<VoleMap>>;
+/// Reference-counted VoleMap with RcHeader prefix.
+///
+/// Layout: `[RcHeader] [VoleMap]` — the map is stored inline, not behind
+/// another pointer. Since vole is single-threaded, no RefCell is needed.
+#[repr(C)]
+pub struct RcMap {
+    header: RcHeader,
+    map: VoleMap,
+}
+
+/// Drop function for RcMap, called by rc_dec when refcount reaches zero.
+/// Deallocates the RcMap allocation.
+///
+/// # Safety
+/// `ptr` must point to a valid `RcMap` allocation with refcount already at zero.
+unsafe extern "C" fn map_drop(ptr: *mut u8) {
+    unsafe {
+        let map_ptr = ptr as *mut RcMap;
+        // Drop the VoleMap in place (frees the HashTable), then deallocate
+        std::ptr::drop_in_place(&mut (*map_ptr).map);
+        let layout = Layout::new::<RcMap>();
+        dealloc(ptr, layout);
+    }
+}
+
+/// Allocate a new RcMap on the heap with the given VoleMap.
+fn alloc_rc_map(map: VoleMap) -> *mut RcMap {
+    let layout = Layout::new::<RcMap>();
+    unsafe {
+        let ptr = std::alloc::alloc(layout) as *mut RcMap;
+        if ptr.is_null() {
+            std::alloc::handle_alloc_error(layout);
+        }
+        std::ptr::write(
+            &mut (*ptr).header,
+            RcHeader::with_drop_fn(TYPE_MAP, map_drop),
+        );
+        std::ptr::write(&mut (*ptr).map, map);
+        ptr
+    }
+}
 
 // =============================================================================
 // VoleSet - Hash set for Vole Set<T> type
@@ -444,8 +482,47 @@ impl VoleSet {
     }
 }
 
-/// Reference-counted VoleSet for Vole runtime
-pub type RcSet = Rc<RefCell<VoleSet>>;
+/// Reference-counted VoleSet with RcHeader prefix.
+///
+/// Layout: `[RcHeader] [VoleSet]` — the set is stored inline, not behind
+/// another pointer. Since vole is single-threaded, no RefCell is needed.
+#[repr(C)]
+pub struct RcSet {
+    header: RcHeader,
+    set: VoleSet,
+}
+
+/// Drop function for RcSet, called by rc_dec when refcount reaches zero.
+/// Deallocates the RcSet allocation.
+///
+/// # Safety
+/// `ptr` must point to a valid `RcSet` allocation with refcount already at zero.
+unsafe extern "C" fn set_drop(ptr: *mut u8) {
+    unsafe {
+        let set_ptr = ptr as *mut RcSet;
+        // Drop the VoleSet in place (frees the HashTable), then deallocate
+        std::ptr::drop_in_place(&mut (*set_ptr).set);
+        let layout = Layout::new::<RcSet>();
+        dealloc(ptr, layout);
+    }
+}
+
+/// Allocate a new RcSet on the heap with the given VoleSet.
+fn alloc_rc_set(set: VoleSet) -> *mut RcSet {
+    let layout = Layout::new::<RcSet>();
+    unsafe {
+        let ptr = std::alloc::alloc(layout) as *mut RcSet;
+        if ptr.is_null() {
+            std::alloc::handle_alloc_error(layout);
+        }
+        std::ptr::write(
+            &mut (*ptr).header,
+            RcHeader::with_drop_fn(TYPE_SET, set_drop),
+        );
+        std::ptr::write(&mut (*ptr).set, set);
+        ptr
+    }
+}
 
 // =============================================================================
 // FFI Functions for Map<K, V>
@@ -456,44 +533,38 @@ pub type RcSet = Rc<RefCell<VoleSet>>;
 
 /// Create a new empty map (uses i64 equality by default)
 #[unsafe(no_mangle)]
-pub extern "C" fn map_new() -> *const RefCell<VoleMap> {
-    Rc::into_raw(Rc::new(RefCell::new(VoleMap::new(i64_eq))))
+pub extern "C" fn map_new() -> *mut RcMap {
+    alloc_rc_map(VoleMap::new(i64_eq))
 }
 
 /// Create a new empty map with closure-based equality (for generic Map<K, V>)
 /// The eq_closure is a Vole closure: (closure_ptr, a: K, b: K) -> bool
 #[unsafe(no_mangle)]
-pub extern "C" fn map_new_with_eq(eq_closure: *const Closure) -> *const RefCell<VoleMap> {
-    Rc::into_raw(Rc::new(RefCell::new(VoleMap::new_with_closure(eq_closure))))
+pub extern "C" fn map_new_with_eq(eq_closure: *const Closure) -> *mut RcMap {
+    alloc_rc_map(VoleMap::new_with_closure(eq_closure))
 }
 
 /// Create a new map with the given capacity (uses i64 equality by default)
 #[unsafe(no_mangle)]
-pub extern "C" fn map_with_capacity(capacity: i64) -> *const RefCell<VoleMap> {
-    Rc::into_raw(Rc::new(RefCell::new(VoleMap::with_capacity(
-        capacity as usize,
-        i64_eq,
-    ))))
+pub extern "C" fn map_with_capacity(capacity: i64) -> *mut RcMap {
+    alloc_rc_map(VoleMap::with_capacity(capacity as usize, i64_eq))
 }
 
 /// Create a new map with capacity and closure-based equality
 #[unsafe(no_mangle)]
-pub extern "C" fn map_with_capacity_eq(
-    capacity: i64,
-    eq_closure: *const Closure,
-) -> *const RefCell<VoleMap> {
-    Rc::into_raw(Rc::new(RefCell::new(VoleMap::with_capacity_closure(
+pub extern "C" fn map_with_capacity_eq(capacity: i64, eq_closure: *const Closure) -> *mut RcMap {
+    alloc_rc_map(VoleMap::with_capacity_closure(
         capacity as usize,
         eq_closure,
-    ))))
+    ))
 }
 
 /// Get a value from the map. Returns a tagged optional (0 = nil, non-zero = Some).
 /// The value is returned in the high bits if present.
 #[unsafe(no_mangle)]
-pub extern "C" fn map_get(map_ptr: *const RefCell<VoleMap>, key: i64, key_hash: i64) -> i64 {
-    let map = unsafe { &*map_ptr };
-    match map.borrow().get(key, key_hash) {
+pub extern "C" fn map_get(map_ptr: *mut RcMap, key: i64, key_hash: i64) -> i64 {
+    let map = unsafe { &(*map_ptr).map };
+    match map.get(key, key_hash) {
         Some(value) => value,
         None => 0, // nil sentinel - caller should check tag
     }
@@ -501,9 +572,9 @@ pub extern "C" fn map_get(map_ptr: *const RefCell<VoleMap>, key: i64, key_hash: 
 
 /// Check if map has a value for the given key (for optional return)
 #[unsafe(no_mangle)]
-pub extern "C" fn map_has(map_ptr: *const RefCell<VoleMap>, key: i64, key_hash: i64) -> i8 {
-    let map = unsafe { &*map_ptr };
-    if map.borrow().contains_key(key, key_hash) {
+pub extern "C" fn map_has(map_ptr: *mut RcMap, key: i64, key_hash: i64) -> i8 {
+    let map = unsafe { &(*map_ptr).map };
+    if map.contains_key(key, key_hash) {
         1
     } else {
         0
@@ -512,27 +583,23 @@ pub extern "C" fn map_has(map_ptr: *const RefCell<VoleMap>, key: i64, key_hash: 
 
 /// Set a value in the map
 #[unsafe(no_mangle)]
-pub extern "C" fn map_set(map_ptr: *const RefCell<VoleMap>, key: i64, key_hash: i64, value: i64) {
-    let map = unsafe { &*map_ptr };
-    map.borrow_mut().set(key, key_hash, value);
+pub extern "C" fn map_set(map_ptr: *mut RcMap, key: i64, key_hash: i64, value: i64) {
+    let map = unsafe { &mut (*map_ptr).map };
+    map.set(key, key_hash, value);
 }
 
 /// Remove a key from the map, returning the old value if present
 #[unsafe(no_mangle)]
-pub extern "C" fn map_remove(map_ptr: *const RefCell<VoleMap>, key: i64, key_hash: i64) -> i64 {
-    let map = unsafe { &*map_ptr };
-    map.borrow_mut().remove(key, key_hash).unwrap_or(0)
+pub extern "C" fn map_remove(map_ptr: *mut RcMap, key: i64, key_hash: i64) -> i64 {
+    let map = unsafe { &mut (*map_ptr).map };
+    map.remove(key, key_hash).unwrap_or(0)
 }
 
 /// Check if map contains a key
 #[unsafe(no_mangle)]
-pub extern "C" fn map_contains_key(
-    map_ptr: *const RefCell<VoleMap>,
-    key: i64,
-    key_hash: i64,
-) -> i8 {
-    let map = unsafe { &*map_ptr };
-    if map.borrow().contains_key(key, key_hash) {
+pub extern "C" fn map_contains_key(map_ptr: *mut RcMap, key: i64, key_hash: i64) -> i8 {
+    let map = unsafe { &(*map_ptr).map };
+    if map.contains_key(key, key_hash) {
         1
     } else {
         0
@@ -541,16 +608,16 @@ pub extern "C" fn map_contains_key(
 
 /// Get the number of entries in the map
 #[unsafe(no_mangle)]
-pub extern "C" fn map_len(map_ptr: *const RefCell<VoleMap>) -> i64 {
-    let map = unsafe { &*map_ptr };
-    map.borrow().len() as i64
+pub extern "C" fn map_len(map_ptr: *mut RcMap) -> i64 {
+    let map = unsafe { &(*map_ptr).map };
+    map.len() as i64
 }
 
 /// Clear all entries from the map
 #[unsafe(no_mangle)]
-pub extern "C" fn map_clear(map_ptr: *const RefCell<VoleMap>) {
-    let map = unsafe { &*map_ptr };
-    map.borrow_mut().clear();
+pub extern "C" fn map_clear(map_ptr: *mut RcMap) {
+    let map = unsafe { &mut (*map_ptr).map };
+    map.clear();
 }
 
 /// Helper to create an array from a Vec<i64>
@@ -566,9 +633,9 @@ fn vec_to_array(values: Vec<i64>) -> *mut RcArray {
 
 /// Get an iterator over the map's keys
 #[unsafe(no_mangle)]
-pub extern "C" fn map_keys_iter(map_ptr: *const RefCell<VoleMap>) -> *mut UnifiedIterator {
-    let map = unsafe { &*map_ptr };
-    let keys: Vec<i64> = map.borrow().keys();
+pub extern "C" fn map_keys_iter(map_ptr: *mut RcMap) -> *mut UnifiedIterator {
+    let map = unsafe { &(*map_ptr).map };
+    let keys: Vec<i64> = map.keys();
     let array = vec_to_array(keys);
     Box::into_raw(Box::new(UnifiedIterator {
         kind: IteratorKind::Array,
@@ -580,9 +647,9 @@ pub extern "C" fn map_keys_iter(map_ptr: *const RefCell<VoleMap>) -> *mut Unifie
 
 /// Get an iterator over the map's values
 #[unsafe(no_mangle)]
-pub extern "C" fn map_values_iter(map_ptr: *const RefCell<VoleMap>) -> *mut UnifiedIterator {
-    let map = unsafe { &*map_ptr };
-    let values: Vec<i64> = map.borrow().values();
+pub extern "C" fn map_values_iter(map_ptr: *mut RcMap) -> *mut UnifiedIterator {
+    let map = unsafe { &(*map_ptr).map };
+    let values: Vec<i64> = map.values();
     let array = vec_to_array(values);
     Box::into_raw(Box::new(UnifiedIterator {
         kind: IteratorKind::Array,
@@ -594,9 +661,9 @@ pub extern "C" fn map_values_iter(map_ptr: *const RefCell<VoleMap>) -> *mut Unif
 
 /// Get an iterator over the map's entries as [key, value] tuples
 #[unsafe(no_mangle)]
-pub extern "C" fn map_entries_iter(map_ptr: *const RefCell<VoleMap>) -> *mut UnifiedIterator {
-    let map = unsafe { &*map_ptr };
-    let entries: Vec<(i64, i64)> = map.borrow().entries();
+pub extern "C" fn map_entries_iter(map_ptr: *mut RcMap) -> *mut UnifiedIterator {
+    let map = unsafe { &(*map_ptr).map };
+    let entries: Vec<(i64, i64)> = map.entries();
 
     // Create an array of tuple pointers
     let tuples: Vec<i64> = entries
@@ -621,22 +688,6 @@ pub extern "C" fn map_entries_iter(map_ptr: *const RefCell<VoleMap>) -> *mut Uni
     }))
 }
 
-/// Increment map reference count
-#[unsafe(no_mangle)]
-pub extern "C" fn map_inc_ref(map_ptr: *const RefCell<VoleMap>) {
-    unsafe {
-        Rc::increment_strong_count(map_ptr);
-    }
-}
-
-/// Decrement map reference count
-#[unsafe(no_mangle)]
-pub extern "C" fn map_dec_ref(map_ptr: *const RefCell<VoleMap>) {
-    unsafe {
-        Rc::decrement_strong_count(map_ptr);
-    }
-}
-
 // =============================================================================
 // FFI Functions for Set<T>
 // =============================================================================
@@ -646,90 +697,72 @@ pub extern "C" fn map_dec_ref(map_ptr: *const RefCell<VoleMap>) {
 
 /// Create a new empty set (uses i64 equality by default)
 #[unsafe(no_mangle)]
-pub extern "C" fn set_new() -> *const RefCell<VoleSet> {
-    Rc::into_raw(Rc::new(RefCell::new(VoleSet::new(i64_eq))))
+pub extern "C" fn set_new() -> *mut RcSet {
+    alloc_rc_set(VoleSet::new(i64_eq))
 }
 
 /// Create a new empty set with closure-based equality (for generic Set<T>)
 /// The eq_closure is a Vole closure: (closure_ptr, a: T, b: T) -> bool
 #[unsafe(no_mangle)]
-pub extern "C" fn set_new_with_eq(eq_closure: *const Closure) -> *const RefCell<VoleSet> {
-    Rc::into_raw(Rc::new(RefCell::new(VoleSet::new_with_closure(eq_closure))))
+pub extern "C" fn set_new_with_eq(eq_closure: *const Closure) -> *mut RcSet {
+    alloc_rc_set(VoleSet::new_with_closure(eq_closure))
 }
 
 /// Create a new set with the given capacity (uses i64 equality by default)
 #[unsafe(no_mangle)]
-pub extern "C" fn set_with_capacity(capacity: i64) -> *const RefCell<VoleSet> {
-    Rc::into_raw(Rc::new(RefCell::new(VoleSet::with_capacity(
-        capacity as usize,
-        i64_eq,
-    ))))
+pub extern "C" fn set_with_capacity(capacity: i64) -> *mut RcSet {
+    alloc_rc_set(VoleSet::with_capacity(capacity as usize, i64_eq))
 }
 
 /// Create a new set with capacity and closure-based equality
 #[unsafe(no_mangle)]
-pub extern "C" fn set_with_capacity_eq(
-    capacity: i64,
-    eq_closure: *const Closure,
-) -> *const RefCell<VoleSet> {
-    Rc::into_raw(Rc::new(RefCell::new(VoleSet::with_capacity_closure(
+pub extern "C" fn set_with_capacity_eq(capacity: i64, eq_closure: *const Closure) -> *mut RcSet {
+    alloc_rc_set(VoleSet::with_capacity_closure(
         capacity as usize,
         eq_closure,
-    ))))
+    ))
 }
 
 /// Add a value to the set, returns true if it was newly inserted
 #[unsafe(no_mangle)]
-pub extern "C" fn set_add(set_ptr: *const RefCell<VoleSet>, value: i64, hash: i64) -> i8 {
-    let set = unsafe { &*set_ptr };
-    if set.borrow_mut().add(value, hash) {
-        1
-    } else {
-        0
-    }
+pub extern "C" fn set_add(set_ptr: *mut RcSet, value: i64, hash: i64) -> i8 {
+    let set = unsafe { &mut (*set_ptr).set };
+    if set.add(value, hash) { 1 } else { 0 }
 }
 
 /// Remove a value from the set, returns true if it was present
 #[unsafe(no_mangle)]
-pub extern "C" fn set_remove(set_ptr: *const RefCell<VoleSet>, value: i64, hash: i64) -> i8 {
-    let set = unsafe { &*set_ptr };
-    if set.borrow_mut().remove(value, hash) {
-        1
-    } else {
-        0
-    }
+pub extern "C" fn set_remove(set_ptr: *mut RcSet, value: i64, hash: i64) -> i8 {
+    let set = unsafe { &mut (*set_ptr).set };
+    if set.remove(value, hash) { 1 } else { 0 }
 }
 
 /// Check if set contains a value
 #[unsafe(no_mangle)]
-pub extern "C" fn set_contains(set_ptr: *const RefCell<VoleSet>, value: i64, hash: i64) -> i8 {
-    let set = unsafe { &*set_ptr };
-    if set.borrow().contains(value, hash) {
-        1
-    } else {
-        0
-    }
+pub extern "C" fn set_contains(set_ptr: *mut RcSet, value: i64, hash: i64) -> i8 {
+    let set = unsafe { &(*set_ptr).set };
+    if set.contains(value, hash) { 1 } else { 0 }
 }
 
 /// Get the number of elements in the set
 #[unsafe(no_mangle)]
-pub extern "C" fn set_len(set_ptr: *const RefCell<VoleSet>) -> i64 {
-    let set = unsafe { &*set_ptr };
-    set.borrow().len() as i64
+pub extern "C" fn set_len(set_ptr: *mut RcSet) -> i64 {
+    let set = unsafe { &(*set_ptr).set };
+    set.len() as i64
 }
 
 /// Clear all elements from the set
 #[unsafe(no_mangle)]
-pub extern "C" fn set_clear(set_ptr: *const RefCell<VoleSet>) {
-    let set = unsafe { &*set_ptr };
-    set.borrow_mut().clear();
+pub extern "C" fn set_clear(set_ptr: *mut RcSet) {
+    let set = unsafe { &mut (*set_ptr).set };
+    set.clear();
 }
 
 /// Get an iterator over the set's values
 #[unsafe(no_mangle)]
-pub extern "C" fn set_iter(set_ptr: *const RefCell<VoleSet>) -> *mut UnifiedIterator {
-    let set = unsafe { &*set_ptr };
-    let values: Vec<i64> = set.borrow().values();
+pub extern "C" fn set_iter(set_ptr: *mut RcSet) -> *mut UnifiedIterator {
+    let set = unsafe { &(*set_ptr).set };
+    let values: Vec<i64> = set.values();
     let array = vec_to_array(values);
     Box::into_raw(Box::new(UnifiedIterator {
         kind: IteratorKind::Array,
@@ -741,116 +774,136 @@ pub extern "C" fn set_iter(set_ptr: *const RefCell<VoleSet>) -> *mut UnifiedIter
 
 /// Compute union of two sets
 #[unsafe(no_mangle)]
-pub extern "C" fn set_union(
-    a_ptr: *const RefCell<VoleSet>,
-    b_ptr: *const RefCell<VoleSet>,
-) -> *const RefCell<VoleSet> {
-    let a = unsafe { &*a_ptr };
-    let b = unsafe { &*b_ptr };
-    let result = a.borrow().union(&b.borrow());
-    Rc::into_raw(Rc::new(RefCell::new(result)))
+pub extern "C" fn set_union(a_ptr: *mut RcSet, b_ptr: *mut RcSet) -> *mut RcSet {
+    let a = unsafe { &(*a_ptr).set };
+    let b = unsafe { &(*b_ptr).set };
+    alloc_rc_set(a.union(b))
 }
 
 /// Compute intersection of two sets
 #[unsafe(no_mangle)]
-pub extern "C" fn set_intersection(
-    a_ptr: *const RefCell<VoleSet>,
-    b_ptr: *const RefCell<VoleSet>,
-) -> *const RefCell<VoleSet> {
-    let a = unsafe { &*a_ptr };
-    let b = unsafe { &*b_ptr };
-    let result = a.borrow().intersection(&b.borrow());
-    Rc::into_raw(Rc::new(RefCell::new(result)))
+pub extern "C" fn set_intersection(a_ptr: *mut RcSet, b_ptr: *mut RcSet) -> *mut RcSet {
+    let a = unsafe { &(*a_ptr).set };
+    let b = unsafe { &(*b_ptr).set };
+    alloc_rc_set(a.intersection(b))
 }
 
 /// Compute difference of two sets (a - b)
 #[unsafe(no_mangle)]
-pub extern "C" fn set_difference(
-    a_ptr: *const RefCell<VoleSet>,
-    b_ptr: *const RefCell<VoleSet>,
-) -> *const RefCell<VoleSet> {
-    let a = unsafe { &*a_ptr };
-    let b = unsafe { &*b_ptr };
-    let result = a.borrow().difference(&b.borrow());
-    Rc::into_raw(Rc::new(RefCell::new(result)))
+pub extern "C" fn set_difference(a_ptr: *mut RcSet, b_ptr: *mut RcSet) -> *mut RcSet {
+    let a = unsafe { &(*a_ptr).set };
+    let b = unsafe { &(*b_ptr).set };
+    alloc_rc_set(a.difference(b))
 }
 
 /// Compute symmetric difference of two sets
 #[unsafe(no_mangle)]
-pub extern "C" fn set_symmetric_difference(
-    a_ptr: *const RefCell<VoleSet>,
-    b_ptr: *const RefCell<VoleSet>,
-) -> *const RefCell<VoleSet> {
-    let a = unsafe { &*a_ptr };
-    let b = unsafe { &*b_ptr };
-    let result = a.borrow().symmetric_difference(&b.borrow());
-    Rc::into_raw(Rc::new(RefCell::new(result)))
+pub extern "C" fn set_symmetric_difference(a_ptr: *mut RcSet, b_ptr: *mut RcSet) -> *mut RcSet {
+    let a = unsafe { &(*a_ptr).set };
+    let b = unsafe { &(*b_ptr).set };
+    alloc_rc_set(a.symmetric_difference(b))
 }
 
 /// Check if a is subset of b
 #[unsafe(no_mangle)]
-pub extern "C" fn set_is_subset(
-    a_ptr: *const RefCell<VoleSet>,
-    b_ptr: *const RefCell<VoleSet>,
-) -> i8 {
-    let a = unsafe { &*a_ptr };
-    let b = unsafe { &*b_ptr };
-    if a.borrow().is_subset(&b.borrow()) {
-        1
-    } else {
-        0
-    }
+pub extern "C" fn set_is_subset(a_ptr: *mut RcSet, b_ptr: *mut RcSet) -> i8 {
+    let a = unsafe { &(*a_ptr).set };
+    let b = unsafe { &(*b_ptr).set };
+    if a.is_subset(b) { 1 } else { 0 }
 }
 
 /// Check if a is superset of b
 #[unsafe(no_mangle)]
-pub extern "C" fn set_is_superset(
-    a_ptr: *const RefCell<VoleSet>,
-    b_ptr: *const RefCell<VoleSet>,
-) -> i8 {
-    let a = unsafe { &*a_ptr };
-    let b = unsafe { &*b_ptr };
-    if a.borrow().is_superset(&b.borrow()) {
-        1
-    } else {
-        0
-    }
+pub extern "C" fn set_is_superset(a_ptr: *mut RcSet, b_ptr: *mut RcSet) -> i8 {
+    let a = unsafe { &(*a_ptr).set };
+    let b = unsafe { &(*b_ptr).set };
+    if a.is_superset(b) { 1 } else { 0 }
 }
 
 /// Check if two sets are disjoint (no common elements)
 #[unsafe(no_mangle)]
-pub extern "C" fn set_is_disjoint(
-    a_ptr: *const RefCell<VoleSet>,
-    b_ptr: *const RefCell<VoleSet>,
-) -> i8 {
-    let a = unsafe { &*a_ptr };
-    let b = unsafe { &*b_ptr };
-    if a.borrow().is_disjoint(&b.borrow()) {
-        1
-    } else {
-        0
-    }
-}
-
-/// Increment set reference count
-#[unsafe(no_mangle)]
-pub extern "C" fn set_inc_ref(set_ptr: *const RefCell<VoleSet>) {
-    unsafe {
-        Rc::increment_strong_count(set_ptr);
-    }
-}
-
-/// Decrement set reference count
-#[unsafe(no_mangle)]
-pub extern "C" fn set_dec_ref(set_ptr: *const RefCell<VoleSet>) {
-    unsafe {
-        Rc::decrement_strong_count(set_ptr);
-    }
+pub extern "C" fn set_is_disjoint(a_ptr: *mut RcSet, b_ptr: *mut RcSet) -> i8 {
+    let a = unsafe { &(*a_ptr).set };
+    let b = unsafe { &(*b_ptr).set };
+    if a.is_disjoint(b) { 1 } else { 0 }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::value::rc_dec;
+    use std::sync::atomic::Ordering;
+
+    #[test]
+    fn test_rc_map_header_fields() {
+        // Verify the RcHeader is properly initialized
+        let map = map_new();
+        unsafe {
+            let header = &(*map).header;
+            assert_eq!(header.type_id, TYPE_MAP);
+            assert_eq!(header.ref_count.load(Ordering::Relaxed), 1);
+            assert!(header.drop_fn.is_some());
+        }
+        rc_dec(map as *mut u8);
+    }
+
+    #[test]
+    fn test_rc_map_inc_dec() {
+        // Verify inc/dec work through RcHeader
+        let map = map_new();
+        unsafe {
+            let header = &(*map).header;
+            assert_eq!(header.ref_count.load(Ordering::Relaxed), 1);
+
+            crate::value::rc_inc(map as *mut u8);
+            assert_eq!(header.ref_count.load(Ordering::Relaxed), 2);
+
+            // First dec: refcount goes to 1, no drop
+            rc_dec(map as *mut u8);
+            assert_eq!(header.ref_count.load(Ordering::Relaxed), 1);
+
+            // Still usable
+            map_set(map, 1, 1, 42);
+            assert_eq!(map_get(map, 1, 1), 42);
+
+            // Final dec: refcount goes to 0, map_drop called
+            rc_dec(map as *mut u8);
+        }
+    }
+
+    #[test]
+    fn test_rc_map_ffi_operations() {
+        // Test map operations through FFI functions with RcMap
+        let map = map_new();
+
+        map_set(map, 10, 10, 100);
+        map_set(map, 20, 20, 200);
+
+        assert_eq!(map_get(map, 10, 10), 100);
+        assert_eq!(map_get(map, 20, 20), 200);
+        assert_eq!(map_get(map, 30, 30), 0); // nil sentinel
+        assert_eq!(map_has(map, 10, 10), 1);
+        assert_eq!(map_has(map, 30, 30), 0);
+        assert_eq!(map_contains_key(map, 10, 10), 1);
+        assert_eq!(map_contains_key(map, 30, 30), 0);
+        assert_eq!(map_len(map), 2);
+
+        assert_eq!(map_remove(map, 10, 10), 100);
+        assert_eq!(map_len(map), 1);
+
+        map_clear(map);
+        assert_eq!(map_len(map), 0);
+
+        rc_dec(map as *mut u8);
+    }
+
+    #[test]
+    fn test_rc_map_with_capacity() {
+        let map = map_with_capacity(16);
+        map_set(map, 1, 1, 42);
+        assert_eq!(map_get(map, 1, 1), 42);
+        rc_dec(map as *mut u8);
+    }
 
     #[test]
     fn test_map_basic_operations() {
@@ -924,6 +977,75 @@ mod tests {
         let diff = a.difference(&b);
         assert_eq!(diff.len(), 1);
         assert!(diff.contains(1, 1));
+    }
+
+    #[test]
+    fn test_rc_set_header_fields() {
+        // Verify the RcHeader is properly initialized
+        let set = set_new();
+        unsafe {
+            let header = &(*set).header;
+            assert_eq!(header.type_id, TYPE_SET);
+            assert_eq!(header.ref_count.load(Ordering::Relaxed), 1);
+            assert!(header.drop_fn.is_some());
+        }
+        rc_dec(set as *mut u8);
+    }
+
+    #[test]
+    fn test_rc_set_inc_dec() {
+        // Verify inc/dec work through RcHeader
+        let set = set_new();
+        unsafe {
+            let header = &(*set).header;
+            assert_eq!(header.ref_count.load(Ordering::Relaxed), 1);
+
+            crate::value::rc_inc(set as *mut u8);
+            assert_eq!(header.ref_count.load(Ordering::Relaxed), 2);
+
+            // First dec: refcount goes to 1, no drop
+            rc_dec(set as *mut u8);
+            assert_eq!(header.ref_count.load(Ordering::Relaxed), 1);
+
+            // Still usable
+            set_add(set, 1, 1);
+            assert_eq!(set_contains(set, 1, 1), 1);
+
+            // Final dec: refcount goes to 0, set_drop called
+            rc_dec(set as *mut u8);
+        }
+    }
+
+    #[test]
+    fn test_rc_set_ffi_operations() {
+        // Test set operations through FFI functions with RcSet
+        let set = set_new();
+
+        assert_eq!(set_add(set, 10, 10), 1); // newly inserted
+        assert_eq!(set_add(set, 20, 20), 1); // newly inserted
+        assert_eq!(set_add(set, 10, 10), 0); // already present
+
+        assert_eq!(set_contains(set, 10, 10), 1);
+        assert_eq!(set_contains(set, 20, 20), 1);
+        assert_eq!(set_contains(set, 30, 30), 0);
+        assert_eq!(set_len(set), 2);
+
+        assert_eq!(set_remove(set, 10, 10), 1); // was present
+        assert_eq!(set_remove(set, 10, 10), 0); // not present
+        assert_eq!(set_len(set), 1);
+
+        set_clear(set);
+        assert_eq!(set_len(set), 0);
+
+        rc_dec(set as *mut u8);
+    }
+
+    #[test]
+    fn test_rc_set_with_capacity() {
+        let set = set_with_capacity(16);
+        assert_eq!(set_add(set, 1, 1), 1);
+        assert_eq!(set_contains(set, 1, 1), 1);
+        rc_dec(set as *mut u8);
     }
 
     // Test custom equality function injection

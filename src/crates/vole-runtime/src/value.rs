@@ -91,6 +91,8 @@ pub const TYPE_ARRAY: u32 = 5;
 pub const TYPE_CLOSURE: u32 = 6;
 pub const TYPE_INSTANCE: u32 = 7;
 pub const TYPE_RNG: u32 = 8;
+pub const TYPE_MAP: u32 = 9;
+pub const TYPE_SET: u32 = 10;
 
 /// Tagged value for boxed/heterogeneous storage
 /// Used in arrays, union types, and fallible returns
