@@ -1,0 +1,18 @@
+// Module B - imports D (left side of diamond)
+
+let d = import "./d"
+let { Pair } = import "./d"
+
+let B_VALUE: i64 = 100
+
+func b_make_pair(x: i64) -> Pair {
+    return d.make_pair(x, x + 1)
+}
+
+func b_transform(p: Pair) -> Pair {
+    return Pair { first: p.first * 2, second: p.second * 2 }
+}
+
+func b_pair_sum(p: Pair) -> i64 {
+    return p.sum()
+}

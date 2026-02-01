@@ -1,0 +1,21 @@
+// Module D - shared leaf module in the diamond pattern
+// Both B and C import this module
+
+let D_VALUE: i64 = 42
+
+struct Pair {
+    first: i64,
+    second: i64,
+
+    func sum() -> i64 {
+        return self.first + self.second
+    }
+}
+
+func make_pair(a: i64, b: i64) -> Pair {
+    return Pair { first: a, second: b }
+}
+
+func add_pairs(p1: Pair, p2: Pair) -> Pair {
+    return Pair { first: p1.first + p2.first, second: p1.second + p2.second }
+}

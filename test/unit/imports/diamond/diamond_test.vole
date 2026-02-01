@@ -1,0 +1,105 @@
+// Diamond import pattern test
+//
+//     diamond_test (A)
+//        /    \
+//       B      C
+//        \    /
+//          D
+//
+// Both B and C import D. This test verifies:
+// 1. Module D is cached (same types through both paths)
+// 2. Types from D are identical whether accessed through B or C
+// 3. Values from D are consistent across both paths
+
+let b = import "./b"
+let c = import "./c"
+let d = import "./d"
+
+tests {
+    test "D value is consistent through direct import" {
+        assert(d.D_VALUE == 42)
+    }
+
+    test "B and C have their own values" {
+        assert(b.B_VALUE == 100)
+        assert(c.C_VALUE == 200)
+    }
+
+    test "D's make_pair works directly" {
+        let p = d.make_pair(3, 7)
+        assert(p.first == 3)
+        assert(p.second == 7)
+        assert(p.sum() == 10)
+    }
+
+    test "B creates Pair using D's type" {
+        // b_make_pair(5) => Pair { first: 5, second: 6 }
+        let p = b.b_make_pair(5)
+        assert(p.first == 5)
+        assert(p.second == 6)
+        assert(p.sum() == 11)
+    }
+
+    test "C creates Pair using D's type" {
+        // c_make_pair(5) => Pair { first: 5, second: 10 }
+        let p = c.c_make_pair(5)
+        assert(p.first == 5)
+        assert(p.second == 10)
+        assert(p.sum() == 15)
+    }
+
+    test "pass B-created Pair to C's function (type identity)" {
+        // B creates a Pair, C accepts it - proves types are identical
+        let p = b.b_make_pair(3)  // Pair { first: 3, second: 4 }
+        let sum = c.c_pair_sum(p)
+        assert(sum == 7)
+    }
+
+    test "pass C-created Pair to B's function (type identity)" {
+        // C creates a Pair, B accepts it - proves types are identical
+        let p = c.c_make_pair(4)  // Pair { first: 4, second: 8 }
+        let sum = b.b_pair_sum(p)
+        assert(sum == 12)
+    }
+
+    test "B transforms a Pair created by C" {
+        // C creates Pair { first: 2, second: 4 }
+        // B doubles it to Pair { first: 4, second: 8 }
+        let p = c.c_make_pair(2)
+        let transformed = b.b_transform(p)
+        assert(transformed.first == 4)
+        assert(transformed.second == 8)
+    }
+
+    test "C transforms a Pair created by B" {
+        // B creates Pair { first: 3, second: 4 }
+        // C adds 10 to each: Pair { first: 13, second: 14 }
+        let p = b.b_make_pair(3)
+        let transformed = c.c_transform(p)
+        assert(transformed.first == 13)
+        assert(transformed.second == 14)
+    }
+
+    test "D's add_pairs works with Pairs from B and C" {
+        // B creates Pair { first: 1, second: 2 }
+        // C creates Pair { first: 3, second: 6 }
+        // add_pairs => Pair { first: 4, second: 8 }
+        let bp = b.b_make_pair(1)
+        let cp = c.c_make_pair(3)
+        let combined = d.add_pairs(bp, cp)
+        assert(combined.first == 4)
+        assert(combined.second == 8)
+        assert(combined.sum() == 12)
+    }
+
+    test "chain: B creates, C transforms, D combines" {
+        let bp = b.b_make_pair(5)           // Pair { first: 5, second: 6 }
+        let cp = c.c_make_pair(2)            // Pair { first: 2, second: 4 }
+        let ct = c.c_transform(bp)           // Pair { first: 15, second: 16 }
+        let bt = b.b_transform(cp)           // Pair { first: 4, second: 8 }
+        let combined = d.add_pairs(ct, bt)   // Pair { first: 19, second: 24 }
+        assert(combined.first == 19)
+        assert(combined.second == 24)
+        assert(combined.sum() == 43)
+    }
+}
