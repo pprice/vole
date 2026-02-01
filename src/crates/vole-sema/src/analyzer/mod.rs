@@ -921,6 +921,58 @@ impl Analyzer {
         }
     }
 
+    /// Analyze a program as a virtual module (used for tests blocks).
+    ///
+    /// Runs the standard analysis pipeline (shells, aliases, imports, signatures,
+    /// globals, bodies) but with virtual module isolation:
+    /// - Type shells and type signatures are registered under `virtual_module_id`
+    /// - Function signatures are registered under the parent module (current_module)
+    /// - Imports resolve against the parent file path
+    /// - Prelude/primitives are NOT re-loaded (already in parent)
+    pub(crate) fn analyze_virtual_module(
+        &mut self,
+        program: &Program,
+        interner: &Interner,
+        virtual_module_id: ModuleId,
+    ) {
+        let parent_module = self.current_module;
+
+        // Register type shells under the virtual module for scope isolation
+        self.current_module = virtual_module_id;
+        self.register_all_type_shells(program, interner);
+
+        // Add the virtual module to parent_modules so the resolver can find
+        // types registered under the virtual module
+        self.parent_modules.push(virtual_module_id);
+
+        // Set the virtual module as the priority module for type resolution.
+        // Types defined in the tests block shadow parent types of the same name.
+        self.type_priority_module = Some(virtual_module_id);
+
+        // Resolve type aliases (uses resolver which searches parent_modules)
+        self.collect_type_aliases(program, interner);
+
+        // Process module imports under the parent module so relative import paths
+        // resolve against the actual file, not the virtual module
+        self.current_module = parent_module;
+        self.process_module_imports(program, interner);
+
+        // Collect type signatures under the virtual module (matches shells above)
+        self.current_module = virtual_module_id;
+        self.collect_type_signatures(program, interner);
+
+        // Collect function signatures under the parent module so codegen can
+        // find them via program_module() lookups
+        self.current_module = parent_module;
+        self.collect_function_signatures(program, interner);
+
+        // Process global lets (scoped lets in the tests block)
+        let _ = self.process_global_lets(program, interner);
+
+        // Check declaration bodies (including nested tests blocks)
+        let _ = self.check_declaration_bodies(program, interner);
+    }
+
     /// Pass 0: Collect type aliases (so they're available for function signatures)
     /// Pass 2: Type check function bodies, tests, and methods
     fn check_declaration_bodies(

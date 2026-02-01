@@ -401,8 +401,7 @@ impl Analyzer {
         self.tests_virtual_modules
             .insert(tests_decl.span, virtual_module_id);
 
-        // Create a sub-analyzer that inherits the parent scope.
-        // current_module stays as the parent's module so all lookups work.
+        // Create a sub-analyzer that inherits the parent scope
         let mut sub = self.fork_for_tests_module(virtual_module_id);
 
         // Build a synthetic Program from the tests block's declarations
@@ -411,45 +410,8 @@ impl Analyzer {
             next_node_id: 0,
         };
 
-        // Register type shells under the virtual module ID for scope isolation.
-        let saved_module = sub.current_module;
-        sub.current_module = virtual_module_id;
-        sub.register_all_type_shells(&synthetic_program, interner);
-
-        // Add the virtual module to parent_modules so the resolver can find
-        // types registered under the virtual module.
-        sub.parent_modules.push(virtual_module_id);
-
-        // Set the virtual module as the priority module for type resolution.
-        // This ensures that types defined in the tests block shadow parent types
-        // of the same name during type resolution (while current_module stays as
-        // the parent for function name interning).
-        sub.type_priority_module = Some(virtual_module_id);
-
-        // Resolve type aliases (uses resolver which searches parent_modules)
-        sub.collect_type_aliases(&synthetic_program, interner);
-
-        // Process module imports so they're available within the tests block.
-        // This must run under the parent module (saved_module) so that relative
-        // import paths resolve against the actual file, not the virtual module.
-        sub.current_module = saved_module;
-        sub.process_module_imports(&synthetic_program, interner);
-        sub.current_module = virtual_module_id;
-
-        // Collect type signatures (records, classes, interfaces, implement blocks) under
-        // the virtual module so they match the shells registered above.
-        sub.collect_type_signatures(&synthetic_program, interner);
-        sub.current_module = saved_module;
-
-        // Collect function signatures under the parent module so codegen can find
-        // them via program_module() lookups.
-        sub.collect_function_signatures(&synthetic_program, interner);
-
-        // Process global lets (scoped lets in the tests block)
-        let _ = sub.process_global_lets(&synthetic_program, interner);
-
-        // Check declaration bodies (including nested tests blocks)
-        let _ = sub.check_declaration_bodies(&synthetic_program, interner);
+        // Run the standard analysis pipeline with virtual module isolation
+        sub.analyze_virtual_module(&synthetic_program, interner, virtual_module_id);
 
         // Check each test case (each gets its own child scope)
         for test_case in &tests_decl.tests {
