@@ -4,37 +4,25 @@
 // Populated at JIT compile time, used at runtime to properly clean up
 // reference-counted fields when instances are freed.
 
-use crate::value::{TYPE_ARRAY, TYPE_INSTANCE, TYPE_STRING};
 use rustc_hash::FxHashMap;
 use std::sync::RwLock;
 
-/// Field type info for cleanup purposes
+/// Field type info for cleanup purposes.
+///
+/// With RcHeader v2, each RC allocation carries its own drop_fn,
+/// so the type registry only needs to know Value vs Rc (needs rc_dec).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FieldTypeTag {
     /// Non-reference type (i64, f64, bool, etc.) - no cleanup needed
     Value,
-    /// String field - needs RcString::dec_ref
-    String,
-    /// Array field - needs RcArray::dec_ref
-    Array,
-    /// Instance field - needs RcInstance::dec_ref
-    Instance,
+    /// Reference-counted field (String, Array, Instance) - needs rc_dec
+    Rc,
 }
 
 impl FieldTypeTag {
-    /// Convert from runtime type ID to field type tag
-    pub fn from_type_id(type_id: u32) -> Self {
-        match type_id {
-            TYPE_STRING => FieldTypeTag::String,
-            TYPE_ARRAY => FieldTypeTag::Array,
-            TYPE_INSTANCE => FieldTypeTag::Instance,
-            _ => FieldTypeTag::Value,
-        }
-    }
-
     /// Check if this field type needs reference count cleanup
     pub fn needs_cleanup(&self) -> bool {
-        !matches!(self, FieldTypeTag::Value)
+        matches!(self, FieldTypeTag::Rc)
     }
 }
 
@@ -89,7 +77,7 @@ pub fn clear_type_registry() {
 // FFI functions for JIT-compiled code
 
 /// Register field types for an instance type (FFI)
-/// field_types is an array of u8 tags (0=Value, 1=String, 2=Array, 3=Instance)
+/// field_types is an array of u8 tags (0=Value, 1=Rc)
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_register_instance_type(
@@ -107,9 +95,7 @@ pub extern "C" fn vole_register_instance_type(
         unsafe {
             (0..field_count as usize)
                 .map(|i| match *field_types.add(i) {
-                    1 => FieldTypeTag::String,
-                    2 => FieldTypeTag::Array,
-                    3 => FieldTypeTag::Instance,
+                    1 => FieldTypeTag::Rc,
                     _ => FieldTypeTag::Value,
                 })
                 .collect()
@@ -124,18 +110,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_field_type_tag_from_type_id() {
-        assert_eq!(
-            FieldTypeTag::from_type_id(TYPE_STRING),
-            FieldTypeTag::String
-        );
-        assert_eq!(FieldTypeTag::from_type_id(TYPE_ARRAY), FieldTypeTag::Array);
-        assert_eq!(
-            FieldTypeTag::from_type_id(TYPE_INSTANCE),
-            FieldTypeTag::Instance
-        );
-        assert_eq!(FieldTypeTag::from_type_id(0), FieldTypeTag::Value);
-        assert_eq!(FieldTypeTag::from_type_id(2), FieldTypeTag::Value); // TYPE_I64
+    fn test_field_type_tag_needs_cleanup() {
+        assert!(!FieldTypeTag::Value.needs_cleanup());
+        assert!(FieldTypeTag::Rc.needs_cleanup());
     }
 
     // Note: These tests use unique type IDs and don't clear the registry to
@@ -150,18 +127,14 @@ mod tests {
 
         register_instance_type(
             test_type_id,
-            vec![
-                FieldTypeTag::Value,
-                FieldTypeTag::String,
-                FieldTypeTag::Instance,
-            ],
+            vec![FieldTypeTag::Value, FieldTypeTag::Rc, FieldTypeTag::Rc],
         );
 
         let info = get_instance_type_info(test_type_id).unwrap();
         assert_eq!(info.field_types.len(), 3);
         assert_eq!(info.field_types[0], FieldTypeTag::Value);
-        assert_eq!(info.field_types[1], FieldTypeTag::String);
-        assert_eq!(info.field_types[2], FieldTypeTag::Instance);
+        assert_eq!(info.field_types[1], FieldTypeTag::Rc);
+        assert_eq!(info.field_types[2], FieldTypeTag::Rc);
         assert!(info.needs_cleanup());
     }
 

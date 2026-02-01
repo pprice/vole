@@ -10,20 +10,18 @@ use vole_identity::ModuleId;
 use vole_runtime::type_registry::{FieldTypeTag, register_instance_type};
 use vole_sema::type_arena::TypeId;
 
-/// Convert a TypeId to a FieldTypeTag for runtime cleanup
+/// Convert a TypeId to a FieldTypeTag for runtime cleanup.
+///
+/// With RcHeader v2, we only need to distinguish Value (no cleanup) from Rc (needs rc_dec).
+/// Each RC allocation's own drop_fn handles type-specific cleanup.
 fn type_id_to_field_tag(ty: TypeId, arena: &vole_sema::type_arena::TypeArena) -> FieldTypeTag {
-    if arena.is_string(ty) {
-        FieldTypeTag::String
-    } else if arena.is_array(ty) {
-        FieldTypeTag::Array
-    } else if arena.is_class(ty) {
-        FieldTypeTag::Instance
+    if arena.is_string(ty) || arena.is_array(ty) || arena.is_class(ty) {
+        FieldTypeTag::Rc
     } else if let Some(variants) = arena.unwrap_union(ty) {
         // If any variant is a reference type, mark as needing cleanup
         for &variant in variants.iter() {
-            let tag = type_id_to_field_tag(variant, arena);
-            if tag.needs_cleanup() {
-                return tag;
+            if type_id_to_field_tag(variant, arena).needs_cleanup() {
+                return FieldTypeTag::Rc;
             }
         }
         FieldTypeTag::Value
