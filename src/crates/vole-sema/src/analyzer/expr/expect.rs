@@ -383,16 +383,29 @@ impl Analyzer {
                 );
                 Ok(ArenaTypeId::INVALID)
             }
-            // Comparison ops
-            BinaryOp::Eq
-            | BinaryOp::Ne
-            | BinaryOp::Lt
-            | BinaryOp::Gt
-            | BinaryOp::Le
-            | BinaryOp::Ge => {
+            // Equality ops (handle allowed)
+            BinaryOp::Eq | BinaryOp::Ne => {
                 let left_id = self.check_expr_expecting_id(&bin.left, None, interner)?;
                 self.check_expr_expecting_id(&bin.right, Some(left_id), interner)?;
                 Ok(ArenaTypeId::BOOL)
+            }
+            // Ordering ops (handle rejected)
+            BinaryOp::Lt | BinaryOp::Gt | BinaryOp::Le | BinaryOp::Ge => {
+                let left_id = self.check_expr_expecting_id(&bin.left, None, interner)?;
+                let right_id = self.check_expr_expecting_id(&bin.right, Some(left_id), interner)?;
+                if left_id == ArenaTypeId::HANDLE || right_id == ArenaTypeId::HANDLE {
+                    self.add_error(
+                        SemanticError::TypeMismatch {
+                            expected: "orderable".to_string(),
+                            found: self.type_display_pair_id(left_id, right_id),
+                            span: expr.span.into(),
+                        },
+                        expr.span,
+                    );
+                    Ok(ArenaTypeId::INVALID)
+                } else {
+                    Ok(ArenaTypeId::BOOL)
+                }
             }
             // Logical ops
             BinaryOp::And | BinaryOp::Or => {

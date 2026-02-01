@@ -1,0 +1,28 @@
+// Test that handle type cannot be used with ordering comparison operators
+// Equality (==, !=) should still work
+
+external("test:handle") {
+    func get_handle() -> handle
+}
+
+func main() {
+    let a = get_handle()
+    let b = get_handle()
+
+    // These should be rejected (ordering)
+    // handle < handle
+    let r1 = a < b
+
+    // handle > handle
+    let r2 = a > b
+
+    // handle <= handle
+    let r3 = a <= b
+
+    // handle >= handle
+    let r4 = a >= b
+
+    // These should be allowed (equality)
+    let r5 = a == b
+    let r6 = a != b
+}

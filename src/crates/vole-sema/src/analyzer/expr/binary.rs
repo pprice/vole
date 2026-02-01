@@ -18,12 +18,10 @@ impl Analyzer {
             BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
                 self.check_arithmetic_op(left_ty, right_ty, expr.span)
             }
-            BinaryOp::Eq
-            | BinaryOp::Ne
-            | BinaryOp::Lt
-            | BinaryOp::Gt
-            | BinaryOp::Le
-            | BinaryOp::Ge => Ok(ArenaTypeId::BOOL),
+            BinaryOp::Eq | BinaryOp::Ne => Ok(ArenaTypeId::BOOL),
+            BinaryOp::Lt | BinaryOp::Gt | BinaryOp::Le | BinaryOp::Ge => {
+                self.check_ordering_op(left_ty, right_ty, expr.span)
+            }
             BinaryOp::And | BinaryOp::Or => self.check_logical_op(left_ty, right_ty, expr.span),
             BinaryOp::BitAnd
             | BinaryOp::BitOr
@@ -92,6 +90,22 @@ impl Analyzer {
         } else {
             self.type_error_pair_id("bool", left_ty, right_ty, span);
             Ok(ArenaTypeId::INVALID)
+        }
+    }
+
+    /// Check ordering comparison operators (lt, gt, le, ge).
+    /// Handle type does not support ordering - only equality is allowed.
+    fn check_ordering_op(
+        &mut self,
+        left_ty: ArenaTypeId,
+        right_ty: ArenaTypeId,
+        span: Span,
+    ) -> Result<ArenaTypeId, Vec<TypeError>> {
+        if left_ty == ArenaTypeId::HANDLE || right_ty == ArenaTypeId::HANDLE {
+            self.type_error_pair_id("orderable", left_ty, right_ty, span);
+            Ok(ArenaTypeId::INVALID)
+        } else {
+            Ok(ArenaTypeId::BOOL)
         }
     }
 
