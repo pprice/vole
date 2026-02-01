@@ -786,10 +786,16 @@ impl Cg<'_, '_, '_> {
                 .unwrap_or_else(|| arena.i64())
         };
         let payload_cranelift_type = self.cranelift_type(inner_type_id);
-        let payload =
+        // Only load payload if union has payload data.
+        // Sentinel-only unions have union_size == 8 (tag only), no payload to read.
+        let union_size = self.type_size(optional.type_id);
+        let payload = if union_size > 8 {
             self.builder
                 .ins()
-                .load(payload_cranelift_type, MemFlags::new(), optional.value, 8);
+                .load(payload_cranelift_type, MemFlags::new(), optional.value, 8)
+        } else {
+            self.builder.ins().iconst(payload_cranelift_type, 0)
+        };
 
         // Compare payload with value (extend if necessary to match types)
         let values_equal = if value.ty == types::F64 {

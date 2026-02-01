@@ -197,10 +197,16 @@ impl Cg<'_, '_, '_> {
             .unwrap_or(TypeId::NIL);
         let inner_cr_type = type_id_to_cranelift(inner_type_id, arena, self.ptr_type());
 
-        let inner_val = self
-            .builder
-            .ins()
-            .load(inner_cr_type, MemFlags::new(), ptr, 8);
+        // Only load payload if inner type has data (non-zero size).
+        // Sentinel-only unions have no payload bytes allocated at offset 8.
+        let inner_size = self.type_size(inner_type_id);
+        let inner_val = if inner_size > 0 {
+            self.builder
+                .ins()
+                .load(inner_cr_type, MemFlags::new(), ptr, 8)
+        } else {
+            self.builder.ins().iconst(inner_cr_type, 0)
+        };
 
         let inner_compiled = CompiledValue {
             value: inner_val,

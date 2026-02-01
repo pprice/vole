@@ -145,7 +145,14 @@ impl Cg<'_, '_, '_> {
                 // Union layout: [tag:1][padding:7][payload]
                 let payload_ty =
                     type_id_to_cranelift(narrowed_type_id, self.arena(), self.ptr_type());
-                let payload = self.builder.ins().load(payload_ty, MemFlags::new(), val, 8);
+                // Only load payload if union has payload data.
+                // Sentinel-only unions have union_size == 8 (tag only), no payload to read.
+                let union_size = self.type_size(*type_id);
+                let payload = if union_size > 8 {
+                    self.builder.ins().load(payload_ty, MemFlags::new(), val, 8)
+                } else {
+                    self.builder.ins().iconst(payload_ty, 0)
+                };
                 return Ok(CompiledValue {
                     value: payload,
                     ty: payload_ty,
@@ -1083,10 +1090,16 @@ impl Cg<'_, '_, '_> {
         self.builder.ins().jump(merge_block, &[default_arg]);
 
         self.switch_and_seal(not_nil_block);
-        let payload = self
-            .builder
-            .ins()
-            .load(cranelift_type, MemFlags::new(), value.value, 8);
+        // Only load payload if union has payload data.
+        // Sentinel-only unions have union_size == 8 (tag only), no payload to read.
+        let union_size = self.type_size(value.type_id);
+        let payload = if union_size > 8 {
+            self.builder
+                .ins()
+                .load(cranelift_type, MemFlags::new(), value.value, 8)
+        } else {
+            self.builder.ins().iconst(cranelift_type, 0)
+        };
         let payload_arg = BlockArg::from(payload);
         self.builder.ins().jump(merge_block, &[payload_arg]);
 

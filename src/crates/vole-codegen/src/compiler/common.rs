@@ -233,10 +233,16 @@ pub fn compile_function_body_with_cg(
                 .builder
                 .ins()
                 .load(types::I64, MemFlags::new(), value.value, 0);
-            let payload = cg
-                .builder
-                .ins()
-                .load(types::I64, MemFlags::new(), value.value, 8);
+            // Only load payload if union has payload data.
+            // Sentinel-only unions have union_size == 8 (tag only), no payload to read.
+            let union_size = cg.type_size(value.type_id);
+            let payload = if union_size > 8 {
+                cg.builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), value.value, 8)
+            } else {
+                cg.builder.ins().iconst(types::I64, 0)
+            };
             cg.builder.ins().return_(&[tag, payload]);
         } else if let Some(ret_type_id) = cg.return_type
             && cg.is_small_struct_return(ret_type_id)

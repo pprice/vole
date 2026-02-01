@@ -183,14 +183,20 @@ impl Cg<'_, '_, '_> {
         self.switch_and_seal(not_nil_block);
 
         // Load the actual object from the union payload (offset 8)
+        // Only load if union has payload data.
+        // Sentinel-only unions have union_size == 8 (tag only), no payload to read.
         let inner_cranelift_type = {
             let arena = self.arena();
             crate::types::type_id_to_cranelift(inner_type_id, arena, self.ptr_type())
         };
-        let inner_obj =
+        let union_size = self.type_size(obj.type_id);
+        let inner_obj = if union_size > 8 {
             self.builder
                 .ins()
-                .load(inner_cranelift_type, MemFlags::new(), obj.value, 8);
+                .load(inner_cranelift_type, MemFlags::new(), obj.value, 8)
+        } else {
+            self.builder.ins().iconst(inner_cranelift_type, 0)
+        };
 
         // Get field from the inner object
         let is_struct = self.arena().is_struct(inner_type_id);

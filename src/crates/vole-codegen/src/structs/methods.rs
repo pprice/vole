@@ -612,10 +612,10 @@ impl Cg<'_, '_, '_> {
                 // Copy payload (8 bytes at offset 8) only if union has payload data.
                 // Sentinel-only unions have union_size == 8 (tag only), no payload.
                 if union_size > 8 {
-                    let payload = self
-                        .builder
-                        .ins()
-                        .load(types::I64, MemFlags::new(), result_value, 8);
+                    let payload =
+                        self.builder
+                            .ins()
+                            .load(types::I64, MemFlags::new(), result_value, 8);
                     self.builder.ins().stack_store(payload, local_slot, 8);
                 }
 
