@@ -203,7 +203,12 @@ impl Analyzer {
                             && let ExprKind::TypeLiteral(type_expr) = &init_expr.kind
                         {
                             let aliased_type_id = self.resolve_type_id(type_expr, interner);
-                            self.register_type_alias_id(let_stmt.name, aliased_type_id, interner);
+                            self.register_type_alias_id(
+                                let_stmt.name,
+                                aliased_type_id,
+                                interner,
+                                let_stmt.span,
+                            );
                         }
 
                         // Only define if not already pre-registered for recursion
@@ -232,7 +237,12 @@ impl Analyzer {
                         let aliased_type_id = self.resolve_type_id(type_expr, interner);
                         // Check for struct types in union variants
                         self.check_struct_in_union(aliased_type_id, let_stmt.span);
-                        self.register_type_alias_id(let_stmt.name, aliased_type_id, interner);
+                        self.register_type_alias_id(
+                            let_stmt.name,
+                            aliased_type_id,
+                            interner,
+                            let_stmt.span,
+                        );
                     }
                 }
             }

@@ -69,13 +69,23 @@ impl Analyzer {
                         let aliased_type_id = self.resolve_type_id(type_expr, interner);
                         // Check for struct types in union variants
                         self.check_struct_in_union(aliased_type_id, let_stmt.span);
-                        self.register_type_alias_id(let_stmt.name, aliased_type_id, interner);
+                        self.register_type_alias_id(
+                            let_stmt.name,
+                            aliased_type_id,
+                            interner,
+                            let_stmt.span,
+                        );
                     }
                     LetInit::Expr(init_expr) => {
                         // Legacy: handle let X: type = SomeType
                         if let ExprKind::TypeLiteral(type_expr) = &init_expr.kind {
                             let aliased_type_id = self.resolve_type_id(type_expr, interner);
-                            self.register_type_alias_id(let_stmt.name, aliased_type_id, interner);
+                            self.register_type_alias_id(
+                                let_stmt.name,
+                                aliased_type_id,
+                                interner,
+                                let_stmt.span,
+                            );
                         }
                     }
                 }
@@ -89,15 +99,26 @@ impl Analyzer {
         name: Symbol,
         aliased_type_id: ArenaTypeId,
         interner: &Interner,
+        span: Span,
     ) {
         // Lookup shell registered in register_all_type_shells
         let name_id = self
             .name_table_mut()
             .intern(self.current_module, &[name], interner);
-        let type_id = self
-            .entity_registry_mut()
-            .type_by_name(name_id)
-            .expect("alias shell registered in register_all_type_shells");
+        let Some(type_id) = self.entity_registry_mut().type_by_name(name_id) else {
+            // Shell not found - this can happen when the parser misidentifies
+            // an expression as a type alias (e.g. `let r = a | b` where a/b are
+            // variables, not types). Produce a clean error instead of panicking.
+            self.add_error(
+                SemanticError::TypeMismatch {
+                    expected: "type".to_string(),
+                    found: interner.resolve(name).to_string(),
+                    span: span.into(),
+                },
+                span,
+            );
+            return;
+        };
         // Set the aliased type (uses TypeId directly as alias index key)
         self.entity_registry_mut()
             .set_aliased_type(type_id, aliased_type_id);
@@ -182,7 +203,12 @@ impl Analyzer {
                             && let ExprKind::TypeLiteral(type_expr) = &init_expr.kind
                         {
                             let aliased_type_id = self.resolve_type_id(type_expr, interner);
-                            self.register_type_alias_id(let_stmt.name, aliased_type_id, interner);
+                            self.register_type_alias_id(
+                                let_stmt.name,
+                                aliased_type_id,
+                                interner,
+                                let_stmt.span,
+                            );
                         }
                         self.globals.insert(let_stmt.name, var_type_id);
                         self.scope.define(
