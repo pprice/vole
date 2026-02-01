@@ -1,0 +1,19 @@
+// A structural constraint requiring a method with specific param types
+func call_add<T: { func add(n: i64) -> i64 }>(x: T) -> i64 {
+    return x.add(1)
+}
+
+class Foo {
+    value: string
+}
+
+implement Foo {
+    func add(n: string) -> string {
+        return self.value
+    }
+}
+
+func main() {
+    let f = Foo { value: "hi" }
+    call_add(f)  // Foo.add takes string, not i64
+}

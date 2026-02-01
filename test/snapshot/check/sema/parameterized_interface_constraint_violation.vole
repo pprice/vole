@@ -1,0 +1,22 @@
+interface Producer<T> {
+    func produce() -> T
+}
+
+class StringProducer {
+    value: string
+}
+
+implement Producer<string> for StringProducer {
+    func produce() -> string {
+        return self.value
+    }
+}
+
+func get_int<P: Producer<i64>>(p: P) -> i64 {
+    return p.produce()
+}
+
+func main() {
+    let p = StringProducer { value: "hi" }
+    get_int(p)  // StringProducer implements Producer<string>, not Producer<i64>
+}

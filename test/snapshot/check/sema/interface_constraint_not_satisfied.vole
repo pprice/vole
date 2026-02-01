@@ -1,0 +1,18 @@
+interface Printable {
+    func print_val() -> string
+}
+
+class Wrapper {
+    value: i64
+}
+
+// Wrapper does NOT implement Printable
+
+func show<T: Printable>(x: T) -> string {
+    return x.print_val()
+}
+
+func main() {
+    let w = Wrapper { value: 42 }
+    show(w)  // Wrapper doesn't implement Printable
+}
