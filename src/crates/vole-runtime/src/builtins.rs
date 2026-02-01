@@ -355,16 +355,14 @@ pub extern "C" fn vole_array_len(arr: *const RcArray) -> usize {
     unsafe { RcArray::len(arr) }
 }
 
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_array_inc(ptr: *mut RcArray) {
-    unsafe { RcArray::inc_ref(ptr) }
+    crate::value::rc_inc(ptr as *mut u8);
 }
 
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_array_dec(ptr: *mut RcArray) {
-    unsafe { RcArray::dec_ref(ptr) }
+    crate::value::rc_dec(ptr as *mut u8);
 }
 
 #[cfg(test)]

@@ -1,9 +1,7 @@
 // src/runtime/instance.rs
 
-use crate::array::RcArray;
-use crate::string::RcString;
-use crate::type_registry::{FieldTypeTag, get_instance_type_info};
-use crate::value::RcHeader;
+use crate::type_registry::get_instance_type_info;
+use crate::value::{RcHeader, rc_dec, rc_inc};
 use std::alloc::{Layout, alloc, dealloc};
 use std::ptr;
 
@@ -28,7 +26,10 @@ impl RcInstance {
                 std::alloc::handle_alloc_error(layout);
             }
 
-            ptr::write(&mut (*ptr).header, RcHeader::new(runtime_type_id));
+            ptr::write(
+                &mut (*ptr).header,
+                RcHeader::with_drop_fn(runtime_type_id, instance_drop),
+            );
             ptr::write(&mut (*ptr).type_id, type_id);
             ptr::write(&mut (*ptr).field_count, field_count);
 
@@ -96,65 +97,52 @@ impl RcInstance {
     /// The pointer must be null or point to a valid, properly initialized `RcInstance`.
     #[inline]
     pub unsafe fn inc_ref(ptr: *mut Self) {
-        if !ptr.is_null() {
-            unsafe { (*ptr).header.inc() };
-        }
+        rc_inc(ptr as *mut u8);
     }
 
-    /// Decrement reference count and free if zero
+    /// Decrement reference count and free if zero (via unified rc_dec + drop_fn)
     ///
     /// # Safety
     /// The pointer must be null or point to a valid, properly initialized `RcInstance`.
-    ///
-    /// When the reference count reaches zero, this function:
-    /// 1. Looks up field types from the runtime type registry
-    /// 2. Decrements reference counts for any reference-typed fields (strings, arrays, instances)
-    /// 3. Frees the instance memory
     #[inline]
     pub unsafe fn dec_ref(ptr: *mut Self) {
-        if ptr.is_null() {
-            return;
-        }
+        rc_dec(ptr as *mut u8);
+    }
+}
 
-        unsafe {
-            let prev = (*ptr).header.dec();
-            if prev == 1 {
-                let type_id = (*ptr).type_id;
-                let field_count = (*ptr).field_count as usize;
+/// Drop function for RcInstance, called by rc_dec when refcount reaches zero.
+/// Walks fields using the type registry, decrements RC fields via rc_dec,
+/// then frees the instance memory.
+///
+/// # Safety
+/// `ptr` must point to a valid `RcInstance` allocation with refcount already at zero.
+unsafe extern "C" fn instance_drop(ptr: *mut u8) {
+    unsafe {
+        let inst = ptr as *mut RcInstance;
+        let type_id = (*inst).type_id;
+        let field_count = (*inst).field_count as usize;
 
-                // Look up field types and clean up reference-typed fields
-                if let Some(type_info) = get_instance_type_info(type_id) {
-                    let fields_ptr = Self::fields_ptr(ptr);
-                    for (slot, field_type) in type_info.field_types.iter().enumerate() {
-                        if slot >= field_count {
-                            break;
-                        }
-                        let field_value = *fields_ptr.add(slot);
-                        if field_value == 0 {
-                            continue; // Null pointer, skip
-                        }
-                        match field_type {
-                            FieldTypeTag::String => {
-                                RcString::dec_ref(field_value as *mut RcString);
-                            }
-                            FieldTypeTag::Array => {
-                                RcArray::dec_ref(field_value as *mut RcArray);
-                            }
-                            FieldTypeTag::Instance => {
-                                // Recursive cleanup for nested instances
-                                Self::dec_ref(field_value as *mut Self);
-                            }
-                            FieldTypeTag::Value => {
-                                // No cleanup needed for value types
-                            }
-                        }
-                    }
+        // Look up field types and clean up reference-typed fields
+        if let Some(type_info) = get_instance_type_info(type_id) {
+            let fields_ptr = RcInstance::fields_ptr(inst);
+            for (slot, field_type) in type_info.field_types.iter().enumerate() {
+                if slot >= field_count {
+                    break;
                 }
-
-                let layout = Self::layout_for_fields(field_count);
-                dealloc(ptr as *mut u8, layout);
+                let field_value = *fields_ptr.add(slot);
+                if field_value == 0 {
+                    continue; // Null pointer, skip
+                }
+                if field_type.needs_cleanup() {
+                    // All RC types (String, Array, Instance) go through rc_dec,
+                    // which will call their respective drop_fn.
+                    rc_dec(field_value as *mut u8);
+                }
             }
         }
+
+        let layout = RcInstance::layout_for_fields(field_count);
+        dealloc(ptr, layout);
     }
 }
 
@@ -168,16 +156,14 @@ pub extern "C" fn vole_instance_new(
     RcInstance::new(type_id, field_count, runtime_type_id)
 }
 
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_instance_inc(ptr: *mut RcInstance) {
-    unsafe { RcInstance::inc_ref(ptr) };
+    rc_inc(ptr as *mut u8);
 }
 
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_instance_dec(ptr: *mut RcInstance) {
-    unsafe { RcInstance::dec_ref(ptr) };
+    rc_dec(ptr as *mut u8);
 }
 
 #[allow(clippy::not_unsafe_ptr_arg_deref)]

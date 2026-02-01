@@ -18,8 +18,8 @@ use std::alloc::{Layout, dealloc};
 use hashbrown::HashTable;
 
 use crate::array::RcArray;
-use crate::iterator::{ArraySource, IteratorKind, IteratorSource, UnifiedIterator};
-use crate::value::{RcHeader, TYPE_MAP, TYPE_SET, TaggedValue};
+use crate::iterator::{ArraySource, IteratorKind, IteratorSource, RcIterator};
+use crate::value::{RcHeader, TYPE_MAP, TYPE_SET, TaggedValue, rc_dec_raw, rc_inc_raw};
 
 // =============================================================================
 // Equality function type for generic collections
@@ -103,6 +103,8 @@ impl EqMode {
 pub struct VoleMap {
     table: HashTable<(u64, i64, i64)>, // (hash, key, value) tuples
     eq_mode: EqMode,
+    key_is_rc: bool,
+    value_is_rc: bool,
 }
 
 impl VoleMap {
@@ -111,6 +113,18 @@ impl VoleMap {
         Self {
             table: HashTable::new(),
             eq_mode: EqMode::Native(eq_fn),
+            key_is_rc: false,
+            value_is_rc: false,
+        }
+    }
+
+    /// Create a new map with a native equality function and RC flags.
+    pub fn new_with_rc(eq_fn: EqFn, key_is_rc: bool, value_is_rc: bool) -> Self {
+        Self {
+            table: HashTable::new(),
+            eq_mode: EqMode::Native(eq_fn),
+            key_is_rc,
+            value_is_rc,
         }
     }
 
@@ -119,6 +133,22 @@ impl VoleMap {
         Self {
             table: HashTable::new(),
             eq_mode: EqMode::Closure(eq_closure),
+            key_is_rc: false,
+            value_is_rc: false,
+        }
+    }
+
+    /// Create a new map with closure-based equality and RC flags.
+    pub fn new_with_closure_rc(
+        eq_closure: *const Closure,
+        key_is_rc: bool,
+        value_is_rc: bool,
+    ) -> Self {
+        Self {
+            table: HashTable::new(),
+            eq_mode: EqMode::Closure(eq_closure),
+            key_is_rc,
+            value_is_rc,
         }
     }
 
@@ -127,6 +157,23 @@ impl VoleMap {
         Self {
             table: HashTable::with_capacity(capacity),
             eq_mode: EqMode::Native(eq_fn),
+            key_is_rc: false,
+            value_is_rc: false,
+        }
+    }
+
+    /// Create a new map with capacity, native equality, and RC flags.
+    pub fn with_capacity_rc(
+        capacity: usize,
+        eq_fn: EqFn,
+        key_is_rc: bool,
+        value_is_rc: bool,
+    ) -> Self {
+        Self {
+            table: HashTable::with_capacity(capacity),
+            eq_mode: EqMode::Native(eq_fn),
+            key_is_rc,
+            value_is_rc,
         }
     }
 
@@ -135,6 +182,23 @@ impl VoleMap {
         Self {
             table: HashTable::with_capacity(capacity),
             eq_mode: EqMode::Closure(eq_closure),
+            key_is_rc: false,
+            value_is_rc: false,
+        }
+    }
+
+    /// Create a new map with capacity, closure-based equality, and RC flags.
+    pub fn with_capacity_closure_rc(
+        capacity: usize,
+        eq_closure: *const Closure,
+        key_is_rc: bool,
+        value_is_rc: bool,
+    ) -> Self {
+        Self {
+            table: HashTable::with_capacity(capacity),
+            eq_mode: EqMode::Closure(eq_closure),
+            key_is_rc,
+            value_is_rc,
         }
     }
 
@@ -152,11 +216,24 @@ impl VoleMap {
 
         // Check if key exists and update
         if let Some((_, _, v)) = self.table.find_mut(hash, |(_, k, _)| eq_mode.eq(*k, key)) {
+            let old_value = *v;
             *v = value;
+            // Overwrite: dec the evicted old value, caller transferred ownership of new value.
+            // The key stays — caller's key ref is consumed but we don't need to inc (existing key
+            // in the table keeps its ref). We dec the caller's key since we're not storing it.
+            if self.value_is_rc {
+                rc_dec_raw(old_value);
+            }
+            if self.key_is_rc {
+                // Caller transferred ownership of the key, but we already have this key.
+                // Dec the caller's key since we're not keeping the duplicate.
+                rc_dec_raw(key);
+            }
             return;
         }
 
-        // Insert new entry with stored hash for resize operations
+        // Insert new entry — caller transfers ownership of both key and value.
+        // No inc needed.
         self.table
             .insert_unique(hash, (hash, key, value), |(h, _, _)| *h);
     }
@@ -167,7 +244,12 @@ impl VoleMap {
 
         match self.table.find_entry(hash, |(_, k, _)| eq_mode.eq(*k, key)) {
             Ok(entry) => {
-                let (_, _, value) = entry.remove().0;
+                let (_, stored_key, value) = entry.remove().0;
+                // The stored key is evicted — dec it.
+                if self.key_is_rc {
+                    rc_dec_raw(stored_key);
+                }
+                // The value is returned to the caller — ownership transfers out, no dec.
                 Some(value)
             }
             Err(_) => None,
@@ -191,19 +273,62 @@ impl VoleMap {
     }
 
     pub fn clear(&mut self) {
+        self.dec_all_entries();
         self.table.clear();
     }
 
+    /// Decrement RC for all keys and values in the map.
+    fn dec_all_entries(&self) {
+        if !self.key_is_rc && !self.value_is_rc {
+            return;
+        }
+        for (_, key, value) in self.table.iter() {
+            if self.key_is_rc {
+                rc_dec_raw(*key);
+            }
+            if self.value_is_rc {
+                rc_dec_raw(*value);
+            }
+        }
+    }
+
     pub fn keys(&self) -> Vec<i64> {
-        self.table.iter().map(|(_, k, _)| *k).collect()
+        self.table
+            .iter()
+            .map(|(_, k, _)| {
+                if self.key_is_rc {
+                    rc_inc_raw(*k);
+                }
+                *k
+            })
+            .collect()
     }
 
     pub fn values(&self) -> Vec<i64> {
-        self.table.iter().map(|(_, _, v)| *v).collect()
+        self.table
+            .iter()
+            .map(|(_, _, v)| {
+                if self.value_is_rc {
+                    rc_inc_raw(*v);
+                }
+                *v
+            })
+            .collect()
     }
 
     pub fn entries(&self) -> Vec<(i64, i64)> {
-        self.table.iter().map(|(_, k, v)| (*k, *v)).collect()
+        self.table
+            .iter()
+            .map(|(_, k, v)| {
+                if self.key_is_rc {
+                    rc_inc_raw(*k);
+                }
+                if self.value_is_rc {
+                    rc_inc_raw(*v);
+                }
+                (*k, *v)
+            })
+            .collect()
     }
 }
 
@@ -218,13 +343,15 @@ pub struct RcMap {
 }
 
 /// Drop function for RcMap, called by rc_dec when refcount reaches zero.
-/// Deallocates the RcMap allocation.
+/// Decrements RC for all contained keys/values, then deallocates.
 ///
 /// # Safety
 /// `ptr` must point to a valid `RcMap` allocation with refcount already at zero.
 unsafe extern "C" fn map_drop(ptr: *mut u8) {
     unsafe {
         let map_ptr = ptr as *mut RcMap;
+        // Dec all contained RC keys/values before freeing the table
+        (*map_ptr).map.dec_all_entries();
         // Drop the VoleMap in place (frees the HashTable), then deallocate
         std::ptr::drop_in_place(&mut (*map_ptr).map);
         let layout = Layout::new::<RcMap>();
@@ -258,6 +385,7 @@ fn alloc_rc_map(map: VoleMap) -> *mut RcMap {
 pub struct VoleSet {
     table: HashTable<(u64, i64)>, // (hash, value) pairs
     eq_mode: EqMode,
+    elem_is_rc: bool,
 }
 
 impl VoleSet {
@@ -266,6 +394,16 @@ impl VoleSet {
         Self {
             table: HashTable::new(),
             eq_mode: EqMode::Native(eq_fn),
+            elem_is_rc: false,
+        }
+    }
+
+    /// Create a new set with a native equality function and RC flag.
+    pub fn new_with_rc(eq_fn: EqFn, elem_is_rc: bool) -> Self {
+        Self {
+            table: HashTable::new(),
+            eq_mode: EqMode::Native(eq_fn),
+            elem_is_rc,
         }
     }
 
@@ -274,6 +412,16 @@ impl VoleSet {
         Self {
             table: HashTable::new(),
             eq_mode: EqMode::Closure(eq_closure),
+            elem_is_rc: false,
+        }
+    }
+
+    /// Create a new set with closure-based equality and RC flag.
+    pub fn new_with_closure_rc(eq_closure: *const Closure, elem_is_rc: bool) -> Self {
+        Self {
+            table: HashTable::new(),
+            eq_mode: EqMode::Closure(eq_closure),
+            elem_is_rc,
         }
     }
 
@@ -282,6 +430,16 @@ impl VoleSet {
         Self {
             table: HashTable::with_capacity(capacity),
             eq_mode: EqMode::Native(eq_fn),
+            elem_is_rc: false,
+        }
+    }
+
+    /// Create a new set with capacity, native equality, and RC flag.
+    pub fn with_capacity_rc(capacity: usize, eq_fn: EqFn, elem_is_rc: bool) -> Self {
+        Self {
+            table: HashTable::with_capacity(capacity),
+            eq_mode: EqMode::Native(eq_fn),
+            elem_is_rc,
         }
     }
 
@@ -290,6 +448,20 @@ impl VoleSet {
         Self {
             table: HashTable::with_capacity(capacity),
             eq_mode: EqMode::Closure(eq_closure),
+            elem_is_rc: false,
+        }
+    }
+
+    /// Create a new set with capacity, closure-based equality, and RC flag.
+    pub fn with_capacity_closure_rc(
+        capacity: usize,
+        eq_closure: *const Closure,
+        elem_is_rc: bool,
+    ) -> Self {
+        Self {
+            table: HashTable::with_capacity(capacity),
+            eq_mode: EqMode::Closure(eq_closure),
+            elem_is_rc,
         }
     }
 
@@ -303,10 +475,15 @@ impl VoleSet {
             .find(hash, |(_, v)| eq_mode.eq(*v, value))
             .is_some()
         {
+            // Caller transferred ownership but we already have this value.
+            // Dec the duplicate since we're not keeping it.
+            if self.elem_is_rc {
+                rc_dec_raw(value);
+            }
             return false;
         }
 
-        // Insert new entry
+        // Insert new entry — caller transfers ownership, no inc needed.
         self.table.insert_unique(hash, (hash, value), |(h, _)| *h);
         true
     }
@@ -317,7 +494,11 @@ impl VoleSet {
 
         match self.table.find_entry(hash, |(_, v)| eq_mode.eq(*v, value)) {
             Ok(entry) => {
-                entry.remove();
+                let (_, stored_value) = entry.remove().0;
+                // The stored value is evicted — dec it.
+                if self.elem_is_rc {
+                    rc_dec_raw(stored_value);
+                }
                 true
             }
             Err(_) => false,
@@ -341,31 +522,60 @@ impl VoleSet {
     }
 
     pub fn clear(&mut self) {
+        self.dec_all_elements();
         self.table.clear();
     }
 
-    pub fn values(&self) -> Vec<i64> {
-        self.table.iter().map(|(_, v)| *v).collect()
+    /// Decrement RC for all elements in the set.
+    fn dec_all_elements(&self) {
+        if !self.elem_is_rc {
+            return;
+        }
+        for (_, value) in self.table.iter() {
+            rc_dec_raw(*value);
+        }
     }
 
-    /// Internal helper to create a result set with the same eq_mode.
+    pub fn values(&self) -> Vec<i64> {
+        self.table
+            .iter()
+            .map(|(_, v)| {
+                if self.elem_is_rc {
+                    rc_inc_raw(*v);
+                }
+                *v
+            })
+            .collect()
+    }
+
+    /// Insert a value into the result set, incrementing RC if needed.
+    /// Used by set operations that copy references from source sets.
+    fn insert_with_rc_inc(&mut self, hash: u64, value: i64) {
+        if self.elem_is_rc {
+            rc_inc_raw(value);
+        }
+        self.table.insert_unique(hash, (hash, value), |(h, _)| *h);
+    }
+
+    /// Internal helper to create a result set with the same eq_mode and RC flag.
     fn new_result(&self) -> VoleSet {
         VoleSet {
             table: HashTable::new(),
             eq_mode: self.eq_mode,
+            elem_is_rc: self.elem_is_rc,
         }
     }
 
-    // Set operations - these use self's eq_mode for the result
+    // Set operations - these use self's eq_mode for the result.
+    // Each element inserted into the result gets rc_inc'd since the source
+    // set retains its own reference.
     pub fn union(&self, other: &VoleSet) -> VoleSet {
         let mut result = self.new_result();
         let eq_mode = self.eq_mode;
 
         // Add all from self
         for (hash, value) in self.table.iter() {
-            result
-                .table
-                .insert_unique(*hash, (*hash, *value), |(h, _)| *h);
+            result.insert_with_rc_inc(*hash, *value);
         }
         // Add all from other (duplicates handled by eq check)
         for (hash, value) in other.table.iter() {
@@ -374,9 +584,7 @@ impl VoleSet {
                 .find(*hash, |(_, v)| eq_mode.eq(*v, *value))
                 .is_none()
             {
-                result
-                    .table
-                    .insert_unique(*hash, (*hash, *value), |(h, _)| *h);
+                result.insert_with_rc_inc(*hash, *value);
             }
         }
         result
@@ -392,9 +600,7 @@ impl VoleSet {
                 .find(*hash, |(_, v)| eq_mode.eq(*v, *value))
                 .is_some()
             {
-                result
-                    .table
-                    .insert_unique(*hash, (*hash, *value), |(h, _)| *h);
+                result.insert_with_rc_inc(*hash, *value);
             }
         }
         result
@@ -410,9 +616,7 @@ impl VoleSet {
                 .find(*hash, |(_, v)| eq_mode.eq(*v, *value))
                 .is_none()
             {
-                result
-                    .table
-                    .insert_unique(*hash, (*hash, *value), |(h, _)| *h);
+                result.insert_with_rc_inc(*hash, *value);
             }
         }
         result
@@ -429,9 +633,7 @@ impl VoleSet {
                 .find(*hash, |(_, v)| eq_mode.eq(*v, *value))
                 .is_none()
             {
-                result
-                    .table
-                    .insert_unique(*hash, (*hash, *value), |(h, _)| *h);
+                result.insert_with_rc_inc(*hash, *value);
             }
         }
         // Add elements in other but not in self
@@ -441,9 +643,7 @@ impl VoleSet {
                 .find(*hash, |(_, v)| eq_mode.eq(*v, *value))
                 .is_none()
             {
-                result
-                    .table
-                    .insert_unique(*hash, (*hash, *value), |(h, _)| *h);
+                result.insert_with_rc_inc(*hash, *value);
             }
         }
         result
@@ -493,13 +693,15 @@ pub struct RcSet {
 }
 
 /// Drop function for RcSet, called by rc_dec when refcount reaches zero.
-/// Deallocates the RcSet allocation.
+/// Decrements RC for all contained elements, then deallocates.
 ///
 /// # Safety
 /// `ptr` must point to a valid `RcSet` allocation with refcount already at zero.
 unsafe extern "C" fn set_drop(ptr: *mut u8) {
     unsafe {
         let set_ptr = ptr as *mut RcSet;
+        // Dec all contained RC elements before freeing the table
+        (*set_ptr).set.dec_all_elements();
         // Drop the VoleSet in place (frees the HashTable), then deallocate
         std::ptr::drop_in_place(&mut (*set_ptr).set);
         let layout = Layout::new::<RcSet>();
@@ -544,6 +746,31 @@ pub extern "C" fn map_new_with_eq(eq_closure: *const Closure) -> *mut RcMap {
     alloc_rc_map(VoleMap::new_with_closure(eq_closure))
 }
 
+/// Create a new map with RC flags for key/value types.
+/// `key_is_rc` and `value_is_rc` indicate whether the key/value types are RC-managed.
+#[unsafe(no_mangle)]
+pub extern "C" fn map_new_rc(key_is_rc: i8, value_is_rc: i8) -> *mut RcMap {
+    alloc_rc_map(VoleMap::new_with_rc(
+        i64_eq,
+        key_is_rc != 0,
+        value_is_rc != 0,
+    ))
+}
+
+/// Create a new map with closure-based equality and RC flags.
+#[unsafe(no_mangle)]
+pub extern "C" fn map_new_with_eq_rc(
+    eq_closure: *const Closure,
+    key_is_rc: i8,
+    value_is_rc: i8,
+) -> *mut RcMap {
+    alloc_rc_map(VoleMap::new_with_closure_rc(
+        eq_closure,
+        key_is_rc != 0,
+        value_is_rc != 0,
+    ))
+}
+
 /// Create a new map with the given capacity (uses i64 equality by default)
 #[unsafe(no_mangle)]
 pub extern "C" fn map_with_capacity(capacity: i64) -> *mut RcMap {
@@ -556,6 +783,37 @@ pub extern "C" fn map_with_capacity_eq(capacity: i64, eq_closure: *const Closure
     alloc_rc_map(VoleMap::with_capacity_closure(
         capacity as usize,
         eq_closure,
+    ))
+}
+
+/// Create a new map with capacity and RC flags.
+#[unsafe(no_mangle)]
+pub extern "C" fn map_with_capacity_rc(
+    capacity: i64,
+    key_is_rc: i8,
+    value_is_rc: i8,
+) -> *mut RcMap {
+    alloc_rc_map(VoleMap::with_capacity_rc(
+        capacity as usize,
+        i64_eq,
+        key_is_rc != 0,
+        value_is_rc != 0,
+    ))
+}
+
+/// Create a new map with capacity, closure-based equality, and RC flags.
+#[unsafe(no_mangle)]
+pub extern "C" fn map_with_capacity_eq_rc(
+    capacity: i64,
+    eq_closure: *const Closure,
+    key_is_rc: i8,
+    value_is_rc: i8,
+) -> *mut RcMap {
+    alloc_rc_map(VoleMap::with_capacity_closure_rc(
+        capacity as usize,
+        eq_closure,
+        key_is_rc != 0,
+        value_is_rc != 0,
     ))
 }
 
@@ -633,35 +891,35 @@ fn vec_to_array(values: Vec<i64>) -> *mut RcArray {
 
 /// Get an iterator over the map's keys
 #[unsafe(no_mangle)]
-pub extern "C" fn map_keys_iter(map_ptr: *mut RcMap) -> *mut UnifiedIterator {
+pub extern "C" fn map_keys_iter(map_ptr: *mut RcMap) -> *mut RcIterator {
     let map = unsafe { &(*map_ptr).map };
     let keys: Vec<i64> = map.keys();
     let array = vec_to_array(keys);
-    Box::into_raw(Box::new(UnifiedIterator {
-        kind: IteratorKind::Array,
-        source: IteratorSource {
+    RcIterator::new(
+        IteratorKind::Array,
+        IteratorSource {
             array: ArraySource { array, index: 0 },
         },
-    }))
+    )
 }
 
 /// Get an iterator over the map's values
 #[unsafe(no_mangle)]
-pub extern "C" fn map_values_iter(map_ptr: *mut RcMap) -> *mut UnifiedIterator {
+pub extern "C" fn map_values_iter(map_ptr: *mut RcMap) -> *mut RcIterator {
     let map = unsafe { &(*map_ptr).map };
     let values: Vec<i64> = map.values();
     let array = vec_to_array(values);
-    Box::into_raw(Box::new(UnifiedIterator {
-        kind: IteratorKind::Array,
-        source: IteratorSource {
+    RcIterator::new(
+        IteratorKind::Array,
+        IteratorSource {
             array: ArraySource { array, index: 0 },
         },
-    }))
+    )
 }
 
 /// Get an iterator over the map's entries as [key, value] tuples
 #[unsafe(no_mangle)]
-pub extern "C" fn map_entries_iter(map_ptr: *mut RcMap) -> *mut UnifiedIterator {
+pub extern "C" fn map_entries_iter(map_ptr: *mut RcMap) -> *mut RcIterator {
     let map = unsafe { &(*map_ptr).map };
     let entries: Vec<(i64, i64)> = map.entries();
 
@@ -680,12 +938,12 @@ pub extern "C" fn map_entries_iter(map_ptr: *mut RcMap) -> *mut UnifiedIterator 
         .collect();
 
     let array = vec_to_array(tuples);
-    Box::into_raw(Box::new(UnifiedIterator {
-        kind: IteratorKind::Array,
-        source: IteratorSource {
+    RcIterator::new(
+        IteratorKind::Array,
+        IteratorSource {
             array: ArraySource { array, index: 0 },
         },
-    }))
+    )
 }
 
 // =============================================================================
@@ -720,6 +978,42 @@ pub extern "C" fn set_with_capacity_eq(capacity: i64, eq_closure: *const Closure
     alloc_rc_set(VoleSet::with_capacity_closure(
         capacity as usize,
         eq_closure,
+    ))
+}
+
+/// Create a new set with RC flag for element type.
+#[unsafe(no_mangle)]
+pub extern "C" fn set_new_rc(elem_is_rc: i8) -> *mut RcSet {
+    alloc_rc_set(VoleSet::new_with_rc(i64_eq, elem_is_rc != 0))
+}
+
+/// Create a new set with closure-based equality and RC flag.
+#[unsafe(no_mangle)]
+pub extern "C" fn set_new_with_eq_rc(eq_closure: *const Closure, elem_is_rc: i8) -> *mut RcSet {
+    alloc_rc_set(VoleSet::new_with_closure_rc(eq_closure, elem_is_rc != 0))
+}
+
+/// Create a new set with capacity and RC flag.
+#[unsafe(no_mangle)]
+pub extern "C" fn set_with_capacity_rc(capacity: i64, elem_is_rc: i8) -> *mut RcSet {
+    alloc_rc_set(VoleSet::with_capacity_rc(
+        capacity as usize,
+        i64_eq,
+        elem_is_rc != 0,
+    ))
+}
+
+/// Create a new set with capacity, closure-based equality, and RC flag.
+#[unsafe(no_mangle)]
+pub extern "C" fn set_with_capacity_eq_rc(
+    capacity: i64,
+    eq_closure: *const Closure,
+    elem_is_rc: i8,
+) -> *mut RcSet {
+    alloc_rc_set(VoleSet::with_capacity_closure_rc(
+        capacity as usize,
+        eq_closure,
+        elem_is_rc != 0,
     ))
 }
 
@@ -760,16 +1054,16 @@ pub extern "C" fn set_clear(set_ptr: *mut RcSet) {
 
 /// Get an iterator over the set's values
 #[unsafe(no_mangle)]
-pub extern "C" fn set_iter(set_ptr: *mut RcSet) -> *mut UnifiedIterator {
+pub extern "C" fn set_iter(set_ptr: *mut RcSet) -> *mut RcIterator {
     let set = unsafe { &(*set_ptr).set };
     let values: Vec<i64> = set.values();
     let array = vec_to_array(values);
-    Box::into_raw(Box::new(UnifiedIterator {
-        kind: IteratorKind::Array,
-        source: IteratorSource {
+    RcIterator::new(
+        IteratorKind::Array,
+        IteratorSource {
             array: ArraySource { array, index: 0 },
         },
-    }))
+    )
 }
 
 /// Compute union of two sets

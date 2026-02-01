@@ -53,6 +53,51 @@ pub fn module() -> NativeModule {
         },
     );
 
+    // map_new_rc: (key_is_rc, value_is_rc) -> Map
+    m.register(
+        "map_new_rc",
+        collections::map_new_rc as *const u8,
+        NativeSignature {
+            params: vec![NativeType::Bool, NativeType::Bool],
+            return_type: NativeType::I64,
+        },
+    );
+
+    // map_new_with_eq_rc: (eq_closure, key_is_rc, value_is_rc) -> Map
+    m.register(
+        "map_new_with_eq_rc",
+        collections::map_new_with_eq_rc as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64, NativeType::Bool, NativeType::Bool],
+            return_type: NativeType::I64,
+        },
+    );
+
+    // map_with_capacity_rc: (capacity, key_is_rc, value_is_rc) -> Map
+    m.register(
+        "map_with_capacity_rc",
+        collections::map_with_capacity_rc as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64, NativeType::Bool, NativeType::Bool],
+            return_type: NativeType::I64,
+        },
+    );
+
+    // map_with_capacity_eq_rc: (capacity, eq_closure, key_is_rc, value_is_rc) -> Map
+    m.register(
+        "map_with_capacity_eq_rc",
+        collections::map_with_capacity_eq_rc as *const u8,
+        NativeSignature {
+            params: vec![
+                NativeType::I64,
+                NativeType::I64,
+                NativeType::Bool,
+                NativeType::Bool,
+            ],
+            return_type: NativeType::I64,
+        },
+    );
+
     // map_get: (Map, key, key_hash) -> value
     m.register(
         "map_get",
@@ -199,6 +244,46 @@ pub fn module() -> NativeModule {
         collections::set_with_capacity_eq as *const u8,
         NativeSignature {
             params: vec![NativeType::I64, NativeType::I64],
+            return_type: NativeType::I64,
+        },
+    );
+
+    // set_new_rc: (elem_is_rc) -> Set
+    m.register(
+        "set_new_rc",
+        collections::set_new_rc as *const u8,
+        NativeSignature {
+            params: vec![NativeType::Bool],
+            return_type: NativeType::I64,
+        },
+    );
+
+    // set_new_with_eq_rc: (eq_closure, elem_is_rc) -> Set
+    m.register(
+        "set_new_with_eq_rc",
+        collections::set_new_with_eq_rc as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64, NativeType::Bool],
+            return_type: NativeType::I64,
+        },
+    );
+
+    // set_with_capacity_rc: (capacity, elem_is_rc) -> Set
+    m.register(
+        "set_with_capacity_rc",
+        collections::set_with_capacity_rc as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64, NativeType::Bool],
+            return_type: NativeType::I64,
+        },
+    );
+
+    // set_with_capacity_eq_rc: (capacity, eq_closure, elem_is_rc) -> Set
+    m.register(
+        "set_with_capacity_eq_rc",
+        collections::set_with_capacity_eq_rc as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64, NativeType::I64, NativeType::Bool],
             return_type: NativeType::I64,
         },
     );

@@ -1,6 +1,6 @@
 // src/runtime/string.rs
 
-use crate::value::{RcHeader, TYPE_STRING};
+use crate::value::{RcHeader, TYPE_STRING, rc_dec, rc_inc};
 use std::alloc::{Layout, alloc, dealloc};
 use std::ptr;
 use std::slice;
@@ -30,8 +30,11 @@ impl RcString {
                 std::alloc::handle_alloc_error(layout);
             }
 
-            // Initialize header
-            ptr::write(&mut (*ptr).header, RcHeader::new(TYPE_STRING));
+            // Initialize header with drop_fn for unified rc_dec cleanup
+            ptr::write(
+                &mut (*ptr).header,
+                RcHeader::with_drop_fn(TYPE_STRING, string_drop),
+            );
             ptr::write(&mut (*ptr).len, len);
             ptr::write(&mut (*ptr).hash, hash);
 
@@ -86,30 +89,30 @@ impl RcString {
     /// The pointer must be null or point to a valid, properly initialized `RcString`.
     #[inline]
     pub unsafe fn inc_ref(ptr: *mut Self) {
-        if !ptr.is_null() {
-            unsafe { (*ptr).header.inc() };
-        }
+        rc_inc(ptr as *mut u8);
     }
 
-    /// Decrement reference count and free if zero
+    /// Decrement reference count and free if zero (via unified rc_dec + drop_fn)
     ///
     /// # Safety
     /// The pointer must be null or point to a valid, properly initialized `RcString`.
     #[inline]
     pub unsafe fn dec_ref(ptr: *mut Self) {
-        if ptr.is_null() {
-            return;
-        }
+        rc_dec(ptr as *mut u8);
+    }
+}
 
-        unsafe {
-            let prev = (*ptr).header.dec();
-            if prev == 1 {
-                // Last reference, deallocate
-                let len = (*ptr).len;
-                let layout = Self::layout_for_len(len);
-                dealloc(ptr as *mut u8, layout);
-            }
-        }
+/// Drop function for RcString, called by rc_dec when refcount reaches zero.
+/// Deallocates the contiguous string allocation (header + inline data).
+///
+/// # Safety
+/// `ptr` must point to a valid `RcString` allocation with refcount already at zero.
+unsafe extern "C" fn string_drop(ptr: *mut u8) {
+    unsafe {
+        let s = ptr as *mut RcString;
+        let len = (*s).len;
+        let layout = RcString::layout_for_len(len);
+        dealloc(ptr, layout);
     }
 }
 
@@ -126,18 +129,14 @@ pub extern "C" fn vole_string_new(data: *const u8, len: usize) -> *mut RcString 
     RcString::new(s)
 }
 
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_string_inc(ptr: *mut RcString) {
-    // Safety: Called from JIT code which ensures pointer validity
-    unsafe { RcString::inc_ref(ptr) };
+    rc_inc(ptr as *mut u8);
 }
 
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_string_dec(ptr: *mut RcString) {
-    // Safety: Called from JIT code which ensures pointer validity
-    unsafe { RcString::dec_ref(ptr) };
+    rc_dec(ptr as *mut u8);
 }
 
 #[allow(clippy::not_unsafe_ptr_arg_deref)]

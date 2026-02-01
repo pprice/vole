@@ -93,6 +93,24 @@ pub const TYPE_INSTANCE: u32 = 7;
 pub const TYPE_RNG: u32 = 8;
 pub const TYPE_MAP: u32 = 9;
 pub const TYPE_SET: u32 = 10;
+pub const TYPE_ITERATOR: u32 = 11;
+
+/// Check if a type tag represents an RC-managed (heap-allocated) type.
+/// These types need rc_inc/rc_dec when ownership changes.
+#[inline]
+pub fn tag_needs_rc(tag: u64) -> bool {
+    matches!(
+        tag as u32,
+        TYPE_STRING
+            | TYPE_ARRAY
+            | TYPE_CLOSURE
+            | TYPE_INSTANCE
+            | TYPE_RNG
+            | TYPE_MAP
+            | TYPE_SET
+            | TYPE_ITERATOR
+    )
+}
 
 /// Tagged value for boxed/heterogeneous storage
 /// Used in arrays, union types, and fallible returns
@@ -142,6 +160,48 @@ impl TaggedValue {
 
     pub fn as_bool(&self) -> bool {
         self.value != 0
+    }
+
+    /// Check if this tagged value holds an RC-managed type.
+    #[inline]
+    pub fn needs_rc(&self) -> bool {
+        tag_needs_rc(self.tag)
+    }
+
+    /// If this tagged value holds an RC type, decrement its reference count.
+    #[inline]
+    pub fn rc_dec_if_needed(&self) {
+        if self.needs_rc() && self.value != 0 {
+            rc_dec(self.value as *mut u8);
+        }
+    }
+
+    /// If this tagged value holds an RC type, increment its reference count.
+    #[inline]
+    pub fn rc_inc_if_needed(&self) {
+        if self.needs_rc() && self.value != 0 {
+            rc_inc(self.value as *mut u8);
+        }
+    }
+}
+
+/// Decrement refcount of an i64 value if it represents an RC pointer.
+/// Used by collections that store raw i64 values and know their element types are RC.
+#[inline]
+pub fn rc_dec_raw(value: i64) {
+    let ptr = value as *mut u8;
+    if !ptr.is_null() {
+        rc_dec(ptr);
+    }
+}
+
+/// Increment refcount of an i64 value if it represents an RC pointer.
+/// Used by collections that store raw i64 values and know their element types are RC.
+#[inline]
+pub fn rc_inc_raw(value: i64) {
+    let ptr = value as *mut u8;
+    if !ptr.is_null() {
+        rc_inc(ptr);
     }
 }
 

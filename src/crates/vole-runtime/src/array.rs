@@ -1,6 +1,6 @@
 // src/runtime/array.rs
 
-use crate::value::{RcHeader, TYPE_ARRAY, TaggedValue};
+use crate::value::{RcHeader, TYPE_ARRAY, TaggedValue, rc_dec, rc_inc};
 use std::alloc::{Layout, alloc, dealloc, realloc};
 use std::ptr;
 
@@ -36,7 +36,10 @@ impl RcArray {
                 ptr::null_mut()
             };
 
-            ptr::write(&mut (*ptr).header, RcHeader::new(TYPE_ARRAY));
+            ptr::write(
+                &mut (*ptr).header,
+                RcHeader::with_drop_fn(TYPE_ARRAY, array_drop),
+            );
             ptr::write(&mut (*ptr).len, 0);
             ptr::write(&mut (*ptr).capacity, capacity);
             ptr::write(&mut (*ptr).data, data);
@@ -104,7 +107,7 @@ impl RcArray {
         }
     }
 
-    /// Set element at index
+    /// Set element at index, decrementing RC of old value if needed.
     ///
     /// # Safety
     /// `arr` must be a valid pointer to an initialized `RcArray` and
@@ -113,6 +116,9 @@ impl RcArray {
     pub unsafe fn set(arr: *mut Self, index: usize, value: TaggedValue) {
         unsafe {
             debug_assert!(index < (*arr).len);
+            // Dec the old value being overwritten
+            let old = ptr::read((*arr).data.add(index));
+            old.rc_dec_if_needed();
             ptr::write((*arr).data.add(index), value);
         }
     }
@@ -132,35 +138,45 @@ impl RcArray {
     /// `ptr` must be null or a valid pointer to an initialized `RcArray`
     #[inline]
     pub unsafe fn inc_ref(ptr: *mut Self) {
-        unsafe {
-            if !ptr.is_null() {
-                (*ptr).header.inc();
-            }
-        }
+        rc_inc(ptr as *mut u8);
     }
 
-    /// Decrement reference count and free if zero
+    /// Decrement reference count and free if zero (via unified rc_dec + drop_fn)
     ///
     /// # Safety
     /// `ptr` must be null or a valid pointer to an initialized `RcArray`
     #[inline]
     pub unsafe fn dec_ref(ptr: *mut Self) {
-        if ptr.is_null() {
-            return;
-        }
+        rc_dec(ptr as *mut u8);
+    }
+}
 
-        unsafe {
-            let prev = (*ptr).header.dec();
-            if prev == 1 {
-                let cap = (*ptr).capacity;
-                if cap > 0 && !(*ptr).data.is_null() {
-                    let data_layout = Layout::array::<TaggedValue>(cap).unwrap();
-                    dealloc((*ptr).data as *mut u8, data_layout);
-                }
+/// Drop function for RcArray, called by rc_dec when refcount reaches zero.
+/// Decrements RC for all contained RC elements, frees the data buffer,
+/// and deallocates the RcArray struct itself.
+///
+/// # Safety
+/// `ptr` must point to a valid `RcArray` allocation with refcount already at zero.
+unsafe extern "C" fn array_drop(ptr: *mut u8) {
+    unsafe {
+        let arr = ptr as *mut RcArray;
+        let len = (*arr).len;
+        let cap = (*arr).capacity;
 
-                let layout = Layout::new::<RcArray>();
-                dealloc(ptr as *mut u8, layout);
+        // Dec all contained RC elements before freeing
+        if len > 0 && !(*arr).data.is_null() {
+            for i in 0..len {
+                let tv = ptr::read((*arr).data.add(i));
+                tv.rc_dec_if_needed();
             }
         }
+
+        if cap > 0 && !(*arr).data.is_null() {
+            let data_layout = Layout::array::<TaggedValue>(cap).unwrap();
+            dealloc((*arr).data as *mut u8, data_layout);
+        }
+
+        let layout = Layout::new::<RcArray>();
+        dealloc(ptr, layout);
     }
 }
