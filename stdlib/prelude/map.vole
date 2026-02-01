@@ -8,7 +8,7 @@
 let { MapLike, Iterator } = import "./traits"
 
 class Map implements MapLike<i64, i64> {
-    _ptr: i64,  // Pointer to native VoleMap
+    _ptr: handle,  // Pointer to native VoleMap
 
     statics {
         func new() -> Map {
@@ -75,16 +75,16 @@ class Map implements MapLike<i64, i64> {
 
 // Module-level native functions
 external("std:collections") {
-    func "map_new" as _map_new() -> i64
-    func "map_with_capacity" as _map_with_capacity(capacity: i64) -> i64
-    func "map_get" as _map_get(ptr: i64, key: i64, key_hash: i64) -> i64
-    func "map_has" as _map_has(ptr: i64, key: i64, key_hash: i64) -> bool
-    func "map_set" as _map_set(ptr: i64, key: i64, key_hash: i64, value: i64) -> void
-    func "map_remove" as _map_remove(ptr: i64, key: i64, key_hash: i64) -> i64
-    func "map_contains_key" as _map_contains_key(ptr: i64, key: i64, key_hash: i64) -> bool
-    func "map_len" as _map_len(ptr: i64) -> i64
-    func "map_clear" as _map_clear(ptr: i64) -> void
-    func "map_keys_iter" as _map_keys_iter(ptr: i64) -> Iterator<i64>
-    func "map_values_iter" as _map_values_iter(ptr: i64) -> Iterator<i64>
-    func "map_entries_iter" as _map_entries_iter(ptr: i64) -> Iterator<[i64, i64]>
+    func "map_new" as _map_new() -> handle
+    func "map_with_capacity" as _map_with_capacity(capacity: i64) -> handle
+    func "map_get" as _map_get(ptr: handle, key: i64, key_hash: i64) -> i64
+    func "map_has" as _map_has(ptr: handle, key: i64, key_hash: i64) -> bool
+    func "map_set" as _map_set(ptr: handle, key: i64, key_hash: i64, value: i64) -> void
+    func "map_remove" as _map_remove(ptr: handle, key: i64, key_hash: i64) -> i64
+    func "map_contains_key" as _map_contains_key(ptr: handle, key: i64, key_hash: i64) -> bool
+    func "map_len" as _map_len(ptr: handle) -> i64
+    func "map_clear" as _map_clear(ptr: handle) -> void
+    func "map_keys_iter" as _map_keys_iter(ptr: handle) -> Iterator<i64>
+    func "map_values_iter" as _map_values_iter(ptr: handle) -> Iterator<i64>
+    func "map_entries_iter" as _map_entries_iter(ptr: handle) -> Iterator<[i64, i64]>
 }

@@ -8,7 +8,7 @@
 let { SetLike, Iterator } = import "./traits"
 
 class Set implements SetLike<i64> {
-    _ptr: i64,  // Pointer to native VoleSet
+    _ptr: handle,  // Pointer to native VoleSet
 
     statics {
         func new() -> Set {
@@ -79,19 +79,19 @@ class Set implements SetLike<i64> {
 
 // Module-level native functions
 external("std:collections") {
-    func "set_new" as _set_new() -> i64
-    func "set_with_capacity" as _set_with_capacity(capacity: i64) -> i64
-    func "set_add" as _set_add(ptr: i64, value: i64, hash: i64) -> bool
-    func "set_remove" as _set_remove(ptr: i64, value: i64, hash: i64) -> bool
-    func "set_contains" as _set_contains(ptr: i64, value: i64, hash: i64) -> bool
-    func "set_len" as _set_len(ptr: i64) -> i64
-    func "set_clear" as _set_clear(ptr: i64) -> void
-    func "set_iter" as _set_iter(ptr: i64) -> Iterator<i64>
-    func "set_union" as _set_union(ptr: i64, other: i64) -> i64
-    func "set_intersection" as _set_intersection(ptr: i64, other: i64) -> i64
-    func "set_difference" as _set_difference(ptr: i64, other: i64) -> i64
-    func "set_symmetric_difference" as _set_symmetric_difference(ptr: i64, other: i64) -> i64
-    func "set_is_subset" as _set_is_subset(ptr: i64, other: i64) -> bool
-    func "set_is_superset" as _set_is_superset(ptr: i64, other: i64) -> bool
-    func "set_is_disjoint" as _set_is_disjoint(ptr: i64, other: i64) -> bool
+    func "set_new" as _set_new() -> handle
+    func "set_with_capacity" as _set_with_capacity(capacity: i64) -> handle
+    func "set_add" as _set_add(ptr: handle, value: i64, hash: i64) -> bool
+    func "set_remove" as _set_remove(ptr: handle, value: i64, hash: i64) -> bool
+    func "set_contains" as _set_contains(ptr: handle, value: i64, hash: i64) -> bool
+    func "set_len" as _set_len(ptr: handle) -> i64
+    func "set_clear" as _set_clear(ptr: handle) -> void
+    func "set_iter" as _set_iter(ptr: handle) -> Iterator<i64>
+    func "set_union" as _set_union(ptr: handle, other: handle) -> handle
+    func "set_intersection" as _set_intersection(ptr: handle, other: handle) -> handle
+    func "set_difference" as _set_difference(ptr: handle, other: handle) -> handle
+    func "set_symmetric_difference" as _set_symmetric_difference(ptr: handle, other: handle) -> handle
+    func "set_is_subset" as _set_is_subset(ptr: handle, other: handle) -> bool
+    func "set_is_superset" as _set_is_superset(ptr: handle, other: handle) -> bool
+    func "set_is_disjoint" as _set_is_disjoint(ptr: handle, other: handle) -> bool
 }

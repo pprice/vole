@@ -23,23 +23,23 @@ func coin() -> bool {
 // Use seeded() to create an RNG handle, then pass it to rng_* functions
 // =============================================================================
 
-// seeded(seed) -> i64 - create a seeded RNG handle
+// seeded(seed) -> handle - create a seeded RNG handle
 // Returns an opaque handle to use with rng_* functions
 external("std:random") {
-    func "seeded" as seeded(seed: i64) -> i64
+    func "seeded" as seeded(seed: i64) -> handle
 }
 
 // rng_float(rng) -> f64 - get float from seeded RNG
 external("std:random") {
-    func rng_float(rng: i64) -> f64
+    func rng_float(rng: handle) -> f64
 }
 
 // rng_int(rng, min, max) -> i64 - get int from seeded RNG
 external("std:random") {
-    func rng_int(rng: i64, min: i64, max: i64) -> i64
+    func rng_int(rng: handle, min: i64, max: i64) -> i64
 }
 
 // rng_coin(rng) -> bool - get boolean from seeded RNG
 external("std:random") {
-    func rng_coin(rng: i64) -> bool
+    func rng_coin(rng: handle) -> bool
 }

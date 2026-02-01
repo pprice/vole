@@ -3,7 +3,7 @@
 
 // Simple wrapper to test the pattern without full Map implementation
 class GenericContainer<K: Hashable + Equatable, V> {
-    _ptr: i64,
+    _ptr: handle,
 
     statics {
         func new() -> GenericContainer<K, V> {
@@ -34,11 +34,11 @@ class GenericContainer<K: Hashable + Equatable, V> {
 // External declarations with generic type params for type erasure
 // Using different names to avoid conflict with prelude's non-generic versions
 external("std:collections") {
-    func "map_new_with_eq" as _generic_map_new_with_eq<K>(eq_closure: (K, K) -> bool) -> i64
-    func "map_get" as _generic_map_get<K, V>(ptr: i64, key: K, key_hash: i64) -> V
-    func "map_has" as _generic_map_has<K>(ptr: i64, key: K, key_hash: i64) -> bool
-    func "map_set" as _generic_map_set<K, V>(ptr: i64, key: K, key_hash: i64, value: V) -> void
-    func "map_len" as _generic_map_len(ptr: i64) -> i64
+    func "map_new_with_eq" as _generic_map_new_with_eq<K>(eq_closure: (K, K) -> bool) -> handle
+    func "map_get" as _generic_map_get<K, V>(ptr: handle, key: K, key_hash: i64) -> V
+    func "map_has" as _generic_map_has<K>(ptr: handle, key: K, key_hash: i64) -> bool
+    func "map_set" as _generic_map_set<K, V>(ptr: handle, key: K, key_hash: i64, value: V) -> void
+    func "map_len" as _generic_map_len(ptr: handle) -> i64
 }
 
 tests {
