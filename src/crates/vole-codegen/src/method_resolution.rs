@@ -43,6 +43,10 @@ pub(crate) fn get_type_def_id_from_type_id(
             };
             analyzed.entity_registry().type_by_name(name_id)
         }
+        SemaType::Handle => {
+            let name_id = analyzed.name_table().primitives.handle;
+            analyzed.entity_registry().type_by_name(name_id)
+        }
         _ => None,
     }
 }

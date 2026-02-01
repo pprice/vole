@@ -169,6 +169,7 @@ impl Analyzer {
                 PrimitiveTypeId::Bool,
                 PrimitiveTypeId::String,
                 PrimitiveTypeId::Range,
+                PrimitiveTypeId::Handle,
             ]
             .iter()
             .map(|prim| {

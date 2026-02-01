@@ -23,6 +23,7 @@ pub enum PrimitiveTypeId {
     Bool,
     String,
     Range,
+    Handle,
 }
 
 impl PrimitiveTypeId {
@@ -43,6 +44,7 @@ impl PrimitiveTypeId {
             PrimitiveTypeId::Bool => "bool",
             PrimitiveTypeId::String => "string",
             PrimitiveTypeId::Range => "range",
+            PrimitiveTypeId::Handle => "handle",
         }
     }
 }
@@ -85,6 +87,9 @@ impl ImplTypeId {
             }
             ArenaType::Range => entity_registry
                 .primitive_name_id(PrimitiveTypeId::Range)
+                .map(ImplTypeId),
+            ArenaType::Handle => entity_registry
+                .primitive_name_id(PrimitiveTypeId::Handle)
                 .map(ImplTypeId),
             ArenaType::Array(_) => entity_registry.array_name_id().map(ImplTypeId),
             ArenaType::Class { type_def_id, .. } => {

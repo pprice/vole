@@ -1,6 +1,8 @@
 // Test handle primitive type - opaque native pointer
 // handle is a distinct type that cannot be used with arithmetic or comparison operators
 
+let random = import "std:random"
+
 class Resource {
     ptr: handle?
 
@@ -48,5 +50,16 @@ tests {
     test "handle variable declaration" {
         let h: handle? = nil
         assert(h == nil)
+    }
+
+    test "handle Stringable to_string" {
+        let rng = random.seeded(42)
+        assert(rng.to_string() == "handle")
+    }
+
+    test "handle Stringable to_string via variable" {
+        let rng = random.seeded(123)
+        let s = rng.to_string()
+        assert(s == "handle")
     }
 }

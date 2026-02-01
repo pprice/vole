@@ -1,0 +1,9 @@
+// stdlib/prelude/handle.vole
+
+let { Stringable } = import "./traits"
+
+implement Stringable for handle {
+    func to_string() -> string {
+        return "handle"
+    }
+}

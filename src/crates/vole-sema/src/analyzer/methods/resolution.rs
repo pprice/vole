@@ -40,7 +40,7 @@ impl Analyzer {
 
         // Step 3: Try primitives if no nominal type matched
         if type_def_id.is_none()
-            && object_type_id.is_primitive()
+            && (object_type_id.is_primitive() || object_type_id == ArenaTypeId::HANDLE)
             && let Some(resolved) =
                 self.resolve_method_on_primitive_type(object_type_id, method_name, interner)
         {
@@ -172,6 +172,7 @@ impl Analyzer {
             ArenaTypeId::F64 => Some(primitives.f64),
             ArenaTypeId::BOOL => Some(primitives.bool),
             ArenaTypeId::STRING => Some(primitives.string),
+            ArenaTypeId::HANDLE => Some(primitives.handle),
             _ => None,
         }
     }

@@ -82,6 +82,7 @@ pub struct Primitives {
     pub f64: NameId,
     pub bool: NameId,
     pub string: NameId,
+    pub handle: NameId,
     pub nil: NameId,
 }
 
@@ -102,6 +103,7 @@ impl Primitives {
             "f64" => Some(self.f64),
             "bool" => Some(self.bool),
             "string" => Some(self.string),
+            "handle" => Some(self.handle),
             "nil" => Some(self.nil),
             _ => None,
         }
@@ -223,6 +225,7 @@ impl NameTable {
                 f64: placeholder,
                 bool: placeholder,
                 string: placeholder,
+                handle: placeholder,
                 nil: placeholder,
             },
             well_known: WellKnownTypes::new(),
@@ -265,6 +268,7 @@ impl NameTable {
             f64: self.intern_raw(builtin, &["f64"]),
             bool: self.intern_raw(builtin, &["bool"]),
             string: self.intern_raw(builtin, &["string"]),
+            handle: self.intern_raw(builtin, &["handle"]),
             nil: self.intern_raw(builtin, &["nil"]),
         }
     }

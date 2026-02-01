@@ -64,6 +64,7 @@ impl EntityRegistry {
         self.register_type(primitives.f64, TypeDefKind::Primitive, builtin_module);
         self.register_type(primitives.bool, TypeDefKind::Primitive, builtin_module);
         self.register_type(primitives.string, TypeDefKind::Primitive, builtin_module);
+        self.register_type(primitives.handle, TypeDefKind::Primitive, builtin_module);
         self.register_type(primitives.nil, TypeDefKind::Primitive, builtin_module);
     }
 

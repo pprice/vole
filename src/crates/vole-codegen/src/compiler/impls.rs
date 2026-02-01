@@ -188,6 +188,7 @@ impl Compiler<'_> {
     fn get_type_name_from_expr(&self, ty: &TypeExpr) -> Option<String> {
         match ty {
             TypeExpr::Primitive(p) => Some(primitive_type_name(*p).to_string()),
+            TypeExpr::Handle => Some("handle".to_string()),
             TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => {
                 Some(self.query().resolve_symbol(*sym).to_string())
             }
@@ -229,6 +230,11 @@ impl Compiler<'_> {
                 TypeExpr::Primitive(p) => {
                     let prim_type = vole_sema::PrimitiveType::from_ast(*p);
                     let type_id = self.analyzed.type_arena().primitive(prim_type);
+                    let impl_id = self.impl_type_id_from_type_id(type_id);
+                    (type_id, impl_id)
+                }
+                TypeExpr::Handle => {
+                    let type_id = TypeId::HANDLE;
                     let impl_id = self.impl_type_id_from_type_id(type_id);
                     (type_id, impl_id)
                 }
@@ -408,6 +414,11 @@ impl Compiler<'_> {
                     let impl_id = self.impl_type_id_from_type_id(type_id);
                     (type_id, impl_id)
                 }
+                TypeExpr::Handle => {
+                    let type_id = TypeId::HANDLE;
+                    let impl_id = self.impl_type_id_from_type_id(type_id);
+                    (type_id, impl_id)
+                }
                 TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => {
                     // Look up TypeDefId from Symbol (for Generic, uses the base class name)
                     // Try given module first, then fall back to program module
@@ -447,10 +458,8 @@ impl Compiler<'_> {
                     (metadata.vole_type, impl_id)
                 }
                 _ => {
-                    // This branch is unreachable: get_type_name_from_expr() returns None
-                    // for non-Primitive/non-Named/non-Generic types, causing early return above
                     unreachable!(
-                        "target_type was neither Primitive, Named, nor Generic, \
+                        "target_type was neither Primitive, Handle, Named, nor Generic, \
                          but passed get_type_name_from_expr check"
                     )
                 }
@@ -525,6 +534,10 @@ impl Compiler<'_> {
                 match &impl_block.target_type {
                     TypeExpr::Primitive(p) => {
                         let name_id = name_table.primitives.from_ast(*p);
+                        self.query().try_type_def_id(name_id)
+                    }
+                    TypeExpr::Handle => {
+                        let name_id = name_table.primitives.handle;
                         self.query().try_type_def_id(name_id)
                     }
                     TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => {
@@ -634,6 +647,7 @@ impl Compiler<'_> {
                 let prim_type = vole_sema::PrimitiveType::from_ast(*p);
                 self.analyzed.type_arena().primitive(prim_type)
             }
+            TypeExpr::Handle => TypeId::HANDLE,
             TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => {
                 // Try given module first, then fall back to program module
                 let type_def_id = self
@@ -671,7 +685,7 @@ impl Compiler<'_> {
             }
             _ => {
                 unreachable!(
-                    "target_type was neither Primitive, Named, nor Generic, \
+                    "target_type was neither Primitive, Handle, Named, nor Generic, \
                      but passed get_type_name_from_expr check"
                 )
             }
@@ -721,6 +735,7 @@ impl Compiler<'_> {
                 let prim_type = vole_sema::PrimitiveType::from_ast(*p);
                 self.analyzed.type_arena().primitive(prim_type)
             }
+            TypeExpr::Handle => TypeId::HANDLE,
             TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => {
                 let type_def_id = self
                     .query()
@@ -743,7 +758,7 @@ impl Compiler<'_> {
                         )
                     })
             }
-            _ => unreachable!("target_type was neither Primitive, Named, nor Generic"),
+            _ => unreachable!("target_type was neither Primitive, Handle, Named, nor Generic"),
         };
 
         let impl_type_id = self.impl_type_id_from_type_id(self_type_id);
