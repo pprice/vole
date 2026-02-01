@@ -1322,12 +1322,16 @@ impl Cg<'_, '_, '_> {
                     .load(types::I8, MemFlags::new(), src_ptr, 0);
                 self.builder.ins().stack_store(tag, slot, 0);
 
-                // Payload is at offset 8 (8 bytes)
-                let payload = self
-                    .builder
-                    .ins()
-                    .load(types::I64, MemFlags::new(), src_ptr, 8);
-                self.builder.ins().stack_store(payload, slot, 8);
+                // Payload is at offset 8 (8 bytes) - only copy if union has payload data.
+                // Sentinel-only unions (e.g. A | B where both are zero-sized) have
+                // union_size == 8 (tag only), so there's no payload to copy.
+                if union_size > 8 {
+                    let payload = self
+                        .builder
+                        .ins()
+                        .load(types::I64, MemFlags::new(), src_ptr, 8);
+                    self.builder.ins().stack_store(payload, slot, 8);
+                }
 
                 let ptr_type = self.ptr_type();
                 let new_ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);

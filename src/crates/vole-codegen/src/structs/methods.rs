@@ -602,18 +602,22 @@ impl Cg<'_, '_, '_> {
                 let union_size = self.type_size(return_type_id);
                 let local_slot = self.alloc_stack(union_size);
 
-                // Copy tag (8 bytes at offset 0) and value (8 bytes at offset 8)
+                // Copy tag (8 bytes at offset 0)
                 let tag = self
                     .builder
                     .ins()
                     .load(types::I64, MemFlags::new(), result_value, 0);
                 self.builder.ins().stack_store(tag, local_slot, 0);
 
-                let payload = self
-                    .builder
-                    .ins()
-                    .load(types::I64, MemFlags::new(), result_value, 8);
-                self.builder.ins().stack_store(payload, local_slot, 8);
+                // Copy payload (8 bytes at offset 8) only if union has payload data.
+                // Sentinel-only unions have union_size == 8 (tag only), no payload.
+                if union_size > 8 {
+                    let payload = self
+                        .builder
+                        .ins()
+                        .load(types::I64, MemFlags::new(), result_value, 8);
+                    self.builder.ins().stack_store(payload, local_slot, 8);
+                }
 
                 let ptr_type = self.ptr_type();
                 let local_ptr = self.builder.ins().stack_addr(ptr_type, local_slot, 0);
