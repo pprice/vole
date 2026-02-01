@@ -3,12 +3,39 @@
 //!
 //! Provides:
 //! - random_float() -> f64 in [0.0, 1.0) using thread_rng
-//! - random_seeded(seed: i64) -> *mut Rng - creates a seeded RNG instance
-//! - rng_float(rng: *mut Rng) -> f64 - get next float from seeded RNG
+//! - random_seeded(seed: i64) -> *mut RcRng - creates a seeded RNG instance
+//! - rng_float(rng: *mut RcRng) -> f64 - get next float from seeded RNG
 
 use crate::native_registry::{NativeModule, NativeSignature, NativeType};
+use crate::value::{RcHeader, TYPE_RNG};
 use rand::rngs::StdRng;
 use rand::{Rng as RandRng, SeedableRng};
+use std::alloc::{Layout, dealloc};
+
+/// Reference-counted RNG wrapper with RcHeader prefix.
+///
+/// Layout: `[RcHeader] [StdRng]` — the RNG is stored inline, not behind
+/// another pointer.
+#[repr(C)]
+pub struct RcRng {
+    header: RcHeader,
+    rng: StdRng,
+}
+
+/// Drop function for RcRng, called by rc_dec when refcount reaches zero.
+/// Deallocates the RcRng allocation.
+///
+/// # Safety
+/// `ptr` must point to a valid `RcRng` allocation with refcount already at zero.
+unsafe extern "C" fn rng_drop(ptr: *mut u8) {
+    unsafe {
+        let rng_ptr = ptr as *mut RcRng;
+        // Drop the StdRng in place, then deallocate
+        std::ptr::drop_in_place(&mut (*rng_ptr).rng);
+        let layout = Layout::new::<RcRng>();
+        dealloc(ptr, layout);
+    }
+}
 
 /// Create the std:random native module
 pub fn module() -> NativeModule {
@@ -24,7 +51,7 @@ pub fn module() -> NativeModule {
         },
     );
 
-    // seeded: (i64) -> i64 (opaque Rng pointer)
+    // seeded: (i64) -> i64 (opaque RcRng pointer)
     m.register(
         "seeded",
         random_seeded as *const u8,
@@ -87,10 +114,10 @@ pub extern "C" fn random_float() -> f64 {
     rand::random::<f64>()
 }
 
-/// Create a seeded RNG instance
-/// Returns an opaque pointer to a heap-allocated StdRng
+/// Create a seeded RNG instance wrapped in an RcRng with RcHeader.
+/// Returns an opaque pointer (as *mut RcRng) to the heap-allocated RcRng.
 #[unsafe(no_mangle)]
-pub extern "C" fn random_seeded(seed: i64) -> *mut StdRng {
+pub extern "C" fn random_seeded(seed: i64) -> *mut RcRng {
     // Convert i64 seed to u64 bytes for seeding
     let seed_bytes = seed.to_le_bytes();
     let mut full_seed = [0u8; 32];
@@ -99,17 +126,30 @@ pub extern "C" fn random_seeded(seed: i64) -> *mut StdRng {
         full_seed[i * 8..(i + 1) * 8].copy_from_slice(&seed_bytes);
     }
     let rng = StdRng::from_seed(full_seed);
-    Box::into_raw(Box::new(rng))
+
+    let layout = Layout::new::<RcRng>();
+    unsafe {
+        let ptr = std::alloc::alloc(layout) as *mut RcRng;
+        if ptr.is_null() {
+            std::alloc::handle_alloc_error(layout);
+        }
+        std::ptr::write(
+            &mut (*ptr).header,
+            RcHeader::with_drop_fn(TYPE_RNG, rng_drop),
+        );
+        std::ptr::write(&mut (*ptr).rng, rng);
+        ptr
+    }
 }
 
 /// Get the next random f64 in [0.0, 1.0) from a seeded RNG
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
-pub extern "C" fn rng_float(rng_ptr: *mut StdRng) -> f64 {
+pub extern "C" fn rng_float(rng_ptr: *mut RcRng) -> f64 {
     if rng_ptr.is_null() {
         return 0.0;
     }
-    unsafe { (*rng_ptr).r#gen::<f64>() }
+    unsafe { (*rng_ptr).rng.r#gen::<f64>() }
 }
 
 /// Convert a random float in [0.0, 1.0) to an i64 in [min, max] (inclusive).
@@ -139,22 +179,22 @@ pub extern "C" fn random_int(min: i64, max: i64) -> i64 {
 /// Get the next random i64 in [min, max] (inclusive) from a seeded RNG
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
-pub extern "C" fn rng_int(rng_ptr: *mut StdRng, min: i64, max: i64) -> i64 {
+pub extern "C" fn rng_int(rng_ptr: *mut RcRng, min: i64, max: i64) -> i64 {
     if rng_ptr.is_null() || min > max {
         return min;
     }
-    let f = unsafe { (*rng_ptr).r#gen::<f64>() };
+    let f = unsafe { (*rng_ptr).rng.r#gen::<f64>() };
     int_from_float(f, min, max)
 }
 
 /// Get the next random boolean from a seeded RNG
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
-pub extern "C" fn rng_coin(rng_ptr: *mut StdRng) -> bool {
+pub extern "C" fn rng_coin(rng_ptr: *mut RcRng) -> bool {
     if rng_ptr.is_null() {
         return false;
     }
-    unsafe { (*rng_ptr).r#gen::<f64>() < 0.5 }
+    unsafe { (*rng_ptr).rng.r#gen::<f64>() < 0.5 }
 }
 
 // =============================================================================
@@ -164,6 +204,8 @@ pub extern "C" fn rng_coin(rng_ptr: *mut StdRng) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::value::rc_dec;
+    use std::sync::atomic::Ordering;
 
     #[test]
     fn test_random_float_range() {
@@ -198,23 +240,21 @@ mod tests {
         let rng1 = random_seeded(42);
         let rng2 = random_seeded(42);
 
-        unsafe {
-            let v1_1 = rng_float(rng1);
-            let v1_2 = rng_float(rng1);
-            let v1_3 = rng_float(rng1);
+        let v1_1 = rng_float(rng1);
+        let v1_2 = rng_float(rng1);
+        let v1_3 = rng_float(rng1);
 
-            let v2_1 = rng_float(rng2);
-            let v2_2 = rng_float(rng2);
-            let v2_3 = rng_float(rng2);
+        let v2_1 = rng_float(rng2);
+        let v2_2 = rng_float(rng2);
+        let v2_3 = rng_float(rng2);
 
-            assert_eq!(v1_1, v2_1, "first values should match");
-            assert_eq!(v1_2, v2_2, "second values should match");
-            assert_eq!(v1_3, v2_3, "third values should match");
+        assert_eq!(v1_1, v2_1, "first values should match");
+        assert_eq!(v1_2, v2_2, "second values should match");
+        assert_eq!(v1_3, v2_3, "third values should match");
 
-            // Clean up
-            drop(Box::from_raw(rng1));
-            drop(Box::from_raw(rng2));
-        }
+        // Clean up via rc_dec (triggers rng_drop)
+        rc_dec(rng1 as *mut u8);
+        rc_dec(rng2 as *mut u8);
     }
 
     #[test]
@@ -223,31 +263,27 @@ mod tests {
         let rng1 = random_seeded(42);
         let rng2 = random_seeded(123);
 
-        unsafe {
-            let v1 = rng_float(rng1);
-            let v2 = rng_float(rng2);
+        let v1 = rng_float(rng1);
+        let v2 = rng_float(rng2);
 
-            assert_ne!(v1, v2, "different seeds should produce different values");
+        assert_ne!(v1, v2, "different seeds should produce different values");
 
-            // Clean up
-            drop(Box::from_raw(rng1));
-            drop(Box::from_raw(rng2));
-        }
+        // Clean up via rc_dec
+        rc_dec(rng1 as *mut u8);
+        rc_dec(rng2 as *mut u8);
     }
 
     #[test]
     fn test_rng_float_range() {
         // Test that rng_float returns values in [0.0, 1.0)
         let rng = random_seeded(999);
-        unsafe {
-            for _ in 0..100 {
-                let f = rng_float(rng);
-                assert!(f >= 0.0, "rng_float {} should be >= 0.0", f);
-                assert!(f < 1.0, "rng_float {} should be < 1.0", f);
-            }
-            // Clean up
-            drop(Box::from_raw(rng));
+        for _ in 0..100 {
+            let f = rng_float(rng);
+            assert!(f >= 0.0, "rng_float {} should be >= 0.0", f);
+            assert!(f < 1.0, "rng_float {} should be < 1.0", f);
         }
+        // Clean up via rc_dec
+        rc_dec(rng as *mut u8);
     }
 
     #[test]
@@ -311,14 +347,12 @@ mod tests {
     fn test_rng_int_no_overflow() {
         // Smoke test: rng_int with large range should not panic
         let rng = random_seeded(12345);
-        unsafe {
-            for _ in 0..100 {
-                let v = rng_int(rng, i64::MIN, i64::MAX);
-                // Just verify it doesn't panic; any i64 value is valid
-                let _ = v;
-            }
-            drop(Box::from_raw(rng));
+        for _ in 0..100 {
+            let v = rng_int(rng, i64::MIN, i64::MAX);
+            // Just verify it doesn't panic; any i64 value is valid
+            let _ = v;
         }
+        rc_dec(rng as *mut u8);
     }
 
     #[test]
@@ -349,5 +383,42 @@ mod tests {
         assert_eq!(rng_float_func.signature.params.len(), 1);
         assert_eq!(rng_float_func.signature.params[0], NativeType::I64);
         assert_eq!(rng_float_func.signature.return_type, NativeType::F64);
+    }
+
+    #[test]
+    fn test_rc_rng_header_fields() {
+        // Verify the RcHeader is properly initialized
+        let rng = random_seeded(42);
+        unsafe {
+            let header = &(*rng).header;
+            assert_eq!(header.type_id, TYPE_RNG);
+            assert_eq!(header.ref_count.load(Ordering::Relaxed), 1);
+            assert!(header.drop_fn.is_some());
+        }
+        rc_dec(rng as *mut u8);
+    }
+
+    #[test]
+    fn test_rc_rng_inc_dec() {
+        // Verify inc/dec work through RcHeader
+        let rng = random_seeded(42);
+        unsafe {
+            let header = &(*rng).header;
+            assert_eq!(header.ref_count.load(Ordering::Relaxed), 1);
+
+            crate::value::rc_inc(rng as *mut u8);
+            assert_eq!(header.ref_count.load(Ordering::Relaxed), 2);
+
+            // First dec: refcount goes to 1, no drop
+            rc_dec(rng as *mut u8);
+            assert_eq!(header.ref_count.load(Ordering::Relaxed), 1);
+
+            // Still usable
+            let f = rng_float(rng);
+            assert!(f >= 0.0 && f < 1.0);
+
+            // Final dec: refcount goes to 0, rng_drop called
+            rc_dec(rng as *mut u8);
+        }
     }
 }

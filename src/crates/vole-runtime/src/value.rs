@@ -77,8 +77,7 @@ pub extern "C" fn rc_dec(ptr: *mut u8) {
             if let Some(f) = drop_fn {
                 f(ptr);
             }
-            // If drop_fn is None, the caller is using legacy type-specific
-            // dec_ref (e.g. RcString::dec_ref) — nothing to do here.
+            // If drop_fn is None, the object has no type-specific cleanup.
         }
     }
 }
@@ -91,6 +90,7 @@ pub const TYPE_BOOL: u32 = 4;
 pub const TYPE_ARRAY: u32 = 5;
 pub const TYPE_CLOSURE: u32 = 6;
 pub const TYPE_INSTANCE: u32 = 7;
+pub const TYPE_RNG: u32 = 8;
 
 /// Tagged value for boxed/heterogeneous storage
 /// Used in arrays, union types, and fallible returns
