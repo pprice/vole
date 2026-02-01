@@ -1,0 +1,23 @@
+// Test that handle cannot be assigned to/from i64
+
+external("test:handle") {
+    func get_handle() -> handle
+}
+
+func takes_i64(x: i64) -> i64 { return x }
+func takes_handle(x: handle) -> handle { return x }
+
+func main() {
+    // handle assigned to i64 variable
+    let h: i64 = get_handle()
+
+    // i64 assigned to handle variable
+    let n: i64 = 42
+    let h2: handle = n
+
+    // handle passed to i64 parameter
+    let r1 = takes_i64(get_handle())
+
+    // i64 passed to handle parameter
+    let r2 = takes_handle(42)
+}

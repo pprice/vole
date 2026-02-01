@@ -1,0 +1,40 @@
+// Test that handle type cannot be used with arithmetic operators
+
+external("test:handle") {
+    func get_handle() -> handle
+}
+
+func main() {
+    let a = get_handle()
+    let b = get_handle()
+
+    // handle + handle
+    let r1 = a + b
+
+    // handle - handle
+    let r2 = a - b
+
+    // handle * handle
+    let r3 = a * b
+
+    // handle / handle
+    let r4 = a / b
+
+    // handle % handle
+    let r5 = a % b
+
+    // handle + i64
+    let r6 = a + 1
+
+    // handle - i64
+    let r7 = a - 1
+
+    // handle * i64
+    let r8 = a * 2
+
+    // handle / i64
+    let r9 = a / 2
+
+    // handle % i64
+    let r10 = a % 2
+}
