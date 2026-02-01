@@ -1871,14 +1871,17 @@ impl Compiler<'_> {
                     if let Some(sym) = target_sym {
                         let query = self.query();
                         if let Some(name_id) = query.try_name_id(module_id, &[sym])
-                            && name_id == class_name_id {
-                                // Found matching implement block - search its methods
-                                if let Some(method) = impl_block.methods.iter().find(|m| {
-                                    self.query().resolve_symbol(m.name) == method_name_str
-                                }) {
-                                    return Some(method);
-                                }
+                            && name_id == class_name_id
+                        {
+                            // Found matching implement block - search its methods
+                            if let Some(method) = impl_block
+                                .methods
+                                .iter()
+                                .find(|m| self.query().resolve_symbol(m.name) == method_name_str)
+                            {
+                                return Some(method);
                             }
+                        }
                     }
                 }
                 Decl::Tests(tests_decl) => {
@@ -1903,9 +1906,10 @@ impl Compiler<'_> {
                             class_name_id,
                             method_name_str,
                             module_id,
-                        ) {
-                            return Some(method);
-                        }
+                        )
+                    {
+                        return Some(method);
+                    }
                 }
                 _ => {}
             }

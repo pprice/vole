@@ -1,0 +1,28 @@
+interface Describable {
+    func describe() -> string
+}
+
+class MyType implements Describable {
+    name: string
+}
+
+implement Describable for MyType {
+    func describe() -> string {
+        return self.name
+    }
+}
+
+tests {
+    class Wrapper<T: Describable> {
+        inner: T
+
+        func get_description() -> string {
+            return self.inner.describe()
+        }
+    }
+
+    test "interface constraint in tests block" {
+        let w = Wrapper { inner: MyType { name: "hello" } }
+        assert(w.get_description() == "hello")
+    }
+}

@@ -236,6 +236,35 @@ impl Analyzer {
         Ok(())
     }
 
+    /// Look up a type's NameId by searching current_module, type_priority_module,
+    /// and parent_modules. This is needed because types in tests blocks are registered
+    /// under a virtual module, but check_declaration_bodies may run with
+    /// current_module set to the parent module.
+    fn resolve_type_name_id(&self, type_name: Symbol, interner: &Interner) -> Option<NameId> {
+        // Try current module first
+        let name_id = self
+            .name_table()
+            .name_id(self.current_module, &[type_name], interner);
+        if name_id.is_some() {
+            return name_id;
+        }
+        // Try priority module (virtual test module for type shadowing)
+        if let Some(priority) = self.type_priority_module {
+            let name_id = self.name_table().name_id(priority, &[type_name], interner);
+            if name_id.is_some() {
+                return name_id;
+            }
+        }
+        // Try parent modules (includes virtual test modules added during check_tests)
+        for &parent in &self.parent_modules {
+            let name_id = self.name_table().name_id(parent, &[type_name], interner);
+            if name_id.is_some() {
+                return name_id;
+            }
+        }
+        None
+    }
+
     /// Check field defaults, methods, and static methods for a type declaration.
     /// This is the common logic shared between Class and Record checking.
     pub(crate) fn check_type_body<T: TypeBodyDecl>(
@@ -247,9 +276,7 @@ impl Analyzer {
 
         // Set up type param scope for generic type methods
         let generic_type_params = if !decl.type_params().is_empty() {
-            let name_id = self
-                .name_table()
-                .name_id(self.current_module, &[type_name], interner);
+            let name_id = self.resolve_type_name_id(type_name, interner);
             name_id.and_then(|name_id| {
                 let registry = self.entity_registry();
                 registry
@@ -271,9 +298,7 @@ impl Analyzer {
 
         // Type-check field default expressions
         {
-            let name_id = self
-                .name_table()
-                .name_id(self.current_module, &[type_name], interner);
+            let name_id = self.resolve_type_name_id(type_name, interner);
             let field_types = name_id.and_then(|name_id| {
                 let registry = self.entity_registry();
                 registry
