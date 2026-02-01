@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 use std::process::ExitCode;
 
-use super::common::{parse_and_analyze_skip_tests, read_stdin};
+use super::common::{PipelineOptions, compile_source, read_stdin};
 use crate::codegen::{Compiler, JitContext, JitOptions};
 use crate::runtime::{push_context, replace_context};
 
@@ -50,8 +50,17 @@ fn execute(path: &Path, project_root: Option<&Path>, release: bool) -> Result<()
 
     // Parse and type check (skip tests blocks in run mode)
     replace_context(&format!("{} (parsing)", file_path));
-    let analyzed = parse_and_analyze_skip_tests(&source, &file_path, project_root)
-        .map_err(|()| String::new())?;
+    let analyzed = compile_source(
+        PipelineOptions {
+            source: &source,
+            file_path: &file_path,
+            skip_tests: true,
+            project_root,
+            module_cache: None,
+        },
+        &mut std::io::stderr(),
+    )
+    .map_err(|()| String::new())?;
 
     // Codegen phase
     replace_context(&format!("{} (compiling)", file_path));

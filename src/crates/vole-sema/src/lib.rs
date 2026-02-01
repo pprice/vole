@@ -23,7 +23,7 @@ pub mod types;
 pub mod well_known;
 
 pub use analysis_cache::{CachedModule, IsCheckResult, ModuleCache};
-pub use analyzer::{AnalysisOutput, Analyzer, TypeError, TypeWarning};
+pub use analyzer::{AnalysisOutput, Analyzer, AnalyzerBuilder, TypeError, TypeWarning};
 pub use compilation_db::{CodegenDb, CompilationDb};
 pub use entity_defs::{FieldDef, FunctionDef, MethodDef, TypeDef, TypeDefKind};
 pub use entity_registry::EntityRegistry;

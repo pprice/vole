@@ -12,7 +12,7 @@ use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use super::common::{TermColors, parse_and_analyze_with_cache, read_stdin};
+use super::common::{PipelineOptions, TermColors, compile_source, read_stdin};
 use crate::cli::{ColorMode, ReportMode, expand_paths, should_skip_path};
 use crate::codegen::{CompiledModules, Compiler, JitContext, JitOptions, TestInfo};
 use crate::runtime::{
@@ -408,8 +408,17 @@ fn run_source_tests_with_modules(
     let sema_start = Instant::now();
 
     // Parse and type check with shared cache
-    let analyzed = parse_and_analyze_with_cache(source, file_path, cache, project_root)
-        .map_err(|()| String::new())?;
+    let analyzed = compile_source(
+        PipelineOptions {
+            source,
+            file_path,
+            skip_tests: false,
+            project_root,
+            module_cache: Some(cache),
+        },
+        &mut io::stderr(),
+    )
+    .map_err(|()| String::new())?;
     let sema_time = sema_start.elapsed();
 
     // Compile - either with pre-compiled modules or compiling them fresh
@@ -599,8 +608,17 @@ fn run_source_tests_with_progress(
     let sema_start = Instant::now();
 
     // Parse and type check with shared cache
-    let analyzed = parse_and_analyze_with_cache(source, file_path, cache, project_root)
-        .map_err(|()| String::new())?;
+    let analyzed = compile_source(
+        PipelineOptions {
+            source,
+            file_path,
+            skip_tests: false,
+            project_root,
+            module_cache: Some(cache),
+        },
+        &mut io::stderr(),
+    )
+    .map_err(|()| String::new())?;
     let sema_time = sema_start.elapsed();
 
     // Compile

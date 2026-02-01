@@ -7,11 +7,10 @@ use miette::NamedSource;
 
 use crate::cli::{InspectType, expand_paths_flat};
 use crate::codegen::{Compiler, JitContext, JitOptions};
-use crate::commands::common::AnalyzedProgram;
+use crate::commands::common::{PipelineOptions, compile_source};
 use crate::commands::mir_format::format_mir;
 use crate::errors::render_to_stderr;
 use crate::frontend::{AstPrinter, Parser};
-use crate::sema::{Analyzer, optimize_all};
 
 /// Inspect compilation output for the given files
 pub fn inspect_files(
@@ -79,39 +78,22 @@ pub fn inspect_files(
                 print!("{}", printer.print_program(&program));
             }
             InspectType::Ir => {
-                // Parse
-                let mut parser = Parser::with_file(&source, &file_path);
-                let mut program = match parser.parse_program() {
-                    Ok(p) => p,
-                    Err(e) => {
-                        let report = miette::Report::new(e.error.clone())
-                            .with_source_code(NamedSource::new(&file_path, source.clone()));
-                        render_to_stderr(report.as_ref());
+                let analyzed = match compile_source(
+                    PipelineOptions {
+                        source: &source,
+                        file_path: &file_path,
+                        skip_tests: false,
+                        project_root: None,
+                        module_cache: None,
+                    },
+                    &mut std::io::stderr(),
+                ) {
+                    Ok(a) => a,
+                    Err(()) => {
                         had_error = true;
                         continue;
                     }
                 };
-
-                let interner = parser.into_interner();
-
-                // Type check
-                let mut analyzer = Analyzer::new(&file_path, &source);
-                if let Err(errors) = analyzer.analyze(&program, &interner) {
-                    for err in &errors {
-                        let report = miette::Report::new(err.error.clone())
-                            .with_source_code(NamedSource::new(&file_path, source.clone()));
-                        render_to_stderr(report.as_ref());
-                    }
-                    had_error = true;
-                    continue;
-                }
-                let mut output = analyzer.into_analysis_results();
-
-                // Optimizer phase (constant folding, algebraic simplifications)
-                let _stats = optimize_all(&mut program, &interner, &mut output.expression_data);
-
-                // Generate IR
-                let analyzed = AnalyzedProgram::from_analysis(program, interner, output);
                 // For IR inspection, always enable loop optimization to show optimized IR
                 let options = if release {
                     JitOptions::release()
@@ -130,39 +112,22 @@ pub fn inspect_files(
                 }
             }
             InspectType::Mir => {
-                // Parse
-                let mut parser = Parser::with_file(&source, &file_path);
-                let mut program = match parser.parse_program() {
-                    Ok(p) => p,
-                    Err(e) => {
-                        let report = miette::Report::new(e.error.clone())
-                            .with_source_code(NamedSource::new(&file_path, source.clone()));
-                        render_to_stderr(report.as_ref());
+                let analyzed = match compile_source(
+                    PipelineOptions {
+                        source: &source,
+                        file_path: &file_path,
+                        skip_tests: false,
+                        project_root: None,
+                        module_cache: None,
+                    },
+                    &mut std::io::stderr(),
+                ) {
+                    Ok(a) => a,
+                    Err(()) => {
                         had_error = true;
                         continue;
                     }
                 };
-
-                let interner = parser.into_interner();
-
-                // Type check
-                let mut analyzer = Analyzer::new(&file_path, &source);
-                if let Err(errors) = analyzer.analyze(&program, &interner) {
-                    for err in &errors {
-                        let report = miette::Report::new(err.error.clone())
-                            .with_source_code(NamedSource::new(&file_path, source.clone()));
-                        render_to_stderr(report.as_ref());
-                    }
-                    had_error = true;
-                    continue;
-                }
-                let mut output = analyzer.into_analysis_results();
-
-                // Optimizer phase (constant folding, algebraic simplifications)
-                let _stats = optimize_all(&mut program, &interner, &mut output.expression_data);
-
-                // Generate assembly with disasm enabled
-                let analyzed = AnalyzedProgram::from_analysis(program, interner, output);
                 let options = JitOptions::disasm();
                 let mut jit = JitContext::with_options(options);
                 let mut compiler = Compiler::new(&mut jit, &analyzed);

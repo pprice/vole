@@ -16,7 +16,7 @@ use crate::runtime::{
     JmpBuf, call_setjmp, clear_test_jmp_buf, set_capture_mode, set_stderr_capture,
     set_stdout_capture, set_test_jmp_buf,
 };
-use crate::sema::{Analyzer, ModuleCache, TypeError, TypeWarning, optimize_all};
+use crate::sema::{ModuleCache, TypeError, TypeWarning, optimize_all};
 use crate::transforms;
 
 // Re-export AnalyzedProgram from codegen
@@ -50,42 +50,32 @@ fn render_sema_warning(warn: &TypeWarning, file_path: &str, source: &str, w: &mu
     let _ = render_to_writer(report.as_ref(), w);
 }
 
-/// Parse and analyze a source file, rendering any diagnostics on error.
-///
-/// Returns `Ok(AnalyzedProgram)` on success, or `Err(())` if there were
-/// errors (diagnostics are rendered to stderr before returning).
-#[allow(clippy::result_unit_err)] // Error details are rendered internally
-pub fn parse_and_analyze(
-    source: &str,
-    file_path: &str,
-    project_root: Option<&std::path::Path>,
-) -> Result<AnalyzedProgram, ()> {
-    parse_and_analyze_opts(source, file_path, project_root, false)
+/// Options for the compile_source pipeline.
+pub struct PipelineOptions<'a> {
+    pub source: &'a str,
+    pub file_path: &'a str,
+    pub skip_tests: bool,
+    pub project_root: Option<&'a std::path::Path>,
+    pub module_cache: Option<Rc<RefCell<ModuleCache>>>,
 }
 
-/// Parse and analyze a source file, skipping tests blocks.
+/// Compile source through the full pipeline: parse -> transform -> analyze -> optimize.
 ///
-/// Used by `vole run` to avoid sema cost for tests blocks in production.
+/// All diagnostics (errors and warnings) are rendered to the provided `errors` writer.
+/// Returns `Ok(AnalyzedProgram)` on success, or `Err(())` if there were errors.
 #[allow(clippy::result_unit_err)]
-pub fn parse_and_analyze_skip_tests(
-    source: &str,
-    file_path: &str,
-    project_root: Option<&std::path::Path>,
+pub fn compile_source(
+    opts: PipelineOptions,
+    errors: &mut dyn Write,
 ) -> Result<AnalyzedProgram, ()> {
-    parse_and_analyze_opts(source, file_path, project_root, true)
-}
+    let PipelineOptions {
+        source,
+        file_path,
+        skip_tests,
+        project_root,
+        module_cache,
+    } = opts;
 
-/// Parse and analyze a source file, optionally skipping tests blocks.
-///
-/// When `skip_tests` is true, `Decl::Tests` is ignored in all sema passes.
-/// This is used by `vole run` to avoid sema cost for tests blocks in production.
-#[allow(clippy::result_unit_err)]
-fn parse_and_analyze_opts(
-    source: &str,
-    file_path: &str,
-    project_root: Option<&std::path::Path>,
-    skip_tests: bool,
-) -> Result<AnalyzedProgram, ()> {
     // Parse phase
     let (mut program, mut interner) = {
         let _span = tracing::info_span!("parse", file = %file_path).entered();
@@ -93,14 +83,13 @@ fn parse_and_analyze_opts(
         let program = match parser.parse_program() {
             Ok(prog) => prog,
             Err(e) => {
-                // Render any lexer errors first
                 let lexer_errors = parser.take_lexer_errors();
                 if !lexer_errors.is_empty() {
                     for err in &lexer_errors {
-                        render_lexer_error(err, file_path, source, &mut io::stderr());
+                        render_lexer_error(err, file_path, source, errors);
                     }
                 } else {
-                    render_parser_error(&e, file_path, source, &mut io::stderr());
+                    render_parser_error(&e, file_path, source, errors);
                 }
                 return Err(());
             }
@@ -110,7 +99,7 @@ fn parse_and_analyze_opts(
         let lexer_errors = parser.take_lexer_errors();
         if !lexer_errors.is_empty() {
             for err in &lexer_errors {
-                render_lexer_error(err, file_path, source, &mut io::stderr());
+                render_lexer_error(err, file_path, source, errors);
             }
             return Err(());
         }
@@ -127,7 +116,7 @@ fn parse_and_analyze_opts(
         let (_, transform_errors) = transforms::transform_generators(&mut program, &mut interner);
         if !transform_errors.is_empty() {
             for err in &transform_errors {
-                render_sema_error(err, file_path, source, &mut io::stderr());
+                render_sema_error(err, file_path, source, errors);
             }
             return Err(());
         }
@@ -136,11 +125,16 @@ fn parse_and_analyze_opts(
     // Sema phase (type checking)
     let mut analyzer = {
         let _span = tracing::info_span!("sema").entered();
-        let mut analyzer = Analyzer::with_project_root(file_path, source, project_root);
+        let mut builder =
+            crate::sema::AnalyzerBuilder::new(file_path).with_project_root(project_root);
+        if let Some(cache) = module_cache {
+            builder = builder.with_cache(cache);
+        }
+        let mut analyzer = builder.build();
         analyzer.set_skip_tests(skip_tests);
-        if let Err(errors) = analyzer.analyze(&program, &interner) {
-            for err in &errors {
-                render_sema_error(err, file_path, source, &mut io::stderr());
+        if let Err(errs) = analyzer.analyze(&program, &interner) {
+            for err in &errs {
+                render_sema_error(err, file_path, source, errors);
             }
             return Err(());
         }
@@ -150,97 +144,7 @@ fn parse_and_analyze_opts(
 
     // Render any warnings (non-fatal diagnostics)
     for warn in &analyzer.take_warnings() {
-        render_sema_warning(warn, file_path, source, &mut io::stderr());
-    }
-
-    let mut output = analyzer.into_analysis_results();
-
-    // Optimizer phase (constant folding, algebraic simplifications)
-    {
-        let _span = tracing::info_span!("optimize").entered();
-        let stats = optimize_all(&mut program, &interner, &mut output.expression_data);
-        tracing::debug!(
-            constants_folded = stats.constants_folded,
-            div_to_mul = stats.div_to_mul,
-            div_to_shift = stats.div_to_shift,
-            "optimization complete"
-        );
-    }
-
-    Ok(AnalyzedProgram::from_analysis(program, interner, output))
-}
-
-/// Parse and analyze a source file with a shared module cache.
-/// The cache is used to avoid re-analyzing modules that have already been analyzed.
-#[allow(clippy::result_unit_err)]
-pub fn parse_and_analyze_with_cache(
-    source: &str,
-    file_path: &str,
-    cache: Rc<RefCell<ModuleCache>>,
-    project_root: Option<&std::path::Path>,
-) -> Result<AnalyzedProgram, ()> {
-    // Parse phase
-    let (mut program, mut interner) = {
-        let _span = tracing::info_span!("parse", file = %file_path).entered();
-        let mut parser = Parser::with_file(source, file_path);
-        let program = match parser.parse_program() {
-            Ok(prog) => prog,
-            Err(e) => {
-                let lexer_errors = parser.take_lexer_errors();
-                if !lexer_errors.is_empty() {
-                    for err in &lexer_errors {
-                        render_lexer_error(err, file_path, source, &mut io::stderr());
-                    }
-                } else {
-                    render_parser_error(&e, file_path, source, &mut io::stderr());
-                }
-                return Err(());
-            }
-        };
-
-        let lexer_errors = parser.take_lexer_errors();
-        if !lexer_errors.is_empty() {
-            for err in &lexer_errors {
-                render_lexer_error(err, file_path, source, &mut io::stderr());
-            }
-            return Err(());
-        }
-
-        let mut interner = parser.into_interner();
-        interner.seed_builtin_symbols();
-        tracing::debug!(declarations = program.declarations.len(), "parsed");
-        (program, interner)
-    };
-
-    // Transform phase
-    {
-        let _span = tracing::info_span!("transform").entered();
-        let (_, transform_errors) = transforms::transform_generators(&mut program, &mut interner);
-        if !transform_errors.is_empty() {
-            for err in &transform_errors {
-                render_sema_error(err, file_path, source, &mut io::stderr());
-            }
-            return Err(());
-        }
-    }
-
-    // Sema phase with cache
-    let mut analyzer = {
-        let _span = tracing::info_span!("sema").entered();
-        let mut analyzer =
-            Analyzer::with_cache_and_project_root(file_path, source, cache, project_root);
-        if let Err(errors) = analyzer.analyze(&program, &interner) {
-            for err in &errors {
-                render_sema_error(err, file_path, source, &mut io::stderr());
-            }
-            return Err(());
-        }
-        tracing::debug!("type checking complete");
-        analyzer
-    };
-
-    for warn in &analyzer.take_warnings() {
-        render_sema_warning(warn, file_path, source, &mut io::stderr());
+        render_sema_warning(warn, file_path, source, errors);
     }
 
     let mut output = analyzer.into_analysis_results();
@@ -327,57 +231,16 @@ pub fn check_captured<W: Write + Send + 'static>(
     file_path: &str,
     mut stderr: W,
 ) -> Result<(), ()> {
-    // Parse
-    let mut parser = Parser::with_file(source, file_path);
-    let mut program = match parser.parse_program() {
-        Ok(prog) => prog,
-        Err(e) => {
-            let lexer_errors = parser.take_lexer_errors();
-            if !lexer_errors.is_empty() {
-                for err in &lexer_errors {
-                    render_lexer_error(err, file_path, source, &mut stderr);
-                }
-            } else {
-                render_parser_error(&e, file_path, source, &mut stderr);
-            }
-            return Err(());
-        }
-    };
-
-    let lexer_errors = parser.take_lexer_errors();
-    if !lexer_errors.is_empty() {
-        for err in &lexer_errors {
-            render_lexer_error(err, file_path, source, &mut stderr);
-        }
-        return Err(());
-    }
-
-    let mut interner = parser.into_interner();
-    interner.seed_builtin_symbols();
-
-    // Transform generators to state machines (before type checking)
-    let (_, transform_errors) = transforms::transform_generators(&mut program, &mut interner);
-    if !transform_errors.is_empty() {
-        for err in &transform_errors {
-            render_sema_error(err, file_path, source, &mut stderr);
-        }
-        return Err(());
-    }
-
-    // Type check
-    let mut analyzer = Analyzer::new(file_path, source);
-    if let Err(errors) = analyzer.analyze(&program, &interner) {
-        for err in &errors {
-            render_sema_error(err, file_path, source, &mut stderr);
-        }
-        return Err(());
-    }
-
-    // Render warnings (non-fatal diagnostics)
-    for warn in &analyzer.take_warnings() {
-        render_sema_warning(warn, file_path, source, &mut stderr);
-    }
-
+    compile_source(
+        PipelineOptions {
+            source,
+            file_path,
+            skip_tests: false,
+            project_root: None,
+            module_cache: None,
+        },
+        &mut stderr,
+    )?;
     Ok(())
 }
 
@@ -389,58 +252,16 @@ pub fn run_captured<W: Write + Send + 'static>(
     stdout: W,
     mut stderr: W,
 ) -> Result<(), ()> {
-    // Parse and analyze
-    let mut parser = Parser::with_file(source, file_path);
-    let mut program = match parser.parse_program() {
-        Ok(prog) => prog,
-        Err(e) => {
-            let lexer_errors = parser.take_lexer_errors();
-            if !lexer_errors.is_empty() {
-                for err in &lexer_errors {
-                    render_lexer_error(err, file_path, source, &mut stderr);
-                }
-            } else {
-                render_parser_error(&e, file_path, source, &mut stderr);
-            }
-            return Err(());
-        }
-    };
-
-    let lexer_errors = parser.take_lexer_errors();
-    if !lexer_errors.is_empty() {
-        for err in &lexer_errors {
-            render_lexer_error(err, file_path, source, &mut stderr);
-        }
-        return Err(());
-    }
-
-    let mut interner = parser.into_interner();
-    interner.seed_builtin_symbols();
-
-    // Transform generators to state machines (before type checking)
-    let (_, transform_errors) = transforms::transform_generators(&mut program, &mut interner);
-    if !transform_errors.is_empty() {
-        for err in &transform_errors {
-            render_sema_error(err, file_path, source, &mut stderr);
-        }
-        return Err(());
-    }
-
-    // Type check (skip tests blocks, matching `vole run` behavior)
-    let mut analyzer = Analyzer::new(file_path, source);
-    analyzer.set_skip_tests(true);
-    if let Err(errors) = analyzer.analyze(&program, &interner) {
-        for err in &errors {
-            render_sema_error(err, file_path, source, &mut stderr);
-        }
-        return Err(());
-    }
-    let mut output = analyzer.into_analysis_results();
-
-    // Optimizer phase (constant folding, algebraic simplifications)
-    let _stats = optimize_all(&mut program, &interner, &mut output.expression_data);
-
-    let analyzed = AnalyzedProgram::from_analysis(program, interner, output);
+    let analyzed = compile_source(
+        PipelineOptions {
+            source,
+            file_path,
+            skip_tests: true,
+            project_root: None,
+            module_cache: None,
+        },
+        &mut stderr,
+    )?;
 
     // Compile (skip tests blocks, matching `vole run` behavior)
     let mut jit = JitContext::new();

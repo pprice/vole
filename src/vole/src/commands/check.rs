@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 use std::process::ExitCode;
 
-use super::common::{parse_and_analyze, read_stdin};
+use super::common::{PipelineOptions, compile_source, read_stdin};
 use crate::cli::expand_paths_flat;
 use crate::runtime::push_context;
 
@@ -54,7 +54,16 @@ fn check_stdin() -> ExitCode {
         }
     };
 
-    match parse_and_analyze(&source, "<stdin>", None) {
+    match compile_source(
+        PipelineOptions {
+            source: &source,
+            file_path: "<stdin>",
+            skip_tests: false,
+            project_root: None,
+            module_cache: None,
+        },
+        &mut std::io::stderr(),
+    ) {
         Ok(_) => ExitCode::SUCCESS,
         Err(()) => ExitCode::FAILURE,
     }
@@ -72,6 +81,15 @@ fn check_single_file(path: &Path) -> Result<(), ()> {
 
     let file_path = path.to_string_lossy();
     push_context(&format!("checking {}", file_path));
-    parse_and_analyze(&source, &file_path, None)?;
+    compile_source(
+        PipelineOptions {
+            source: &source,
+            file_path: &file_path,
+            skip_tests: false,
+            project_root: None,
+            module_cache: None,
+        },
+        &mut std::io::stderr(),
+    )?;
     Ok(())
 }
