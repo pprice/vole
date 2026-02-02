@@ -172,7 +172,11 @@ impl Analyzer {
         if let Err(ref errors) = analyze_result {
             tracing::warn!(import_path, ?errors, "prelude analysis errors");
         }
-        if analyze_result.is_ok() {
+        // Always store the module program, even if analysis had errors.
+        // Partial analysis results (e.g. Map class with its methods) are still
+        // valid and needed by codegen. Methods that reference unknown types
+        // (like Iterator) simply won't be callable, but everything else works.
+        {
             // Cache the analysis results
             if let Some(ref cache) = self.ctx.module_cache {
                 cache.borrow_mut().insert(

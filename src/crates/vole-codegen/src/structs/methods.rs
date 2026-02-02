@@ -1354,8 +1354,14 @@ impl Cg<'_, '_, '_> {
         self.field_cache.clear();
         // call_result must run before consume_rc_args to copy union data
         // from callee's stack before rc_dec calls can clobber it
-        let result = self.call_result(call, return_type_id);
+        let mut result = self.call_result(call, return_type_id);
         self.consume_rc_args(&mut rc_temps)?;
+
+        // Mark RC-typed results as Owned so they get properly cleaned up
+        if self.needs_rc_cleanup(return_type_id) {
+            result.rc_lifecycle = RcLifecycle::Owned;
+        }
+
         Ok(result)
     }
 

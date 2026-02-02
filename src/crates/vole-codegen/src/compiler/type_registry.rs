@@ -15,7 +15,13 @@ use vole_sema::type_arena::TypeId;
 /// With RcHeader v2, we only need to distinguish Value (no cleanup) from Rc (needs rc_dec).
 /// Each RC allocation's own drop_fn handles type-specific cleanup.
 fn type_id_to_field_tag(ty: TypeId, arena: &vole_sema::type_arena::TypeArena) -> FieldTypeTag {
-    if arena.is_string(ty) || arena.is_array(ty) || arena.is_class(ty) {
+    if arena.is_string(ty)
+        || arena.is_array(ty)
+        || arena.is_class(ty)
+        || arena.is_handle(ty)
+        || arena.is_function(ty)
+        || arena.is_interface(ty)
+    {
         FieldTypeTag::Rc
     } else if let Some(variants) = arena.unwrap_union(ty) {
         // If any variant is a reference type, mark as needing cleanup
