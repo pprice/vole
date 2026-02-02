@@ -689,15 +689,22 @@ impl Cg<'_, '_, '_> {
         // Register loop context - continue jumps to header (but there's no continue in this path)
         let rc_depth = self.rc_scope_depth();
         self.cf.push_loop(exit_block, header, rc_depth);
+        // Push a per-iteration RC scope so temps are cleaned each iteration
+        self.push_rc_scope();
         let terminated = self.block(&for_stmt.body)?;
         self.cf.pop_loop();
 
         if !terminated {
+            // Emit per-iteration cleanup before the back-edge jump
+            self.pop_rc_scope_with_cleanup(None)?;
             // Inline the counter increment at end of body
             let current = self.builder.use_var(var);
             let next = self.builder.ins().iadd_imm(current, 1);
             self.builder.def_var(var, next);
             self.builder.ins().jump(header, &[]);
+        } else {
+            // Body terminated — pop scope to keep stack balanced
+            self.rc_scopes.pop_scope();
         }
 
         // Finalize: switch to exit and seal all blocks

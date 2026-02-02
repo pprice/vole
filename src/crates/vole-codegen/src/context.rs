@@ -1226,10 +1226,19 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ) -> Result<bool, String> {
         let rc_depth = self.rc_scope_depth();
         self.cf.push_loop(exit_block, continue_block, rc_depth);
+        // Push a per-iteration RC scope so temps created in the loop body
+        // get cleaned up at the end of each iteration, not just once at loop exit.
+        self.push_rc_scope();
         let terminated = self.block(body)?;
         self.cf.pop_loop();
         if !terminated {
+            // Emit per-iteration cleanup before jumping back to continue/header
+            self.pop_rc_scope_with_cleanup(None)?;
             self.builder.ins().jump(continue_block, &[]);
+        } else {
+            // Body terminated (break/return) — scope already cleaned by those paths.
+            // Still pop the scope to keep the stack balanced.
+            self.rc_scopes.pop_scope();
         }
         Ok(terminated)
     }

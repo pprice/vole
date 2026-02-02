@@ -1248,7 +1248,12 @@ impl Cg<'_, '_, '_> {
             .ins()
             .load(cranelift_ty, MemFlags::new(), heap_ptr, 0);
 
-        Ok(CompiledValue::new(value, cranelift_ty, binding.vole_type))
+        // Capture loads are borrows — the closure owns the reference via its
+        // capture slot.  Marking as Borrowed ensures the return path inc's the
+        // value when it leaves the closure body, giving the caller a +1 ref.
+        let mut cv = CompiledValue::new(value, cranelift_ty, binding.vole_type);
+        self.mark_borrowed_if_rc(&mut cv);
+        Ok(cv)
     }
 
     /// Store a value to a captured variable in closure

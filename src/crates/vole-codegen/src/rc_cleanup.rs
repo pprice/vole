@@ -196,7 +196,11 @@ pub(crate) fn emit_rc_cleanup(
     locals: &[RcLocal],
     rc_dec_ref: cranelift::codegen::ir::FuncRef,
 ) {
-    for local in locals {
+    // Iterate in reverse (LIFO) so that closures are dec'd before their
+    // captured variables. A closure destructor dec's its captures, so the
+    // closure must be freed first to avoid double-freeing a capture that
+    // was already dec'd by direct scope cleanup.
+    for local in locals.iter().rev() {
         let flag_val = builder.use_var(local.drop_flag);
         let is_live = builder.ins().icmp_imm(IntCC::NotEqual, flag_val, 0);
 
@@ -249,7 +253,8 @@ pub(crate) fn emit_composite_rc_cleanup(
     composites: &[CompositeRcLocal],
     rc_dec_ref: cranelift::codegen::ir::FuncRef,
 ) {
-    for composite in composites {
+    // Reverse order (LIFO) for consistency with emit_rc_cleanup.
+    for composite in composites.iter().rev() {
         let flag_val = builder.use_var(composite.drop_flag);
         let is_live = builder.ins().icmp_imm(IntCC::NotEqual, flag_val, 0);
 
