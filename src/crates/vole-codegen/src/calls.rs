@@ -82,14 +82,16 @@ impl Cg<'_, '_, '_> {
         Ok(self.string_temp(value))
     }
 
-    /// Compile an interpolated string
+    /// Compile an interpolated string using StringBuilder for efficient single-allocation
     pub fn interpolated_string(&mut self, parts: &[StringPart]) -> Result<CompiledValue, String> {
         if parts.is_empty() {
             return self.string_literal("");
         }
 
-        // Track which parts are owned (literals, to_string results) vs borrowed
-        // (existing string variables) so we can free owned parts after concat.
+        // Collect all string values, tracking which need cleanup after the build.
+        // - Literals: static (pinned RC), rc_dec is a no-op
+        // - Expr already string: borrowed or owned from expression
+        // - Expr converted via to_string: owned, needs rc_dec
         let mut string_values: Vec<Value> = Vec::new();
         let mut owned_flags: Vec<bool> = Vec::new();
         for part in parts {
@@ -98,10 +100,8 @@ impl Cg<'_, '_, '_> {
                 StringPart::Expr(expr) => {
                     let compiled = self.expr(expr)?;
                     if compiled.type_id == TypeId::STRING {
-                        // Already a string - keep borrow status
                         (compiled.value, compiled.is_owned())
                     } else {
-                        // Converted to string - new allocation, owned
                         (self.value_to_string(compiled)?, true)
                     }
                 }
@@ -110,24 +110,21 @@ impl Cg<'_, '_, '_> {
             owned_flags.push(is_owned);
         }
 
+        // Single part — return directly, no builder needed
         if string_values.len() == 1 {
             return Ok(self.string_temp(string_values[0]));
         }
 
-        let concat_func_ref = self.runtime_func_ref(RuntimeFn::StringConcat)?;
-        let mut result = string_values[0];
-        for (i, &next) in string_values.iter().enumerate().skip(1) {
-            let call = self.builder.ins().call(concat_func_ref, &[result, next]);
-            let new_result = self.builder.inst_results(call)[0];
-            // Free the previous result (intermediate concat) if it's not the
-            // first part (which is freed below with all owned parts).
-            if i > 1 {
-                self.emit_rc_dec(result)?;
-            }
-            result = new_result;
+        // Multi-part: use StringBuilder — one allocation instead of N concats
+        let sb = self.call_runtime(RuntimeFn::SbNew, &[])?;
+
+        for &sv in &string_values {
+            self.call_runtime_void(RuntimeFn::SbPushString, &[sb, sv])?;
         }
 
-        // Free all owned input parts — they've been consumed by concat.
+        let result = self.call_runtime(RuntimeFn::SbFinish, &[sb])?;
+
+        // Free all owned input parts — builder has copied the bytes
         for (val, is_owned) in string_values.iter().zip(owned_flags.iter()) {
             if *is_owned {
                 self.emit_rc_dec(*val)?;
