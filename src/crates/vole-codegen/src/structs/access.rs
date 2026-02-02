@@ -279,7 +279,7 @@ impl Cg<'_, '_, '_> {
                 } else {
                     None
                 };
-                if rc_old.is_some() && self.expr_needs_rc_inc(value_expr) {
+                if rc_old.is_some() && value.is_borrowed() {
                     self.emit_rc_inc(value.value)?;
                 }
                 let store_value = convert_to_i64_for_storage(self.builder, &value);

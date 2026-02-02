@@ -229,10 +229,7 @@ pub fn compile_function_body_with_cg(
             } else {
                 None
             };
-            if skip_var.is_none()
-                && cg.needs_rc_cleanup(value.type_id)
-                && cg.expr_needs_rc_inc(expr)
-            {
+            if skip_var.is_none() && cg.needs_rc_cleanup(value.type_id) && value.is_borrowed() {
                 cg.emit_rc_inc(value.value)?;
             }
 

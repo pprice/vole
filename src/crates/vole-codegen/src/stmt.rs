@@ -249,7 +249,7 @@ impl Cg<'_, '_, '_> {
                 // still get normal RC tracking — they produce a fresh +1 that
                 // the scope-exit dec balances against the last iteration's value.
                 if self.rc_scopes.has_active_scope() && self.needs_rc_cleanup(final_type_id) {
-                    let is_borrow = self.expr_needs_rc_inc(init_expr);
+                    let is_borrow = init.is_borrowed();
                     if self.cf.in_loop() && is_borrow {
                         // Borrow inside loop: skip inc and RC registration.
                         // The container (array, struct, etc.) keeps the value alive.
@@ -277,7 +277,7 @@ impl Cg<'_, '_, '_> {
             Stmt::LetTuple(let_tuple) => {
                 // Compile the initializer - should be a tuple, fixed array, or class
                 let init = self.expr(&let_tuple.init)?;
-                let is_borrow = self.expr_needs_rc_inc(&let_tuple.init);
+                let is_borrow = init.is_borrowed();
 
                 // When the initializer is a fresh temporary (literal, call result),
                 // register it as a composite RC local so its RC fields are dec'd at
@@ -335,7 +335,7 @@ impl Cg<'_, '_, '_> {
                     };
                     if skip_var.is_none()
                         && self.needs_rc_cleanup(compiled.type_id)
-                        && self.expr_needs_rc_inc(value)
+                        && compiled.is_borrowed()
                     {
                         self.emit_rc_inc(compiled.value)?;
                     }
@@ -1228,9 +1228,7 @@ impl Cg<'_, '_, '_> {
             let field_value = self.expr(&field_init.value)?;
             // RC: if the field value is a borrow (e.g., a parameter variable),
             // inc it so the caller gets an owned reference in the error payload.
-            if self.needs_rc_cleanup(field_value.type_id)
-                && self.expr_needs_rc_inc(&field_init.value)
-            {
+            if self.needs_rc_cleanup(field_value.type_id) && field_value.is_borrowed() {
                 self.emit_rc_inc(field_value.value)?;
             }
             convert_to_i64_for_storage(self.builder, &field_value)
@@ -1253,9 +1251,7 @@ impl Cg<'_, '_, '_> {
 
                 let field_value = self.expr(&field_init.value)?;
                 // RC: inc borrowed field values for the error payload
-                if self.needs_rc_cleanup(field_value.type_id)
-                    && self.expr_needs_rc_inc(&field_init.value)
-                {
+                if self.needs_rc_cleanup(field_value.type_id) && field_value.is_borrowed() {
                     self.emit_rc_inc(field_value.value)?;
                 }
                 let store_value = convert_to_i64_for_storage(self.builder, &field_value);

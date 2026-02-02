@@ -454,7 +454,7 @@ impl Cg<'_, '_, '_> {
             // so the new struct gets its own reference.
             if self.rc_scopes.has_active_scope()
                 && self.needs_rc_cleanup(value.type_id)
-                && self.expr_needs_rc_inc(&init.value)
+                && value.is_borrowed()
             {
                 self.emit_rc_inc(value.value)?;
             }

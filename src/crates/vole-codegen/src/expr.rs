@@ -481,7 +481,7 @@ impl Cg<'_, '_, '_> {
                 // 1. rc_inc new value if it's a borrow (variable copy)
                 // 2. Store the new value
                 // 3. rc_dec old value (after store, in case old == new)
-                if rc_old.is_some() && self.expr_needs_rc_inc(&assign.value) {
+                if rc_old.is_some() && value.is_borrowed() {
                     self.emit_rc_inc(value.value)?;
                 }
                 self.builder.def_var(var, value.value);
@@ -597,7 +597,7 @@ impl Cg<'_, '_, '_> {
             // share a single refcount, causing double-free on scope exit.
             if self.rc_scopes.has_active_scope()
                 && self.needs_rc_cleanup(compiled.type_id)
-                && self.expr_needs_rc_inc(elem)
+                && compiled.is_borrowed()
             {
                 self.emit_rc_inc(compiled.value)?;
             }
@@ -856,7 +856,7 @@ impl Cg<'_, '_, '_> {
             } else {
                 None
             };
-            if rc_old.is_some() && self.expr_needs_rc_inc(value) {
+            if rc_old.is_some() && val.is_borrowed() {
                 self.emit_rc_inc(val.value)?;
             }
             self.builder

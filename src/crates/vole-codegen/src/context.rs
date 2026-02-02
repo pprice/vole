@@ -372,33 +372,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Ok(())
     }
 
-    /// Check if storing the result of `expr` into a new binding requires rc_inc.
-    ///
-    /// Returns true when the expression produces a borrowed reference (reading
-    /// from a local variable, indexing a container, accessing a field). Returns
-    /// false for expressions that produce fresh values (literals, calls,
-    /// constructors) — those transfer ownership with refcount already set.
-    pub fn expr_needs_rc_inc(&self, expr: &Expr) -> bool {
-        use vole_frontend::ExprKind;
-        match &expr.kind {
-            // Variable read: borrow if it's a local variable binding.
-            // Function names, globals, module bindings create new RC objects
-            // (closure wrappers, etc.) — ownership transfers, no inc.
-            ExprKind::Identifier(sym) => self.vars.contains_key(sym),
-            // Array/tuple index reads borrow from the container.
-            ExprKind::Index(_) => true,
-            // FieldAccess borrows from the parent struct/instance.
-            // If the field value is RC (string, array), the caller must inc
-            // to balance the scope-exit dec on the new binding.
-            ExprKind::FieldAccess(_) => true,
-            // Transparent wrappers: look through them.
-            ExprKind::Grouping(inner) => self.expr_needs_rc_inc(inner),
-            // Everything else produces a fresh +1 reference (calls, literals,
-            // constructors, operators, etc.) — no inc needed.
-            _ => false,
-        }
-    }
-
     /// Register an RC local in the current scope. Allocates a drop flag,
     /// initializes it to 0, and adds it to the current scope.
     /// Returns the drop flag Variable so the caller can set it to 1 after assignment.
@@ -1103,10 +1076,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue::new(value, self.cranelift_type(type_id), type_id)
     }
 
-    /// Mark a CompiledValue as borrowed if its type is RC-managed.
+    /// Mark a CompiledValue as borrowed if its type is RC-managed or is a
+    /// composite type (tuple, fixed array, struct) with RC fields.
     /// This sets lifecycle metadata without emitting any rc_inc/rc_dec.
     pub fn mark_borrowed_if_rc(&self, cv: &mut CompiledValue) {
-        if self.needs_rc_cleanup(cv.type_id) {
+        if self.needs_rc_cleanup(cv.type_id)
+            || self.composite_rc_field_offsets(cv.type_id).is_some()
+        {
             cv.mark_borrowed();
         }
     }
