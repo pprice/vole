@@ -223,33 +223,23 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Check if a type needs RC cleanup in codegen.
     ///
-    /// Currently conservative: only String and Array variables get scope-exit cleanup.
-    /// Other RC types (Iterator, Instance, Closure) have their lifetimes
-    /// managed by the runtime (e.g., collect() decs the iterator). Emitting
-    /// scope-exit rc_dec for those would cause double-frees.
-    ///
-    /// Future tickets will add proper move semantics so all RC types can be
-    /// cleaned up at scope exit (clearing the drop flag when a value is moved/consumed).
+    /// Scope-exit cleanup is enabled for RC types whose drop functions
+    /// correctly handle recursive cleanup when their refcount reaches zero.
     pub fn needs_rc_cleanup(&self, type_id: TypeId) -> bool {
         let arena = self.arena();
-        // Only enable scope-exit RC cleanup for types with RcHeader whose
-        // drop functions don't recursively free child references.
-        //
         // Strings: atomic RC values, no child references.
         // Arrays: drop function handles element cleanup internally.
+        // Functions/Closures: closure_drop decs captured RC values when
+        //   refcount reaches zero, so scope-exit rc_dec cascades correctly.
         //
         // NOT yet enabled for:
         // - Class instances: instance_drop already decs RC fields, so scope-exit
         //   dec would double-free. Needs field-level rc_inc first (v-17c5).
-        // - Closures: now have RcHeader with closure_drop, but scope-exit tracking
-        //   would double-free since callers take ownership. Closure cleanup happens
-        //   via closure_drop when refcount reaches zero.
-        // - Functions: closure wrappers, same lifecycle as closures.
         // - Iterators: complex lifecycle managed by the runtime (collect, etc.).
         // - Interfaces: boxed values (fat pointers), not raw RC pointers.
         // - Structs: stack-allocated value types.
         // - Sentinels: i8 zero values, not heap pointers.
-        arena.is_string(type_id) || arena.is_array(type_id)
+        arena.is_string(type_id) || arena.is_array(type_id) || arena.is_function(type_id)
     }
 
     /// Check if a captured variable type is RC-managed and needs rc_inc/rc_dec.
