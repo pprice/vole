@@ -1,0 +1,68 @@
+// RC tests for class instances with primitive-only fields.
+//
+// Classes are heap-allocated and reference-counted. Even when fields are
+// all primitives (i64, f64, bool), the class instance itself is RC'd.
+// These tests exercise creation, copy, reassignment, and function passing
+// of class instances to verify RC inc/dec correctness.
+
+class Measurement {
+    value: i64,
+    scale: f64,
+    active: bool
+}
+
+func accept_measurement(m: Measurement) -> i64 {
+    return m.value
+}
+
+func pass_through(m: Measurement) -> Measurement {
+    return m
+}
+
+tests "class with primitives" {
+    test "create instance and read fields" {
+        let m = Measurement { value: 42, scale: 1.5, active: true }
+        assert(m.value == 42)
+        assert(m.scale == 1.5)
+        assert(m.active == true)
+    }
+
+    test "copy instance both accessible" {
+        let a = Measurement { value: 10, scale: 2.0, active: false }
+        let b = a
+        assert(a.value == 10)
+        assert(b.value == 10)
+        assert(a.active == false)
+        assert(b.active == false)
+    }
+
+    test "reassign instance variable" {
+        let mut m = Measurement { value: 1, scale: 0.5, active: true }
+        m = Measurement { value: 2, scale: 1.0, active: false }
+        assert(m.value == 2)
+        assert(m.scale == 1.0)
+        assert(m.active == false)
+    }
+
+    test "pass instance to function and return value" {
+        let m = Measurement { value: 99, scale: 3.14, active: true }
+        let v = accept_measurement(m)
+        assert(v == 99)
+        assert(m.value == 99)
+    }
+
+    test "pass instance through function and read result" {
+        let m = Measurement { value: 7, scale: 0.1, active: false }
+        let returned = pass_through(m)
+        assert(returned.value == 7)
+        assert(returned.scale == 0.1)
+        assert(returned.active == false)
+    }
+
+    test "multiple instances go out of scope" {
+        let a = Measurement { value: 1, scale: 1.0, active: true }
+        let b = Measurement { value: 2, scale: 2.0, active: false }
+        let c = Measurement { value: 3, scale: 3.0, active: true }
+        assert(a.value + b.value + c.value == 6)
+    }
+}
