@@ -11,6 +11,7 @@ pub mod native_registry;
 pub mod signal;
 pub mod stdlib;
 pub mod string;
+pub mod string_builder;
 pub mod type_registry;
 pub mod value;
 
