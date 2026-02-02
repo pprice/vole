@@ -141,7 +141,7 @@ impl Cg<'_, '_, '_> {
 
                 // Struct copy: when binding a struct value, copy to a new stack slot
                 // to maintain value semantics (structs are stack-allocated value types)
-                let init = if self.arena().is_struct(init.type_id) {
+                let mut init = if self.arena().is_struct(init.type_id) {
                     self.copy_struct_value(init)?
                 } else {
                     init
@@ -271,12 +271,15 @@ impl Cg<'_, '_, '_> {
                     }
                 }
 
+                // The init value is consumed by the let binding — the binding
+                // now owns it and scope cleanup handles the eventual dec.
+                init.mark_consumed();
                 Ok(false)
             }
 
             Stmt::LetTuple(let_tuple) => {
                 // Compile the initializer - should be a tuple, fixed array, or class
-                let init = self.expr(&let_tuple.init)?;
+                let mut init = self.expr(&let_tuple.init)?;
                 let is_borrow = init.is_borrowed();
 
                 // When the initializer is a fresh temporary (literal, call result),
@@ -296,6 +299,8 @@ impl Cg<'_, '_, '_> {
 
                 // Recursively compile the destructuring pattern
                 self.compile_destructure_pattern(&let_tuple.pattern, init.value, init.type_id)?;
+                // The init value is consumed by the destructuring — bindings now own the elements.
+                init.mark_consumed();
                 Ok(false)
             }
 
@@ -319,7 +324,7 @@ impl Cg<'_, '_, '_> {
             Stmt::Return(ret) => {
                 let return_type_id = self.return_type;
                 if let Some(value) = &ret.value {
-                    let compiled = self.expr(value)?;
+                    let mut compiled = self.expr(value)?;
 
                     // RC bookkeeping for return values:
                     // - RC local variable: skip its cleanup (ownership transfers to caller)
@@ -340,6 +345,9 @@ impl Cg<'_, '_, '_> {
                         self.emit_rc_inc(compiled.value)?;
                     }
                     self.emit_rc_cleanup_all_scopes(skip_var)?;
+
+                    // The return value is consumed — ownership transfers to the caller.
+                    compiled.mark_consumed();
 
                     // Box concrete types to interface representation if needed
                     // But skip boxing for RuntimeIterator - it's the raw representation of Iterator
@@ -1225,12 +1233,14 @@ impl Cg<'_, '_, '_> {
                 .find(|f| self.interner().resolve(f.name) == field_name)
                 .ok_or_else(|| format!("Missing field {} in raise statement", &field_name))?;
 
-            let field_value = self.expr(&field_init.value)?;
+            let mut field_value = self.expr(&field_init.value)?;
             // RC: if the field value is a borrow (e.g., a parameter variable),
             // inc it so the caller gets an owned reference in the error payload.
             if self.needs_rc_cleanup(field_value.type_id) && field_value.is_borrowed() {
                 self.emit_rc_inc(field_value.value)?;
             }
+            // The field value is consumed into the error payload.
+            field_value.mark_consumed();
             convert_to_i64_for_storage(self.builder, &field_value)
         } else {
             // Multiple fields - allocate on stack and store field values
@@ -1249,11 +1259,13 @@ impl Cg<'_, '_, '_> {
                     .find(|f| self.interner().resolve(f.name) == field_name)
                     .ok_or_else(|| format!("Missing field {} in raise statement", &field_name))?;
 
-                let field_value = self.expr(&field_init.value)?;
+                let mut field_value = self.expr(&field_init.value)?;
                 // RC: inc borrowed field values for the error payload
                 if self.needs_rc_cleanup(field_value.type_id) && field_value.is_borrowed() {
                     self.emit_rc_inc(field_value.value)?;
                 }
+                // The field value is consumed into the error payload.
+                field_value.mark_consumed();
                 let store_value = convert_to_i64_for_storage(self.builder, &field_value);
                 let field_offset = (field_idx as i32) * 8;
                 self.builder

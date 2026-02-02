@@ -449,7 +449,7 @@ impl Cg<'_, '_, '_> {
                 .unwrap_or((field_slot as i32) * 8)
             };
 
-            let value = self.expr(&init.value)?;
+            let mut value = self.expr(&init.value)?;
             // RC: inc borrowed field values (e.g., reading from another struct's field)
             // so the new struct gets its own reference.
             if self.rc_scopes.has_active_scope()
@@ -459,6 +459,8 @@ impl Cg<'_, '_, '_> {
                 self.emit_rc_inc(value.value)?;
             }
             self.store_struct_field(value, slot, offset)?;
+            // The field value is consumed into the struct literal.
+            value.mark_consumed();
         }
 
         // Handle omitted fields with default values

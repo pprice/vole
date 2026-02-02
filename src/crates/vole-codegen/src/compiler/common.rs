@@ -216,7 +216,7 @@ pub fn compile_function_body_with_cg(
             (terminated, None)
         }
         FuncBody::Expr(expr) => {
-            let value = cg.expr(expr)?;
+            let mut value = cg.expr(expr)?;
 
             // RC bookkeeping for expression-bodied returns (mirrors Stmt::Return logic):
             // If the return expression is a borrow (variable read, index, field access),
@@ -233,6 +233,8 @@ pub fn compile_function_body_with_cg(
                 cg.emit_rc_inc(value.value)?;
             }
 
+            // The return value is consumed — ownership transfers to the caller.
+            value.mark_consumed();
             (true, Some((value, skip_var)))
         }
     };

@@ -12,7 +12,7 @@ use vole_sema::type_arena::TypeId;
 
 use super::context::Cg;
 use super::structs::{convert_to_i64_for_storage, get_field_slot_and_type_id_cg};
-use super::types::{CompiledValue, RcLifecycle, array_element_tag_id, convert_to_type};
+use super::types::{CompiledValue, array_element_tag_id, convert_to_type};
 
 /// Convert a numeric TypeId to its corresponding Cranelift type.
 /// Only handles numeric types; other types will default to I64.
@@ -878,9 +878,10 @@ impl Cg<'_, '_, '_> {
         let result = self.binary_op(current, rhs, binary_op, line)?;
 
         self.builder.def_var(var, result.value);
-        // Assignment consumed the temp — clear the flag
+        // The compound assignment consumed the temp — ownership transfers
+        // to the variable binding; scope cleanup handles the dec.
         let mut result = result;
-        result.rc_lifecycle = RcLifecycle::Untracked;
+        result.mark_consumed();
         Ok(result)
     }
 

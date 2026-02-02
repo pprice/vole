@@ -8,7 +8,6 @@ use cranelift_module::Module;
 
 use crate::RuntimeFn;
 use crate::errors::CodegenError;
-use crate::types::RcLifecycle;
 use rustc_hash::FxHashMap;
 
 use vole_frontend::{
@@ -489,9 +488,9 @@ impl Cg<'_, '_, '_> {
                     self.emit_rc_dec(old_val)?;
                 }
 
-                // The assignment consumed the temp — clear the flag so
-                // Stmt::Expr won't double-dec it.
-                value.rc_lifecycle = RcLifecycle::Untracked;
+                // The assignment consumed the temp — ownership transfers
+                // to the variable binding; scope cleanup handles the dec.
+                value.mark_consumed();
                 Ok(value)
             }
             AssignTarget::Field { object, field, .. } => {
@@ -589,7 +588,7 @@ impl Cg<'_, '_, '_> {
 
         // Compile and store each element
         for (i, elem) in elements.iter().enumerate() {
-            let compiled = self.expr(elem)?;
+            let mut compiled = self.expr(elem)?;
             let offset = offsets[i];
 
             // RC: inc borrowed RC elements so the tuple gets its own reference.
@@ -604,6 +603,8 @@ impl Cg<'_, '_, '_> {
 
             // Store the value at its offset in the tuple
             self.builder.ins().stack_store(compiled.value, slot, offset);
+            // The element value is consumed into the tuple container.
+            compiled.mark_consumed();
         }
 
         // Return pointer to the tuple
@@ -622,7 +623,7 @@ impl Cg<'_, '_, '_> {
         expr: &Expr,
     ) -> Result<CompiledValue, String> {
         // Compile the element once
-        let elem_value = self.expr(element)?;
+        let mut elem_value = self.expr(element)?;
 
         // Each element is aligned to 8 bytes
         let elem_size = 8u32;
@@ -645,6 +646,8 @@ impl Cg<'_, '_, '_> {
                 .ins()
                 .stack_store(elem_value.value, slot, offset);
         }
+        // The element value is consumed into the repeat array container.
+        elem_value.mark_consumed();
 
         // Return pointer to the array
         let ptr_type = self.ptr_type();
@@ -866,9 +869,10 @@ impl Cg<'_, '_, '_> {
                 self.emit_rc_dec(old_val)?;
             }
 
-            // Assignment consumed the temp — clear the flag
+            // The assignment consumed the temp — ownership transfers
+            // to the array element; the container's cleanup handles the dec.
             let mut val = val;
-            val.rc_lifecycle = RcLifecycle::Untracked;
+            val.mark_consumed();
             Ok(val)
         } else if is_dynamic_array {
             // Dynamic array assignment
@@ -887,9 +891,10 @@ impl Cg<'_, '_, '_> {
                 .ins()
                 .call(set_value_ref, &[arr.value, idx.value, tag_val, value_bits]);
 
-            // Assignment consumed the temp — clear the flag
+            // The assignment consumed the temp — ownership transfers
+            // to the dynamic array element.
             let mut val = val;
-            val.rc_lifecycle = RcLifecycle::Untracked;
+            val.mark_consumed();
             Ok(val)
         } else {
             // Error: not an indexable type
@@ -1187,7 +1192,7 @@ impl Cg<'_, '_, '_> {
     fn store_capture(
         &mut self,
         binding: &super::lambda::CaptureBinding,
-        value: CompiledValue,
+        mut value: CompiledValue,
     ) -> Result<CompiledValue, String> {
         let closure_var = self
             .closure_var()
@@ -1203,6 +1208,8 @@ impl Cg<'_, '_, '_> {
             .ins()
             .store(MemFlags::new(), value.value, heap_ptr, 0);
 
+        // The value is consumed into the captured variable storage.
+        value.mark_consumed();
         Ok(CompiledValue::new(
             value.value,
             cranelift_ty,

@@ -4,7 +4,7 @@ use super::helpers::{convert_to_i64_for_storage, get_field_slot_and_type_id_cg};
 use crate::RuntimeFn;
 use crate::context::Cg;
 use crate::errors::CodegenError;
-use crate::types::{CompiledValue, RcLifecycle, module_name_id};
+use crate::types::{CompiledValue, module_name_id};
 use cranelift::prelude::*;
 use vole_frontend::{Expr, FieldAccessExpr, NodeId, OptionalChainExpr, Symbol};
 use vole_sema::type_arena::TypeId;
@@ -290,9 +290,10 @@ impl Cg<'_, '_, '_> {
                     self.emit_rc_dec(old_val)?;
                 }
             }
-            // Assignment consumed the temp — clear the flag
+            // The assignment consumed the temp — ownership transfers
+            // to the struct field; the struct's cleanup handles the dec.
             let mut value = value;
-            value.rc_lifecycle = RcLifecycle::Untracked;
+            value.mark_consumed();
             return Ok(value);
         }
 
@@ -311,9 +312,10 @@ impl Cg<'_, '_, '_> {
         )?;
         self.field_cache.clear(); // Invalidate cached field reads
 
-        // Assignment consumed the temp — clear the flag
+        // The assignment consumed the temp — ownership transfers
+        // to the instance field; the instance's cleanup handles the dec.
         let mut value = value;
-        value.rc_lifecycle = RcLifecycle::Untracked;
+        value.mark_consumed();
         Ok(value)
     }
 
