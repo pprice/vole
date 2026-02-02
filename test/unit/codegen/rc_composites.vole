@@ -140,6 +140,15 @@ tests "fixed array of strings" {
     }
 }
 
+class Item {
+    label: string,
+    count: i64
+}
+
+func read_item_label(it: Item) -> string {
+    return it.label
+}
+
 tests "nested struct with strings" {
     test "nested struct field read" {
         let inner = Named { name: "deep", value: 10 }
@@ -155,5 +164,80 @@ tests "nested struct with strings" {
         let tag = n.tag
         assert(name == "deep")
         assert(tag == "outer")
+    }
+}
+
+tests "array of RC types" {
+    test "array of strings create and access" {
+        let arr = ["alpha", "beta", "gamma"]
+        assert(arr[0] == "alpha")
+        assert(arr[1] == "beta")
+        assert(arr[2] == "gamma")
+        assert(arr.length() == 3)
+    }
+
+    test "array of strings iterate with for loop" {
+        let arr = ["one", "two", "three"]
+        let mut result = ""
+        for item in arr {
+            result = result + item + ","
+        }
+        assert(result == "one,two,three,")
+    }
+
+    test "array of strings read into locals and scope exit" {
+        let arr = ["first", "second", "third"]
+        let a = arr[0]
+        let b = arr[1]
+        let c = arr[2]
+        assert(a == "first")
+        assert(b == "second")
+        assert(c == "third")
+        assert(arr[0] == "first")
+    }
+
+    test "array of class instances create and access" {
+        let a = Item { label: "sword", count: 1 }
+        let b = Item { label: "shield", count: 2 }
+        let c = Item { label: "potion", count: 5 }
+        let arr = [a, b, c]
+        assert(arr[0].label == "sword")
+        assert(arr[1].label == "shield")
+        assert(arr[2].label == "potion")
+        assert(arr[0].count == 1)
+        assert(arr[1].count == 2)
+        assert(arr[2].count == 5)
+    }
+
+    test "array of class instances iterate" {
+        let x = Item { label: "x", count: 10 }
+        let y = Item { label: "y", count: 20 }
+        let z = Item { label: "z", count: 30 }
+        let items = [x, y, z]
+        let mut total = 0
+        for it in items {
+            total = total + it.count
+        }
+        assert(total == 60)
+    }
+
+    test "array of closures create and call" {
+        let add1 = (x: i64) -> i64 => x + 1
+        let add2 = (x: i64) -> i64 => x + 2
+        let add3 = (x: i64) -> i64 => x + 3
+        let fns = [add1, add2, add3]
+        assert(fns[0](10) == 11)
+        assert(fns[1](10) == 12)
+        assert(fns[2](10) == 13)
+    }
+
+    test "nested array of strings" {
+        let inner1 = ["a", "b"]
+        let inner2 = ["c", "d"]
+        let outer = [inner1, inner2]
+        assert(outer[0][0] == "a")
+        assert(outer[0][1] == "b")
+        assert(outer[1][0] == "c")
+        assert(outer[1][1] == "d")
     }
 }
