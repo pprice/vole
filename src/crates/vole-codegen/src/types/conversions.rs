@@ -96,6 +96,11 @@ impl CompiledValue {
         )
     }
 
+    /// Mark this value as a borrow from an existing binding.
+    pub fn mark_borrowed(&mut self) {
+        self.rc_lifecycle = RcLifecycle::Borrowed;
+    }
+
     /// Mark this value as consumed — no further RC action needed.
     pub fn mark_consumed(&mut self) {
         self.rc_lifecycle = RcLifecycle::Consumed;

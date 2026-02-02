@@ -1103,6 +1103,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue::new(value, self.cranelift_type(type_id), type_id)
     }
 
+    /// Mark a CompiledValue as borrowed if its type is RC-managed.
+    /// This sets lifecycle metadata without emitting any rc_inc/rc_dec.
+    pub fn mark_borrowed_if_rc(&self, cv: &mut CompiledValue) {
+        if self.needs_rc_cleanup(cv.type_id) {
+            cv.mark_borrowed();
+        }
+    }
+
     /// Convert a raw i64 field value to a CompiledValue with the proper type.
     /// Handles type narrowing for primitives (f64 bitcast, bool/int reduction).
     pub fn convert_field_value(&mut self, raw_value: Value, type_id: TypeId) -> CompiledValue {

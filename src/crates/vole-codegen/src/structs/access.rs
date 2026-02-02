@@ -97,7 +97,9 @@ impl Cg<'_, '_, '_> {
         }
 
         let result_raw = self.get_field_cached(obj.value, slot as u32)?;
-        Ok(self.convert_field_value(result_raw, field_type_id))
+        let mut cv = self.convert_field_value(result_raw, field_type_id);
+        self.mark_borrowed_if_rc(&mut cv);
+        Ok(cv)
     }
 
     pub fn optional_chain(
@@ -195,7 +197,9 @@ impl Cg<'_, '_, '_> {
             let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
             let field_raw =
                 self.call_runtime(RuntimeFn::InstanceGetField, &[inner_obj, slot_val])?;
-            self.convert_field_value(field_raw, field_type_id)
+            let mut cv = self.convert_field_value(field_raw, field_type_id);
+            self.mark_borrowed_if_rc(&mut cv);
+            cv
         };
 
         // Wrap the field value in an optional (using construct_union_id)
@@ -349,6 +353,8 @@ impl Cg<'_, '_, '_> {
             .builder
             .ins()
             .load(types::I64, MemFlags::new(), struct_ptr, offset);
-        Ok(self.convert_field_value(raw_value, field_type_id))
+        let mut cv = self.convert_field_value(raw_value, field_type_id);
+        self.mark_borrowed_if_rc(&mut cv);
+        Ok(cv)
     }
 }

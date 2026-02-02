@@ -181,7 +181,9 @@ impl Cg<'_, '_, '_> {
                 return Ok(extracted);
             }
 
-            Ok(CompiledValue::new(val, ty, *type_id))
+            let mut cv = CompiledValue::new(val, ty, *type_id);
+            self.mark_borrowed_if_rc(&mut cv);
+            Ok(cv)
         } else if let Some(&(module_id, export_name, export_type_id)) =
             self.module_bindings.get(&sym)
         {
@@ -716,7 +718,9 @@ impl Cg<'_, '_, '_> {
                         .ins()
                         .load(elem_cr_type, MemFlags::new(), obj.value, offset);
 
-                return Ok(CompiledValue::new(value, elem_cr_type, elem_type_id));
+                let mut cv = CompiledValue::new(value, elem_cr_type, elem_type_id);
+                self.mark_borrowed_if_rc(&mut cv);
+                return Ok(cv);
             } else {
                 return Err("tuple index must be a constant".to_string());
             }
@@ -766,7 +770,9 @@ impl Cg<'_, '_, '_> {
                 .ins()
                 .load(elem_cr_type, MemFlags::new(), elem_ptr, 0);
 
-            return Ok(CompiledValue::new(value, elem_cr_type, element_id));
+            let mut cv = CompiledValue::new(value, elem_cr_type, element_id);
+            self.mark_borrowed_if_rc(&mut cv);
+            return Ok(cv);
         }
 
         // Try dynamic array
@@ -776,7 +782,9 @@ impl Cg<'_, '_, '_> {
 
             let raw_value =
                 self.call_runtime_cached(RuntimeFn::ArrayGetValue, &[obj.value, idx.value])?;
-            return Ok(self.convert_field_value(raw_value, element_id));
+            let mut cv = self.convert_field_value(raw_value, element_id);
+            self.mark_borrowed_if_rc(&mut cv);
+            return Ok(cv);
         }
 
         let type_name = self.arena().display_basic(obj.type_id);
