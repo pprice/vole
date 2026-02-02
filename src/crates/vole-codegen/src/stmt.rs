@@ -238,12 +238,30 @@ impl Cg<'_, '_, '_> {
                 // new reference to the same heap object. Ownership transfers (let x =
                 // new_string(), let x = "literal") don't need inc — the value is born
                 // with refcount=1 for us.
+                //
+                // Inside a loop body, borrowed let-bindings (array index, field
+                // access, variable copies) must NOT be rc_inc'd because the
+                // source container keeps the value alive for the duration of
+                // the iteration and the let re-executes each iteration. Without
+                // per-iteration dec of the old value, each inc leaks. This
+                // matches for-loop semantics where the loop variable is a raw
+                // borrow. Ownership transfers (calls, literals) inside loops
+                // still get normal RC tracking — they produce a fresh +1 that
+                // the scope-exit dec balances against the last iteration's value.
                 if self.rc_scopes.has_active_scope() && self.needs_rc_cleanup(final_type_id) {
-                    if self.expr_needs_rc_inc(init_expr) {
-                        self.emit_rc_inc(final_value)?;
+                    let is_borrow = self.expr_needs_rc_inc(init_expr);
+                    if self.cf.in_loop() && is_borrow {
+                        // Borrow inside loop: skip inc and RC registration.
+                        // The container (array, struct, etc.) keeps the value alive.
+                        // If this value is later assigned to an outer variable or
+                        // returned, the assign/return handlers emit their own inc.
+                    } else {
+                        if is_borrow {
+                            self.emit_rc_inc(final_value)?;
+                        }
+                        let drop_flag = self.register_rc_local(var, final_type_id);
+                        crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
                     }
-                    let drop_flag = self.register_rc_local(var, final_type_id);
-                    crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
                 } else if self.rc_scopes.has_active_scope() {
                     // Check for composite types (struct, fixed array, tuple) with RC fields.
                     // These need element-level cleanup on scope exit.

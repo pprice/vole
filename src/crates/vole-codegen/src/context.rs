@@ -79,6 +79,11 @@ impl ControlFlow {
     pub fn loop_rc_depth(&self) -> Option<usize> {
         self.loop_rc_depths.last().copied()
     }
+
+    /// Returns true if currently inside a loop body.
+    pub fn in_loop(&self) -> bool {
+        !self.loop_exits.is_empty()
+    }
 }
 
 impl Default for ControlFlow {
