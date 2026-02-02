@@ -19,6 +19,57 @@ func pass_through(m: Measurement) -> Measurement {
     return m
 }
 
+class Person {
+    name: string,
+    age: i64
+}
+
+tests "class with string fields" {
+    test "create instance and read string field" {
+        let p = Person { name: "Alice", age: 30 }
+        assert(p.name == "Alice")
+        assert(p.age == 30)
+    }
+
+    test "string field scope exit" {
+        let p = Person { name: "Bob", age: 25 }
+        assert(p.name == "Bob")
+    }
+
+    test "read string field into local variable" {
+        let p = Person { name: "Charlie", age: 40 }
+        let n = p.name
+        assert(n == "Charlie")
+        assert(p.name == "Charlie")
+    }
+
+    test "reassign instance with string field" {
+        let mut p = Person { name: "Dave", age: 20 }
+        p = Person { name: "Eve", age: 35 }
+        assert(p.name == "Eve")
+        assert(p.age == 35)
+    }
+
+    test "copy instance with string field" {
+        let a = Person { name: "Frank", age: 50 }
+        let b = a
+        assert(a.name == "Frank")
+        assert(b.name == "Frank")
+        assert(a.age == 50)
+        assert(b.age == 50)
+    }
+
+    test "multiple instances with string fields go out of scope" {
+        let a = Person { name: "Grace", age: 10 }
+        let b = Person { name: "Heidi", age: 20 }
+        let c = Person { name: "Ivan", age: 30 }
+        assert(a.name == "Grace")
+        assert(b.name == "Heidi")
+        assert(c.name == "Ivan")
+        assert(a.age + b.age + c.age == 60)
+    }
+}
+
 tests "class with primitives" {
     test "create instance and read fields" {
         let m = Measurement { value: 42, scale: 1.5, active: true }
