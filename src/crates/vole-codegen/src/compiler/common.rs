@@ -235,6 +235,7 @@ pub fn compile_function_body_with_cg(
 
             // The return value is consumed — ownership transfers to the caller.
             value.mark_consumed();
+            value.debug_assert_rc_handled("implicit return");
             (true, Some((value, skip_var)))
         }
     };

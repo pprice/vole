@@ -294,6 +294,7 @@ impl Cg<'_, '_, '_> {
             // to the struct field; the struct's cleanup handles the dec.
             let mut value = value;
             value.mark_consumed();
+            value.debug_assert_rc_handled("struct field assign (stack)");
             return Ok(value);
         }
 
@@ -316,6 +317,7 @@ impl Cg<'_, '_, '_> {
         // to the instance field; the instance's cleanup handles the dec.
         let mut value = value;
         value.mark_consumed();
+        value.debug_assert_rc_handled("instance field assign");
         Ok(value)
     }
 

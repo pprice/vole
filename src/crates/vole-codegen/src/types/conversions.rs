@@ -99,6 +99,19 @@ impl CompiledValue {
     pub fn mark_consumed(&mut self) {
         self.rc_lifecycle = RcLifecycle::Consumed;
     }
+
+    /// Debug assertion that this value's RC lifecycle has been handled.
+    /// Panics in debug builds if the value is still Owned or Borrowed,
+    /// meaning a codegen path forgot to consume or clean up the value.
+    #[inline]
+    pub fn debug_assert_rc_handled(&self, context: &str) {
+        debug_assert!(
+            !self.is_tracked(),
+            "Unhandled RC value at {context}: lifecycle={:?} type_id={:?}",
+            self.rc_lifecycle,
+            self.type_id,
+        );
+    }
 }
 
 /// Metadata about a class type for code generation

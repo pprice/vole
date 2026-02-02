@@ -491,6 +491,7 @@ impl Cg<'_, '_, '_> {
                 // The assignment consumed the temp — ownership transfers
                 // to the variable binding; scope cleanup handles the dec.
                 value.mark_consumed();
+                value.debug_assert_rc_handled("assign to variable");
                 Ok(value)
             }
             AssignTarget::Field { object, field, .. } => {
@@ -605,6 +606,7 @@ impl Cg<'_, '_, '_> {
             self.builder.ins().stack_store(compiled.value, slot, offset);
             // The element value is consumed into the tuple container.
             compiled.mark_consumed();
+            compiled.debug_assert_rc_handled("tuple element");
         }
 
         // Return pointer to the tuple
@@ -648,6 +650,7 @@ impl Cg<'_, '_, '_> {
         }
         // The element value is consumed into the repeat array container.
         elem_value.mark_consumed();
+        elem_value.debug_assert_rc_handled("repeat array element");
 
         // Return pointer to the array
         let ptr_type = self.ptr_type();
@@ -873,6 +876,7 @@ impl Cg<'_, '_, '_> {
             // to the array element; the container's cleanup handles the dec.
             let mut val = val;
             val.mark_consumed();
+            val.debug_assert_rc_handled("fixed array index assign");
             Ok(val)
         } else if is_dynamic_array {
             // Dynamic array assignment
@@ -895,6 +899,7 @@ impl Cg<'_, '_, '_> {
             // to the dynamic array element.
             let mut val = val;
             val.mark_consumed();
+            val.debug_assert_rc_handled("dynamic array index assign");
             Ok(val)
         } else {
             // Error: not an indexable type
@@ -1210,6 +1215,7 @@ impl Cg<'_, '_, '_> {
 
         // The value is consumed into the captured variable storage.
         value.mark_consumed();
+        value.debug_assert_rc_handled("closure capture assign");
         Ok(CompiledValue::new(
             value.value,
             cranelift_ty,

@@ -882,6 +882,7 @@ impl Cg<'_, '_, '_> {
         // to the variable binding; scope cleanup handles the dec.
         let mut result = result;
         result.mark_consumed();
+        result.debug_assert_rc_handled("compound assign to variable");
         Ok(result)
     }
 

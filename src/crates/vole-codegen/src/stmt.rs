@@ -274,6 +274,7 @@ impl Cg<'_, '_, '_> {
                 // The init value is consumed by the let binding — the binding
                 // now owns it and scope cleanup handles the eventual dec.
                 init.mark_consumed();
+                init.debug_assert_rc_handled("Stmt::Let");
                 Ok(false)
             }
 
@@ -301,6 +302,7 @@ impl Cg<'_, '_, '_> {
                 self.compile_destructure_pattern(&let_tuple.pattern, init.value, init.type_id)?;
                 // The init value is consumed by the destructuring — bindings now own the elements.
                 init.mark_consumed();
+                init.debug_assert_rc_handled("Stmt::LetTuple");
                 Ok(false)
             }
 
@@ -317,6 +319,7 @@ impl Cg<'_, '_, '_> {
                     // Consume RC value if the expression result is unused
                     // (e.g. standalone function call returning a string)
                     self.consume_rc_value(&mut result)?;
+                    result.debug_assert_rc_handled("Stmt::Expr");
                     Ok(false)
                 }
             }
@@ -348,6 +351,7 @@ impl Cg<'_, '_, '_> {
 
                     // The return value is consumed — ownership transfers to the caller.
                     compiled.mark_consumed();
+                    compiled.debug_assert_rc_handled("Stmt::Return");
 
                     // Box concrete types to interface representation if needed
                     // But skip boxing for RuntimeIterator - it's the raw representation of Iterator
@@ -1250,6 +1254,7 @@ impl Cg<'_, '_, '_> {
             }
             // The field value is consumed into the error payload.
             field_value.mark_consumed();
+            field_value.debug_assert_rc_handled("Stmt::Raise (single field)");
             convert_to_i64_for_storage(self.builder, &field_value)
         } else {
             // Multiple fields - allocate on stack and store field values
@@ -1275,6 +1280,7 @@ impl Cg<'_, '_, '_> {
                 }
                 // The field value is consumed into the error payload.
                 field_value.mark_consumed();
+                field_value.debug_assert_rc_handled("Stmt::Raise (multi field)");
                 let store_value = convert_to_i64_for_storage(self.builder, &field_value);
                 let field_offset = (field_idx as i32) * 8;
                 self.builder

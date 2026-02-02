@@ -461,6 +461,7 @@ impl Cg<'_, '_, '_> {
             self.store_struct_field(value, slot, offset)?;
             // The field value is consumed into the struct literal.
             value.mark_consumed();
+            value.debug_assert_rc_handled("struct literal field");
         }
 
         // Handle omitted fields with default values
