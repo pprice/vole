@@ -1,0 +1,94 @@
+// RC tests for closures as first-class values.
+//
+// Closures themselves are heap-allocated and reference-counted. These tests
+// exercise closures as values: stored in variables, passed to functions,
+// returned from functions, stored in arrays, and multiple closures going
+// out of scope.
+
+func apply_i64(f: (i64) -> i64, x: i64) -> i64 {
+    return f(x)
+}
+
+func apply_str(f: (string) -> string, x: string) -> string {
+    return f(x)
+}
+
+func make_adder(n: i64) -> (i64) -> i64 {
+    return (x: i64) -> i64 => x + n
+}
+
+func make_greeter(greeting: string) -> (string) -> string {
+    return (name: string) -> string => greeting + " " + name
+}
+
+tests "closure stored in variable goes out of scope" {
+    test "closure with int capture drops at scope exit" {
+        let offset = 10
+        let add_offset = (x: i64) -> i64 => x + offset
+        assert(add_offset(5) == 15)
+        assert(add_offset(0) == 10)
+    }
+
+    test "closure with string capture drops at scope exit" {
+        let prefix = "hello"
+        let greet = (name: string) -> string => prefix + " " + name
+        assert(greet("world") == "hello world")
+        assert(greet("vole") == "hello vole")
+    }
+}
+
+tests "closure passed to function as argument" {
+    test "pass closure with int capture to function" {
+        let factor = 7
+        let multiply = (x: i64) -> i64 => x * factor
+        let result = apply_i64(multiply, 6)
+        assert(result == 42)
+    }
+
+    test "pass closure with string capture to function" {
+        let tag = "item"
+        let label = (s: string) -> string => tag + ":" + s
+        let result = apply_str(label, "alpha")
+        assert(result == "item:alpha")
+    }
+}
+
+tests "closure returned from function" {
+    test "return closure that captures int" {
+        let add5 = make_adder(5)
+        assert(add5(10) == 15)
+        assert(add5(0) == 5)
+        let add3 = make_adder(3)
+        assert(add3(10) == 13)
+    }
+
+    test "return closure that captures string" {
+        let hi = make_greeter("hi")
+        assert(hi("world") == "hi world")
+        let hey = make_greeter("hey")
+        assert(hey("there") == "hey there")
+    }
+}
+
+tests "multiple closures going out of scope" {
+    test "several closures with different captures drop together" {
+        let a = 1
+        let b = 2
+        let c = 3
+        let fa = (x: i64) -> i64 => x + a
+        let fb = (x: i64) -> i64 => x + b
+        let fc = (x: i64) -> i64 => x + c
+        assert(fa(10) == 11)
+        assert(fb(10) == 12)
+        assert(fc(10) == 13)
+    }
+
+    test "returned closures from multiple calls drop together" {
+        let add1 = make_adder(1)
+        let add2 = make_adder(2)
+        let add3 = make_adder(3)
+        assert(add1(0) == 1)
+        assert(add2(0) == 2)
+        assert(add3(0) == 3)
+    }
+}
