@@ -286,6 +286,9 @@ impl Cg<'_, '_, '_> {
                     self.emit_rc_dec(old_val)?;
                 }
             }
+            // Assignment consumed the temp — clear the flag
+            let mut value = value;
+            value.is_rc_temp = false;
             return Ok(value);
         }
 
@@ -304,6 +307,9 @@ impl Cg<'_, '_, '_> {
         )?;
         self.field_cache.clear(); // Invalidate cached field reads
 
+        // Assignment consumed the temp — clear the flag
+        let mut value = value;
+        value.is_rc_temp = false;
         Ok(value)
     }
 

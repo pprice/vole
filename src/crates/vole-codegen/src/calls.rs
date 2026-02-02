@@ -739,9 +739,13 @@ impl Cg<'_, '_, '_> {
         // Determine the offset into expected_types for user args (skip sret param)
         let user_param_offset = if is_sret { 1 } else { 0 };
 
-        // Compile arguments with type narrowing
+        // Compile arguments with type narrowing, tracking RC temps for cleanup
+        let mut rc_temp_args = Vec::new();
         for (i, arg) in call.args.iter().enumerate() {
             let compiled = self.expr(arg)?;
+            if compiled.is_rc_temp {
+                rc_temp_args.push(compiled);
+            }
             let expected_ty = expected_types.get(i + user_param_offset).copied();
 
             // Narrow/extend integer types if needed
@@ -777,6 +781,9 @@ impl Cg<'_, '_, '_> {
 
         let call_inst = self.builder.ins().call(func_ref, &args);
         self.field_cache.clear(); // Callee may mutate instance fields
+
+        // Dec RC temp args after the call has consumed them
+        self.dec_rc_temp_args(&rc_temp_args)?;
 
         // For sret, the returned value is the sret pointer we passed in
         if sret_slot.is_some() {
@@ -833,9 +840,13 @@ impl Cg<'_, '_, '_> {
 
         let user_param_offset = if is_sret { 1 } else { 0 };
 
-        // Compile arguments with type narrowing
+        // Compile arguments with type narrowing, tracking RC temps for cleanup
+        let mut rc_temp_args = Vec::new();
         for (i, arg) in call.args.iter().enumerate() {
             let compiled = self.expr(arg)?;
+            if compiled.is_rc_temp {
+                rc_temp_args.push(compiled);
+            }
             let expected_ty = expected_types.get(i + user_param_offset).copied();
             let arg_value = if let Some(expected) = expected_ty {
                 if compiled.ty.is_int() && expected.is_int() && expected.bits() < compiled.ty.bits()
@@ -872,6 +883,9 @@ impl Cg<'_, '_, '_> {
 
         let call_inst = self.builder.ins().call(func_ref, &args);
         self.field_cache.clear(); // Callee may mutate instance fields
+
+        // Dec RC temp args after the call has consumed them
+        self.dec_rc_temp_args(&rc_temp_args)?;
 
         if sret_slot.is_some() {
             let results = self.builder.inst_results(call_inst);

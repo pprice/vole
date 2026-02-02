@@ -275,6 +275,9 @@ impl Cg<'_, '_, '_> {
                     self.builder.ins().trap(TrapCode::unwrap_user(1));
                     Ok(true)
                 } else {
+                    // Dec RC temp if the expression result is unused
+                    // (e.g. standalone function call returning a string)
+                    self.dec_rc_temp(&result)?;
                     Ok(false)
                 }
             }

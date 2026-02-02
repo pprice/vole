@@ -7,7 +7,7 @@
 use rustc_hash::FxHashMap;
 
 use cranelift::prelude::{FunctionBuilder, InstBuilder, MemFlags, Type, Variable, types};
-use vole_frontend::{FuncBody, Symbol};
+use vole_frontend::{ExprKind, FuncBody, Symbol};
 use vole_sema::type_arena::TypeId;
 
 use crate::context::{Captures, Cg};
@@ -217,7 +217,26 @@ pub fn compile_function_body_with_cg(
         }
         FuncBody::Expr(expr) => {
             let value = cg.expr(expr)?;
-            (true, Some(value))
+
+            // RC bookkeeping for expression-bodied returns (mirrors Stmt::Return logic):
+            // If the return expression is a borrow (variable read, index, field access),
+            // we must rc_inc before scope cleanup so the caller receives an owned +1 ref.
+            let skip_var = if let ExprKind::Identifier(sym) = &expr.kind
+                && let Some((var, _)) = cg.vars.get(sym)
+                && cg.rc_scopes.is_rc_local(*var)
+            {
+                Some(*var)
+            } else {
+                None
+            };
+            if skip_var.is_none()
+                && cg.needs_rc_cleanup(value.type_id)
+                && cg.expr_needs_rc_inc(expr)
+            {
+                cg.emit_rc_inc(value.value)?;
+            }
+
+            (true, Some((value, skip_var)))
         }
     };
 
@@ -226,14 +245,15 @@ pub fn compile_function_body_with_cg(
     // If the function terminated (via explicit return/break), cleanup was already
     // emitted at that point, so we only clean up for non-terminated paths.
     if !terminated || expr_value.is_some() {
-        cg.pop_rc_scope_with_cleanup(None)?;
+        let skip_var = expr_value.as_ref().and_then(|(_, sv)| *sv);
+        cg.pop_rc_scope_with_cleanup(skip_var)?;
     } else {
         // Just pop the scope marker (cleanup was emitted by the return/break)
         cg.rc_scopes.pop_scope();
     }
 
     // Add implicit return if no explicit return
-    if let Some(value) = expr_value {
+    if let Some((value, _skip_var)) = expr_value {
         // Check if the return type is fallible - need multi-value return
         let is_fallible_return = cg
             .return_type

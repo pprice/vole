@@ -422,7 +422,9 @@ impl Cg<'_, '_, '_> {
             AssignTarget::Discard => {
                 // Discard pattern: _ = expr
                 // Compile the expression for side effects, discard result
-                let _value = self.expr(&assign.value)?;
+                let value = self.expr(&assign.value)?;
+                // Dec RC temp since the value is discarded
+                self.dec_rc_temp(&value)?;
                 // Return a void value
                 Ok(CompiledValue::new(
                     self.builder.ins().iconst(types::I64, 0),
@@ -474,6 +476,9 @@ impl Cg<'_, '_, '_> {
                     self.emit_rc_dec(old_val)?;
                 }
 
+                // The assignment consumed the temp — clear the flag so
+                // Stmt::Expr won't double-dec it.
+                value.is_rc_temp = false;
                 Ok(value)
             }
             AssignTarget::Field { object, field, .. } => {
@@ -842,6 +847,9 @@ impl Cg<'_, '_, '_> {
                 self.emit_rc_dec(old_val)?;
             }
 
+            // Assignment consumed the temp — clear the flag
+            let mut val = val;
+            val.is_rc_temp = false;
             Ok(val)
         } else if is_dynamic_array {
             // Dynamic array assignment
@@ -860,6 +868,9 @@ impl Cg<'_, '_, '_> {
                 .ins()
                 .call(set_value_ref, &[arr.value, idx.value, tag_val, value_bits]);
 
+            // Assignment consumed the temp — clear the flag
+            let mut val = val;
+            val.is_rc_temp = false;
             Ok(val)
         } else {
             // Error: not an indexable type

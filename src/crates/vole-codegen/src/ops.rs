@@ -351,6 +351,10 @@ impl Cg<'_, '_, '_> {
         let concat_result =
             self.call_runtime(RuntimeFn::StringConcat, &[left.value, right_string])?;
 
+        // Dec RC temp operands consumed by string concat
+        self.dec_rc_temp(&left)?;
+        self.dec_rc_temp(&right)?;
+
         Ok(self.string_temp(concat_result))
     }
 
@@ -653,6 +657,12 @@ impl Cg<'_, '_, '_> {
             }
         };
 
+        // Dec RC temp operands consumed by string comparison
+        if left_is_string && matches!(op, BinaryOp::Eq | BinaryOp::Ne) {
+            self.dec_rc_temp(&left)?;
+            self.dec_rc_temp(&right)?;
+        }
+
         // For comparison ops, result is bool; otherwise use the promoted type
         let (final_ty, final_type_id) = match op {
             BinaryOp::Eq
@@ -861,6 +871,9 @@ impl Cg<'_, '_, '_> {
         let result = self.binary_op(current, rhs, binary_op, line)?;
 
         self.builder.def_var(var, result.value);
+        // Assignment consumed the temp — clear the flag
+        let mut result = result;
+        result.is_rc_temp = false;
         Ok(result)
     }
 
