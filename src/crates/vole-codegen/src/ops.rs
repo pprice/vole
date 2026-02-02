@@ -339,13 +339,14 @@ impl Cg<'_, '_, '_> {
         right: CompiledValue,
     ) -> Result<CompiledValue, String> {
         // Get the right operand as a string
-        let right_string = if right.type_id == TypeId::STRING {
+        let right_converted = if right.type_id == TypeId::STRING {
             // Right is already a string, use it directly
-            right.value
+            None
         } else {
-            // Right is not a string, call to_string() on it
-            self.call_to_string(&right)?
+            // Right is not a string, call to_string() on it (allocates a new string)
+            Some(self.call_to_string(&right)?)
         };
+        let right_string = right_converted.unwrap_or(right.value);
 
         // Call vole_string_concat(left, right_string)
         let concat_result =
@@ -354,6 +355,12 @@ impl Cg<'_, '_, '_> {
         // Dec RC temp operands consumed by string concat
         self.dec_rc_temp(&left)?;
         self.dec_rc_temp(&right)?;
+
+        // Dec the to_string intermediate if we created one (it's a fresh allocation
+        // that was only needed for the concat call)
+        if let Some(to_string_val) = right_converted {
+            self.emit_rc_dec(to_string_val)?;
+        }
 
         Ok(self.string_temp(concat_result))
     }

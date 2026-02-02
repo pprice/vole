@@ -1233,9 +1233,13 @@ impl Cg<'_, '_, '_> {
             .get_lambda_defaults(call_expr_id)
             .cloned();
 
-        // Compile provided arguments
+        // Compile provided arguments, tracking RC temps for cleanup
+        let mut rc_temp_args = Vec::new();
         for (arg, &param_type_id) in call.args.iter().zip(params.iter()) {
             let compiled = self.expr(arg)?;
+            if compiled.is_rc_temp {
+                rc_temp_args.push(compiled);
+            }
             let compiled = self.coerce_to_type(compiled, param_type_id)?;
             args.push(compiled.value);
         }
@@ -1274,6 +1278,9 @@ impl Cg<'_, '_, '_> {
                     // AnalyzedProgram. AnalyzedProgram outlives this entire compilation session.
                     let default_expr = unsafe { &**default_ptr };
                     let compiled = self.expr(default_expr)?;
+                    if compiled.is_rc_temp {
+                        rc_temp_args.push(compiled);
+                    }
                     let compiled = self.coerce_to_type(compiled, param_type_id)?;
                     args.push(compiled.value);
                 } else {
@@ -1286,6 +1293,9 @@ impl Cg<'_, '_, '_> {
 
         let call_inst = self.builder.ins().call_indirect(sig_ref, func_ptr, &args);
         self.field_cache.clear(); // Callee may mutate instance fields
+
+        // Dec RC temp args after the call has consumed them
+        self.dec_rc_temp_args(&rc_temp_args)?;
         let results = self.builder.inst_results(call_inst);
 
         if results.is_empty() {
