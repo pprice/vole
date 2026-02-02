@@ -66,19 +66,29 @@ impl Cg<'_, '_, '_> {
             }
             ExprKind::InterpolatedString(parts) => self.interpolated_string(parts),
             ExprKind::Range(range) => self.range(range),
-            ExprKind::ArrayLiteral(elements) => self.array_literal(elements, expr),
+            ExprKind::ArrayLiteral(elements) => {
+                let result = self.array_literal(elements, expr)?;
+                Ok(self.mark_rc_temp(result))
+            }
             ExprKind::RepeatLiteral { element, count } => {
-                self.repeat_literal(element, *count, expr)
+                let result = self.repeat_literal(element, *count, expr)?;
+                Ok(self.mark_rc_temp(result))
             }
             ExprKind::Index(idx) => self.index(&idx.object, &idx.index),
             ExprKind::Match(match_expr) => self.match_expr(match_expr),
             ExprKind::Is(is_expr) => self.is_expr(is_expr, expr.id),
             ExprKind::NullCoalesce(nc) => self.null_coalesce(nc),
-            ExprKind::Lambda(lambda) => self.lambda(lambda, expr.id),
+            ExprKind::Lambda(lambda) => {
+                let result = self.lambda(lambda, expr.id)?;
+                Ok(self.mark_rc_temp(result))
+            }
             ExprKind::TypeLiteral(_) => {
                 Err(CodegenError::unsupported("type expressions as runtime values").into())
             }
-            ExprKind::StructLiteral(sl) => self.struct_literal(sl, expr),
+            ExprKind::StructLiteral(sl) => {
+                let result = self.struct_literal(sl, expr)?;
+                Ok(self.mark_rc_temp(result))
+            }
             ExprKind::FieldAccess(fa) => self.field_access(fa),
             ExprKind::OptionalChain(oc) => self.optional_chain(oc, expr.id),
             ExprKind::MethodCall(mc) => {
