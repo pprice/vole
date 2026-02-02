@@ -280,14 +280,14 @@ impl Cg<'_, '_, '_> {
                     None
                 };
                 if rc_old.is_some() && value.is_borrowed() {
-                    self.emit_rc_inc(value.value)?;
+                    self.emit_rc_inc_for_type(value.value, field_type_id)?;
                 }
                 let store_value = convert_to_i64_for_storage(self.builder, &value);
                 self.builder
                     .ins()
                     .store(MemFlags::new(), store_value, obj.value, offset);
                 if let Some(old_val) = rc_old {
-                    self.emit_rc_dec(old_val)?;
+                    self.emit_rc_dec_for_type(old_val, field_type_id)?;
                 }
             }
             // The assignment consumed the temp — ownership transfers

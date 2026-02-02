@@ -497,11 +497,11 @@ impl Cg<'_, '_, '_> {
                 // 2. Store the new value
                 // 3. rc_dec old value (after store, in case old == new)
                 if rc_old.is_some() && value.is_borrowed() {
-                    self.emit_rc_inc(value.value)?;
+                    self.emit_rc_inc_for_type(value.value, var_type_id)?;
                 }
                 self.builder.def_var(var, value.value);
                 if let Some(old_val) = rc_old {
-                    self.emit_rc_dec(old_val)?;
+                    self.emit_rc_dec_for_type(old_val, var_type_id)?;
                 }
 
                 // Composite RC reassignment: rc_dec each RC field of the OLD struct.
@@ -584,7 +584,7 @@ impl Cg<'_, '_, '_> {
                 && self.needs_rc_cleanup(compiled.type_id)
                 && compiled.is_borrowed()
             {
-                self.emit_rc_inc(compiled.value)?;
+                self.emit_rc_inc_for_type(compiled.value, compiled.type_id)?;
             }
 
             // Compute tag before using builder to avoid borrow conflict
@@ -643,7 +643,7 @@ impl Cg<'_, '_, '_> {
                 && self.needs_rc_cleanup(compiled.type_id)
                 && compiled.is_borrowed()
             {
-                self.emit_rc_inc(compiled.value)?;
+                self.emit_rc_inc_for_type(compiled.value, compiled.type_id)?;
             }
 
             // Store the value at its offset in the tuple
@@ -685,7 +685,7 @@ impl Cg<'_, '_, '_> {
             self.rc_scopes.has_active_scope() && self.needs_rc_cleanup(elem_value.type_id);
         for i in 0..count {
             if needs_rc && i > 0 {
-                self.emit_rc_inc(elem_value.value)?;
+                self.emit_rc_inc_for_type(elem_value.value, elem_value.type_id)?;
             }
             let offset = (i as i32) * (elem_size as i32);
             self.builder
@@ -907,13 +907,13 @@ impl Cg<'_, '_, '_> {
                 None
             };
             if rc_old.is_some() && val.is_borrowed() {
-                self.emit_rc_inc(val.value)?;
+                self.emit_rc_inc_for_type(val.value, elem_type_id)?;
             }
             self.builder
                 .ins()
                 .store(MemFlags::new(), val.value, elem_ptr, 0);
             if let Some(old_val) = rc_old {
-                self.emit_rc_dec(old_val)?;
+                self.emit_rc_dec_for_type(old_val, elem_type_id)?;
             }
 
             // The assignment consumed the temp — ownership transfers
@@ -1168,12 +1168,19 @@ impl Cg<'_, '_, '_> {
         let cranelift_type = type_id_to_cranelift(inner_type_id, self.arena(), self.ptr_type());
         self.builder.append_block_param(merge_block, cranelift_type);
 
+        let result_needs_rc =
+            self.rc_scopes.has_active_scope() && self.needs_rc_cleanup(inner_type_id);
+
         self.builder
             .ins()
             .brif(is_nil, nil_block, &[], not_nil_block, &[]);
 
         self.switch_and_seal(nil_block);
         let default_val = self.expr(&nc.default)?;
+        // RC: inc borrowed default values so the result gets its own reference.
+        if result_needs_rc && default_val.is_borrowed() {
+            self.emit_rc_inc_for_type(default_val.value, inner_type_id)?;
+        }
         let default_coerced = if default_val.ty != cranelift_type {
             if default_val.ty.is_int() && cranelift_type.is_int() {
                 if cranelift_type.bytes() < default_val.ty.bytes() {
@@ -1199,9 +1206,16 @@ impl Cg<'_, '_, '_> {
         // Sentinel-only unions have union_size == 8 (tag only), no payload to read.
         let union_size = self.type_size(value.type_id);
         let payload = if union_size > 8 {
-            self.builder
+            let loaded = self
+                .builder
                 .ins()
-                .load(cranelift_type, MemFlags::new(), value.value, 8)
+                .load(cranelift_type, MemFlags::new(), value.value, 8);
+            // RC: the payload is a borrow from the optional — inc it so the
+            // result owns its reference independently.
+            if result_needs_rc {
+                self.emit_rc_inc_for_type(loaded, inner_type_id)?;
+            }
+            loaded
         } else {
             self.builder.ins().iconst(cranelift_type, 0)
         };
@@ -1211,7 +1225,7 @@ impl Cg<'_, '_, '_> {
         self.switch_and_seal(merge_block);
 
         let result = self.builder.block_params(merge_block)[0];
-        Ok(CompiledValue::new(result, cranelift_type, inner_type_id))
+        Ok(CompiledValue::temp(result, cranelift_type, inner_type_id))
     }
 
     /// Load a captured variable from closure
@@ -1890,7 +1904,7 @@ impl Cg<'_, '_, '_> {
         let then_result = self.expr(&if_expr.then_branch)?;
         if !is_void {
             if result_needs_rc && then_result.is_borrowed() {
-                self.emit_rc_inc(then_result.value)?;
+                self.emit_rc_inc_for_type(then_result.value, result_type_id)?;
             }
             self.builder
                 .ins()
@@ -1909,7 +1923,7 @@ impl Cg<'_, '_, '_> {
         };
         if !is_void {
             if result_needs_rc && else_result.is_borrowed() {
-                self.emit_rc_inc(else_result.value)?;
+                self.emit_rc_inc_for_type(else_result.value, result_type_id)?;
             }
             self.builder
                 .ins()
@@ -2134,7 +2148,7 @@ impl Cg<'_, '_, '_> {
             if !is_void {
                 // For RC types, ensure each arm contributes an owned +1 ref.
                 if result_needs_rc && body_result.is_borrowed() {
-                    self.emit_rc_inc(body_result.value)?;
+                    self.emit_rc_inc_for_type(body_result.value, result_type_id)?;
                 }
                 self.builder
                     .ins()

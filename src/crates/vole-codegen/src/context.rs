@@ -242,7 +242,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Handles: opaque RC pointers (Map, Set, Rng, etc.) with their own drop fns.
         //
         // NOT enabled for:
-        // - Interfaces: boxed values (fat pointers), not raw RC pointers.
         // - Structs: stack-allocated value types.
         // - Sentinels: i8 zero values, not heap pointers.
         arena.is_string(type_id)
@@ -250,6 +249,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             || arena.is_function(type_id)
             || arena.is_class(type_id)
             || arena.is_handle(type_id)
+            || arena.is_interface(type_id)
     }
 
     /// Check if a captured variable type is RC-managed and needs rc_inc/rc_dec.
@@ -362,17 +362,46 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.call_runtime_void(RuntimeFn::RcInc, &[value])
     }
 
+    /// Emit rc_inc for a value, handling interface fat pointers by loading the
+    /// data word at offset 0 before incrementing.
+    pub fn emit_rc_inc_for_type(&mut self, value: Value, type_id: TypeId) -> Result<(), String> {
+        if self.arena().is_interface(type_id) {
+            let data_word = self
+                .builder
+                .ins()
+                .load(types::I64, MemFlags::new(), value, 0);
+            self.call_runtime_void(RuntimeFn::RcInc, &[data_word])
+        } else {
+            self.call_runtime_void(RuntimeFn::RcInc, &[value])
+        }
+    }
+
     /// Emit rc_dec(value) to decrement the reference count.
     /// Used when destroying a reference (e.g., reassignment).
     pub fn emit_rc_dec(&mut self, value: Value) -> Result<(), String> {
         self.call_runtime_void(RuntimeFn::RcDec, &[value])
     }
 
+    /// Emit rc_dec for a value, handling interface fat pointers by loading the
+    /// data word at offset 0 before decrementing.
+    pub fn emit_rc_dec_for_type(&mut self, value: Value, type_id: TypeId) -> Result<(), String> {
+        if self.arena().is_interface(type_id) {
+            let data_word = self
+                .builder
+                .ins()
+                .load(types::I64, MemFlags::new(), value, 0);
+            self.call_runtime_void(RuntimeFn::RcDec, &[data_word])
+        } else {
+            self.call_runtime_void(RuntimeFn::RcDec, &[value])
+        }
+    }
+
     /// Emit rc_dec for an owned RC value and mark it as consumed.
     /// No-op if the value is not Owned (Borrowed, Consumed, or Untracked).
+    /// For interface types, extracts the data word before decrementing.
     pub fn consume_rc_value(&mut self, cv: &mut CompiledValue) -> Result<(), String> {
         if cv.is_owned() {
-            self.emit_rc_dec(cv.value)?;
+            self.emit_rc_dec_for_type(cv.value, cv.type_id)?;
             cv.mark_consumed();
         }
         Ok(())
@@ -391,8 +420,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Returns the drop flag Variable so the caller can set it to 1 after assignment.
     pub fn register_rc_local(&mut self, variable: Variable, type_id: TypeId) -> Variable {
         let drop_flag = super::rc_cleanup::alloc_drop_flag(self.builder);
+        let is_interface = self.arena().is_interface(type_id);
         self.rc_scopes
-            .register_rc_local(variable, drop_flag, type_id);
+            .register_rc_local(variable, drop_flag, type_id, is_interface);
         drop_flag
     }
 

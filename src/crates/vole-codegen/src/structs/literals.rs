@@ -209,7 +209,7 @@ impl Cg<'_, '_, '_> {
                 && self.needs_rc_cleanup(value.type_id)
                 && value.is_borrowed()
             {
-                self.emit_rc_inc(value.value)?;
+                self.emit_rc_inc_for_type(value.value, value.type_id)?;
             }
             // The field value is consumed into the instance.
             value.mark_consumed();
@@ -468,7 +468,7 @@ impl Cg<'_, '_, '_> {
                 && self.needs_rc_cleanup(value.type_id)
                 && value.is_borrowed()
             {
-                self.emit_rc_inc(value.value)?;
+                self.emit_rc_inc_for_type(value.value, value.type_id)?;
             }
             self.store_struct_field(value, slot, offset)?;
             // The field value is consumed into the struct literal.

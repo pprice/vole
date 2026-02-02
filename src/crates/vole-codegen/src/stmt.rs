@@ -257,7 +257,7 @@ impl Cg<'_, '_, '_> {
                         // returned, the assign/return handlers emit their own inc.
                     } else {
                         if is_borrow {
-                            self.emit_rc_inc(final_value)?;
+                            self.emit_rc_inc_for_type(final_value, final_type_id)?;
                         }
                         let drop_flag = self.register_rc_local(var, final_type_id);
                         crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
@@ -370,7 +370,7 @@ impl Cg<'_, '_, '_> {
                         && self.needs_rc_cleanup(compiled.type_id)
                         && compiled.is_borrowed()
                     {
-                        self.emit_rc_inc(compiled.value)?;
+                        self.emit_rc_inc_for_type(compiled.value, compiled.type_id)?;
                     }
                     self.emit_rc_cleanup_all_scopes(skip_var)?;
 
@@ -1052,7 +1052,7 @@ impl Cg<'_, '_, '_> {
                 // Extracted elements borrow from the parent composite.
                 // RC_inc + register so scope-exit dec balances the borrow.
                 if self.rc_scopes.has_active_scope() && self.needs_rc_cleanup(ty_id) {
-                    self.emit_rc_inc(value)?;
+                    self.emit_rc_inc_for_type(value, ty_id)?;
                     let drop_flag = self.register_rc_local(var, ty_id);
                     crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
                 }
@@ -1275,7 +1275,7 @@ impl Cg<'_, '_, '_> {
             // RC: if the field value is a borrow (e.g., a parameter variable),
             // inc it so the caller gets an owned reference in the error payload.
             if self.needs_rc_cleanup(field_value.type_id) && field_value.is_borrowed() {
-                self.emit_rc_inc(field_value.value)?;
+                self.emit_rc_inc_for_type(field_value.value, field_value.type_id)?;
             }
             // The field value is consumed into the error payload.
             field_value.mark_consumed();
@@ -1301,7 +1301,7 @@ impl Cg<'_, '_, '_> {
                 let mut field_value = self.expr(&field_init.value)?;
                 // RC: inc borrowed field values for the error payload
                 if self.needs_rc_cleanup(field_value.type_id) && field_value.is_borrowed() {
-                    self.emit_rc_inc(field_value.value)?;
+                    self.emit_rc_inc_for_type(field_value.value, field_value.type_id)?;
                 }
                 // The field value is consumed into the error payload.
                 field_value.mark_consumed();

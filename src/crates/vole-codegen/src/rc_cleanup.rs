@@ -20,6 +20,10 @@ pub(crate) struct RcLocal {
     /// The Vole type of this variable (for diagnostics / future use).
     #[allow(dead_code)]
     pub type_id: TypeId,
+    /// True if this is an interface (fat pointer) local. For interfaces, the
+    /// actual RC-managed data word is at offset 0 of the fat pointer, so cleanup
+    /// must load it before calling rc_dec.
+    pub is_interface: bool,
 }
 
 /// A composite local (struct, fixed array, tuple) that contains RC fields.
@@ -67,7 +71,13 @@ impl RcScopeStack {
     /// Register an RC local in the current (innermost) scope.
     ///
     /// Panics if no scope is active (should never happen if push/pop are balanced).
-    pub fn register_rc_local(&mut self, variable: Variable, drop_flag: Variable, type_id: TypeId) {
+    pub fn register_rc_local(
+        &mut self,
+        variable: Variable,
+        drop_flag: Variable,
+        type_id: TypeId,
+        is_interface: bool,
+    ) {
         let scope = self
             .scopes
             .last_mut()
@@ -76,6 +86,7 @@ impl RcScopeStack {
             variable,
             drop_flag,
             type_id,
+            is_interface,
         });
     }
 
@@ -199,7 +210,14 @@ pub(crate) fn emit_rc_cleanup(
         builder.switch_to_block(cleanup_block);
         builder.seal_block(cleanup_block);
         let val = builder.use_var(local.variable);
-        builder.ins().call(rc_dec_ref, &[val]);
+        if local.is_interface {
+            // Interface locals are fat pointers: [data_word, vtable_ptr].
+            // The RC-managed value is the data word at offset 0.
+            let data_word = builder.ins().load(types::I64, MemFlags::new(), val, 0);
+            builder.ins().call(rc_dec_ref, &[data_word]);
+        } else {
+            builder.ins().call(rc_dec_ref, &[val]);
+        }
         builder.ins().jump(after_block, &[]);
 
         builder.switch_to_block(after_block);

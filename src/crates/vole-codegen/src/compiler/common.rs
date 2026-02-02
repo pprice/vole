@@ -230,7 +230,7 @@ pub fn compile_function_body_with_cg(
                 None
             };
             if skip_var.is_none() && cg.needs_rc_cleanup(value.type_id) && value.is_borrowed() {
-                cg.emit_rc_inc(value.value)?;
+                cg.emit_rc_inc_for_type(value.value, value.type_id)?;
             }
 
             // The return value is consumed — ownership transfers to the caller.
