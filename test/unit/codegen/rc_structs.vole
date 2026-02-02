@@ -25,6 +25,63 @@ func pass_through_vec3(v: Vec3) -> Vec3 {
     return v
 }
 
+struct NamedPoint {
+    label: string,
+    x: i64,
+    y: i64
+}
+
+struct FullName {
+    first: string,
+    last: string
+}
+
+tests "struct with string fields" {
+    test "create struct with string field and scope exit" {
+        let p = NamedPoint { label: "origin", x: 0, y: 0 }
+        assert(p.label == "origin")
+        assert(p.x == 0)
+        assert(p.y == 0)
+    }
+
+    test "read string field into local variable" {
+        let p = NamedPoint { label: "center", x: 5, y: 10 }
+        let name = p.label
+        assert(name == "center")
+        assert(p.label == "center")
+    }
+
+    test "reassign string field on mut struct" {
+        let mut p = NamedPoint { label: "start", x: 1, y: 2 }
+        p.label = "end"
+        assert(p.label == "end")
+        assert(p.x == 1)
+        assert(p.y == 2)
+    }
+
+    test "copy struct with string field both copies alive" {
+        let a = NamedPoint { label: "shared", x: 3, y: 4 }
+        let b = a
+        assert(a.label == "shared")
+        assert(b.label == "shared")
+        assert(a.x == 3)
+        assert(b.x == 3)
+    }
+
+    test "multiple string fields on same struct" {
+        let n = FullName { first: "Alice", last: "Smith" }
+        assert(n.first == "Alice")
+        assert(n.last == "Smith")
+    }
+
+    test "reassign struct with string fields" {
+        let mut n = FullName { first: "Bob", last: "Jones" }
+        n = FullName { first: "Carol", last: "King" }
+        assert(n.first == "Carol")
+        assert(n.last == "King")
+    }
+}
+
 tests "struct with primitives" {
     test "create struct and read fields" {
         let v = Vec3 { x: 10, y: 20, z: 30 }
