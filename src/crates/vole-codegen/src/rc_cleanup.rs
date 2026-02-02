@@ -114,6 +114,13 @@ impl RcScopeStack {
             .any(|s| s.locals.iter().any(|l| l.variable == variable))
     }
 
+    /// Returns true if `variable` is registered as a composite RC local in any scope.
+    pub fn is_composite_rc_local(&self, variable: Variable) -> bool {
+        self.scopes
+            .iter()
+            .any(|s| s.composites.iter().any(|c| c.variable == variable))
+    }
+
     /// Get RC locals for the current (innermost) scope only.
     /// Used for normal block exit cleanup.
     #[allow(dead_code)]

@@ -266,6 +266,31 @@ impl Cg<'_, '_, '_> {
                     // Check for composite types (struct, fixed array, tuple) with RC fields.
                     // These need element-level cleanup on scope exit.
                     if let Some(offsets) = self.composite_rc_field_offsets(final_type_id) {
+                        // Struct copy (let b = a): the bytewise copy shares the same RC
+                        // pointers as the original.  rc_inc each RC field so both the
+                        // original and the copy own their reference and scope-exit dec
+                        // is balanced.  We detect copies by checking whether the init
+                        // expression is an identifier (variable reference) that is
+                        // already tracked as a composite RC local — meaning its fields
+                        // will also be dec'd on scope exit.
+                        let is_struct_copy = if let ExprKind::Identifier(sym) = &init_expr.kind {
+                            self.vars
+                                .get(sym)
+                                .is_some_and(|&(v, _)| self.rc_scopes.is_composite_rc_local(v))
+                        } else {
+                            false
+                        };
+                        if is_struct_copy {
+                            for &off in &offsets {
+                                let field_ptr = self.builder.ins().load(
+                                    types::I64,
+                                    MemFlags::new(),
+                                    final_value,
+                                    off,
+                                );
+                                self.emit_rc_inc(field_ptr)?;
+                            }
+                        }
                         let drop_flag = self.register_composite_rc_local(var, offsets);
                         crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
                     }
