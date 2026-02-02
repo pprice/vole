@@ -732,7 +732,7 @@ impl Cg<'_, '_, '_> {
 
     /// Compile a for loop over an array
     fn for_array(&mut self, for_stmt: &vole_frontend::ForStmt) -> Result<bool, String> {
-        let arr = self.expr(&for_stmt.iterable)?;
+        let mut arr = self.expr(&for_stmt.iterable)?;
 
         // Get element type using arena method
         let elem_type_id = self
@@ -784,6 +784,9 @@ impl Cg<'_, '_, '_> {
 
         self.finalize_for_loop(header, body_block, continue_block, exit_block);
 
+        // Safety net: consume the iterable's RC value after the loop
+        self.consume_rc_value(&mut arr)?;
+
         Ok(false)
     }
 
@@ -801,7 +804,7 @@ impl Cg<'_, '_, '_> {
 
     /// Compile a for loop over an iterator
     fn for_iterator(&mut self, for_stmt: &vole_frontend::ForStmt) -> Result<bool, String> {
-        let iter = self.expr(&for_stmt.iterable)?;
+        let mut iter = self.expr(&for_stmt.iterable)?;
 
         // Get element type using arena methods
         let elem_type_id = {
@@ -858,13 +861,16 @@ impl Cg<'_, '_, '_> {
 
         self.finalize_for_loop(header, body_block, continue_block, exit_block);
 
+        // Safety net: consume the iterable's RC value after the loop
+        self.consume_rc_value(&mut iter)?;
+
         Ok(false)
     }
 
     /// Compile a for loop over a string (iterating characters)
     fn for_string(&mut self, for_stmt: &vole_frontend::ForStmt) -> Result<bool, String> {
         // Compile the string expression
-        let string_val = self.expr(&for_stmt.iterable)?;
+        let mut string_val = self.expr(&for_stmt.iterable)?;
 
         // Create a string chars iterator from the string
         let iter_val = self.call_runtime(RuntimeFn::StringCharsIter, &[string_val.value])?;
@@ -911,6 +917,9 @@ impl Cg<'_, '_, '_> {
         self.builder.ins().jump(header, &[]);
 
         self.finalize_for_loop(header, body_block, continue_block, exit_block);
+
+        // Safety net: consume the string iterable's RC value after the loop
+        self.consume_rc_value(&mut string_val)?;
 
         Ok(false)
     }
