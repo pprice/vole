@@ -335,8 +335,8 @@ impl Cg<'_, '_, '_> {
     /// Left must be a string, right will be converted via to_string() if not already string.
     fn string_concat(
         &mut self,
-        left: CompiledValue,
-        right: CompiledValue,
+        mut left: CompiledValue,
+        mut right: CompiledValue,
     ) -> Result<CompiledValue, String> {
         // Get the right operand as a string
         let right_converted = if right.type_id == TypeId::STRING {
@@ -352,9 +352,9 @@ impl Cg<'_, '_, '_> {
         let concat_result =
             self.call_runtime(RuntimeFn::StringConcat, &[left.value, right_string])?;
 
-        // Dec RC temp operands consumed by string concat
-        self.dec_rc_temp(&left)?;
-        self.dec_rc_temp(&right)?;
+        // Consume RC operands used by string concat
+        self.consume_rc_value(&mut left)?;
+        self.consume_rc_value(&mut right)?;
 
         // Dec the to_string intermediate if we created one (it's a fresh allocation
         // that was only needed for the concat call)
@@ -481,8 +481,8 @@ impl Cg<'_, '_, '_> {
     /// Compile a binary operation on two values
     pub fn binary_op(
         &mut self,
-        left: CompiledValue,
-        right: CompiledValue,
+        mut left: CompiledValue,
+        mut right: CompiledValue,
         op: BinaryOp,
         line: u32,
     ) -> Result<CompiledValue, String> {
@@ -664,10 +664,10 @@ impl Cg<'_, '_, '_> {
             }
         };
 
-        // Dec RC temp operands consumed by string comparison
+        // Consume RC operands used by string comparison
         if left_is_string && matches!(op, BinaryOp::Eq | BinaryOp::Ne) {
-            self.dec_rc_temp(&left)?;
-            self.dec_rc_temp(&right)?;
+            self.consume_rc_value(&mut left)?;
+            self.consume_rc_value(&mut right)?;
         }
 
         // For comparison ops, result is bool; otherwise use the promoted type

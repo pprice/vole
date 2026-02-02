@@ -300,7 +300,7 @@ impl Cg<'_, '_, '_> {
             }
 
             Stmt::Expr(expr_stmt) => {
-                let result = self.expr(&expr_stmt.expr)?;
+                let mut result = self.expr(&expr_stmt.expr)?;
                 if result.type_id == TypeId::NEVER {
                     // The expression diverges (e.g. `unreachable`, `panic`).
                     // emit_panic_static creates an unreachable continuation block
@@ -309,9 +309,9 @@ impl Cg<'_, '_, '_> {
                     self.builder.ins().trap(TrapCode::unwrap_user(1));
                     Ok(true)
                 } else {
-                    // Dec RC temp if the expression result is unused
+                    // Consume RC value if the expression result is unused
                     // (e.g. standalone function call returning a string)
-                    self.dec_rc_temp(&result)?;
+                    self.consume_rc_value(&mut result)?;
                     Ok(false)
                 }
             }

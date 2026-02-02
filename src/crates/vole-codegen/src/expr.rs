@@ -62,17 +62,17 @@ impl Cg<'_, '_, '_> {
             ExprKind::StringLiteral(s) => self.string_literal(s),
             ExprKind::Call(call) => {
                 let result = self.call(call, expr.span.line, expr.id)?;
-                Ok(self.mark_rc_temp(result))
+                Ok(self.mark_rc_owned(result))
             }
             ExprKind::InterpolatedString(parts) => self.interpolated_string(parts),
             ExprKind::Range(range) => self.range(range),
             ExprKind::ArrayLiteral(elements) => {
                 let result = self.array_literal(elements, expr)?;
-                Ok(self.mark_rc_temp(result))
+                Ok(self.mark_rc_owned(result))
             }
             ExprKind::RepeatLiteral { element, count } => {
                 let result = self.repeat_literal(element, *count, expr)?;
-                Ok(self.mark_rc_temp(result))
+                Ok(self.mark_rc_owned(result))
             }
             ExprKind::Index(idx) => self.index(&idx.object, &idx.index),
             ExprKind::Match(match_expr) => self.match_expr(match_expr),
@@ -80,20 +80,20 @@ impl Cg<'_, '_, '_> {
             ExprKind::NullCoalesce(nc) => self.null_coalesce(nc),
             ExprKind::Lambda(lambda) => {
                 let result = self.lambda(lambda, expr.id)?;
-                Ok(self.mark_rc_temp(result))
+                Ok(self.mark_rc_owned(result))
             }
             ExprKind::TypeLiteral(_) => {
                 Err(CodegenError::unsupported("type expressions as runtime values").into())
             }
             ExprKind::StructLiteral(sl) => {
                 let result = self.struct_literal(sl, expr)?;
-                Ok(self.mark_rc_temp(result))
+                Ok(self.mark_rc_owned(result))
             }
             ExprKind::FieldAccess(fa) => self.field_access(fa),
             ExprKind::OptionalChain(oc) => self.optional_chain(oc, expr.id),
             ExprKind::MethodCall(mc) => {
                 let result = self.method_call(mc, expr.id)?;
-                Ok(self.mark_rc_temp(result))
+                Ok(self.mark_rc_owned(result))
             }
             ExprKind::Try(inner) => self.try_propagate(inner),
             ExprKind::Import(_) => {
@@ -435,9 +435,9 @@ impl Cg<'_, '_, '_> {
             AssignTarget::Discard => {
                 // Discard pattern: _ = expr
                 // Compile the expression for side effects, discard result
-                let value = self.expr(&assign.value)?;
-                // Dec RC temp since the value is discarded
-                self.dec_rc_temp(&value)?;
+                let mut value = self.expr(&assign.value)?;
+                // Consume RC value since the result is discarded
+                self.consume_rc_value(&mut value)?;
                 // Return a void value
                 Ok(CompiledValue::new(
                     self.builder.ins().iconst(types::I64, 0),

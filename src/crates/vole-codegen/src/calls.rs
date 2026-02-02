@@ -743,7 +743,7 @@ impl Cg<'_, '_, '_> {
         let mut rc_temp_args = Vec::new();
         for (i, arg) in call.args.iter().enumerate() {
             let compiled = self.expr(arg)?;
-            if compiled.is_rc_temp() {
+            if compiled.is_owned() {
                 rc_temp_args.push(compiled);
             }
             let expected_ty = expected_types.get(i + user_param_offset).copied();
@@ -783,7 +783,7 @@ impl Cg<'_, '_, '_> {
         self.field_cache.clear(); // Callee may mutate instance fields
 
         // Dec RC temp args after the call has consumed them
-        self.dec_rc_temp_args(&rc_temp_args)?;
+        self.consume_rc_args(&mut rc_temp_args)?;
 
         // For sret, the returned value is the sret pointer we passed in
         if sret_slot.is_some() {
@@ -844,7 +844,7 @@ impl Cg<'_, '_, '_> {
         let mut rc_temp_args = Vec::new();
         for (i, arg) in call.args.iter().enumerate() {
             let compiled = self.expr(arg)?;
-            if compiled.is_rc_temp() {
+            if compiled.is_owned() {
                 rc_temp_args.push(compiled);
             }
             let expected_ty = expected_types.get(i + user_param_offset).copied();
@@ -885,7 +885,7 @@ impl Cg<'_, '_, '_> {
         self.field_cache.clear(); // Callee may mutate instance fields
 
         // Dec RC temp args after the call has consumed them
-        self.dec_rc_temp_args(&rc_temp_args)?;
+        self.consume_rc_args(&mut rc_temp_args)?;
 
         if sret_slot.is_some() {
             let results = self.builder.inst_results(call_inst);
@@ -1237,7 +1237,7 @@ impl Cg<'_, '_, '_> {
         let mut rc_temp_args = Vec::new();
         for (arg, &param_type_id) in call.args.iter().zip(params.iter()) {
             let compiled = self.expr(arg)?;
-            if compiled.is_rc_temp() {
+            if compiled.is_owned() {
                 rc_temp_args.push(compiled);
             }
             let compiled = self.coerce_to_type(compiled, param_type_id)?;
@@ -1278,7 +1278,7 @@ impl Cg<'_, '_, '_> {
                     // AnalyzedProgram. AnalyzedProgram outlives this entire compilation session.
                     let default_expr = unsafe { &**default_ptr };
                     let compiled = self.expr(default_expr)?;
-                    if compiled.is_rc_temp() {
+                    if compiled.is_owned() {
                         rc_temp_args.push(compiled);
                     }
                     let compiled = self.coerce_to_type(compiled, param_type_id)?;
@@ -1295,7 +1295,7 @@ impl Cg<'_, '_, '_> {
         self.field_cache.clear(); // Callee may mutate instance fields
 
         // Dec RC temp args after the call has consumed them
-        self.dec_rc_temp_args(&rc_temp_args)?;
+        self.consume_rc_args(&mut rc_temp_args)?;
         let results = self.builder.inst_results(call_inst);
 
         if results.is_empty() {

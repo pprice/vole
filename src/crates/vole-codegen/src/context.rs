@@ -363,11 +363,20 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.call_runtime_void(RuntimeFn::RcDec, &[value])
     }
 
-    /// Emit rc_dec for an RC temporary after it has been consumed.
-    /// No-op if the value is not marked as an RC temp.
-    pub fn dec_rc_temp(&mut self, val: &CompiledValue) -> Result<(), String> {
-        if val.is_rc_temp() {
-            self.emit_rc_dec(val.value)?;
+    /// Emit rc_dec for an owned RC value and mark it as consumed.
+    /// No-op if the value is not Owned (Borrowed, Consumed, or Untracked).
+    pub fn consume_rc_value(&mut self, cv: &mut CompiledValue) -> Result<(), String> {
+        if cv.is_owned() {
+            self.emit_rc_dec(cv.value)?;
+            cv.mark_consumed();
+        }
+        Ok(())
+    }
+
+    /// Consume all tracked RC values in a slice.
+    pub fn consume_rc_args(&mut self, args: &mut [CompiledValue]) -> Result<(), String> {
+        for cv in args.iter_mut() {
+            self.consume_rc_value(cv)?;
         }
         Ok(())
     }
@@ -1061,10 +1070,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue::temp(value, self.ptr_type(), TypeId::STRING)
     }
 
-    /// Mark a CompiledValue as an RC temp if its type needs RC cleanup.
+    /// Mark a CompiledValue as owned if its type needs RC cleanup.
     /// Use this for fresh allocations (function returns, operator results) — NOT for
     /// borrowed values (variable reads, field access, index operations).
-    pub fn mark_rc_temp(&self, mut cv: CompiledValue) -> CompiledValue {
+    pub fn mark_rc_owned(&self, mut cv: CompiledValue) -> CompiledValue {
         if self.needs_rc_cleanup(cv.type_id) {
             cv.rc_lifecycle = RcLifecycle::Owned;
         }
@@ -1118,14 +1127,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             values.push(compiled.value);
         }
         Ok(values)
-    }
-
-    /// Dec all RC temps collected from call arguments.
-    pub fn dec_rc_temp_args(&mut self, temps: &[CompiledValue]) -> Result<(), String> {
-        for temp in temps {
-            self.dec_rc_temp(temp)?;
-        }
-        Ok(())
     }
 
     // ========== Control flow helpers ==========

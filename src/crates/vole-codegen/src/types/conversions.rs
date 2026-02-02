@@ -72,12 +72,6 @@ impl CompiledValue {
         }
     }
 
-    /// Compatibility shim: equivalent to the old `is_rc_temp` field.
-    /// Returns true when this value is an owned RC temporary needing cleanup.
-    pub fn is_rc_temp(&self) -> bool {
-        self.rc_lifecycle == RcLifecycle::Owned
-    }
-
     /// Whether this value has Owned lifecycle.
     pub fn is_owned(&self) -> bool {
         self.rc_lifecycle == RcLifecycle::Owned
