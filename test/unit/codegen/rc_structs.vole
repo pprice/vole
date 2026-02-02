@@ -125,3 +125,230 @@ tests "struct with primitives" {
         assert(v.x == 7)
     }
 }
+
+// --- Struct types with RC fields ---
+
+struct WithArray {
+    label: string,
+    items: [i64]
+}
+
+class Tag {
+    name: string
+}
+
+struct WithClass {
+    tag: Tag,
+    value: i64
+}
+
+struct WithClosure {
+    transform: (i64) -> i64,
+    label: string
+}
+
+struct MixedRC {
+    name: string,
+    tags: [string],
+    tag: Tag,
+    count: i64
+}
+
+struct Inner {
+    name: string,
+    value: i64
+}
+
+struct Outer {
+    inner: Inner,
+    label: string
+}
+
+tests "struct with RC fields" {
+    // --- Array field ---
+
+    test "struct with array field create and read" {
+        let s = WithArray { label: "nums", items: [10, 20, 30] }
+        assert(s.label == "nums")
+        assert(s.items[0] == 10)
+        assert(s.items[1] == 20)
+        assert(s.items[2] == 30)
+    }
+
+    test "struct with array field copy both alive" {
+        let a = WithArray { label: "data", items: [1, 2, 3] }
+        let b = a
+        assert(a.label == "data")
+        assert(b.label == "data")
+        assert(a.items[0] == 1)
+        assert(b.items[0] == 1)
+        assert(a.items.length() == 3)
+        assert(b.items.length() == 3)
+    }
+
+    test "struct with array field reassign" {
+        let mut s = WithArray { label: "old", items: [1] }
+        s = WithArray { label: "new", items: [4, 5, 6, 7] }
+        assert(s.label == "new")
+        assert(s.items.length() == 4)
+        assert(s.items[3] == 7)
+    }
+
+    test "struct with array field read into local" {
+        let s = WithArray { label: "arr", items: [100, 200] }
+        let arr = s.items
+        let lbl = s.label
+        assert(arr[0] == 100)
+        assert(arr[1] == 200)
+        assert(lbl == "arr")
+    }
+
+    // --- Class instance field ---
+
+    test "struct with class field create and read" {
+        let t = Tag { name: "important" }
+        let s = WithClass { tag: t, value: 42 }
+        assert(s.tag.name == "important")
+        assert(s.value == 42)
+    }
+
+    test "struct with class field copy both alive" {
+        let t = Tag { name: "shared" }
+        let a = WithClass { tag: t, value: 1 }
+        let b = a
+        assert(a.tag.name == "shared")
+        assert(b.tag.name == "shared")
+        assert(a.value == 1)
+        assert(b.value == 1)
+    }
+
+    test "struct with class field reassign" {
+        let mut s = WithClass { tag: Tag { name: "first" }, value: 10 }
+        s = WithClass { tag: Tag { name: "second" }, value: 20 }
+        assert(s.tag.name == "second")
+        assert(s.value == 20)
+    }
+
+    test "struct with class field read into local" {
+        let s = WithClass { tag: Tag { name: "extracted" }, value: 99 }
+        let t = s.tag
+        assert(t.name == "extracted")
+        assert(s.tag.name == "extracted")
+    }
+
+    // --- Closure field ---
+
+    test "struct with closure field create and call" {
+        let double = (x: i64) -> i64 => x * 2
+        let s = WithClosure { transform: double, label: "doubler" }
+        let f = s.transform
+        assert(f(5) == 10)
+        assert(s.label == "doubler")
+    }
+
+    test "struct with closure field copy both alive" {
+        let inc = (x: i64) -> i64 => x + 1
+        let a = WithClosure { transform: inc, label: "inc" }
+        let b = a
+        let fa = a.transform
+        let fb = b.transform
+        assert(fa(10) == 11)
+        assert(fb(10) == 11)
+        assert(a.label == "inc")
+        assert(b.label == "inc")
+    }
+
+    test "struct with closure field reassign" {
+        let add1 = (x: i64) -> i64 => x + 1
+        let mul3 = (x: i64) -> i64 => x * 3
+        let mut s = WithClosure { transform: add1, label: "add" }
+        let f1 = s.transform
+        assert(f1(5) == 6)
+        s = WithClosure { transform: mul3, label: "mul" }
+        let f2 = s.transform
+        assert(f2(5) == 15)
+        assert(s.label == "mul")
+    }
+
+    test "struct with capturing closure field" {
+        let factor = 10
+        let scale = (x: i64) -> i64 => x * factor
+        let s = WithClosure { transform: scale, label: "scaler" }
+        let f = s.transform
+        assert(f(3) == 30)
+        assert(f(7) == 70)
+    }
+
+    // --- Multiple mixed RC fields ---
+
+    test "struct with multiple mixed RC fields create and read" {
+        let t = Tag { name: "info" }
+        let s = MixedRC { name: "test", tags: ["a", "b"], tag: t, count: 5 }
+        assert(s.name == "test")
+        assert(s.tags[0] == "a")
+        assert(s.tags[1] == "b")
+        assert(s.tag.name == "info")
+        assert(s.count == 5)
+    }
+
+    test "struct with multiple mixed RC fields copy both alive" {
+        let t = Tag { name: "shared" }
+        let a = MixedRC { name: "orig", tags: ["x"], tag: t, count: 1 }
+        let b = a
+        assert(a.name == "orig")
+        assert(b.name == "orig")
+        assert(a.tags[0] == "x")
+        assert(b.tags[0] == "x")
+        assert(a.tag.name == "shared")
+        assert(b.tag.name == "shared")
+    }
+
+    test "struct with multiple mixed RC fields reassign" {
+        let mut s = MixedRC { name: "v1", tags: ["old"], tag: Tag { name: "t1" }, count: 1 }
+        s = MixedRC { name: "v2", tags: ["new", "newer"], tag: Tag { name: "t2" }, count: 2 }
+        assert(s.name == "v2")
+        assert(s.tags[0] == "new")
+        assert(s.tags[1] == "newer")
+        assert(s.tag.name == "t2")
+        assert(s.count == 2)
+    }
+
+    // --- Nested structs (struct containing struct with string) ---
+
+    test "nested struct create and read inner string" {
+        let inner = Inner { name: "deep", value: 42 }
+        let outer = Outer { inner: inner, label: "wrapper" }
+        assert(outer.inner.name == "deep")
+        assert(outer.inner.value == 42)
+        assert(outer.label == "wrapper")
+    }
+
+    test "nested struct copy both alive" {
+        let inner = Inner { name: "shared", value: 7 }
+        let a = Outer { inner: inner, label: "alpha" }
+        let b = a
+        assert(a.inner.name == "shared")
+        assert(b.inner.name == "shared")
+        assert(a.label == "alpha")
+        assert(b.label == "alpha")
+        assert(a.inner.value == 7)
+        assert(b.inner.value == 7)
+    }
+
+    test "nested struct reassign" {
+        let mut o = Outer { inner: Inner { name: "first", value: 1 }, label: "v1" }
+        o = Outer { inner: Inner { name: "second", value: 2 }, label: "v2" }
+        assert(o.inner.name == "second")
+        assert(o.inner.value == 2)
+        assert(o.label == "v2")
+    }
+
+    test "nested struct read inner into local" {
+        let outer = Outer { inner: Inner { name: "extracted", value: 55 }, label: "box" }
+        let i = outer.inner
+        let lbl = outer.label
+        assert(i.name == "extracted")
+        assert(i.value == 55)
+        assert(lbl == "box")
+    }
+}
