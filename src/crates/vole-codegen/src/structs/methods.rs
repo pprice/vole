@@ -843,7 +843,7 @@ impl Cg<'_, '_, '_> {
         obj: &CompiledValue,
         mc: &MethodCallExpr,
         method_name: &str,
-        _elem_type_id: TypeId,
+        elem_type_id: TypeId,
         expr_id: NodeId,
     ) -> Result<CompiledValue, String> {
         // Look up the Iterator interface
@@ -891,19 +891,18 @@ impl Cg<'_, '_, '_> {
         // For collect and reduce, append element type tag so the runtime can
         // properly tag RC values in the resulting array / clean up intermediates.
         if method_name == "collect" {
-            let elem_tag = crate::types::unknown_type_tag(_elem_type_id, self.arena());
+            let elem_tag = crate::types::unknown_type_tag(elem_type_id, self.arena());
             let tag_val = self.builder.ins().iconst(types::I64, elem_tag as i64);
             args.push(tag_val);
         } else if method_name == "reduce" {
             // reduce signature: (iter, init, reducer, acc_tag, elem_tag)
             // The accumulator type is the same as the element type for reduce(init, f)
             // since init: T and f: (T, T) -> T
-            let acc_tag = crate::types::unknown_type_tag(_elem_type_id, self.arena());
-            let elem_tag = acc_tag;
-            let acc_tag_val = self.builder.ins().iconst(types::I64, acc_tag as i64);
-            let elem_tag_val = self.builder.ins().iconst(types::I64, elem_tag as i64);
-            args.push(acc_tag_val);
-            args.push(elem_tag_val);
+            let tag = crate::types::unknown_type_tag(elem_type_id, self.arena());
+            let tag_val = self.builder.ins().iconst(types::I64, tag as i64);
+            // acc_tag and elem_tag are the same for reduce(init, f) since init: T and f: (T, T) -> T
+            args.push(tag_val);
+            args.push(tag_val);
         }
 
         // Call the external function directly
