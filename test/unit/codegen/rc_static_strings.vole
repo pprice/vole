@@ -1,0 +1,73 @@
+// RC tests for static string patterns.
+//
+// Verifies that static strings work correctly through all RC paths:
+// assignment, arrays, function passing, comparison, concatenation,
+// interpolation, reassignment, and loops.
+
+tests {
+    test "static string assigned to variable" {
+        let s = "hello"
+        assert(s == "hello")
+    }
+
+    test "static string stored in array" {
+        let arr = ["hello", "world", "foo"]
+        assert(arr[0] == "hello")
+        assert(arr[1] == "world")
+        assert(arr.length() == 3)
+    }
+
+    test "static string passed to function" {
+        func identity(s: string) -> string { return s }
+        let result = identity("hello")
+        assert(result == "hello")
+    }
+
+    test "static string as comparison target" {
+        let x = "hello"
+        assert(x == "hello")
+        assert(x != "world")
+    }
+
+    test "static string concatenated with dynamic" {
+        func make_name() -> string { return "world" }
+        let result = "hello " + make_name()
+        assert(result == "hello world")
+    }
+
+    test "static string in interpolation" {
+        let name = "world"
+        let result = "hello {name}"
+        assert(result == "hello world")
+    }
+
+    test "multiple static strings in scope" {
+        let a = "foo"
+        let b = "bar"
+        let c = "baz"
+        assert(a + b + c == "foobarbaz")
+    }
+
+    test "static string reassigned" {
+        let mut s = "hello"
+        s = "world"
+        assert(s == "world")
+    }
+
+    test "static string in loop" {
+        let mut count = 0
+        for i in 0..3 {
+            let s = "hello"
+            if s == "hello" {
+                count = count + 1
+            }
+        }
+        assert(count == 3)
+    }
+
+    test "static string returned from function" {
+        func greeting() -> string { return "hello" }
+        let s = greeting()
+        assert(s == "hello")
+    }
+}
