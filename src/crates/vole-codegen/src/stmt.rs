@@ -277,6 +277,20 @@ impl Cg<'_, '_, '_> {
             Stmt::LetTuple(let_tuple) => {
                 // Compile the initializer - should be a tuple, fixed array, or class
                 let init = self.expr(&let_tuple.init)?;
+                let is_borrow = self.expr_needs_rc_inc(&let_tuple.init);
+
+                // When the initializer is a fresh temporary (literal, call result),
+                // register it as a composite RC local so its RC fields are dec'd at
+                // scope exit.  When the init is a borrow (variable, index, field),
+                // its source already has composite cleanup registered.
+                if self.rc_scopes.has_active_scope() && !is_borrow
+                    && let Some(offsets) = self.composite_rc_field_offsets(init.type_id) {
+                        let cr_type = self.cranelift_type(init.type_id);
+                        let temp_var = self.builder.declare_var(cr_type);
+                        self.builder.def_var(temp_var, init.value);
+                        let drop_flag = self.register_composite_rc_local(temp_var, offsets);
+                        crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
+                    }
 
                 // Recursively compile the destructuring pattern
                 self.compile_destructure_pattern(&let_tuple.pattern, init.value, init.type_id)?;
@@ -986,6 +1000,14 @@ impl Cg<'_, '_, '_> {
                 let var = self.builder.declare_var(cr_type);
                 self.builder.def_var(var, value);
                 self.vars.insert(*name, (var, ty_id));
+
+                // Extracted elements borrow from the parent composite.
+                // RC_inc + register so scope-exit dec balances the borrow.
+                if self.rc_scopes.has_active_scope() && self.needs_rc_cleanup(ty_id) {
+                    self.emit_rc_inc(value)?;
+                    let drop_flag = self.register_rc_local(var, ty_id);
+                    crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
+                }
             }
             PatternKind::Wildcard => {
                 // Wildcard - nothing to bind
