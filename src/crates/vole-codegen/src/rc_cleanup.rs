@@ -121,16 +121,6 @@ impl RcScopeStack {
             .any(|s| s.composites.iter().any(|c| c.variable == variable))
     }
 
-    /// Get RC locals for the current (innermost) scope only.
-    /// Used for normal block exit cleanup.
-    #[allow(dead_code)]
-    pub fn current_scope_locals(&self) -> &[RcLocal] {
-        self.scopes
-            .last()
-            .map(|s| s.locals.as_slice())
-            .unwrap_or(&[])
-    }
-
     /// Register a composite RC local in the current scope.
     pub fn register_composite(
         &mut self,
