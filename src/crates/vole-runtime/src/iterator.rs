@@ -426,7 +426,8 @@ pub extern "C" fn vole_interface_iter(boxed_interface: *const u8) -> *mut RcIter
 /// Drop function for RcIterator, called by rc_dec when refcount reaches zero.
 ///
 /// Handles all iterator kinds and recursively decrements nested source iterators.
-/// Closures (for Map, Filter) are NOT freed since they are owned by the calling context.
+/// Closures (for Map, Filter, FlatMap, FromFn) are freed here since the iterator
+/// takes ownership of the closure reference passed by the caller.
 ///
 /// # Safety
 /// `ptr` must point to a valid `RcIterator` allocation.
@@ -457,9 +458,11 @@ fn iterator_drop_sources(iter_ref: &UnifiedIterator) {
             }
             IteratorKind::Map => {
                 RcIterator::dec_ref(iter_ref.source.map.source);
+                Closure::free(iter_ref.source.map.transform as *mut Closure);
             }
             IteratorKind::Filter => {
                 RcIterator::dec_ref(iter_ref.source.filter.source);
+                Closure::free(iter_ref.source.filter.predicate as *mut Closure);
             }
             IteratorKind::Take => {
                 RcIterator::dec_ref(iter_ref.source.take.source);
@@ -480,6 +483,7 @@ fn iterator_drop_sources(iter_ref: &UnifiedIterator) {
             }
             IteratorKind::FlatMap => {
                 RcIterator::dec_ref(iter_ref.source.flat_map.source);
+                Closure::free(iter_ref.source.flat_map.transform as *mut Closure);
                 let inner = iter_ref.source.flat_map.inner;
                 if !inner.is_null() {
                     RcIterator::dec_ref(inner);
@@ -501,7 +505,10 @@ fn iterator_drop_sources(iter_ref: &UnifiedIterator) {
                 }
             }
             IteratorKind::Repeat | IteratorKind::Once | IteratorKind::Empty => {}
-            IteratorKind::FromFn | IteratorKind::Range => {}
+            IteratorKind::FromFn => {
+                Closure::free(iter_ref.source.from_fn.generator as *mut Closure);
+            }
+            IteratorKind::Range => {}
             IteratorKind::StringChars => {
                 let string = iter_ref.source.string_chars.string;
                 if !string.is_null() {
