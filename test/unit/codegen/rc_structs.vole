@@ -1,0 +1,70 @@
+// RC tests for structs (value types, stack-allocated).
+//
+// Structs are NOT RC themselves, but when they contain RC fields (strings,
+// arrays, classes), those fields need RC management. This file starts with
+// primitive-only structs as a baseline — these should never leak since no
+// RC is involved.
+
+struct Vec3 {
+    x: i64,
+    y: i64,
+    z: i64
+}
+
+struct Metrics {
+    count: i64,
+    ratio: f64,
+    enabled: bool
+}
+
+func accept_vec3(v: Vec3) -> i64 {
+    return v.x + v.y + v.z
+}
+
+func pass_through_vec3(v: Vec3) -> Vec3 {
+    return v
+}
+
+tests "struct with primitives" {
+    test "create struct and read fields" {
+        let v = Vec3 { x: 10, y: 20, z: 30 }
+        assert(v.x == 10)
+        assert(v.y == 20)
+        assert(v.z == 30)
+    }
+
+    test "copy struct both accessible" {
+        let a = Metrics { count: 5, ratio: 0.75, enabled: true }
+        let b = a
+        assert(a.count == 5)
+        assert(b.count == 5)
+        assert(a.ratio == 0.75)
+        assert(b.ratio == 0.75)
+        assert(a.enabled == true)
+        assert(b.enabled == true)
+    }
+
+    test "reassign struct variable" {
+        let mut m = Metrics { count: 1, ratio: 0.1, enabled: false }
+        m = Metrics { count: 2, ratio: 0.9, enabled: true }
+        assert(m.count == 2)
+        assert(m.ratio == 0.9)
+        assert(m.enabled == true)
+    }
+
+    test "pass struct to function and return sum" {
+        let v = Vec3 { x: 3, y: 4, z: 5 }
+        let sum = accept_vec3(v)
+        assert(sum == 12)
+        assert(v.x == 3)
+    }
+
+    test "pass struct through function and read result" {
+        let v = Vec3 { x: 7, y: 8, z: 9 }
+        let returned = pass_through_vec3(v)
+        assert(returned.x == 7)
+        assert(returned.y == 8)
+        assert(returned.z == 9)
+        assert(v.x == 7)
+    }
+}
