@@ -574,6 +574,41 @@ impl Cg<'_, '_, '_> {
         let call = self.builder.ins().call(method_func_ref, &args);
         self.field_cache.clear(); // Methods may mutate fields via self
 
+        // If the return type is a union, copy the data from the callee's stack to our own
+        // IMMEDIATELY after the call, before any rc_dec calls (consume_rc_value/consume_rc_args)
+        // can clobber the callee's stack frame.
+        if self.arena().is_union(return_type_id) && !is_sret {
+            let results = self.builder.inst_results(call);
+            if !results.is_empty() {
+                let src_ptr = results[0];
+                let union_size = self.type_size(return_type_id);
+                let local_slot = self.alloc_stack(union_size);
+
+                let tag = self
+                    .builder
+                    .ins()
+                    .load(types::I8, MemFlags::new(), src_ptr, 0);
+                self.builder.ins().stack_store(tag, local_slot, 0);
+
+                if union_size > 8 {
+                    let payload = self
+                        .builder
+                        .ins()
+                        .load(types::I64, MemFlags::new(), src_ptr, 8);
+                    self.builder.ins().stack_store(payload, local_slot, 8);
+                }
+
+                let ptr_type = self.ptr_type();
+                let local_ptr = self.builder.ins().stack_addr(ptr_type, local_slot, 0);
+
+                // Now consume RC receiver and temps
+                let mut obj = obj;
+                self.consume_rc_value(&mut obj)?;
+
+                return Ok(self.compiled(local_ptr, return_type_id));
+            }
+        }
+
         // Consume RC receiver after the call completes. In chained calls
         // like s.trim().to_upper(), the intermediate string from trim() is
         // Owned but was never rc_dec'd, causing leaks/heap corruption.
@@ -1253,9 +1288,12 @@ impl Cg<'_, '_, '_> {
                 let func_ref = self.func_ref(func_key)?;
                 let call = self.builder.ins().call(func_ref, &args);
                 self.field_cache.clear();
-                self.consume_rc_args(&mut rc_temps)?;
+                // call_result must run before consume_rc_args to copy union data
+                // from callee's stack before rc_dec calls can clobber it
                 let return_type_id = instance.func_type.return_type_id;
-                return Ok(self.call_result(call, return_type_id));
+                let result = self.call_result(call, return_type_id);
+                self.consume_rc_args(&mut rc_temps)?;
+                return Ok(result);
             }
         }
 
@@ -1314,8 +1352,11 @@ impl Cg<'_, '_, '_> {
         let func_ref = self.func_ref(func_key)?;
         let call = self.builder.ins().call(func_ref, &args);
         self.field_cache.clear();
+        // call_result must run before consume_rc_args to copy union data
+        // from callee's stack before rc_dec calls can clobber it
+        let result = self.call_result(call, return_type_id);
         self.consume_rc_args(&mut rc_temps)?;
-        Ok(self.call_result(call, return_type_id))
+        Ok(result)
     }
 
     /// Compile default expressions for omitted static method parameters.

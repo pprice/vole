@@ -300,11 +300,11 @@ impl Cg<'_, '_, '_> {
                         }
                         let drop_flag = self.register_composite_rc_local(var, offsets);
                         crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
-                    } else if is_stack_union {
-                        // Only register union RC cleanup for stack-allocated unions
-                        // (created by construct_union_id above). Values from function
-                        // calls or existing variables are raw i64 values, not pointers
-                        // to the [tag, payload] layout that cleanup expects.
+                    } else if is_stack_union || self.arena().is_union(final_type_id) {
+                        // Register union RC cleanup for any union-typed value. This
+                        // includes both locally constructed unions (construct_union_id)
+                        // and function return values (call_result copies callee data
+                        // to a local [tag, payload] stack slot).
                         if let Some(rc_tags) = self.union_rc_variant_tags(final_type_id) {
                             // If the init value is a borrow (e.g. let g: T? = some_var),
                             // the RC value is aliased and needs rc_inc so the union

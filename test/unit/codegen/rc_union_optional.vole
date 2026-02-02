@@ -1,0 +1,815 @@
+// RC tests for union and optional value cleanup patterns.
+//
+// Exercises RC inc/dec correctness for union types (int | string) and optional
+// types (string?) across creation, function calls, match expressions, loops,
+// reassignment, method calls, and nested patterns.
+//
+// Focus is on ensuring RC-tracked values (strings, class instances) are
+// properly retained and released through union/optional control flow.
+//
+// KNOWN ISSUE: >3 match expressions on optional string types in a single
+// process causes nondeterministic heap corruption (SIGILL/SIGSEGV). Tests
+// are organized to exercise non-match patterns first, then match patterns,
+// so we get maximum coverage before any crash.
+
+class Box {
+    label: string,
+    value: i64
+}
+
+class Tag {
+    text: string
+}
+
+// --- Helper functions ---
+
+func make_optional_string(flag: bool) -> string? {
+    if flag {
+        return "hello"
+    }
+    return nil
+}
+
+func make_optional_box(flag: bool) -> Box? {
+    if flag {
+        return Box { label: "item", value: 42 }
+    }
+    return nil
+}
+
+func make_union_int_or_string(flag: bool) -> i64 | string {
+    if flag {
+        return "text_value"
+    }
+    return 99
+}
+
+func accept_optional_string(x: string?) -> string {
+    let result = match x {
+        string => x
+        nil => "was_nil"
+    }
+    return result
+}
+
+func accept_union(x: i64 | string) -> string {
+    let result = match x {
+        string => x
+        i64 => "was_int"
+    }
+    return result
+}
+
+func return_optional_from_concat(a: string, b: string, flag: bool) -> string? {
+    if flag {
+        return a + b
+    }
+    return nil
+}
+
+func return_union_string(s: string) -> i64 | string {
+    return s
+}
+
+func return_union_int(n: i64) -> i64 | string {
+    return n
+}
+
+// ===================================================================
+// Section A: Tests that do NOT involve match on optional/union strings.
+// These should run without heap corruption.
+// ===================================================================
+
+// === 1. Optional value creation (no match) ===
+
+tests "optional string creation" {
+    test "create optional string with value" {
+        let x: string? = "hello"
+        assert(x is string)
+    }
+
+    test "create optional string with nil" {
+        let x: string? = nil
+        assert(x is nil)
+    }
+
+    test "optional string assigned from variable" {
+        let s = "world"
+        let x: string? = s
+        assert(x is string)
+    }
+
+    test "optional string is check after creation" {
+        let a: string? = "test"
+        let b: string? = nil
+        assert(a is string)
+        assert(b is nil)
+        assert(!(a is nil))
+        assert(!(b is string))
+    }
+
+    test "two optional strings in same scope" {
+        let x: string? = "alpha"
+        let y: string? = "beta"
+        assert(x is string)
+        assert(y is string)
+    }
+
+    test "optional string and nil in same scope" {
+        let x: string? = "present"
+        let y: string? = nil
+        assert(x is string)
+        assert(y is nil)
+    }
+}
+
+// === 2. Optional class creation (no match) ===
+
+tests "optional class creation" {
+    test "create optional box with value" {
+        let b: Box? = Box { label: "pkg", value: 10 }
+        assert(b is Box)
+    }
+
+    test "create optional box with nil" {
+        let b: Box? = nil
+        assert(b is nil)
+    }
+
+    test "optional box from function - non-nil" {
+        let b = make_optional_box(true)
+        assert(b is Box)
+    }
+
+    test "optional box from function - nil" {
+        let b = make_optional_box(false)
+        assert(b is nil)
+    }
+}
+
+// === 3. Union value creation (no match) ===
+
+tests "union value creation" {
+    test "create int|string with int" {
+        let x: i64 | string = 42
+        assert(x is i64)
+    }
+
+    test "create int|string with string" {
+        let x: i64 | string = "hello"
+        assert(x is string)
+    }
+
+    test "create three-way union with nil" {
+        let x: i64 | string | nil = nil
+        assert(x is nil)
+    }
+
+    test "create three-way union with string" {
+        let x: i64 | string | nil = "present"
+        assert(x is string)
+    }
+
+    test "create three-way union with int" {
+        let x: i64 | string | nil = 77
+        assert(x is i64)
+    }
+}
+
+// === 4. Optional/union returned from functions (no match by caller) ===
+
+tests "optional string returned from functions" {
+    test "function returns non-nil optional string" {
+        let x = make_optional_string(true)
+        assert(x is string)
+    }
+
+    test "function returns nil optional string" {
+        let x = make_optional_string(false)
+        assert(x is nil)
+    }
+
+    test "function returns concat as optional" {
+        let x = return_optional_from_concat("ab", "cd", true)
+        assert(x is string)
+    }
+
+    test "function returns nil instead of concat" {
+        let x = return_optional_from_concat("ab", "cd", false)
+        assert(x is nil)
+    }
+}
+
+tests "union returned from functions" {
+    test "function returns string variant" {
+        let x = make_union_int_or_string(true)
+        assert(x is string)
+    }
+
+    test "function returns int variant" {
+        let x = make_union_int_or_string(false)
+        assert(x is i64)
+    }
+
+    test "return_union_string wraps string" {
+        let x = return_union_string("wrapped")
+        assert(x is string)
+    }
+
+    test "return_union_int wraps int" {
+        let x = return_union_int(55)
+        assert(x is i64)
+    }
+}
+
+// === 5. Reassignment of optional variables (no match) ===
+
+tests "optional variable reassignment" {
+    test "reassign optional from string to nil" {
+        let mut x: string? = "initial"
+        assert(x is string)
+        x = nil
+        assert(x is nil)
+    }
+
+    test "reassign optional from nil to string" {
+        let mut x: string? = nil
+        assert(x is nil)
+        x = "assigned"
+        assert(x is string)
+    }
+
+    test "reassign optional string multiple times" {
+        let mut x: string? = "first"
+        x = "second"
+        x = "third"
+        assert(x is string)
+    }
+
+    test "reassign optional between string and nil repeatedly" {
+        let mut x: string? = "a"
+        x = nil
+        x = "b"
+        x = nil
+        x = "c"
+        assert(x is string)
+    }
+
+    test "reassign optional box from value to nil" {
+        let mut b: Box? = Box { label: "old", value: 1 }
+        assert(b is Box)
+        b = nil
+        assert(b is nil)
+    }
+
+    test "reassign optional box from nil to value" {
+        let mut b: Box? = nil
+        assert(b is nil)
+        b = Box { label: "new", value: 2 }
+        assert(b is Box)
+    }
+}
+
+// === 6. Reassignment of union variables (no match) ===
+
+tests "union variable reassignment" {
+    test "reassign union from int to string" {
+        let mut x: i64 | string = 42
+        assert(x is i64)
+        x = "now_string"
+        assert(x is string)
+    }
+
+    test "reassign union from string to int" {
+        let mut x: i64 | string = "start"
+        assert(x is string)
+        x = 100
+        assert(x is i64)
+    }
+
+    test "reassign union multiple times across variants" {
+        let mut x: i64 | string = "a"
+        x = 1
+        x = "b"
+        x = 2
+        x = "c"
+        assert(x is string)
+    }
+
+    test "reassign three-way union" {
+        let mut x: i64 | string | nil = "initial"
+        x = 42
+        x = nil
+        x = "back"
+        assert(x is string)
+    }
+}
+
+// === 7. Scope cleanup (no match) ===
+
+tests "optional scope cleanup" {
+    test "optional string goes out of scope - some" {
+        let x: string? = "scoped"
+        assert(x is string)
+    }
+
+    test "optional string goes out of scope - nil" {
+        let x: string? = nil
+        assert(x is nil)
+    }
+
+    test "optional box goes out of scope" {
+        let b: Box? = Box { label: "scoped_box", value: 99 }
+        assert(b is Box)
+    }
+
+    test "union string goes out of scope" {
+        let x: i64 | string = "scoped_str"
+        assert(x is string)
+    }
+
+    test "union int goes out of scope" {
+        let x: i64 | string = 42
+        assert(x is i64)
+    }
+
+    test "three-way union string goes out of scope" {
+        let x: i64 | string | nil = "bye"
+        assert(x is string)
+    }
+
+    test "three-way union nil goes out of scope" {
+        let x: i64 | string | nil = nil
+        assert(x is nil)
+    }
+}
+
+// === 8. Optional/union in loops (no match) ===
+
+tests "optional in loops without match" {
+    test "create optional strings in for loop" {
+        let mut count = 0
+        for i in 0..5 {
+            let x: string? = "iter"
+            if x is string {
+                count = count + 1
+            }
+        }
+        assert(count == 5)
+    }
+
+    test "create nil optionals in for loop" {
+        let mut count = 0
+        for i in 0..5 {
+            let x: string? = nil
+            if x is nil {
+                count = count + 1
+            }
+        }
+        assert(count == 5)
+    }
+
+    test "alternate optional values in loop" {
+        let mut some_count = 0
+        let mut nil_count = 0
+        for i in 0..6 {
+            let mut x: string? = "even"
+            if i % 2 != 0 {
+                x = nil
+            }
+            if x is string {
+                some_count = some_count + 1
+            } else {
+                nil_count = nil_count + 1
+            }
+        }
+        assert(some_count == 3)
+        assert(nil_count == 3)
+    }
+
+    test "union values in for loop" {
+        let mut str_count = 0
+        let mut int_count = 0
+        for i in 0..4 {
+            let mut x: i64 | string = "s"
+            if i % 2 != 0 {
+                x = 1
+            }
+            if x is string {
+                str_count = str_count + 1
+            } else {
+                int_count = int_count + 1
+            }
+        }
+        assert(str_count == 2)
+        assert(int_count == 2)
+    }
+
+    test "reassign optional in loop body" {
+        let mut x: string? = nil
+        for i in 0..3 {
+            x = "iteration"
+        }
+        assert(x is string)
+    }
+
+    test "reassign union in loop body" {
+        let mut x: i64 | string = 0
+        for i in 0..3 {
+            x = "loop_val"
+        }
+        assert(x is string)
+    }
+}
+
+// === 9. Null coalescing (no match internally) ===
+
+tests "null coalescing on optional strings" {
+    test "nil coalescing returns fallback" {
+        let x: string? = nil
+        let result = x ?? "fallback"
+        assert(result == "fallback")
+    }
+
+    test "nil coalescing returns value" {
+        let x: string? = "present"
+        let result = x ?? "fallback"
+        assert(result == "present")
+    }
+
+    test "nil coalescing chain with strings" {
+        let a: string? = nil
+        let b: string? = nil
+        let c: string? = "found"
+        let result = a ?? b ?? c ?? "default"
+        assert(result == "found")
+    }
+
+    test "nil coalescing chain all nil" {
+        let a: string? = nil
+        let b: string? = nil
+        let c: string? = nil
+        let result = a ?? b ?? c ?? "default"
+        assert(result == "default")
+    }
+
+    test "nil coalescing first non-nil wins" {
+        let a: string? = "first"
+        let b: string? = "second"
+        let result = a ?? b ?? "third"
+        assert(result == "first")
+    }
+}
+
+// ===================================================================
+// Section B: Tests that DO involve match on optional/union strings.
+// These may trigger heap corruption when accumulated.
+// ===================================================================
+
+// === 10. Match on optional - basic ===
+
+tests "match on optional extracting values" {
+    test "match optional string - some case" {
+        let x: string? = "extracted"
+        let result = match x {
+            string => x
+            nil => "nothing"
+        }
+        assert(result == "extracted")
+    }
+
+    test "match optional string - nil case" {
+        let x: string? = nil
+        let result = match x {
+            string => x
+            nil => "nothing"
+        }
+        assert(result == "nothing")
+    }
+
+    test "match optional box - nil branch" {
+        let b: Box? = nil
+        let result = match b {
+            Box => b.label
+            nil => "empty"
+        }
+        assert(result == "empty")
+    }
+
+    test "match optional box - some reads field" {
+        let b: Box? = Box { label: "target", value: 5 }
+        let result = match b {
+            Box => b.label
+            nil => "empty"
+        }
+        assert(result == "target")
+    }
+}
+
+// === 11. Match on optional with string operations ===
+
+tests "match optional with string operations" {
+    test "match optional string - concat in some arm" {
+        let x: string? = "world"
+        let result = match x {
+            string => "hello " + x
+            nil => "empty"
+        }
+        assert(result == "hello world")
+    }
+
+    test "match optional string - constructed default" {
+        let x: string? = nil
+        let fallback = "fallback_value"
+        let result = match x {
+            string => x
+            nil => fallback
+        }
+        assert(result == "fallback_value")
+    }
+}
+
+// === 12. Sequential/nested match on optional ===
+
+tests "nested match on optional" {
+    test "sequential match on two optionals" {
+        let a: string? = "first"
+        let b: string? = "second"
+        let ra = match a {
+            string => a
+            nil => "nil_a"
+        }
+        let rb = match b {
+            string => b
+            nil => "nil_b"
+        }
+        assert(ra == "first")
+        assert(rb == "second")
+    }
+
+    test "sequential match - first nil second some" {
+        let a: string? = nil
+        let b: string? = "only"
+        let ra = match a {
+            string => a
+            nil => "nil_a"
+        }
+        let rb = match b {
+            string => b
+            nil => "nil_b"
+        }
+        assert(ra == "nil_a")
+        assert(rb == "only")
+    }
+}
+
+// === 13. Match on union ===
+
+tests "match on union extracting values" {
+    test "match int|string - string case" {
+        let x: i64 | string = "got_it"
+        let result = match x {
+            string => x
+            i64 => "number"
+        }
+        assert(result == "got_it")
+    }
+
+    test "match int|string - int case" {
+        let x: i64 | string = 42
+        let result = match x {
+            string => x
+            i64 => "number"
+        }
+        assert(result == "number")
+    }
+
+    test "match union returning string from both branches" {
+        let x: i64 | string = "direct"
+        let result = match x {
+            string => x
+            i64 => "converted"
+        }
+        assert(result == "direct")
+    }
+
+    test "match union returning string from int branch" {
+        let x: i64 | string = 10
+        let result = match x {
+            string => x
+            i64 => "converted"
+        }
+        assert(result == "converted")
+    }
+
+    test "match three-way union - string branch" {
+        let x: i64 | string | bool = "middle"
+        let result = match x {
+            i64 => "int"
+            string => x
+            bool => "bool"
+        }
+        assert(result == "middle")
+    }
+
+    test "match three-way union - bool branch" {
+        let x: i64 | string | bool = true
+        let result = match x {
+            i64 => "int"
+            string => x
+            bool => "bool"
+        }
+        assert(result == "bool")
+    }
+}
+
+// === 14. Match on union with string concat ===
+
+tests "match union with string concat" {
+    test "match union - concat in string arm" {
+        let x: i64 | string = "data"
+        let result = match x {
+            string => "str:" + x
+            i64 => "int_value"
+        }
+        assert(result == "str:data")
+    }
+
+    test "match union - wildcard arm" {
+        let x: i64 | string | bool = "captured"
+        let result = match x {
+            i64 => "number"
+            _ => "other"
+        }
+        assert(result == "other")
+    }
+}
+
+// === 15. Passing optional/union to functions (involves match internally) ===
+
+tests "optional string passed to functions" {
+    test "pass non-nil optional string to function" {
+        let x: string? = "greet"
+        let result = accept_optional_string(x)
+        assert(result == "greet")
+    }
+
+    test "pass nil optional string to function" {
+        let x: string? = nil
+        let result = accept_optional_string(x)
+        assert(result == "was_nil")
+    }
+
+    test "pass string literal as optional to function" {
+        let result = accept_optional_string("direct")
+        assert(result == "direct")
+    }
+
+    test "pass nil literal as optional to function" {
+        let result = accept_optional_string(nil)
+        assert(result == "was_nil")
+    }
+}
+
+tests "union passed to functions" {
+    test "pass string variant to union function" {
+        let x: i64 | string = "forwarded"
+        let result = accept_union(x)
+        assert(result == "forwarded")
+    }
+
+    test "pass int variant to union function" {
+        let x: i64 | string = 123
+        let result = accept_union(x)
+        assert(result == "was_int")
+    }
+}
+
+// === 16. Method calls on extracted optionals (involves match) ===
+
+tests "method calls on extracted optionals" {
+    test "string length on matched optional" {
+        let x: string? = "hello"
+        let result = match x {
+            string => x.length()
+            nil => 0
+        }
+        assert(result == 5)
+    }
+
+    test "string length on matched union" {
+        let x: i64 | string = "world"
+        let result = match x {
+            string => x.length()
+            i64 => 0
+        }
+        assert(result == 5)
+    }
+
+    test "string interpolation with optional value" {
+        let name: string? = "Alice"
+        let greeting = match name {
+            string => "Hello {name}!"
+            nil => "Hello stranger!"
+        }
+        assert(greeting == "Hello Alice!")
+    }
+
+    test "string interpolation with nil optional" {
+        let name: string? = nil
+        let greeting = match name {
+            string => "Hello {name}!"
+            nil => "Hello stranger!"
+        }
+        assert(greeting == "Hello stranger!")
+    }
+}
+
+// === 17. Match inside loops ===
+
+tests "match inside loops" {
+    test "match optional in for loop" {
+        let mut count = 0
+        for i in 0..3 {
+            let x: string? = "val"
+            let r = match x {
+                string => x
+                nil => "n"
+            }
+            if r == "val" {
+                count = count + 1
+            }
+        }
+        assert(count == 3)
+    }
+
+    test "match union in for loop" {
+        let mut str_count = 0
+        for i in 0..4 {
+            let mut x: i64 | string = "s"
+            if i >= 2 {
+                x = 0
+            }
+            let r = match x {
+                string => "got_str"
+                i64 => "got_int"
+            }
+            if r == "got_str" {
+                str_count = str_count + 1
+            }
+        }
+        assert(str_count == 2)
+    }
+}
+
+// === 18. Nested optional patterns (involves match) ===
+
+tests "nested optional patterns" {
+    test "optional containing concatenated string" {
+        let a = "hello"
+        let b = " world"
+        let x: string? = a + b
+        let result = match x {
+            string => x
+            nil => "empty"
+        }
+        assert(result == "hello world")
+    }
+
+    test "optional containing interpolated string" {
+        let name = "Vole"
+        let x: string? = "lang: {name}"
+        let result = match x {
+            string => x
+            nil => "empty"
+        }
+        assert(result == "lang: Vole")
+    }
+
+    test "union of class types - box variant" {
+        let x: Box | Tag = Box { label: "boxed", value: 1 }
+        let result = match x {
+            Box => x.label
+            Tag => x.text
+        }
+        assert(result == "boxed")
+    }
+
+    test "union of class types - tag variant" {
+        let x: Box | Tag = Tag { text: "tagged" }
+        let result = match x {
+            Box => x.label
+            Tag => x.text
+        }
+        assert(result == "tagged")
+    }
+
+    test "optional result from function used in match" {
+        let x = make_optional_string(true)
+        let result = match x {
+            string => x
+            nil => "default"
+        }
+        assert(result == "hello")
+    }
+}

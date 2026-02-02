@@ -760,6 +760,19 @@ impl Cg<'_, '_, '_> {
         // Determine the offset into expected_types for user args (skip sret param)
         let user_param_offset = if is_sret { 1 } else { 0 };
 
+        // Get parameter TypeIds from the function definition for union coercion
+        let param_type_ids: Vec<TypeId> = {
+            let module_id = self.current_module().unwrap_or(self.env.analyzed.module_id);
+            let name_id = self.query().try_function_name_id(module_id, callee_sym);
+            let func_id_sema = name_id.and_then(|id| self.query().registry().function_by_name(id));
+            if let Some(fid) = func_id_sema {
+                let func_def = self.query().registry().get_function(fid);
+                func_def.signature.params_id.iter().copied().collect()
+            } else {
+                Vec::new()
+            }
+        };
+
         // Compile arguments with type narrowing, tracking RC temps for cleanup
         let mut rc_temp_args = Vec::new();
         for (i, arg) in call.args.iter().enumerate() {
@@ -767,6 +780,14 @@ impl Cg<'_, '_, '_> {
             if compiled.is_owned() {
                 rc_temp_args.push(compiled);
             }
+
+            // Coerce argument to parameter type if needed (e.g., string -> string?)
+            let compiled = if let Some(&param_type_id) = param_type_ids.get(i) {
+                self.coerce_to_type(compiled, param_type_id)?
+            } else {
+                compiled
+            };
+
             let expected_ty = expected_types.get(i + user_param_offset).copied();
 
             // Narrow/extend integer types if needed
@@ -803,8 +824,43 @@ impl Cg<'_, '_, '_> {
         let call_inst = self.builder.ins().call(func_ref, &args);
         self.field_cache.clear(); // Callee may mutate instance fields
 
+        // If the return type is a union, copy the data from the callee's stack to our own
+        // BEFORE consuming RC args. The rc_dec calls in consume_rc_args can clobber the
+        // callee's stack frame, invalidating the returned pointer.
+        let union_copy = if sret_slot.is_none() && self.arena().is_union(return_type_id) {
+            let results = self.builder.inst_results(call_inst);
+            let src_ptr = results[0];
+            let union_size = self.type_size(return_type_id);
+            let slot = self.alloc_stack(union_size);
+
+            let tag = self
+                .builder
+                .ins()
+                .load(types::I8, MemFlags::new(), src_ptr, 0);
+            self.builder.ins().stack_store(tag, slot, 0);
+
+            if union_size > 8 {
+                let payload = self
+                    .builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), src_ptr, 8);
+                self.builder.ins().stack_store(payload, slot, 8);
+            }
+
+            let ptr_type = self.ptr_type();
+            let new_ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+            Some(self.compiled(new_ptr, return_type_id))
+        } else {
+            None
+        };
+
         // Dec RC temp args after the call has consumed them
         self.consume_rc_args(&mut rc_temp_args)?;
+
+        // If we already copied the union data, return that
+        if let Some(result) = union_copy {
+            return Ok(result);
+        }
 
         // For sret, the returned value is the sret pointer we passed in
         if sret_slot.is_some() {
@@ -861,6 +917,17 @@ impl Cg<'_, '_, '_> {
 
         let user_param_offset = if is_sret { 1 } else { 0 };
 
+        // Get parameter TypeIds from the function definition for union coercion
+        let param_type_ids: Vec<TypeId> = {
+            let func_id_sema = self.query().registry().function_by_name(name_id);
+            if let Some(fid) = func_id_sema {
+                let func_def = self.query().registry().get_function(fid);
+                func_def.signature.params_id.iter().copied().collect()
+            } else {
+                Vec::new()
+            }
+        };
+
         // Compile arguments with type narrowing, tracking RC temps for cleanup
         let mut rc_temp_args = Vec::new();
         for (i, arg) in call.args.iter().enumerate() {
@@ -868,6 +935,14 @@ impl Cg<'_, '_, '_> {
             if compiled.is_owned() {
                 rc_temp_args.push(compiled);
             }
+
+            // Coerce argument to parameter type if needed (e.g., string -> string?)
+            let compiled = if let Some(&param_type_id) = param_type_ids.get(i) {
+                self.coerce_to_type(compiled, param_type_id)?
+            } else {
+                compiled
+            };
+
             let expected_ty = expected_types.get(i + user_param_offset).copied();
             let arg_value = if let Some(expected) = expected_ty {
                 if compiled.ty.is_int() && expected.is_int() && expected.bits() < compiled.ty.bits()
@@ -905,8 +980,42 @@ impl Cg<'_, '_, '_> {
         let call_inst = self.builder.ins().call(func_ref, &args);
         self.field_cache.clear(); // Callee may mutate instance fields
 
+        // If the return type is a union, copy the data from the callee's stack to our own
+        // BEFORE consuming RC args. The rc_dec calls in consume_rc_args can clobber the
+        // callee's stack frame, invalidating the returned pointer.
+        let union_copy = if sret_slot.is_none() && self.arena().is_union(return_type_id) {
+            let results = self.builder.inst_results(call_inst);
+            let src_ptr = results[0];
+            let union_size = self.type_size(return_type_id);
+            let slot = self.alloc_stack(union_size);
+
+            let tag = self
+                .builder
+                .ins()
+                .load(types::I8, MemFlags::new(), src_ptr, 0);
+            self.builder.ins().stack_store(tag, slot, 0);
+
+            if union_size > 8 {
+                let payload = self
+                    .builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), src_ptr, 8);
+                self.builder.ins().stack_store(payload, slot, 8);
+            }
+
+            let ptr_type = self.ptr_type();
+            let new_ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+            Some(self.compiled(new_ptr, return_type_id))
+        } else {
+            None
+        };
+
         // Dec RC temp args after the call has consumed them
         self.consume_rc_args(&mut rc_temp_args)?;
+
+        if let Some(result) = union_copy {
+            return Ok(result);
+        }
 
         if sret_slot.is_some() {
             let results = self.builder.inst_results(call_inst);

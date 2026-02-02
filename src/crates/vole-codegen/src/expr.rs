@@ -165,7 +165,11 @@ impl Cg<'_, '_, '_> {
                 } else {
                     self.builder.ins().iconst(payload_ty, 0)
                 };
-                return Ok(CompiledValue::new(payload, payload_ty, narrowed_type_id));
+                let mut cv = CompiledValue::new(payload, payload_ty, narrowed_type_id);
+                // The extracted payload is borrowed from the union variable —
+                // callers must rc_inc if they take ownership.
+                self.mark_borrowed_if_rc(&mut cv);
+                return Ok(cv);
             }
 
             // Check for narrowed type from unknown
@@ -477,6 +481,22 @@ impl Cg<'_, '_, '_> {
                     None
                 };
 
+                // For union types with RC variants, snapshot the old union pointer
+                // so we can rc_dec its payload after overwrite.
+                let union_rc_old = if self.rc_scopes.has_active_scope() {
+                    if let Some(&(var, type_id)) = self.vars.get(sym) {
+                        if let Some(rc_tags) = self.union_rc_variant_tags(type_id) {
+                            Some((self.builder.use_var(var), rc_tags))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+
                 let mut value = self.expr(&assign.value)?;
 
                 // Check for captured variable assignment
@@ -517,6 +537,12 @@ impl Cg<'_, '_, '_> {
                     // Update the composite RC local's offsets so scope-exit cleanup
                     // covers nested RC fields in the new value too.
                     self.rc_scopes.update_composite_offsets(var, offsets);
+                }
+
+                // Union RC reassignment: rc_dec the RC payload of the OLD union value.
+                // The new value's payload is already alive (fresh from the expression).
+                if let Some((old_ptr, rc_tags)) = union_rc_old {
+                    self.emit_union_rc_dec(old_ptr, &rc_tags)?;
                 }
 
                 // The assignment consumed the temp — ownership transfers
@@ -1607,6 +1633,15 @@ impl Cg<'_, '_, '_> {
                 result_type_id = body_val.type_id;
             }
 
+            // If the arm body produces a borrowed RC value, emit rc_inc so
+            // the match result owns its reference (mirroring if_expr_blocks).
+            // Without this, borrowed payloads extracted from unions would be
+            // freed by both the union cleanup and the result variable cleanup.
+            let result_needs_rc = self.needs_rc_cleanup(result_type_id);
+            if result_needs_rc && body_val.is_borrowed() {
+                self.emit_rc_inc_for_type(body_val.value, result_type_id)?;
+            }
+
             let result_val = if body_val.ty != types::I64 {
                 match body_val.ty {
                     types::I8 => self.builder.ins().sextend(types::I64, body_val.value),
@@ -1641,7 +1676,11 @@ impl Cg<'_, '_, '_> {
             (merged_value, types::I64)
         };
 
-        Ok(CompiledValue::new(result, result_ty, result_type_id))
+        let mut cv = CompiledValue::new(result, result_ty, result_type_id);
+        if self.needs_rc_cleanup(result_type_id) {
+            cv.rc_lifecycle = RcLifecycle::Owned;
+        }
+        Ok(cv)
     }
 
     /// Compile a try expression (propagation)

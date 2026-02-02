@@ -568,6 +568,57 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Ok(())
     }
 
+    /// Emit rc_dec for the RC payload of a union value, based on its current tag.
+    /// For each RC variant, checks if the tag matches and rc_dec's the payload.
+    /// Used when a union variable is reassigned (to clean up the old value).
+    pub fn emit_union_rc_dec(
+        &mut self,
+        union_ptr: Value,
+        rc_tags: &[(u8, bool)],
+    ) -> Result<(), String> {
+        use cranelift::prelude::{InstBuilder, IntCC, MemFlags, types};
+
+        let tag = self
+            .builder
+            .ins()
+            .load(types::I8, MemFlags::new(), union_ptr, 0);
+        let rc_dec_ref = self.runtime_func_ref(RuntimeFn::RcDec)?;
+
+        for &(variant_tag, is_interface) in rc_tags {
+            let is_match = self
+                .builder
+                .ins()
+                .icmp_imm(IntCC::Equal, tag, variant_tag as i64);
+            let dec_block = self.builder.create_block();
+            let next_block = self.builder.create_block();
+
+            self.builder
+                .ins()
+                .brif(is_match, dec_block, &[], next_block, &[]);
+
+            self.builder.switch_to_block(dec_block);
+            self.builder.seal_block(dec_block);
+            let payload = self
+                .builder
+                .ins()
+                .load(types::I64, MemFlags::new(), union_ptr, 8);
+            if is_interface {
+                let data_word = self
+                    .builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), payload, 0);
+                self.builder.ins().call(rc_dec_ref, &[data_word]);
+            } else {
+                self.builder.ins().call(rc_dec_ref, &[payload]);
+            }
+            self.builder.ins().jump(next_block, &[]);
+
+            self.builder.switch_to_block(next_block);
+            self.builder.seal_block(next_block);
+        }
+        Ok(())
+    }
+
     /// Emit rc_dec(value) to decrement the reference count.
     /// Used when destroying a reference (e.g., reassignment).
     pub fn emit_rc_dec(&mut self, value: Value) -> Result<(), String> {
@@ -1276,6 +1327,37 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Large struct sret return: the result is already a pointer to the buffer
         // (handled by the caller passing the sret arg, result[0] is the sret pointer)
         // No special handling needed here since result[0] is already the pointer.
+
+        // If the return type is a union, the returned value is a pointer to the callee's stack.
+        // We must copy the union data to our own stack immediately, before any subsequent
+        // calls (e.g. rc_dec for temporary args) can clobber the callee's stack frame.
+        if self.arena().is_union(return_type_id) {
+            let src_ptr = results[0];
+            let union_size = self.type_size(return_type_id);
+            let slot = self.alloc_stack(union_size);
+
+            // Copy tag at offset 0 (1 byte)
+            let tag = self
+                .builder
+                .ins()
+                .load(types::I8, MemFlags::new(), src_ptr, 0);
+            self.builder.ins().stack_store(tag, slot, 0);
+
+            // Copy payload at offset 8 (8 bytes) if the union has payload data.
+            // Sentinel-only unions (e.g. A | B where both are zero-sized) have
+            // union_size == 8 (tag only), so there's no payload to copy.
+            if union_size > 8 {
+                let payload = self
+                    .builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), src_ptr, 8);
+                self.builder.ins().stack_store(payload, slot, 8);
+            }
+
+            let ptr_type = self.ptr_type();
+            let new_ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+            return self.compiled(new_ptr, return_type_id);
+        }
 
         self.compiled(results[0], return_type_id)
     }
