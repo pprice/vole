@@ -62,14 +62,10 @@ impl CompiledValue {
         }
     }
 
-    /// Alias for `owned` — create a compiled value marked as an RC temporary that needs cleanup.
+    /// Alias for `owned`.
+    #[allow(dead_code)]
     pub fn temp(value: Value, ty: Type, type_id: TypeId) -> Self {
-        Self {
-            value,
-            ty,
-            type_id,
-            rc_lifecycle: RcLifecycle::Owned,
-        }
+        Self::owned(value, ty, type_id)
     }
 
     /// Create a new CompiledValue with a different value but the same types

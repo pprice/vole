@@ -176,91 +176,87 @@ impl Analyzer {
         // Partial analysis results (e.g. Map class with its methods) are still
         // valid and needed by codegen. Methods that reference unknown types
         // (like Iterator) simply won't be callable, but everything else works.
-        {
-            // Cache the analysis results
-            if let Some(ref cache) = self.ctx.module_cache {
-                cache.borrow_mut().insert(
-                    import_path.to_string(),
-                    CachedModule {
-                        program: program.clone(),
-                        interner: prelude_interner.clone(),
-                        expr_types: sub_analyzer.expr_types.clone(),
-                        method_resolutions: sub_analyzer.method_resolutions.clone_inner(),
-                        functions_by_name: sub_analyzer.functions_by_name.clone(),
-                        is_check_results: sub_analyzer.is_check_results.clone(),
-                    },
-                );
-            }
 
-            // Merge functions by name
-            for (name, func_type) in sub_analyzer.functions_by_name {
-                self.functions_by_name.insert(name, func_type);
-            }
-
-            // Register generic prelude functions for cross-interner generic lookup
-            for decl in &program.declarations {
-                if let Decl::Function(func) = decl
-                    && !func.type_params.is_empty()
-                {
-                    let name_str = prelude_interner.resolve(func.name).to_string();
-                    let name_id = self.name_table_mut().intern(
-                        prelude_module,
-                        &[func.name],
-                        &prelude_interner,
-                    );
-                    self.generic_prelude_functions.insert(name_str, name_id);
-                }
-            }
-
-            // Create module type with exports so other prelude files can import this one.
-            // Only export interfaces - that's what prelude files need to import from each other.
-            let mut exports: smallvec::SmallVec<[(NameId, ArenaTypeId); 8]> = smallvec![];
-            for decl in &program.declarations {
-                if let Decl::Interface(iface) = decl {
-                    let iface_str = prelude_interner.resolve(iface.name);
-                    // Resolve type_def_id first, then drop the borrow before getting name_id
-                    let type_def_id = self
-                        .resolver(&prelude_interner)
-                        .resolve_type_str_or_interface(iface_str, &self.entity_registry());
-                    if let Some(type_def_id) = type_def_id {
-                        let name_id = self.name_table_mut().intern(
-                            prelude_module,
-                            &[iface.name],
-                            &prelude_interner,
-                        );
-                        let iface_type_id =
-                            self.type_arena_mut().interface(type_def_id, smallvec![]);
-                        exports.push((name_id, iface_type_id));
-                    }
-                }
-            }
-
-            // Create module type and cache it
-            // Use canonical_path for module_type_ids cache (for deduplication)
-            let module_type_id = self.type_arena_mut().module(prelude_module, exports);
-            self.ctx
-                .module_type_ids
-                .borrow_mut()
-                .insert(canonical_path, module_type_id);
-
-            // Use import_path for program/expr/method maps (consistent with module_id)
-            self.ctx
-                .module_programs
-                .borrow_mut()
-                .insert(import_path.to_string(), (program, prelude_interner));
-            self.ctx
-                .module_expr_types
-                .borrow_mut()
-                .insert(import_path.to_string(), sub_analyzer.expr_types.clone());
-            self.ctx.module_method_resolutions.borrow_mut().insert(
+        // Cache the analysis results
+        if let Some(ref cache) = self.ctx.module_cache {
+            cache.borrow_mut().insert(
                 import_path.to_string(),
-                sub_analyzer.method_resolutions.into_inner(),
-            );
-            self.ctx.module_is_check_results.borrow_mut().insert(
-                import_path.to_string(),
-                sub_analyzer.is_check_results.clone(),
+                CachedModule {
+                    program: program.clone(),
+                    interner: prelude_interner.clone(),
+                    expr_types: sub_analyzer.expr_types.clone(),
+                    method_resolutions: sub_analyzer.method_resolutions.clone_inner(),
+                    functions_by_name: sub_analyzer.functions_by_name.clone(),
+                    is_check_results: sub_analyzer.is_check_results.clone(),
+                },
             );
         }
+
+        // Merge functions by name
+        for (name, func_type) in sub_analyzer.functions_by_name {
+            self.functions_by_name.insert(name, func_type);
+        }
+
+        // Register generic prelude functions for cross-interner generic lookup
+        for decl in &program.declarations {
+            if let Decl::Function(func) = decl
+                && !func.type_params.is_empty()
+            {
+                let name_str = prelude_interner.resolve(func.name).to_string();
+                let name_id =
+                    self.name_table_mut()
+                        .intern(prelude_module, &[func.name], &prelude_interner);
+                self.generic_prelude_functions.insert(name_str, name_id);
+            }
+        }
+
+        // Create module type with exports so other prelude files can import this one.
+        // Only export interfaces - that's what prelude files need to import from each other.
+        let mut exports: smallvec::SmallVec<[(NameId, ArenaTypeId); 8]> = smallvec![];
+        for decl in &program.declarations {
+            if let Decl::Interface(iface) = decl {
+                let iface_str = prelude_interner.resolve(iface.name);
+                // Resolve type_def_id first, then drop the borrow before getting name_id
+                let type_def_id = self
+                    .resolver(&prelude_interner)
+                    .resolve_type_str_or_interface(iface_str, &self.entity_registry());
+                if let Some(type_def_id) = type_def_id {
+                    let name_id = self.name_table_mut().intern(
+                        prelude_module,
+                        &[iface.name],
+                        &prelude_interner,
+                    );
+                    let iface_type_id = self.type_arena_mut().interface(type_def_id, smallvec![]);
+                    exports.push((name_id, iface_type_id));
+                }
+            }
+        }
+
+        // Create module type and cache it
+        // Use canonical_path for module_type_ids cache (for deduplication)
+        let module_type_id = self.type_arena_mut().module(prelude_module, exports);
+        self.ctx
+            .module_type_ids
+            .borrow_mut()
+            .insert(canonical_path, module_type_id);
+
+        // Use import_path for program/expr/method maps (consistent with module_id)
+        self.ctx
+            .module_programs
+            .borrow_mut()
+            .insert(import_path.to_string(), (program, prelude_interner));
+        self.ctx
+            .module_expr_types
+            .borrow_mut()
+            .insert(import_path.to_string(), sub_analyzer.expr_types.clone());
+        self.ctx.module_method_resolutions.borrow_mut().insert(
+            import_path.to_string(),
+            sub_analyzer.method_resolutions.into_inner(),
+        );
+        self.ctx.module_is_check_results.borrow_mut().insert(
+            import_path.to_string(),
+            sub_analyzer.is_check_results.clone(),
+        );
     }
 
     /// Check if a function name refers to a generic function in a prelude module.

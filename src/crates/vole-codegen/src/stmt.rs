@@ -979,18 +979,9 @@ impl Cg<'_, '_, '_> {
 
         self.finalize_for_loop(header, body_block, continue_block, exit_block);
 
-        // Free the last iteration's char string (the one that was current when the loop ended).
-        // When the loop exits (is_done branch from header), the last loaded elem_val was never
-        // freed because we jumped to exit_block instead of continue_block.
-        // However, on the exit path the elem_var still holds the LAST iteration's value
-        // (the one whose body completed and jumped to continue, where it was already freed).
-        // Actually, exit is taken when iter_next returns 0, so no new elem_val was loaded.
-        // The last freed-in-continue value is the last one. We just need to handle the case
-        // where exit is reached with an elem_var that was set but never freed.
-        // On second thought: header calls iter_next. If iter_next returns 0, we jump to exit.
-        // The elem_var was last def'd in the body_block. The continue block freed it.
-        // So on exit, there's no dangling string. But we should zero the var after freeing
-        // to avoid double-free on scope exit.
+        // No dangling char string on exit: the exit branch is taken when
+        // iter_next returns 0 (no new value loaded), and the continue block
+        // already freed the previous iteration's char string.
 
         // Free the string chars iterator after the loop
         self.call_runtime_void(RuntimeFn::RcDec, &[iter_val])?;

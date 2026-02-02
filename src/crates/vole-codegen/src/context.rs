@@ -1441,7 +1441,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Wrap a Cranelift value as a String CompiledValue marked as an RC temp
     pub fn string_temp(&self, value: Value) -> CompiledValue {
-        CompiledValue::temp(value, self.ptr_type(), TypeId::STRING)
+        CompiledValue::owned(value, self.ptr_type(), TypeId::STRING)
     }
 
     /// Mark a CompiledValue as owned if its type needs RC cleanup.

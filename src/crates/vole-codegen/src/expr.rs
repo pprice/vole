@@ -1251,7 +1251,7 @@ impl Cg<'_, '_, '_> {
         self.switch_and_seal(merge_block);
 
         let result = self.builder.block_params(merge_block)[0];
-        Ok(CompiledValue::temp(result, cranelift_type, inner_type_id))
+        Ok(CompiledValue::owned(result, cranelift_type, inner_type_id))
     }
 
     /// Load a captured variable from closure
