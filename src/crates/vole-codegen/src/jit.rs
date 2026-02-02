@@ -591,6 +591,19 @@ impl JitContext {
         let sig = self.create_signature(&[ptr_ty, types::I32, types::I64], None);
         self.import_function("vole_instance_set_field", &sig);
 
+        // StringBuilder functions
+        // vole_sb_new() -> *mut StringBuilder
+        let sig = self.create_signature(&[], Some(ptr_ty));
+        self.import_function("vole_sb_new", &sig);
+
+        // vole_sb_push_string(sb: *mut StringBuilder, s: *const RcString)
+        let sig = self.create_signature(&[ptr_ty, ptr_ty], None);
+        self.import_function("vole_sb_push_string", &sig);
+
+        // vole_sb_finish(sb: *mut StringBuilder) -> *mut RcString
+        let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
+        self.import_function("vole_sb_finish", &sig);
+
         // Unified RC functions
         // rc_inc(ptr: *mut u8)
         let sig = self.create_signature(&[ptr_ty], None);
@@ -981,6 +994,20 @@ impl JitContext {
         builder.symbol(
             "vole_heap_alloc",
             vole_runtime::closure::vole_heap_alloc as *const u8,
+        );
+
+        // StringBuilder functions
+        builder.symbol(
+            "vole_sb_new",
+            vole_runtime::string_builder::vole_sb_new as *const u8,
+        );
+        builder.symbol(
+            "vole_sb_push_string",
+            vole_runtime::string_builder::vole_sb_push_string as *const u8,
+        );
+        builder.symbol(
+            "vole_sb_finish",
+            vole_runtime::string_builder::vole_sb_finish as *const u8,
         );
 
         // Instance functions (classes and records)

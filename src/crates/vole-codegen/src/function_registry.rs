@@ -99,6 +99,9 @@ runtime_fns! {
     InstanceNew => "vole_instance_new",
     InstanceGetField => "vole_instance_get_field",
     InstanceSetField => "vole_instance_set_field",
+    SbNew => "vole_sb_new",
+    SbPushString => "vole_sb_push_string",
+    SbFinish => "vole_sb_finish",
     RcInc => "rc_inc",
     RcDec => "rc_dec",
 }
