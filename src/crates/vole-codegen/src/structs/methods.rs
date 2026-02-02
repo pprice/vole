@@ -1220,8 +1220,12 @@ impl Cg<'_, '_, '_> {
                 // Compile arguments with substituted param types (TypeId-based)
                 let param_type_ids = &instance.func_type.params_id;
                 let mut args = Vec::new();
+                let mut rc_temps: Vec<CompiledValue> = Vec::new();
                 for (arg, &param_type_id) in mc.args.iter().zip(param_type_ids.iter()) {
                     let compiled = self.expr(arg)?;
+                    if compiled.is_owned() {
+                        rc_temps.push(compiled);
+                    }
                     let compiled = self.coerce_to_type(compiled, param_type_id)?;
                     args.push(compiled.value);
                 }
@@ -1230,6 +1234,8 @@ impl Cg<'_, '_, '_> {
                 let func_key = self.funcs().intern_name_id(instance.mangled_name);
                 let func_ref = self.func_ref(func_key)?;
                 let call = self.builder.ins().call(func_ref, &args);
+                self.field_cache.clear();
+                self.consume_rc_args(&mut rc_temps)?;
                 let return_type_id = instance.func_type.return_type_id;
                 return Ok(self.call_result(call, return_type_id));
             }
@@ -1267,10 +1273,14 @@ impl Cg<'_, '_, '_> {
             (params.clone(), ret)
         };
 
-        // Compile provided arguments (no receiver for static methods)
+        // Compile provided arguments (no receiver for static methods), tracking RC temps
         let mut args = Vec::new();
+        let mut rc_temps: Vec<CompiledValue> = Vec::new();
         for (arg, param_id) in mc.args.iter().zip(param_ids.iter()) {
             let compiled = self.expr(arg)?;
+            if compiled.is_owned() {
+                rc_temps.push(compiled);
+            }
             let compiled = self.coerce_to_type(compiled, *param_id)?;
             args.push(compiled.value);
         }
@@ -1285,6 +1295,8 @@ impl Cg<'_, '_, '_> {
         // Get function reference and call
         let func_ref = self.func_ref(func_key)?;
         let call = self.builder.ins().call(func_ref, &args);
+        self.field_cache.clear();
+        self.consume_rc_args(&mut rc_temps)?;
         Ok(self.call_result(call, return_type_id))
     }
 

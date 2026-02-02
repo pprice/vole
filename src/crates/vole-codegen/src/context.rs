@@ -18,7 +18,7 @@ use crate::errors::CodegenError;
 use crate::{FunctionKey, RuntimeFn};
 use smallvec::SmallVec;
 use vole_frontend::{Expr, Symbol};
-use vole_identity::{ModuleId, NameId};
+use vole_identity::{ModuleId, NameId, TypeDefId};
 use vole_runtime::native_registry::NativeType;
 use vole_sema::PrimitiveType;
 use vole_sema::implement_registry::ExternalMethodInfo;
@@ -250,6 +250,121 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             || arena.is_class(type_id)
             || arena.is_handle(type_id)
             || arena.is_interface(type_id)
+    }
+
+    /// Get or create a runtime type_id for a monomorphized generic class instance.
+    ///
+    /// For generic classes like `Wrapper<T>`, the base class is registered with
+    /// field type tags based on TypeParam placeholders (which are tagged as Value).
+    /// When a concrete instantiation like `Wrapper<Tag>` is created, the fields
+    /// may actually be RC types that need cleanup. This method creates a unique
+    /// runtime type_id for each (base_class, type_args) combination and registers
+    /// the correct field type tags based on the concrete type arguments.
+    ///
+    /// Returns the base type_id unchanged if:
+    /// - The class has no type args (non-generic)
+    /// - None of the field types involve type parameters
+    pub fn mono_instance_type_id(&self, base_type_id: u32, result_type_id: TypeId) -> u32 {
+        let arena = self.arena();
+        let Some((type_def_id, type_args)) = arena.unwrap_class(result_type_id) else {
+            return base_type_id;
+        };
+        if type_args.is_empty() {
+            return base_type_id;
+        }
+        self.mono_instance_type_id_with_args(base_type_id, type_def_id, type_args.to_vec())
+    }
+
+    /// Resolve a monomorphized runtime type_id for a generic class instance
+    /// using explicit concrete type arguments.
+    ///
+    /// This variant is used when the caller already has the correct concrete
+    /// type args (e.g., from substituting type params in a monomorphized context).
+    pub fn mono_instance_type_id_with_args(
+        &self,
+        base_type_id: u32,
+        type_def_id: TypeDefId,
+        concrete_type_args: Vec<TypeId>,
+    ) -> u32 {
+        if concrete_type_args.is_empty() {
+            return base_type_id;
+        }
+
+        let arena = self.arena();
+
+        // Check if any field type is a TypeParam that maps to an RC type
+        let type_def = self.query().get_type(type_def_id);
+        let Some(generic_info) = &type_def.generic_info else {
+            return base_type_id;
+        };
+        if generic_info.type_params.is_empty() {
+            return base_type_id;
+        }
+
+        // Build substitution map: type_param NameId -> concrete TypeId
+        let subs: FxHashMap<NameId, TypeId> = generic_info
+            .type_params
+            .iter()
+            .zip(concrete_type_args.iter())
+            .map(|(param, &arg)| (param.name_id, arg))
+            .collect();
+
+        // Substitute field types to get concrete types
+        let concrete_field_types: Vec<TypeId> = generic_info
+            .field_types
+            .iter()
+            .map(|&ft| arena.expect_substitute(ft, &subs, "mono_instance_type_id"))
+            .collect();
+
+        // Check if any field type changes from non-RC to RC after substitution.
+        // If all concrete field types have the same RC-ness as the base registration,
+        // we can reuse the base type_id.
+        let base_tags: Vec<bool> = generic_info
+            .field_types
+            .iter()
+            .map(|&ft| self.needs_rc_cleanup(ft))
+            .collect();
+        let concrete_tags: Vec<bool> = concrete_field_types
+            .iter()
+            .map(|&ft| self.needs_rc_cleanup(ft))
+            .collect();
+        if base_tags == concrete_tags {
+            return base_type_id;
+        }
+
+        // Need a monomorphized type_id. Check cache first.
+        let key = (type_def_id, concrete_type_args);
+        if let Some(&cached_id) = self.env.state.mono_type_ids.borrow().get(&key) {
+            return cached_id;
+        }
+
+        // Allocate a new type_id
+        let new_type_id = self.env.state.mono_type_id_counter.get();
+        self.env.state.mono_type_id_counter.set(new_type_id + 1);
+
+        // Compute field type tags from concrete types
+        let field_type_tags: Vec<vole_runtime::type_registry::FieldTypeTag> = concrete_field_types
+            .iter()
+            .map(|&ft| {
+                if self.needs_rc_cleanup(ft) {
+                    vole_runtime::type_registry::FieldTypeTag::Rc
+                } else {
+                    vole_runtime::type_registry::FieldTypeTag::Value
+                }
+            })
+            .collect();
+
+        // Register in the runtime type registry
+        vole_runtime::type_registry::register_instance_type(new_type_id, field_type_tags);
+
+        // Cache for future use
+        self.env
+            .state
+            .mono_type_ids
+            .borrow_mut()
+            .insert(key, new_type_id);
+
+        new_type_id
     }
 
     /// Check if a captured variable type is RC-managed and needs rc_inc/rc_dec.
@@ -840,7 +955,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Unwrap an interface type, returning the TypeDefId if it is one
-    pub fn interface_type_def_id(&self, ty: TypeId) -> Option<vole_identity::TypeDefId> {
+    pub fn interface_type_def_id(&self, ty: TypeId) -> Option<TypeDefId> {
         self.arena().unwrap_interface(ty).map(|(id, _)| id)
     }
 
@@ -850,7 +965,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// imports, builtin module, and interface/class fallback.
     /// Note: We convert the Symbol to string first because the current interner
     /// may be module-specific while the query uses the main program's interner.
-    pub fn resolve_type(&self, sym: Symbol) -> Option<vole_identity::TypeDefId> {
+    pub fn resolve_type(&self, sym: Symbol) -> Option<TypeDefId> {
         let name = self.interner().resolve(sym);
         let query = self.query();
         let module_id = self
@@ -863,7 +978,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ///
     /// This uses the same resolution path as sema: primitives, current module,
     /// imports, builtin module, and interface/class fallback.
-    pub fn resolve_type_str_or_interface(&self, name: &str) -> Option<vole_identity::TypeDefId> {
+    pub fn resolve_type_str_or_interface(&self, name: &str) -> Option<TypeDefId> {
         let query = self.query();
         let module_id = self
             .current_module_id()
@@ -879,12 +994,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &self,
         error_union_id: TypeId,
         name: &str,
-    ) -> Option<vole_identity::TypeDefId> {
+    ) -> Option<TypeDefId> {
         let arena = self.arena();
         let name_table = self.name_table();
         let registry = self.query().registry();
 
-        let check_variant = |type_def_id: vole_identity::TypeDefId| -> bool {
+        let check_variant = |type_def_id: TypeDefId| -> bool {
             name_table
                 .last_segment_str(registry.name_id(type_def_id))
                 .is_some_and(|seg| seg == name)
@@ -2996,7 +3111,7 @@ impl<'a, 'b, 'ctx> crate::vtable_ctx::VtableCtx for Cg<'a, 'b, 'ctx> {
         self.codegen_ctx.funcs()
     }
 
-    fn resolve_type_str_or_interface(&self, name: &str) -> Option<vole_identity::TypeDefId> {
+    fn resolve_type_str_or_interface(&self, name: &str) -> Option<TypeDefId> {
         let query = self.query();
         let module_id = self
             .current_module_id()

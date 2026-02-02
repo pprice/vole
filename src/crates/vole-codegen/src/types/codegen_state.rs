@@ -7,6 +7,7 @@ use std::cell::{Cell, RefCell};
 
 use vole_identity::{NameId, TypeDefId};
 use vole_runtime::NativeRegistry;
+use vole_sema::type_arena::TypeId;
 
 use crate::FunctionKey;
 use crate::interface_vtable::InterfaceVtableRegistry;
@@ -17,6 +18,10 @@ use super::TypeMetadata;
 /// Type metadata lookup map.
 /// Keyed by TypeDefId for stable cross-interner identity.
 pub type TypeMetadataMap = FxHashMap<TypeDefId, TypeMetadata>;
+
+/// Key for monomorphized generic class type_id cache.
+/// Combines the base class TypeDefId with concrete type arguments.
+type MonoTypeKey = (TypeDefId, Vec<TypeId>);
 
 /// Grouped codegen lookup tables.
 ///
@@ -39,6 +44,15 @@ pub struct CodegenState {
     pub intrinsics_registry: IntrinsicsRegistry,
     /// Counter for generating unique lambda names (interior mutability)
     pub lambda_counter: Cell<usize>,
+    /// Counter for dynamically allocated monomorphized type_ids (interior mutability).
+    /// Initialized from `Compiler::next_type_id` after pass 1 completes.
+    pub mono_type_id_counter: Cell<u32>,
+    /// Cache of runtime type_ids for monomorphized generic class instances.
+    /// Maps (base TypeDefId, concrete type args) -> runtime type_id.
+    /// When a generic class like `Wrapper<Tag>` is instantiated, we register
+    /// a new runtime type_id with field type tags based on the concrete types,
+    /// so that instance_drop can properly rc_dec RC-typed fields.
+    pub mono_type_ids: RefCell<FxHashMap<MonoTypeKey, u32>>,
 }
 
 impl CodegenState {
@@ -51,6 +65,8 @@ impl CodegenState {
             native_registry,
             intrinsics_registry: IntrinsicsRegistry::new(),
             lambda_counter: Cell::new(0),
+            mono_type_id_counter: Cell::new(0),
+            mono_type_ids: RefCell::new(FxHashMap::default()),
         }
     }
 }

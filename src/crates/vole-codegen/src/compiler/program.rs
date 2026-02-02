@@ -256,6 +256,11 @@ impl Compiler<'_> {
         // Reset counter for second pass
         test_count = 0;
 
+        // Initialize monomorphized type_id counter from pass 1's next_type_id.
+        // This ensures dynamically allocated type_ids for generic instantiations
+        // don't collide with statically registered type_ids from pass 1.
+        self.state.mono_type_id_counter.set(self.next_type_id);
+
         // Declare monomorphized function instances before second pass
         self.declare_all_monomorphized_instances(program)?;
 

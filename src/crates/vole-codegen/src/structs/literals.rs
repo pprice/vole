@@ -140,11 +140,53 @@ impl Cg<'_, '_, '_> {
             );
         }
 
-        let type_id = metadata.type_id;
+        let base_type_id = metadata.type_id;
         let field_count = metadata.field_slots.len() as u32;
         // Prefer the type from semantic analysis (handles generic instantiation, module-aware)
         let result_type_id = self.get_expr_type(&expr.id).unwrap_or(metadata.vole_type);
         let field_slots = metadata.field_slots.clone();
+
+        // For generic class instances, resolve a monomorphized type_id with correct
+        // field type tags for RC cleanup. This ensures instance_drop properly rc_dec's
+        // fields that are RC types after type parameter substitution.
+        //
+        // When inside a monomorphized function, get_expr_type may return a concrete type
+        // from a different instantiation (since all instantiations share the same AST).
+        // We reconstruct the correct concrete type by substituting the class's type args
+        // using the current function's substitutions.
+        let type_id = if let Some(subs) = self.substitutions {
+            // In a monomorphized context, get_expr_type may return a concrete type
+            // from a different instantiation (since all share the same AST).
+            // We compute the correct concrete type args by looking up each class
+            // type parameter in the current function's substitution map.
+            let type_def = self.query().get_type(type_def_id);
+            if let Some(generic_info) = &type_def.generic_info {
+                if !generic_info.type_params.is_empty() {
+                    let concrete_args: Vec<_> = generic_info
+                        .type_params
+                        .iter()
+                        .filter_map(|tp| subs.get(&tp.name_id).copied())
+                        .collect();
+                    if concrete_args.len() == generic_info.type_params.len() {
+                        self.mono_instance_type_id_with_args(
+                            base_type_id,
+                            type_def_id,
+                            concrete_args,
+                        )
+                    } else {
+                        // Not all type params found in substitutions - class type params
+                        // don't match function type params. Fall back to result_type_id.
+                        self.mono_instance_type_id(base_type_id, result_type_id)
+                    }
+                } else {
+                    base_type_id
+                }
+            } else {
+                base_type_id
+            }
+        } else {
+            self.mono_instance_type_id(base_type_id, result_type_id)
+        };
 
         let type_id_val = self.builder.ins().iconst(types::I32, type_id as i64);
         let field_count_val = self.builder.ins().iconst(types::I32, field_count as i64);
