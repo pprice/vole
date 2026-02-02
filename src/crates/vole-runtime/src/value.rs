@@ -53,6 +53,9 @@ pub extern "C" fn rc_inc(ptr: *mut u8) {
     }
     unsafe {
         let header = &*(ptr as *const RcHeader);
+        if header.ref_count.load(Ordering::Relaxed) == RC_PINNED {
+            return;
+        }
         header.inc();
     }
 }
@@ -70,6 +73,9 @@ pub extern "C" fn rc_dec(ptr: *mut u8) {
     }
     unsafe {
         let header = &*(ptr as *const RcHeader);
+        if header.ref_count.load(Ordering::Relaxed) == RC_PINNED {
+            return;
+        }
         let prev = header.dec();
         if prev == 1 {
             // Refcount was 1, now 0 — time to drop
@@ -81,6 +87,9 @@ pub extern "C" fn rc_dec(ptr: *mut u8) {
         }
     }
 }
+
+/// Sentinel refcount for static/pinned objects — rc_inc/rc_dec are no-ops.
+pub const RC_PINNED: u32 = u32::MAX;
 
 /// Type IDs for runtime objects
 pub const TYPE_STRING: u32 = 1;
@@ -334,5 +343,59 @@ mod tests {
         // Should not crash
         rc_inc(std::ptr::null_mut());
         rc_dec(std::ptr::null_mut());
+    }
+
+    /// Allocate a pinned RcHeader (ref_count = RC_PINNED) on the heap.
+    unsafe fn alloc_pinned_header(drop_fn: Option<unsafe extern "C" fn(*mut u8)>) -> *mut u8 {
+        let layout = Layout::new::<RcHeader>();
+        let ptr = unsafe { alloc(layout) };
+        assert!(!ptr.is_null());
+        let header = RcHeader {
+            ref_count: AtomicU32::new(RC_PINNED),
+            type_id: TYPE_STRING,
+            drop_fn,
+        };
+        unsafe { std::ptr::write(ptr as *mut RcHeader, header) };
+        ptr
+    }
+
+    #[test]
+    fn rc_inc_is_noop_for_pinned() {
+        unsafe {
+            let ptr = alloc_pinned_header(None);
+            rc_inc(ptr);
+            let header = &*(ptr as *const RcHeader);
+            assert_eq!(header.ref_count.load(Ordering::Relaxed), RC_PINNED);
+            dealloc(ptr, Layout::new::<RcHeader>());
+        }
+    }
+
+    #[test]
+    fn rc_dec_is_noop_for_pinned() {
+        DROP_CALLED.store(false, Ordering::SeqCst);
+        unsafe {
+            let ptr = alloc_pinned_header(Some(dummy_drop));
+            rc_dec(ptr);
+            let header = &*(ptr as *const RcHeader);
+            assert_eq!(header.ref_count.load(Ordering::Relaxed), RC_PINNED);
+            assert!(!DROP_CALLED.load(Ordering::SeqCst));
+            dealloc(ptr, Layout::new::<RcHeader>());
+        }
+    }
+
+    #[test]
+    fn rc_inc_dec_repeated_on_pinned() {
+        DROP_CALLED.store(false, Ordering::SeqCst);
+        unsafe {
+            let ptr = alloc_pinned_header(Some(dummy_drop));
+            for _ in 0..10 {
+                rc_inc(ptr);
+                rc_dec(ptr);
+            }
+            let header = &*(ptr as *const RcHeader);
+            assert_eq!(header.ref_count.load(Ordering::Relaxed), RC_PINNED);
+            assert!(!DROP_CALLED.load(Ordering::SeqCst));
+            dealloc(ptr, Layout::new::<RcHeader>());
+        }
     }
 }
