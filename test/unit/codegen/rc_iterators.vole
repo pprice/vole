@@ -1,0 +1,495 @@
+// RC cleanup tests for iterator patterns.
+//
+// Tests exercise RC tracking for iterators over RC types (strings, classes,
+// closures), iterator adapters (map, filter, take), and chained operations.
+// Focus is on ensuring RC temporaries from iterator pipelines are properly
+// cleaned up.
+
+class Item {
+    name: string,
+    value: i64
+}
+
+func make_item(name: string, value: i64) -> Item {
+    return Item { name: name, value: value }
+}
+
+func item_name(it: Item) -> string {
+    return it.name
+}
+
+tests "basic for-in iteration over RC elements" {
+    test "iterate string array and concatenate" {
+        let words = ["hello", "world", "foo"]
+        let mut result = ""
+        for w in words {
+            result = result + w + ","
+        }
+        assert(result == "hello,world,foo,")
+    }
+
+    test "iterate string array and build result" {
+        let names = ["alice", "bob", "carol"]
+        let mut count = 0
+        let mut last = ""
+        for n in names {
+            count = count + 1
+            last = n
+        }
+        assert(count == 3)
+        assert(last == "carol")
+    }
+
+    test "iterate class instances and read string fields" {
+        let a = Item { name: "sword", value: 10 }
+        let b = Item { name: "shield", value: 20 }
+        let c = Item { name: "potion", value: 5 }
+        let items = [a, b, c]
+        let mut total = 0
+        let mut names = ""
+        for it in items {
+            total = total + it.value
+            names = names + it.name + ","
+        }
+        assert(total == 35)
+        assert(names == "sword,shield,potion,")
+    }
+
+    test "iterate and read string field into local" {
+        let a = Item { name: "alpha", value: 1 }
+        let b = Item { name: "beta", value: 2 }
+        let items = [a, b]
+        let mut result = ""
+        for it in items {
+            let n = it.name
+            result = result + n + ","
+        }
+        assert(result == "alpha,beta,")
+    }
+}
+
+tests "iterator .map() with RC types" {
+    test "map string array to lengths" {
+        let words = ["hello", "hi", "hey"]
+        let lengths = words.iter().map((w) => w.length()).collect()
+        assert(lengths.length() == 3)
+        assert(lengths[0] == 5)
+        assert(lengths[1] == 2)
+        assert(lengths[2] == 3)
+    }
+
+    test "map string array to transformed strings" {
+        let words = ["a", "b", "c"]
+        let prefixed = words.iter().map((w) => "pre_" + w).collect()
+        assert(prefixed.length() == 3)
+        assert(prefixed[0] == "pre_a")
+        assert(prefixed[1] == "pre_b")
+        assert(prefixed[2] == "pre_c")
+    }
+
+    test "map class instances to string fields" {
+        let x = Item { name: "sword", value: 10 }
+        let y = Item { name: "shield", value: 20 }
+        let items = [x, y]
+        let names = items.iter().map((it) => it.name).collect()
+        assert(names.length() == 2)
+        assert(names[0] == "sword")
+        assert(names[1] == "shield")
+    }
+
+    test "map class instances to values" {
+        let x = Item { name: "x", value: 5 }
+        let y = Item { name: "y", value: 15 }
+        let z = Item { name: "z", value: 25 }
+        let items = [x, y, z]
+        let values = items.iter().map((it) => it.value).collect()
+        assert(values.length() == 3)
+        assert(values[0] == 5)
+        assert(values[1] == 15)
+        assert(values[2] == 25)
+    }
+
+    test "map with closure capturing string" {
+        let prefix = "item"
+        let nums = [1, 2, 3]
+        let labels = nums.iter().map((n) => prefix + "_" + n).collect()
+        assert(labels.length() == 3)
+        assert(labels[0] == "item_1")
+        assert(labels[1] == "item_2")
+        assert(labels[2] == "item_3")
+    }
+}
+
+tests "iterator .filter() with RC types" {
+    test "filter strings by length" {
+        let words = ["hi", "hello", "hey", "howdy"]
+        let long_words = words.iter().filter((w) => w.length() > 3).collect()
+        assert(long_words.length() == 2)
+        assert(long_words[0] == "hello")
+        assert(long_words[1] == "howdy")
+    }
+
+    test "filter class instances by value" {
+        let a = Item { name: "cheap", value: 5 }
+        let b = Item { name: "mid", value: 50 }
+        let c = Item { name: "pricey", value: 200 }
+        let items = [a, b, c]
+        let expensive = items.iter().filter((it) => it.value > 10).collect()
+        assert(expensive.length() == 2)
+        assert(expensive[0].name == "mid")
+        assert(expensive[1].name == "pricey")
+    }
+
+    test "filter all elements out" {
+        let words = ["a", "b", "c"]
+        let result = words.iter().filter((w) => w.length() > 10).collect()
+        assert(result.length() == 0)
+    }
+
+    test "filter keeps all elements" {
+        let words = ["hello", "world"]
+        let result = words.iter().filter((w) => w.length() > 0).collect()
+        assert(result.length() == 2)
+        assert(result[0] == "hello")
+        assert(result[1] == "world")
+    }
+}
+
+tests "iterator chaining .map().filter()" {
+    test "map then filter on strings" {
+        let words = ["a", "bb", "ccc", "dddd"]
+        let result = words.iter().map((w) => w.length()).filter((n) => n > 2).collect()
+        assert(result.length() == 2)
+        assert(result[0] == 3)
+        assert(result[1] == 4)
+    }
+
+    test "filter then map on strings" {
+        let words = ["hi", "hello", "hey", "howdy"]
+        let result = words.iter().filter((w) => w.length() > 3).map((w) => "long:" + w).collect()
+        assert(result.length() == 2)
+        assert(result[0] == "long:hello")
+        assert(result[1] == "long:howdy")
+    }
+
+    test "filter then map on class instances" {
+        let a = Item { name: "a", value: 1 }
+        let b = Item { name: "b", value: 20 }
+        let c = Item { name: "c", value: 3 }
+        let d = Item { name: "d", value: 40 }
+        let items = [a, b, c, d]
+        let names = items.iter().filter((it) => it.value > 10).map((it) => it.name).collect()
+        assert(names.length() == 2)
+        assert(names[0] == "b")
+        assert(names[1] == "d")
+    }
+
+    test "map then filter on class instances" {
+        let a = Item { name: "short", value: 1 }
+        let b = Item { name: "longname", value: 2 }
+        let c = Item { name: "x", value: 3 }
+        let items = [a, b, c]
+        let result = items.iter().map((it) => it.name).filter((n) => n.length() > 3).collect()
+        assert(result.length() == 2)
+        assert(result[0] == "short")
+        assert(result[1] == "longname")
+    }
+}
+
+tests "iterator .take() with RC types" {
+    test "take from string array" {
+        let words = ["alpha", "beta", "gamma", "delta"]
+        let first2 = words.iter().take(2).collect()
+        assert(first2.length() == 2)
+        assert(first2[0] == "alpha")
+        assert(first2[1] == "beta")
+    }
+
+    test "take from class instance array" {
+        let a = Item { name: "a", value: 1 }
+        let b = Item { name: "b", value: 2 }
+        let c = Item { name: "c", value: 3 }
+        let items = [a, b, c]
+        let first = items.iter().take(1).collect()
+        assert(first.length() == 1)
+        assert(first[0].name == "a")
+        assert(first[0].value == 1)
+    }
+
+    test "take with map on strings" {
+        let words = ["hello", "world", "foo", "bar"]
+        let result = words.iter().map((w) => w + "!").take(2).collect()
+        assert(result.length() == 2)
+        assert(result[0] == "hello!")
+        assert(result[1] == "world!")
+    }
+
+    test "take with filter on strings" {
+        let words = ["a", "bb", "ccc", "dddd", "eeeee"]
+        let result = words.iter().filter((w) => w.length() > 1).take(2).collect()
+        assert(result.length() == 2)
+        assert(result[0] == "bb")
+        assert(result[1] == "ccc")
+    }
+
+    test "take zero from string array" {
+        let words = ["hello", "world"]
+        let result = words.iter().take(0).collect()
+        assert(result.length() == 0)
+    }
+
+    test "take more than available from string array" {
+        let words = ["only"]
+        let result = words.iter().take(100).collect()
+        assert(result.length() == 1)
+        assert(result[0] == "only")
+    }
+}
+
+tests "iterator .collect() creating new arrays of RC types" {
+    test "collect strings from iter" {
+        let original = ["one", "two", "three"]
+        let copy = original.iter().collect()
+        assert(copy.length() == 3)
+        assert(copy[0] == "one")
+        assert(copy[1] == "two")
+        assert(copy[2] == "three")
+    }
+
+    test "collect class instances from iter" {
+        let a = Item { name: "a", value: 1 }
+        let b = Item { name: "b", value: 2 }
+        let items = [a, b]
+        let copy = items.iter().collect()
+        assert(copy.length() == 2)
+        assert(copy[0].name == "a")
+        assert(copy[1].name == "b")
+        assert(copy[0].value == 1)
+        assert(copy[1].value == 2)
+    }
+
+    test "collect after complex chain with strings" {
+        let words = ["hi", "hello", "hey", "howdy", "hola"]
+        let result = words.iter().filter((w) => w.length() > 2).map((w) => w + "_suffix").take(3).collect()
+        assert(result.length() == 3)
+        assert(result[0] == "hello_suffix")
+        assert(result[1] == "hey_suffix")
+        assert(result[2] == "howdy_suffix")
+    }
+
+    test "collect empty iterator of strings" {
+        let words = ["a", "b"]
+        let result = words.iter().filter((w) => w.length() > 100).collect()
+        assert(result.length() == 0)
+    }
+}
+
+tests "iterator over strings (RC elements)" {
+    test "string iter map to concatenation" {
+        let parts = ["hello", " ", "world"]
+        let result = parts.iter().map((s) => s + "!").collect()
+        assert(result.length() == 3)
+        assert(result[0] == "hello!")
+        assert(result[1] == " !")
+        assert(result[2] == "world!")
+    }
+
+    test "string iter filter and count" {
+        let words = ["cat", "dog", "catfish", "catalog", "bird"]
+        let count = words.iter().filter((w) => w.length() > 3).count()
+        assert(count == 3)
+    }
+
+    test "string iter reduce to concatenation" {
+        let words = ["hello", "world"]
+        let result = words.iter().reduce("", (acc, w) => acc + w + " ")
+        assert(result == "hello world ")
+    }
+
+    test "string iter sum of lengths via map" {
+        let words = ["hi", "hey", "hello"]
+        let total = words.iter().map((w) => w.length()).sum()
+        assert(total == 10)
+    }
+}
+
+tests "early termination with break in for loop" {
+    test "break from string iteration" {
+        let words = ["first", "second", "third", "fourth"]
+        let mut found = ""
+        for w in words {
+            if w == "second" {
+                found = w
+                break
+            }
+        }
+        assert(found == "second")
+    }
+
+    test "break from class instance iteration" {
+        let a = Item { name: "a", value: 1 }
+        let b = Item { name: "target", value: 42 }
+        let c = Item { name: "c", value: 3 }
+        let items = [a, b, c]
+        let mut found_name = ""
+        let mut found_value = 0
+        for it in items {
+            if it.value == 42 {
+                found_name = it.name
+                found_value = it.value
+                break
+            }
+        }
+        assert(found_name == "target")
+        assert(found_value == 42)
+    }
+
+    test "break after partial string concatenation" {
+        let words = ["a", "b", "c", "d", "e"]
+        let mut result = ""
+        for w in words {
+            result = result + w
+            if result.length() >= 3 {
+                break
+            }
+        }
+        assert(result == "abc")
+    }
+
+    test "continue skipping strings" {
+        let words = ["keep", "skip", "keep2", "skip", "keep3"]
+        let mut result = ""
+        for w in words {
+            if w == "skip" {
+                continue
+            }
+            result = result + w + ","
+        }
+        assert(result == "keep,keep2,keep3,")
+    }
+}
+
+tests "nested iterator chains (.map().map().filter())" {
+    test "double map then filter on integers" {
+        let nums = [1, 2, 3, 4, 5]
+        let result = nums.iter().map((x) => x + 1).map((x) => x * 2).filter((x) => x > 7).collect()
+        assert(result.length() == 3)
+        assert(result[0] == 8)
+        assert(result[1] == 10)
+        assert(result[2] == 12)
+    }
+
+    test "map to string then map to length then filter" {
+        let nums = [1, 22, 333, 4444]
+        let result = nums.iter().map((n) => "" + n).map((s) => s.length()).filter((len) => len > 1).collect()
+        assert(result.length() == 3)
+        assert(result[0] == 2)
+        assert(result[1] == 3)
+        assert(result[2] == 4)
+    }
+
+    test "filter then map then map on class instances" {
+        let a = Item { name: "aa", value: 5 }
+        let b = Item { name: "bbbb", value: 50 }
+        let c = Item { name: "cc", value: 100 }
+        let items = [a, b, c]
+        let result = items.iter().filter((it) => it.value > 10).map((it) => it.name).map((n) => n + "_ok").collect()
+        assert(result.length() == 2)
+        assert(result[0] == "bbbb_ok")
+        assert(result[1] == "cc_ok")
+    }
+
+    test "triple map chain on strings" {
+        let words = ["ab", "cd"]
+        let result = words.iter().map((w) => w + "1").map((w) => w + "2").map((w) => w + "3").collect()
+        assert(result.length() == 2)
+        assert(result[0] == "ab123")
+        assert(result[1] == "cd123")
+    }
+
+    test "map filter map filter chain" {
+        let nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        let result = nums.iter().map((x) => x * 2).filter((x) => x > 8).map((x) => x - 10).filter((x) => x > 3).collect()
+        assert(result.length() == 4)
+        assert(result[0] == 4)
+        assert(result[1] == 6)
+        assert(result[2] == 8)
+        assert(result[3] == 10)
+    }
+}
+
+tests "iterator over classes and closures (RC elements)" {
+    test "collect class instances through filter" {
+        let a = Item { name: "keep1", value: 100 }
+        let b = Item { name: "drop", value: 1 }
+        let c = Item { name: "keep2", value: 200 }
+        let items = [a, b, c]
+        let kept = items.iter().filter((it) => it.value > 50).collect()
+        assert(kept.length() == 2)
+        assert(kept[0].name == "keep1")
+        assert(kept[1].name == "keep2")
+        assert(kept[0].value == 100)
+        assert(kept[1].value == 200)
+    }
+
+    test "map class instances to new class instances" {
+        let a = Item { name: "a", value: 10 }
+        let b = Item { name: "b", value: 20 }
+        let items = [a, b]
+        let doubled = items.iter().map((it) => Item { name: it.name, value: it.value * 2 }).collect()
+        assert(doubled.length() == 2)
+        assert(doubled[0].name == "a")
+        assert(doubled[0].value == 20)
+        assert(doubled[1].name == "b")
+        assert(doubled[1].value == 40)
+    }
+
+    test "array of closures iterated in for loop" {
+        let add1 = (x: i64) -> i64 => x + 1
+        let add2 = (x: i64) -> i64 => x + 2
+        let add3 = (x: i64) -> i64 => x + 3
+        let fns = [add1, add2, add3]
+        let mut total = 0
+        for f in fns {
+            total = total + f(10)
+        }
+        // (10+1) + (10+2) + (10+3) = 11 + 12 + 13 = 36
+        assert(total == 36)
+    }
+
+    test "closures capturing strings iterated" {
+        let greet = (name: string) -> string => "hello " + name
+        let farewell = (name: string) -> string => "bye " + name
+        let fns = [greet, farewell]
+        let mut result = ""
+        for f in fns {
+            result = result + f("world") + ","
+        }
+        assert(result == "hello world,bye world,")
+    }
+
+    test "take from class instance iterator" {
+        let a = Item { name: "first", value: 1 }
+        let b = Item { name: "second", value: 2 }
+        let c = Item { name: "third", value: 3 }
+        let d = Item { name: "fourth", value: 4 }
+        let items = [a, b, c, d]
+        let first2 = items.iter().take(2).collect()
+        assert(first2.length() == 2)
+        assert(first2[0].name == "first")
+        assert(first2[1].name == "second")
+    }
+
+    test "chained filter and map on class instances with take" {
+        let a = Item { name: "a", value: 5 }
+        let b = Item { name: "b", value: 50 }
+        let c = Item { name: "c", value: 100 }
+        let d = Item { name: "d", value: 200 }
+        let e = Item { name: "e", value: 2 }
+        let items = [a, b, c, d, e]
+        let result = items.iter().filter((it) => it.value > 10).map((it) => it.name + "=" + it.value).take(2).collect()
+        assert(result.length() == 2)
+        assert(result[0] == "b=50")
+        assert(result[1] == "c=100")
+    }
+}
