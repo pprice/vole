@@ -176,3 +176,76 @@ tests "class with primitives" {
         assert(a.value + b.value + c.value == 6)
     }
 }
+
+func read_person_name(p: Person) -> string {
+    return p.name
+}
+
+func read_person_age(p: Person) -> i64 {
+    return p.age
+}
+
+func make_person(name: string, age: i64) -> Person {
+    return Person { name: name, age: age }
+}
+
+func read_outer_label(o: Outer) -> string {
+    return o.label
+}
+
+func read_outer_inner_value(o: Outer) -> string {
+    return o.inner.value
+}
+
+tests "class passed to functions" {
+    test "pass class instance as argument and read field" {
+        let p = Person { name: "Alice", age: 30 }
+        let n = read_person_name(p)
+        assert(n == "Alice")
+        let a = read_person_age(p)
+        assert(a == 30)
+        assert(p.name == "Alice")
+        assert(p.age == 30)
+    }
+
+    test "return class instance from function" {
+        let p = make_person("Bob", 25)
+        assert(p.name == "Bob")
+        assert(p.age == 25)
+        let p2 = make_person("Carol", 40)
+        assert(p2.name == "Carol")
+        assert(p2.age == 40)
+    }
+
+    test "class instance captured by closure" {
+        let p = Person { name: "Dave", age: 35 }
+        let get_name = () -> string => p.name
+        let get_age = () -> i64 => p.age
+        assert(get_name() == "Dave")
+        assert(get_age() == 35)
+        assert(p.name == "Dave")
+    }
+
+    test "class instance stored in array passed to function" {
+        let a = Person { name: "Eve", age: 20 }
+        let b = Person { name: "Frank", age: 45 }
+        let arr = [a, b]
+        let n0 = read_person_name(arr[0])
+        let n1 = read_person_name(arr[1])
+        assert(n0 == "Eve")
+        assert(n1 == "Frank")
+        assert(arr[0].age == 20)
+        assert(arr[1].age == 45)
+    }
+
+    test "nested class instance passed to function" {
+        let inner = Inner { value: "payload" }
+        let outer = Outer { inner: inner, label: "envelope" }
+        let lbl = read_outer_label(outer)
+        let inner_val = read_outer_inner_value(outer)
+        assert(lbl == "envelope")
+        assert(inner_val == "payload")
+        assert(outer.inner.value == "payload")
+        assert(outer.label == "envelope")
+    }
+}
