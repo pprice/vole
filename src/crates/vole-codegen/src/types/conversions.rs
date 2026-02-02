@@ -17,6 +17,19 @@ use vole_sema::{EntityRegistry, PrimitiveType};
 use super::TypeCtx;
 use super::codegen_state::TypeMetadataMap;
 
+/// Lifecycle state for reference-counted values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RcLifecycle {
+    /// Fresh allocation — caller must consume or auto-drop
+    Owned,
+    /// Borrow from existing binding — rc_inc already emitted
+    Borrowed,
+    /// Handed off (assigned, returned, passed) — no further action
+    Consumed,
+    /// Non-RC type, or explicitly opted out
+    Untracked,
+}
+
 /// Compiled value with its type
 #[derive(Clone, Copy)]
 pub struct CompiledValue {
@@ -24,10 +37,8 @@ pub struct CompiledValue {
     pub ty: Type,
     /// The Vole type of this value (interned TypeId handle - use arena to query)
     pub type_id: TypeId,
-    /// Whether this value is a freshly allocated RC object not yet bound to a
-    /// let-binding. Temporaries marked with this flag need cleanup after
-    /// consumption.
-    pub is_rc_temp: bool,
+    /// Lifecycle state for reference-counted values.
+    pub rc_lifecycle: RcLifecycle,
 }
 
 impl CompiledValue {
@@ -37,7 +48,7 @@ impl CompiledValue {
             value,
             ty,
             type_id,
-            is_rc_temp: false,
+            rc_lifecycle: RcLifecycle::Untracked,
         }
     }
 
@@ -47,7 +58,7 @@ impl CompiledValue {
             value,
             ty,
             type_id,
-            is_rc_temp: true,
+            rc_lifecycle: RcLifecycle::Owned,
         }
     }
 
@@ -57,8 +68,37 @@ impl CompiledValue {
             value,
             ty: self.ty,
             type_id: self.type_id,
-            is_rc_temp: false,
+            rc_lifecycle: RcLifecycle::Untracked,
         }
+    }
+
+    /// Compatibility shim: equivalent to the old `is_rc_temp` field.
+    /// Returns true when this value is an owned RC temporary needing cleanup.
+    pub fn is_rc_temp(&self) -> bool {
+        self.rc_lifecycle == RcLifecycle::Owned
+    }
+
+    /// Whether this value has Owned lifecycle.
+    pub fn is_owned(&self) -> bool {
+        self.rc_lifecycle == RcLifecycle::Owned
+    }
+
+    /// Whether this value has Borrowed lifecycle.
+    pub fn is_borrowed(&self) -> bool {
+        self.rc_lifecycle == RcLifecycle::Borrowed
+    }
+
+    /// Whether this value is tracked (Owned or Borrowed).
+    pub fn is_tracked(&self) -> bool {
+        matches!(
+            self.rc_lifecycle,
+            RcLifecycle::Owned | RcLifecycle::Borrowed
+        )
+    }
+
+    /// Mark this value as consumed — no further RC action needed.
+    pub fn mark_consumed(&mut self) {
+        self.rc_lifecycle = RcLifecycle::Consumed;
     }
 }
 

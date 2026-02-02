@@ -27,8 +27,8 @@ use vole_sema::type_arena::{SemaType as ArenaType, TypeId};
 use super::lambda::CaptureBinding;
 use super::rc_cleanup::RcScopeStack;
 use super::types::{
-    CodegenCtx, CompileEnv, CompiledValue, TypeMetadataMap, native_type_to_cranelift, type_id_size,
-    type_id_to_cranelift,
+    CodegenCtx, CompileEnv, CompiledValue, RcLifecycle, TypeMetadataMap, native_type_to_cranelift,
+    type_id_size, type_id_to_cranelift,
 };
 
 /// Control flow context for loops (break/continue targets)
@@ -366,7 +366,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Emit rc_dec for an RC temporary after it has been consumed.
     /// No-op if the value is not marked as an RC temp.
     pub fn dec_rc_temp(&mut self, val: &CompiledValue) -> Result<(), String> {
-        if val.is_rc_temp {
+        if val.is_rc_temp() {
             self.emit_rc_dec(val.value)?;
         }
         Ok(())
@@ -1093,7 +1093,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// borrowed values (variable reads, field access, index operations).
     pub fn mark_rc_temp(&self, mut cv: CompiledValue) -> CompiledValue {
         if self.needs_rc_cleanup(cv.type_id) {
-            cv.is_rc_temp = true;
+            cv.rc_lifecycle = RcLifecycle::Owned;
         }
         cv
     }

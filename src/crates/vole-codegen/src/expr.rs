@@ -8,6 +8,7 @@ use cranelift_module::Module;
 
 use crate::RuntimeFn;
 use crate::errors::CodegenError;
+use crate::types::RcLifecycle;
 use rustc_hash::FxHashMap;
 
 use vole_frontend::{
@@ -478,7 +479,7 @@ impl Cg<'_, '_, '_> {
 
                 // The assignment consumed the temp — clear the flag so
                 // Stmt::Expr won't double-dec it.
-                value.is_rc_temp = false;
+                value.rc_lifecycle = RcLifecycle::Untracked;
                 Ok(value)
             }
             AssignTarget::Field { object, field, .. } => {
@@ -849,7 +850,7 @@ impl Cg<'_, '_, '_> {
 
             // Assignment consumed the temp — clear the flag
             let mut val = val;
-            val.is_rc_temp = false;
+            val.rc_lifecycle = RcLifecycle::Untracked;
             Ok(val)
         } else if is_dynamic_array {
             // Dynamic array assignment
@@ -870,7 +871,7 @@ impl Cg<'_, '_, '_> {
 
             // Assignment consumed the temp — clear the flag
             let mut val = val;
-            val.is_rc_temp = false;
+            val.rc_lifecycle = RcLifecycle::Untracked;
             Ok(val)
         } else {
             // Error: not an indexable type

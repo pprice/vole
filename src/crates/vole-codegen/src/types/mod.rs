@@ -18,7 +18,7 @@ pub use function_ctx::FunctionCtx;
 pub use type_ctx::TypeCtx;
 
 // Re-export conversion types and functions
-pub use conversions::CompiledValue;
+pub use conversions::{CompiledValue, RcLifecycle};
 pub(crate) use conversions::{
     FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, MethodInfo, TypeMetadata, array_element_tag_id,
     convert_to_type, fallible_error_tag_by_id, function_name_id_with_interner,

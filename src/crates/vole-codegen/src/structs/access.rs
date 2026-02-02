@@ -4,7 +4,7 @@ use super::helpers::{convert_to_i64_for_storage, get_field_slot_and_type_id_cg};
 use crate::RuntimeFn;
 use crate::context::Cg;
 use crate::errors::CodegenError;
-use crate::types::{CompiledValue, module_name_id};
+use crate::types::{CompiledValue, RcLifecycle, module_name_id};
 use cranelift::prelude::*;
 use vole_frontend::{Expr, FieldAccessExpr, NodeId, OptionalChainExpr, Symbol};
 use vole_sema::type_arena::TypeId;
@@ -288,7 +288,7 @@ impl Cg<'_, '_, '_> {
             }
             // Assignment consumed the temp — clear the flag
             let mut value = value;
-            value.is_rc_temp = false;
+            value.rc_lifecycle = RcLifecycle::Untracked;
             return Ok(value);
         }
 
@@ -309,7 +309,7 @@ impl Cg<'_, '_, '_> {
 
         // Assignment consumed the temp — clear the flag
         let mut value = value;
-        value.is_rc_temp = false;
+        value.rc_lifecycle = RcLifecycle::Untracked;
         Ok(value)
     }
 

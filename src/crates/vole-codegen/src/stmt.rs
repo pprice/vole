@@ -283,14 +283,16 @@ impl Cg<'_, '_, '_> {
                 // register it as a composite RC local so its RC fields are dec'd at
                 // scope exit.  When the init is a borrow (variable, index, field),
                 // its source already has composite cleanup registered.
-                if self.rc_scopes.has_active_scope() && !is_borrow
-                    && let Some(offsets) = self.composite_rc_field_offsets(init.type_id) {
-                        let cr_type = self.cranelift_type(init.type_id);
-                        let temp_var = self.builder.declare_var(cr_type);
-                        self.builder.def_var(temp_var, init.value);
-                        let drop_flag = self.register_composite_rc_local(temp_var, offsets);
-                        crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
-                    }
+                if self.rc_scopes.has_active_scope()
+                    && !is_borrow
+                    && let Some(offsets) = self.composite_rc_field_offsets(init.type_id)
+                {
+                    let cr_type = self.cranelift_type(init.type_id);
+                    let temp_var = self.builder.declare_var(cr_type);
+                    self.builder.def_var(temp_var, init.value);
+                    let drop_flag = self.register_composite_rc_local(temp_var, offsets);
+                    crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
+                }
 
                 // Recursively compile the destructuring pattern
                 self.compile_destructure_pattern(&let_tuple.pattern, init.value, init.type_id)?;

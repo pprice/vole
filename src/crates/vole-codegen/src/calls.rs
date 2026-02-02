@@ -743,7 +743,7 @@ impl Cg<'_, '_, '_> {
         let mut rc_temp_args = Vec::new();
         for (i, arg) in call.args.iter().enumerate() {
             let compiled = self.expr(arg)?;
-            if compiled.is_rc_temp {
+            if compiled.is_rc_temp() {
                 rc_temp_args.push(compiled);
             }
             let expected_ty = expected_types.get(i + user_param_offset).copied();
@@ -844,7 +844,7 @@ impl Cg<'_, '_, '_> {
         let mut rc_temp_args = Vec::new();
         for (i, arg) in call.args.iter().enumerate() {
             let compiled = self.expr(arg)?;
-            if compiled.is_rc_temp {
+            if compiled.is_rc_temp() {
                 rc_temp_args.push(compiled);
             }
             let expected_ty = expected_types.get(i + user_param_offset).copied();
@@ -1237,7 +1237,7 @@ impl Cg<'_, '_, '_> {
         let mut rc_temp_args = Vec::new();
         for (arg, &param_type_id) in call.args.iter().zip(params.iter()) {
             let compiled = self.expr(arg)?;
-            if compiled.is_rc_temp {
+            if compiled.is_rc_temp() {
                 rc_temp_args.push(compiled);
             }
             let compiled = self.coerce_to_type(compiled, param_type_id)?;
@@ -1278,7 +1278,7 @@ impl Cg<'_, '_, '_> {
                     // AnalyzedProgram. AnalyzedProgram outlives this entire compilation session.
                     let default_expr = unsafe { &**default_ptr };
                     let compiled = self.expr(default_expr)?;
-                    if compiled.is_rc_temp {
+                    if compiled.is_rc_temp() {
                         rc_temp_args.push(compiled);
                     }
                     let compiled = self.coerce_to_type(compiled, param_type_id)?;
