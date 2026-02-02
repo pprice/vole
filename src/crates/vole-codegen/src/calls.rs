@@ -208,11 +208,7 @@ impl Cg<'_, '_, '_> {
             self.builder.ins().iconst(inner_cr_type, 0)
         };
 
-        let inner_compiled = CompiledValue {
-            value: inner_val,
-            ty: inner_cr_type,
-            type_id: inner_type_id,
-        };
+        let inner_compiled = CompiledValue::new(inner_val, inner_cr_type, inner_type_id);
         let some_str = self.value_to_string(inner_compiled)?;
         self.builder.ins().jump(merge_block, &[some_str.into()]);
 
@@ -327,11 +323,7 @@ impl Cg<'_, '_, '_> {
             let func_type_id = method.signature_id;
             let method_name_id = method.name_id;
             let value = self.builder.use_var(*var);
-            let obj = CompiledValue {
-                value,
-                ty: self.cranelift_type(*type_id),
-                type_id: *type_id,
-            };
+            let obj = CompiledValue::new(value, self.cranelift_type(*type_id), *type_id);
             return self.interface_dispatch_call_args_by_type_def_id(
                 &obj,
                 &call.args,
@@ -789,11 +781,7 @@ impl Cg<'_, '_, '_> {
         // For sret, the returned value is the sret pointer we passed in
         if sret_slot.is_some() {
             let results = self.builder.inst_results(call_inst);
-            return Ok(CompiledValue {
-                value: results[0],
-                ty: ptr_type,
-                type_id: return_type_id,
-            });
+            return Ok(CompiledValue::new(results[0], ptr_type, return_type_id));
         }
 
         Ok(self.call_result(call_inst, return_type_id))
@@ -887,11 +875,7 @@ impl Cg<'_, '_, '_> {
 
         if sret_slot.is_some() {
             let results = self.builder.inst_results(call_inst);
-            return Ok(CompiledValue {
-                value: results[0],
-                ty: ptr_type,
-                type_id: return_type_id,
-            });
+            return Ok(CompiledValue::new(results[0], ptr_type, return_type_id));
         }
 
         Ok(self.call_result(call_inst, return_type_id))
@@ -1306,11 +1290,7 @@ impl Cg<'_, '_, '_> {
             let ptr_type = self.ptr_type();
             let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
 
-            Ok(CompiledValue {
-                value: ptr,
-                ty: ptr_type,
-                type_id: ret,
-            })
+            Ok(CompiledValue::new(ptr, ptr_type, ret))
         } else {
             // If the return type is a union, the returned value is a pointer to callee's stack.
             // We need to copy the union data to our own stack to prevent it from being
@@ -1487,19 +1467,15 @@ impl Cg<'_, '_, '_> {
                 return self.reconstruct_struct_from_regs(&results_vec, type_id);
             }
             // Large struct (sret): result[0] is already the pointer to our buffer
-            return CompiledValue {
-                value: results[0],
-                ty: self.ptr_type(),
-                type_id,
-            };
+            return CompiledValue::new(results[0], self.ptr_type(), type_id);
         }
 
         // Non-struct: standard single result
-        CompiledValue {
-            value: results[0],
-            ty: native_type_to_cranelift(&native_func.signature.return_type, self.ptr_type()),
+        CompiledValue::new(
+            results[0],
+            native_type_to_cranelift(&native_func.signature.return_type, self.ptr_type()),
             type_id,
-        }
+        )
     }
 
     /// Compile a native function call with known Vole types (for generic external functions)

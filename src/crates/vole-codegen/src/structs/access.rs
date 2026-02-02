@@ -45,27 +45,15 @@ impl Cg<'_, '_, '_> {
                 return match const_val {
                     ConstantValue::F64(v) => {
                         let val = self.builder.ins().f64const(v);
-                        Ok(CompiledValue {
-                            value: val,
-                            ty: types::F64,
-                            type_id: f64_id,
-                        })
+                        Ok(CompiledValue::new(val, types::F64, f64_id))
                     }
                     ConstantValue::I64(v) => {
                         let val = self.builder.ins().iconst(types::I64, v);
-                        Ok(CompiledValue {
-                            value: val,
-                            ty: types::I64,
-                            type_id: i64_id,
-                        })
+                        Ok(CompiledValue::new(val, types::I64, i64_id))
                     }
                     ConstantValue::Bool(v) => {
                         let val = self.builder.ins().iconst(types::I8, if v { 1 } else { 0 });
-                        Ok(CompiledValue {
-                            value: val,
-                            ty: types::I8,
-                            type_id: bool_id,
-                        })
+                        Ok(CompiledValue::new(val, types::I8, bool_id))
                     }
                     ConstantValue::String(s) => self.string_literal(&s),
                 };
@@ -227,11 +215,7 @@ impl Cg<'_, '_, '_> {
         self.switch_and_seal(merge_block);
 
         let result = self.builder.block_params(merge_block)[0];
-        Ok(CompiledValue {
-            value: result,
-            ty: cranelift_type,
-            type_id: result_type_id,
-        })
+        Ok(CompiledValue::new(result, cranelift_type, result_type_id))
     }
 
     pub fn field_assign(
@@ -351,11 +335,7 @@ impl Cg<'_, '_, '_> {
             } else {
                 self.builder.ins().iadd_imm(struct_ptr, offset as i64)
             };
-            return Ok(CompiledValue {
-                value: field_ptr,
-                ty: ptr_type,
-                type_id: field_type_id,
-            });
+            return Ok(CompiledValue::new(field_ptr, ptr_type, field_type_id));
         }
 
         // Non-struct field: load as i64, then convert to proper type

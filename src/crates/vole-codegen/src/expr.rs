@@ -87,11 +87,11 @@ impl Cg<'_, '_, '_> {
                 let type_id = self
                     .get_expr_type(&expr.id)
                     .unwrap_or(self.arena().primitives.i64);
-                Ok(CompiledValue {
-                    value: self.builder.ins().iconst(types::I64, 0),
-                    ty: types::I64,
+                Ok(CompiledValue::new(
+                    self.builder.ins().iconst(types::I64, 0),
+                    types::I64,
                     type_id,
-                })
+                ))
             }
             ExprKind::Yield(_) => {
                 // Yield should be caught in semantic analysis
@@ -125,11 +125,7 @@ impl Cg<'_, '_, '_> {
                 });
             if let Some(type_id) = sentinel_type_id {
                 let value = self.builder.ins().iconst(types::I8, 0);
-                return Ok(CompiledValue {
-                    value,
-                    ty: types::I8,
-                    type_id,
-                });
+                return Ok(CompiledValue::new(value, types::I8, type_id));
             }
         }
 
@@ -153,11 +149,7 @@ impl Cg<'_, '_, '_> {
                 } else {
                     self.builder.ins().iconst(payload_ty, 0)
                 };
-                return Ok(CompiledValue {
-                    value: payload,
-                    ty: payload_ty,
-                    type_id: narrowed_type_id,
-                });
+                return Ok(CompiledValue::new(payload, payload_ty, narrowed_type_id));
             }
 
             // Check for narrowed type from unknown
@@ -172,11 +164,7 @@ impl Cg<'_, '_, '_> {
                 return Ok(extracted);
             }
 
-            Ok(CompiledValue {
-                value: val,
-                ty,
-                type_id: *type_id,
-            })
+            Ok(CompiledValue::new(val, ty, *type_id))
         } else if let Some(&(module_id, export_name, export_type_id)) =
             self.module_bindings.get(&sym)
         {
@@ -207,11 +195,7 @@ impl Cg<'_, '_, '_> {
         {
             // Bare identifier refers to a sentinel type - emit i8(0)
             let value = self.builder.ins().iconst(types::I8, 0);
-            Ok(CompiledValue {
-                value,
-                ty: types::I8,
-                type_id: sentinel_type_id,
-            })
+            Ok(CompiledValue::new(value, types::I8, sentinel_type_id))
         } else {
             Err(CodegenError::not_found("variable", self.interner().resolve(sym)).into())
         }
@@ -249,27 +233,15 @@ impl Cg<'_, '_, '_> {
             match const_val {
                 vole_sema::types::ConstantValue::F64(v) => {
                     let val = self.builder.ins().f64const(v);
-                    Ok(CompiledValue {
-                        value: val,
-                        ty: types::F64,
-                        type_id: f64_id,
-                    })
+                    Ok(CompiledValue::new(val, types::F64, f64_id))
                 }
                 vole_sema::types::ConstantValue::I64(v) => {
                     let val = self.builder.ins().iconst(types::I64, v);
-                    Ok(CompiledValue {
-                        value: val,
-                        ty: types::I64,
-                        type_id: i64_id,
-                    })
+                    Ok(CompiledValue::new(val, types::I64, i64_id))
                 }
                 vole_sema::types::ConstantValue::Bool(v) => {
                     let val = self.builder.ins().iconst(types::I8, if v { 1 } else { 0 });
-                    Ok(CompiledValue {
-                        value: val,
-                        ty: types::I8,
-                        type_id: bool_id,
-                    })
+                    Ok(CompiledValue::new(val, types::I8, bool_id))
                 }
                 vole_sema::types::ConstantValue::String(s) => self.string_literal(&s),
             }
@@ -411,11 +383,11 @@ impl Cg<'_, '_, '_> {
         let closure_ptr = self.builder.inst_results(alloc_call)[0];
 
         // Use closure type from sema (already has is_closure: true)
-        Ok(CompiledValue {
-            value: closure_ptr,
-            ty: self.ptr_type(),
-            type_id: func_type_id,
-        })
+        Ok(CompiledValue::new(
+            closure_ptr,
+            self.ptr_type(),
+            func_type_id,
+        ))
     }
 
     /// Compile a unary expression
@@ -446,11 +418,11 @@ impl Cg<'_, '_, '_> {
                 // Compile the expression for side effects, discard result
                 let _value = self.expr(&assign.value)?;
                 // Return a void value
-                Ok(CompiledValue {
-                    value: self.builder.ins().iconst(types::I64, 0),
-                    ty: types::I64,
-                    type_id: TypeId::VOID,
-                })
+                Ok(CompiledValue::new(
+                    self.builder.ins().iconst(types::I64, 0),
+                    types::I64,
+                    TypeId::VOID,
+                ))
             }
             AssignTarget::Variable(sym) => {
                 // Read the old value BEFORE evaluating the new expression,
@@ -515,11 +487,11 @@ impl Cg<'_, '_, '_> {
 
         // Return a dummy value with the never type
         // The actual value doesn't matter since control never reaches here
-        Ok(CompiledValue {
-            value: self.builder.ins().iconst(types::I64, 0),
-            ty: types::I64,
-            type_id: TypeId::NEVER,
-        })
+        Ok(CompiledValue::new(
+            self.builder.ins().iconst(types::I64, 0),
+            types::I64,
+            TypeId::NEVER,
+        ))
     }
 
     /// Compile an array or tuple literal
@@ -570,11 +542,7 @@ impl Cg<'_, '_, '_> {
                 expr.span.line
             )
         });
-        Ok(CompiledValue {
-            value: arr_ptr,
-            ty: self.ptr_type(),
-            type_id: array_type_id,
-        })
+        Ok(CompiledValue::new(arr_ptr, self.ptr_type(), array_type_id))
     }
 
     /// Compile a tuple literal to stack-allocated memory
@@ -619,11 +587,7 @@ impl Cg<'_, '_, '_> {
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
 
         // Use TypeId from ExpressionData (passed from caller)
-        Ok(CompiledValue {
-            value: ptr,
-            ty: ptr_type,
-            type_id: tuple_type_id,
-        })
+        Ok(CompiledValue::new(ptr, ptr_type, tuple_type_id))
     }
 
     /// Compile a repeat literal [expr; N] to a fixed-size array
@@ -670,11 +634,7 @@ impl Cg<'_, '_, '_> {
             )
         });
 
-        Ok(CompiledValue {
-            value: ptr,
-            ty: ptr_type,
-            type_id,
-        })
+        Ok(CompiledValue::new(ptr, ptr_type, type_id))
     }
 
     /// Compile a range expression (start..end or start..=end)
@@ -704,11 +664,7 @@ impl Cg<'_, '_, '_> {
         let range_type_id = self.arena().range();
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
 
-        Ok(CompiledValue {
-            value: ptr,
-            ty: ptr_type,
-            type_id: range_type_id,
-        })
+        Ok(CompiledValue::new(ptr, ptr_type, range_type_id))
     }
 
     /// Compile an index expression
@@ -738,11 +694,7 @@ impl Cg<'_, '_, '_> {
                         .ins()
                         .load(elem_cr_type, MemFlags::new(), obj.value, offset);
 
-                return Ok(CompiledValue {
-                    value,
-                    ty: elem_cr_type,
-                    type_id: elem_type_id,
-                });
+                return Ok(CompiledValue::new(value, elem_cr_type, elem_type_id));
             } else {
                 return Err("tuple index must be a constant".to_string());
             }
@@ -792,11 +744,7 @@ impl Cg<'_, '_, '_> {
                 .ins()
                 .load(elem_cr_type, MemFlags::new(), elem_ptr, 0);
 
-            return Ok(CompiledValue {
-                value,
-                ty: elem_cr_type,
-                type_id: element_id,
-            });
+            return Ok(CompiledValue::new(value, elem_cr_type, element_id));
         }
 
         // Try dynamic array
@@ -1173,11 +1121,7 @@ impl Cg<'_, '_, '_> {
         self.switch_and_seal(merge_block);
 
         let result = self.builder.block_params(merge_block)[0];
-        Ok(CompiledValue {
-            value: result,
-            ty: cranelift_type,
-            type_id: inner_type_id,
-        })
+        Ok(CompiledValue::new(result, cranelift_type, inner_type_id))
     }
 
     /// Load a captured variable from closure
@@ -1200,11 +1144,7 @@ impl Cg<'_, '_, '_> {
             .ins()
             .load(cranelift_ty, MemFlags::new(), heap_ptr, 0);
 
-        Ok(CompiledValue {
-            value,
-            ty: cranelift_ty,
-            type_id: binding.vole_type,
-        })
+        Ok(CompiledValue::new(value, cranelift_ty, binding.vole_type))
     }
 
     /// Store a value to a captured variable in closure
@@ -1227,11 +1167,11 @@ impl Cg<'_, '_, '_> {
             .ins()
             .store(MemFlags::new(), value.value, heap_ptr, 0);
 
-        Ok(CompiledValue {
-            value: value.value,
-            ty: cranelift_ty,
-            type_id: binding.vole_type,
-        })
+        Ok(CompiledValue::new(
+            value.value,
+            cranelift_ty,
+            binding.vole_type,
+        ))
     }
 
     /// Compile a match expression
@@ -1589,11 +1529,7 @@ impl Cg<'_, '_, '_> {
             (merged_value, types::I64)
         };
 
-        Ok(CompiledValue {
-            value: result,
-            ty: result_ty,
-            type_id: result_type_id,
-        })
+        Ok(CompiledValue::new(result, result_ty, result_type_id))
     }
 
     /// Compile a try expression (propagation)
@@ -1661,11 +1597,7 @@ impl Cg<'_, '_, '_> {
         self.switch_and_seal(merge_block);
         let result = self.builder.block_params(merge_block)[0];
 
-        Ok(CompiledValue {
-            value: result,
-            ty: payload_ty,
-            type_id: success_type_id,
-        })
+        Ok(CompiledValue::new(result, payload_ty, success_type_id))
     }
 
     /// Compile a block expression: { stmts; trailing_expr }
@@ -1795,11 +1727,11 @@ impl Cg<'_, '_, '_> {
         // Use select instruction: select(cond, if_true, if_false)
         let result = self.builder.ins().select(cond_val, then_val, else_val);
 
-        Ok(CompiledValue {
-            value: result,
-            ty: result_cranelift_type,
-            type_id: result_type_id,
-        })
+        Ok(CompiledValue::new(
+            result,
+            result_cranelift_type,
+            result_type_id,
+        ))
     }
 
     /// Convert a value for use in select (ensure matching types).
@@ -1886,11 +1818,11 @@ impl Cg<'_, '_, '_> {
 
         if !is_void {
             let result = self.builder.block_params(merge_block)[0];
-            Ok(CompiledValue {
-                value: result,
-                ty: result_cranelift_type,
-                type_id: result_type_id,
-            })
+            Ok(CompiledValue::new(
+                result,
+                result_cranelift_type,
+                result_type_id,
+            ))
         } else {
             Ok(self.void_value())
         }
@@ -1991,11 +1923,11 @@ impl Cg<'_, '_, '_> {
         // Use select instruction
         let result = self.builder.ins().select(cond_val, then_val, else_val);
 
-        Ok(CompiledValue {
-            value: result,
-            ty: result_cranelift_type,
-            type_id: result_type_id,
-        })
+        Ok(CompiledValue::new(
+            result,
+            result_cranelift_type,
+            result_type_id,
+        ))
     }
 
     /// Compile when expression using blocks (standard path).
@@ -2099,11 +2031,11 @@ impl Cg<'_, '_, '_> {
 
         if !is_void {
             let result = self.builder.block_params(merge_block)[0];
-            Ok(CompiledValue {
-                value: result,
-                ty: result_cranelift_type,
-                type_id: result_type_id,
-            })
+            Ok(CompiledValue::new(
+                result,
+                result_cranelift_type,
+                result_type_id,
+            ))
         } else {
             Ok(self.void_value())
         }

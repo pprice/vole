@@ -24,15 +24,40 @@ pub struct CompiledValue {
     pub ty: Type,
     /// The Vole type of this value (interned TypeId handle - use arena to query)
     pub type_id: TypeId,
+    /// Whether this value is a freshly allocated RC object not yet bound to a
+    /// let-binding. Temporaries marked with this flag need cleanup after
+    /// consumption.
+    pub is_rc_temp: bool,
 }
 
 impl CompiledValue {
+    /// Create a compiled value (not an RC temporary).
+    pub fn new(value: Value, ty: Type, type_id: TypeId) -> Self {
+        Self {
+            value,
+            ty,
+            type_id,
+            is_rc_temp: false,
+        }
+    }
+
+    /// Create a compiled value marked as an RC temporary that needs cleanup.
+    pub fn temp(value: Value, ty: Type, type_id: TypeId) -> Self {
+        Self {
+            value,
+            ty,
+            type_id,
+            is_rc_temp: true,
+        }
+    }
+
     /// Create a new CompiledValue with a different value but the same types
     pub fn with_value(&self, value: Value) -> Self {
         Self {
             value,
             ty: self.ty,
             type_id: self.type_id,
+            is_rc_temp: false,
         }
     }
 }

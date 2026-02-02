@@ -196,9 +196,5 @@ pub(crate) fn emit_switch_match(
         (merged_value, types::I64)
     };
 
-    Ok(CompiledValue {
-        value: result,
-        ty: result_ty,
-        type_id: result_type_id,
-    })
+    Ok(CompiledValue::new(result, result_ty, result_type_id))
 }

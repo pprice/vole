@@ -391,11 +391,11 @@ impl InterfaceVtableRegistry {
                 let arena = ctx.arena();
                 let word = value_to_word(
                     &mut builder,
-                    &CompiledValue {
-                        value: result,
-                        ty: type_id_to_cranelift(method.return_type_id, arena, ctx.ptr_type()),
-                        type_id: method.return_type_id,
-                    },
+                    &CompiledValue::new(
+                        result,
+                        type_id_to_cranelift(method.return_type_id, arena, ctx.ptr_type()),
+                        method.return_type_id,
+                    ),
                     ctx.ptr_type(),
                     Some(heap_alloc_ref),
                     ctx.arena(),
@@ -811,11 +811,11 @@ pub(crate) fn box_interface_value_id<'a, 'ctx>(
     // Check if this is an external-only interface
     if env.analyzed.entity_registry().is_external_only(type_def_id) {
         tracing::debug!("external-only interface, skip boxing");
-        return Ok(CompiledValue {
-            value: value.value,
-            ty: codegen_ctx.ptr_type(),
-            type_id: interface_type_id,
-        });
+        return Ok(CompiledValue::new(
+            value.value,
+            codegen_ctx.ptr_type(),
+            interface_type_id,
+        ));
     }
 
     // Create a VtableCtxView for operations that need VtableCtx
@@ -861,11 +861,11 @@ pub(crate) fn box_interface_value_id<'a, 'ctx>(
         .ins()
         .store(MemFlags::new(), vtable_ptr, iface_ptr, word_bytes as i32);
 
-    Ok(CompiledValue {
-        value: iface_ptr,
-        ty: ctx_view.ptr_type(),
-        type_id: interface_type_id,
-    })
+    Ok(CompiledValue::new(
+        iface_ptr,
+        ctx_view.ptr_type(),
+        interface_type_id,
+    ))
 }
 
 fn resolve_vtable_target<C: VtableCtx>(

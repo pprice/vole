@@ -158,11 +158,11 @@ impl Cg<'_, '_, '_> {
         let closure_ptr = self.builder.inst_results(alloc_call)[0];
 
         // Use the type ID from sema (already computed during type checking)
-        Ok(CompiledValue {
-            value: closure_ptr,
-            ty: self.ptr_type(),
-            type_id: func_type_id,
-        })
+        Ok(CompiledValue::new(
+            closure_ptr,
+            self.ptr_type(),
+            func_type_id,
+        ))
     }
 
     /// Compile a lambda with captures - returns a closure pointer.
@@ -318,11 +318,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Use the type ID from sema (already computed during type checking)
-        Ok(CompiledValue {
-            value: closure_ptr,
-            ty: ptr_type,
-            type_id: func_type_id,
-        })
+        Ok(CompiledValue::new(closure_ptr, ptr_type, func_type_id))
     }
 
     /// Compile a lambda expression

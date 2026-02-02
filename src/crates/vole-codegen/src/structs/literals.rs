@@ -113,11 +113,7 @@ impl Cg<'_, '_, '_> {
                         .unwrap_or(TypeId::NIL)
                 });
                 let value = self.builder.ins().iconst(types::I8, 0);
-                return Ok(CompiledValue {
-                    value,
-                    ty: types::I8,
-                    type_id: sentinel_type_id,
-                });
+                return Ok(CompiledValue::new(value, types::I8, sentinel_type_id));
             }
         }
 
@@ -288,11 +284,11 @@ impl Cg<'_, '_, '_> {
                 .call(set_func_ref, &[instance_ptr, slot_val, store_value]);
         }
 
-        Ok(CompiledValue {
-            value: instance_ptr,
-            ty: self.ptr_type(),
-            type_id: result_type_id,
-        })
+        Ok(CompiledValue::new(
+            instance_ptr,
+            self.ptr_type(),
+            result_type_id,
+        ))
     }
 
     /// Collect raw pointers to default expressions for omitted fields in a struct literal.
@@ -410,11 +406,7 @@ impl Cg<'_, '_, '_> {
                 .store(MemFlags::new(), value.value, heap_ptr, 8);
         }
 
-        Ok(CompiledValue {
-            value: heap_ptr,
-            ty: self.ptr_type(),
-            type_id: union_type_id,
-        })
+        Ok(CompiledValue::new(heap_ptr, self.ptr_type(), union_type_id))
     }
 
     /// Compile a struct literal to a stack-allocated value.
@@ -513,11 +505,7 @@ impl Cg<'_, '_, '_> {
         let ptr_type = self.ptr_type();
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
 
-        Ok(CompiledValue {
-            value: ptr,
-            ty: ptr_type,
-            type_id: result_type_id,
-        })
+        Ok(CompiledValue::new(ptr, ptr_type, result_type_id))
     }
 
     /// Store a value into a struct field's stack slot, handling nested structs.

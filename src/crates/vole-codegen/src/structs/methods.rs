@@ -552,11 +552,11 @@ impl Cg<'_, '_, '_> {
         if is_sret {
             // Sret: result[0] is the sret pointer we passed in
             let results = self.builder.inst_results(call);
-            return Ok(CompiledValue {
-                value: results[0],
-                ty: self.ptr_type(),
-                type_id: return_type_id,
-            });
+            return Ok(CompiledValue::new(
+                results[0],
+                self.ptr_type(),
+                return_type_id,
+            ));
         }
 
         // Small struct multi-value return: reconstruct from registers
@@ -626,11 +626,7 @@ impl Cg<'_, '_, '_> {
                 (result_value, expected_ty)
             };
 
-            Ok(CompiledValue {
-                value: final_value,
-                ty: final_type,
-                type_id: return_type_id,
-            })
+            Ok(CompiledValue::new(final_value, final_type, return_type_id))
         }
     }
 
@@ -658,11 +654,7 @@ impl Cg<'_, '_, '_> {
         // Use sema's pre-computed RuntimeIterator type
         let iter_type_id =
             iter_type_hint.expect("sema must provide concrete_return_hint for range iterator");
-        Ok(CompiledValue {
-            value: result,
-            ty: self.ptr_type(),
-            type_id: iter_type_id,
-        })
+        Ok(CompiledValue::new(result, self.ptr_type(), iter_type_id))
     }
 
     /// Handle built-in methods on arrays, strings, and ranges.
@@ -692,11 +684,11 @@ impl Cg<'_, '_, '_> {
                             .lookup_runtime_iterator(elem_type_id)
                             .expect("RuntimeIterator type must be pre-created by sema")
                     });
-                    Ok(Some(CompiledValue {
-                        value: result,
-                        ty: self.ptr_type(),
-                        type_id: iter_type_id,
-                    }))
+                    Ok(Some(CompiledValue::new(
+                        result,
+                        self.ptr_type(),
+                        iter_type_id,
+                    )))
                 }
                 _ => Ok(None),
             };
@@ -714,11 +706,11 @@ impl Cg<'_, '_, '_> {
                     // Use sema's pre-computed RuntimeIterator type
                     let iter_type_id = iter_type_hint
                         .expect("sema must provide concrete_return_hint for string.iter()");
-                    Ok(Some(CompiledValue {
-                        value: result,
-                        ty: self.ptr_type(),
-                        type_id: iter_type_id,
-                    }))
+                    Ok(Some(CompiledValue::new(
+                        result,
+                        self.ptr_type(),
+                        iter_type_id,
+                    )))
                 }
                 _ => Ok(None),
             };
@@ -743,11 +735,11 @@ impl Cg<'_, '_, '_> {
                 // Use sema's pre-computed RuntimeIterator type
                 let iter_type_id = iter_type_hint
                     .expect("sema must provide concrete_return_hint for range.iter()");
-                return Ok(Some(CompiledValue {
-                    value: result,
-                    ty: self.ptr_type(),
-                    type_id: iter_type_id,
-                }));
+                return Ok(Some(CompiledValue::new(
+                    result,
+                    self.ptr_type(),
+                    iter_type_id,
+                )));
             }
             return Ok(None);
         }
@@ -800,11 +792,11 @@ impl Cg<'_, '_, '_> {
 
         // Return void
         let void_type_id = self.arena().void();
-        Ok(CompiledValue {
-            value: self.builder.ins().iconst(types::I64, 0),
-            ty: types::I64,
-            type_id: void_type_id,
-        })
+        Ok(CompiledValue::new(
+            self.builder.ins().iconst(types::I64, 0),
+            types::I64,
+            void_type_id,
+        ))
     }
 
     /// Handle method calls on RuntimeIterator - calls external Iterator functions directly
@@ -1307,69 +1299,37 @@ impl Cg<'_, '_, '_> {
             "nan" => {
                 if is_f32 {
                     let v = self.builder.ins().f32const(f32::NAN);
-                    CompiledValue {
-                        value: v,
-                        ty: types::F32,
-                        type_id: TypeId::F32,
-                    }
+                    CompiledValue::new(v, types::F32, TypeId::F32)
                 } else {
                     let v = self.builder.ins().f64const(f64::NAN);
-                    CompiledValue {
-                        value: v,
-                        ty: types::F64,
-                        type_id: TypeId::F64,
-                    }
+                    CompiledValue::new(v, types::F64, TypeId::F64)
                 }
             }
             "infinity" => {
                 if is_f32 {
                     let v = self.builder.ins().f32const(f32::INFINITY);
-                    CompiledValue {
-                        value: v,
-                        ty: types::F32,
-                        type_id: TypeId::F32,
-                    }
+                    CompiledValue::new(v, types::F32, TypeId::F32)
                 } else {
                     let v = self.builder.ins().f64const(f64::INFINITY);
-                    CompiledValue {
-                        value: v,
-                        ty: types::F64,
-                        type_id: TypeId::F64,
-                    }
+                    CompiledValue::new(v, types::F64, TypeId::F64)
                 }
             }
             "neg_infinity" => {
                 if is_f32 {
                     let v = self.builder.ins().f32const(f32::NEG_INFINITY);
-                    CompiledValue {
-                        value: v,
-                        ty: types::F32,
-                        type_id: TypeId::F32,
-                    }
+                    CompiledValue::new(v, types::F32, TypeId::F32)
                 } else {
                     let v = self.builder.ins().f64const(f64::NEG_INFINITY);
-                    CompiledValue {
-                        value: v,
-                        ty: types::F64,
-                        type_id: TypeId::F64,
-                    }
+                    CompiledValue::new(v, types::F64, TypeId::F64)
                 }
             }
             "epsilon" => {
                 if is_f32 {
                     let v = self.builder.ins().f32const(f32::EPSILON);
-                    CompiledValue {
-                        value: v,
-                        ty: types::F32,
-                        type_id: TypeId::F32,
-                    }
+                    CompiledValue::new(v, types::F32, TypeId::F32)
                 } else {
                     let v = self.builder.ins().f64const(f64::EPSILON);
-                    CompiledValue {
-                        value: v,
-                        ty: types::F64,
-                        type_id: TypeId::F64,
-                    }
+                    CompiledValue::new(v, types::F64, TypeId::F64)
                 }
             }
             _ => return Ok(None),

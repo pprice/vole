@@ -167,11 +167,7 @@ impl Cg<'_, '_, '_> {
                     self.builder.ins().fma(x.value, y.value, neg_z)
                 };
 
-                return Ok(Some(CompiledValue {
-                    value: result,
-                    ty: x.ty,
-                    type_id: x.type_id,
-                }));
+                return Ok(Some(CompiledValue::new(result, x.ty, x.type_id)));
             }
         }
 
@@ -188,11 +184,7 @@ impl Cg<'_, '_, '_> {
                 // z + (x * y) → fma(x, y, z)
                 let result = self.builder.ins().fma(x.value, y.value, z.value);
 
-                return Ok(Some(CompiledValue {
-                    value: result,
-                    ty: z.ty,
-                    type_id: z.type_id,
-                }));
+                return Ok(Some(CompiledValue::new(result, z.ty, z.type_id)));
             }
         }
 
@@ -210,11 +202,7 @@ impl Cg<'_, '_, '_> {
                 let neg_x = self.builder.ins().fneg(x.value);
                 let result = self.builder.ins().fma(neg_x, y.value, z.value);
 
-                return Ok(Some(CompiledValue {
-                    value: result,
-                    ty: z.ty,
-                    type_id: z.type_id,
-                }));
+                return Ok(Some(CompiledValue::new(result, z.ty, z.type_id)));
             }
         }
 
@@ -305,11 +293,7 @@ impl Cg<'_, '_, '_> {
                 _ => return Ok(None),
             };
 
-            return Ok(Some(CompiledValue {
-                value: result,
-                ty: result_ty,
-                type_id: result_type_id,
-            }));
+            return Ok(Some(CompiledValue::new(result, result_ty, result_type_id)));
         }
 
         // For multiplication, also check if LEFT operand is power of 2 (commutative)
@@ -341,11 +325,7 @@ impl Cg<'_, '_, '_> {
             // 2^n * x → x << n
             let result = self.builder.ins().ishl(right_val, shift_val);
 
-            return Ok(Some(CompiledValue {
-                value: result,
-                ty: result_ty,
-                type_id: result_type_id,
-            }));
+            return Ok(Some(CompiledValue::new(result, result_ty, result_type_id)));
         }
 
         Ok(None)
@@ -685,11 +665,7 @@ impl Cg<'_, '_, '_> {
             _ => (result_ty, result_type_id),
         };
 
-        Ok(CompiledValue {
-            value: result,
-            ty: final_ty,
-            type_id: final_type_id,
-        })
+        Ok(CompiledValue::new(result, final_ty, final_type_id))
     }
 
     /// String equality comparison

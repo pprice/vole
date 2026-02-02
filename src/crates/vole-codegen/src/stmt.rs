@@ -212,11 +212,7 @@ impl Cg<'_, '_, '_> {
                         let cranelift_ty =
                             type_id_to_cranelift(final_type_id, arena, self.ptr_type());
                         let boxed = self.box_interface_value(
-                            CompiledValue {
-                                value: final_value,
-                                ty: cranelift_ty,
-                                type_id: final_type_id,
-                            },
+                            CompiledValue::new(final_value, cranelift_ty, final_type_id),
                             declared_type_id,
                         )?;
                         final_value = boxed.value;
@@ -953,11 +949,7 @@ impl Cg<'_, '_, '_> {
 
         let ptr_type = self.ptr_type();
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
-        Ok(CompiledValue {
-            value: ptr,
-            ty: ptr_type,
-            type_id: union_type_id,
-        })
+        Ok(CompiledValue::new(ptr, ptr_type, union_type_id))
     }
 
     /// Recursively compile a destructuring pattern, binding variables for the values extracted

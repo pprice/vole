@@ -940,11 +940,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Create a void return value
     pub fn void_value(&mut self) -> CompiledValue {
         let zero = self.builder.ins().iconst(types::I64, 0);
-        CompiledValue {
-            value: zero,
-            ty: types::I64,
-            type_id: TypeId::VOID,
-        }
+        CompiledValue::new(zero, types::I64, TypeId::VOID)
     }
 
     /// Get the result of a call instruction as a CompiledValue.
@@ -980,11 +976,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             let ptr_type = self.ptr_type();
             let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
 
-            return CompiledValue {
-                value: ptr,
-                ty: ptr_type,
-                type_id: return_type_id,
-            };
+            return CompiledValue::new(ptr, ptr_type, return_type_id);
         }
 
         // Check for small struct multi-value return (2 results: field0, field1)
@@ -1004,11 +996,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Wrap a Cranelift value as a Bool CompiledValue
     pub fn bool_value(&self, value: Value) -> CompiledValue {
-        CompiledValue {
-            value,
-            ty: types::I8,
-            type_id: TypeId::BOOL,
-        }
+        CompiledValue::new(value, types::I8, TypeId::BOOL)
     }
 
     /// Create a boolean constant (true or false)
@@ -1019,11 +1007,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Wrap a Cranelift value as an I64 CompiledValue
     pub fn i64_value(&self, value: Value) -> CompiledValue {
-        CompiledValue {
-            value,
-            ty: types::I64,
-            type_id: TypeId::I64,
-        }
+        CompiledValue::new(value, types::I64, TypeId::I64)
     }
 
     /// Create an integer constant with a specific Vole type
@@ -1037,7 +1021,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         } else {
             self.builder.ins().iconst(ty, n)
         };
-        CompiledValue { value, ty, type_id }
+        CompiledValue::new(value, ty, type_id)
     }
 
     /// Create a float constant with explicit type (for bidirectional inference)
@@ -1054,17 +1038,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 (types::F64, v)
             }
         };
-        CompiledValue { value, ty, type_id }
+        CompiledValue::new(value, ty, type_id)
     }
 
     /// Create a nil value
     pub fn nil_value(&mut self) -> CompiledValue {
         let value = self.builder.ins().iconst(types::I8, 0);
-        CompiledValue {
-            value,
-            ty: types::I8,
-            type_id: TypeId::NIL,
-        }
+        CompiledValue::new(value, types::I8, TypeId::NIL)
     }
 
     /// Load a tag byte from a union/optional pointer and compare to expected value.
@@ -1085,20 +1065,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Wrap a Cranelift value as a String CompiledValue
     pub fn string_value(&self, value: Value) -> CompiledValue {
-        CompiledValue {
-            value,
-            ty: self.ptr_type(),
-            type_id: TypeId::STRING,
-        }
+        CompiledValue::new(value, self.ptr_type(), TypeId::STRING)
     }
 
     /// Create a CompiledValue from a value and TypeId, automatically computing the cranelift type
     pub fn compiled(&self, value: Value, type_id: TypeId) -> CompiledValue {
-        CompiledValue {
-            value,
-            ty: self.cranelift_type(type_id),
-            type_id,
-        }
+        CompiledValue::new(value, self.cranelift_type(type_id), type_id)
     }
 
     /// Convert a raw i64 field value to a CompiledValue with the proper type.
@@ -1108,7 +1080,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let arena = self.env.analyzed.type_arena();
         let (value, ty) =
             super::structs::convert_field_value_id(self.builder, raw_value, type_id, arena);
-        CompiledValue { value, ty, type_id }
+        CompiledValue::new(value, ty, type_id)
     }
 
     /// Extract a value from a TaggedValue (unknown type) after type narrowing.
@@ -1120,7 +1092,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let arena = self.env.analyzed.type_arena();
         let (value, ty) =
             super::structs::convert_field_value_id(self.builder, raw_value, type_id, arena);
-        CompiledValue { value, ty, type_id }
+        CompiledValue::new(value, ty, type_id)
     }
 
     /// Compile a list of expression arguments into Cranelift values.
@@ -1241,11 +1213,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let ptr_type = self.ptr_type();
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
 
-        CompiledValue {
-            value: ptr,
-            ty: ptr_type,
-            type_id,
-        }
+        CompiledValue::new(ptr, ptr_type, type_id)
     }
 
     /// Copy a struct value to a new stack slot (value semantics).
@@ -1271,11 +1239,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let ptr_type = self.ptr_type();
         let dst_ptr = self.builder.ins().stack_addr(ptr_type, dst_slot, 0);
 
-        Ok(CompiledValue {
-            value: dst_ptr,
-            ty: ptr_type,
-            type_id: src.type_id,
-        })
+        Ok(CompiledValue::new(dst_ptr, ptr_type, src.type_id))
     }
 
     /// Copy a struct value to a heap allocation.
@@ -1306,11 +1270,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 .store(MemFlags::new(), val, heap_ptr, offset);
         }
 
-        Ok(CompiledValue {
-            value: heap_ptr,
-            ty: ptr_type,
-            type_id: src.type_id,
-        })
+        Ok(CompiledValue::new(heap_ptr, ptr_type, src.type_id))
     }
 
     // ========== Saturating arithmetic helpers ==========
@@ -1823,11 +1783,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Return pointer to the stack slot
         let ptr_type = self.ptr_type();
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
-        Ok(CompiledValue {
-            value: ptr,
-            ty: ptr_type,
-            type_id: return_type_id,
-        })
+        Ok(CompiledValue::new(ptr, ptr_type, return_type_id))
     }
 
     /// Checked signed division: returns nil on div-by-zero or MIN/-1 overflow.
@@ -1979,11 +1935,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         } else {
             let arena = self.arena();
             let cranelift_ty = type_id_to_cranelift(return_type_id, arena, ptr_type);
-            Ok(CompiledValue {
-                value: results[0],
-                ty: cranelift_ty,
-                type_id: return_type_id,
-            })
+            Ok(CompiledValue::new(results[0], cranelift_ty, return_type_id))
         }
     }
 
@@ -2057,7 +2009,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                         (v, types::F64, TypeId::F64)
                     }
                 };
-                Ok(CompiledValue { value, ty, type_id })
+                Ok(CompiledValue::new(value, ty, type_id))
             }
             IntrinsicHandler::UnaryFloatOp(op) => {
                 if args.is_empty() {
@@ -2117,7 +2069,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                         (v, types::F64, TypeId::F64)
                     }
                 };
-                Ok(CompiledValue { value, ty, type_id })
+                Ok(CompiledValue::new(value, ty, type_id))
             }
             IntrinsicHandler::BinaryFloatOp(op) => {
                 use crate::intrinsics::BinaryFloatOp;
@@ -2147,7 +2099,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                         (v, types::F64, TypeId::F64)
                     }
                 };
-                Ok(CompiledValue { value, ty, type_id })
+                Ok(CompiledValue::new(value, ty, type_id))
             }
             IntrinsicHandler::UnaryIntOp(op) => {
                 use crate::intrinsics::UnaryIntOp;
@@ -2262,7 +2214,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                         (v, types::I64, TypeId::U64)
                     }
                 };
-                Ok(CompiledValue { value, ty, type_id })
+                Ok(CompiledValue::new(value, ty, type_id))
             }
             IntrinsicHandler::BinaryIntOp(op) => {
                 use crate::intrinsics::BinaryIntOp;
@@ -2628,7 +2580,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                         (v, types::I64, TypeId::U64)
                     }
                 };
-                Ok(CompiledValue { value, ty, type_id })
+                Ok(CompiledValue::new(value, ty, type_id))
             }
             IntrinsicHandler::UnaryIntWrappingOp(op) => {
                 use crate::intrinsics::UnaryIntWrappingOp;
@@ -2658,7 +2610,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                         (v, types::I64, TypeId::I64)
                     }
                 };
-                Ok(CompiledValue { value, ty, type_id })
+                Ok(CompiledValue::new(value, ty, type_id))
             }
             IntrinsicHandler::CheckedIntOp(op) => {
                 if args.len() < 2 {
@@ -2800,11 +2752,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let ptr_type = self.ptr_type();
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
 
-        Ok(CompiledValue {
-            value: ptr,
-            ty: ptr_type,
-            type_id: TypeId::UNKNOWN,
-        })
+        Ok(CompiledValue::new(ptr, ptr_type, TypeId::UNKNOWN))
     }
 
     /// Box a value as an interface type.
@@ -2885,11 +2833,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                     } else {
                         self.builder.ins().sextend(expected_ty, compiled.value)
                     };
-                    CompiledValue {
-                        value: new_value,
-                        ty: expected_ty,
-                        type_id: param_type_id,
-                    }
+                    CompiledValue::new(new_value, expected_ty, param_type_id)
                 } else {
                     compiled
                 };
