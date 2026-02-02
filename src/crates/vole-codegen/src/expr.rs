@@ -465,7 +465,7 @@ impl Cg<'_, '_, '_> {
                 // struct pointer so we can rc_dec its RC fields after overwrite.
                 let composite_rc_old = if self.rc_scopes.has_active_scope() {
                     if let Some(&(var, type_id)) = self.vars.get(sym) {
-                        if let Some(offsets) = self.composite_rc_field_offsets(type_id) {
+                        if let Some(offsets) = self.deep_rc_field_offsets(type_id) {
                             Some((self.builder.use_var(var), offsets))
                         } else {
                             None
@@ -507,13 +507,16 @@ impl Cg<'_, '_, '_> {
                 // Composite RC reassignment: rc_dec each RC field of the OLD struct.
                 // The new struct's fields are already alive (fresh from the literal).
                 if let Some((old_ptr, offsets)) = composite_rc_old {
-                    for off in offsets {
+                    for off in &offsets {
                         let field_ptr =
                             self.builder
                                 .ins()
-                                .load(types::I64, MemFlags::new(), old_ptr, off);
+                                .load(types::I64, MemFlags::new(), old_ptr, *off);
                         self.emit_rc_dec(field_ptr)?;
                     }
+                    // Update the composite RC local's offsets so scope-exit cleanup
+                    // covers nested RC fields in the new value too.
+                    self.rc_scopes.update_composite_offsets(var, offsets);
                 }
 
                 // The assignment consumed the temp — ownership transfers

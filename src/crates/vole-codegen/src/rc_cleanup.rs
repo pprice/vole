@@ -149,6 +149,20 @@ impl RcScopeStack {
         });
     }
 
+    /// Update the RC field offsets for an existing composite RC local.
+    /// Used when a mutable composite variable is reassigned and the
+    /// scope-exit cleanup needs to cover nested RC fields.
+    pub fn update_composite_offsets(&mut self, variable: Variable, new_offsets: Vec<i32>) {
+        for scope in self.scopes.iter_mut().rev() {
+            for composite in scope.composites.iter_mut() {
+                if composite.variable == variable {
+                    composite.rc_field_offsets = new_offsets;
+                    return;
+                }
+            }
+        }
+    }
+
     /// Iterate all composite RC locals from all active scopes (innermost first).
     pub fn all_composites_innermost_first(&self) -> impl Iterator<Item = &CompositeRcLocal> {
         self.scopes.iter().rev().flat_map(|s| s.composites.iter())

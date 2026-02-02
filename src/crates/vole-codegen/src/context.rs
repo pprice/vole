@@ -452,6 +452,40 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         None
     }
 
+    /// Like `composite_rc_field_offsets`, but recursively includes RC fields
+    /// within nested struct fields. Used for variable reassignment where the
+    /// old value's entire RC tree needs to be decremented — there is no
+    /// separate local binding that would take responsibility for the nested
+    /// struct's RC fields.
+    pub fn deep_rc_field_offsets(&self, type_id: TypeId) -> Option<Vec<i32>> {
+        let arena = self.arena();
+        if let Some((type_def_id, _)) = arena.unwrap_struct(type_id) {
+            let entities = self.query().registry();
+            let type_def = entities.get_type(type_def_id);
+            let generic_info = type_def.generic_info.as_ref()?;
+            let field_types = &generic_info.field_types;
+            let mut offsets = Vec::new();
+            let mut byte_offset = 0i32;
+            for field_type in field_types {
+                let slots = super::structs::field_flat_slots(*field_type, arena, entities);
+                if self.needs_rc_cleanup(*field_type) {
+                    offsets.push(byte_offset);
+                } else if let Some(nested) = self.deep_rc_field_offsets(*field_type) {
+                    for off in nested {
+                        offsets.push(byte_offset + off);
+                    }
+                }
+                byte_offset += (slots as i32) * 8;
+            }
+            if offsets.is_empty() {
+                return None;
+            }
+            return Some(offsets);
+        }
+        // Non-struct types: delegate to the shallow version
+        self.composite_rc_field_offsets(type_id)
+    }
+
     /// Register a composite RC local (struct/fixed-array/tuple with RC fields)
     /// in the current scope. Returns the drop flag Variable.
     pub fn register_composite_rc_local(
