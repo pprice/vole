@@ -723,19 +723,27 @@ pub(crate) fn word_to_value_type_id(
 }
 
 /// Get the runtime tag value for an array element type.
-/// These tags are used by the runtime to distinguish element types.
+/// These tags must match the runtime TYPE_* constants in vole_runtime::value
+/// so that `tag_needs_rc` correctly identifies RC-managed elements for cleanup
+/// in `array_drop`.
 pub(crate) fn array_element_tag_id(ty: TypeId, arena: &TypeArena) -> i64 {
     use vole_sema::type_arena::SemaType as ArenaType;
+    // Handle type uses a special TypeId sentinel, check before SemaType match
+    if arena.is_handle(ty) {
+        return 8; // TYPE_RNG / generic handle
+    }
     match arena.get(ty) {
-        ArenaType::Primitive(PrimitiveType::String) => 1,
+        ArenaType::Primitive(PrimitiveType::String) => 1, // TYPE_STRING
         ArenaType::Primitive(PrimitiveType::I64)
         | ArenaType::Primitive(PrimitiveType::I32)
         | ArenaType::Primitive(PrimitiveType::I16)
-        | ArenaType::Primitive(PrimitiveType::I8) => 2,
-        ArenaType::Primitive(PrimitiveType::F64) | ArenaType::Primitive(PrimitiveType::F32) => 3,
-        ArenaType::Primitive(PrimitiveType::Bool) => 4,
-        ArenaType::Array(_) => 5,
-        _ => 2, // default to integer
+        | ArenaType::Primitive(PrimitiveType::I8) => 2, // TYPE_I64
+        ArenaType::Primitive(PrimitiveType::F64) | ArenaType::Primitive(PrimitiveType::F32) => 3, // TYPE_F64
+        ArenaType::Primitive(PrimitiveType::Bool) => 4, // TYPE_BOOL
+        ArenaType::Array(_) => 5,                       // TYPE_ARRAY
+        ArenaType::Function { .. } => 6,                // TYPE_CLOSURE
+        ArenaType::Class { .. } => 7,                   // TYPE_INSTANCE
+        _ => 2,                                         // default to integer for non-RC types
     }
 }
 

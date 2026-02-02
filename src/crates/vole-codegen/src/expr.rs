@@ -571,11 +571,21 @@ impl Cg<'_, '_, '_> {
 
             // Structs are stack-allocated; copy to heap so the data survives
             // if the array escapes the current stack frame (e.g. returned from a function).
-            let compiled = if self.arena().is_struct(compiled.type_id) {
+            let mut compiled = if self.arena().is_struct(compiled.type_id) {
                 self.copy_struct_to_heap(compiled)?
             } else {
                 compiled
             };
+
+            // RC: inc borrowed RC elements so the array gets its own reference.
+            // Without this, the element's original binding and the array would
+            // share a single refcount, causing double-free on scope exit.
+            if self.rc_scopes.has_active_scope()
+                && self.needs_rc_cleanup(compiled.type_id)
+                && compiled.is_borrowed()
+            {
+                self.emit_rc_inc(compiled.value)?;
+            }
 
             // Compute tag before using builder to avoid borrow conflict
             let tag = {
@@ -588,6 +598,9 @@ impl Cg<'_, '_, '_> {
             self.builder
                 .ins()
                 .call(array_push_ref, &[arr_ptr, tag_val, value_bits]);
+
+            // The element value is consumed into the array container.
+            compiled.mark_consumed();
         }
 
         // Use type from ExpressionData - sema always records array/tuple types
