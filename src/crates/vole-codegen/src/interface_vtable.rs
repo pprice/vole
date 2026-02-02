@@ -252,6 +252,19 @@ impl InterfaceVtableRegistry {
         data.define_zeroinit(word_bytes * state.method_ids.len());
         data.set_align(word_bytes as u64);
 
+        // For Iterator<T> interfaces, compute the elem type tag from the
+        // substitution for the first type parameter (T) so that the vtable
+        // thunk can set it on the created RcIterator.
+        let iter_elem_tag: Option<u64> = if interface_name_str == "Iterator" {
+            state
+                .substitutions
+                .values()
+                .next()
+                .map(|&elem_type_id| crate::types::unknown_type_tag(elem_type_id, ctx.arena()))
+        } else {
+            None
+        };
+
         for (index, &method_id) in state.method_ids.iter().enumerate() {
             let method = ctx.query().get_method(method_id);
             let method_name_str = ctx.analyzed().name_table().display(method.name_id);
@@ -268,6 +281,7 @@ impl InterfaceVtableRegistry {
                 &method_name_str,
                 state.concrete_type,
                 &target,
+                iter_elem_tag,
             )?;
             let func_ref = ctx.jit_module().declare_func_in_data(wrapper_id, &mut data);
             data.write_function_addr((index * word_bytes) as u32, func_ref);
@@ -306,6 +320,7 @@ impl InterfaceVtableRegistry {
         method_name: &str,
         concrete_type_id: TypeId,
         method: &VtableMethod,
+        iter_elem_tag: Option<u64>,
     ) -> Result<cranelift_module::FuncId, String> {
         // Build wrapper signature using param_count and returns_void directly
         let word_type = ctx.ptr_type();
@@ -375,6 +390,7 @@ impl InterfaceVtableRegistry {
                     interface_name,
                     &method.param_type_ids,
                     method.return_type_id,
+                    iter_elem_tag,
                 )?,
             };
 
@@ -574,29 +590,49 @@ fn compile_external_wrapper<C: VtableCtx>(
     interface_name: &str,
     param_type_ids: &[TypeId],
     return_type_id: TypeId,
+    iter_elem_tag: Option<u64>,
 ) -> Result<Vec<Value>, String> {
     // For Iterator interface, wrap the boxed interface in a RcIterator
     // so external functions like vole_iter_collect can iterate via vtable.
     let self_val = if interface_name == "Iterator" {
-        // Call vole_interface_iter(box_ptr) to create RcIterator adapter
-        // Extract just the pointer value to end the borrow before jit_module() call
+        // Use tagged variant when we know the element type, so that terminal
+        // methods (reduce, count, first, last) can determine RC cleanup needs.
+        let (native_name, use_tag) = match iter_elem_tag {
+            Some(tag) if tag != 0 => ("interface_iter_tagged", true),
+            _ => ("interface_iter", false),
+        };
         let interface_iter_ptr = ctx
             .native_registry()
-            .lookup("vole:std:runtime", "interface_iter")
+            .lookup("vole:std:runtime", native_name)
             .ok_or_else(|| {
-                "native function vole:std:runtime::interface_iter not found".to_string()
+                format!(
+                    "native function vole:std:runtime::{} not found",
+                    native_name
+                )
             })?
             .ptr;
         let mut iter_sig = ctx.jit_module().make_signature();
         iter_sig.params.push(AbiParam::new(ctx.ptr_type()));
+        if use_tag {
+            iter_sig.params.push(AbiParam::new(types::I64));
+        }
         iter_sig.returns.push(AbiParam::new(ctx.ptr_type()));
         let iter_sig_ref = builder.import_signature(iter_sig);
         let iter_fn_ptr = builder
             .ins()
             .iconst(ctx.ptr_type(), interface_iter_ptr as i64);
-        let iter_call = builder
-            .ins()
-            .call_indirect(iter_sig_ref, iter_fn_ptr, &[box_ptr]);
+        let iter_call = if use_tag {
+            let tag_val = builder
+                .ins()
+                .iconst(types::I64, iter_elem_tag.unwrap() as i64);
+            builder
+                .ins()
+                .call_indirect(iter_sig_ref, iter_fn_ptr, &[box_ptr, tag_val])
+        } else {
+            builder
+                .ins()
+                .call_indirect(iter_sig_ref, iter_fn_ptr, &[box_ptr])
+        };
         builder.inst_results(iter_call)[0]
     } else {
         word_to_value_type_id(

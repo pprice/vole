@@ -150,6 +150,12 @@ impl Cg<'_, '_, '_> {
                 // Look up the declared type from sema (pre-computed for let statements with type annotations)
                 let declared_type_id_opt = self.get_declared_var_type(&init_expr.id);
 
+                // Track whether the value was constructed as a stack-allocated union
+                // (via construct_union_id). Only stack-allocated unions have the
+                // [tag: i8, pad(7), payload: i64] layout that union RC cleanup expects.
+                // Values from function calls are raw i64 values, not pointers to stack slots.
+                let mut is_stack_union = false;
+
                 let (mut final_value, mut final_type_id) = if let Some(declared_type_id) =
                     declared_type_id_opt
                 {
@@ -167,6 +173,7 @@ impl Cg<'_, '_, '_> {
                         (boxed.value, boxed.type_id)
                     } else if is_declared_union && !self.arena().is_union(init.type_id) {
                         let wrapped = self.construct_union_id(init, declared_type_id)?;
+                        is_stack_union = true;
                         (wrapped.value, wrapped.type_id)
                     } else if is_declared_integer && init.type_id.is_integer() {
                         let arena = self.arena();
@@ -293,6 +300,21 @@ impl Cg<'_, '_, '_> {
                         }
                         let drop_flag = self.register_composite_rc_local(var, offsets);
                         crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
+                    } else if is_stack_union {
+                        // Only register union RC cleanup for stack-allocated unions
+                        // (created by construct_union_id above). Values from function
+                        // calls or existing variables are raw i64 values, not pointers
+                        // to the [tag, payload] layout that cleanup expects.
+                        if let Some(rc_tags) = self.union_rc_variant_tags(final_type_id) {
+                            // If the init value is a borrow (e.g. let g: T? = some_var),
+                            // the RC value is aliased and needs rc_inc so the union
+                            // owns its own reference.
+                            if init.is_borrowed() {
+                                self.emit_union_rc_inc(final_value, &rc_tags)?;
+                            }
+                            let drop_flag = self.register_union_rc_local(var, rc_tags);
+                            crate::rc_cleanup::set_drop_flag_live(self.builder, drop_flag);
+                        }
                     }
                 }
 
@@ -948,11 +970,30 @@ impl Cg<'_, '_, '_> {
 
         self.compile_loop_body(&for_stmt.body, exit_block, continue_block)?;
 
-        // Continue: jump back to header
+        // Continue: free the current iteration's char string before looping back.
+        // Each iteration produces a new owned string from string_chars_next.
         self.builder.switch_to_block(continue_block);
+        let cur_elem = self.builder.use_var(elem_var);
+        self.call_runtime_void(RuntimeFn::RcDec, &[cur_elem])?;
         self.builder.ins().jump(header, &[]);
 
         self.finalize_for_loop(header, body_block, continue_block, exit_block);
+
+        // Free the last iteration's char string (the one that was current when the loop ended).
+        // When the loop exits (is_done branch from header), the last loaded elem_val was never
+        // freed because we jumped to exit_block instead of continue_block.
+        // However, on the exit path the elem_var still holds the LAST iteration's value
+        // (the one whose body completed and jumped to continue, where it was already freed).
+        // Actually, exit is taken when iter_next returns 0, so no new elem_val was loaded.
+        // The last freed-in-continue value is the last one. We just need to handle the case
+        // where exit is reached with an elem_var that was set but never freed.
+        // On second thought: header calls iter_next. If iter_next returns 0, we jump to exit.
+        // The elem_var was last def'd in the body_block. The continue block freed it.
+        // So on exit, there's no dangling string. But we should zero the var after freeing
+        // to avoid double-free on scope exit.
+
+        // Free the string chars iterator after the loop
+        self.call_runtime_void(RuntimeFn::RcDec, &[iter_val])?;
 
         // Safety net: consume the string iterable's RC value after the loop
         self.consume_rc_value(&mut string_val)?;

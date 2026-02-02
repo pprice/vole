@@ -392,6 +392,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let scope = self.rc_scopes.pop_scope();
         if let Some(scope) = scope {
             let rc_dec_ref = self.runtime_func_ref(RuntimeFn::RcDec)?;
+            // Unions first: their payloads may reference values owned by
+            // containers (arrays, classes) tracked as regular RC locals.
+            // Decrementing the union payload before the container prevents
+            // use-after-free when the container's drop cascades to free the
+            // same value.
+            if !scope.unions.is_empty() {
+                super::rc_cleanup::emit_union_rc_cleanup(self.builder, &scope.unions, rc_dec_ref);
+            }
             self.emit_rc_locals_cleanup(&scope.locals, skip_var, rc_dec_ref);
             if !scope.composites.is_empty() {
                 super::rc_cleanup::emit_composite_rc_cleanup(
@@ -417,9 +425,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .all_composites_innermost_first()
             .cloned()
             .collect();
-        let has_work = !locals.is_empty() || !composites.is_empty();
+        let unions: Vec<_> = self
+            .rc_scopes
+            .all_unions_innermost_first()
+            .cloned()
+            .collect();
+        let has_work = !locals.is_empty() || !composites.is_empty() || !unions.is_empty();
         if has_work {
             let rc_dec_ref = self.runtime_func_ref(RuntimeFn::RcDec)?;
+            if !unions.is_empty() {
+                super::rc_cleanup::emit_union_rc_cleanup(self.builder, &unions, rc_dec_ref);
+            }
             self.emit_rc_locals_cleanup(&locals, skip_var, rc_dec_ref);
             if !composites.is_empty() {
                 super::rc_cleanup::emit_composite_rc_cleanup(self.builder, &composites, rc_dec_ref);
@@ -441,9 +457,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .composites_from_depth(target_depth)
             .cloned()
             .collect();
-        let has_work = !locals.is_empty() || !composites.is_empty();
+        let unions: Vec<_> = self
+            .rc_scopes
+            .unions_from_depth(target_depth)
+            .cloned()
+            .collect();
+        let has_work = !locals.is_empty() || !composites.is_empty() || !unions.is_empty();
         if has_work {
             let rc_dec_ref = self.runtime_func_ref(RuntimeFn::RcDec)?;
+            if !unions.is_empty() {
+                super::rc_cleanup::emit_union_rc_cleanup(self.builder, &unions, rc_dec_ref);
+            }
             self.emit_rc_locals_cleanup(&locals, None, rc_dec_ref);
             if !composites.is_empty() {
                 super::rc_cleanup::emit_composite_rc_cleanup(self.builder, &composites, rc_dec_ref);
@@ -489,6 +513,59 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         } else {
             self.call_runtime_void(RuntimeFn::RcInc, &[value])
         }
+    }
+
+    /// Emit rc_inc for the RC payload inside a union value.
+    ///
+    /// Loads the tag, checks each RC variant, and rc_inc's the payload at
+    /// offset 8 for the matching variant. For interface variants, loads the
+    /// data word at offset 0 of the payload before inc'ing.
+    pub fn emit_union_rc_inc(
+        &mut self,
+        union_ptr: Value,
+        rc_tags: &[(u8, bool)],
+    ) -> Result<(), String> {
+        use cranelift::prelude::{InstBuilder, IntCC, MemFlags, types};
+
+        let tag = self
+            .builder
+            .ins()
+            .load(types::I8, MemFlags::new(), union_ptr, 0);
+        let rc_inc_ref = self.runtime_func_ref(RuntimeFn::RcInc)?;
+
+        for &(variant_tag, is_interface) in rc_tags {
+            let is_match = self
+                .builder
+                .ins()
+                .icmp_imm(IntCC::Equal, tag, variant_tag as i64);
+            let inc_block = self.builder.create_block();
+            let next_block = self.builder.create_block();
+
+            self.builder
+                .ins()
+                .brif(is_match, inc_block, &[], next_block, &[]);
+
+            self.builder.switch_to_block(inc_block);
+            self.builder.seal_block(inc_block);
+            let payload = self
+                .builder
+                .ins()
+                .load(types::I64, MemFlags::new(), union_ptr, 8);
+            if is_interface {
+                let data_word = self
+                    .builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), payload, 0);
+                self.builder.ins().call(rc_inc_ref, &[data_word]);
+            } else {
+                self.builder.ins().call(rc_inc_ref, &[payload]);
+            }
+            self.builder.ins().jump(next_block, &[]);
+
+            self.builder.switch_to_block(next_block);
+            self.builder.seal_block(next_block);
+        }
+        Ok(())
     }
 
     /// Emit rc_dec(value) to decrement the reference count.
@@ -641,6 +718,37 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let drop_flag = super::rc_cleanup::alloc_drop_flag(self.builder);
         self.rc_scopes
             .register_composite(variable, drop_flag, rc_field_offsets);
+        drop_flag
+    }
+
+    /// For a union type, compute which variant tags correspond to RC types.
+    /// Returns None if no variants need RC cleanup.
+    pub fn union_rc_variant_tags(&self, type_id: TypeId) -> Option<Vec<(u8, bool)>> {
+        let arena = self.arena();
+        let variants = arena.unwrap_union(type_id)?;
+        let mut rc_tags = Vec::new();
+        for (i, &variant_type_id) in variants.iter().enumerate() {
+            if self.needs_rc_cleanup(variant_type_id) {
+                let is_interface = arena.is_interface(variant_type_id);
+                rc_tags.push((i as u8, is_interface));
+            }
+        }
+        if rc_tags.is_empty() {
+            None
+        } else {
+            Some(rc_tags)
+        }
+    }
+
+    /// Register a union RC local in the current scope. Returns the drop flag Variable.
+    pub fn register_union_rc_local(
+        &mut self,
+        variable: Variable,
+        rc_variant_tags: Vec<(u8, bool)>,
+    ) -> Variable {
+        let drop_flag = super::rc_cleanup::alloc_drop_flag(self.builder);
+        self.rc_scopes
+            .register_union(variable, drop_flag, rc_variant_tags);
         drop_flag
     }
 

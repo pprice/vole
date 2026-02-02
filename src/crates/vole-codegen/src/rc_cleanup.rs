@@ -38,6 +38,21 @@ pub(crate) struct CompositeRcLocal {
     pub rc_field_offsets: Vec<i32>,
 }
 
+/// A union local that may contain RC variants. At scope exit, we check the tag
+/// and rc_dec the payload only when the active variant is an RC type.
+///
+/// Union layout: `[tag: i8, pad(7), value: i64]`
+#[derive(Debug, Clone)]
+pub(crate) struct UnionRcLocal {
+    /// The Cranelift Variable holding the pointer to the union stack slot.
+    pub variable: Variable,
+    /// Drop flag: 1 = live, 0 = not yet initialized.
+    pub drop_flag: Variable,
+    /// Tag indices of variants that are RC-managed (need rc_dec at offset 8).
+    /// Each entry is (tag_index, is_interface).
+    pub rc_variant_tags: Vec<(u8, bool)>,
+}
+
 /// A scope that tracks RC locals introduced within it.
 ///
 /// Pushed when entering a block, popped when leaving.
@@ -45,6 +60,7 @@ pub(crate) struct CompositeRcLocal {
 pub(crate) struct RcScope {
     pub locals: Vec<RcLocal>,
     pub composites: Vec<CompositeRcLocal>,
+    pub unions: Vec<UnionRcLocal>,
 }
 
 /// Stack of RC scopes. The outermost scope is index 0.
@@ -179,6 +195,37 @@ impl RcScopeStack {
             .rev()
             .flat_map(|s| s.composites.iter())
     }
+
+    /// Register a union RC local in the current scope.
+    pub fn register_union(
+        &mut self,
+        variable: Variable,
+        drop_flag: Variable,
+        rc_variant_tags: Vec<(u8, bool)>,
+    ) {
+        let scope = self
+            .scopes
+            .last_mut()
+            .expect("register_union called with no active RC scope");
+        scope.unions.push(UnionRcLocal {
+            variable,
+            drop_flag,
+            rc_variant_tags,
+        });
+    }
+
+    /// Iterate all union RC locals from all active scopes (innermost first).
+    pub fn all_unions_innermost_first(&self) -> impl Iterator<Item = &UnionRcLocal> {
+        self.scopes.iter().rev().flat_map(|s| s.unions.iter())
+    }
+
+    /// Iterate union RC locals from scopes at or above the given depth.
+    pub fn unions_from_depth(&self, target_depth: usize) -> impl Iterator<Item = &UnionRcLocal> {
+        self.scopes[target_depth..]
+            .iter()
+            .rev()
+            .flat_map(|s| s.unions.iter())
+    }
 }
 
 /// Emit cleanup code for a slice of RC locals.
@@ -242,6 +289,67 @@ pub(crate) fn alloc_drop_flag(builder: &mut FunctionBuilder) -> Variable {
 pub(crate) fn set_drop_flag_live(builder: &mut FunctionBuilder, drop_flag: Variable) {
     let one = builder.ins().iconst(types::I8, 1);
     builder.def_var(drop_flag, one);
+}
+
+/// Emit cleanup code for union RC locals.
+///
+/// For each union, checks the drop flag, then loads the tag byte at offset 0.
+/// For each RC variant, checks if the tag matches and if so, rc_dec's the
+/// payload at offset 8.
+pub(crate) fn emit_union_rc_cleanup(
+    builder: &mut FunctionBuilder,
+    unions: &[UnionRcLocal],
+    rc_dec_ref: cranelift::codegen::ir::FuncRef,
+) {
+    for union_local in unions.iter().rev() {
+        let flag_val = builder.use_var(union_local.drop_flag);
+        let is_live = builder.ins().icmp_imm(IntCC::NotEqual, flag_val, 0);
+
+        let cleanup_block = builder.create_block();
+        let after_block = builder.create_block();
+
+        builder
+            .ins()
+            .brif(is_live, cleanup_block, &[], after_block, &[]);
+
+        builder.switch_to_block(cleanup_block);
+        builder.seal_block(cleanup_block);
+
+        let base_ptr = builder.use_var(union_local.variable);
+        let tag = builder.ins().load(types::I8, MemFlags::new(), base_ptr, 0);
+
+        // For each RC variant, emit: if tag == variant_tag { rc_dec(payload) }
+        for &(variant_tag, is_interface) in &union_local.rc_variant_tags {
+            let is_match = builder
+                .ins()
+                .icmp_imm(IntCC::Equal, tag, variant_tag as i64);
+            let dec_block = builder.create_block();
+            let next_block = builder.create_block();
+
+            builder
+                .ins()
+                .brif(is_match, dec_block, &[], next_block, &[]);
+
+            builder.switch_to_block(dec_block);
+            builder.seal_block(dec_block);
+            let payload = builder.ins().load(types::I64, MemFlags::new(), base_ptr, 8);
+            if is_interface {
+                let data_word = builder.ins().load(types::I64, MemFlags::new(), payload, 0);
+                builder.ins().call(rc_dec_ref, &[data_word]);
+            } else {
+                builder.ins().call(rc_dec_ref, &[payload]);
+            }
+            builder.ins().jump(next_block, &[]);
+
+            builder.switch_to_block(next_block);
+            builder.seal_block(next_block);
+        }
+
+        builder.ins().jump(after_block, &[]);
+
+        builder.switch_to_block(after_block);
+        builder.seal_block(after_block);
+    }
 }
 
 /// Emit cleanup code for composite RC locals.

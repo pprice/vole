@@ -53,6 +53,16 @@ impl CompiledValue {
     }
 
     /// Create a compiled value marked as an RC temporary that needs cleanup.
+    pub fn owned(value: Value, ty: Type, type_id: TypeId) -> Self {
+        Self {
+            value,
+            ty,
+            type_id,
+            rc_lifecycle: RcLifecycle::Owned,
+        }
+    }
+
+    /// Alias for `owned` — create a compiled value marked as an RC temporary that needs cleanup.
     pub fn temp(value: Value, ty: Type, type_id: TypeId) -> Self {
         Self {
             value,

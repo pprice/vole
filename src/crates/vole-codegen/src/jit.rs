@@ -368,6 +368,10 @@ impl JitContext {
         let sig = self.create_signature(&[ptr_ty, types::I64], None);
         self.import_function("vole_iter_set_elem_tag", &sig);
 
+        // vole_iter_set_produces_owned(iter: *mut RcIterator)
+        let sig = self.create_signature(&[ptr_ty], None);
+        self.import_function("vole_iter_set_produces_owned", &sig);
+
         // vole_iter_count(iter: *mut RcIterator) -> i64
         let sig = self.create_signature(&[ptr_ty], Some(types::I64));
         self.import_function("vole_iter_count", &sig);
@@ -383,6 +387,13 @@ impl JitContext {
         // vole_iter_reduce(iter: *mut RcIterator, init: i64, reducer: *const Closure) -> i64
         let sig = self.create_signature(&[ptr_ty, types::I64, ptr_ty], Some(types::I64));
         self.import_function("vole_iter_reduce", &sig);
+
+        // vole_iter_reduce_tagged(iter, init, reducer, acc_tag, elem_tag) -> i64
+        let sig = self.create_signature(
+            &[ptr_ty, types::I64, ptr_ty, types::I64, types::I64],
+            Some(types::I64),
+        );
+        self.import_function("vole_iter_reduce_tagged", &sig);
 
         // vole_iter_first(iter: *mut RcIterator) -> *mut u8 (optional: [tag:1][pad:7][payload:8])
         let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
@@ -799,12 +810,20 @@ impl JitContext {
             vole_runtime::iterator::vole_iter_set_elem_tag as *const u8,
         );
         builder.symbol(
+            "vole_iter_set_produces_owned",
+            vole_runtime::iterator::vole_iter_set_produces_owned as *const u8,
+        );
+        builder.symbol(
             "vole_iter_for_each",
             vole_runtime::iterator::vole_iter_for_each as *const u8,
         );
         builder.symbol(
             "vole_iter_reduce",
             vole_runtime::iterator::vole_iter_reduce as *const u8,
+        );
+        builder.symbol(
+            "vole_iter_reduce_tagged",
+            vole_runtime::iterator::vole_iter_reduce_tagged as *const u8,
         );
         builder.symbol(
             "vole_iter_first",

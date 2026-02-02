@@ -361,6 +361,15 @@ pub fn module() -> NativeModule {
             return_type: NativeType::I64,  // RcIterator pointer
         },
     );
+    // interface_iter_tagged: like interface_iter but also sets elem_tag
+    m.register(
+        "interface_iter_tagged",
+        iterator::vole_interface_iter_tagged as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64, NativeType::I64], // boxed_interface, elem_tag
+            return_type: NativeType::I64,                   // RcIterator pointer
+        },
+    );
     m.register(
         "iter_next",
         iterator::vole_iter_next as *const u8,
@@ -427,15 +436,9 @@ pub fn module() -> NativeModule {
     );
     m.register(
         "iter_reduce",
-        iterator::vole_iter_reduce_tagged as *const u8,
+        iterator::vole_iter_reduce as *const u8,
         NativeSignature {
-            params: vec![
-                NativeType::I64,
-                NativeType::I64,
-                NativeType::I64,
-                NativeType::I64,
-                NativeType::I64,
-            ],
+            params: vec![NativeType::I64, NativeType::I64, NativeType::I64],
             return_type: NativeType::I64,
         },
     );

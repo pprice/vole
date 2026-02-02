@@ -335,6 +335,9 @@ pub struct RcIterator {
     pub iter: UnifiedIterator,
     /// Runtime type tag for elements (0 = unset/i64, TYPE_STRING = 1, etc.)
     pub elem_tag: u64,
+    /// True if this iterator's next() produces freshly owned values (e.g. generators).
+    /// Used to decide whether terminal methods should rc_dec consumed elements.
+    pub produces_owned: bool,
 }
 
 impl RcIterator {
@@ -358,6 +361,7 @@ impl RcIterator {
             ptr::write(&mut (*ptr).iter.kind, kind);
             ptr::write(&mut (*ptr).iter.source, source);
             ptr::write(&mut (*ptr).elem_tag, elem_tag);
+            ptr::write(&mut (*ptr).produces_owned, false);
             alloc_track::track_alloc(TYPE_ITERATOR);
             ptr
         }
@@ -404,6 +408,20 @@ pub extern "C" fn vole_iter_set_elem_tag(iter: *mut RcIterator, tag: u64) {
     RcIterator::set_elem_tag(iter, tag);
 }
 
+/// Mark an iterator as producing owned values (e.g. generators).
+///
+/// # Safety
+/// `iter` must be null or a valid pointer to an initialized `RcIterator`.
+#[unsafe(no_mangle)]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub extern "C" fn vole_iter_set_produces_owned(iter: *mut RcIterator) {
+    if !iter.is_null() {
+        unsafe {
+            (*iter).produces_owned = true;
+        }
+    }
+}
+
 // Legacy type aliases for backwards compatibility
 pub type ArrayIterator = UnifiedIterator;
 pub type MapIterator = UnifiedIterator;
@@ -447,13 +465,46 @@ pub extern "C" fn vole_array_iter(array: *const RcArray) -> *mut RcIterator {
 /// The boxed_interface has layout: [data_ptr, vtable_ptr].
 /// Returns pointer to heap-allocated iterator.
 #[unsafe(no_mangle)]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_interface_iter(boxed_interface: *const u8) -> *mut RcIterator {
-    RcIterator::new(
+    let iter = RcIterator::new(
         IteratorKind::Interface,
         IteratorSource {
             interface: InterfaceSource { boxed_interface },
         },
-    )
+    );
+    // Interface iterators produce owned values: next() is a function call
+    // that returns a fresh value (generators, or classes returning owned values).
+    if !iter.is_null() {
+        unsafe {
+            (*iter).produces_owned = true;
+        }
+    }
+    iter
+}
+
+/// Create an RcIterator adapter for an interface with a known element type tag.
+/// Used when the element type is known at compile time (e.g. vtable thunks for
+/// Iterator<string>).
+#[unsafe(no_mangle)]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+pub extern "C" fn vole_interface_iter_tagged(
+    boxed_interface: *const u8,
+    elem_tag: u64,
+) -> *mut RcIterator {
+    let iter = RcIterator::new_with_tag(
+        IteratorKind::Interface,
+        IteratorSource {
+            interface: InterfaceSource { boxed_interface },
+        },
+        elem_tag,
+    );
+    if !iter.is_null() {
+        unsafe {
+            (*iter).produces_owned = true;
+        }
+    }
+    iter
 }
 
 /// Drop function for RcIterator, called by rc_dec when refcount reaches zero.
@@ -548,7 +599,21 @@ fn iterator_drop_sources(iter_ref: &UnifiedIterator) {
                     RcString::dec_ref(string as *mut RcString);
                 }
             }
-            IteratorKind::Interface => {}
+            IteratorKind::Interface => {
+                // The boxed interface layout is [data_ptr, vtable_ptr].
+                // We need to rc_dec the data_ptr (the actual instance) so the
+                // underlying object (e.g., generator state machine) is freed.
+                let boxed = iter_ref.source.interface.boxed_interface;
+                if !boxed.is_null() {
+                    let data_ptr = *(boxed as *const *mut u8);
+                    if !data_ptr.is_null() {
+                        rc_dec(data_ptr);
+                    }
+                    // Free the interface box itself (heap-allocated 2-word struct)
+                    let layout = Layout::from_size_align(16, 8).unwrap();
+                    dealloc(boxed as *mut u8, layout);
+                }
+            }
             IteratorKind::Enumerate => {
                 RcIterator::dec_ref(iter_ref.source.enumerate.source);
             }
@@ -822,7 +887,9 @@ fn iter_produces_owned(iter: *mut RcIterator) -> bool {
             }
 
             // Leaf sources: values are borrowed from the source container
-            IteratorKind::Array | IteratorKind::Interface | IteratorKind::Empty => false,
+            IteratorKind::Array | IteratorKind::Empty => false,
+            // Interface: next() is a function call that returns owned values
+            IteratorKind::Interface => true,
         }
     }
 }
@@ -1172,6 +1239,28 @@ pub extern "C" fn vole_filter_iter_collect(iter: *mut RcIterator) -> *mut RcArra
 // Consumer methods - eager evaluation that consumes the entire iterator
 // =============================================================================
 
+/// Check if an iterator produces owned RC values that need to be freed when discarded.
+/// Returns true if values from this iterator should be rc_dec'd when the consumer doesn't keep them.
+fn iter_produces_owned_rc(iter: *mut RcIterator) -> bool {
+    if iter.is_null() {
+        return false;
+    }
+    let tag = unsafe { (*iter).elem_tag };
+    crate::value::tag_needs_rc(tag) && iter_produces_owned(iter)
+}
+
+/// Returns true if the iterator produces borrowed RC values (i.e. values whose
+/// elem_tag indicates they need RC but the iterator source doesn't own them).
+/// Used by terminal methods (first, last, nth) to rc_inc the returned value
+/// before freeing the iterator chain.
+fn iter_produces_borrowed_rc(iter: *mut RcIterator) -> bool {
+    if iter.is_null() {
+        return false;
+    }
+    let tag = unsafe { (*iter).elem_tag };
+    crate::value::tag_needs_rc(tag) && !iter_produces_owned(iter)
+}
+
 /// Count the number of elements in any iterator
 /// Returns the count as i64
 /// Frees the iterator after counting.
@@ -1182,6 +1271,7 @@ pub extern "C" fn vole_iter_count(iter: *mut RcIterator) -> i64 {
         return 0;
     }
 
+    let owned_rc = iter_produces_owned_rc(iter);
     let mut count: i64 = 0;
     loop {
         let mut value: i64 = 0;
@@ -1189,6 +1279,10 @@ pub extern "C" fn vole_iter_count(iter: *mut RcIterator) -> i64 {
 
         if has_value == 0 {
             break;
+        }
+        // Free owned RC values that we're discarding (e.g., strings from string iteration)
+        if owned_rc && value != 0 {
+            rc_dec(value as *mut u8);
         }
         count += 1;
     }
@@ -1273,7 +1367,7 @@ pub extern "C" fn vole_iter_reduce_tagged(
     init: i64,
     reducer: *const Closure,
     acc_tag: u64,
-    _elem_tag: u64,
+    elem_tag: u64,
 ) -> i64 {
     use crate::value::tag_needs_rc;
 
@@ -1282,6 +1376,10 @@ pub extern "C" fn vole_iter_reduce_tagged(
     }
 
     let acc_is_rc = tag_needs_rc(acc_tag);
+    // Use the passed elem_tag to determine if elements need RC cleanup.
+    // This is more reliable than checking the iterator's stored elem_tag,
+    // which may be unset for interface iterators (generators).
+    let elem_is_owned_rc = tag_needs_rc(elem_tag) && iter_produces_owned(iter);
 
     let mut acc = init;
     loop {
@@ -1306,6 +1404,10 @@ pub extern "C" fn vole_iter_reduce_tagged(
         if acc_is_rc && old_acc != acc && old_acc != 0 {
             rc_dec(old_acc as *mut u8);
         }
+        // Free owned RC element values after the reducer has used them
+        if elem_is_owned_rc && value != 0 {
+            rc_dec(value as *mut u8);
+        }
     }
 
     // Free the iterator chain
@@ -1328,36 +1430,15 @@ pub extern "C" fn vole_iter_reduce(
     init: i64,
     reducer: *const Closure,
 ) -> i64 {
-    if iter.is_null() || reducer.is_null() {
-        return init;
-    }
-
-    let mut acc = init;
-    loop {
-        let mut value: i64 = 0;
-        let has_value = vole_array_iter_next(iter, &mut value);
-
-        if has_value == 0 {
-            break;
-        }
-
-        // Call the reducer closure with (acc, value) -> new_acc
-        // All lambdas now use closure calling convention (closure ptr as first arg)
-        unsafe {
-            let func_ptr = Closure::get_func(reducer);
-            let reducer_fn: extern "C" fn(*const Closure, i64, i64) -> i64 =
-                std::mem::transmute(func_ptr);
-            acc = reducer_fn(reducer, acc, value);
-        }
-    }
-
-    // Free the iterator chain
-    RcIterator::dec_ref(iter);
-
-    // Free the reducer closure (ownership transferred from codegen)
-    unsafe { Closure::free(reducer as *mut Closure) };
-
-    acc
+    // Delegate to the tagged version using the iterator's stored elem_tag.
+    // For reduce, the accumulator type equals the element type (T),
+    // so both acc_tag and elem_tag use the same value.
+    let tag = if iter.is_null() {
+        0
+    } else {
+        unsafe { (*iter).elem_tag }
+    };
+    vole_iter_reduce_tagged(iter, init, reducer, tag, tag)
 }
 
 /// Get the first element from any iterator, returns T? (optional)
@@ -1385,6 +1466,12 @@ pub extern "C" fn vole_iter_first(iter: *mut RcIterator) -> *mut u8 {
 
     let mut value: i64 = 0;
     let has_value = vole_array_iter_next(iter, &mut value);
+
+    // rc_inc borrowed RC values before freeing the iterator chain so the
+    // returned optional owns its payload.
+    if has_value != 0 && iter_produces_borrowed_rc(iter) {
+        rc_inc(value as *mut u8);
+    }
 
     // Free the iterator chain
     RcIterator::dec_ref(iter);
@@ -1424,6 +1511,8 @@ pub extern "C" fn vole_iter_last(iter: *mut RcIterator) -> *mut u8 {
         return ptr;
     }
 
+    let owned_rc = iter_produces_owned_rc(iter);
+    let borrowed_rc = iter_produces_borrowed_rc(iter);
     let mut last_value: i64 = 0;
     let mut found_any = false;
 
@@ -1434,8 +1523,18 @@ pub extern "C" fn vole_iter_last(iter: *mut RcIterator) -> *mut u8 {
         if has_value == 0 {
             break;
         }
+        // Free the previous "last" value if it was an owned RC value
+        if owned_rc && found_any && last_value != 0 {
+            rc_dec(last_value as *mut u8);
+        }
         last_value = value;
         found_any = true;
+    }
+
+    // rc_inc borrowed RC values before freeing the iterator chain so the
+    // returned optional owns its payload.
+    if found_any && borrowed_rc && last_value != 0 {
+        rc_inc(last_value as *mut u8);
     }
 
     // Free the iterator chain
@@ -1478,6 +1577,9 @@ pub extern "C" fn vole_iter_nth(iter: *mut RcIterator, n: i64) -> *mut u8 {
         return ptr;
     }
 
+    let owned_rc = iter_produces_owned_rc(iter);
+    let borrowed_rc = iter_produces_borrowed_rc(iter);
+
     // Skip n elements
     for _ in 0..n {
         let mut dummy: i64 = 0;
@@ -1491,11 +1593,21 @@ pub extern "C" fn vole_iter_nth(iter: *mut RcIterator, n: i64) -> *mut u8 {
             }
             return ptr;
         }
+        // Free skipped owned RC values
+        if owned_rc && dummy != 0 {
+            rc_dec(dummy as *mut u8);
+        }
     }
 
     // Get the nth element
     let mut value: i64 = 0;
     let has_value = vole_array_iter_next(iter, &mut value);
+
+    // rc_inc borrowed RC values before freeing the iterator chain so the
+    // returned optional owns its payload.
+    if has_value != 0 && borrowed_rc && value != 0 {
+        rc_inc(value as *mut u8);
+    }
 
     // Free the iterator chain
     RcIterator::dec_ref(iter);
@@ -1655,6 +1767,7 @@ pub extern "C" fn vole_skip_iter_next(iter: *mut RcIterator, out_value: *mut i64
     // If we haven't skipped yet, do the initial skip
     if skip_src.skipped == 0 {
         skip_src.skipped = 1;
+        let owned_rc = iter_produces_owned_rc(skip_src.source);
         let mut skipped: i64 = 0;
         while skipped < skip_src.skip_count {
             let mut dummy: i64 = 0;
@@ -1662,6 +1775,10 @@ pub extern "C" fn vole_skip_iter_next(iter: *mut RcIterator, out_value: *mut i64
             if has_value == 0 {
                 // Source exhausted during skip
                 return 0;
+            }
+            // Free skipped owned RC values
+            if owned_rc && dummy != 0 {
+                rc_dec(dummy as *mut u8);
             }
             skipped += 1;
         }
@@ -2144,9 +2261,13 @@ pub extern "C" fn vole_flat_map_iter_next(iter: *mut RcIterator, out_value: *mut
             transform_fn(flat_map_src.transform, source_value)
         };
 
-        // Create an iterator for the resulting array
-        let inner_array = array_ptr as *const RcArray;
+        // Create an iterator for the resulting array.
+        // vole_array_iter rc_inc's the array (for user arrays).
+        // The transform created this array (refcount 1), so dec_ref after wrapping
+        // to transfer sole ownership to the inner iterator.
+        let inner_array = array_ptr as *mut RcArray;
         flat_map_src.inner = vole_array_iter(inner_array);
+        unsafe { RcArray::dec_ref(inner_array) };
         // Continue loop to get first element from this inner iterator
     }
 }
@@ -2236,8 +2357,12 @@ pub extern "C" fn vole_reverse_iter(iter: *mut RcIterator) -> *mut RcIterator {
         }
     }
 
-    // Return iterator over the reversed array
-    vole_array_iter(result)
+    // Return iterator over the reversed array.
+    // vole_array_iter rc_inc's the array (for user arrays that must outlive the iterator).
+    // Since we own this intermediate array, dec_ref to transfer sole ownership to the iterator.
+    let iter = vole_array_iter(result);
+    unsafe { RcArray::dec_ref(result) };
+    iter
 }
 
 /// Sorted iterator - collects all elements, sorts them, returns new array iterator
@@ -2286,8 +2411,12 @@ pub extern "C" fn vole_sorted_iter(iter: *mut RcIterator) -> *mut RcIterator {
         }
     }
 
-    // Return iterator over the sorted array
-    vole_array_iter(result)
+    // Return iterator over the sorted array.
+    // vole_array_iter rc_inc's the array (for user arrays that must outlive the iterator).
+    // Since we own this intermediate array, dec_ref to transfer sole ownership to the iterator.
+    let iter = vole_array_iter(result);
+    unsafe { RcArray::dec_ref(result) };
+    iter
 }
 
 /// Create a new unique iterator wrapping any source iterator

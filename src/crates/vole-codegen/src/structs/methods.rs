@@ -13,8 +13,8 @@ use crate::context::Cg;
 use crate::errors::CodegenError;
 use crate::method_resolution::get_type_def_id_from_type_id;
 use crate::types::{
-    CompiledValue, array_element_tag_id, module_name_id, type_id_to_cranelift, value_to_word,
-    word_to_value_type_id,
+    CompiledValue, RcLifecycle, array_element_tag_id, module_name_id, type_id_to_cranelift,
+    value_to_word, word_to_value_type_id,
 };
 use vole_frontend::{Expr, ExprKind, MethodCallExpr, NodeId, Symbol};
 use vole_identity::NamerLookup;
@@ -685,7 +685,7 @@ impl Cg<'_, '_, '_> {
         // Use sema's pre-computed RuntimeIterator type
         let iter_type_id =
             iter_type_hint.expect("sema must provide concrete_return_hint for range iterator");
-        Ok(CompiledValue::new(result, self.ptr_type(), iter_type_id))
+        Ok(CompiledValue::owned(result, self.ptr_type(), iter_type_id))
     }
 
     /// Handle built-in methods on arrays, strings, and ranges.
@@ -722,7 +722,7 @@ impl Cg<'_, '_, '_> {
                         let tag_val = self.builder.ins().iconst(types::I64, tag as i64);
                         self.call_runtime_void(RuntimeFn::IterSetElemTag, &[result, tag_val])?;
                     }
-                    Ok(Some(CompiledValue::new(
+                    Ok(Some(CompiledValue::owned(
                         result,
                         self.ptr_type(),
                         iter_type_id,
@@ -744,7 +744,14 @@ impl Cg<'_, '_, '_> {
                     // Use sema's pre-computed RuntimeIterator type
                     let iter_type_id = iter_type_hint
                         .expect("sema must provide concrete_return_hint for string.iter()");
-                    Ok(Some(CompiledValue::new(
+                    // Set elem_tag to TYPE_STRING so terminal methods can properly
+                    // free owned char strings produced by the string chars iterator.
+                    let string_tag = crate::types::unknown_type_tag(TypeId::STRING, self.arena());
+                    if string_tag != 0 {
+                        let tag_val = self.builder.ins().iconst(types::I64, string_tag as i64);
+                        self.call_runtime_void(RuntimeFn::IterSetElemTag, &[result, tag_val])?;
+                    }
+                    Ok(Some(CompiledValue::owned(
                         result,
                         self.ptr_type(),
                         iter_type_id,
@@ -773,7 +780,7 @@ impl Cg<'_, '_, '_> {
                 // Use sema's pre-computed RuntimeIterator type
                 let iter_type_id = iter_type_hint
                     .expect("sema must provide concrete_return_hint for range.iter()");
-                return Ok(Some(CompiledValue::new(
+                return Ok(Some(CompiledValue::owned(
                     result,
                     self.ptr_type(),
                     iter_type_id,
@@ -894,19 +901,30 @@ impl Cg<'_, '_, '_> {
             let elem_tag = crate::types::unknown_type_tag(elem_type_id, self.arena());
             let tag_val = self.builder.ins().iconst(types::I64, elem_tag as i64);
             args.push(tag_val);
-        } else if method_name == "reduce" {
-            // reduce signature: (iter, init, reducer, acc_tag, elem_tag)
-            // The accumulator type is the same as the element type for reduce(init, f)
-            // since init: T and f: (T, T) -> T
-            let tag = crate::types::unknown_type_tag(elem_type_id, self.arena());
-            let tag_val = self.builder.ins().iconst(types::I64, tag as i64);
-            // acc_tag and elem_tag are the same for reduce(init, f) since init: T and f: (T, T) -> T
-            args.push(tag_val);
-            args.push(tag_val);
         }
 
-        // Call the external function directly
-        let result = self.call_external_id(&external_info, &args, return_type_id)?;
+        // Call the external function directly. For reduce, use the tagged
+        // variant (IterReduceTagged) which accepts explicit acc/elem type
+        // tags for proper RC cleanup of accumulators and consumed elements.
+        let mut result = if method_name == "reduce" {
+            let tag = crate::types::unknown_type_tag(elem_type_id, self.arena());
+            let tag_val = self.builder.ins().iconst(types::I64, tag as i64);
+            args.push(tag_val); // acc_tag
+            args.push(tag_val); // elem_tag
+            let result_val = self.call_runtime(RuntimeFn::IterReduceTagged, &args)?;
+            CompiledValue::new(
+                result_val,
+                self.cranelift_type(return_type_id),
+                return_type_id,
+            )
+        } else {
+            self.call_external_id(&external_info, &args, return_type_id)?
+        };
+
+        // Mark RC-typed results as Owned so they get properly cleaned up
+        if self.needs_rc_cleanup(return_type_id) {
+            result.rc_lifecycle = RcLifecycle::Owned;
+        }
 
         // For methods that return iterators, set the elem_tag on the result iterator
         // so that intermediate pipeline operations (map, filter) can properly manage
