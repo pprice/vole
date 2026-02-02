@@ -90,6 +90,43 @@ impl RcString {
         unsafe { str::from_utf8_unchecked(self.data()) }
     }
 
+    /// Allocate a new RcString by concatenating two byte slices without an
+    /// intermediate String allocation.
+    pub fn from_two_parts(a: &[u8], b: &[u8]) -> *mut Self {
+        let total_len = a.len() + b.len();
+
+        // Hash both parts sequentially to produce the same result as hashing
+        // the concatenated bytes.
+        let mut hash: u64 = 0xcbf29ce484222325;
+        for &byte in a.iter().chain(b.iter()) {
+            hash ^= byte as u64;
+            hash = hash.wrapping_mul(0x100000001b3);
+        }
+
+        let layout = Self::layout_for_len(total_len);
+
+        unsafe {
+            let ptr = alloc(layout) as *mut Self;
+            if ptr.is_null() {
+                std::alloc::handle_alloc_error(layout);
+            }
+
+            ptr::write(
+                &mut (*ptr).header,
+                RcHeader::with_drop_fn(TYPE_STRING, string_drop),
+            );
+            ptr::write(&mut (*ptr).len, total_len);
+            ptr::write(&mut (*ptr).hash, hash);
+
+            let data_ptr = (ptr as *mut u8).add(size_of::<RcString>());
+            ptr::copy_nonoverlapping(a.as_ptr(), data_ptr, a.len());
+            ptr::copy_nonoverlapping(b.as_ptr(), data_ptr.add(a.len()), b.len());
+
+            alloc_track::track_alloc(TYPE_STRING);
+            ptr
+        }
+    }
+
     /// Increment reference count
     ///
     /// # Safety

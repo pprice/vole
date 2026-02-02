@@ -159,10 +159,9 @@ pub extern "C" fn vole_print_bool(value: i8) {
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_string_concat(a: *const RcString, b: *const RcString) -> *mut RcString {
     unsafe {
-        let s_a = if a.is_null() { "" } else { (*a).as_str() };
-        let s_b = if b.is_null() { "" } else { (*b).as_str() };
-        let result = format!("{}{}", s_a, s_b);
-        RcString::new(&result)
+        let bytes_a: &[u8] = if a.is_null() { &[] } else { (*a).data() };
+        let bytes_b: &[u8] = if b.is_null() { &[] } else { (*b).data() };
+        RcString::from_two_parts(bytes_a, bytes_b)
     }
 }
 
