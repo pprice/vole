@@ -7,6 +7,17 @@ use std::ptr;
 use std::slice;
 use std::str;
 
+/// FNV-1a hash for string bytes. Used by both runtime allocation and
+/// compile-time static string embedding in codegen.
+pub fn fnv1a_hash(bytes: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for &byte in bytes {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
 /// Reference-counted string
 #[repr(C)]
 pub struct RcString {
@@ -55,13 +66,7 @@ impl RcString {
     }
 
     fn compute_hash(bytes: &[u8]) -> u64 {
-        // Simple FNV-1a hash
-        let mut hash: u64 = 0xcbf29ce484222325;
-        for &byte in bytes {
-            hash ^= byte as u64;
-            hash = hash.wrapping_mul(0x100000001b3);
-        }
-        hash
+        fnv1a_hash(bytes)
     }
 
     /// Get the string data

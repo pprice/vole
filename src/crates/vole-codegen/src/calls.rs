@@ -22,11 +22,12 @@ use super::context::Cg;
 use super::types::{CompiledValue, native_type_to_cranelift, type_id_to_cranelift};
 use super::{FunctionKey, FunctionRegistry, RuntimeFn};
 
-/// Compile a string literal by calling vole_string_new.
-/// Returns the raw Cranelift Value - caller should wrap with string_value() for CompiledValue.
+/// Compile a string literal as a static RcString baked into the JIT data section.
+/// Returns the raw Cranelift Value (pointer to the static RcString) - caller should
+/// wrap with string_value() for CompiledValue.
 ///
-/// String data is allocated in the JIT module's data section to ensure it
-/// remains valid when JIT code runs (avoiding use-after-free in release builds).
+/// The RcString is built at compile time with RC_PINNED refcount so rc_inc/rc_dec
+/// are no-ops, making string literals zero-allocation at runtime.
 pub(crate) fn compile_string_literal(
     builder: &mut FunctionBuilder,
     s: &str,
@@ -34,39 +35,39 @@ pub(crate) fn compile_string_literal(
     module: &mut JITModule,
     func_registry: &mut FunctionRegistry,
 ) -> Result<Value, String> {
-    // Get the vole_string_new function
-    let func_id = func_registry
-        .runtime_key(RuntimeFn::StringNew)
-        .and_then(|key| func_registry.func_id(key))
-        .ok_or_else(|| {
-            CodegenError::not_found("runtime function", "vole_string_new").to_string()
-        })?;
-    let func_ref = module.declare_func_in_func(func_id, builder.func);
+    use vole_runtime::{RC_PINNED, TYPE_STRING, fnv1a_hash};
 
-    // Allocate string data in JIT module's data section
+    // Build complete RcString struct as bytes:
+    //   RcHeader { ref_count: u32, type_id: u32, drop_fn: Option<fn> }  = 16 bytes
+    //   len: usize                                                       =  8 bytes
+    //   hash: u64                                                        =  8 bytes
+    //   data: [u8; s.len()]                                              =  N bytes
+    let mut data = Vec::with_capacity(32 + s.len());
+    // RcHeader
+    data.extend_from_slice(&RC_PINNED.to_ne_bytes()); // ref_count = pinned (no-op inc/dec)
+    data.extend_from_slice(&TYPE_STRING.to_ne_bytes()); // type_id
+    data.extend_from_slice(&0u64.to_ne_bytes()); // drop_fn = null (no cleanup needed)
+    // RcString fields
+    data.extend_from_slice(&s.len().to_ne_bytes()); // len
+    data.extend_from_slice(&fnv1a_hash(s.as_bytes()).to_ne_bytes()); // hash
+    data.extend_from_slice(s.as_bytes()); // inline string data
+
+    // Embed in JIT data section
     let data_name = func_registry.next_string_data_name();
     let data_id = module
         .declare_data(&data_name, Linkage::Local, false, false)
         .map_err(|e| e.to_string())?;
 
-    // Define the data with the string bytes
     let mut data_desc = DataDescription::new();
-    data_desc.define(s.as_bytes().to_vec().into_boxed_slice());
+    data_desc.define(data.into_boxed_slice());
+    data_desc.set_align(8);
     module
         .define_data(data_id, &data_desc)
         .map_err(|e| e.to_string())?;
 
-    // Get data reference for use in current function
+    // The data section pointer IS the RcString pointer
     let data_gv = module.declare_data_in_func(data_id, builder.func);
-    let data_val = builder.ins().global_value(pointer_type, data_gv);
-
-    // Pass length as constant
-    let len = s.len() as i64;
-    let len_val = builder.ins().iconst(pointer_type, len);
-
-    // Call vole_string_new(data, len) -> *mut RcString
-    let call = builder.ins().call(func_ref, &[data_val, len_val]);
-    Ok(builder.inst_results(call)[0])
+    Ok(builder.ins().global_value(pointer_type, data_gv))
 }
 impl Cg<'_, '_, '_> {
     /// Compile a string literal
