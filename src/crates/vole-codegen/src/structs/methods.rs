@@ -715,6 +715,13 @@ impl Cg<'_, '_, '_> {
                             .lookup_runtime_iterator(elem_type_id)
                             .expect("RuntimeIterator type must be pre-created by sema")
                     });
+                    // Set elem_tag on the array iterator so pipeline operations
+                    // can properly manage RC values
+                    let tag = crate::types::unknown_type_tag(elem_type_id, self.arena());
+                    if tag != 0 {
+                        let tag_val = self.builder.ins().iconst(types::I64, tag as i64);
+                        self.call_runtime_void(RuntimeFn::IterSetElemTag, &[result, tag_val])?;
+                    }
                     Ok(Some(CompiledValue::new(
                         result,
                         self.ptr_type(),
@@ -881,8 +888,44 @@ impl Cg<'_, '_, '_> {
             args.push(compiled.value);
         }
 
+        // For collect and reduce, append element type tag so the runtime can
+        // properly tag RC values in the resulting array / clean up intermediates.
+        if method_name == "collect" {
+            let elem_tag = crate::types::unknown_type_tag(_elem_type_id, self.arena());
+            let tag_val = self.builder.ins().iconst(types::I64, elem_tag as i64);
+            args.push(tag_val);
+        } else if method_name == "reduce" {
+            // reduce signature: (iter, init, reducer, acc_tag, elem_tag)
+            // The accumulator type is the same as the element type for reduce(init, f)
+            // since init: T and f: (T, T) -> T
+            let acc_tag = crate::types::unknown_type_tag(_elem_type_id, self.arena());
+            let elem_tag = acc_tag;
+            let acc_tag_val = self.builder.ins().iconst(types::I64, acc_tag as i64);
+            let elem_tag_val = self.builder.ins().iconst(types::I64, elem_tag as i64);
+            args.push(acc_tag_val);
+            args.push(elem_tag_val);
+        }
+
         // Call the external function directly
-        self.call_external_id(&external_info, &args, return_type_id)
+        let result = self.call_external_id(&external_info, &args, return_type_id)?;
+
+        // For methods that return iterators, set the elem_tag on the result iterator
+        // so that intermediate pipeline operations (map, filter) can properly manage
+        // RC values (rc_dec consumed/rejected values of RC types).
+        let result_elem_type = {
+            let arena = self.arena();
+            arena.unwrap_runtime_iterator(return_type_id)
+        };
+        if let Some(result_elem_id) = result_elem_type {
+            let tag = crate::types::unknown_type_tag(result_elem_id, self.arena());
+            if tag != 0 {
+                // Only set tag for non-default types (RC types, etc.)
+                let tag_val = self.builder.ins().iconst(types::I64, tag as i64);
+                self.call_runtime_void(RuntimeFn::IterSetElemTag, &[result.value, tag_val])?;
+            }
+        }
+
+        Ok(result)
     }
 
     /// Convert Iterator<T> return types to RuntimeIterator(T)

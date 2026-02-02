@@ -324,16 +324,27 @@ pub struct UnifiedIterator {
 
 /// Reference-counted iterator
 ///
-/// Layout: [RcHeader (16 bytes)] [UnifiedIterator (kind + source)]
+/// Layout: [RcHeader (16 bytes)] [UnifiedIterator (kind + source)] [elem_tag: u64]
+///
+/// `elem_tag` is the runtime type tag (e.g., TYPE_STRING) for the element type flowing
+/// through this iterator. Used by next() to rc_inc produced values and by filter/take/etc.
+/// to rc_dec rejected/discarded values.
 #[repr(C)]
 pub struct RcIterator {
     pub header: RcHeader,
     pub iter: UnifiedIterator,
+    /// Runtime type tag for elements (0 = unset/i64, TYPE_STRING = 1, etc.)
+    pub elem_tag: u64,
 }
 
 impl RcIterator {
-    /// Allocate a new RcIterator with the given kind and source
+    /// Allocate a new RcIterator with the given kind and source (elem_tag defaults to 0/i64)
     pub fn new(kind: IteratorKind, source: IteratorSource) -> *mut Self {
+        Self::new_with_tag(kind, source, 0)
+    }
+
+    /// Allocate a new RcIterator with the given kind, source, and element type tag
+    pub fn new_with_tag(kind: IteratorKind, source: IteratorSource, elem_tag: u64) -> *mut Self {
         let layout = Layout::new::<RcIterator>();
         unsafe {
             let ptr = alloc(layout) as *mut Self;
@@ -346,6 +357,7 @@ impl RcIterator {
             );
             ptr::write(&mut (*ptr).iter.kind, kind);
             ptr::write(&mut (*ptr).iter.source, source);
+            ptr::write(&mut (*ptr).elem_tag, elem_tag);
             alloc_track::track_alloc(TYPE_ITERATOR);
             ptr
         }
@@ -369,6 +381,27 @@ impl RcIterator {
     pub fn dec_ref(ptr: *mut Self) {
         rc_dec(ptr as *mut u8);
     }
+
+    /// Set the element type tag on this iterator (non-recursive).
+    /// Each iterator in the chain stores its OWN element type tag.
+    /// The tag represents the type of values this iterator produces.
+    #[allow(clippy::not_unsafe_ptr_arg_deref)]
+    pub fn set_elem_tag(ptr: *mut Self, tag: u64) {
+        if ptr.is_null() {
+            return;
+        }
+        unsafe {
+            (*ptr).elem_tag = tag;
+        }
+    }
+}
+
+/// Set the element type tag on an iterator chain.
+/// Called from codegen to enable RC tracking in the iterator pipeline.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_iter_set_elem_tag(iter: *mut RcIterator, tag: u64) {
+    RcIterator::set_elem_tag(iter, tag);
 }
 
 // Legacy type aliases for backwards compatibility
@@ -747,6 +780,119 @@ pub extern "C" fn vole_iter_next(iter: *mut RcIterator) -> *mut u8 {
     ptr
 }
 
+/// Check if an iterator chain produces "owned" values (from map/string_chars/etc.)
+/// vs "borrowed" values (from array source with only filter/take/skip in between).
+/// This determines whether collect needs to rc_inc values before storing.
+fn iter_produces_owned(iter: *mut RcIterator) -> bool {
+    if iter.is_null() {
+        return false;
+    }
+    unsafe {
+        let kind = (*iter).iter.kind;
+        match kind {
+            // Creating sources: values are newly created (owned)
+            IteratorKind::Map
+            | IteratorKind::FlatMap
+            | IteratorKind::StringChars
+            | IteratorKind::StringSplit
+            | IteratorKind::StringLines
+            | IteratorKind::StringCodepoints
+            | IteratorKind::Chunks
+            | IteratorKind::Windows
+            | IteratorKind::Enumerate
+            | IteratorKind::Zip
+            | IteratorKind::FromFn
+            | IteratorKind::Repeat
+            | IteratorKind::Once
+            | IteratorKind::Range => true,
+
+            // Pass-through sources: check what they pass through
+            IteratorKind::Filter => iter_produces_owned((*iter).iter.source.filter.source),
+            IteratorKind::Take => iter_produces_owned((*iter).iter.source.take.source),
+            IteratorKind::Skip => iter_produces_owned((*iter).iter.source.skip.source),
+            IteratorKind::Unique => iter_produces_owned((*iter).iter.source.unique.source),
+            IteratorKind::Chain => {
+                // Chain: both branches must produce owned for us to say owned
+                // In practice, if either is borrowed, we need to rc_inc
+                false
+            }
+            IteratorKind::Flatten => {
+                // Flatten yields elements from inner arrays - these are borrowed
+                false
+            }
+
+            // Leaf sources: values are borrowed from the source container
+            IteratorKind::Array | IteratorKind::Interface | IteratorKind::Empty => false,
+        }
+    }
+}
+
+/// Collect all remaining iterator values into a new array with proper element type tags.
+/// `elem_tag` is the runtime type tag for the element type (e.g. TYPE_STRING, TYPE_INSTANCE).
+/// This ensures the resulting array properly tracks RC types for cleanup.
+/// Handles both "owned" values (from map/string_chars) and "borrowed" values (from array)
+/// by rc_inc-ing borrowed RC values so the collected array properly owns them.
+/// Frees the iterator after collecting.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_iter_collect_tagged(iter: *mut RcIterator, elem_tag: u64) -> *mut RcArray {
+    use crate::value::{TaggedValue, tag_needs_rc};
+
+    let result = RcArray::new();
+
+    if iter.is_null() {
+        return result;
+    }
+
+    let needs_rc = tag_needs_rc(elem_tag);
+    let values_owned = iter_produces_owned(iter);
+
+    loop {
+        let mut value: i64 = 0;
+        let has_value = vole_array_iter_next(iter, &mut value);
+
+        if has_value == 0 {
+            break;
+        }
+
+        // Determine the actual tag for this value.
+        // The codegen-provided elem_tag may be wrong for type-transforming iterators
+        // like Flatten (which reduces Array<T> to T). Use a pointer alignment check
+        // to validate: all RC heap objects are 8-byte aligned, so if the value isn't
+        // aligned, it can't be an RC pointer regardless of what the tag says.
+        let actual_tag = if needs_rc && !(value as usize).is_multiple_of(8) {
+            // Value is not a valid heap pointer - use tag 0 (non-RC)
+            0u64
+        } else {
+            elem_tag
+        };
+        let actual_needs_rc = tag_needs_rc(actual_tag);
+
+        // For borrowed RC values (from array source), rc_inc so the collected
+        // array gets its own reference. For owned values (from map), the value
+        // is already at refcount 1 from creation - just transfer ownership.
+        if actual_needs_rc && !values_owned && value != 0 {
+            rc_inc(value as *mut u8);
+        }
+
+        // Push to result array with correct element type tag.
+        unsafe {
+            RcArray::push(
+                result,
+                TaggedValue {
+                    tag: actual_tag,
+                    value: value as u64,
+                },
+            );
+        }
+    }
+
+    // Free the iterator chain
+    RcIterator::dec_ref(iter);
+
+    result
+}
+
 /// Collect all remaining iterator values into a new array
 /// Returns pointer to newly allocated array (empty if iterator is null)
 /// Frees the iterator after collecting.
@@ -828,6 +974,14 @@ pub extern "C" fn vole_map_iter_next(iter: *mut RcIterator, out_value: *mut i64)
 
     let map_src = unsafe { iter_ref.source.map };
 
+    // Check if source values are owned RC values that need rc_dec after consumption.
+    // The source iterator's elem_tag tells us the type of values it produces.
+    // If the source produces owned RC values (from another map, string_chars, etc.),
+    // we need to rc_dec them after the transform closure consumes them.
+    let source_elem_tag = unsafe { (*map_src.source).elem_tag };
+    let source_needs_rc_dec =
+        crate::value::tag_needs_rc(source_elem_tag) && iter_produces_owned(map_src.source);
+
     // Get next value from source iterator (could be Array or Map)
     let mut source_value: i64 = 0;
     let has_value = vole_array_iter_next(map_src.source, &mut source_value);
@@ -843,6 +997,12 @@ pub extern "C" fn vole_map_iter_next(iter: *mut RcIterator, out_value: *mut i64)
         let transform_fn: extern "C" fn(*const Closure, i64) -> i64 = std::mem::transmute(func_ptr);
         let result = transform_fn(map_src.transform, source_value);
         *out_value = result;
+    }
+
+    // rc_dec the consumed source value if it was an owned RC value (from another map, etc.).
+    // The closure has consumed the value (used it to produce the result).
+    if source_needs_rc_dec && source_value != 0 {
+        rc_dec(source_value as *mut u8);
     }
 
     1 // Has value
@@ -929,6 +1089,11 @@ pub extern "C" fn vole_filter_iter_next(iter: *mut RcIterator, out_value: *mut i
 
     let filter_src = unsafe { iter_ref.source.filter };
 
+    // Check if rejected values need rc_dec (source produces owned RC values)
+    let elem_tag = unsafe { (*iter).elem_tag };
+    let rc_dec_rejects =
+        crate::value::tag_needs_rc(elem_tag) && iter_produces_owned(filter_src.source);
+
     // Keep getting values from source until we find one that passes the predicate
     loop {
         // Get next value from source iterator (could be Array, Map, or Filter)
@@ -955,7 +1120,10 @@ pub extern "C" fn vole_filter_iter_next(iter: *mut RcIterator, out_value: *mut i
             unsafe { *out_value = source_value };
             return 1; // Has value
         }
-        // Otherwise, continue to next element
+        // Rejected value: rc_dec if it's an owned RC value (from map/etc.)
+        if rc_dec_rejects && source_value != 0 {
+            rc_dec(source_value as *mut u8);
+        }
     }
 }
 
@@ -1087,6 +1255,66 @@ pub extern "C" fn vole_iter_for_each(iter: *mut RcIterator, callback: *const Clo
 
     // Free the iterator chain
     RcIterator::dec_ref(iter);
+
+    // Free the callback closure (ownership transferred from codegen)
+    unsafe { Closure::free(callback as *mut Closure) };
+}
+
+/// Reduce all elements in any iterator using an accumulator function, with RC cleanup.
+/// `acc_tag` is the runtime type tag for the accumulator type.
+/// `elem_tag` is the runtime type tag for the element type.
+/// When the accumulator or element is an RC type, old values are properly decremented.
+/// Returns the final accumulated value.
+/// Frees the iterator after reduction.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_iter_reduce_tagged(
+    iter: *mut RcIterator,
+    init: i64,
+    reducer: *const Closure,
+    acc_tag: u64,
+    _elem_tag: u64,
+) -> i64 {
+    use crate::value::tag_needs_rc;
+
+    if iter.is_null() || reducer.is_null() {
+        return init;
+    }
+
+    let acc_is_rc = tag_needs_rc(acc_tag);
+
+    let mut acc = init;
+    loop {
+        let mut value: i64 = 0;
+        let has_value = vole_array_iter_next(iter, &mut value);
+
+        if has_value == 0 {
+            break;
+        }
+
+        // Call the reducer closure with (acc, value) -> new_acc
+        // All lambdas now use closure calling convention (closure ptr as first arg)
+        let old_acc = acc;
+        unsafe {
+            let func_ptr = Closure::get_func(reducer);
+            let reducer_fn: extern "C" fn(*const Closure, i64, i64) -> i64 =
+                std::mem::transmute(func_ptr);
+            acc = reducer_fn(reducer, old_acc, value);
+        }
+
+        // Decrement old accumulator if it's an RC type and changed
+        if acc_is_rc && old_acc != acc && old_acc != 0 {
+            rc_dec(old_acc as *mut u8);
+        }
+    }
+
+    // Free the iterator chain
+    RcIterator::dec_ref(iter);
+
+    // Free the reducer closure (ownership transferred from codegen)
+    unsafe { Closure::free(reducer as *mut Closure) };
+
+    acc
 }
 
 /// Reduce all elements in any iterator using an accumulator function
@@ -1125,6 +1353,9 @@ pub extern "C" fn vole_iter_reduce(
 
     // Free the iterator chain
     RcIterator::dec_ref(iter);
+
+    // Free the reducer closure (ownership transferred from codegen)
+    unsafe { Closure::free(reducer as *mut Closure) };
 
     acc
 }

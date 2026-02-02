@@ -84,6 +84,7 @@ runtime_fns! {
     IterSum => "vole_iter_sum",
     IterForEach => "vole_iter_for_each",
     IterReduce => "vole_iter_reduce",
+    IterSetElemTag => "vole_iter_set_elem_tag",
     IterFirst => "vole_iter_first",
     IterLast => "vole_iter_last",
     IterNth => "vole_iter_nth",

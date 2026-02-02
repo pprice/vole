@@ -395,9 +395,9 @@ pub fn module() -> NativeModule {
     );
     m.register(
         "iter_collect",
-        iterator::vole_array_iter_collect as *const u8,
+        iterator::vole_iter_collect_tagged as *const u8,
         NativeSignature {
-            params: vec![NativeType::I64],
+            params: vec![NativeType::I64, NativeType::I64],
             return_type: NativeType::Array(Box::new(NativeType::I64)),
         },
     );
@@ -427,9 +427,15 @@ pub fn module() -> NativeModule {
     );
     m.register(
         "iter_reduce",
-        iterator::vole_iter_reduce as *const u8,
+        iterator::vole_iter_reduce_tagged as *const u8,
         NativeSignature {
-            params: vec![NativeType::I64, NativeType::I64, NativeType::I64],
+            params: vec![
+                NativeType::I64,
+                NativeType::I64,
+                NativeType::I64,
+                NativeType::I64,
+                NativeType::I64,
+            ],
             return_type: NativeType::I64,
         },
     );

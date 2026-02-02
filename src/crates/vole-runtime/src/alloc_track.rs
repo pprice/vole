@@ -108,11 +108,11 @@ mod tests {
         TYPE_ARRAY, TYPE_CLOSURE, TYPE_INSTANCE, TYPE_ITERATOR, TYPE_MAP, TYPE_RNG, TYPE_SET,
         TYPE_STRING,
     };
+    use std::sync::Mutex;
 
-    // Note: These tests use per-type counter snapshots because the global TOTAL
-    // counter is modified by parallel tests that allocate/deallocate RC types.
-    // Per-type counters for uncommon types (ITERATOR, RNG, etc.) are stable
-    // during parallel test execution.
+    // These tests manipulate global state (ENABLED flag, counters, reset) and must
+    // not run in parallel. A static mutex ensures mutual exclusion.
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
 
     /// Read a specific type counter.
     fn type_count(type_id: u32) -> i64 {
@@ -121,6 +121,7 @@ mod tests {
 
     #[test]
     fn test_disabled_mode_does_not_count() {
+        let _guard = TEST_LOCK.lock().unwrap();
         // Temporarily disable to test the disabled path.
         let was_enabled = ENABLED.load(Ordering::Relaxed);
         ENABLED.store(false, Ordering::Relaxed);
@@ -136,12 +137,14 @@ mod tests {
 
     #[test]
     fn test_enable_tracking() {
+        let _guard = TEST_LOCK.lock().unwrap();
         enable_tracking();
         assert!(ENABLED.load(Ordering::Relaxed));
     }
 
     #[test]
     fn test_track_alloc_increments_type_counter() {
+        let _guard = TEST_LOCK.lock().unwrap();
         enable_tracking();
         let before = type_count(TYPE_ITERATOR);
 
@@ -158,6 +161,7 @@ mod tests {
 
     #[test]
     fn test_track_dealloc_decrements_type_counter() {
+        let _guard = TEST_LOCK.lock().unwrap();
         enable_tracking();
         let before = type_count(TYPE_RNG);
 
@@ -174,6 +178,7 @@ mod tests {
 
     #[test]
     fn test_snapshot_and_delta_on_type_counter() {
+        let _guard = TEST_LOCK.lock().unwrap();
         enable_tracking();
         let before = type_count(TYPE_SET);
 
@@ -190,6 +195,7 @@ mod tests {
 
     #[test]
     fn test_report_includes_tracked_types() {
+        let _guard = TEST_LOCK.lock().unwrap();
         enable_tracking();
         let before = type_count(TYPE_ITERATOR);
 
@@ -208,6 +214,7 @@ mod tests {
 
     #[test]
     fn test_reset_zeros_type_counters() {
+        let _guard = TEST_LOCK.lock().unwrap();
         enable_tracking();
 
         track_alloc(TYPE_RNG);
@@ -221,6 +228,7 @@ mod tests {
 
     #[test]
     fn test_negative_on_double_free() {
+        let _guard = TEST_LOCK.lock().unwrap();
         enable_tracking();
         let before = type_count(TYPE_ITERATOR);
 
@@ -235,6 +243,7 @@ mod tests {
 
     #[test]
     fn test_all_type_ids_tracked() {
+        let _guard = TEST_LOCK.lock().unwrap();
         enable_tracking();
 
         let types = [

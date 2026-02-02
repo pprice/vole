@@ -364,6 +364,10 @@ impl JitContext {
         let sig = self.create_signature(&[ptr_ty], Some(ptr_ty));
         self.import_function("vole_filter_iter_collect", &sig);
 
+        // vole_iter_set_elem_tag(iter: *mut RcIterator, tag: u64)
+        let sig = self.create_signature(&[ptr_ty, types::I64], None);
+        self.import_function("vole_iter_set_elem_tag", &sig);
+
         // vole_iter_count(iter: *mut RcIterator) -> i64
         let sig = self.create_signature(&[ptr_ty], Some(types::I64));
         self.import_function("vole_iter_count", &sig);
@@ -776,6 +780,10 @@ impl JitContext {
         builder.symbol(
             "vole_iter_sum",
             vole_runtime::iterator::vole_iter_sum as *const u8,
+        );
+        builder.symbol(
+            "vole_iter_set_elem_tag",
+            vole_runtime::iterator::vole_iter_set_elem_tag as *const u8,
         );
         builder.symbol(
             "vole_iter_for_each",
