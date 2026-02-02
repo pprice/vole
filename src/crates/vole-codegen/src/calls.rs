@@ -87,16 +87,26 @@ impl Cg<'_, '_, '_> {
             return self.string_literal("");
         }
 
+        // Track which parts are owned (literals, to_string results) vs borrowed
+        // (existing string variables) so we can free owned parts after concat.
         let mut string_values: Vec<Value> = Vec::new();
+        let mut owned_flags: Vec<bool> = Vec::new();
         for part in parts {
-            let str_val = match part {
-                StringPart::Literal(s) => self.string_literal(s)?.value,
+            let (str_val, is_owned) = match part {
+                StringPart::Literal(s) => (self.string_literal(s)?.value, true),
                 StringPart::Expr(expr) => {
                     let compiled = self.expr(expr)?;
-                    self.value_to_string(compiled)?
+                    if compiled.type_id == TypeId::STRING {
+                        // Already a string - keep borrow status
+                        (compiled.value, compiled.is_owned())
+                    } else {
+                        // Converted to string - new allocation, owned
+                        (self.value_to_string(compiled)?, true)
+                    }
                 }
             };
             string_values.push(str_val);
+            owned_flags.push(is_owned);
         }
 
         if string_values.len() == 1 {
@@ -105,9 +115,22 @@ impl Cg<'_, '_, '_> {
 
         let concat_func_ref = self.runtime_func_ref(RuntimeFn::StringConcat)?;
         let mut result = string_values[0];
-        for &next in &string_values[1..] {
+        for (i, &next) in string_values.iter().enumerate().skip(1) {
             let call = self.builder.ins().call(concat_func_ref, &[result, next]);
-            result = self.builder.inst_results(call)[0];
+            let new_result = self.builder.inst_results(call)[0];
+            // Free the previous result (intermediate concat) if it's not the
+            // first part (which is freed below with all owned parts).
+            if i > 1 {
+                self.emit_rc_dec(result)?;
+            }
+            result = new_result;
+        }
+
+        // Free all owned input parts — they've been consumed by concat.
+        for (val, is_owned) in string_values.iter().zip(owned_flags.iter()) {
+            if *is_owned {
+                self.emit_rc_dec(*val)?;
+            }
         }
 
         Ok(self.string_temp(result))

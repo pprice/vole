@@ -296,15 +296,22 @@ impl Cg<'_, '_, '_> {
                     .unwrap_function(resolved.func_type_id())
                     .map(|(params, _, _)| params.clone());
                 let mut args: ArgVec = smallvec![obj.value];
+                let mut rc_temps: Vec<CompiledValue> = Vec::new();
                 if let Some(param_type_ids) = &param_type_ids {
                     for (arg, &param_type_id) in mc.args.iter().zip(param_type_ids.iter()) {
                         let compiled = self.expr(arg)?;
+                        if compiled.is_owned() {
+                            rc_temps.push(compiled);
+                        }
                         let compiled = self.coerce_to_type(compiled, param_type_id)?;
                         args.push(compiled.value);
                     }
                 } else {
                     for arg in &mc.args {
                         let compiled = self.expr(arg)?;
+                        if compiled.is_owned() {
+                            rc_temps.push(compiled);
+                        }
                         args.push(compiled.value);
                     }
                 }
@@ -313,7 +320,16 @@ impl Cg<'_, '_, '_> {
                 let return_type_id = resolved.concrete_return_hint().unwrap_or_else(|| {
                     self.maybe_convert_iterator_return_type(resolved.return_type_id())
                 });
-                return self.call_external_id(external_info, &args, return_type_id);
+                let result = self.call_external_id(external_info, &args, return_type_id)?;
+                // Consume RC receiver and temp args after the call completes.
+                // In chained calls like s.trim().to_upper(), the intermediate
+                // string from trim() is Owned but was never rc_dec'd, causing
+                // leaks/heap corruption. Similarly, Owned string arguments
+                // (e.g., s.replace("world", "vole")) need cleanup.
+                let mut obj = obj;
+                self.consume_rc_value(&mut obj)?;
+                self.consume_rc_args(&mut rc_temps)?;
+                return Ok(result);
             }
 
             // Builtin methods - return error since they should have been handled earlier
@@ -365,14 +381,23 @@ impl Cg<'_, '_, '_> {
                 // External method - call via FFI
                 let param_type_ids = &binding.func_type.params_id;
                 let mut args: ArgVec = smallvec![obj.value];
+                let mut rc_temps: Vec<CompiledValue> = Vec::new();
                 for (arg, &param_type_id) in mc.args.iter().zip(param_type_ids.iter()) {
                     let compiled = self.expr(arg)?;
+                    if compiled.is_owned() {
+                        rc_temps.push(compiled);
+                    }
                     let compiled = self.coerce_to_type(compiled, param_type_id)?;
                     args.push(compiled.value);
                 }
                 let return_type_id =
                     self.maybe_convert_iterator_return_type(binding.func_type.return_type_id);
-                return self.call_external_id(&external_info, &args, return_type_id);
+                let result = self.call_external_id(&external_info, &args, return_type_id)?;
+                // Consume RC receiver and temp args after the call
+                let mut obj = obj;
+                self.consume_rc_value(&mut obj)?;
+                self.consume_rc_args(&mut rc_temps)?;
+                return Ok(result);
             }
 
             // Try method_func_keys lookup using type's NameId for stable lookup
@@ -548,6 +573,12 @@ impl Cg<'_, '_, '_> {
 
         let call = self.builder.ins().call(method_func_ref, &args);
         self.field_cache.clear(); // Methods may mutate fields via self
+
+        // Consume RC receiver after the call completes. In chained calls
+        // like s.trim().to_upper(), the intermediate string from trim() is
+        // Owned but was never rc_dec'd, causing leaks/heap corruption.
+        let mut obj = obj;
+        self.consume_rc_value(&mut obj)?;
 
         if is_sret {
             // Sret: result[0] is the sret pointer we passed in

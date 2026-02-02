@@ -23,9 +23,9 @@ use super::context::Cg;
 use super::match_switch;
 use super::structs::{convert_to_i64_for_storage, get_field_slot_and_type_id_cg};
 use super::types::{
-    CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, array_element_tag_id,
-    fallible_error_tag_by_id, load_fallible_payload, load_fallible_tag, tuple_layout_id,
-    type_id_to_cranelift,
+    CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, RcLifecycle,
+    array_element_tag_id, fallible_error_tag_by_id, load_fallible_payload, load_fallible_tag,
+    tuple_layout_id, type_id_to_cranelift,
 };
 
 impl Cg<'_, '_, '_> {
@@ -1759,7 +1759,11 @@ impl Cg<'_, '_, '_> {
         // - Must have an else branch
         // - Both branches must be selectable (pure expressions)
         // - Result must be non-void (select needs a value)
+        // Don't use select for RC types — select evaluates both arms eagerly,
+        // so the unused RC arm would leak. Block-based if only evaluates the
+        // taken branch.
         let can_use_select = !is_void
+            && !self.needs_rc_cleanup(result_type_id)
             && if_expr.else_branch.is_some()
             && if_expr.then_branch.is_selectable()
             && if_expr
@@ -1879,10 +1883,15 @@ impl Cg<'_, '_, '_> {
             .ins()
             .brif(condition.value, then_block, &[], else_block, &[]);
 
+        let result_needs_rc = !is_void && self.needs_rc_cleanup(result_type_id);
+
         // Compile then branch
         self.switch_and_seal(then_block);
         let then_result = self.expr(&if_expr.then_branch)?;
         if !is_void {
+            if result_needs_rc && then_result.is_borrowed() {
+                self.emit_rc_inc(then_result.value)?;
+            }
             self.builder
                 .ins()
                 .jump(merge_block, &[then_result.value.into()]);
@@ -1899,6 +1908,9 @@ impl Cg<'_, '_, '_> {
             self.void_value()
         };
         if !is_void {
+            if result_needs_rc && else_result.is_borrowed() {
+                self.emit_rc_inc(else_result.value)?;
+            }
             self.builder
                 .ins()
                 .jump(merge_block, &[else_result.value.into()]);
@@ -1911,11 +1923,11 @@ impl Cg<'_, '_, '_> {
 
         if !is_void {
             let result = self.builder.block_params(merge_block)[0];
-            Ok(CompiledValue::new(
-                result,
-                result_cranelift_type,
-                result_type_id,
-            ))
+            let mut cv = CompiledValue::new(result, result_cranelift_type, result_type_id);
+            if result_needs_rc {
+                cv.rc_lifecycle = RcLifecycle::Owned;
+            }
+            Ok(cv)
         } else {
             Ok(self.void_value())
         }
@@ -1956,7 +1968,10 @@ impl Cg<'_, '_, '_> {
         // - First arm has a condition, second is wildcard
         // - Both bodies are selectable (pure expressions)
         // - Result is non-void
+        // - Result is not RC-managed (select evaluates both arms, so an unused
+        //   RC arm would leak; block-based when only evaluates the taken branch)
         let can_use_select = !is_void
+            && !self.needs_rc_cleanup(result_type_id)
             && when_expr.arms.len() == 2
             && when_expr.arms[0].condition.is_some()
             && when_expr.arms[1].condition.is_none()
@@ -2104,6 +2119,12 @@ impl Cg<'_, '_, '_> {
             }
         }
 
+        // Whether the result type needs RC cleanup. When it does, each arm must
+        // ensure the value flowing into the merge block is "owned" (has a +1 ref
+        // that the consumer will balance). Borrowed arm results (variable reads)
+        // get an rc_inc; Owned arm results (fresh allocations) already have +1.
+        let result_needs_rc = !is_void && self.needs_rc_cleanup(result_type_id);
+
         // Compile body blocks
         for (i, arm) in when_expr.arms.iter().enumerate() {
             self.switch_and_seal(body_blocks[i]);
@@ -2111,6 +2132,10 @@ impl Cg<'_, '_, '_> {
             let body_result = self.expr(&arm.body)?;
 
             if !is_void {
+                // For RC types, ensure each arm contributes an owned +1 ref.
+                if result_needs_rc && body_result.is_borrowed() {
+                    self.emit_rc_inc(body_result.value)?;
+                }
                 self.builder
                     .ins()
                     .jump(merge_block, &[body_result.value.into()]);
@@ -2124,11 +2149,13 @@ impl Cg<'_, '_, '_> {
 
         if !is_void {
             let result = self.builder.block_params(merge_block)[0];
-            Ok(CompiledValue::new(
-                result,
-                result_cranelift_type,
-                result_type_id,
-            ))
+            let mut cv = CompiledValue::new(result, result_cranelift_type, result_type_id);
+            // For RC types, each arm ensured a +1 ref, so the merge result is
+            // effectively Owned. Mark it so the consumer doesn't add another inc.
+            if result_needs_rc {
+                cv.rc_lifecycle = RcLifecycle::Owned;
+            }
+            Ok(cv)
         } else {
             Ok(self.void_value())
         }
