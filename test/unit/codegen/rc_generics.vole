@@ -1,0 +1,391 @@
+// RC tests for generic class instances.
+//
+// Generic classes are monomorphized at compile time, producing concrete
+// types. Each concrete instantiation is heap-allocated and RC'd.
+// These tests exercise creation, method calls, function passing, arrays,
+// and interface constraints on generic classes to verify RC inc/dec
+// correctness for both primitive and RC-typed type parameters.
+
+// ---------------------------------------------------------------------------
+// Generic class definitions
+// ---------------------------------------------------------------------------
+
+class Box<T> {
+    value: T,
+
+    func get() -> T {
+        return self.value
+    }
+
+    func set(new_val: T) {
+        self.value = new_val
+    }
+
+    statics {
+        func create(v: T) -> Box<T> {
+            return Box { value: v }
+        }
+    }
+}
+
+class Pair<A, B> {
+    first: A,
+    second: B,
+
+    func getFirst() -> A {
+        return self.first
+    }
+
+    func getSecond() -> B {
+        return self.second
+    }
+
+    statics {
+        func create(a: A, b: B) -> Pair<A, B> {
+            return Pair { first: a, second: b }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Interface for constraint tests
+// ---------------------------------------------------------------------------
+
+interface Describable {
+    func describe() -> string
+}
+
+class Tag implements Describable {
+    label: string,
+}
+
+implement Describable for Tag {
+    func describe() -> string {
+        return self.label
+    }
+}
+
+class Wrapper<T: Describable> {
+    inner: T,
+
+    func getDescription() -> string {
+        return self.inner.describe()
+    }
+
+    statics {
+        func wrap(t: T) -> Wrapper<T> {
+            return Wrapper { inner: t }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Free functions accepting/returning generic instances
+// ---------------------------------------------------------------------------
+
+func accept_box_i64(b: Box<i64>) -> i64 {
+    return b.get()
+}
+
+func accept_box_string(b: Box<string>) -> string {
+    return b.get()
+}
+
+func pass_through_box_string(b: Box<string>) -> Box<string> {
+    return b
+}
+
+func make_box_string(s: string) -> Box<string> {
+    return Box { value: s }
+}
+
+// ===========================================================================
+// Tests
+// ===========================================================================
+
+tests "generic box with primitive field (control)" {
+    test "create Box<i64> and read field" {
+        let b = Box { value: 42 }
+        assert(b.value == 42)
+        assert(b.get() == 42)
+    }
+
+    test "copy Box<i64>" {
+        let a = Box { value: 10 }
+        let b = a
+        assert(a.get() == 10)
+        assert(b.get() == 10)
+    }
+
+    test "reassign Box<i64>" {
+        let mut b = Box { value: 1 }
+        b = Box { value: 2 }
+        assert(b.get() == 2)
+    }
+
+    test "Box<i64> set method" {
+        let b = Box { value: 5 }
+        b.set(99)
+        assert(b.get() == 99)
+    }
+
+    test "multiple Box<i64> go out of scope" {
+        let a = Box { value: 1 }
+        let b = Box { value: 2 }
+        let c = Box { value: 3 }
+        assert(a.get() + b.get() + c.get() == 6)
+    }
+}
+
+tests "generic box with string field" {
+    test "create Box<string> and read field" {
+        let b = Box { value: "hello" }
+        assert(b.value == "hello")
+        assert(b.get() == "hello")
+    }
+
+    test "copy Box<string>" {
+        let a = Box { value: "shared" }
+        let b = a
+        assert(a.get() == "shared")
+        assert(b.get() == "shared")
+    }
+
+    test "reassign Box<string>" {
+        let mut b = Box { value: "first" }
+        b = Box { value: "second" }
+        assert(b.get() == "second")
+    }
+
+    test "Box<string> set method" {
+        let b = Box { value: "original" }
+        b.set("updated")
+        assert(b.get() == "updated")
+    }
+
+    test "read Box<string> field into local" {
+        let b = Box { value: "extract" }
+        let v = b.get()
+        assert(v == "extract")
+        assert(b.get() == "extract")
+    }
+
+    test "multiple Box<string> go out of scope" {
+        let a = Box { value: "alpha" }
+        let b = Box { value: "beta" }
+        let c = Box { value: "gamma" }
+        assert(a.get() == "alpha")
+        assert(b.get() == "beta")
+        assert(c.get() == "gamma")
+    }
+}
+
+tests "generic static method returning instance" {
+    test "Box.create with i64" {
+        let b = Box.create(42)
+        assert(b.get() == 42)
+    }
+
+    test "Box.create with string" {
+        let b = Box.create("factory")
+        assert(b.get() == "factory")
+    }
+
+    test "Pair.create with mixed types" {
+        let p = Pair.create(10, "ten")
+        assert(p.getFirst() == 10)
+        assert(p.getSecond() == "ten")
+    }
+
+    test "Pair.create with two strings" {
+        let p = Pair.create("key", "value")
+        assert(p.getFirst() == "key")
+        assert(p.getSecond() == "value")
+    }
+
+    test "static create then reassign" {
+        let mut b = Box.create("first")
+        b = Box.create("second")
+        assert(b.get() == "second")
+    }
+}
+
+tests "generic method on class returning RC value" {
+    test "get() returns string from Box" {
+        let b = Box { value: "payload" }
+        let s = b.get()
+        assert(s == "payload")
+    }
+
+    test "getFirst() and getSecond() return strings from Pair" {
+        let p = Pair { first: "hello", second: "world" }
+        let a = p.getFirst()
+        let b = p.getSecond()
+        assert(a == "hello")
+        assert(b == "world")
+    }
+
+    test "get() called multiple times" {
+        let b = Box { value: "repeat" }
+        let v1 = b.get()
+        let v2 = b.get()
+        let v3 = b.get()
+        assert(v1 == "repeat")
+        assert(v2 == "repeat")
+        assert(v3 == "repeat")
+    }
+
+    test "set then get returns new RC value" {
+        let b = Box { value: "old" }
+        b.set("new")
+        let v = b.get()
+        assert(v == "new")
+    }
+}
+
+tests "generic class passed to function" {
+    test "pass Box<i64> to function" {
+        let b = Box { value: 77 }
+        let v = accept_box_i64(b)
+        assert(v == 77)
+        assert(b.get() == 77)
+    }
+
+    test "pass Box<string> to function" {
+        let b = Box { value: "argument" }
+        let v = accept_box_string(b)
+        assert(v == "argument")
+        assert(b.get() == "argument")
+    }
+
+    test "pass through Box<string>" {
+        let b = Box { value: "through" }
+        let returned = pass_through_box_string(b)
+        assert(returned.get() == "through")
+        assert(b.get() == "through")
+    }
+
+    test "create Box<string> from function" {
+        let b = make_box_string("constructed")
+        assert(b.get() == "constructed")
+    }
+
+    test "create and immediately pass to function" {
+        let v = accept_box_string(Box { value: "inline" })
+        assert(v == "inline")
+    }
+}
+
+tests "generic class in array" {
+    test "array of Box<i64>" {
+        let a = Box { value: 1 }
+        let b = Box { value: 2 }
+        let c = Box { value: 3 }
+        let arr = [a, b, c]
+        assert(arr[0].get() == 1)
+        assert(arr[1].get() == 2)
+        assert(arr[2].get() == 3)
+    }
+
+    test "array of Box<string>" {
+        let a = Box { value: "x" }
+        let b = Box { value: "y" }
+        let c = Box { value: "z" }
+        let arr = [a, b, c]
+        assert(arr[0].get() == "x")
+        assert(arr[1].get() == "y")
+        assert(arr[2].get() == "z")
+    }
+
+    test "array element passed to function" {
+        let arr = [Box { value: "elem0" }, Box { value: "elem1" }]
+        let v = accept_box_string(arr[0])
+        assert(v == "elem0")
+        assert(arr[0].get() == "elem0")
+        assert(arr[1].get() == "elem1")
+    }
+
+    test "array of Box<string> scope exit" {
+        let arr = [Box { value: "gone1" }, Box { value: "gone2" }, Box { value: "gone3" }]
+        assert(arr[0].get() == "gone1")
+        assert(arr[1].get() == "gone2")
+        assert(arr[2].get() == "gone3")
+    }
+}
+
+tests "multiple generic type params with RC values" {
+    test "Pair<string, string>" {
+        let p = Pair { first: "key", second: "value" }
+        assert(p.getFirst() == "key")
+        assert(p.getSecond() == "value")
+    }
+
+    test "Pair<i64, string>" {
+        let p = Pair { first: 42, second: "answer" }
+        assert(p.getFirst() == 42)
+        assert(p.getSecond() == "answer")
+    }
+
+    test "Pair<string, i64>" {
+        let p = Pair { first: "count", second: 7 }
+        assert(p.getFirst() == "count")
+        assert(p.getSecond() == 7)
+    }
+
+    test "copy Pair<string, string>" {
+        let a = Pair { first: "a1", second: "a2" }
+        let b = a
+        assert(a.getFirst() == "a1")
+        assert(a.getSecond() == "a2")
+        assert(b.getFirst() == "a1")
+        assert(b.getSecond() == "a2")
+    }
+
+    test "reassign Pair<string, string>" {
+        let mut p = Pair { first: "old1", second: "old2" }
+        p = Pair { first: "new1", second: "new2" }
+        assert(p.getFirst() == "new1")
+        assert(p.getSecond() == "new2")
+    }
+
+    test "Pair<Box<string>, string> nested generic" {
+        let inner = Box { value: "nested" }
+        let p = Pair { first: inner, second: "outer" }
+        assert(p.getFirst().get() == "nested")
+        assert(p.getSecond() == "outer")
+    }
+}
+
+tests "generic class with interface constraint" {
+    test "Wrapper with Tag" {
+        let t = Tag { label: "hello" }
+        let w = Wrapper { inner: t }
+        assert(w.getDescription() == "hello")
+    }
+
+    test "Wrapper.wrap static method" {
+        let w = Wrapper.wrap(Tag { label: "wrapped" })
+        assert(w.getDescription() == "wrapped")
+    }
+
+    test "copy Wrapper" {
+        let w = Wrapper { inner: Tag { label: "shared" } }
+        let w2 = w
+        assert(w.getDescription() == "shared")
+        assert(w2.getDescription() == "shared")
+    }
+
+    test "reassign Wrapper" {
+        let mut w = Wrapper { inner: Tag { label: "first" } }
+        w = Wrapper { inner: Tag { label: "second" } }
+        assert(w.getDescription() == "second")
+    }
+
+    test "Wrapper in array" {
+        let w1 = Wrapper { inner: Tag { label: "a" } }
+        let w2 = Wrapper { inner: Tag { label: "b" } }
+        let arr = [w1, w2]
+        assert(arr[0].getDescription() == "a")
+        assert(arr[1].getDescription() == "b")
+    }
+}
