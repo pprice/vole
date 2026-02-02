@@ -200,7 +200,19 @@ impl Cg<'_, '_, '_> {
                 .get(init_name)
                 .ok_or_else(|| format!("Unknown field: {} in type {}", init_name, path_str))?;
 
-            let value = self.expr(&init.value)?;
+            let mut value = self.expr(&init.value)?;
+
+            // RC: inc borrowed field values (e.g., reading from a variable) so the
+            // instance gets its own reference. instance_drop will rc_dec these fields
+            // when the instance refcount reaches zero.
+            if self.rc_scopes.has_active_scope()
+                && self.needs_rc_cleanup(value.type_id)
+                && value.is_borrowed()
+            {
+                self.emit_rc_inc(value.value)?;
+            }
+            // The field value is consumed into the instance.
+            value.mark_consumed();
 
             // If field type is optional (union) and value type is not a union, wrap it
             // Use heap allocation for unions stored in class fields since stack slots

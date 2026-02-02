@@ -236,15 +236,20 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Arrays: drop function handles element cleanup internally.
         // Functions/Closures: closure_drop decs captured RC values when
         //   refcount reaches zero, so scope-exit rc_dec cascades correctly.
+        // Classes: instance_drop walks fields and decs RC children when refcount
+        //   reaches zero. Field values are rc_inc'd at construction time when
+        //   borrowed, so the instance owns its references.
+        // Handles: opaque RC pointers (Map, Set, Rng, etc.) with their own drop fns.
         //
-        // NOT yet enabled for:
-        // - Class instances: instance_drop already decs RC fields, so scope-exit
-        //   dec would double-free. Needs field-level rc_inc first (v-17c5).
-        // - Iterators: complex lifecycle managed by the runtime (collect, etc.).
+        // NOT enabled for:
         // - Interfaces: boxed values (fat pointers), not raw RC pointers.
         // - Structs: stack-allocated value types.
         // - Sentinels: i8 zero values, not heap pointers.
-        arena.is_string(type_id) || arena.is_array(type_id) || arena.is_function(type_id)
+        arena.is_string(type_id)
+            || arena.is_array(type_id)
+            || arena.is_function(type_id)
+            || arena.is_class(type_id)
+            || arena.is_handle(type_id)
     }
 
     /// Check if a captured variable type is RC-managed and needs rc_inc/rc_dec.
