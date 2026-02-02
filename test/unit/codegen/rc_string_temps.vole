@@ -1,0 +1,422 @@
+// RC tests for string temporaries in complex expressions.
+//
+// Tests that string temporaries created during expression evaluation
+// (method chains, nested calls, concatenation in arguments, conditionals,
+// loops, interpolation, multiple temps per expression) are properly managed.
+// The leak checker tool validates no leaks; these tests verify correctness.
+
+func identity(s: string) -> string {
+    return s
+}
+
+func concat3(a: string, b: string, c: string) -> string {
+    return a + b + c
+}
+
+func wrap(prefix: string, s: string, suffix: string) -> string {
+    return prefix + s + suffix
+}
+
+func pick_longer(a: string, b: string) -> string {
+    let result = when { a.length() >= b.length() => a, _ => b }
+    return result
+}
+
+func nested_wrap(s: string) -> string {
+    return wrap("[", wrap("(", s, ")"), "]")
+}
+
+func transform(s: string) -> string {
+    return s.trim().to_upper()
+}
+
+tests "string method chains" {
+    test "trim result used in comparison" {
+        let s = "  hello  "
+        let trimmed = s.trim()
+        assert(trimmed == "hello")
+    }
+
+    test "to_upper on literal" {
+        let result = "hello".to_upper()
+        assert(result == "HELLO")
+    }
+
+    test "to_lower on literal" {
+        let result = "WORLD".to_lower()
+        assert(result == "world")
+    }
+
+    test "chained trim then to_upper" {
+        let s = "  vole  "
+        let result = s.trim().to_upper()
+        assert(result == "VOLE")
+    }
+
+    test "chained trim then to_lower" {
+        let s = "  HELLO  "
+        let result = s.trim().to_lower()
+        assert(result == "hello")
+    }
+
+    test "method chain result discarded" {
+        let s = "  discard me  "
+        _ = s.trim().to_upper()
+        assert(s == "  discard me  ")
+    }
+
+    test "replace then to_upper" {
+        let s = "hello world"
+        let result = s.replace("world", "vole").to_upper()
+        assert(result == "HELLO VOLE")
+    }
+
+    test "replace_all then trim" {
+        let s = "  a-b-c  "
+        let result = s.trim().replace_all("-", " ")
+        assert(result == "a b c")
+    }
+
+    test "multiple method results as temporaries" {
+        let a = "  HELLO  ".trim()
+        let b = "  WORLD  ".trim()
+        assert(a == "HELLO")
+        assert(b == "WORLD")
+    }
+
+    test "substring then to_upper" {
+        let s = "hello world"
+        let result = s.substring(0, 5).to_upper()
+        assert(result == "HELLO")
+    }
+}
+
+tests "nested function calls returning strings" {
+    test "identity of literal" {
+        let result = identity("temporary")
+        assert(result == "temporary")
+    }
+
+    test "nested identity calls" {
+        let result = identity(identity(identity("deep")))
+        assert(result == "deep")
+    }
+
+    test "wrap with literal args" {
+        let result = wrap("[", "item", "]")
+        assert(result == "[item]")
+    }
+
+    test "nested wrap calls" {
+        let result = nested_wrap("core")
+        assert(result == "[(core)]")
+    }
+
+    test "concat3 with method results" {
+        let result = concat3("  a  ".trim(), "-", "  b  ".trim())
+        assert(result == "a-b")
+    }
+
+    test "function returning transformed string" {
+        let result = transform("  hello  ")
+        assert(result == "HELLO")
+    }
+
+    test "nested transform calls" {
+        let result = identity(transform("  vole  "))
+        assert(result == "VOLE")
+    }
+}
+
+tests "string concatenation in function arguments" {
+    test "concat as argument to identity" {
+        let result = identity("hello" + " " + "world")
+        assert(result == "hello world")
+    }
+
+    test "concat as argument to wrap" {
+        let a = "he"
+        let b = "llo"
+        let result = wrap("<", a + b, ">")
+        assert(result == "<hello>")
+    }
+
+    test "multiple concat args" {
+        let x = "a"
+        let y = "b"
+        let z = "c"
+        let result = concat3(x + "1", y + "2", z + "3")
+        assert(result == "a1b2c3")
+    }
+
+    test "concat in comparison after function call" {
+        let prefix = "hello"
+        let suffix = "world"
+        let result = identity(prefix + " " + suffix)
+        assert(result == prefix + " " + suffix)
+    }
+
+    test "repeated concat temporaries" {
+        let base = "x"
+        let r1 = identity(base + "1")
+        let r2 = identity(base + "2")
+        let r3 = identity(base + "3")
+        assert(r1 == "x1")
+        assert(r2 == "x2")
+        assert(r3 == "x3")
+    }
+}
+
+tests "conditional expressions with string results" {
+    test "when expression with string branches" {
+        let x = 42
+        let result = when {
+            x > 100 => "big",
+            x > 10 => "medium",
+            _ => "small"
+        }
+        assert(result == "medium")
+    }
+
+    test "when expression both branches create temps" {
+        let flag = true
+        let result = when {
+            flag => "  yes  ".trim(),
+            _ => "  no  ".trim()
+        }
+        assert(result == "yes")
+    }
+
+    test "when with concatenation in branches" {
+        let name = "vole"
+        let loud = true
+        let greeting = when {
+            loud => "HELLO " + name.to_upper(),
+            _ => "hello " + name
+        }
+        assert(greeting == "HELLO VOLE")
+    }
+
+    test "when result passed to function" {
+        let x = 5
+        let result = identity(when { x > 3 => "big", _ => "small" })
+        assert(result == "big")
+    }
+
+    test "chained when expressions" {
+        let a = 1
+        let b = 2
+        let ra = when { a > 0 => "pos", _ => "neg" }
+        let rb = when { b > 0 => "pos", _ => "neg" }
+        assert(ra == "pos")
+        assert(rb == "pos")
+    }
+
+    test "when with string method in condition value" {
+        let s = "hello"
+        let result = when {
+            s.length() > 10 => "long",
+            s.length() > 3 => "medium",
+            _ => "short"
+        }
+        assert(result == "medium")
+    }
+}
+
+tests "string temps in while loops" {
+    test "concat in while loop body" {
+        let mut result = ""
+        let mut i = 0
+        while i < 5 {
+            result = result + "x"
+            i = i + 1
+        }
+        assert(result == "xxxxx")
+    }
+
+    test "method call temps in while loop" {
+        let mut result = ""
+        let words = ["  hello  ", "  world  "]
+        let mut i = 0
+        while i < words.length() {
+            let trimmed = words[i].trim()
+            if i > 0 {
+                result = result + " "
+            }
+            result = result + trimmed
+            i = i + 1
+        }
+        assert(result == "hello world")
+    }
+
+    test "string temps created and discarded in while loop" {
+        let mut i = 0
+        let mut last = ""
+        while i < 3 {
+            let temp = "iter-" + i.to_string()
+            last = temp
+            i = i + 1
+        }
+        assert(last == "iter-2")
+    }
+
+    test "nested concat in while loop" {
+        let mut result = ""
+        let mut i = 0
+        while i < 3 {
+            result = result + "[" + i.to_string() + "]"
+            i = i + 1
+        }
+        assert(result == "[0][1][2]")
+    }
+}
+
+tests "string temps in for loops" {
+    test "method calls on for loop items" {
+        let items = ["  alpha  ", "  beta  ", "  gamma  "]
+        let mut result = ""
+        for item in items {
+            if result.length() > 0 {
+                result = result + ","
+            }
+            result = result + item.trim()
+        }
+        assert(result == "alpha,beta,gamma")
+    }
+
+    test "concat temps in for loop" {
+        let names = ["alice", "bob", "carol"]
+        let mut result = ""
+        for name in names {
+            result = result + "(" + name + ")"
+        }
+        assert(result == "(alice)(bob)(carol)")
+    }
+
+    test "nested function calls in for loop" {
+        let words = ["hello", "world"]
+        let mut result = ""
+        for w in words {
+            let wrapped = wrap("<", w.to_upper(), ">")
+            result = result + wrapped
+        }
+        assert(result == "<HELLO><WORLD>")
+    }
+
+    test "for loop with to_string temps" {
+        let nums = [1, 2, 3, 4, 5]
+        let mut result = ""
+        for n in nums {
+            result = result + n.to_string()
+        }
+        assert(result == "12345")
+    }
+
+    test "replace_all in for loop" {
+        let templates = ["a-b", "c-d", "e-f"]
+        let mut result = ""
+        for t in templates {
+            result = result + t.replace_all("-", "=") + " "
+        }
+        assert(result == "a=b c=d e=f ")
+    }
+}
+
+tests "string interpolation temporaries" {
+    test "interpolation creates string temps" {
+        let name = "vole"
+        let result = "hello, {name}!"
+        assert(result == "hello, vole!")
+    }
+
+    test "interpolation with expression" {
+        let a = 10
+        let b = 20
+        let result = "{a} + {b} = {a + b}"
+        assert(result == "10 + 20 = 30")
+    }
+
+    test "interpolation with method call" {
+        let s = "  hello  "
+        let result = "trimmed: {s.trim()}"
+        assert(result == "trimmed: hello")
+    }
+
+    test "interpolation in loop creates temps each iteration" {
+        let mut result = ""
+        let names = ["a", "b", "c"]
+        for name in names {
+            let line = "item={name} "
+            result = result + line
+        }
+        assert(result == "item=a item=b item=c ")
+    }
+
+    test "nested interpolation temps" {
+        let x = 42
+        let label = "value"
+        let result = "[{label}: {x}]"
+        assert(result == "[value: 42]")
+    }
+
+    test "interpolation result passed to function" {
+        let n = 7
+        let result = identity("number={n}")
+        assert(result == "number=7")
+    }
+
+    test "interpolation with to_string" {
+        let arr = [1, 2, 3]
+        let result = "length is {arr.length()}"
+        assert(result == "length is 3")
+    }
+}
+
+tests "multiple string temps in one expression" {
+    test "concat of three method results" {
+        let result = "  a  ".trim() + "  b  ".trim() + "  c  ".trim()
+        assert(result == "abc")
+    }
+
+    test "concat of function results" {
+        let result = identity("x") + identity("y") + identity("z")
+        assert(result == "xyz")
+    }
+
+    test "mixed temps: methods, concat, functions" {
+        let s = "  hello  "
+        let result = wrap("[", s.trim().to_upper(), "]")
+        assert(result == "[HELLO]")
+    }
+
+    test "comparison with multiple temp strings" {
+        let a = "hello".to_upper()
+        let b = "HELLO"
+        assert(a == b)
+        assert("world".to_upper() == "WORLD")
+    }
+
+    test "pick_longer with temp arguments" {
+        let result = pick_longer("hi".to_upper(), "hello".to_upper())
+        assert(result == "HELLO")
+    }
+
+    test "chained operations producing many temps" {
+        let s = "  hello world  "
+        let result = s.trim().replace("world", "vole").to_upper()
+        assert(result == "HELLO VOLE")
+    }
+
+    test "concat3 with all temp arguments" {
+        let result = concat3("  x  ".trim(), "-", "  y  ".trim())
+        assert(result == "x-y")
+    }
+
+    test "multiple independent temp chains" {
+        let a = "  foo  ".trim().to_upper()
+        let b = "  bar  ".trim().to_upper()
+        let c = "  baz  ".trim().to_upper()
+        let result = a + "-" + b + "-" + c
+        assert(result == "FOO-BAR-BAZ")
+    }
+}
