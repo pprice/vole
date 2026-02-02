@@ -70,6 +70,65 @@ tests "class with string fields" {
     }
 }
 
+class Inner {
+    value: string
+}
+
+class Outer {
+    inner: Inner,
+    label: string
+}
+
+class Deep {
+    outer: Outer,
+    tag: i64
+}
+
+tests "class with class fields" {
+    test "create nested class and read inner field" {
+        let inner = Inner { value: "hello" }
+        let outer = Outer { inner: inner, label: "wrapper" }
+        assert(outer.inner.value == "hello")
+        assert(outer.label == "wrapper")
+    }
+
+    test "access nested field into local variable" {
+        let inner = Inner { value: "data" }
+        let outer = Outer { inner: inner, label: "box" }
+        let v = outer.inner.value
+        assert(v == "data")
+        assert(outer.inner.value == "data")
+        assert(outer.label == "box")
+    }
+
+    test "reassign outer with different inner" {
+        let mut outer = Outer { inner: Inner { value: "first" }, label: "v1" }
+        assert(outer.inner.value == "first")
+        outer = Outer { inner: Inner { value: "second" }, label: "v2" }
+        assert(outer.inner.value == "second")
+        assert(outer.label == "v2")
+    }
+
+    test "deep nesting three levels" {
+        let inner = Inner { value: "leaf" }
+        let outer = Outer { inner: inner, label: "mid" }
+        let deep = Deep { outer: outer, tag: 42 }
+        assert(deep.outer.inner.value == "leaf")
+        assert(deep.outer.label == "mid")
+        assert(deep.tag == 42)
+    }
+
+    test "copy nested class instance" {
+        let inner = Inner { value: "shared" }
+        let a = Outer { inner: inner, label: "alpha" }
+        let b = a
+        assert(a.inner.value == "shared")
+        assert(b.inner.value == "shared")
+        assert(a.label == "alpha")
+        assert(b.label == "alpha")
+    }
+}
+
 tests "class with primitives" {
     test "create instance and read fields" {
         let m = Measurement { value: 42, scale: 1.5, active: true }
