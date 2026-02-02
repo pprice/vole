@@ -78,7 +78,7 @@ impl Cg<'_, '_, '_> {
             self.codegen_ctx.module,
             self.codegen_ctx.func_registry,
         )?;
-        Ok(self.string_value(value))
+        Ok(self.string_temp(value))
     }
 
     /// Compile an interpolated string
@@ -100,7 +100,7 @@ impl Cg<'_, '_, '_> {
         }
 
         if string_values.len() == 1 {
-            return Ok(self.string_value(string_values[0]));
+            return Ok(self.string_temp(string_values[0]));
         }
 
         let concat_func_ref = self.runtime_func_ref(RuntimeFn::StringConcat)?;
@@ -110,7 +110,7 @@ impl Cg<'_, '_, '_> {
             result = self.builder.inst_results(call)[0];
         }
 
-        Ok(self.string_value(result))
+        Ok(self.string_temp(result))
     }
 
     /// Convert a value to a string

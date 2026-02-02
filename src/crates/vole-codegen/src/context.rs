@@ -1063,9 +1063,25 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.builder.ins().icmp(IntCC::NotEqual, tag, expected)
     }
 
-    /// Wrap a Cranelift value as a String CompiledValue
+    /// Wrap a Cranelift value as a String CompiledValue (borrowed, not a fresh allocation)
+    #[allow(dead_code)]
     pub fn string_value(&self, value: Value) -> CompiledValue {
         CompiledValue::new(value, self.ptr_type(), TypeId::STRING)
+    }
+
+    /// Wrap a Cranelift value as a String CompiledValue marked as an RC temp
+    pub fn string_temp(&self, value: Value) -> CompiledValue {
+        CompiledValue::temp(value, self.ptr_type(), TypeId::STRING)
+    }
+
+    /// Mark a CompiledValue as an RC temp if its type needs RC cleanup.
+    /// Use this for fresh allocations (function returns, operator results) — NOT for
+    /// borrowed values (variable reads, field access, index operations).
+    pub fn mark_rc_temp(&self, mut cv: CompiledValue) -> CompiledValue {
+        if self.needs_rc_cleanup(cv.type_id) {
+            cv.is_rc_temp = true;
+        }
+        cv
     }
 
     /// Create a CompiledValue from a value and TypeId, automatically computing the cranelift type

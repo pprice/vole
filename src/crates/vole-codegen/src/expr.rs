@@ -59,7 +59,10 @@ impl Cg<'_, '_, '_> {
             ExprKind::CompoundAssign(compound) => self.compound_assign(compound, expr.span.line),
             ExprKind::Grouping(inner) => self.expr(inner),
             ExprKind::StringLiteral(s) => self.string_literal(s),
-            ExprKind::Call(call) => self.call(call, expr.span.line, expr.id),
+            ExprKind::Call(call) => {
+                let result = self.call(call, expr.span.line, expr.id)?;
+                Ok(self.mark_rc_temp(result))
+            }
             ExprKind::InterpolatedString(parts) => self.interpolated_string(parts),
             ExprKind::Range(range) => self.range(range),
             ExprKind::ArrayLiteral(elements) => self.array_literal(elements, expr),
@@ -77,7 +80,10 @@ impl Cg<'_, '_, '_> {
             ExprKind::StructLiteral(sl) => self.struct_literal(sl, expr),
             ExprKind::FieldAccess(fa) => self.field_access(fa),
             ExprKind::OptionalChain(oc) => self.optional_chain(oc, expr.id),
-            ExprKind::MethodCall(mc) => self.method_call(mc, expr.id),
+            ExprKind::MethodCall(mc) => {
+                let result = self.method_call(mc, expr.id)?;
+                Ok(self.mark_rc_temp(result))
+            }
             ExprKind::Try(inner) => self.try_propagate(inner),
             ExprKind::Import(_) => {
                 // Import expressions produce a compile-time module value

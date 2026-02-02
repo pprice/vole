@@ -351,7 +351,7 @@ impl Cg<'_, '_, '_> {
         let concat_result =
             self.call_runtime(RuntimeFn::StringConcat, &[left.value, right_string])?;
 
-        Ok(self.string_value(concat_result))
+        Ok(self.string_temp(concat_result))
     }
 
     /// Call to_string() on a value via the Stringable interface.
