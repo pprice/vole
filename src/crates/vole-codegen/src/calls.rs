@@ -379,9 +379,9 @@ impl Cg<'_, '_, '_> {
         if self.current_module.is_none()
             && let Some(result) =
                 self.try_call_monomorphized_function(call_expr_id, call, callee_sym, callee_name)?
-            {
-                return Ok(result);
-            }
+        {
+            return Ok(result);
+        }
 
         // Regular function call - handle module context
         // 1. Try direct function lookup
@@ -1702,18 +1702,18 @@ impl Cg<'_, '_, '_> {
             .get_generic_external(callee_name)
             && let Some(key) = self
                 .find_intrinsic_key_for_monomorph(&generic_ext_info.type_mappings, &substitutions)
-            {
-                let module_path = self
-                    .name_table()
-                    .last_segment_str(generic_ext_info.module_path)
-                    .unwrap_or_default();
+        {
+            let module_path = self
+                .name_table()
+                .last_segment_str(generic_ext_info.module_path)
+                .unwrap_or_default();
 
-                let return_type_id = self.substitute_type(return_type_id);
+            let return_type_id = self.substitute_type(return_type_id);
 
-                return self
-                    .call_generic_external_intrinsic(&module_path, &key, call, return_type_id)
-                    .map(Some);
-            }
+            return self
+                .call_generic_external_intrinsic(&module_path, &key, call, return_type_id)
+                .map(Some);
+        }
 
         // Fallback: For generic external functions without type mappings,
         // call them directly with type erasure via native_registry

@@ -5,6 +5,60 @@ use crate::type_arena::TypeId as ArenaTypeId;
 use rustc_hash::FxHashMap;
 use vole_identity::{NameId, TypeDefId, TypeParamId};
 
+/// Context for method resolution to reduce argument boilerplate.
+///
+/// This struct carries common values used across method resolution helpers.
+struct MethodResolutionContext<'a> {
+    /// The interner for symbol resolution
+    interner: &'a Interner,
+    /// Method name as Symbol
+    method_name: Symbol,
+    /// Method name as NameId
+    method_name_id: NameId,
+    /// The type on which the method is being resolved
+    object_type_id: ArenaTypeId,
+    /// The TypeDefId of the nominal type (if available)
+    type_def_id: TypeDefId,
+}
+
+impl<'a> MethodResolutionContext<'a> {
+    fn new(
+        interner: &'a Interner,
+        method_name: Symbol,
+        method_name_id: NameId,
+        object_type_id: ArenaTypeId,
+        type_def_id: TypeDefId,
+    ) -> Self {
+        Self {
+            interner,
+            method_name,
+            method_name_id,
+            object_type_id,
+            type_def_id,
+        }
+    }
+}
+
+/// Resolved signature information for interface method resolution.
+struct ResolvedSignature {
+    /// The interned function type
+    func_type_id: ArenaTypeId,
+    /// The return type
+    return_type_id: ArenaTypeId,
+}
+
+/// Information about the interface defining a method.
+struct DefiningInterfaceInfo {
+    /// TypeDefId of the interface that defines the method
+    method_defining_type_id: TypeDefId,
+    /// NameId of the defining interface
+    defining_type_name_id: NameId,
+    /// Whether the method has a default implementation
+    method_has_default: bool,
+    /// External binding information if present
+    method_external_binding: Option<ExternalMethodInfo>,
+}
+
 impl Analyzer {
     /// Resolve a method on a type using EntityRegistry (TypeDefId-based)
     ///
@@ -473,18 +527,17 @@ impl Analyzer {
         interner: &Interner,
     ) -> Option<ResolvedMethod> {
         let method_name_id = self.method_name_id(method_name, interner);
+        let ctx = MethodResolutionContext::new(
+            interner,
+            method_name,
+            method_name_id,
+            object_type_id,
+            type_def_id,
+        );
 
         // Try to find the method via EntityRegistry
         if let Some(method_id) = self.find_method_via_entity_registry(type_def_id, method_name_id)
-            && let Some(resolved) = self.resolve_found_method(
-                object_type_id,
-                type_def_id,
-                type_args_id,
-                method_id,
-                method_name_id,
-                method_name,
-                interner,
-            )
+            && let Some(resolved) = self.resolve_found_method(&ctx, type_args_id, method_id)
         {
             return Some(resolved);
         }
@@ -497,25 +550,15 @@ impl Analyzer {
         }
 
         // Check default methods from implemented interfaces
-        self.resolve_default_method_from_interfaces(
-            type_def_id,
-            method_name,
-            method_name_id,
-            interner,
-        )
+        self.resolve_default_method_from_interfaces(&ctx)
     }
 
     /// Resolve a method that was found via EntityRegistry
-    #[allow(clippy::too_many_arguments)]
     fn resolve_found_method(
         &mut self,
-        object_type_id: ArenaTypeId,
-        type_def_id: TypeDefId,
+        ctx: &MethodResolutionContext<'_>,
         type_args_id: &[ArenaTypeId],
         method_id: MethodId,
-        method_name_id: NameId,
-        method_name: Symbol,
-        interner: &Interner,
     ) -> Option<ResolvedMethod> {
         // Extract all needed method data upfront
         let (
@@ -539,7 +582,7 @@ impl Analyzer {
 
         // Build substitutions for generic types
         let substitutions = if !type_args_id.is_empty() {
-            self.build_substitutions_id(type_def_id, type_args_id)
+            self.build_substitutions_id(ctx.type_def_id, type_args_id)
         } else {
             FxHashMap::default()
         };
@@ -562,26 +605,27 @@ impl Analyzer {
         let return_type_id = func_type.return_type_id;
         let func_type_id = func_type.intern(&mut self.type_arena_mut());
 
+        let signature = ResolvedSignature {
+            func_type_id,
+            return_type_id,
+        };
+
         // Determine the resolution type based on the defining type's kind
         match defining_type_kind {
-            TypeDefKind::Interface => self.resolve_interface_method(
-                object_type_id,
-                type_def_id,
-                method_defining_type_id,
-                defining_type_name_id,
-                method_name_id,
-                method_name,
-                method_has_default,
-                method_external_binding,
-                func_type_id,
-                return_type_id,
-                interner,
-            ),
+            TypeDefKind::Interface => {
+                let defining_info = DefiningInterfaceInfo {
+                    method_defining_type_id,
+                    defining_type_name_id,
+                    method_has_default,
+                    method_external_binding,
+                };
+                self.resolve_interface_method(ctx, &signature, &defining_info)
+            }
             TypeDefKind::Class | TypeDefKind::Struct | TypeDefKind::Sentinel => {
                 // Direct method on class, struct, or sentinel
                 Some(ResolvedMethod::Direct {
-                    type_def_id: Some(type_def_id),
-                    method_name_id,
+                    type_def_id: Some(ctx.type_def_id),
+                    method_name_id: ctx.method_name_id,
                     func_type_id,
                     return_type_id,
                     method_id: Some(method_id),
@@ -592,20 +636,11 @@ impl Analyzer {
     }
 
     /// Resolve a method defined on an interface
-    #[allow(clippy::too_many_arguments)]
     fn resolve_interface_method(
         &mut self,
-        object_type_id: ArenaTypeId,
-        type_def_id: TypeDefId,
-        method_defining_type_id: TypeDefId,
-        defining_type_name_id: NameId,
-        method_name_id: NameId,
-        method_name: Symbol,
-        method_has_default: bool,
-        method_external_binding: Option<ExternalMethodInfo>,
-        func_type_id: ArenaTypeId,
-        return_type_id: ArenaTypeId,
-        interner: &Interner,
+        ctx: &MethodResolutionContext<'_>,
+        signature: &ResolvedSignature,
+        defining_info: &DefiningInterfaceInfo,
     ) -> Option<ResolvedMethod> {
         use crate::type_arena::NominalKind;
 
@@ -613,7 +648,7 @@ impl Analyzer {
         let nominal_kind = {
             let arena = self.type_arena();
             arena
-                .unwrap_nominal(object_type_id)
+                .unwrap_nominal(ctx.object_type_id)
                 .map(|(_, _, kind)| kind)
         };
         let is_interface_type = nominal_kind == Some(NominalKind::Interface);
@@ -623,109 +658,67 @@ impl Analyzer {
         );
 
         // For external default methods on CONCRETE types (not interface types)
-        if method_has_default
-            && method_external_binding.is_some()
+        if defining_info.method_has_default
+            && defining_info.method_external_binding.is_some()
             && !is_interface_type
-            && let Some(resolved) = self.resolve_external_default_method(
-                type_def_id,
-                defining_type_name_id,
-                method_name_id,
-                method_name,
-                func_type_id,
-                return_type_id,
-                method_external_binding,
-                interner,
-            )
+            && let Some(resolved) = self.resolve_default_method(ctx, signature, defining_info, true)
         {
             return Some(resolved);
         }
 
         // For non-external default methods on concrete types (Class/Record)
-        if method_has_default
+        if defining_info.method_has_default
             && is_class_or_struct
-            && let Some(resolved) = self.resolve_non_external_default_method(
-                type_def_id,
-                defining_type_name_id,
-                method_name_id,
-                method_name,
-                func_type_id,
-                return_type_id,
-                interner,
-            )
+            && let Some(resolved) =
+                self.resolve_default_method(ctx, signature, defining_info, false)
         {
             return Some(resolved);
         }
 
         // For interface types and non-default methods, use vtable dispatch
-        let interface_sym = self.get_type_symbol_by_name_id(defining_type_name_id, interner)?;
+        let interface_sym =
+            self.get_type_symbol_by_name_id(defining_info.defining_type_name_id, ctx.interner)?;
         // Compute vtable slot index for direct dispatch
         let method_index = self
             .entity_registry()
-            .interface_method_slot(method_defining_type_id, method_name_id)
+            .interface_method_slot(defining_info.method_defining_type_id, ctx.method_name_id)
             .unwrap_or(0);
         Some(ResolvedMethod::InterfaceMethod {
-            method_name_id,
+            method_name_id: ctx.method_name_id,
             interface_name: interface_sym,
-            method_name,
-            func_type_id,
-            return_type_id,
-            interface_type_def_id: method_defining_type_id,
+            method_name: ctx.method_name,
+            func_type_id: signature.func_type_id,
+            return_type_id: signature.return_type_id,
+            interface_type_def_id: defining_info.method_defining_type_id,
             method_index,
         })
     }
 
-    /// Resolve an external default method (has `external` binding)
-    #[allow(clippy::too_many_arguments)]
-    fn resolve_external_default_method(
+    /// Resolve a default method (either external or non-external)
+    fn resolve_default_method(
         &self,
-        type_def_id: TypeDefId,
-        defining_type_name_id: NameId,
-        method_name_id: NameId,
-        method_name: Symbol,
-        func_type_id: ArenaTypeId,
-        return_type_id: ArenaTypeId,
-        method_external_binding: Option<ExternalMethodInfo>,
-        interner: &Interner,
+        ctx: &MethodResolutionContext<'_>,
+        signature: &ResolvedSignature,
+        defining_info: &DefiningInterfaceInfo,
+        include_external: bool,
     ) -> Option<ResolvedMethod> {
-        let type_name_id = self.entity_registry().name_id(type_def_id);
-        let type_sym = self.get_type_symbol_by_name_id(type_name_id, interner)?;
-        let interface_sym = self.get_type_symbol_by_name_id(defining_type_name_id, interner)?;
+        let type_name_id = self.entity_registry().name_id(ctx.type_def_id);
+        let type_sym = self.get_type_symbol_by_name_id(type_name_id, ctx.interner)?;
+        let interface_sym =
+            self.get_type_symbol_by_name_id(defining_info.defining_type_name_id, ctx.interner)?;
         Some(ResolvedMethod::DefaultMethod {
-            type_def_id: Some(type_def_id),
-            method_name_id,
+            type_def_id: Some(ctx.type_def_id),
+            method_name_id: ctx.method_name_id,
             interface_name: interface_sym,
             type_name: type_sym,
-            method_name,
-            func_type_id,
-            return_type_id,
-            external_info: method_external_binding,
-        })
-    }
-
-    /// Resolve a non-external default method on a class
-    #[allow(clippy::too_many_arguments)]
-    fn resolve_non_external_default_method(
-        &self,
-        type_def_id: TypeDefId,
-        defining_type_name_id: NameId,
-        method_name_id: NameId,
-        method_name: Symbol,
-        func_type_id: ArenaTypeId,
-        return_type_id: ArenaTypeId,
-        interner: &Interner,
-    ) -> Option<ResolvedMethod> {
-        let type_name_id = self.entity_registry().name_id(type_def_id);
-        let type_sym = self.get_type_symbol_by_name_id(type_name_id, interner)?;
-        let interface_sym = self.get_type_symbol_by_name_id(defining_type_name_id, interner)?;
-        Some(ResolvedMethod::DefaultMethod {
-            type_def_id: Some(type_def_id),
-            method_name_id,
-            interface_name: interface_sym,
-            type_name: type_sym,
-            method_name,
-            func_type_id,
-            return_type_id,
-            external_info: None,
+            method_name: ctx.method_name,
+            func_type_id: signature.func_type_id,
+            return_type_id: signature.return_type_id,
+            external_info: if include_external {
+                defining_info.method_external_binding
+            } else {
+                None
+            },
         })
     }
 
@@ -766,28 +759,19 @@ impl Analyzer {
     /// Resolve a default method from implemented interfaces
     fn resolve_default_method_from_interfaces(
         &mut self,
-        type_def_id: TypeDefId,
-        method_name: Symbol,
-        method_name_id: NameId,
-        interner: &Interner,
+        ctx: &MethodResolutionContext<'_>,
     ) -> Option<ResolvedMethod> {
-        let type_name_id = self.entity_registry().name_id(type_def_id);
-        let type_sym = self.get_type_symbol_by_name_id(type_name_id, interner)?;
-        let method_name_str = interner.resolve(method_name);
+        let type_name_id = self.entity_registry().name_id(ctx.type_def_id);
+        let type_sym = self.get_type_symbol_by_name_id(type_name_id, ctx.interner)?;
+        let method_name_str = ctx.interner.resolve(ctx.method_name);
         let interface_ids = self
             .entity_registry()
-            .get_implemented_interfaces(type_def_id);
+            .get_implemented_interfaces(ctx.type_def_id);
 
         for interface_id in interface_ids {
-            if let Some(resolved) = self.find_default_method_in_interface(
-                type_def_id,
-                interface_id,
-                method_name,
-                method_name_id,
-                type_sym,
-                method_name_str,
-                interner,
-            ) {
+            if let Some(resolved) =
+                self.find_default_method_in_interface(ctx, interface_id, type_sym, method_name_str)
+            {
                 return Some(resolved);
             }
         }
@@ -796,16 +780,12 @@ impl Analyzer {
     }
 
     /// Find a default method in an implemented interface
-    #[allow(clippy::too_many_arguments)]
     fn find_default_method_in_interface(
         &mut self,
-        type_def_id: TypeDefId,
+        ctx: &MethodResolutionContext<'_>,
         interface_id: TypeDefId,
-        method_name: Symbol,
-        method_name_id: NameId,
         type_sym: Symbol,
         method_name_str: &str,
-        interner: &Interner,
     ) -> Option<ResolvedMethod> {
         let interface_name_id = self.entity_registry().name_id(interface_id);
         let method_ids = self.entity_registry().type_methods(interface_id);
@@ -840,7 +820,7 @@ impl Analyzer {
             let interface_name = self
                 .name_table()
                 .last_segment_str(interface_name_id)
-                .and_then(|s| interner.lookup(&s))
+                .and_then(|s| ctx.interner.lookup(&s))
                 .unwrap_or(Symbol(0));
 
             let func_type = {
@@ -860,11 +840,11 @@ impl Analyzer {
             let func_type_id = func_type.intern(&mut self.type_arena_mut());
 
             return Some(ResolvedMethod::DefaultMethod {
-                type_def_id: Some(type_def_id),
-                method_name_id,
+                type_def_id: Some(ctx.type_def_id),
+                method_name_id: ctx.method_name_id,
                 interface_name,
                 type_name: type_sym,
-                method_name,
+                method_name: ctx.method_name,
                 func_type_id,
                 return_type_id,
                 external_info: method_external_binding,
