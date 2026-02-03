@@ -53,8 +53,9 @@ pub struct CompilationDb {
     /// Methods added via implement blocks.
     /// Rc-wrapped for cheap sharing with CodegenDb.
     pub implements: Rc<ImplementRegistry>,
-    /// Fully-qualified name interner
-    pub names: NameTable,
+    /// Fully-qualified name interner.
+    /// Rc-wrapped for cheap sharing with CodegenDb.
+    pub names: Rc<NameTable>,
 }
 
 impl CompilationDb {
@@ -67,7 +68,7 @@ impl CompilationDb {
             types: Rc::new(TypeArena::new()),
             entities: Rc::new(entities),
             implements: Rc::new(ImplementRegistry::new()),
-            names,
+            names: Rc::new(names),
         }
     }
 
@@ -92,6 +93,13 @@ impl CompilationDb {
         Rc::make_mut(&mut self.implements)
     }
 
+    /// Get mutable access to the name table (copy-on-write via Rc::make_mut).
+    /// Free when refcount is 1 (the common case).
+    #[inline]
+    pub fn names_mut(&mut self) -> &mut NameTable {
+        Rc::make_mut(&mut self.names)
+    }
+
     /// Get the main module ID
     pub fn main_module(&self) -> vole_identity::ModuleId {
         self.names.main_module()
@@ -99,7 +107,7 @@ impl CompilationDb {
 
     /// Get the builtin module ID (creates it if needed)
     pub fn builtin_module(&mut self) -> vole_identity::ModuleId {
-        self.names.builtin_module()
+        self.names_mut().builtin_module()
     }
 }
 
@@ -130,20 +138,20 @@ impl CompilationDb {
             types: self.types,
             entities: self.entities,
             implements: self.implements,
-            names: Rc::new(self.names),
+            names: self.names,
         }
     }
 
     /// Create a CodegenDb that shares data with this CompilationDb via Rc.
     /// This is the zero-clone path used when the CompilationDb has multiple owners
     /// (e.g., when the module cache holds a reference).
-    /// NameTable is cloned (other fields are Rc-shared).
+    /// All fields are Rc-shared (O(1), no cloning).
     pub fn to_codegen_shared(&self) -> CodegenDb {
         CodegenDb {
             types: Rc::clone(&self.types),
             entities: Rc::clone(&self.entities),
             implements: Rc::clone(&self.implements),
-            names: Rc::new(self.names.clone()),
+            names: Rc::clone(&self.names),
         }
     }
 }

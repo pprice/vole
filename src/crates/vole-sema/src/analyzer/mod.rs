@@ -84,7 +84,7 @@ impl<'a> ResolverGuard<'a> {
     /// Get the resolver. The lifetime is tied to this guard.
     pub fn resolver(&self) -> Resolver<'_> {
         // SAFETY: We hold the guard, so the borrow is valid
-        let names = unsafe { &*(&self._guard.names as *const NameTable) };
+        let names = unsafe { &*(&*self._guard.names as *const NameTable) };
         Resolver::new(self.interner, names, self.module_id, self.imports)
             .with_priority_module(self.priority_module)
     }
@@ -270,7 +270,7 @@ impl AnalyzerBuilder {
                 .as_ref()
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_else(|| self.file.clone());
-            db.borrow_mut().names.module_id(&module_path)
+            db.borrow_mut().names_mut().module_id(&module_path)
         } else {
             db.borrow().main_module()
         };
@@ -687,13 +687,13 @@ impl Analyzer {
     /// Get the name table (read access)
     #[inline]
     fn name_table(&self) -> std::cell::Ref<'_, NameTable> {
-        std::cell::Ref::map(self.ctx.db.borrow(), |db| &db.names)
+        std::cell::Ref::map(self.ctx.db.borrow(), |db| &*db.names)
     }
 
-    /// Get the name table (write access)
+    /// Get the name table (write access) - uses Rc::make_mut for copy-on-write
     #[inline]
     fn name_table_mut(&self) -> std::cell::RefMut<'_, NameTable> {
-        std::cell::RefMut::map(self.ctx.db.borrow_mut(), |db| &mut db.names)
+        std::cell::RefMut::map(self.ctx.db.borrow_mut(), |db| db.names_mut())
     }
 
     /// Get the implement registry (read access)
@@ -901,7 +901,7 @@ impl Analyzer {
                 ref entities,
                 ..
             } = *db;
-            crate::well_known::populate_type_def_ids(names, entities);
+            crate::well_known::populate_type_def_ids(Rc::make_mut(names), entities);
         }
 
         // Process global let declarations

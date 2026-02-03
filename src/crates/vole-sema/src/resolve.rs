@@ -154,12 +154,12 @@ impl<'a> TypeResolutionContext<'a> {
 
     /// Get the name table (read access)
     pub fn name_table(&self) -> std::cell::Ref<'_, NameTable> {
-        std::cell::Ref::map(self.db.borrow(), |db| &db.names)
+        std::cell::Ref::map(self.db.borrow(), |db| &*db.names)
     }
 
-    /// Get the name table (write access)
+    /// Get the name table (write access) - uses Rc::make_mut for copy-on-write
     pub fn name_table_mut(&self) -> std::cell::RefMut<'_, NameTable> {
-        std::cell::RefMut::map(self.db.borrow_mut(), |db| &mut db.names)
+        std::cell::RefMut::map(self.db.borrow_mut(), |db| db.names_mut())
     }
 
     /// Get the type arena (read access)
@@ -759,17 +759,20 @@ mod tests {
         let value_sym = interner.intern("value");
 
         let db = RefCell::new(CompilationDb::new());
-        let module_id = db.borrow_mut().names.main_module();
+        let module_id = db.borrow().names.main_module();
 
         // Create type param name ID
-        let t_name_id = db.borrow_mut().names.intern(module_id, &[t_sym], &interner);
+        let t_name_id = db
+            .borrow_mut()
+            .names_mut()
+            .intern(module_id, &[t_sym], &interner);
         let box_name_id = db
             .borrow_mut()
-            .names
+            .names_mut()
             .intern(module_id, &[box_sym], &interner);
         let value_name_id = db
             .borrow_mut()
-            .names
+            .names_mut()
             .intern(module_id, &[value_sym], &interner);
 
         // Create a type param TypeId (T)

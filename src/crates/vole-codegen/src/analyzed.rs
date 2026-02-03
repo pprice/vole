@@ -30,8 +30,7 @@ impl AnalyzedProgram {
     ///
     /// When the CompilationDb has a single owner (non-cached path), unwraps it
     /// directly. When shared (cached path, where module cache holds a reference),
-    /// creates a CodegenDb that shares type/entity/implement data via Rc (O(1)),
-    /// only cloning the NameTable.
+    /// creates a CodegenDb that shares all data via Rc (O(1), zero cloning).
     pub fn from_analysis(program: Program, interner: Interner, output: AnalysisOutput) -> Self {
         let db = match Rc::try_unwrap(output.db) {
             // Non-cached path: sole owner, move data directly (zero-cost)

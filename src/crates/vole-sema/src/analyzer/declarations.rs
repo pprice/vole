@@ -1451,7 +1451,7 @@ impl Analyzer {
                 Rc::make_mut(entities).register_interface_default_methods_on_implementing_type(
                     entity_type_id,
                     interface_type_id,
-                    names,
+                    Rc::make_mut(names),
                 );
             }
 
