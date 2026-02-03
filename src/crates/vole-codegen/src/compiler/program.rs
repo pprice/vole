@@ -1032,6 +1032,11 @@ impl Compiler<'_> {
             }
         }
 
+        // Declare monomorphized instances (for generic function calls)
+        // This is needed before building IR because function calls may reference
+        // monomorphized generic functions like println<string>
+        self.declare_all_monomorphized_instances(program)?;
+
         // Second pass: build and emit IR for each function
         for decl in &program.declarations {
             match decl {

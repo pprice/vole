@@ -725,10 +725,11 @@ impl Analyzer {
         for i in (0..self.lambda_captures.len()).rev() {
             // Check if this variable is a local at this lambda level
             if let Some(locals) = self.lambda_locals.get(i)
-                && locals.contains(&sym) {
-                    // Variable is defined at this level, no need to capture
-                    break;
-                }
+                && locals.contains(&sym)
+            {
+                // Variable is defined at this level, no need to capture
+                break;
+            }
 
             // Not a local at this level, so it must be captured
             if let Some(captures) = self.lambda_captures.get_mut(i) {
@@ -746,15 +747,17 @@ impl Analyzer {
         for i in (0..self.lambda_captures.len()).rev() {
             // Stop if variable is a local at this level
             if let Some(locals) = self.lambda_locals.get(i)
-                && locals.contains(&sym) {
-                    break;
-                }
+                && locals.contains(&sym)
+            {
+                break;
+            }
 
             // Mark as mutated if captured at this level
             if let Some(captures) = self.lambda_captures.get_mut(i)
-                && let Some(info) = captures.get_mut(&sym) {
-                    info.is_mutated = true;
-                }
+                && let Some(info) = captures.get_mut(&sym)
+            {
+                info.is_mutated = true;
+            }
         }
     }
 
