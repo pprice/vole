@@ -150,6 +150,59 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     pub env: &'a CompileEnv<'ctx>,
 }
 
+/// Macro to generate saturating arithmetic functions using widen-clamp-narrow approach.
+/// Cranelift's sadd_sat/uadd_sat/ssub_sat/usub_sat don't support i8/i16, so we widen first.
+macro_rules! impl_sat_widen_narrow {
+    // Signed add: sextend, iadd, smax(min), smin(max), ireduce
+    (signed_add, $fn_name:ident, $src_ty:expr, $wide_ty:expr, $min:expr, $max:expr) => {
+        pub fn $fn_name(&mut self, a: Value, b: Value) -> Value {
+            let a_wide = self.builder.ins().sextend($wide_ty, a);
+            let b_wide = self.builder.ins().sextend($wide_ty, b);
+            let sum = self.builder.ins().iadd(a_wide, b_wide);
+            let min = self.builder.ins().iconst($wide_ty, $min);
+            let max = self.builder.ins().iconst($wide_ty, $max);
+            let clamped = self.builder.ins().smax(sum, min);
+            let clamped = self.builder.ins().smin(clamped, max);
+            self.builder.ins().ireduce($src_ty, clamped)
+        }
+    };
+    // Unsigned add: uextend, iadd, umin(max), ireduce
+    (unsigned_add, $fn_name:ident, $src_ty:expr, $wide_ty:expr, $max:expr) => {
+        pub fn $fn_name(&mut self, a: Value, b: Value) -> Value {
+            let a_wide = self.builder.ins().uextend($wide_ty, a);
+            let b_wide = self.builder.ins().uextend($wide_ty, b);
+            let sum = self.builder.ins().iadd(a_wide, b_wide);
+            let max = self.builder.ins().iconst($wide_ty, $max);
+            let clamped = self.builder.ins().umin(sum, max);
+            self.builder.ins().ireduce($src_ty, clamped)
+        }
+    };
+    // Signed sub: sextend, isub, smax(min), smin(max), ireduce
+    (signed_sub, $fn_name:ident, $src_ty:expr, $wide_ty:expr, $min:expr, $max:expr) => {
+        pub fn $fn_name(&mut self, a: Value, b: Value) -> Value {
+            let a_wide = self.builder.ins().sextend($wide_ty, a);
+            let b_wide = self.builder.ins().sextend($wide_ty, b);
+            let diff = self.builder.ins().isub(a_wide, b_wide);
+            let min = self.builder.ins().iconst($wide_ty, $min);
+            let max = self.builder.ins().iconst($wide_ty, $max);
+            let clamped = self.builder.ins().smax(diff, min);
+            let clamped = self.builder.ins().smin(clamped, max);
+            self.builder.ins().ireduce($src_ty, clamped)
+        }
+    };
+    // Unsigned sub: uextend, isub, smax(0), ireduce (result can go negative)
+    (unsigned_sub, $fn_name:ident, $src_ty:expr, $wide_ty:expr) => {
+        pub fn $fn_name(&mut self, a: Value, b: Value) -> Value {
+            let a_wide = self.builder.ins().uextend($wide_ty, a);
+            let b_wide = self.builder.ins().uextend($wide_ty, b);
+            let diff = self.builder.ins().isub(a_wide, b_wide);
+            let zero = self.builder.ins().iconst($wide_ty, 0);
+            let clamped = self.builder.ins().smax(diff, zero);
+            self.builder.ins().ireduce($src_ty, clamped)
+        }
+    };
+}
+
 impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Create a new codegen context.
     ///
@@ -1801,127 +1854,30 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.builder.ins().select(overflow, zero, result)
     }
 
-    /// Signed saturating add for i8 using widen-clamp-narrow approach.
-    /// Cranelift's sadd_sat doesn't support i8, so we widen to i16 first.
-    pub fn i8_sadd_sat(&mut self, a: Value, b: Value) -> Value {
-        // Widen to i16
-        let a16 = self.builder.ins().sextend(types::I16, a);
-        let b16 = self.builder.ins().sextend(types::I16, b);
-        // Add in i16 (no overflow possible for i8 range)
-        let sum = self.builder.ins().iadd(a16, b16);
-        // Clamp to i8 range [-128, 127]
-        let min = self.builder.ins().iconst(types::I16, -128);
-        let max = self.builder.ins().iconst(types::I16, 127);
-        let clamped = self.builder.ins().smax(sum, min);
-        let clamped = self.builder.ins().smin(clamped, max);
-        // Narrow back to i8
-        self.builder.ins().ireduce(types::I8, clamped)
-    }
-
-    /// Unsigned saturating add for u8 using widen-clamp-narrow approach.
-    pub fn u8_uadd_sat(&mut self, a: Value, b: Value) -> Value {
-        // Widen to i16 (zero extend)
-        let a16 = self.builder.ins().uextend(types::I16, a);
-        let b16 = self.builder.ins().uextend(types::I16, b);
-        // Add in i16
-        let sum = self.builder.ins().iadd(a16, b16);
-        // Clamp to u8 range [0, 255]
-        let max = self.builder.ins().iconst(types::I16, 255);
-        let clamped = self.builder.ins().umin(sum, max);
-        // Narrow back to i8
-        self.builder.ins().ireduce(types::I8, clamped)
-    }
-
-    /// Signed saturating sub for i8 using widen-clamp-narrow approach.
-    pub fn i8_ssub_sat(&mut self, a: Value, b: Value) -> Value {
-        // Widen to i16
-        let a16 = self.builder.ins().sextend(types::I16, a);
-        let b16 = self.builder.ins().sextend(types::I16, b);
-        // Subtract in i16
-        let diff = self.builder.ins().isub(a16, b16);
-        // Clamp to i8 range [-128, 127]
-        let min = self.builder.ins().iconst(types::I16, -128);
-        let max = self.builder.ins().iconst(types::I16, 127);
-        let clamped = self.builder.ins().smax(diff, min);
-        let clamped = self.builder.ins().smin(clamped, max);
-        // Narrow back to i8
-        self.builder.ins().ireduce(types::I8, clamped)
-    }
-
-    /// Unsigned saturating sub for u8 using widen-clamp-narrow approach.
-    pub fn u8_usub_sat(&mut self, a: Value, b: Value) -> Value {
-        // Widen to i16 (zero extend)
-        let a16 = self.builder.ins().uextend(types::I16, a);
-        let b16 = self.builder.ins().uextend(types::I16, b);
-        // Subtract in i16
-        let diff = self.builder.ins().isub(a16, b16);
-        // Clamp to u8 range - min is 0
-        let zero = self.builder.ins().iconst(types::I16, 0);
-        let clamped = self.builder.ins().smax(diff, zero);
-        // Narrow back to i8
-        self.builder.ins().ireduce(types::I8, clamped)
-    }
-
-    /// Signed saturating add for i16 using widen-clamp-narrow approach.
-    /// Cranelift's sadd_sat doesn't support i16, so we widen to i32 first.
-    pub fn i16_sadd_sat(&mut self, a: Value, b: Value) -> Value {
-        // Widen to i32
-        let a32 = self.builder.ins().sextend(types::I32, a);
-        let b32 = self.builder.ins().sextend(types::I32, b);
-        // Add in i32 (no overflow possible for i16 range)
-        let sum = self.builder.ins().iadd(a32, b32);
-        // Clamp to i16 range [-32768, 32767]
-        let min = self.builder.ins().iconst(types::I32, -32768);
-        let max = self.builder.ins().iconst(types::I32, 32767);
-        let clamped = self.builder.ins().smax(sum, min);
-        let clamped = self.builder.ins().smin(clamped, max);
-        // Narrow back to i16
-        self.builder.ins().ireduce(types::I16, clamped)
-    }
-
-    /// Unsigned saturating add for u16 using widen-clamp-narrow approach.
-    pub fn u16_uadd_sat(&mut self, a: Value, b: Value) -> Value {
-        // Widen to i32 (zero extend)
-        let a32 = self.builder.ins().uextend(types::I32, a);
-        let b32 = self.builder.ins().uextend(types::I32, b);
-        // Add in i32
-        let sum = self.builder.ins().iadd(a32, b32);
-        // Clamp to u16 range [0, 65535]
-        let max = self.builder.ins().iconst(types::I32, 65535);
-        let clamped = self.builder.ins().umin(sum, max);
-        // Narrow back to i16
-        self.builder.ins().ireduce(types::I16, clamped)
-    }
-
-    /// Signed saturating sub for i16 using widen-clamp-narrow approach.
-    pub fn i16_ssub_sat(&mut self, a: Value, b: Value) -> Value {
-        // Widen to i32
-        let a32 = self.builder.ins().sextend(types::I32, a);
-        let b32 = self.builder.ins().sextend(types::I32, b);
-        // Subtract in i32
-        let diff = self.builder.ins().isub(a32, b32);
-        // Clamp to i16 range [-32768, 32767]
-        let min = self.builder.ins().iconst(types::I32, -32768);
-        let max = self.builder.ins().iconst(types::I32, 32767);
-        let clamped = self.builder.ins().smax(diff, min);
-        let clamped = self.builder.ins().smin(clamped, max);
-        // Narrow back to i16
-        self.builder.ins().ireduce(types::I16, clamped)
-    }
-
-    /// Unsigned saturating sub for u16 using widen-clamp-narrow approach.
-    pub fn u16_usub_sat(&mut self, a: Value, b: Value) -> Value {
-        // Widen to i32 (zero extend)
-        let a32 = self.builder.ins().uextend(types::I32, a);
-        let b32 = self.builder.ins().uextend(types::I32, b);
-        // Subtract in i32
-        let diff = self.builder.ins().isub(a32, b32);
-        // Clamp to u16 range - min is 0
-        let zero = self.builder.ins().iconst(types::I32, 0);
-        let clamped = self.builder.ins().smax(diff, zero);
-        // Narrow back to i16
-        self.builder.ins().ireduce(types::I16, clamped)
-    }
+    // Saturating arithmetic helpers for i8/u8/i16/u16 using widen-clamp-narrow approach.
+    // Cranelift's sadd_sat/uadd_sat/ssub_sat/usub_sat don't support i8/i16.
+    impl_sat_widen_narrow!(signed_add, i8_sadd_sat, types::I8, types::I16, -128, 127);
+    impl_sat_widen_narrow!(unsigned_add, u8_uadd_sat, types::I8, types::I16, 255);
+    impl_sat_widen_narrow!(signed_sub, i8_ssub_sat, types::I8, types::I16, -128, 127);
+    impl_sat_widen_narrow!(unsigned_sub, u8_usub_sat, types::I8, types::I16);
+    impl_sat_widen_narrow!(
+        signed_add,
+        i16_sadd_sat,
+        types::I16,
+        types::I32,
+        -32768,
+        32767
+    );
+    impl_sat_widen_narrow!(unsigned_add, u16_uadd_sat, types::I16, types::I32, 65535);
+    impl_sat_widen_narrow!(
+        signed_sub,
+        i16_ssub_sat,
+        types::I16,
+        types::I32,
+        -32768,
+        32767
+    );
+    impl_sat_widen_narrow!(unsigned_sub, u16_usub_sat, types::I16, types::I32);
 
     // ========== Checked arithmetic helpers ==========
 
