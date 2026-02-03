@@ -1,0 +1,146 @@
+// Tests for ReturnInfo aggregation in block expressions
+// This tests that return/raise statements in function/lambda bodies are properly tracked
+
+// Function with early return inside an if inside the function body
+func withEarlyReturn(x: i64) -> string {
+    if x < 0 {
+        return "negative"
+    }
+    if x == 0 {
+        return "zero"
+    }
+    // This is only reached if x > 0
+    return "positive"
+}
+
+// Multiple early returns in different branches
+func multipleReturns(x: i64, y: i64) -> string {
+    if x < 0 {
+        return "x negative"
+    }
+    if y < 0 {
+        return "y negative"
+    }
+    if x == 0 && y == 0 {
+        return "both zero"
+    }
+    return "both positive or one positive"
+}
+
+// Nested if with returns in inner branches
+func nestedWithReturns(x: i64, y: i64) -> string {
+    if x > 0 {
+        if y > 0 {
+            return "both positive"
+        }
+        return "x positive, y non-positive"
+    }
+    return "x non-positive"
+}
+
+// Test that early return in lambda body works correctly
+func testLambdaReturn() -> i64 {
+    let f = (x: i64) -> i64 => {
+        if x < 0 {
+            return -x
+        }
+        return x
+    }
+    return f(-5) + f(3)
+}
+
+// Lambda with multiple return paths
+func testLambdaMultipleReturns() -> string {
+    let classify = (x: i64) -> string => {
+        if x < 0 {
+            return "negative"
+        }
+        if x == 0 {
+            return "zero"
+        }
+        return "positive"
+    }
+    return classify(-1) + ", " + classify(0) + ", " + classify(1)
+}
+
+// Error handling with early raise
+error ParseError { message: string }
+
+func parsePositive(s: string) -> fallible(i64, ParseError) {
+    if s == "one" {
+        return 1
+    }
+    if s == "two" {
+        return 2
+    }
+    raise ParseError { message: "unknown: " + s }
+}
+
+// When expression
+func whenClassify(x: i64) -> string {
+    return when {
+        x < 0 => "negative"
+        x == 0 => "zero"
+        _ => "positive"
+    }
+}
+
+tests "block expr return aggregation" {
+    test "early return in function body" {
+        assert(withEarlyReturn(-5) == "negative")
+        assert(withEarlyReturn(0) == "zero")
+        assert(withEarlyReturn(5) == "positive")
+    }
+
+    test "multiple early returns" {
+        assert(multipleReturns(-1, 0) == "x negative")
+        assert(multipleReturns(1, -1) == "y negative")
+        assert(multipleReturns(0, 0) == "both zero")
+        assert(multipleReturns(1, 1) == "both positive or one positive")
+    }
+
+    test "nested if with returns" {
+        assert(nestedWithReturns(1, 1) == "both positive")
+        assert(nestedWithReturns(1, -1) == "x positive, y non-positive")
+        assert(nestedWithReturns(-1, 1) == "x non-positive")
+    }
+
+    test "lambda with early return" {
+        assert(testLambdaReturn() == 8)  // |-5| + |3| = 5 + 3 = 8
+    }
+
+    test "lambda with multiple return paths" {
+        assert(testLambdaMultipleReturns() == "negative, zero, positive")
+    }
+
+    test "early raise in function" {
+        // Test success cases
+        let r1 = match parsePositive("one") {
+            success x => x
+            error => -999
+            _ => -888
+        }
+        assert(r1 == 1)
+
+        let r2 = match parsePositive("two") {
+            success x => x
+            error => -999
+            _ => -888
+        }
+        assert(r2 == 2)
+
+        // Test error case
+        let r3 = match parsePositive("three") {
+            success x => x
+            error ParseError => -999
+            _ => -888
+        }
+        assert(r3 == -999)
+    }
+
+    test "when expression" {
+        assert(whenClassify(-5) == "negative")
+        assert(whenClassify(0) == "zero")
+        assert(whenClassify(5) == "positive")
+    }
+}

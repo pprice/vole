@@ -21,15 +21,32 @@ impl Analyzer {
             );
         }
 
-        // Type check all statements
+        // Type check all statements, aggregating ReturnInfo
+        let mut block_info = ReturnInfo::default();
         for stmt in &block.stmts {
-            // TODO(v-bd6c): Aggregate ReturnInfo from statements
-            let _ = self.check_stmt(stmt, interner)?;
+            let stmt_info = self.check_stmt(stmt, interner)?;
+            block_info.return_types.extend(stmt_info.return_types);
+            if stmt_info.definitely_returns {
+                block_info.definitely_returns = true;
+                // Note: subsequent statements are unreachable but we continue
+                // checking them to report any type errors they may contain
+            }
         }
 
         // Block evaluates to its trailing expression, if present
+        // But if any statement definitely returns, the trailing expr is unreachable
         if let Some(trailing) = &block.trailing_expr {
-            self.check_expr(trailing, interner)
+            // Still type-check for error reporting, but if we definitely returned,
+            // the block type is `never` since we never reach the trailing expression
+            let trailing_ty = self.check_expr(trailing, interner)?;
+            if block_info.definitely_returns {
+                Ok(ArenaTypeId::NEVER)
+            } else {
+                Ok(trailing_ty)
+            }
+        } else if block_info.definitely_returns {
+            // No trailing expr and we definitely return - block type is `never`
+            Ok(ArenaTypeId::NEVER)
         } else {
             Ok(ArenaTypeId::VOID)
         }
