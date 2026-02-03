@@ -59,6 +59,69 @@ pub enum RcState {
     Union { rc_variants: Vec<(u8, bool)> },
 }
 
+impl RcState {
+    /// Returns true if this type requires RC cleanup.
+    ///
+    /// This is the inverse of `None` - any `Simple`, `Composite`, or `Union`
+    /// state indicates the type has reference-counted data that needs management.
+    #[inline]
+    pub fn needs_cleanup(&self) -> bool {
+        !matches!(self, RcState::None)
+    }
+
+    /// Returns true if this is a capture-eligible RC type.
+    ///
+    /// Capture-eligible types are simple RC types (String, Array, Function, Class)
+    /// that can be captured by closures with special RC management.
+    /// Handles and iterators are RC but not capture-eligible.
+    #[inline]
+    pub fn is_capture(&self) -> bool {
+        matches!(self, RcState::Simple { is_capture: true })
+    }
+
+    /// Returns the shallow RC field offsets for composite types.
+    ///
+    /// Shallow offsets are direct RC fields at the top level of the struct/tuple.
+    /// Returns `None` for non-composite types.
+    #[inline]
+    pub fn shallow_offsets(&self) -> Option<&[i32]> {
+        match self {
+            RcState::Composite {
+                shallow_offsets, ..
+            } => Some(shallow_offsets),
+            _ => None,
+        }
+    }
+
+    /// Returns the deep RC field offsets for composite types.
+    ///
+    /// Deep offsets include all RC fields, including those in nested structs.
+    /// For non-struct composites (tuple, fixed array), this equals shallow offsets.
+    /// Returns `None` for non-composite types.
+    #[inline]
+    pub fn deep_offsets(&self) -> Option<&[i32]> {
+        match self {
+            RcState::Composite { deep_offsets, .. } => Some(deep_offsets),
+            _ => None,
+        }
+    }
+
+    /// Returns the RC variant information for union types.
+    ///
+    /// Each entry is (tag_index, is_interface) where:
+    /// - `tag_index`: The variant's tag byte value
+    /// - `is_interface`: Whether the variant is an interface (fat pointer)
+    ///
+    /// Returns `None` for non-union types.
+    #[inline]
+    pub fn union_variants(&self) -> Option<&[(u8, bool)]> {
+        match self {
+            RcState::Union { rc_variants } => Some(rc_variants),
+            _ => None,
+        }
+    }
+}
+
 /// Compute the RC state for a type.
 ///
 /// This is a pure function that analyzes the type structure and returns
