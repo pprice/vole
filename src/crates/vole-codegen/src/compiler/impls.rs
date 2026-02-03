@@ -50,6 +50,77 @@ struct TypeMethodsData<'a> {
     type_kind: &'static str,
 }
 
+impl<'a> TypeMethodsData<'a> {
+    /// Create from any type implementing TypeDeclInfo
+    fn from_decl<T: TypeDeclInfo>(decl: &'a T) -> Self {
+        Self {
+            name: decl.name(),
+            methods: decl.methods(),
+            statics: decl.statics(),
+            type_kind: decl.type_kind(),
+        }
+    }
+}
+
+/// Trait to abstract over class and struct declarations for unified method compilation.
+/// This allows consolidating the parallel compile_module_class_methods/compile_module_struct_methods.
+pub(crate) trait TypeDeclInfo {
+    /// Get the type name symbol
+    fn name(&self) -> Symbol;
+    /// Get the instance methods
+    fn methods(&self) -> &[FuncDecl];
+    /// Get the statics block (if present)
+    fn statics(&self) -> Option<&StaticsBlock>;
+    /// Get the type kind string for error messages ("class" or "struct")
+    fn type_kind(&self) -> &'static str;
+    /// Whether this is a class (vs struct). Classes need runtime type registration.
+    fn is_class(&self) -> bool;
+    /// Whether this type has generic type parameters (classes can be generic, structs too)
+    fn has_type_params(&self) -> bool;
+}
+
+impl TypeDeclInfo for ClassDecl {
+    fn name(&self) -> Symbol {
+        self.name
+    }
+    fn methods(&self) -> &[FuncDecl] {
+        &self.methods
+    }
+    fn statics(&self) -> Option<&StaticsBlock> {
+        self.statics.as_ref()
+    }
+    fn type_kind(&self) -> &'static str {
+        "class"
+    }
+    fn is_class(&self) -> bool {
+        true
+    }
+    fn has_type_params(&self) -> bool {
+        !self.type_params.is_empty()
+    }
+}
+
+impl TypeDeclInfo for StructDecl {
+    fn name(&self) -> Symbol {
+        self.name
+    }
+    fn methods(&self) -> &[FuncDecl] {
+        &self.methods
+    }
+    fn statics(&self) -> Option<&StaticsBlock> {
+        self.statics.as_ref()
+    }
+    fn type_kind(&self) -> &'static str {
+        "struct"
+    }
+    fn is_class(&self) -> bool {
+        false
+    }
+    fn has_type_params(&self) -> bool {
+        !self.type_params.is_empty()
+    }
+}
+
 impl Compiler<'_> {
     /// Compile methods for a class
     pub(super) fn compile_class_methods(
@@ -68,16 +139,7 @@ impl Compiler<'_> {
         program: &vole_frontend::Program,
     ) -> CodegenResult<()> {
         let module_id = self.program_module();
-        self.compile_type_methods(
-            TypeMethodsData {
-                name: struct_decl.name,
-                methods: &struct_decl.methods,
-                statics: struct_decl.statics.as_ref(),
-                type_kind: "struct",
-            },
-            program,
-            module_id,
-        )
+        self.compile_type_methods(TypeMethodsData::from_decl(struct_decl), program, module_id)
     }
 
     /// Compile methods for a class using a specific module for type lookups.
@@ -88,19 +150,10 @@ impl Compiler<'_> {
         module_id: ModuleId,
     ) -> CodegenResult<()> {
         // Skip generic classes - they're compiled via monomorphized instances
-        if !class.type_params.is_empty() {
+        if class.has_type_params() {
             return Ok(());
         }
-        self.compile_type_methods(
-            TypeMethodsData {
-                name: class.name,
-                methods: &class.methods,
-                statics: class.statics.as_ref(),
-                type_kind: "class",
-            },
-            program,
-            module_id,
-        )
+        self.compile_type_methods(TypeMethodsData::from_decl(class), program, module_id)
     }
 
     /// Core implementation for compiling methods of a class or struct
@@ -1440,21 +1493,27 @@ impl Compiler<'_> {
         Ok(())
     }
 
-    /// Compile methods for a module class (uses module interner)
-    pub(super) fn compile_module_class_methods(
+    /// Compile methods for a module type (class or struct) using module interner.
+    /// This is the unified implementation for compile_module_class_methods and
+    /// compile_module_struct_methods.
+    fn compile_module_type_methods<T: TypeDeclInfo>(
         &mut self,
-        class: &ClassDecl,
+        type_decl: &T,
         module_interner: &Interner,
         module_path: &str,
         module_global_inits: &FxHashMap<Symbol, Rc<Expr>>,
     ) -> CodegenResult<()> {
-        let type_name_str = module_interner.resolve(class.name);
+        let type_name_str = module_interner.resolve(type_decl.name());
+        let type_kind = type_decl.type_kind();
+        let is_class = type_decl.is_class();
+
         // Look up the actual module_id from the module_path (not main_module!)
         let module_id = self
             .analyzed
             .name_table()
             .module_id_if_known(module_path)
             .unwrap_or_else(|| self.program_module());
+
         // Find the type metadata by looking for the type name string
         let metadata = self
             .state
@@ -1462,25 +1521,67 @@ impl Compiler<'_> {
             .values()
             .find(|meta| {
                 let arena = self.analyzed.type_arena();
-                if let Some((type_def_id, _)) = arena.unwrap_class(meta.vole_type) {
-                    let name_id = self.query().get_type(type_def_id).name_id;
+                // Use unwrap_class for classes, unwrap_struct for structs
+                let type_def_id = if is_class {
+                    arena.unwrap_class(meta.vole_type).map(|(id, _)| id)
+                } else {
+                    arena.unwrap_struct(meta.vole_type).map(|(id, _)| id)
+                };
+                type_def_id.is_some_and(|id| {
+                    let name_id = self.query().get_type(id).name_id;
                     self.analyzed
                         .name_table()
                         .last_segment_str(name_id)
                         .is_some_and(|name| name == type_name_str)
-                } else {
-                    false
-                }
+                })
             })
             .cloned();
 
         let Some(metadata) = metadata else {
-            tracing::warn!(type_name = %type_name_str, "Could not find metadata for module class");
+            tracing::warn!(type_name = %type_name_str, type_kind, "Could not find metadata for module type");
             return Ok(());
         };
 
         // Compile instance methods
-        for method in &class.methods {
+        self.compile_module_type_instance_methods(
+            type_decl,
+            &metadata,
+            module_interner,
+            module_id,
+            module_global_inits,
+            type_name_str,
+        )?;
+
+        // Compile static methods
+        if let Some(statics) = type_decl.statics() {
+            self.compile_module_type_static_methods(
+                statics,
+                &metadata,
+                module_interner,
+                module_id,
+                module_global_inits,
+                type_name_str,
+                type_kind,
+            )?;
+        }
+
+        Ok(())
+    }
+
+    /// Compile instance methods for a module type.
+    /// Helper for compile_module_type_methods to keep functions under ~80 lines.
+    fn compile_module_type_instance_methods<T: TypeDeclInfo>(
+        &mut self,
+        type_decl: &T,
+        metadata: &TypeMetadata,
+        module_interner: &Interner,
+        module_id: ModuleId,
+        module_global_inits: &FxHashMap<Symbol, Rc<Expr>>,
+        type_name_str: &str,
+    ) -> CodegenResult<()> {
+        let type_kind = type_decl.type_kind();
+
+        for method in type_decl.methods() {
             let method_name_str = module_interner.resolve(method.name);
 
             // Look up MethodId from sema to get pre-computed signature
@@ -1488,8 +1589,8 @@ impl Compiler<'_> {
                 method_name_id_with_interner(self.analyzed, module_interner, method.name)
                     .unwrap_or_else(|| {
                         panic!(
-                            "module class method name not found in name_table: {}::{}",
-                            type_name_str, method_name_str
+                            "module {} method name not found in name_table: {}::{}",
+                            type_kind, type_name_str, method_name_str
                         )
                     });
 
@@ -1499,8 +1600,8 @@ impl Compiler<'_> {
                 .find_method_on_type(metadata.type_def_id, method_name_id)
                 .unwrap_or_else(|| {
                     panic!(
-                        "module class method not registered in entity_registry: {}::{} (type_def_id={:?}, method_name_id={:?})",
-                        type_name_str, method_name_str, metadata.type_def_id, method_name_id
+                        "module {} method not registered in entity_registry: {}::{} (type_def_id={:?}, method_name_id={:?})",
+                        type_kind, type_name_str, method_name_str, metadata.type_def_id, method_name_id
                     )
                 });
 
@@ -1578,166 +1679,48 @@ impl Compiler<'_> {
             self.finalize_function(func_id)?;
         }
 
-        // Compile static methods
-        if let Some(ref statics) = class.statics {
-            for method in &statics.methods {
-                let body = match &method.body {
-                    Some(body) => body,
-                    None => continue,
-                };
-
-                let method_name_str = module_interner.resolve(method.name);
-
-                // Look up MethodId from sema to get pre-computed signature
-                let method_name_id =
-                    method_name_id_with_interner(self.analyzed, module_interner, method.name)
-                        .unwrap_or_else(|| {
-                            panic!(
-                                "module class static method name not found in name_table: {}::{}",
-                                type_name_str, method_name_str
-                            )
-                        });
-
-                let semantic_method_id = self
-                    .analyzed
-                    .entity_registry()
-                    .find_static_method_on_type(metadata.type_def_id, method_name_id)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "module class static method not registered in entity_registry: {}::{} (type_def_id={:?}, method_name_id={:?})",
-                            type_name_str, method_name_str, metadata.type_def_id, method_name_id
-                        )
-                    });
-
-                let method_def = self
-                    .analyzed
-                    .entity_registry()
-                    .get_method(semantic_method_id);
-                let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
-                let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
-                    format!(
-                        "Internal error: static method {}::{} not declared",
-                        type_name_str, method_name_str
-                    )
-                })?;
-
-                // Create signature using pre-resolved MethodId (no self parameter for static)
-                let sig = self.build_signature_for_method(semantic_method_id, SelfParam::None);
-                self.jit.ctx.func.signature = sig;
-
-                // Get param and return types from sema
-                let method_def = self.query().get_method(semantic_method_id);
-                let (param_type_ids, return_type_id) = {
-                    let arena = self.analyzed.type_arena();
-                    let (params, ret, _) = arena
-                        .unwrap_function(method_def.signature_id)
-                        .expect("INTERNAL: static method signature: expected function type");
-                    (params.to_vec(), Some(ret))
-                };
-
-                let param_types = self.type_ids_to_cranelift(&param_type_ids);
-                let params: Vec<_> = method
-                    .params
-                    .iter()
-                    .zip(param_type_ids.iter())
-                    .zip(param_types.iter())
-                    .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
-                    .collect();
-
-                // Create function builder and compile
-                let source_file_ptr = self.source_file_ptr();
-                let mut builder_ctx = FunctionBuilderContext::new();
-                {
-                    let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-                    let env = compile_env!(
-                        self,
-                        module_interner,
-                        module_global_inits,
-                        source_file_ptr,
-                        module_id
-                    );
-                    let mut codegen_ctx =
-                        CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
-
-                    let config = FunctionCompileConfig::top_level(body, params, return_type_id);
-                    compile_function_inner_with_params(
-                        builder,
-                        &mut codegen_ctx,
-                        &env,
-                        config,
-                        Some(module_id),
-                        None,
-                    )?;
-                }
-
-                // Define the function
-                self.jit.define_function(func_id)?;
-                self.jit.clear();
-            }
-        }
-
         Ok(())
     }
 
-    /// Compile methods for a module struct (uses module interner)
-    pub(super) fn compile_module_struct_methods(
+    /// Compile static methods for a module type.
+    /// Helper for compile_module_type_methods to keep functions under ~80 lines.
+    #[allow(clippy::too_many_arguments)]
+    fn compile_module_type_static_methods(
         &mut self,
-        struct_decl: &StructDecl,
+        statics: &StaticsBlock,
+        metadata: &TypeMetadata,
         module_interner: &Interner,
-        module_path: &str,
+        module_id: ModuleId,
         module_global_inits: &FxHashMap<Symbol, Rc<Expr>>,
+        type_name_str: &str,
+        type_kind: &str,
     ) -> CodegenResult<()> {
-        let type_name_str = module_interner.resolve(struct_decl.name);
-        let module_id = self
-            .analyzed
-            .name_table()
-            .module_id_if_known(module_path)
-            .unwrap_or_else(|| self.program_module());
-        // Find the type metadata by looking for the type name string (struct variant)
-        let metadata = self
-            .state
-            .type_metadata
-            .values()
-            .find(|meta| {
-                let arena = self.analyzed.type_arena();
-                if let Some((type_def_id, _)) = arena.unwrap_struct(meta.vole_type) {
-                    let name_id = self.query().get_type(type_def_id).name_id;
-                    self.analyzed
-                        .name_table()
-                        .last_segment_str(name_id)
-                        .is_some_and(|name| name == type_name_str)
-                } else {
-                    false
-                }
-            })
-            .cloned();
+        for method in &statics.methods {
+            let body = match &method.body {
+                Some(body) => body,
+                None => continue,
+            };
 
-        let Some(metadata) = metadata else {
-            tracing::warn!(type_name = %type_name_str, "Could not find metadata for module struct");
-            return Ok(());
-        };
-
-        // Compile instance methods
-        for method in &struct_decl.methods {
             let method_name_str = module_interner.resolve(method.name);
 
+            // Look up MethodId from sema to get pre-computed signature
             let method_name_id =
                 method_name_id_with_interner(self.analyzed, module_interner, method.name)
                     .unwrap_or_else(|| {
                         panic!(
-                            "module struct method name not found in name_table: {}::{}",
-                            type_name_str, method_name_str
+                            "module {} static method name not found in name_table: {}::{}",
+                            type_kind, type_name_str, method_name_str
                         )
                     });
 
             let semantic_method_id = self
                 .analyzed
                 .entity_registry()
-                .find_method_on_type(metadata.type_def_id, method_name_id)
+                .find_static_method_on_type(metadata.type_def_id, method_name_id)
                 .unwrap_or_else(|| {
                     panic!(
-                        "module struct method not registered in entity_registry: {}::{} (type_def_id={:?}, method_name_id={:?})",
-                        type_name_str, method_name_str, metadata.type_def_id, method_name_id
+                        "module {} static method not registered in entity_registry: {}::{} (type_def_id={:?}, method_name_id={:?})",
+                        type_kind, type_name_str, method_name_str, metadata.type_def_id, method_name_id
                     )
                 });
 
@@ -1748,20 +1731,22 @@ impl Compiler<'_> {
             let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
             let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
                 format!(
-                    "Internal error: method {}::{} not declared",
+                    "Internal error: static method {}::{} not declared",
                     type_name_str, method_name_str
                 )
             })?;
 
-            let sig = self.build_signature_for_method(semantic_method_id, SelfParam::Pointer);
+            // Create signature using pre-resolved MethodId (no self parameter for static)
+            let sig = self.build_signature_for_method(semantic_method_id, SelfParam::None);
             self.jit.ctx.func.signature = sig;
 
+            // Get param and return types from sema
             let method_def = self.query().get_method(semantic_method_id);
             let (param_type_ids, return_type_id) = {
                 let arena = self.analyzed.type_arena();
                 let (params, ret, _) = arena
                     .unwrap_function(method_def.signature_id)
-                    .expect("INTERNAL: method signature: expected function type");
+                    .expect("INTERNAL: static method signature: expected function type");
                 (params.to_vec(), Some(ret))
             };
 
@@ -1773,11 +1758,8 @@ impl Compiler<'_> {
                 .zip(param_types.iter())
                 .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
                 .collect();
-            let self_sym = module_interner
-                .lookup("self")
-                .expect("INTERNAL: method compilation: 'self' not interned");
-            let self_binding = (self_sym, metadata.vole_type, self.pointer_type);
 
+            // Create function builder and compile
             let source_file_ptr = self.source_file_ptr();
             let mut builder_ctx = FunctionBuilderContext::new();
             {
@@ -1792,12 +1774,7 @@ impl Compiler<'_> {
                 let mut codegen_ctx =
                     CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
-                let config = FunctionCompileConfig::method(
-                    &method.body,
-                    params,
-                    self_binding,
-                    return_type_id,
-                );
+                let config = FunctionCompileConfig::top_level(body, params, return_type_id);
                 compile_function_inner_with_params(
                     builder,
                     &mut codegen_ctx,
@@ -1808,102 +1785,38 @@ impl Compiler<'_> {
                 )?;
             }
 
-            self.finalize_function(func_id)?;
-        }
-
-        // Compile static methods
-        if let Some(ref statics) = struct_decl.statics {
-            for method in &statics.methods {
-                let body = match &method.body {
-                    Some(body) => body,
-                    None => continue,
-                };
-
-                let method_name_str = module_interner.resolve(method.name);
-
-                let method_name_id =
-                    method_name_id_with_interner(self.analyzed, module_interner, method.name)
-                        .unwrap_or_else(|| {
-                            panic!(
-                                "module struct static method name not found in name_table: {}::{}",
-                                type_name_str, method_name_str
-                            )
-                        });
-
-                let semantic_method_id = self
-                    .analyzed
-                    .entity_registry()
-                    .find_static_method_on_type(metadata.type_def_id, method_name_id)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "module struct static method not registered in entity_registry: {}::{} (type_def_id={:?}, method_name_id={:?})",
-                            type_name_str, method_name_str, metadata.type_def_id, method_name_id
-                        )
-                    });
-
-                let method_def = self
-                    .analyzed
-                    .entity_registry()
-                    .get_method(semantic_method_id);
-                let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
-                let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
-                    format!(
-                        "Internal error: static method {}::{} not declared",
-                        type_name_str, method_name_str
-                    )
-                })?;
-
-                let sig = self.build_signature_for_method(semantic_method_id, SelfParam::None);
-                self.jit.ctx.func.signature = sig;
-
-                let method_def = self.query().get_method(semantic_method_id);
-                let (param_type_ids, return_type_id) = {
-                    let arena = self.analyzed.type_arena();
-                    let (params, ret, _) = arena
-                        .unwrap_function(method_def.signature_id)
-                        .expect("INTERNAL: static method signature: expected function type");
-                    (params.to_vec(), Some(ret))
-                };
-
-                let param_types = self.type_ids_to_cranelift(&param_type_ids);
-                let params: Vec<_> = method
-                    .params
-                    .iter()
-                    .zip(param_type_ids.iter())
-                    .zip(param_types.iter())
-                    .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
-                    .collect();
-
-                let source_file_ptr = self.source_file_ptr();
-                let mut builder_ctx = FunctionBuilderContext::new();
-                {
-                    let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-                    let env = compile_env!(
-                        self,
-                        module_interner,
-                        module_global_inits,
-                        source_file_ptr,
-                        module_id
-                    );
-                    let mut codegen_ctx =
-                        CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
-
-                    let config = FunctionCompileConfig::top_level(body, params, return_type_id);
-                    compile_function_inner_with_params(
-                        builder,
-                        &mut codegen_ctx,
-                        &env,
-                        config,
-                        Some(module_id),
-                        None,
-                    )?;
-                }
-
-                self.jit.define_function(func_id)?;
-                self.jit.clear();
-            }
+            // Define the function
+            self.jit.define_function(func_id)?;
+            self.jit.clear();
         }
 
         Ok(())
+    }
+
+    /// Compile methods for a module class (uses module interner)
+    pub(super) fn compile_module_class_methods(
+        &mut self,
+        class: &ClassDecl,
+        module_interner: &Interner,
+        module_path: &str,
+        module_global_inits: &FxHashMap<Symbol, Rc<Expr>>,
+    ) -> CodegenResult<()> {
+        self.compile_module_type_methods(class, module_interner, module_path, module_global_inits)
+    }
+
+    /// Compile methods for a module struct (uses module interner)
+    pub(super) fn compile_module_struct_methods(
+        &mut self,
+        struct_decl: &StructDecl,
+        module_interner: &Interner,
+        module_path: &str,
+        module_global_inits: &FxHashMap<Symbol, Rc<Expr>>,
+    ) -> CodegenResult<()> {
+        self.compile_module_type_methods(
+            struct_decl,
+            module_interner,
+            module_path,
+            module_global_inits,
+        )
     }
 }
