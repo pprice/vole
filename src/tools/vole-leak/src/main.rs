@@ -160,7 +160,7 @@ fn compile_and_run_tests(
         },
         &mut io::stderr(),
     )
-    .map_err(|()| String::new())?;
+    .map_err(|_| String::new())?;
 
     // Check if cached modules cover all dependencies.
     let can_use_cache = compiled_modules.as_ref().is_some_and(|modules| {

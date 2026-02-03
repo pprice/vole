@@ -60,7 +60,7 @@ fn execute(path: &Path, project_root: Option<&Path>, release: bool) -> Result<()
         },
         &mut std::io::stderr(),
     )
-    .map_err(|()| String::new())?;
+    .map_err(|_| String::new())?;
 
     // Codegen + execute phase
     replace_context(&format!("{} (compiling)", file_path));
@@ -78,5 +78,5 @@ fn execute(path: &Path, project_root: Option<&Path>, release: bool) -> Result<()
 
     replace_context(&format!("{} (executing main)", file_path));
     let mut errors = std::io::stderr();
-    compile_and_run(&analyzed, &run_opts, &mut errors).map_err(|()| String::new())
+    compile_and_run(&analyzed, &run_opts, &mut errors).map_err(|_| String::new())
 }

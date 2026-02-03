@@ -22,6 +22,32 @@ use crate::transforms;
 // Re-export AnalyzedProgram from codegen
 pub use crate::codegen::AnalyzedProgram;
 
+/// Errors that can occur during the compilation pipeline.
+///
+/// The actual error details are rendered to the `errors` writer at the point
+/// of failure. This enum exists to provide typed error handling instead of
+/// unit errors, improving readability and allowing callers to know which
+/// phase failed if needed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PipelineError {
+    /// Lexer encountered invalid tokens
+    Lex,
+    /// Parser encountered syntax errors
+    Parse,
+    /// Generator transformation failed
+    Transform,
+    /// Type checking failed
+    Sema,
+    /// Code generation failed
+    Codegen,
+    /// Program finalization failed
+    Finalize,
+    /// No main function found
+    NoMain,
+    /// I/O error (file not found, permission denied, etc.)
+    Io,
+}
+
 /// Render a lexer error to a writer with source context.
 fn render_lexer_error(err: &LexerError, file_path: &str, source: &str, w: &mut dyn Write) {
     let report = miette::Report::new(err.clone())
@@ -62,12 +88,12 @@ pub struct PipelineOptions<'a> {
 /// Compile source through the full pipeline: parse -> transform -> analyze -> optimize.
 ///
 /// All diagnostics (errors and warnings) are rendered to the provided `errors` writer.
-/// Returns `Ok(AnalyzedProgram)` on success, or `Err(())` if there were errors.
-#[allow(clippy::result_unit_err)]
+/// Returns `Ok(AnalyzedProgram)` on success, or `Err(PipelineError)` indicating which
+/// phase failed.
 pub fn compile_source(
     opts: PipelineOptions,
     errors: &mut dyn Write,
-) -> Result<AnalyzedProgram, ()> {
+) -> Result<AnalyzedProgram, PipelineError> {
     let PipelineOptions {
         source,
         file_path,
@@ -89,10 +115,11 @@ pub fn compile_source(
                     for err in &lexer_errors {
                         render_lexer_error(err, file_path, source, errors);
                     }
+                    return Err(PipelineError::Lex);
                 } else {
                     render_parser_error(&e, file_path, source, errors);
+                    return Err(PipelineError::Parse);
                 }
-                return Err(());
             }
         };
 
@@ -102,7 +129,7 @@ pub fn compile_source(
             for err in &lexer_errors {
                 render_lexer_error(err, file_path, source, errors);
             }
-            return Err(());
+            return Err(PipelineError::Lex);
         }
 
         let mut interner = parser.into_interner();
@@ -119,7 +146,7 @@ pub fn compile_source(
             for err in &transform_errors {
                 render_sema_error(err, file_path, source, errors);
             }
-            return Err(());
+            return Err(PipelineError::Transform);
         }
     }
 
@@ -137,7 +164,7 @@ pub fn compile_source(
             for err in &errs {
                 render_sema_error(err, file_path, source, errors);
             }
-            return Err(());
+            return Err(PipelineError::Sema);
         }
         tracing::debug!("type checking complete");
         analyzer
@@ -179,12 +206,11 @@ pub struct RunOptions<'a> {
 ///
 /// The caller is responsible for setting up stdout/stderr capture (via
 /// `set_stdout_capture`/`set_stderr_capture`) before calling if needed.
-#[allow(clippy::result_unit_err)]
 pub fn compile_and_run(
     analyzed: &AnalyzedProgram,
     opts: &RunOptions,
     errors: &mut dyn Write,
-) -> Result<(), ()> {
+) -> Result<(), PipelineError> {
     // Codegen phase
     let jit = {
         let _span = tracing::info_span!("codegen").entered();
@@ -195,12 +221,12 @@ pub fn compile_and_run(
             compiler.set_skip_tests(opts.skip_tests);
             if let Err(e) = compiler.compile_program(&analyzed.program) {
                 let _ = writeln!(errors, "compilation error: {}", e);
-                return Err(());
+                return Err(PipelineError::Codegen);
             }
         }
         if let Err(e) = jit.finalize() {
             let _ = writeln!(errors, "finalization error: {}", e);
-            return Err(());
+            return Err(PipelineError::Finalize);
         }
         tracing::debug!("compilation complete");
         jit
@@ -211,7 +237,7 @@ pub fn compile_and_run(
         Some(ptr) => ptr,
         None => {
             let _ = writeln!(errors, "error: no 'main' function found");
-            return Err(());
+            return Err(PipelineError::NoMain);
         }
     };
 
@@ -295,13 +321,15 @@ pub fn read_stdin() -> io::Result<String> {
     Ok(source)
 }
 
-/// Check a program with captured stderr output
-#[allow(clippy::result_unit_err)] // Error details are rendered internally
+/// Check a program with captured stderr output.
+///
+/// Error details are rendered to `stderr`; the returned `PipelineError` indicates
+/// which phase failed.
 pub fn check_captured<W: Write + Send + 'static>(
     source: &str,
     file_path: &str,
     mut stderr: W,
-) -> Result<(), ()> {
+) -> Result<(), PipelineError> {
     compile_source(
         PipelineOptions {
             source,
@@ -315,14 +343,16 @@ pub fn check_captured<W: Write + Send + 'static>(
     Ok(())
 }
 
-/// Run a program with captured stdout and stderr
-#[allow(clippy::result_unit_err)] // Error details are rendered internally
+/// Run a program with captured stdout and stderr.
+///
+/// Error details are rendered to `stderr`; the returned `PipelineError` indicates
+/// which phase failed.
 pub fn run_captured<W: Write + Send + 'static>(
     source: &str,
     file_path: &str,
     stdout: W,
     mut stderr: W,
-) -> Result<(), ()> {
+) -> Result<(), PipelineError> {
     let analyzed = compile_source(
         PipelineOptions {
             source,
@@ -362,14 +392,16 @@ pub fn run_captured<W: Write + Send + 'static>(
     result
 }
 
-/// Inspect AST with captured stdout and stderr
-#[allow(clippy::result_unit_err)]
+/// Inspect AST with captured stdout and stderr.
+///
+/// Error details are rendered to `stderr`; the returned `PipelineError` indicates
+/// which phase failed.
 pub fn inspect_ast_captured<W: Write>(
     source: &str,
     file_path: &str,
     mut stdout: W,
     mut stderr: W,
-) -> Result<(), ()> {
+) -> Result<(), PipelineError> {
     // Parse
     let mut parser = Parser::with_file(source, file_path);
     let program = match parser.parse_program() {
@@ -380,10 +412,11 @@ pub fn inspect_ast_captured<W: Write>(
                 for err in &lexer_errors {
                     render_lexer_error(err, file_path, source, &mut stderr);
                 }
+                return Err(PipelineError::Lex);
             } else {
                 render_parser_error(&e, file_path, source, &mut stderr);
+                return Err(PipelineError::Parse);
             }
-            return Err(());
         }
     };
 
@@ -392,7 +425,7 @@ pub fn inspect_ast_captured<W: Write>(
         for err in &lexer_errors {
             render_lexer_error(err, file_path, source, &mut stderr);
         }
-        return Err(());
+        return Err(PipelineError::Lex);
     }
 
     let interner = parser.into_interner();

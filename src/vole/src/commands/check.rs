@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 use std::process::ExitCode;
 
-use super::common::{PipelineOptions, compile_source, read_stdin};
+use super::common::{PipelineError, PipelineOptions, compile_source, read_stdin};
 use crate::cli::expand_paths_flat;
 use crate::runtime::push_context;
 
@@ -65,17 +65,17 @@ fn check_stdin() -> ExitCode {
         &mut std::io::stderr(),
     ) {
         Ok(_) => ExitCode::SUCCESS,
-        Err(()) => ExitCode::FAILURE,
+        Err(_) => ExitCode::FAILURE,
     }
 }
 
 /// Check a single file, returns Ok(()) on success
-fn check_single_file(path: &Path) -> Result<(), ()> {
+fn check_single_file(path: &Path) -> Result<(), PipelineError> {
     let source = match fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("error: could not read '{}': {}", path.display(), e);
-            return Err(());
+            return Err(PipelineError::Io);
         }
     };
 

@@ -372,7 +372,7 @@ fn run_source_tests_with_modules(
         },
         &mut io::stderr(),
     )
-    .map_err(|()| String::new())?;
+    .map_err(|_| String::new())?;
     let sema_time = sema_start.elapsed();
 
     // Compile - either with pre-compiled modules or compiling them fresh
@@ -523,7 +523,7 @@ fn run_source_tests_with_progress(
         },
         &mut io::stderr(),
     )
-    .map_err(|()| String::new())?;
+    .map_err(|_| String::new())?;
     let sema_time = sema_start.elapsed();
 
     // Compile

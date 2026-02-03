@@ -89,7 +89,7 @@ pub fn inspect_files(
                     &mut std::io::stderr(),
                 ) {
                     Ok(a) => a,
-                    Err(()) => {
+                    Err(_) => {
                         had_error = true;
                         continue;
                     }
@@ -123,7 +123,7 @@ pub fn inspect_files(
                     &mut std::io::stderr(),
                 ) {
                     Ok(a) => a,
-                    Err(()) => {
+                    Err(_) => {
                         had_error = true;
                         continue;
                     }
