@@ -10,9 +10,9 @@ use cranelift_codegen::ir::BlockArg;
 use vole_frontend::{ExprKind, MatchExpr, PatternKind, UnaryOp};
 use vole_sema::type_arena::TypeId;
 
-use super::context::Cg;
-use super::types::CompiledValue;
+use crate::context::Cg;
 use crate::errors::CodegenResult;
+use crate::types::CompiledValue;
 
 /// Minimum number of non-default arms required to use the Switch optimization.
 const MIN_SWITCH_ARMS: usize = 4;

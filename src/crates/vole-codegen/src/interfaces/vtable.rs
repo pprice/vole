@@ -5,6 +5,7 @@ use cranelift::prelude::*;
 use cranelift_codegen::ir::FuncRef;
 use cranelift_module::{DataDescription, DataId, Linkage, Module};
 
+use super::vtable_ctx::{VtableCtx, VtableCtxView};
 use crate::RuntimeFn;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CodegenCtx, CompileEnv};
@@ -12,7 +13,6 @@ use crate::types::{
     CompiledValue, MethodInfo, method_name_id_by_str, type_id_to_cranelift,
     type_metadata_by_name_id, value_to_word, word_to_value_type_id,
 };
-use crate::vtable_ctx::{VtableCtx, VtableCtxView};
 use vole_frontend::Symbol;
 use vole_identity::{MethodId, NameId, TypeDefId};
 use vole_sema::EntityRegistry;

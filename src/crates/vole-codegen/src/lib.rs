@@ -2,26 +2,24 @@
 
 mod analyzed;
 mod calls;
-mod cfg_cleanup;
 pub mod compiler;
 mod context;
 pub mod errors;
 mod expr;
 mod function_registry;
-mod interface_vtable;
 mod intrinsics;
 pub mod jit;
 mod lambda;
-pub mod loop_analysis;
-pub mod loop_param_opt;
-mod match_switch;
 mod method_resolution;
 mod ops;
 mod rc_cleanup;
 mod stmt;
 mod structs;
 mod types;
-mod vtable_ctx;
+
+// Organized submodules
+mod control_flow;
+mod interfaces;
 
 pub use compiler::{Compiler, ControlFlowCtx, TestInfo};
 pub use function_registry::{FunctionKey, FunctionRegistry, RuntimeFn};
@@ -35,8 +33,16 @@ pub use errors::{CodegenError, CodegenResult};
 // Analysis types
 pub use analyzed::AnalyzedProgram;
 
-// Loop analysis
-pub use loop_analysis::{FunctionLoopInfo, InductionInfo, InductionStep, LoopInfo, analyze_loops};
+// Loop analysis (re-exported from control_flow)
+pub use control_flow::{
+    FunctionLoopInfo, InductionInfo, InductionStep, LoopInfo, LoopParamOptStats, analyze_loops,
+    optimize_loop_params,
+};
 
-// Loop parameter optimization
-pub use loop_param_opt::{LoopParamOptStats, optimize_loop_params};
+// Public access to control_flow submodules (preserves original pub mod interface)
+pub mod loop_analysis {
+    pub use super::control_flow::loop_analysis::*;
+}
+pub mod loop_param_opt {
+    pub use super::control_flow::loop_param_opt::*;
+}

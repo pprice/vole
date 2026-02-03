@@ -20,7 +20,7 @@ use vole_sema::entity_defs::TypeDefKind;
 use vole_sema::type_arena::TypeId;
 
 use super::context::Cg;
-use super::match_switch;
+use super::control_flow::match_switch;
 use super::structs::{convert_to_i64_for_storage, get_field_slot_and_type_id_cg};
 use super::types::{
     CompiledValue, FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, RcLifecycle,

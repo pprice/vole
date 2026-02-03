@@ -3099,7 +3099,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         value: CompiledValue,
         interface_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
-        crate::interface_vtable::box_interface_value_id(
+        crate::interfaces::box_interface_value_id(
             self.builder,
             self.codegen_ctx,
             self.env,
@@ -3202,7 +3202,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 }
 
-impl<'a, 'b, 'ctx> crate::vtable_ctx::VtableCtx for Cg<'a, 'b, 'ctx> {
+impl<'a, 'b, 'ctx> crate::interfaces::VtableCtx for Cg<'a, 'b, 'ctx> {
     fn analyzed(&self) -> &crate::AnalyzedProgram {
         self.env.analyzed
     }
@@ -3247,7 +3247,7 @@ impl<'a, 'b, 'ctx> crate::vtable_ctx::VtableCtx for Cg<'a, 'b, 'ctx> {
         &self.env.state.native_registry
     }
 
-    fn interface_vtables(&self) -> &RefCell<crate::interface_vtable::InterfaceVtableRegistry> {
+    fn interface_vtables(&self) -> &RefCell<crate::interfaces::InterfaceVtableRegistry> {
         &self.env.state.interface_vtables
     }
 

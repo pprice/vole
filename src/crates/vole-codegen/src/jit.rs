@@ -1125,11 +1125,11 @@ impl JitContext {
     /// Define a function (after building IR)
     pub fn define_function(&mut self, func_id: FuncId) -> CodegenResult<()> {
         // Run CFG cleanup to eliminate trampoline blocks before Cranelift compilation
-        crate::cfg_cleanup::cleanup_cfg(&mut self.ctx.func);
+        crate::control_flow::cleanup_cfg(&mut self.ctx.func);
 
         // Run loop parameter optimization if enabled
         if self.loop_param_opt {
-            crate::loop_param_opt::optimize_loop_params(&mut self.ctx.func);
+            crate::control_flow::optimize_loop_params(&mut self.ctx.func);
         }
 
         // Enable disassembly if requested

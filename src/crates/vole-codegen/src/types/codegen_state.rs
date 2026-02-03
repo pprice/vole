@@ -10,7 +10,7 @@ use vole_runtime::NativeRegistry;
 use vole_sema::type_arena::TypeId;
 
 use crate::FunctionKey;
-use crate::interface_vtable::InterfaceVtableRegistry;
+use crate::interfaces::InterfaceVtableRegistry;
 use crate::intrinsics::IntrinsicsRegistry;
 
 use super::TypeMetadata;

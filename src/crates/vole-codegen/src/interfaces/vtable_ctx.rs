@@ -59,7 +59,7 @@ pub trait VtableCtx {
     fn native_registry(&self) -> &NativeRegistry;
 
     /// Get the interface vtable registry
-    fn interface_vtables(&self) -> &RefCell<crate::interface_vtable::InterfaceVtableRegistry>;
+    fn interface_vtables(&self) -> &RefCell<super::vtable::InterfaceVtableRegistry>;
 
     /// Get type metadata map
     fn type_metadata(&self) -> &TypeMetadataMap;
@@ -127,7 +127,7 @@ impl<'a, 'ctx> VtableCtx for VtableCtxView<'a, 'ctx> {
         &self.env.state.native_registry
     }
 
-    fn interface_vtables(&self) -> &RefCell<crate::interface_vtable::InterfaceVtableRegistry> {
+    fn interface_vtables(&self) -> &RefCell<super::vtable::InterfaceVtableRegistry> {
         &self.env.state.interface_vtables
     }
 

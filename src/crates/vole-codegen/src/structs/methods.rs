@@ -1179,7 +1179,7 @@ impl Cg<'_, '_, '_> {
         method_name_id: NameId,
         func_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
-        let slot = crate::interface_vtable::interface_method_slot_by_type_def_id(
+        let slot = crate::interfaces::interface_method_slot_by_type_def_id(
             interface_type_id,
             method_name_id,
             self.registry(),

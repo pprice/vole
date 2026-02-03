@@ -23,7 +23,7 @@
 use cranelift_codegen::ir::{Block, Function, Opcode, Value};
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::loop_analysis::FunctionLoopInfo;
+use super::loop_analysis::FunctionLoopInfo;
 
 /// Statistics for the loop parameter optimization pass.
 #[derive(Debug, Default)]
@@ -107,7 +107,7 @@ fn collect_optimizations(func: &Function, loop_info: &FunctionLoopInfo) -> Vec<L
 fn find_removable_params(
     func: &Function,
     loop_info: &FunctionLoopInfo,
-    lp: &crate::loop_analysis::LoopInfo,
+    lp: &super::loop_analysis::LoopInfo,
 ) -> Vec<ParamRemoval> {
     let mut removals = Vec::new();
     let header = lp.header;
@@ -136,7 +136,7 @@ fn find_removable_params(
 fn find_entry_value(
     func: &Function,
     _loop_info: &FunctionLoopInfo,
-    lp: &crate::loop_analysis::LoopInfo,
+    lp: &super::loop_analysis::LoopInfo,
     param_idx: usize,
 ) -> Option<Value> {
     let header = lp.header;

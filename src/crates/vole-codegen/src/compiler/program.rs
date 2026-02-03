@@ -1136,11 +1136,11 @@ impl Compiler<'_> {
         // This method is for IR inspection only.
 
         // Run CFG cleanup to show optimized IR
-        crate::cfg_cleanup::cleanup_cfg(&mut self.jit.ctx.func);
+        crate::control_flow::cleanup_cfg(&mut self.jit.ctx.func);
 
         // Run loop parameter optimization if enabled
         if self.jit.loop_param_opt_enabled() {
-            crate::loop_param_opt::optimize_loop_params(&mut self.jit.ctx.func);
+            crate::control_flow::optimize_loop_params(&mut self.jit.ctx.func);
         }
 
         Ok(())
@@ -1185,11 +1185,11 @@ impl Compiler<'_> {
         // This method is for IR inspection only.
 
         // Run CFG cleanup to show optimized IR
-        crate::cfg_cleanup::cleanup_cfg(&mut self.jit.ctx.func);
+        crate::control_flow::cleanup_cfg(&mut self.jit.ctx.func);
 
         // Run loop parameter optimization if enabled
         if self.jit.loop_param_opt_enabled() {
-            crate::loop_param_opt::optimize_loop_params(&mut self.jit.ctx.func);
+            crate::control_flow::optimize_loop_params(&mut self.jit.ctx.func);
         }
 
         Ok(())
