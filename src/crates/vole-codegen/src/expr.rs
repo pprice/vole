@@ -1669,6 +1669,13 @@ impl Cg<'_, '_, '_> {
 
         self.switch_and_seal(merge_block);
 
+        // Clean up fallible scrutinee payload.
+        // Fallible structs are stack-allocated (tag + payload) and never RC-tracked,
+        // so the RC payload inside them leaks unless we explicitly rc_dec it here.
+        // Each match arm already rc_inc'd any borrowed payload it returns, so this
+        // rc_dec balances the original reference from the callee.
+        self.cleanup_fallible_scrutinee(&scrutinee, scrutinee_type_id)?;
+
         let merged_value = self.builder.block_params(merge_block)[0];
 
         // Reduce back to the correct type based on result_type_id
@@ -1687,6 +1694,149 @@ impl Cg<'_, '_, '_> {
             cv.rc_lifecycle = RcLifecycle::Owned;
         }
         Ok(cv)
+    }
+
+    /// Emit rc_dec for the payload inside a fallible scrutinee after a match.
+    ///
+    /// Fallible returns are stack-allocated `(tag, payload)` structs that are
+    /// never RC-tracked.  When a match arm extracts the payload and rc_inc's it
+    /// (because the variable read is Borrowed), the original reference inside
+    /// the fallible struct must be decremented to avoid a leak.
+    ///
+    /// If only one variant's payload is RC, we branch on the tag so we only
+    /// rc_dec when that variant was active.
+    fn cleanup_fallible_scrutinee(
+        &mut self,
+        scrutinee: &CompiledValue,
+        scrutinee_type_id: TypeId,
+    ) -> Result<(), String> {
+        let fallible_types = self.arena().unwrap_fallible(scrutinee_type_id);
+        let Some((success_type_id, error_type_id)) = fallible_types else {
+            return Ok(());
+        };
+
+        let success_rc = self.needs_rc_cleanup(success_type_id);
+        // Error types may have RC payloads even though the error struct itself
+        // isn't RC-tracked.  Single-field error structs store their field value
+        // directly as the payload (no wrapping pointer), so if that field is RC
+        // we must rc_dec the payload.
+        let error_rc = self.needs_rc_cleanup(error_type_id)
+            || self.fallible_error_payload_needs_rc(error_type_id);
+
+        if !success_rc && !error_rc {
+            return Ok(());
+        }
+
+        let payload = load_fallible_payload(self.builder, scrutinee.value, types::I64);
+
+        if success_rc && error_rc {
+            // Both variants need cleanup — unconditional rc_dec
+            self.emit_rc_dec(payload)?;
+        } else {
+            // Only one variant needs cleanup — branch on tag
+            let tag = load_fallible_tag(self.builder, scrutinee.value);
+            let is_success = self
+                .builder
+                .ins()
+                .icmp_imm(IntCC::Equal, tag, FALLIBLE_SUCCESS_TAG);
+
+            let dec_block = self.builder.create_block();
+            let cont_block = self.builder.create_block();
+
+            let cond = self.cond_to_i32(is_success);
+            if success_rc {
+                // rc_dec only on success path
+                self.builder
+                    .ins()
+                    .brif(cond, dec_block, &[], cont_block, &[]);
+            } else {
+                // rc_dec only on error path
+                self.builder
+                    .ins()
+                    .brif(cond, cont_block, &[], dec_block, &[]);
+            }
+
+            self.builder.switch_to_block(dec_block);
+            self.builder.seal_block(dec_block);
+            self.emit_rc_dec(payload)?;
+            self.builder.ins().jump(cont_block, &[]);
+
+            self.builder.switch_to_block(cont_block);
+            self.builder.seal_block(cont_block);
+        }
+
+        Ok(())
+    }
+
+    /// Check whether the payload stored for an error variant is an RC value
+    /// and is safe to unconditionally rc_dec.
+    ///
+    /// Single-field error structs (e.g. `NotFound { path: string }`) store the
+    /// field value directly as the fallible payload.  If that single field is
+    /// RC-managed the payload pointer must be rc_dec'd.
+    ///
+    /// For union error types, this returns true only when ALL variants are safe
+    /// to rc_dec: either 0 fields (payload=null, rc_dec is no-op) or 1 RC field.
+    /// Mixed unions (some RC, some non-RC single-field) are NOT safe and we skip
+    /// cleanup to avoid calling rc_dec on non-pointer values.
+    fn fallible_error_payload_needs_rc(&self, error_type_id: TypeId) -> bool {
+        if self.error_type_single_field_is_rc(error_type_id) {
+            return true;
+        }
+        let arena = self.arena();
+        if let Some(variants) = arena.unwrap_union(error_type_id) {
+            // All variants must be safe for unconditional rc_dec:
+            // - 0 fields: payload is null (rc_dec is no-op)
+            // - 1 RC field: payload is an RC pointer (rc_dec works)
+            // If ANY variant has 1 non-RC field or 2+ fields, we can't safely rc_dec.
+            let any_rc = variants
+                .iter()
+                .any(|&tid| self.error_type_single_field_is_rc(tid));
+            let all_safe = any_rc
+                && variants
+                    .iter()
+                    .all(|&tid| self.error_variant_safe_for_rc_dec(tid));
+            return all_safe;
+        }
+        false
+    }
+
+    /// Check if an error variant is safe for unconditional rc_dec.
+    /// True for: 0 fields (null payload) or 1 RC field.
+    fn error_variant_safe_for_rc_dec(&self, type_id: TypeId) -> bool {
+        let arena = self.arena();
+        let type_def_id = arena
+            .unwrap_error(type_id)
+            .or_else(|| arena.unwrap_struct(type_id).map(|(id, _)| id));
+        let Some(type_def_id) = type_def_id else {
+            return false;
+        };
+        let fields: Vec<_> = self.query().fields_on_type(type_def_id).collect();
+        match fields.len() {
+            0 => true, // null payload, rc_dec is no-op
+            1 => {
+                let field = self.query().get_field(fields[0]);
+                self.needs_rc_cleanup(field.ty)
+            }
+            _ => false, // 2+ fields = stack pointer, NOT safe for rc_dec
+        }
+    }
+
+    /// Check if an error/struct type has exactly one field and that field is RC.
+    fn error_type_single_field_is_rc(&self, type_id: TypeId) -> bool {
+        let arena = self.arena();
+        let type_def_id = arena
+            .unwrap_error(type_id)
+            .or_else(|| arena.unwrap_struct(type_id).map(|(id, _)| id));
+        let Some(type_def_id) = type_def_id else {
+            return false;
+        };
+        let fields: Vec<_> = self.query().fields_on_type(type_def_id).collect();
+        if fields.len() != 1 {
+            return false;
+        }
+        let field = self.query().get_field(fields[0]);
+        self.needs_rc_cleanup(field.ty)
     }
 
     /// Compile a try expression (propagation)

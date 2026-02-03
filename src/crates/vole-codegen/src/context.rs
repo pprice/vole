@@ -1506,6 +1506,24 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Ok(values)
     }
 
+    /// Compile call arguments, returning both Cranelift values for the call
+    /// and owned `CompiledValue`s that need rc_dec after the call completes.
+    pub fn compile_call_args_tracking_rc(
+        &mut self,
+        args: &[Expr],
+    ) -> Result<(Vec<Value>, Vec<CompiledValue>), String> {
+        let mut values = Vec::with_capacity(args.len());
+        let mut rc_temps = Vec::new();
+        for arg in args {
+            let compiled = self.expr(arg)?;
+            if compiled.is_owned() {
+                rc_temps.push(compiled);
+            }
+            values.push(compiled.value);
+        }
+        Ok((values, rc_temps))
+    }
+
     // ========== Control flow helpers ==========
 
     /// Switch to a block and seal it (common pattern for sequential control flow)

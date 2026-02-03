@@ -9,7 +9,7 @@
 use crate::array::RcArray;
 use crate::native_registry::{NativeModule, NativeSignature, NativeType};
 use crate::string::RcString;
-use crate::value::{TYPE_STRING, TaggedValue};
+use crate::value::{TYPE_ARRAY, TYPE_STRING, TaggedValue};
 use std::alloc::{Layout, alloc};
 
 /// Create the std:env native module
@@ -192,7 +192,7 @@ pub extern "C" fn env_vars() -> *mut RcArray {
             RcArray::push(
                 arr,
                 TaggedValue {
-                    tag: 0, // Arrays are stored as pointers
+                    tag: TYPE_ARRAY as u64,
                     value: pair as u64,
                 },
             );

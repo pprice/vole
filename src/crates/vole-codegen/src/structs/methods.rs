@@ -124,12 +124,14 @@ impl Cg<'_, '_, '_> {
                     ret
                 };
 
-                // Compile arguments (no receiver for module functions)
-                let args = self.compile_call_args(&mc.args)?;
+                // Compile arguments, tracking owned RC temps for cleanup
+                let (args, mut rc_temps) = self.compile_call_args_tracking_rc(&mc.args)?;
 
                 if let Some(ext_info) = external_info {
                     // External FFI function
-                    return self.call_external_id(ext_info, &args, return_type_id);
+                    let result = self.call_external_id(ext_info, &args, return_type_id)?;
+                    self.consume_rc_args(&mut rc_temps)?;
+                    return Ok(result);
                 }
 
                 // Check if this is a generic external intrinsic (e.g., math.sqrt<f64>)
@@ -160,6 +162,9 @@ impl Cg<'_, '_, '_> {
 
                         let return_type_id = self.substitute_type(mono_return_type_id);
 
+                        // Clean up rc_temps from initial arg compilation
+                        // (generic intrinsic recompiles args internally)
+                        self.consume_rc_args(&mut rc_temps)?;
                         return self.call_generic_external_intrinsic_args(
                             &ext_module_path,
                             &key,
@@ -189,7 +194,9 @@ impl Cg<'_, '_, '_> {
                     .declare_func_in_func(func_id, self.builder.func);
                 let call_inst = self.builder.ins().call(func_ref, &args);
                 self.field_cache.clear(); // Callee may mutate instance fields
-                return Ok(self.call_result(call_inst, return_type_id));
+                let result = self.call_result(call_inst, return_type_id);
+                self.consume_rc_args(&mut rc_temps)?;
+                return Ok(result);
             } else {
                 return Err(CodegenError::not_found(
                     "module method",
