@@ -27,7 +27,7 @@ use vole::commands::check::check_files;
 use vole::commands::fmt::{FmtOptions, format_files};
 use vole::commands::inspect::inspect_files;
 use vole::commands::run::run_file;
-use vole::commands::test::run_tests;
+use vole::commands::test::{TestRunOptions, run_tests};
 use vole::commands::version::print_version;
 use vole::errors::set_color_mode;
 use vole::runtime::install_segfault_handler;
@@ -97,13 +97,15 @@ fn main() -> ExitCode {
             root,
         } => run_tests(
             &paths,
-            filter.as_deref(),
-            report,
-            max_failures,
-            include_skipped,
-            root.as_deref(),
-            cli.color,
-            cli.release,
+            TestRunOptions {
+                filter: filter.as_deref(),
+                report,
+                max_failures,
+                include_skipped,
+                project_root: root.as_deref(),
+                color: cli.color,
+                release: cli.release,
+            },
         ),
         Commands::Inspect {
             inspect_type,
