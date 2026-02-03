@@ -78,7 +78,6 @@ pub fn clear_type_registry() {
 
 /// Register field types for an instance type (FFI)
 /// field_types is an array of u8 tags (0=Value, 1=Rc)
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_register_instance_type(
     type_id: u32,

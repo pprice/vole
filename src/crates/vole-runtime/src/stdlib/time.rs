@@ -128,7 +128,6 @@ pub extern "C" fn time_now() -> i64 {
 
 /// Parse ISO 8601 string to nanoseconds since epoch
 /// Returns i64::MIN on parse error
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn time_parse_iso(iso_ptr: *const RcString) -> i64 {
     if iso_ptr.is_null() {

@@ -146,7 +146,6 @@ pub extern "C" fn random_seeded(seed: i64) -> *mut RcRng {
 }
 
 /// Get the next random f64 in [0.0, 1.0) from a seeded RNG
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn rng_float(rng_ptr: *mut RcRng) -> f64 {
     if rng_ptr.is_null() {
@@ -180,7 +179,6 @@ pub extern "C" fn random_int(min: i64, max: i64) -> i64 {
 }
 
 /// Get the next random i64 in [min, max] (inclusive) from a seeded RNG
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn rng_int(rng_ptr: *mut RcRng, min: i64, max: i64) -> i64 {
     if rng_ptr.is_null() || min > max {
@@ -191,7 +189,6 @@ pub extern "C" fn rng_int(rng_ptr: *mut RcRng, min: i64, max: i64) -> i64 {
 }
 
 /// Get the next random boolean from a seeded RNG
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn rng_coin(rng_ptr: *mut RcRng) -> bool {
     if rng_ptr.is_null() {

@@ -83,7 +83,6 @@ fn writeln_stderr(s: &str) {
 }
 
 /// Print a string to stdout with newline
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_println_string(ptr: *const RcString) {
     if ptr.is_null() {
@@ -119,7 +118,6 @@ pub extern "C" fn vole_println_bool(value: i8) {
 }
 
 /// Print a string to stdout without newline
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_print_string(ptr: *const RcString) {
     if ptr.is_null() {
@@ -155,7 +153,6 @@ pub extern "C" fn vole_print_bool(value: i8) {
 }
 
 /// Concatenate two strings
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_string_concat(a: *const RcString, b: *const RcString) -> *mut RcString {
     unsafe {
@@ -208,7 +205,6 @@ pub extern "C" fn vole_nil_to_string() -> *mut RcString {
 
 /// Convert an i64 array to string representation
 /// Shows first 5 elements, then "..." for truncation
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_array_i64_to_string(ptr: *const RcArray) -> *mut RcString {
     if ptr.is_null() {
@@ -256,7 +252,6 @@ pub extern "C" fn vole_print_char(c: u8) {
 
 /// Panic with a message - prints to stderr and exits with code 1.
 /// If a test jmp_buf is set (unit tests or capture mode), uses longjmp to escape.
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_panic(
     msg: *const RcString,
@@ -311,7 +306,6 @@ pub extern "C" fn vole_array_with_capacity(capacity: usize) -> *mut RcArray {
     RcArray::with_capacity(capacity)
 }
 
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_array_push(arr: *mut RcArray, tag: u64, value: u64) {
     unsafe {
@@ -319,7 +313,6 @@ pub extern "C" fn vole_array_push(arr: *mut RcArray, tag: u64, value: u64) {
     }
 }
 
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_array_get_tag(arr: *const RcArray, index: usize) -> u64 {
     if arr.is_null() {
@@ -328,7 +321,6 @@ pub extern "C" fn vole_array_get_tag(arr: *const RcArray, index: usize) -> u64 {
     unsafe { RcArray::get(arr, index).tag }
 }
 
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_array_get_value(arr: *const RcArray, index: usize) -> u64 {
     if arr.is_null() {
@@ -337,7 +329,6 @@ pub extern "C" fn vole_array_get_value(arr: *const RcArray, index: usize) -> u64
     unsafe { RcArray::get(arr, index).value }
 }
 
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_array_set(arr: *mut RcArray, index: usize, tag: u64, value: u64) {
     unsafe {
@@ -345,7 +336,6 @@ pub extern "C" fn vole_array_set(arr: *mut RcArray, index: usize, tag: u64, valu
     }
 }
 
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_array_len(arr: *const RcArray) -> usize {
     if arr.is_null() {

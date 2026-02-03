@@ -169,7 +169,6 @@ pub extern "C" fn vole_instance_dec(ptr: *mut RcInstance) {
     rc_dec(ptr as *mut u8);
 }
 
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_instance_get_field(ptr: *const RcInstance, slot: u32) -> u64 {
     if ptr.is_null() {
@@ -178,7 +177,6 @@ pub extern "C" fn vole_instance_get_field(ptr: *const RcInstance, slot: u32) -> 
     unsafe { RcInstance::get_field(ptr, slot as usize) }
 }
 
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_instance_set_field(ptr: *mut RcInstance, slot: u32, value: u64) {
     if ptr.is_null() {

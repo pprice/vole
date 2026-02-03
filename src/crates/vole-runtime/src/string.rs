@@ -164,7 +164,6 @@ unsafe extern "C" fn string_drop(ptr: *mut u8) {
 // Functions exposed to JIT-compiled code
 // These functions are called from JIT-generated code which is responsible for
 // ensuring pointer validity.
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_string_new(data: *const u8, len: usize) -> *mut RcString {
     let s = unsafe {
@@ -184,7 +183,6 @@ pub extern "C" fn vole_string_dec(ptr: *mut RcString) {
     rc_dec(ptr as *mut u8);
 }
 
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_string_len(ptr: *const RcString) -> usize {
     if ptr.is_null() {
@@ -203,7 +201,6 @@ pub extern "C" fn vole_string_data(ptr: *const RcString) -> *const u8 {
 }
 
 /// Compare two strings for equality, returns 1 if equal, 0 otherwise
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_string_eq(a: *const RcString, b: *const RcString) -> i8 {
     if a.is_null() && b.is_null() {

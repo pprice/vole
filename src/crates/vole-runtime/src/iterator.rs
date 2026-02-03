@@ -380,7 +380,6 @@ impl RcIterator {
     ///
     /// Safe to call because `rc_dec` handles null pointers.
     /// `ptr` must be null or a valid pointer to an initialized `RcIterator`.
-    #[allow(clippy::not_unsafe_ptr_arg_deref)]
     #[inline]
     pub fn dec_ref(ptr: *mut Self) {
         rc_dec(ptr as *mut u8);
@@ -389,7 +388,6 @@ impl RcIterator {
     /// Set the element type tag on this iterator (non-recursive).
     /// Each iterator in the chain stores its OWN element type tag.
     /// The tag represents the type of values this iterator produces.
-    #[allow(clippy::not_unsafe_ptr_arg_deref)]
     pub fn set_elem_tag(ptr: *mut Self, tag: u64) {
         if ptr.is_null() {
             return;
@@ -402,7 +400,6 @@ impl RcIterator {
 
 /// Set the element type tag on an iterator chain.
 /// Called from codegen to enable RC tracking in the iterator pipeline.
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_iter_set_elem_tag(iter: *mut RcIterator, tag: u64) {
     RcIterator::set_elem_tag(iter, tag);
@@ -413,7 +410,6 @@ pub extern "C" fn vole_iter_set_elem_tag(iter: *mut RcIterator, tag: u64) {
 /// # Safety
 /// `iter` must be null or a valid pointer to an initialized `RcIterator`.
 #[unsafe(no_mangle)]
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_iter_set_produces_owned(iter: *mut RcIterator) {
     if !iter.is_null() {
         unsafe {
@@ -443,7 +439,6 @@ pub type StringCharsIterator = UnifiedIterator;
 
 /// Create a new array iterator
 /// Returns pointer to heap-allocated iterator
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_array_iter(array: *const RcArray) -> *mut RcIterator {
     // Increment ref count on array so it stays alive while iterator exists
@@ -465,7 +460,6 @@ pub extern "C" fn vole_array_iter(array: *const RcArray) -> *mut RcIterator {
 /// The boxed_interface has layout: [data_ptr, vtable_ptr].
 /// Returns pointer to heap-allocated iterator.
 #[unsafe(no_mangle)]
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_interface_iter(boxed_interface: *const u8) -> *mut RcIterator {
     let iter = RcIterator::new(
         IteratorKind::Interface,
@@ -487,7 +481,6 @@ pub extern "C" fn vole_interface_iter(boxed_interface: *const u8) -> *mut RcIter
 /// Used when the element type is known at compile time (e.g. vtable thunks for
 /// Iterator<string>).
 #[unsafe(no_mangle)]
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn vole_interface_iter_tagged(
     boxed_interface: *const u8,
     elem_tag: u64,
@@ -650,7 +643,6 @@ fn iterator_drop_sources(iter_ref: &UnifiedIterator) {
 /// Get next value from any iterator (array or map)
 /// Returns 1 and stores value in out_value if available
 /// Returns 0 if iterator exhausted (Done)
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_array_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
     if iter.is_null() {
@@ -770,7 +762,6 @@ pub extern "C" fn vole_array_iter_next(iter: *mut RcIterator, out_value: *mut i6
 /// The vtable has method pointers, with next() at slot 0.
 /// The next() wrapper returns a tagged union pointer.
 /// Union variants are sorted descending: Primitive(T) > Done, so tag 0 = value, tag 1 = Done.
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_interface_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
     if iter.is_null() {
@@ -899,7 +890,6 @@ fn iter_produces_owned(iter: *mut RcIterator) -> bool {
 /// `interface_iter_tagged`). Used by vtable dispatch where the extra tag
 /// parameter is not available in the interface signature.
 /// Frees the iterator after collecting.
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_iter_collect(iter: *mut RcIterator) -> *mut RcArray {
     let tag = if iter.is_null() {
@@ -916,7 +906,6 @@ pub extern "C" fn vole_iter_collect(iter: *mut RcIterator) -> *mut RcArray {
 /// Handles both "owned" values (from map/string_chars) and "borrowed" values (from array)
 /// by rc_inc-ing borrowed RC values so the collected array properly owns them.
 /// Frees the iterator after collecting.
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_iter_collect_tagged(iter: *mut RcIterator, elem_tag: u64) -> *mut RcArray {
     use crate::value::{TaggedValue, tag_needs_rc};
@@ -979,7 +968,6 @@ pub extern "C" fn vole_iter_collect_tagged(iter: *mut RcIterator, elem_tag: u64)
 /// Collect all remaining iterator values into a new array
 /// Returns pointer to newly allocated array (empty if iterator is null)
 /// Frees the iterator after collecting.
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_array_iter_collect(iter: *mut RcIterator) -> *mut RcArray {
     use crate::value::TaggedValue;
@@ -1022,7 +1010,6 @@ pub extern "C" fn vole_array_iter_collect(iter: *mut RcIterator) -> *mut RcArray
 
 /// Create a new map iterator wrapping any source iterator
 /// Returns pointer to heap-allocated iterator
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_map_iter(
     source: *mut RcIterator,
@@ -1040,7 +1027,6 @@ pub extern "C" fn vole_map_iter(
 /// Calls the source iterator's next, applies the transform function, returns result
 /// Returns 1 and stores transformed value in out_value if available
 /// Returns 0 if iterator exhausted (Done)
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_map_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
     if iter.is_null() {
@@ -1094,7 +1080,6 @@ pub extern "C" fn vole_map_iter_next(iter: *mut RcIterator, out_value: *mut i64)
 /// Collect all remaining map iterator values into a new array
 /// Returns pointer to newly allocated array
 /// Frees the iterator after collecting.
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_map_iter_collect(iter: *mut RcIterator) -> *mut RcArray {
     use crate::value::TaggedValue;
@@ -1138,7 +1123,6 @@ pub extern "C" fn vole_map_iter_collect(iter: *mut RcIterator) -> *mut RcArray {
 
 /// Create a new filter iterator wrapping any source iterator
 /// Returns pointer to heap-allocated iterator
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_filter_iter(
     source: *mut RcIterator,
@@ -1156,7 +1140,6 @@ pub extern "C" fn vole_filter_iter(
 /// Calls the source iterator's next, applies the predicate function, skips non-matching elements
 /// Returns 1 and stores value in out_value if a matching element is found
 /// Returns 0 if iterator exhausted (Done)
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_filter_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
     if iter.is_null() {
@@ -1213,7 +1196,6 @@ pub extern "C" fn vole_filter_iter_next(iter: *mut RcIterator, out_value: *mut i
 /// Collect all remaining filter iterator values into a new array
 /// Returns pointer to newly allocated array
 /// Frees the iterator after collecting.
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_filter_iter_collect(iter: *mut RcIterator) -> *mut RcArray {
     use crate::value::TaggedValue;
@@ -1280,7 +1262,6 @@ fn iter_produces_borrowed_rc(iter: *mut RcIterator) -> bool {
 /// Count the number of elements in any iterator
 /// Returns the count as i64
 /// Frees the iterator after counting.
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_iter_count(iter: *mut RcIterator) -> i64 {
     if iter.is_null() {
@@ -1312,7 +1293,6 @@ pub extern "C" fn vole_iter_count(iter: *mut RcIterator) -> i64 {
 /// Sum all elements in any iterator (assumes i64 elements)
 /// Returns the sum as i64
 /// Frees the iterator after summing.
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_iter_sum(iter: *mut RcIterator) -> i64 {
     if iter.is_null() {
@@ -1339,7 +1319,6 @@ pub extern "C" fn vole_iter_sum(iter: *mut RcIterator) -> i64 {
 /// Call a function for each element in any iterator
 /// The callback is a closure that takes one i64 argument and returns nothing
 /// Frees the iterator after iteration.
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_iter_for_each(iter: *mut RcIterator, callback: *const Closure) {
     if iter.is_null() || callback.is_null() {
@@ -1383,7 +1362,6 @@ pub extern "C" fn vole_iter_for_each(iter: *mut RcIterator, callback: *const Clo
 /// When the accumulator or element is an RC type, old values are properly decremented.
 /// Returns the final accumulated value.
 /// Frees the iterator after reduction.
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_iter_reduce_tagged(
     iter: *mut RcIterator,
@@ -1446,7 +1424,6 @@ pub extern "C" fn vole_iter_reduce_tagged(
 /// Takes initial value and a reducer closure (acc, value) -> new_acc
 /// Returns the final accumulated value
 /// Frees the iterator after reduction.
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_iter_reduce(
     iter: *mut RcIterator,
@@ -1469,7 +1446,6 @@ pub extern "C" fn vole_iter_reduce(
 /// Note: For T?, variants are sorted by debug string. I64 < Nil alphabetically,
 /// so tag 0 = I64 (value), tag 1 = Nil.
 /// Frees the iterator after getting the first element.
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_iter_first(iter: *mut RcIterator) -> *mut u8 {
     let layout = Layout::from_size_align(16, 8).expect("valid optional layout");
@@ -1516,7 +1492,6 @@ pub extern "C" fn vole_iter_first(iter: *mut RcIterator) -> *mut u8 {
 /// Consumes the entire iterator to find the last element.
 /// Layout: [tag:1][pad:7][payload:8] where tag 0 = value present (I64), tag 1 = nil
 /// Frees the iterator after getting the last element.
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_iter_last(iter: *mut RcIterator) -> *mut u8 {
     let layout = Layout::from_size_align(16, 8).expect("valid optional layout");
@@ -1579,7 +1554,6 @@ pub extern "C" fn vole_iter_last(iter: *mut RcIterator) -> *mut u8 {
 /// Get the nth element from any iterator (0-indexed), returns T? (optional)
 /// Layout: [tag:1][pad:7][payload:8] where tag 0 = value present (I64), tag 1 = nil
 /// Frees the iterator after getting the nth element.
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_iter_nth(iter: *mut RcIterator, n: i64) -> *mut u8 {
     let layout = Layout::from_size_align(16, 8).expect("valid optional layout");
@@ -1654,7 +1628,6 @@ pub extern "C" fn vole_iter_nth(iter: *mut RcIterator, n: i64) -> *mut u8 {
 
 /// Create a new take iterator wrapping any source iterator
 /// Returns pointer to heap-allocated iterator
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_take_iter(source: *mut RcIterator, count: i64) -> *mut RcIterator {
     RcIterator::new(
@@ -1671,7 +1644,6 @@ pub extern "C" fn vole_take_iter(source: *mut RcIterator, count: i64) -> *mut Rc
 /// Get next value from take iterator
 /// Returns 1 and stores value in out_value if available (and remaining > 0)
 /// Returns 0 if remaining is 0 or source iterator exhausted (Done)
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_take_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
     if iter.is_null() {
@@ -1710,7 +1682,6 @@ pub extern "C" fn vole_take_iter_next(iter: *mut RcIterator, out_value: *mut i64
 /// Collect all remaining take iterator values into a new array
 /// Returns pointer to newly allocated array
 /// Frees the iterator after collecting.
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_take_iter_collect(iter: *mut RcIterator) -> *mut RcArray {
     use crate::value::TaggedValue;
@@ -1752,7 +1723,6 @@ pub extern "C" fn vole_take_iter_collect(iter: *mut RcIterator) -> *mut RcArray 
 
 /// Create a new skip iterator wrapping any source iterator
 /// Returns pointer to heap-allocated iterator
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_skip_iter(source: *mut RcIterator, count: i64) -> *mut RcIterator {
     RcIterator::new(
@@ -1771,7 +1741,6 @@ pub extern "C" fn vole_skip_iter(source: *mut RcIterator, count: i64) -> *mut Rc
 /// On first call, skips skip_count elements, then returns remaining elements
 /// Returns 1 and stores value in out_value if available
 /// Returns 0 if iterator exhausted (Done)
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_skip_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
     if iter.is_null() {
@@ -1814,7 +1783,6 @@ pub extern "C" fn vole_skip_iter_next(iter: *mut RcIterator, out_value: *mut i64
 /// Collect all remaining skip iterator values into a new array
 /// Returns pointer to newly allocated array
 /// Frees the iterator after collecting.
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_skip_iter_collect(iter: *mut RcIterator) -> *mut RcArray {
     use crate::value::TaggedValue;
@@ -1858,7 +1826,6 @@ pub extern "C" fn vole_skip_iter_collect(iter: *mut RcIterator) -> *mut RcArray 
 /// Short-circuits on first match.
 /// Layout: [tag:1][pad:7][payload:8] where tag 0 = value present (I64), tag 1 = nil
 /// Frees the iterator after finding (or exhausting).
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_iter_find(iter: *mut RcIterator, predicate: *const Closure) -> *mut u8 {
     let layout = Layout::from_size_align(16, 8).expect("valid optional layout");
@@ -1923,7 +1890,6 @@ pub extern "C" fn vole_iter_find(iter: *mut RcIterator, predicate: *const Closur
 /// Check if any element matches a predicate, returns bool
 /// Short-circuits on first true.
 /// Frees the iterator after checking.
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_iter_any(iter: *mut RcIterator, predicate: *const Closure) -> i8 {
     if iter.is_null() || predicate.is_null() {
@@ -1965,7 +1931,6 @@ pub extern "C" fn vole_iter_any(iter: *mut RcIterator, predicate: *const Closure
 /// Check if all elements match a predicate, returns bool
 /// Short-circuits on first false.
 /// Frees the iterator after checking.
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_iter_all(iter: *mut RcIterator, predicate: *const Closure) -> i8 {
     if iter.is_null() || predicate.is_null() {
@@ -2012,7 +1977,6 @@ pub extern "C" fn vole_iter_all(iter: *mut RcIterator, predicate: *const Closure
 
 /// Create a new chain iterator that yields elements from first, then second
 /// Returns pointer to heap-allocated iterator
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_chain_iter(
     first: *mut RcIterator,
@@ -2034,7 +1998,6 @@ pub extern "C" fn vole_chain_iter(
 /// First exhausts the first iterator, then yields from the second
 /// Returns 1 and stores value in out_value if available
 /// Returns 0 if both iterators exhausted (Done)
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_chain_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
     if iter.is_null() {
@@ -2067,7 +2030,6 @@ pub extern "C" fn vole_chain_iter_next(iter: *mut RcIterator, out_value: *mut i6
 /// Collect all remaining chain iterator values into a new array
 /// Returns pointer to newly allocated array
 /// Frees the iterator after collecting.
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_chain_iter_collect(iter: *mut RcIterator) -> *mut RcArray {
     use crate::value::TaggedValue;
@@ -2109,7 +2071,6 @@ pub extern "C" fn vole_chain_iter_collect(iter: *mut RcIterator) -> *mut RcArray
 
 /// Create a new flatten iterator wrapping any source iterator that yields arrays
 /// Returns pointer to heap-allocated iterator
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_flatten_iter(source: *mut RcIterator) -> *mut RcIterator {
     RcIterator::new(
@@ -2127,7 +2088,6 @@ pub extern "C" fn vole_flatten_iter(source: *mut RcIterator) -> *mut RcIterator 
 /// Yields elements from each inner array until all are exhausted
 /// Returns 1 and stores value in out_value if available
 /// Returns 0 if iterator exhausted (Done)
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_flatten_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
     if iter.is_null() {
@@ -2185,7 +2145,6 @@ pub extern "C" fn vole_flatten_iter_next(iter: *mut RcIterator, out_value: *mut 
 /// Collect all remaining flatten iterator values into a new array
 /// Returns pointer to newly allocated array
 /// Frees the iterator after collecting.
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_flatten_iter_collect(iter: *mut RcIterator) -> *mut RcArray {
     use crate::value::TaggedValue;
@@ -2228,7 +2187,6 @@ pub extern "C" fn vole_flatten_iter_collect(iter: *mut RcIterator) -> *mut RcArr
 /// Create a new flat_map iterator wrapping any source iterator
 /// Takes a transform function that returns an array
 /// Returns pointer to heap-allocated iterator
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_flat_map_iter(
     source: *mut RcIterator,
@@ -2250,7 +2208,6 @@ pub extern "C" fn vole_flat_map_iter(
 /// Applies transform to each source element, then yields elements from resulting arrays
 /// Returns 1 and stores value in out_value if available
 /// Returns 0 if iterator exhausted (Done)
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_flat_map_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
     if iter.is_null() {
@@ -2309,7 +2266,6 @@ pub extern "C" fn vole_flat_map_iter_next(iter: *mut RcIterator, out_value: *mut
 /// Collect all remaining flat_map iterator values into a new array
 /// Returns pointer to newly allocated array
 /// Frees the iterator after collecting.
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_flat_map_iter_collect(iter: *mut RcIterator) -> *mut RcArray {
     use crate::value::TaggedValue;
@@ -2352,7 +2308,6 @@ pub extern "C" fn vole_flat_map_iter_collect(iter: *mut RcIterator) -> *mut RcAr
 /// Reverse iterator - collects all elements, reverses them, returns new array iterator
 /// This is an eager operation that consumes the entire source iterator.
 /// Frees the source iterator after collecting.
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_reverse_iter(iter: *mut RcIterator) -> *mut RcIterator {
     use crate::value::TaggedValue;
@@ -2403,7 +2358,6 @@ pub extern "C" fn vole_reverse_iter(iter: *mut RcIterator) -> *mut RcIterator {
 /// This is an eager operation that consumes the entire source iterator.
 /// Sorts i64 values in ascending order.
 /// Frees the source iterator after collecting.
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_sorted_iter(iter: *mut RcIterator) -> *mut RcIterator {
     use crate::value::TaggedValue;
@@ -2456,7 +2410,6 @@ pub extern "C" fn vole_sorted_iter(iter: *mut RcIterator) -> *mut RcIterator {
 /// Create a new unique iterator wrapping any source iterator
 /// Filters consecutive duplicates (like Unix uniq)
 /// Returns pointer to heap-allocated iterator
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_unique_iter(source: *mut RcIterator) -> *mut RcIterator {
     RcIterator::new(
@@ -2475,7 +2428,6 @@ pub extern "C" fn vole_unique_iter(source: *mut RcIterator) -> *mut RcIterator {
 /// Skips consecutive duplicate values
 /// Returns 1 and stores value in out_value if available
 /// Returns 0 if iterator exhausted (Done)
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_unique_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
     if iter.is_null() {
@@ -2526,7 +2478,6 @@ pub extern "C" fn vole_unique_iter_next(iter: *mut RcIterator, out_value: *mut i
 /// First collects all elements, then yields non-overlapping chunks of the specified size.
 /// The last chunk may be smaller than the specified size.
 /// Returns pointer to heap-allocated iterator
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_chunks_iter(source: *mut RcIterator, chunk_size: i64) -> *mut RcIterator {
     use crate::value::TaggedValue;
@@ -2573,7 +2524,6 @@ pub extern "C" fn vole_chunks_iter(source: *mut RcIterator, chunk_size: i64) -> 
 /// Get next chunk from chunks iterator
 /// Returns 1 and stores array pointer in out_value if available
 /// Returns 0 if iterator exhausted (Done)
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_chunks_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
     use crate::value::TaggedValue;
@@ -2620,7 +2570,6 @@ pub extern "C" fn vole_chunks_iter_next(iter: *mut RcIterator, out_value: *mut i
 /// Collect all remaining chunks into a new array of arrays
 /// Returns pointer to newly allocated array
 /// Frees the iterator after collecting.
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_chunks_iter_collect(iter: *mut RcIterator) -> *mut RcArray {
     use crate::value::TaggedValue;
@@ -2665,7 +2614,6 @@ pub extern "C" fn vole_chunks_iter_collect(iter: *mut RcIterator) -> *mut RcArra
 /// First collects all elements, then yields overlapping windows of the specified size.
 /// Yields nothing if there are fewer elements than window_size.
 /// Returns pointer to heap-allocated iterator
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_windows_iter(source: *mut RcIterator, window_size: i64) -> *mut RcIterator {
     use crate::value::TaggedValue;
@@ -2712,7 +2660,6 @@ pub extern "C" fn vole_windows_iter(source: *mut RcIterator, window_size: i64) -
 /// Get next window from windows iterator
 /// Returns 1 and stores array pointer in out_value if available
 /// Returns 0 if iterator exhausted (Done)
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_windows_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
     use crate::value::TaggedValue;
@@ -2759,7 +2706,6 @@ pub extern "C" fn vole_windows_iter_next(iter: *mut RcIterator, out_value: *mut 
 /// Collect all remaining windows into a new array of arrays
 /// Returns pointer to newly allocated array
 /// Frees the iterator after collecting.
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_windows_iter_collect(iter: *mut RcIterator) -> *mut RcArray {
     use crate::value::TaggedValue;
@@ -2803,7 +2749,6 @@ pub extern "C" fn vole_windows_iter_collect(iter: *mut RcIterator) -> *mut RcArr
 /// Create a new repeat iterator that yields the same value forever
 /// WARNING: This is an infinite iterator - MUST use with take() or similar
 /// Returns pointer to heap-allocated iterator
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_repeat_iter(value: i64) -> *mut RcIterator {
     RcIterator::new(
@@ -2816,7 +2761,6 @@ pub extern "C" fn vole_repeat_iter(value: i64) -> *mut RcIterator {
 
 /// Get next value from repeat iterator
 /// Always returns 1 with the same value (infinite iterator)
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_repeat_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
     if iter.is_null() {
@@ -2840,7 +2784,6 @@ pub extern "C" fn vole_repeat_iter_next(iter: *mut RcIterator, out_value: *mut i
 
 /// Create a new once iterator that yields exactly one value
 /// Returns pointer to heap-allocated iterator
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_once_iter(value: i64) -> *mut RcIterator {
     RcIterator::new(
@@ -2856,7 +2799,6 @@ pub extern "C" fn vole_once_iter(value: i64) -> *mut RcIterator {
 
 /// Get next value from once iterator
 /// Returns 1 with the value on first call, 0 on subsequent calls
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_once_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
     if iter.is_null() {
@@ -2886,7 +2828,6 @@ pub extern "C" fn vole_once_iter_next(iter: *mut RcIterator, out_value: *mut i64
 
 /// Create a new empty iterator that yields nothing
 /// Returns pointer to heap-allocated iterator
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_empty_iter() -> *mut RcIterator {
     RcIterator::new(
@@ -2907,7 +2848,6 @@ pub extern "C" fn vole_empty_iter() -> *mut RcIterator {
 /// Create a new from_fn iterator that calls a generator function repeatedly
 /// The generator should return T? - when it returns nil, iteration ends
 /// Returns pointer to heap-allocated iterator
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_from_fn_iter(generator: *const Closure) -> *mut RcIterator {
     RcIterator::new(
@@ -2920,7 +2860,6 @@ pub extern "C" fn vole_from_fn_iter(generator: *const Closure) -> *mut RcIterato
 
 /// Get next value from from_fn iterator
 /// Calls the generator function - returns 1 with value if not nil, 0 if nil
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_from_fn_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
     if iter.is_null() {
@@ -2987,7 +2926,6 @@ pub extern "C" fn vole_range_iter(start: i64, end: i64) -> *mut RcIterator {
 
 /// Get next value from range iterator
 /// Returns 1 with the value if current < end, 0 if done
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_range_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
     if iter.is_null() {
@@ -3019,7 +2957,6 @@ pub extern "C" fn vole_range_iter_next(iter: *mut RcIterator, out_value: *mut i6
 
 /// Create a new string chars iterator that yields each unicode character as a string
 /// Returns pointer to heap-allocated iterator
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_string_chars_iter(string: *const RcString) -> *mut RcIterator {
     // Increment ref count on string so it stays alive while iterator exists
@@ -3044,7 +2981,6 @@ pub extern "C" fn vole_string_chars_iter(string: *const RcString) -> *mut RcIter
 /// Get next character from string chars iterator
 /// Returns 1 and stores the character string pointer in out_value if available
 /// Returns 0 if iterator exhausted (Done)
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_string_chars_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
     if iter.is_null() {
@@ -3108,7 +3044,6 @@ pub extern "C" fn vole_string_chars_iter_next(iter: *mut RcIterator, out_value: 
 
 /// Create a new enumerate iterator that wraps any source iterator and yields (index, value) tuples.
 /// Returns pointer to heap-allocated iterator
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_enumerate_iter(source: *mut RcIterator) -> *mut RcIterator {
     RcIterator::new(
@@ -3123,7 +3058,6 @@ pub extern "C" fn vole_enumerate_iter(source: *mut RcIterator) -> *mut RcIterato
 /// Returns 1 and stores tuple pointer in out_value if available.
 /// Returns 0 if iterator exhausted (Done).
 /// The tuple layout is: [index:i64][value:i64] (16 bytes total, 8-byte aligned)
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_enumerate_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
     if iter.is_null() {
@@ -3175,7 +3109,6 @@ pub extern "C" fn vole_enumerate_iter_next(iter: *mut RcIterator, out_value: *mu
 /// Create a new zip iterator that combines two iterators.
 /// Stops when either iterator is exhausted.
 /// Returns pointer to heap-allocated iterator
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_zip_iter(
     first: *mut RcIterator,
@@ -3193,7 +3126,6 @@ pub extern "C" fn vole_zip_iter(
 /// Returns 1 and stores tuple pointer in out_value if both iterators have values.
 /// Returns 0 if either iterator is exhausted (Done).
 /// The tuple layout is: [first:i64][second:i64] (16 bytes total, 8-byte aligned)
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_zip_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
     if iter.is_null() {
@@ -3249,7 +3181,6 @@ pub extern "C" fn vole_zip_iter_next(iter: *mut RcIterator, out_value: *mut i64)
 
 /// Create a new string split iterator that yields substrings split by delimiter
 /// Returns pointer to heap-allocated iterator
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_string_split_iter(
     string: *const RcString,
@@ -3282,7 +3213,6 @@ pub extern "C" fn vole_string_split_iter(
 /// Get next substring from string split iterator
 /// Returns 1 and stores the substring pointer in out_value if available
 /// Returns 0 if iterator exhausted (Done)
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_string_split_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
     if iter.is_null() {
@@ -3351,7 +3281,6 @@ pub extern "C" fn vole_string_split_iter_next(iter: *mut RcIterator, out_value: 
 
 /// Create a new string lines iterator that yields lines (split by \n or \r\n)
 /// Returns pointer to heap-allocated iterator
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_string_lines_iter(string: *const RcString) -> *mut RcIterator {
     // Increment ref count on string so it stays alive while iterator exists
@@ -3377,7 +3306,6 @@ pub extern "C" fn vole_string_lines_iter(string: *const RcString) -> *mut RcIter
 /// Get next line from string lines iterator
 /// Returns 1 and stores the line pointer in out_value if available
 /// Returns 0 if iterator exhausted (Done)
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_string_lines_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
     if iter.is_null() {
@@ -3455,7 +3383,6 @@ pub extern "C" fn vole_string_lines_iter_next(iter: *mut RcIterator, out_value: 
 
 /// Create a new string codepoints iterator that yields unicode codepoints as i32
 /// Returns pointer to heap-allocated iterator
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_string_codepoints_iter(string: *const RcString) -> *mut RcIterator {
     // Increment ref count on string so it stays alive while iterator exists
@@ -3479,7 +3406,6 @@ pub extern "C" fn vole_string_codepoints_iter(string: *const RcString) -> *mut R
 /// Get next codepoint from string codepoints iterator
 /// Returns 1 and stores the codepoint (as i32) in out_value if available
 /// Returns 0 if iterator exhausted (Done)
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_string_codepoints_iter_next(
     iter: *mut RcIterator,

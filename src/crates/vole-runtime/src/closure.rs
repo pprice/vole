@@ -252,7 +252,6 @@ unsafe extern "C" fn closure_drop(ptr: *mut u8) {
 // ensuring pointer validity.
 
 /// Allocate a new closure with space for captures
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_closure_alloc(func_ptr: *const u8, num_captures: usize) -> *mut Closure {
     // Safety: Called from JIT code which ensures func_ptr validity
@@ -260,7 +259,6 @@ pub extern "C" fn vole_closure_alloc(func_ptr: *const u8, num_captures: usize) -
 }
 
 /// Get capture at index
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_closure_get_capture(closure: *const Closure, index: usize) -> *mut u8 {
     // Safety: Called from JIT code which ensures pointer validity and index bounds
@@ -268,7 +266,6 @@ pub extern "C" fn vole_closure_get_capture(closure: *const Closure, index: usize
 }
 
 /// Set capture at index
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_closure_set_capture(closure: *mut Closure, index: usize, ptr: *mut u8) {
     // Safety: Called from JIT code which ensures pointer validity and index bounds
@@ -276,7 +273,6 @@ pub extern "C" fn vole_closure_set_capture(closure: *mut Closure, index: usize, 
 }
 
 /// Set capture kind at index (0=Value, 1=Rc)
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_closure_set_capture_kind(closure: *mut Closure, index: usize, kind: u8) {
     // Safety: Called from JIT code which ensures pointer validity and index bounds
@@ -284,7 +280,6 @@ pub extern "C" fn vole_closure_set_capture_kind(closure: *mut Closure, index: us
 }
 
 /// Get the function pointer from a closure
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_closure_get_func(closure: *const Closure) -> *const u8 {
     // Safety: Called from JIT code which ensures pointer validity
@@ -292,7 +287,6 @@ pub extern "C" fn vole_closure_get_func(closure: *const Closure) -> *const u8 {
 }
 
 /// Free a closure (decrements refcount; cleanup via closure_drop when zero)
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_closure_free(closure: *mut Closure) {
     // Safety: Called from JIT code which ensures pointer validity
@@ -315,7 +309,6 @@ pub extern "C" fn vole_heap_alloc(size: usize) -> *mut u8 {
 }
 
 /// Free heap-allocated memory
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_heap_free(ptr: *mut u8, size: usize) {
     use std::alloc::{Layout, dealloc};

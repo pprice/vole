@@ -1,4 +1,16 @@
 //! Vole runtime: values, builtins, and standard library support.
+//!
+//! # Safety: Raw Pointer Arguments in FFI Functions
+//!
+//! This crate provides FFI functions called by JIT-compiled Vole code. These functions
+//! receive raw pointers that are always valid when called through the Vole runtime because:
+//! - The JIT compiler only passes pointers to live, properly-allocated Vole values
+//! - Reference counting ensures objects remain valid for their lifetime
+//! - The type system prevents null or dangling pointers from reaching runtime functions
+//!
+//! We allow `clippy::not_unsafe_ptr_arg_deref` crate-wide since marking every FFI function
+//! as `unsafe` would add noise without improving safety (callers are generated code, not Rust).
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
 pub mod alloc_track;
 pub mod array;
 pub mod assert;

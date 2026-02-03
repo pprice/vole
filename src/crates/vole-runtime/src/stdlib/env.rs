@@ -120,7 +120,6 @@ pub extern "C" fn env_args() -> *mut RcArray {
 
 /// Get environment variable by name
 /// Returns a boxed optional: tag at offset 0 (0=present, 1=nil), value at offset 8
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn env_get(name: *const RcString) -> *mut u8 {
     // Allocate boxed optional (16 bytes: 8 byte tag + 8 byte value)

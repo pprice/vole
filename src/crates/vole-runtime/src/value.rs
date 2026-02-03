@@ -45,7 +45,6 @@ impl RcHeader {
 ///
 /// # Safety
 /// `ptr` must be null or point to a valid allocation starting with an `RcHeader`.
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn rc_inc(ptr: *mut u8) {
     if ptr.is_null() {
@@ -65,7 +64,6 @@ pub extern "C" fn rc_inc(ptr: *mut u8) {
 ///
 /// # Safety
 /// `ptr` must be null or point to a valid allocation starting with an `RcHeader`.
-#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "C" fn rc_dec(ptr: *mut u8) {
     if ptr.is_null() {
