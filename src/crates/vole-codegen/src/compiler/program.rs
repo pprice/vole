@@ -9,7 +9,7 @@ use super::common::{
     DefaultReturn, FunctionCompileConfig, compile_function_inner_with_params,
     finalize_function_body,
 };
-use super::{Compiler, TestInfo};
+use super::{Compiler, DeclareMode, TestInfo};
 
 use crate::FunctionKey;
 use crate::context::Cg;
@@ -179,25 +179,8 @@ impl Compiler<'_> {
                     if !func.type_params.is_empty() {
                         continue;
                     }
-                    // Get FunctionId and build signature from pre-resolved types
-                    let program_module = self.program_module();
-                    let Some(semantic_func_id) =
-                        self.query().function_id(program_module, func.name)
-                    else {
-                        continue; // Skip if function not registered (shouldn't happen)
-                    };
-                    let sig = self.build_signature_for_function(semantic_func_id);
-                    let (func_key, display_name) = self.main_function_key_and_name(func.name);
-                    let jit_func_id = self.jit.declare_function(&display_name, &sig);
-                    self.func_registry.set_func_id(func_key, jit_func_id);
-                    // Record return type for use in call expressions (TypeId-native)
-                    let return_type_id = self
-                        .query()
-                        .registry()
-                        .get_function(semantic_func_id)
-                        .signature
-                        .return_type_id;
-                    self.func_registry.set_return_type(func_key, return_type_id);
+                    // Declare function using helper (skips if not registered)
+                    self.declare_main_function(func.name);
                 }
                 Decl::Tests(_) if self.skip_tests => {}
                 Decl::Tests(tests_decl) => {
@@ -375,42 +358,12 @@ impl Compiler<'_> {
                     .expect("INTERNAL: module function: name_id not registered");
 
                     // Check for implicit generics (structural type params)
-                    let has_implicit_generic_info = self
-                        .analyzed
-                        .entity_registry()
-                        .function_by_name(name_id)
-                        .map(|func_id| {
-                            self.analyzed
-                                .entity_registry()
-                                .get_function(func_id)
-                                .generic_info
-                                .is_some()
-                        })
-                        .unwrap_or(false);
-                    if has_implicit_generic_info {
+                    if self.has_implicit_generic_info(name_id) {
                         continue;
                     }
 
                     let display_name = self.query().display_name(name_id);
-
-                    // Get FunctionId and build signature from pre-resolved types
-                    let Some(semantic_func_id) = self.query().registry().function_by_name(name_id)
-                    else {
-                        continue; // Skip if function not registered
-                    };
-                    let sig = self.build_signature_for_function(semantic_func_id);
-                    let jit_func_id = self.jit.declare_function(&display_name, &sig);
-                    let func_key = self.func_registry.intern_name_id(name_id);
-                    self.func_registry.set_func_id(func_key, jit_func_id);
-
-                    // Record return type from pre-resolved signature
-                    let return_type_id = self
-                        .query()
-                        .registry()
-                        .get_function(semantic_func_id)
-                        .signature
-                        .return_type_id;
-                    self.func_registry.set_return_type(func_key, return_type_id);
+                    self.declare_function_by_name_id(name_id, &display_name, DeclareMode::Declare);
                 }
             }
 
@@ -585,27 +538,9 @@ impl Compiler<'_> {
                         func.name,
                     )
                     .expect("INTERNAL: module function: name_id not registered");
+
                     let display_name = self.query().display_name(name_id);
-
-                    // Get FunctionId and build signature from pre-resolved types
-                    let Some(semantic_func_id) = self.query().registry().function_by_name(name_id)
-                    else {
-                        continue; // Skip if function not registered
-                    };
-                    // Create signature and IMPORT (not declare) the function
-                    let sig = self.build_signature_for_function(semantic_func_id);
-                    let jit_func_id = self.jit.import_function(&display_name, &sig);
-                    let func_key = self.func_registry.intern_name_id(name_id);
-                    self.func_registry.set_func_id(func_key, jit_func_id);
-
-                    // Record return type from pre-resolved signature
-                    let return_type_id = self
-                        .query()
-                        .registry()
-                        .get_function(semantic_func_id)
-                        .signature
-                        .return_type_id;
-                    self.func_registry.set_return_type(func_key, return_type_id);
+                    self.declare_function_by_name_id(name_id, &display_name, DeclareMode::Import);
                 }
             }
 
@@ -937,7 +872,6 @@ impl Compiler<'_> {
         _program: &Program,
         test_count: &mut usize,
     ) {
-        let program_module = self.program_module();
         let interner = &self.analyzed.interner;
 
         // Look up the virtual module ID for scoped type declarations
@@ -951,22 +885,7 @@ impl Compiler<'_> {
                         continue;
                     }
                     // Scoped functions are registered under the program module by sema
-                    let Some(semantic_func_id) =
-                        self.query().function_id(program_module, func.name)
-                    else {
-                        continue;
-                    };
-                    let sig = self.build_signature_for_function(semantic_func_id);
-                    let (func_key, display_name) = self.main_function_key_and_name(func.name);
-                    let jit_func_id = self.jit.declare_function(&display_name, &sig);
-                    self.func_registry.set_func_id(func_key, jit_func_id);
-                    let return_type_id = self
-                        .query()
-                        .registry()
-                        .get_function(semantic_func_id)
-                        .signature
-                        .return_type_id;
-                    self.func_registry.set_return_type(func_key, return_type_id);
+                    self.declare_main_function(func.name);
                 }
                 Decl::Class(class) => {
                     // Scoped classes are registered under the virtual module
@@ -1076,30 +995,13 @@ impl Compiler<'_> {
         // Compile module functions first (prelude, imports) so module variables are available
         self.compile_module_functions()?;
 
-        let program_module = self.program_module();
         // First pass: declare all functions so they can reference each other
         let mut test_count = 0usize;
         for decl in &program.declarations {
             match decl {
                 Decl::Function(func) => {
-                    // Get FunctionId and build signature from pre-resolved types
-                    let Some(semantic_func_id) =
-                        self.query().function_id(program_module, func.name)
-                    else {
-                        continue; // Skip if function not registered
-                    };
-                    let sig = self.build_signature_for_function(semantic_func_id);
-                    let (func_key, display_name) = self.main_function_key_and_name(func.name);
-                    let jit_func_id = self.jit.declare_function(&display_name, &sig);
-                    self.func_registry.set_func_id(func_key, jit_func_id);
-                    // Record return type from pre-resolved signature
-                    let return_type_id = self
-                        .query()
-                        .registry()
-                        .get_function(semantic_func_id)
-                        .signature
-                        .return_type_id;
-                    self.func_registry.set_return_type(func_key, return_type_id);
+                    // Declare function using helper (skips if not registered)
+                    self.declare_main_function(func.name);
                 }
                 Decl::Tests(tests_decl) if include_tests => {
                     let i64_type_id = self.analyzed.type_arena().primitives.i64;

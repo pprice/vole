@@ -41,6 +41,15 @@ pub use signatures::SelfParam;
 
 use std::rc::Rc;
 
+/// Mode for function declaration in JIT.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DeclareMode {
+    /// Declare function for local compilation (Linkage::Export)
+    Declare,
+    /// Import pre-compiled function (Linkage::Import)
+    Import,
+}
+
 use rustc_hash::FxHashMap;
 
 use cranelift::prelude::types as clif_types;
@@ -153,6 +162,24 @@ impl<'a> Compiler<'a> {
         )
     }
 
+    /// Check if a function has implicit generic info (structural type params).
+    ///
+    /// Functions with implicit generics are templates and should be skipped during
+    /// normal compilation - they're compiled via monomorphized instances instead.
+    fn has_implicit_generic_info(&self, name_id: NameId) -> bool {
+        self.analyzed
+            .entity_registry()
+            .function_by_name(name_id)
+            .map(|func_id| {
+                self.analyzed
+                    .entity_registry()
+                    .get_function(func_id)
+                    .generic_info
+                    .is_some()
+            })
+            .unwrap_or(false)
+    }
+
     /// Check if a function (by NameId) is an external function.
     ///
     /// External functions are registered by their short name in the implement registry.
@@ -214,5 +241,69 @@ impl<'a> Compiler<'a> {
         self.jit.define_function(func_id)?;
         self.jit.clear();
         Ok(())
+    }
+
+    /// Declare or import a function given its NameId.
+    ///
+    /// This helper consolidates the common pattern of:
+    /// 1. Looking up the semantic FunctionId from NameId
+    /// 2. Building the Cranelift signature
+    /// 3. Declaring/importing the function in the JIT
+    /// 4. Registering the func_id and return_type in func_registry
+    ///
+    /// Returns `Some(func_key)` if successful, `None` if the function wasn't found
+    /// in the entity registry.
+    fn declare_function_by_name_id(
+        &mut self,
+        name_id: NameId,
+        display_name: &str,
+        mode: DeclareMode,
+    ) -> Option<FunctionKey> {
+        // Look up semantic FunctionId from NameId
+        let semantic_func_id = self.query().registry().function_by_name(name_id)?;
+
+        // Build signature from pre-resolved types
+        let sig = self.build_signature_for_function(semantic_func_id);
+
+        // Declare or import the function
+        let jit_func_id = match mode {
+            DeclareMode::Declare => self.jit.declare_function(display_name, &sig),
+            DeclareMode::Import => self.jit.import_function(display_name, &sig),
+        };
+
+        // Intern the function key and register func_id
+        let func_key = self.func_registry.intern_name_id(name_id);
+        self.func_registry.set_func_id(func_key, jit_func_id);
+
+        // Record return type from pre-resolved signature
+        let return_type_id = self
+            .query()
+            .registry()
+            .get_function(semantic_func_id)
+            .signature
+            .return_type_id;
+        self.func_registry.set_return_type(func_key, return_type_id);
+
+        Some(func_key)
+    }
+
+    /// Declare a main program function given its Symbol.
+    ///
+    /// This is a convenience wrapper for main program functions that:
+    /// 1. Looks up the NameId from the Symbol in the program module
+    /// 2. Delegates to `declare_function_by_name_id`
+    ///
+    /// Returns `None` if the function wasn't found.
+    fn declare_main_function(&mut self, name: Symbol) -> Option<FunctionKey> {
+        // Get name_id and display_name
+        let (name_id, display_name) = {
+            let query = self.query();
+            let module_id = self.program_module();
+            let name_id = query.try_function_name_id(module_id, name)?;
+            let display_name = query.resolve_symbol(name).to_string();
+            (name_id, display_name)
+        };
+
+        self.declare_function_by_name_id(name_id, &display_name, DeclareMode::Declare)
     }
 }
