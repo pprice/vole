@@ -618,9 +618,9 @@ impl Cg<'_, '_, '_> {
         let param_type_ids: Vec<TypeId> = {
             let module_id = self.current_module().unwrap_or(self.env.analyzed.module_id);
             let name_id = self.query().try_function_name_id(module_id, callee_sym);
-            let func_id_sema = name_id.and_then(|id| self.query().registry().function_by_name(id));
+            let func_id_sema = name_id.and_then(|id| self.registry().function_by_name(id));
             if let Some(fid) = func_id_sema {
-                let func_def = self.query().registry().get_function(fid);
+                let func_def = self.registry().get_function(fid);
                 func_def.signature.params_id.iter().copied().collect()
             } else {
                 Vec::new()
@@ -774,9 +774,9 @@ impl Cg<'_, '_, '_> {
 
         // Get parameter TypeIds from the function definition for union coercion
         let param_type_ids: Vec<TypeId> = {
-            let func_id_sema = self.query().registry().function_by_name(name_id);
+            let func_id_sema = self.registry().function_by_name(name_id);
             if let Some(fid) = func_id_sema {
-                let func_def = self.query().registry().get_function(fid);
+                let func_def = self.registry().get_function(fid);
                 func_def.signature.params_id.iter().copied().collect()
             } else {
                 Vec::new()
@@ -888,13 +888,13 @@ impl Cg<'_, '_, '_> {
         start_index: usize,
         _expected_types: &[Type],
     ) -> CodegenResult<(Vec<Value>, Vec<CompiledValue>)> {
-        let func_id = self.query().registry().function_by_name(name_id);
+        let func_id = self.registry().function_by_name(name_id);
         let Some(func_id) = func_id else {
             return Ok((Vec::new(), Vec::new()));
         };
 
         let (default_ptrs, param_type_ids): (Vec<Option<*const Expr>>, Vec<TypeId>) = {
-            let func_def = self.query().registry().get_function(func_id);
+            let func_def = self.registry().get_function(func_id);
             let ptrs = func_def
                 .param_defaults
                 .iter()
@@ -927,7 +927,7 @@ impl Cg<'_, '_, '_> {
         // Get the function ID
         let func_id = {
             let name_id = self.query().try_function_name_id(module_id, callee_sym);
-            name_id.and_then(|id| self.query().registry().function_by_name(id))
+            name_id.and_then(|id| self.registry().function_by_name(id))
         };
 
         let Some(func_id) = func_id else {
@@ -936,7 +936,7 @@ impl Cg<'_, '_, '_> {
 
         // Get raw pointers to default expressions and param TypeIds from FunctionDef.
         let (default_ptrs, param_type_ids): (Vec<Option<*const Expr>>, Vec<TypeId>) = {
-            let func_def = self.query().registry().get_function(func_id);
+            let func_def = self.registry().get_function(func_id);
             let ptrs = func_def
                 .param_defaults
                 .iter()
@@ -980,7 +980,7 @@ impl Cg<'_, '_, '_> {
         // Get the function ID from EntityRegistry
         let func_id = {
             let name_id = self.query().try_function_name_id(module_id, callee_sym);
-            name_id.and_then(|id| self.query().registry().function_by_name(id))
+            name_id.and_then(|id| self.registry().function_by_name(id))
         };
 
         let Some(func_id) = func_id else {
@@ -991,7 +991,7 @@ impl Cg<'_, '_, '_> {
         // These point to data in EntityRegistry which lives for the duration of AnalyzedProgram.
         // We use raw pointers to work around the borrow checker since self.expr() needs &mut self.
         let default_ptrs: Vec<Option<*const Expr>> = {
-            let func_def = self.query().registry().get_function(func_id);
+            let func_def = self.registry().get_function(func_id);
             func_def
                 .param_defaults
                 .iter()

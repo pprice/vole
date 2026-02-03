@@ -283,7 +283,7 @@ impl Compiler<'_> {
             match &impl_block.target_type {
                 TypeExpr::Primitive(p) => {
                     let prim_type = vole_sema::PrimitiveType::from_ast(*p);
-                    let type_id = self.analyzed.type_arena().primitive(prim_type);
+                    let type_id = self.arena().primitive(prim_type);
                     let impl_id = self.impl_type_id_from_type_id(type_id);
                     (type_id, impl_id)
                 }
@@ -467,7 +467,7 @@ impl Compiler<'_> {
             match &impl_block.target_type {
                 TypeExpr::Primitive(p) => {
                     let prim_type = vole_sema::PrimitiveType::from_ast(*p);
-                    let type_id = self.analyzed.type_arena().primitive(prim_type);
+                    let type_id = self.arena().primitive(prim_type);
                     let impl_id = self.impl_type_id_from_type_id(type_id);
                     (type_id, impl_id)
                 }
@@ -703,7 +703,7 @@ impl Compiler<'_> {
         let self_type_id = match &impl_block.target_type {
             TypeExpr::Primitive(p) => {
                 let prim_type = vole_sema::PrimitiveType::from_ast(*p);
-                self.analyzed.type_arena().primitive(prim_type)
+                self.arena().primitive(prim_type)
             }
             TypeExpr::Handle => TypeId::HANDLE,
             TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => {
@@ -791,7 +791,7 @@ impl Compiler<'_> {
         let self_type_id = match &impl_block.target_type {
             TypeExpr::Primitive(p) => {
                 let prim_type = vole_sema::PrimitiveType::from_ast(*p);
-                self.analyzed.type_arena().primitive(prim_type)
+                self.arena().primitive(prim_type)
             }
             TypeExpr::Handle => TypeId::HANDLE,
             TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => {
@@ -906,11 +906,11 @@ impl Compiler<'_> {
         self.jit.ctx.func.signature = sig;
 
         let self_cranelift_type =
-            type_id_to_cranelift(self_type_id, self.analyzed.type_arena(), self.pointer_type);
+            type_id_to_cranelift(self_type_id, self.arena(), self.pointer_type);
 
         let params: Vec<(Symbol, TypeId, types::Type)> = {
             let method_def = self.query().get_method(semantic_method_id);
-            let arena = self.analyzed.type_arena();
+            let arena = self.arena();
             let (param_type_ids, _, _) = arena
                 .unwrap_function(method_def.signature_id)
                 .expect("INTERNAL: method compilation: missing function signature");
@@ -930,7 +930,7 @@ impl Compiler<'_> {
 
         let method_return_type_id = {
             let method_def = self.query().get_method(semantic_method_id);
-            let arena = self.analyzed.type_arena();
+            let arena = self.arena();
             arena
                 .unwrap_function(method_def.signature_id)
                 .map(|(_, ret, _)| ret)
@@ -1004,7 +1004,7 @@ impl Compiler<'_> {
             });
 
             // Look up the registered function via EntityRegistry full_name_id
-            let method_def = self.analyzed.entity_registry().get_method(method_id);
+            let method_def = self.registry().get_method(method_id);
             let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
             let jit_func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
                 let method_name_str = interner.resolve(method.name);
@@ -1016,7 +1016,7 @@ impl Compiler<'_> {
 
             // Use pre-resolved signature from MethodDef
             let method_def = self.query().get_method(method_id);
-            let arena = self.analyzed.type_arena();
+            let arena = self.arena();
             let (params, ret, _) = arena
                 .unwrap_function(method_def.signature_id)
                 .expect("INTERNAL: method compilation: missing function signature");
@@ -1115,13 +1115,13 @@ impl Compiler<'_> {
 
         // Get the Cranelift type for self (using TypeId)
         let self_cranelift_type =
-            type_id_to_cranelift(self_type_id, self.analyzed.type_arena(), self.pointer_type);
+            type_id_to_cranelift(self_type_id, self.arena(), self.pointer_type);
 
         // Build params: Vec<(Symbol, TypeId, Type)>
         // Get param TypeIds from the method signature and pair with AST param names
         let params: Vec<(Symbol, TypeId, types::Type)> = {
             let method_def = self.query().get_method(semantic_method_id);
-            let arena = self.analyzed.type_arena();
+            let arena = self.arena();
             let (param_type_ids, _, _) = arena
                 .unwrap_function(method_def.signature_id)
                 .expect("INTERNAL: method compilation: missing function signature");
@@ -1143,7 +1143,7 @@ impl Compiler<'_> {
         // Get the method's return type from the pre-resolved signature
         let method_return_type_id = {
             let method_def = self.query().get_method(semantic_method_id);
-            let arena = self.analyzed.type_arena();
+            let arena = self.arena();
             arena
                 .unwrap_function(method_def.signature_id)
                 .map(|(_, ret, _)| ret)
@@ -1231,7 +1231,7 @@ impl Compiler<'_> {
         // Get param and return types from sema (pre-resolved signature)
         let method_def = self.query().get_method(semantic_method_id);
         let (param_type_ids, method_return_type_id) = {
-            let arena = self.analyzed.type_arena();
+            let arena = self.arena();
             let (params, ret, _) = arena
                 .unwrap_function(method_def.signature_id)
                 .expect("INTERNAL: method signature: expected function type");
@@ -1240,7 +1240,7 @@ impl Compiler<'_> {
 
         // Build params: Vec<(Symbol, TypeId, Type)>
         let params: Vec<(Symbol, TypeId, types::Type)> = {
-            let arena_ref = self.analyzed.type_arena();
+            let arena_ref = self.arena();
             method
                 .params
                 .iter()
@@ -1332,7 +1332,7 @@ impl Compiler<'_> {
         // Get param and return types from sema (pre-resolved signature)
         let method_def = self.query().get_method(semantic_method_id);
         let (param_type_ids, return_type_id) = {
-            let arena = self.analyzed.type_arena();
+            let arena = self.arena();
             let (params, ret, _) = arena
                 .unwrap_function(method_def.signature_id)
                 .expect("INTERNAL: method signature: expected function type");
@@ -1450,7 +1450,7 @@ impl Compiler<'_> {
 
             // Get param and return types from sema (pre-resolved signature)
             let (param_type_ids, return_type_id) = {
-                let arena = self.analyzed.type_arena();
+                let arena = self.arena();
                 let (params, ret, _) = arena
                     .unwrap_function(method_def.signature_id)
                     .expect("INTERNAL: static method signature: expected function type");
@@ -1520,7 +1520,7 @@ impl Compiler<'_> {
             .type_metadata
             .values()
             .find(|meta| {
-                let arena = self.analyzed.type_arena();
+                let arena = self.arena();
                 // Use unwrap_class for classes, unwrap_struct for structs
                 let type_def_id = if is_class {
                     arena.unwrap_class(meta.vole_type).map(|(id, _)| id)
@@ -1624,7 +1624,7 @@ impl Compiler<'_> {
             // Get param and return types from sema
             let method_def = self.query().get_method(semantic_method_id);
             let (param_type_ids, return_type_id) = {
-                let arena = self.analyzed.type_arena();
+                let arena = self.arena();
                 let (params, ret, _) = arena
                     .unwrap_function(method_def.signature_id)
                     .expect("INTERNAL: method signature: expected function type");
@@ -1743,7 +1743,7 @@ impl Compiler<'_> {
             // Get param and return types from sema
             let method_def = self.query().get_method(semantic_method_id);
             let (param_type_ids, return_type_id) = {
-                let arena = self.analyzed.type_arena();
+                let arena = self.arena();
                 let (params, ret, _) = arena
                     .unwrap_function(method_def.signature_id)
                     .expect("INTERNAL: static method signature: expected function type");

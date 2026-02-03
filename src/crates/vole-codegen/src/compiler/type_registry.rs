@@ -198,17 +198,14 @@ impl Compiler<'_> {
             .collect();
 
         for field_id in field_ids {
-            let field_def = self.analyzed.entity_registry().get_field(field_id);
+            let field_def = self.registry().get_field(field_id);
             let field_name = self
                 .query()
                 .last_segment(field_def.name_id)
                 .expect("INTERNAL: field lookup: field has no name");
             field_slots.insert(field_name, field_def.slot);
             if collect_tags {
-                field_type_tags.push(type_id_to_field_tag(
-                    field_def.ty,
-                    self.analyzed.type_arena(),
-                ));
+                field_type_tags.push(type_id_to_field_tag(field_def.ty, self.arena()));
             }
         }
 
@@ -471,7 +468,7 @@ impl Compiler<'_> {
             let sig = self.build_signature_for_method(method_id, SelfParam::None);
 
             // Function key from entity registry
-            let method_def = self.analyzed.entity_registry().get_method(method_id);
+            let method_def = self.registry().get_method(method_id);
             let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
             let display_name = self.func_registry.display(func_key);
             let jit_func_id = self.jit.declare_function(&display_name, &sig);

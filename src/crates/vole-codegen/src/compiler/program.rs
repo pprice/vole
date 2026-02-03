@@ -188,7 +188,7 @@ impl Compiler<'_> {
                     self.declare_tests_scoped_decls(tests_decl, program, &mut test_count);
 
                     // Declare each test with a generated name and signature () -> i64
-                    let i64_type_id = self.analyzed.type_arena().primitives.i64;
+                    let i64_type_id = self.arena().primitives.i64;
                     for _ in &tests_decl.tests {
                         let func_key = self.test_function_key(test_count);
                         let func_name = self.test_display_name(func_key);
@@ -626,7 +626,7 @@ impl Compiler<'_> {
             .function_by_name(name_id)
             .ok_or_else(|| format!("Function {} not found in registry", display_name))?;
         let (param_type_ids, return_type_id) = {
-            let func_def = self.query().registry().get_function(semantic_func_id);
+            let func_def = self.registry().get_function(semantic_func_id);
             (
                 func_def.signature.params_id.clone(),
                 func_def.signature.return_type_id,
@@ -638,7 +638,7 @@ impl Compiler<'_> {
         // Build params: Vec<(Symbol, TypeId, Type)>
         // Combine AST param names with pre-resolved TypeIds from FunctionDef
         let params: Vec<(Symbol, TypeId, types::Type)> = {
-            let arena_ref = self.analyzed.type_arena();
+            let arena_ref = self.arena();
             func.params
                 .iter()
                 .zip(param_type_ids.iter())
@@ -702,7 +702,7 @@ impl Compiler<'_> {
             .function_id(program_module, func.name)
             .ok_or_else(|| format!("Function {} not found in registry", display_name))?;
         let (param_type_ids, return_type_id) = {
-            let func_def = self.query().registry().get_function(semantic_func_id);
+            let func_def = self.registry().get_function(semantic_func_id);
             (
                 func_def.signature.params_id.clone(),
                 func_def.signature.return_type_id,
@@ -716,7 +716,7 @@ impl Compiler<'_> {
         // Build params: Vec<(Symbol, TypeId, Type)>
         // Combine AST param names with pre-resolved TypeIds from FunctionDef
         let params: Vec<(Symbol, TypeId, types::Type)> = {
-            let arena_ref = self.analyzed.type_arena();
+            let arena_ref = self.arena();
             func.params
                 .iter()
                 .zip(param_type_ids.iter())
@@ -906,7 +906,7 @@ impl Compiler<'_> {
                     self.declare_tests_scoped_decls(nested_tests, _program, test_count);
 
                     // Declare each nested test with a generated name and signature () -> i64
-                    let i64_type_id = self.analyzed.type_arena().primitives.i64;
+                    let i64_type_id = self.arena().primitives.i64;
                     for _ in &nested_tests.tests {
                         let func_key = self.test_function_key(*test_count);
                         let func_name = self.test_display_name(func_key);
@@ -1004,7 +1004,7 @@ impl Compiler<'_> {
                     self.declare_main_function(func.name);
                 }
                 Decl::Tests(tests_decl) if include_tests => {
-                    let i64_type_id = self.analyzed.type_arena().primitives.i64;
+                    let i64_type_id = self.arena().primitives.i64;
                     for _ in &tests_decl.tests {
                         let func_key = self.test_function_key(test_count);
                         let func_name = self.test_display_name(func_key);
@@ -1081,7 +1081,7 @@ impl Compiler<'_> {
                 )
             })?;
         let (param_type_ids, return_type_id) = {
-            let func_def = self.query().registry().get_function(semantic_func_id);
+            let func_def = self.registry().get_function(semantic_func_id);
             (
                 func_def.signature.params_id.clone(),
                 func_def.signature.return_type_id,

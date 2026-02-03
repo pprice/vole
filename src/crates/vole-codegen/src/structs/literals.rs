@@ -102,7 +102,7 @@ impl Cg<'_, '_, '_> {
         // They may not be in type_metadata if they come from prelude modules,
         // so handle them early before the metadata lookup.
         {
-            let kind = self.query().registry().type_kind(type_def_id);
+            let kind = self.registry().type_kind(type_def_id);
             if kind == TypeDefKind::Sentinel {
                 let sentinel_type_id = self.get_expr_type(&expr.id).unwrap_or_else(|| {
                     // Fall back to the base TypeId from entity registry, or type_metadata
@@ -124,7 +124,7 @@ impl Cg<'_, '_, '_> {
 
         // Check if this is a struct type (stack-allocated value type)
         let is_struct_type = {
-            let kind = self.query().registry().type_kind(type_def_id);
+            let kind = self.registry().type_kind(type_def_id);
             kind == TypeDefKind::Struct
         };
 
@@ -479,7 +479,7 @@ impl Cg<'_, '_, '_> {
         // Use flat total size to account for nested struct fields
         let total_size = {
             let arena = self.arena();
-            let entities = self.query().registry();
+            let entities = self.registry();
             super::helpers::struct_total_byte_size(result_type_id, arena, entities)
                 .unwrap_or_else(|| (field_slots.len() as u32) * 8)
         };
@@ -496,7 +496,7 @@ impl Cg<'_, '_, '_> {
 
             let offset = {
                 let arena = self.arena();
-                let entities = self.query().registry();
+                let entities = self.registry();
                 super::helpers::struct_field_byte_offset(
                     result_type_id,
                     field_slot,
@@ -545,7 +545,7 @@ impl Cg<'_, '_, '_> {
 
             let offset = {
                 let arena = self.arena();
-                let entities = self.query().registry();
+                let entities = self.registry();
                 super::helpers::struct_field_byte_offset(
                     result_type_id,
                     field_slot,
@@ -577,7 +577,7 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<()> {
         let field_flat_slots = {
             let arena = self.arena();
-            let entities = self.query().registry();
+            let entities = self.registry();
             super::helpers::struct_flat_slot_count(value.type_id, arena, entities)
         };
         if let Some(nested_flat) = field_flat_slots {

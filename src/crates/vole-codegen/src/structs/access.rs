@@ -271,7 +271,7 @@ impl Cg<'_, '_, '_> {
         if is_struct {
             let offset = {
                 let arena = self.arena();
-                let entities = self.query().registry();
+                let entities = self.registry();
                 super::helpers::struct_field_byte_offset(obj.type_id, slot, arena, entities)
                     .unwrap_or((slot as i32) * 8)
             };
@@ -279,7 +279,7 @@ impl Cg<'_, '_, '_> {
             // If assigning a nested struct, copy all flat slots inline
             let nested_flat = {
                 let arena = self.arena();
-                let entities = self.query().registry();
+                let entities = self.registry();
                 super::helpers::struct_flat_slot_count(value.type_id, arena, entities)
             };
             if let Some(nested_flat) = nested_flat {
@@ -366,7 +366,7 @@ impl Cg<'_, '_, '_> {
         // Compute byte offset accounting for nested struct sizes
         let offset = {
             let arena = self.arena();
-            let entities = self.query().registry();
+            let entities = self.registry();
             super::helpers::struct_field_byte_offset(parent_type_id, slot, arena, entities)
                 .unwrap_or((slot as i32) * 8)
         };

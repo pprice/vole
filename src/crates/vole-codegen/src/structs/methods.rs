@@ -1443,7 +1443,7 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<(Vec<Value>, Vec<CompiledValue>)> {
         // Get raw pointers to default expressions from MethodDef.
         let default_ptrs: Vec<Option<*const Expr>> = {
-            let method_def = self.query().registry().get_method(method_id);
+            let method_def = self.registry().get_method(method_id);
             method_def
                 .param_defaults
                 .iter()
@@ -1473,7 +1473,7 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<(Vec<Value>, Vec<CompiledValue>)> {
         // Get raw pointers to default expressions from MethodDef.
         let default_ptrs: Vec<Option<*const Expr>> = {
-            let method_def = self.query().registry().get_method(method_id);
+            let method_def = self.registry().get_method(method_id);
             method_def
                 .param_defaults
                 .iter()

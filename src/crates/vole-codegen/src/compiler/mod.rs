@@ -129,6 +129,18 @@ impl<'a> Compiler<'a> {
         self.analyzed.query()
     }
 
+    /// Get the entity registry directly
+    #[inline]
+    fn registry(&self) -> &vole_sema::EntityRegistry {
+        self.analyzed.entity_registry()
+    }
+
+    /// Get the type arena directly
+    #[inline]
+    fn arena(&self) -> &vole_sema::TypeArena {
+        self.analyzed.type_arena()
+    }
+
     /// Get the module ID for the program being compiled.
     /// This may differ from main_module() when using a shared cache with multiple programs.
     fn program_module(&self) -> ModuleId {
@@ -155,11 +167,7 @@ impl<'a> Compiler<'a> {
 
     /// Get ImplTypeId from a TypeId
     fn impl_type_id_from_type_id(&self, ty: TypeId) -> Option<ImplTypeId> {
-        ImplTypeId::from_type_id(
-            ty,
-            self.analyzed.type_arena(),
-            self.analyzed.entity_registry(),
-        )
+        ImplTypeId::from_type_id(ty, self.arena(), self.registry())
     }
 
     /// Check if a function has implicit generic info (structural type params).
@@ -260,7 +268,8 @@ impl<'a> Compiler<'a> {
         mode: DeclareMode,
     ) -> Option<FunctionKey> {
         // Look up semantic FunctionId from NameId
-        let semantic_func_id = self.query().registry().function_by_name(name_id)?;
+        let registry = self.registry();
+        let semantic_func_id = registry.function_by_name(name_id)?;
 
         // Build signature from pre-resolved types
         let sig = self.build_signature_for_function(semantic_func_id);
@@ -277,7 +286,6 @@ impl<'a> Compiler<'a> {
 
         // Record return type from pre-resolved signature
         let return_type_id = self
-            .query()
             .registry()
             .get_function(semantic_func_id)
             .signature

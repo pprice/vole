@@ -673,7 +673,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         // Struct: iterate fields, collect offsets of RC-typed fields
         if let Some((type_def_id, _)) = arena.unwrap_struct(type_id) {
-            let entities = self.query().registry();
+            let entities = self.registry();
             let type_def = entities.get_type(type_def_id);
             let generic_info = type_def.generic_info.as_ref()?;
             let field_types = &generic_info.field_types;
@@ -703,7 +703,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         // Tuple: use tuple_layout_id to get correct offsets, then filter RC elements
         if let Some(elem_types) = arena.unwrap_tuple(type_id).cloned() {
-            let entities = self.query().registry();
+            let entities = self.registry();
             let ptr_type = self.ptr_type();
             let (_total, all_offsets) =
                 super::types::tuple_layout_id(&elem_types, ptr_type, entities, arena);
@@ -730,7 +730,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     pub fn deep_rc_field_offsets(&self, type_id: TypeId) -> Option<Vec<i32>> {
         let arena = self.arena();
         if let Some((type_def_id, _)) = arena.unwrap_struct(type_id) {
-            let entities = self.query().registry();
+            let entities = self.registry();
             let type_def = entities.get_type(type_def_id);
             let generic_info = type_def.generic_info.as_ref()?;
             let field_types = &generic_info.field_types;
@@ -1083,7 +1083,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Get the size (in bits) of a TypeId
     pub fn type_size(&self, ty: TypeId) -> u32 {
-        type_id_size(ty, self.ptr_type(), self.query().registry(), self.arena())
+        type_id_size(ty, self.ptr_type(), self.registry(), self.arena())
     }
 
     /// Unwrap an interface type, returning the TypeDefId if it is one
@@ -1129,7 +1129,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ) -> Option<TypeDefId> {
         let arena = self.arena();
         let name_table = self.name_table();
-        let registry = self.query().registry();
+        let registry = self.registry();
 
         let check_variant = |type_def_id: TypeDefId| -> bool {
             name_table
@@ -1559,7 +1559,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// accounting for nested struct fields.
     pub fn struct_flat_slot_count(&self, type_id: TypeId) -> Option<usize> {
         let arena = self.arena();
-        let entities = self.query().registry();
+        let entities = self.registry();
         super::structs::struct_flat_slot_count(type_id, arena, entities)
     }
 

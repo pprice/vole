@@ -224,7 +224,7 @@ impl Cg<'_, '_, '_> {
             self.function_reference(sym, func_type_id)
         } else if let Some(sentinel_type_id) = self.get_expr_type(&expr.id)
             && let Some((type_def_id, _)) = self.arena().unwrap_struct(sentinel_type_id)
-            && self.query().registry().type_kind(type_def_id).is_sentinel()
+            && self.registry().type_kind(type_def_id).is_sentinel()
         {
             // Bare identifier refers to a sentinel type - emit i8(0)
             let value = self.builder.ins().iconst(types::I8, 0);
@@ -661,7 +661,7 @@ impl Cg<'_, '_, '_> {
         let (total_size, offsets) = tuple_layout_id(
             elem_type_ids,
             self.ptr_type(),
-            self.query().registry(),
+            self.registry(),
             self.arena(),
         );
 
@@ -792,7 +792,7 @@ impl Cg<'_, '_, '_> {
                 let (_, offsets) = tuple_layout_id(
                     &elem_type_ids,
                     self.ptr_type(),
-                    self.query().registry(),
+                    self.registry(),
                     self.arena(),
                 );
                 let offset = offsets[i];
@@ -1475,12 +1475,8 @@ impl Cg<'_, '_, '_> {
                         let ptr_type = self.ptr_type();
                         let offsets = {
                             let arena = self.arena();
-                            let (_, offsets) = tuple_layout_id(
-                                &elem_type_ids,
-                                ptr_type,
-                                self.query().registry(),
-                                arena,
-                            );
+                            let (_, offsets) =
+                                tuple_layout_id(&elem_type_ids, ptr_type, self.registry(), arena);
                             offsets
                         };
                         // Precompute cranelift types for each element
@@ -2456,7 +2452,7 @@ impl Cg<'_, '_, '_> {
                             arena,
                             self.interner(),
                             self.name_table(),
-                            self.query().registry(),
+                            self.registry(),
                         )
                     })
                     .is_some()
@@ -2511,7 +2507,7 @@ impl Cg<'_, '_, '_> {
             arena,
             self.interner(),
             name_table,
-            self.query().registry(),
+            self.registry(),
         ) else {
             // Error type not found in fallible - will never match
             return Ok(Some(self.builder.ins().iconst(types::I8, 0)));
@@ -2605,7 +2601,7 @@ impl Cg<'_, '_, '_> {
             arena,
             self.interner(),
             name_table,
-            self.query().registry(),
+            self.registry(),
         ) else {
             // Error type not found in fallible
             return Ok(Some(self.builder.ins().iconst(types::I8, 0)));

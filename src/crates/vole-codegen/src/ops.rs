@@ -370,7 +370,7 @@ impl Cg<'_, '_, '_> {
     /// Returns the resulting string value.
     fn call_to_string(&mut self, val: &CompiledValue) -> CodegenResult<Value> {
         let arena = self.arena();
-        let impl_type_id = ImplTypeId::from_type_id(val.type_id, arena, self.query().registry())
+        let impl_type_id = ImplTypeId::from_type_id(val.type_id, arena, self.registry())
             .ok_or_else(|| format!("Cannot find ImplTypeId for type_id {:?}", val.type_id))?;
 
         // Look up to_string method via query

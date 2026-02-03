@@ -1109,7 +1109,7 @@ impl Cg<'_, '_, '_> {
                     let (_, offsets) = tuple_layout_id(
                         &elem_type_ids,
                         self.ptr_type(),
-                        self.query().registry(),
+                        self.registry(),
                         self.arena(),
                     );
                     for (i, elem_pattern) in elements.iter().enumerate() {
@@ -1238,7 +1238,7 @@ impl Cg<'_, '_, '_> {
             self.arena(),
             self.interner(),
             self.name_table(),
-            self.query().registry(),
+            self.registry(),
         )
         .ok_or_else(|| {
             format!(

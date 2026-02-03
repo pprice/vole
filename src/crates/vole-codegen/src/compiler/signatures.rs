@@ -25,7 +25,7 @@ impl Compiler<'_> {
     /// This helper handles the common pattern of converting resolved TypeIds
     /// to their Cranelift representations for function signatures.
     pub fn type_ids_to_cranelift(&self, type_ids: &[TypeId]) -> Vec<CraneliftType> {
-        let arena = self.analyzed.type_arena();
+        let arena = self.arena();
         type_ids
             .iter()
             .map(|&id| type_id_to_cranelift(id, arena, self.pointer_type))
@@ -34,7 +34,7 @@ impl Compiler<'_> {
 
     /// Convert a single TypeId to a Cranelift type.
     pub fn type_id_to_cranelift(&self, type_id: TypeId) -> CraneliftType {
-        type_id_to_cranelift(type_id, self.analyzed.type_arena(), self.pointer_type)
+        type_id_to_cranelift(type_id, self.arena(), self.pointer_type)
     }
 
     /// Convert a TypeId to Option<CraneliftType>, returning None for void types.
@@ -59,7 +59,7 @@ impl Compiler<'_> {
         return_type_id: Option<TypeId>,
         self_param: SelfParam,
     ) -> Signature {
-        let arena_ref = self.analyzed.type_arena();
+        let arena_ref = self.arena();
 
         // Build cranelift params starting with self if needed
         let mut cranelift_params: ParamVec = match &self_param {
@@ -128,8 +128,8 @@ impl Compiler<'_> {
     /// Used by signature building to decide small-return vs sret convention.
     /// Returns None if the type is not a struct.
     pub fn struct_field_count(&self, type_id: TypeId) -> Option<usize> {
-        let arena = self.analyzed.type_arena();
-        let entities = self.query().registry();
+        let arena = self.arena();
+        let entities = self.registry();
         crate::structs::struct_flat_slot_count(type_id, arena, entities)
     }
 
@@ -138,7 +138,7 @@ impl Compiler<'_> {
     /// This is a convenience method that retrieves the function definition
     /// and builds the signature from its pre-resolved TypeIds.
     pub fn build_signature_for_function(&self, func_id: FunctionId) -> Signature {
-        let func_def = self.query().registry().get_function(func_id);
+        let func_def = self.registry().get_function(func_id);
         self.build_signature_from_type_ids(
             &func_def.signature.params_id,
             Some(func_def.signature.return_type_id),
@@ -155,8 +155,8 @@ impl Compiler<'_> {
         method_id: MethodId,
         self_param: SelfParam,
     ) -> Signature {
-        let method_def = self.query().registry().get_method(method_id);
-        let arena = self.analyzed.type_arena();
+        let method_def = self.registry().get_method(method_id);
+        let arena = self.arena();
         let (params, ret, _) = arena
             .unwrap_function(method_def.signature_id)
             .expect("INTERNAL: method signature: missing function signature");
