@@ -1,7 +1,7 @@
 // RC cleanup tests for iterator consumption patterns.
 //
 // Tests exercise RC tracking for iterator consumption patterns beyond what
-// rc_iterators.vole covers: for-in loop cleanup, terminal methods (first,
+// iterators.vole covers: for-in loop cleanup, terminal methods (first,
 // last, nth, count), reduce with string accumulator, string iteration,
 // enumerate/zip, generators, flatten, sorted/reverse, early termination
 // (break from for-in), and multiple iterators in the same scope.
