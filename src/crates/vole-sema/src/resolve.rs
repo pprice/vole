@@ -37,27 +37,35 @@ pub trait ResolverEntityExt {
     ) -> Option<TypeDefId>;
 }
 
+/// Look up well-known sentinel types (nil, Done) by short name.
+///
+/// These types are defined in the prelude but need to be resolvable from any module.
+/// Returns the sentinel TypeDefId if the name matches a known sentinel, otherwise None.
+fn resolve_sentinel(
+    name: &str,
+    registry: &EntityRegistry,
+    name_table: &NameTable,
+) -> Option<TypeDefId> {
+    if name == "nil" || name == "Done" {
+        registry.sentinel_by_short_name(name, name_table)
+    } else {
+        None
+    }
+}
+
 impl ResolverEntityExt for Resolver<'_> {
     fn resolve_type(&self, sym: Symbol, registry: &EntityRegistry) -> Option<TypeDefId> {
         let name = self.interner().resolve(sym);
-        // Well-known sentinel types (nil, Done) are defined in the prelude but need to be
-        // resolvable from any module. Look them up by short name to find the sentinel TypeDef
-        // rather than the legacy primitive TypeDef.
-        if (name == "nil" || name == "Done")
-            && let Some(type_def_id) = registry.sentinel_by_short_name(name, self.table())
-        {
-            return Some(type_def_id);
+        if let Some(sentinel) = resolve_sentinel(name, registry, self.table()) {
+            return Some(sentinel);
         }
         self.resolve(sym)
             .and_then(|name_id| registry.type_by_name(name_id))
     }
 
     fn resolve_type_str(&self, name: &str, registry: &EntityRegistry) -> Option<TypeDefId> {
-        // Well-known sentinel types (nil, Done) - see resolve_type for explanation
-        if (name == "nil" || name == "Done")
-            && let Some(type_def_id) = registry.sentinel_by_short_name(name, self.table())
-        {
-            return Some(type_def_id);
+        if let Some(sentinel) = resolve_sentinel(name, registry, self.table()) {
+            return Some(sentinel);
         }
         self.resolve_str(name)
             .and_then(|name_id| registry.type_by_name(name_id))
@@ -78,11 +86,8 @@ impl ResolverEntityExt for Resolver<'_> {
         registry: &EntityRegistry,
     ) -> Option<TypeDefId> {
         tracing::trace!(name, "resolve_type_str_or_interface");
-        // Well-known sentinel types (nil, Done) - check sentinel first
-        if (name == "nil" || name == "Done")
-            && let Some(type_def_id) = registry.sentinel_by_short_name(name, self.table())
-        {
-            return Some(type_def_id);
+        if let Some(sentinel) = resolve_sentinel(name, registry, self.table()) {
+            return Some(sentinel);
         }
         let result = self
             .resolve_str(name)
