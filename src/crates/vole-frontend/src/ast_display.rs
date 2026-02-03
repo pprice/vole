@@ -4,9 +4,11 @@
 use std::fmt::Write;
 
 use crate::{
-    AssignTarget, BinaryOp, Block, CompoundOp, Decl, ErrorDecl, Expr, ExprKind, FuncBody, FuncDecl,
-    Interner, LetInit, LetStmt, Param, PrimitiveType, Program, SentinelDecl, Stmt, StringPart,
-    TestCase, TestsDecl, TypeExpr, UnaryOp,
+    AssignTarget, BinaryOp, Block, ClassDecl, CompoundOp, Decl, ErrorDecl, Expr, ExprKind,
+    ExternalBlock, FieldAccessExpr, FuncBody, FuncDecl, ImplementBlock, InterfaceDecl, Interner,
+    LetInit, LetStmt, LetTupleStmt, MethodCallExpr, OptionalChainExpr, Param, PrimitiveType,
+    Program, RaiseStmt, SentinelDecl, Stmt, StringPart, StructLiteralExpr, TestCase, TestsDecl,
+    TypeExpr, UnaryOp,
 };
 
 /// Pretty-printer for AST nodes that resolves symbols via an Interner.
@@ -63,21 +65,14 @@ impl<'a> AstPrinter<'a> {
             Decl::Function(f) => self.write_func_decl(out, f),
             Decl::Tests(t) => self.write_tests_decl(out, t),
             Decl::Let(l) => self.write_let(out, l),
-            Decl::LetTuple(_) => {
-                // TODO: implement let tuple display
-            }
-            Decl::Class(_) => {
-                // TODO: implement class display
-            }
+            Decl::LetTuple(lt) => self.write_let_tuple_decl(out, lt),
+            Decl::Class(c) => self.write_class_decl(out, c),
             Decl::Struct(s) => self.write_struct_decl(out, s),
-            Decl::Interface(_) | Decl::Implement(_) => {
-                // TODO: implement interface/implement display
-            }
+            Decl::Interface(i) => self.write_interface_decl(out, i),
+            Decl::Implement(i) => self.write_implement_decl(out, i),
             Decl::Error(e) => self.write_error_decl(out, e),
             Decl::Sentinel(s) => self.write_sentinel_decl(out, s),
-            Decl::External(_) => {
-                // TODO: implement external decl display
-            }
+            Decl::External(e) => self.write_external_decl(out, e),
         }
     }
 
@@ -199,6 +194,228 @@ impl<'a> AstPrinter<'a> {
                 statics_inner.write_indent(out);
                 let method_name = self.interner.resolve(method.name);
                 writeln!(out, "StaticMethod \"{}\"", method_name).unwrap();
+            }
+        }
+    }
+
+    fn write_let_tuple_decl(&self, out: &mut String, lt: &LetTupleStmt) {
+        self.write_indent(out);
+        if lt.mutable {
+            out.push_str("LetTupleMut\n");
+        } else {
+            out.push_str("LetTuple\n");
+        }
+        let inner = self.indented();
+        inner.write_indent(out);
+        out.push_str("pattern: ");
+        self.write_pattern_inline(out, &lt.pattern);
+        out.push('\n');
+        inner.write_indent(out);
+        out.push_str("init:\n");
+        inner.indented().write_expr(out, &lt.init);
+    }
+
+    fn write_class_decl(&self, out: &mut String, class_decl: &ClassDecl) {
+        self.write_indent(out);
+        let name = self.interner.resolve(class_decl.name);
+        writeln!(out, "ClassDecl \"{}\"", name).unwrap();
+
+        let inner = self.indented();
+
+        if !class_decl.type_params.is_empty() {
+            inner.write_indent(out);
+            out.push_str("type_params: [");
+            for (i, tp) in class_decl.type_params.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                out.push_str(self.interner.resolve(tp.name));
+            }
+            out.push_str("]\n");
+        }
+
+        if !class_decl.implements.is_empty() {
+            inner.write_indent(out);
+            out.push_str("implements: [");
+            for (i, ty) in class_decl.implements.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                self.write_type_inline(out, ty);
+            }
+            out.push_str("]\n");
+        }
+
+        if !class_decl.fields.is_empty() {
+            inner.write_indent(out);
+            out.push_str("fields: [");
+            for (i, field) in class_decl.fields.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                let field_name = self.interner.resolve(field.name);
+                write!(out, "({}: ", field_name).unwrap();
+                self.write_type_inline(out, &field.ty);
+                out.push(')');
+            }
+            out.push_str("]\n");
+        }
+
+        if let Some(ref external) = class_decl.external {
+            self.write_external_block(&inner, out, external);
+        }
+
+        for method in &class_decl.methods {
+            inner.write_func_decl(out, method);
+        }
+
+        if let Some(ref statics) = class_decl.statics {
+            inner.write_indent(out);
+            out.push_str("statics:\n");
+            let statics_inner = inner.indented();
+            for method in &statics.methods {
+                statics_inner.write_indent(out);
+                let method_name = self.interner.resolve(method.name);
+                writeln!(out, "StaticMethod \"{}\"", method_name).unwrap();
+            }
+        }
+    }
+
+    fn write_interface_decl(&self, out: &mut String, iface: &InterfaceDecl) {
+        self.write_indent(out);
+        let name = self.interner.resolve(iface.name);
+        writeln!(out, "InterfaceDecl \"{}\"", name).unwrap();
+
+        let inner = self.indented();
+
+        if !iface.type_params.is_empty() {
+            inner.write_indent(out);
+            out.push_str("type_params: [");
+            for (i, tp) in iface.type_params.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                out.push_str(self.interner.resolve(tp.name));
+            }
+            out.push_str("]\n");
+        }
+
+        if !iface.extends.is_empty() {
+            inner.write_indent(out);
+            out.push_str("extends: [");
+            for (i, sym) in iface.extends.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                out.push_str(self.interner.resolve(*sym));
+            }
+            out.push_str("]\n");
+        }
+
+        if !iface.fields.is_empty() {
+            inner.write_indent(out);
+            out.push_str("fields: [");
+            for (i, field) in iface.fields.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                let field_name = self.interner.resolve(field.name);
+                write!(out, "({}: ", field_name).unwrap();
+                self.write_type_inline(out, &field.ty);
+                out.push(')');
+            }
+            out.push_str("]\n");
+        }
+
+        for external in &iface.external_blocks {
+            self.write_external_block(&inner, out, external);
+        }
+
+        for method in &iface.methods {
+            inner.write_indent(out);
+            let method_name = self.interner.resolve(method.name);
+            if method.is_default {
+                writeln!(out, "DefaultMethod \"{}\"", method_name).unwrap();
+            } else if method.body.is_some() {
+                writeln!(out, "Method \"{}\"", method_name).unwrap();
+            } else {
+                writeln!(out, "AbstractMethod \"{}\"", method_name).unwrap();
+            }
+        }
+
+        if let Some(ref statics) = iface.statics {
+            inner.write_indent(out);
+            out.push_str("statics:\n");
+            let statics_inner = inner.indented();
+            for method in &statics.methods {
+                statics_inner.write_indent(out);
+                let method_name = self.interner.resolve(method.name);
+                writeln!(out, "StaticMethod \"{}\"", method_name).unwrap();
+            }
+        }
+    }
+
+    fn write_implement_decl(&self, out: &mut String, impl_block: &ImplementBlock) {
+        self.write_indent(out);
+        if let Some(ref trait_type) = impl_block.trait_type {
+            out.push_str("Implement ");
+            self.write_type_inline(out, trait_type);
+            out.push_str(" for ");
+            self.write_type_inline(out, &impl_block.target_type);
+            out.push('\n');
+        } else {
+            out.push_str("Implement ");
+            self.write_type_inline(out, &impl_block.target_type);
+            out.push('\n');
+        }
+
+        let inner = self.indented();
+
+        if let Some(ref external) = impl_block.external {
+            self.write_external_block(&inner, out, external);
+        }
+
+        for method in &impl_block.methods {
+            inner.write_func_decl(out, method);
+        }
+
+        if let Some(ref statics) = impl_block.statics {
+            inner.write_indent(out);
+            out.push_str("statics:\n");
+            let statics_inner = inner.indented();
+            for method in &statics.methods {
+                statics_inner.write_indent(out);
+                let method_name = self.interner.resolve(method.name);
+                writeln!(out, "StaticMethod \"{}\"", method_name).unwrap();
+            }
+        }
+    }
+
+    fn write_external_decl(&self, out: &mut String, external: &ExternalBlock) {
+        self.write_external_block(self, out, external);
+    }
+
+    fn write_external_block(
+        &self,
+        printer: &AstPrinter<'_>,
+        out: &mut String,
+        ext: &ExternalBlock,
+    ) {
+        printer.write_indent(out);
+        writeln!(out, "External \"{}\"", ext.module_path).unwrap();
+        let inner = printer.indented();
+        for func in &ext.functions {
+            inner.write_indent(out);
+            let func_name = self.interner.resolve(func.vole_name);
+            if let Some(ref native_name) = func.native_name {
+                writeln!(
+                    out,
+                    "ExternalFunc \"{}\" (native: \"{}\")",
+                    func_name, native_name
+                )
+                .unwrap();
+            } else {
+                writeln!(out, "ExternalFunc \"{}\"", func_name).unwrap();
             }
         }
     }
@@ -448,11 +665,7 @@ impl<'a> AstPrinter<'a> {
                 out.push_str("body:\n");
                 inner.indented().write_block(out, &f.body);
             }
-            Stmt::Raise(_) => {
-                self.write_indent(out);
-                out.push_str("Raise\n");
-                // TODO: implement raise statement display
-            }
+            Stmt::Raise(r) => self.write_raise_stmt(out, r),
             Stmt::LetTuple(lt) => {
                 self.write_indent(out);
                 out.push_str("LetTuple\n");
@@ -492,6 +705,24 @@ impl<'a> AstPrinter<'a> {
                 write!(out, "TypeAlias: ").unwrap();
                 inner.indented().write_type_inline(out, ty);
                 out.push('\n');
+            }
+        }
+    }
+
+    fn write_raise_stmt(&self, out: &mut String, raise: &RaiseStmt) {
+        self.write_indent(out);
+        let error_name = self.interner.resolve(raise.error_name);
+        writeln!(out, "Raise \"{}\"", error_name).unwrap();
+        if !raise.fields.is_empty() {
+            let inner = self.indented();
+            inner.write_indent(out);
+            out.push_str("fields:\n");
+            let fields_inner = inner.indented();
+            for field in &raise.fields {
+                fields_inner.write_indent(out);
+                let field_name = self.interner.resolve(field.name);
+                writeln!(out, "{}:", field_name).unwrap();
+                fields_inner.indented().write_expr(out, &field.value);
             }
         }
     }
@@ -775,29 +1006,13 @@ impl<'a> AstPrinter<'a> {
                 out.push('\n');
             }
 
-            ExprKind::StructLiteral(_) => {
-                self.write_indent(out);
-                out.push_str("StructLiteral\n");
-                // TODO: implement struct literal display
-            }
+            ExprKind::StructLiteral(sl) => self.write_struct_literal(out, sl),
 
-            ExprKind::FieldAccess(_) => {
-                self.write_indent(out);
-                out.push_str("FieldAccess\n");
-                // TODO: implement field access display
-            }
+            ExprKind::FieldAccess(fa) => self.write_field_access(out, fa),
 
-            ExprKind::OptionalChain(_) => {
-                self.write_indent(out);
-                out.push_str("OptionalChain\n");
-                // TODO: implement optional chain display
-            }
+            ExprKind::OptionalChain(oc) => self.write_optional_chain(out, oc),
 
-            ExprKind::MethodCall(_) => {
-                self.write_indent(out);
-                out.push_str("MethodCall\n");
-                // TODO: implement method call display
-            }
+            ExprKind::MethodCall(mc) => self.write_method_call(out, mc),
 
             ExprKind::Try(inner) => {
                 self.write_indent(out);
@@ -875,6 +1090,99 @@ impl<'a> AstPrinter<'a> {
         }
     }
 
+    fn write_struct_literal(&self, out: &mut String, sl: &StructLiteralExpr) {
+        self.write_indent(out);
+        // Format path as module.Type or just Type
+        let path_str: String = sl
+            .path
+            .iter()
+            .map(|sym| self.interner.resolve(*sym))
+            .collect::<Vec<_>>()
+            .join(".");
+        writeln!(out, "StructLiteral \"{}\"", path_str).unwrap();
+        let inner = self.indented();
+
+        if !sl.type_args.is_empty() {
+            inner.write_indent(out);
+            out.push_str("type_args: [");
+            for (i, ty) in sl.type_args.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                self.write_type_inline(out, ty);
+            }
+            out.push_str("]\n");
+        }
+
+        if !sl.fields.is_empty() {
+            inner.write_indent(out);
+            out.push_str("fields:\n");
+            let fields_inner = inner.indented();
+            for field in &sl.fields {
+                fields_inner.write_indent(out);
+                let field_name = self.interner.resolve(field.name);
+                if field.shorthand {
+                    writeln!(out, "{} (shorthand):", field_name).unwrap();
+                } else {
+                    writeln!(out, "{}:", field_name).unwrap();
+                }
+                fields_inner.indented().write_expr(out, &field.value);
+            }
+        }
+    }
+
+    fn write_field_access(&self, out: &mut String, fa: &FieldAccessExpr) {
+        self.write_indent(out);
+        let field_name = self.interner.resolve(fa.field);
+        writeln!(out, "FieldAccess \"{}\"", field_name).unwrap();
+        let inner = self.indented();
+        inner.write_indent(out);
+        out.push_str("object:\n");
+        inner.indented().write_expr(out, &fa.object);
+    }
+
+    fn write_optional_chain(&self, out: &mut String, oc: &OptionalChainExpr) {
+        self.write_indent(out);
+        let field_name = self.interner.resolve(oc.field);
+        writeln!(out, "OptionalChain \"{}\"", field_name).unwrap();
+        let inner = self.indented();
+        inner.write_indent(out);
+        out.push_str("object:\n");
+        inner.indented().write_expr(out, &oc.object);
+    }
+
+    fn write_method_call(&self, out: &mut String, mc: &MethodCallExpr) {
+        self.write_indent(out);
+        let method_name = self.interner.resolve(mc.method);
+        writeln!(out, "MethodCall \"{}\"", method_name).unwrap();
+        let inner = self.indented();
+
+        inner.write_indent(out);
+        out.push_str("object:\n");
+        inner.indented().write_expr(out, &mc.object);
+
+        if !mc.type_args.is_empty() {
+            inner.write_indent(out);
+            out.push_str("type_args: [");
+            for (i, ty) in mc.type_args.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                self.write_type_inline(out, ty);
+            }
+            out.push_str("]\n");
+        }
+
+        if !mc.args.is_empty() {
+            inner.write_indent(out);
+            out.push_str("args:\n");
+            let args_inner = inner.indented();
+            for arg in &mc.args {
+                args_inner.write_expr(out, arg);
+            }
+        }
+    }
+
     fn write_pattern_inline(&self, out: &mut String, pattern: &crate::Pattern) {
         use crate::PatternKind;
         match &pattern.kind {
@@ -899,7 +1207,7 @@ impl<'a> AstPrinter<'a> {
                 out.push_str(ident);
             }
             PatternKind::Type { type_expr, .. } => {
-                self.write_type_expr_inline(out, type_expr);
+                self.write_type_inline(out, type_expr);
             }
             PatternKind::Val { name, .. } => {
                 out.push_str("val ");
@@ -945,144 +1253,6 @@ impl<'a> AstPrinter<'a> {
                     }
                 }
                 out.push_str(" }");
-            }
-        }
-    }
-
-    fn write_type_expr_inline(&self, out: &mut String, ty: &TypeExpr) {
-        use crate::TypeExpr;
-        match ty {
-            TypeExpr::Primitive(p) => out.push_str(&format!("{:?}", p).to_lowercase()),
-            TypeExpr::Named(sym) => out.push_str(self.interner.resolve(*sym)),
-            TypeExpr::Array(inner) => {
-                out.push('[');
-                self.write_type_expr_inline(out, inner);
-                out.push(']');
-            }
-            TypeExpr::Optional(inner) => {
-                self.write_type_expr_inline(out, inner);
-                out.push('?');
-            }
-            TypeExpr::Union(types) => {
-                for (i, t) in types.iter().enumerate() {
-                    if i > 0 {
-                        out.push_str(" | ");
-                    }
-                    self.write_type_expr_inline(out, t);
-                }
-            }
-            TypeExpr::Handle => out.push_str("handle"),
-            TypeExpr::Never => out.push_str("never"),
-            TypeExpr::Unknown => out.push_str("unknown"),
-            TypeExpr::Function {
-                params,
-                return_type,
-            } => {
-                out.push('(');
-                for (i, p) in params.iter().enumerate() {
-                    if i > 0 {
-                        out.push_str(", ");
-                    }
-                    self.write_type_expr_inline(out, p);
-                }
-                out.push_str(") -> ");
-                self.write_type_expr_inline(out, return_type);
-            }
-            TypeExpr::SelfType => out.push_str("Self"),
-            TypeExpr::Fallible {
-                success_type,
-                error_type,
-            } => {
-                out.push_str("fallible(");
-                self.write_type_expr_inline(out, success_type);
-                out.push_str(", ");
-                self.write_type_expr_inline(out, error_type);
-                out.push(')');
-            }
-            TypeExpr::Generic { name, args } => {
-                out.push_str(self.interner.resolve(*name));
-                out.push('<');
-                for (i, arg) in args.iter().enumerate() {
-                    if i > 0 {
-                        out.push_str(", ");
-                    }
-                    self.write_type_expr_inline(out, arg);
-                }
-                out.push('>');
-            }
-            TypeExpr::Tuple(elements) => {
-                out.push('[');
-                for (i, elem) in elements.iter().enumerate() {
-                    if i > 0 {
-                        out.push_str(", ");
-                    }
-                    self.write_type_expr_inline(out, elem);
-                }
-                out.push(']');
-            }
-            TypeExpr::FixedArray { element, size } => {
-                out.push('[');
-                self.write_type_expr_inline(out, element);
-                out.push_str("; ");
-                out.push_str(&size.to_string());
-                out.push(']');
-            }
-            TypeExpr::Structural { fields, methods } => {
-                out.push_str("{ ");
-                let mut first = true;
-                for field in fields {
-                    if !first {
-                        out.push_str(", ");
-                    }
-                    first = false;
-                    out.push_str(self.interner.resolve(field.name));
-                    out.push_str(": ");
-                    self.write_type_expr_inline(out, &field.ty);
-                }
-                for method in methods {
-                    if !first {
-                        out.push_str(", ");
-                    }
-                    first = false;
-                    out.push_str("func ");
-                    out.push_str(self.interner.resolve(method.name));
-                    out.push('(');
-                    for (i, param) in method.params.iter().enumerate() {
-                        if i > 0 {
-                            out.push_str(", ");
-                        }
-                        self.write_type_expr_inline(out, param);
-                    }
-                    out.push_str(") -> ");
-                    self.write_type_expr_inline(out, &method.return_type);
-                }
-                out.push_str(" }");
-            }
-            TypeExpr::Combination(parts) => {
-                for (i, ty) in parts.iter().enumerate() {
-                    if i > 0 {
-                        out.push_str(" + ");
-                    }
-                    self.write_type_expr_inline(out, ty);
-                }
-            }
-            TypeExpr::QualifiedPath { segments, args } => {
-                for (i, sym) in segments.iter().enumerate() {
-                    if i > 0 {
-                        out.push('.');
-                    }
-                    out.push_str(self.interner.resolve(*sym));
-                }
-                if !args.is_empty() {
-                    out.push('<');
-                    for (i, arg) in args.iter().enumerate() {
-                        if i > 0 {
-                            out.push_str(", ");
-                        }
-                        self.write_type_expr_inline(out, arg);
-                    }
-                    out.push('>');
-                }
             }
         }
     }
