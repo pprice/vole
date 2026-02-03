@@ -7,6 +7,13 @@ use crate::generic::TypeConstraint;
 use crate::type_arena::{InternedStructural, TypeId as ArenaTypeId, TypeIdVec};
 use vole_frontend::ast::{ExprKind, FieldDef as AstFieldDef, LetInit, TypeExpr, TypeMapping};
 
+/// Data needed for function registration in the entity registry.
+struct FuncRegistrationData {
+    name_id: NameId,
+    required_params: usize,
+    param_defaults: Vec<Option<Box<Expr>>>,
+}
+
 /// Extract the base interface name from a TypeExpr.
 /// For `Iterator` returns `Iterator`, for `Iterator<i64>` returns `Iterator`.
 /// For `mod.Interface` returns the last segment `Interface`.
@@ -297,6 +304,240 @@ impl Analyzer {
         }
     }
 
+    /// Collect structural types from function parameters for implicit generification.
+    /// Returns a list of (param_index, structural_type) pairs for parameters that need
+    /// synthetic type params.
+    fn collect_structural_params(
+        &self,
+        func: &FuncDecl,
+        interner: &Interner,
+        type_param_scope: Option<&TypeParamScope>,
+    ) -> Vec<(usize, InternedStructural)> {
+        let mut result = Vec::new();
+        for (i, param) in func.params.iter().enumerate() {
+            if let Some(structural) = self.extract_structural_from_type_expr_with_scope(
+                &param.ty,
+                interner,
+                type_param_scope,
+            ) {
+                let func_name = interner.resolve(func.name);
+                tracing::debug!(
+                    ?func_name,
+                    param_idx = i,
+                    ?structural,
+                    "implicit generification: found structural type param"
+                );
+                result.push((i, structural));
+            }
+        }
+        result
+    }
+
+    /// Build synthetic type parameters for structural constraints and add them to the scope.
+    /// Returns a map from param_index -> synthetic type param name_id.
+    fn build_synthetic_type_params(
+        &mut self,
+        structural_params: Vec<(usize, InternedStructural)>,
+        type_param_scope: &mut TypeParamScope,
+    ) -> FxHashMap<usize, NameId> {
+        let builtin_mod = self.name_table_mut().builtin_module();
+        let mut synthetic_param_map: FxHashMap<usize, NameId> = FxHashMap::default();
+
+        for (i, (param_idx, structural)) in structural_params.into_iter().enumerate() {
+            // Generate synthetic type param name like __T0, __T1, etc.
+            let synthetic_name = format!("__T{}", i);
+            let synthetic_name_id = self
+                .name_table_mut()
+                .intern_raw(builtin_mod, &[&synthetic_name]);
+
+            // Create a synthetic Symbol for the type param
+            // Use a high value that won't collide with user symbols.
+            // This is safe because synthetic type params are never looked up by Symbol,
+            // only by name_id during monomorphization/codegen.
+            let synthetic_symbol = Symbol(0x8000_0000 + i as u32);
+
+            tracing::debug!(
+                ?synthetic_name,
+                ?synthetic_name_id,
+                ?param_idx,
+                "created synthetic type param for structural constraint"
+            );
+
+            type_param_scope.add(TypeParamInfo {
+                name: synthetic_symbol,
+                name_id: synthetic_name_id,
+                constraint: Some(TypeConstraint::Structural(structural)),
+                type_param_id: None,
+                variance: TypeParamVariance::default(),
+            });
+            synthetic_param_map.insert(param_idx, synthetic_name_id);
+        }
+
+        synthetic_param_map
+    }
+
+    /// Resolve and validate parameter types for a non-generic function.
+    /// Returns the resolved TypeIds for each parameter.
+    fn resolve_non_generic_params(
+        &mut self,
+        params: &[Param],
+        interner: &Interner,
+    ) -> Vec<ArenaTypeId> {
+        params
+            .iter()
+            .map(|p| {
+                let type_id = self.resolve_type_id(&p.ty, interner);
+                self.check_never_not_allowed(type_id, p.span);
+                self.check_union_simplification(&p.ty, p.span);
+                self.check_combination_not_allowed(&p.ty, p.span);
+                type_id
+            })
+            .collect()
+    }
+
+    /// Resolve and validate the return type for a non-generic function.
+    fn resolve_non_generic_return(&mut self, func: &FuncDecl, interner: &Interner) -> ArenaTypeId {
+        let return_type_id = func
+            .return_type
+            .as_ref()
+            .map(|t| self.resolve_type_id(t, interner))
+            .unwrap_or_else(|| self.type_arena().void());
+        if let Some(rt) = &func.return_type {
+            self.check_union_simplification(rt, func.span);
+            self.check_combination_not_allowed(rt, func.span);
+        }
+        return_type_id
+    }
+
+    /// Resolve parameter types for a generic function with type params in scope.
+    /// Synthetic type params are substituted for their corresponding structural types.
+    fn resolve_generic_params(
+        &mut self,
+        func: &FuncDecl,
+        interner: &Interner,
+        type_param_scope: &TypeParamScope,
+        synthetic_param_map: &FxHashMap<usize, NameId>,
+    ) -> Vec<ArenaTypeId> {
+        let module_id = self.current_module;
+        let mut ctx = TypeResolutionContext::with_type_params(
+            &self.ctx.db,
+            interner,
+            module_id,
+            type_param_scope,
+        );
+
+        func.params
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                if let Some(&synthetic_name_id) = synthetic_param_map.get(&i) {
+                    // Use the synthetic type parameter instead of the structural type
+                    ctx.type_arena_mut().type_param(synthetic_name_id)
+                } else {
+                    resolve_type_to_id(&p.ty, &mut ctx)
+                }
+            })
+            .collect()
+    }
+
+    /// Resolve return type for a generic function with type params in scope.
+    fn resolve_generic_return(
+        &mut self,
+        func: &FuncDecl,
+        interner: &Interner,
+        type_param_scope: &TypeParamScope,
+    ) -> ArenaTypeId {
+        let module_id = self.current_module;
+        let mut ctx = TypeResolutionContext::with_type_params(
+            &self.ctx.db,
+            interner,
+            module_id,
+            type_param_scope,
+        );
+
+        func.return_type
+            .as_ref()
+            .map(|t| resolve_type_to_id(t, &mut ctx))
+            .unwrap_or_else(|| self.type_arena().void())
+    }
+
+    /// Validate parameter and return types after resolution (for generic functions).
+    fn validate_generic_function_types(&mut self, func: &FuncDecl, param_type_ids: &[ArenaTypeId]) {
+        for (param, &type_id) in func.params.iter().zip(param_type_ids) {
+            self.check_never_not_allowed(type_id, param.span);
+            self.check_union_simplification(&param.ty, param.span);
+            self.check_combination_not_allowed(&param.ty, param.span);
+        }
+        if let Some(rt) = &func.return_type {
+            self.check_combination_not_allowed(rt, func.span);
+        }
+    }
+
+    /// Register a non-generic function (no type parameters).
+    fn register_non_generic_function(
+        &mut self,
+        func: &FuncDecl,
+        interner: &Interner,
+        reg_data: FuncRegistrationData,
+    ) {
+        let params_id = self.resolve_non_generic_params(&func.params, interner);
+        let return_type_id = self.resolve_non_generic_return(func, interner);
+
+        let signature = FunctionType::from_ids(&params_id, return_type_id, false);
+        self.functions.insert(func.name, signature.clone());
+
+        // Register in EntityRegistry with default expressions
+        self.entity_registry_mut().register_function_full(
+            reg_data.name_id,
+            reg_data.name_id, // For top-level functions, name_id == full_name_id
+            self.current_module,
+            signature,
+            reg_data.required_params,
+            reg_data.param_defaults,
+        );
+    }
+
+    /// Register a generic function (explicit type parameters or implicit via structural types).
+    fn register_generic_function(
+        &mut self,
+        func: &FuncDecl,
+        interner: &Interner,
+        reg_data: FuncRegistrationData,
+        type_param_scope: TypeParamScope,
+        synthetic_param_map: FxHashMap<usize, NameId>,
+    ) {
+        // Resolve param and return types with type params in scope
+        let param_type_ids =
+            self.resolve_generic_params(func, interner, &type_param_scope, &synthetic_param_map);
+        let return_type_id = self.resolve_generic_return(func, interner, &type_param_scope);
+
+        // Validate types after resolution
+        self.validate_generic_function_types(func, &param_type_ids);
+
+        // Create signature and register
+        let signature = FunctionType::from_ids(&param_type_ids, return_type_id, false);
+
+        let func_id = self.entity_registry_mut().register_function_full(
+            reg_data.name_id,
+            reg_data.name_id, // For top-level functions, name_id == full_name_id
+            self.current_module,
+            signature,
+            reg_data.required_params,
+            reg_data.param_defaults,
+        );
+
+        // Set generic info
+        let type_params = type_param_scope.into_params();
+        self.entity_registry_mut().set_function_generic_info(
+            func_id,
+            GenericFuncInfo {
+                type_params,
+                param_types: param_type_ids,
+                return_type: return_type_id,
+            },
+        );
+    }
+
     fn collect_function_signature(&mut self, func: &FuncDecl, interner: &Interner) {
         let name_id = self
             .name_table_mut()
@@ -312,6 +553,12 @@ impl Analyzer {
             .map(|p| p.default_value.clone())
             .collect();
 
+        let reg_data = FuncRegistrationData {
+            name_id,
+            required_params,
+            param_defaults,
+        };
+
         // Build initial type param scope from explicit type params (if any)
         // This is needed so that structural types like { name: T } can resolve T
         let explicit_type_param_scope: Option<TypeParamScope> = if !func.type_params.is_empty() {
@@ -320,167 +567,28 @@ impl Analyzer {
             None
         };
 
-        // Check for parameters with structural types (duck typing)
-        // These need implicit generification: func f(x: { name: string }) -> func f<__T0: { name: string }>(x: __T0)
-        // Use the explicit type param scope so that structural types can reference type params like T
-        let mut synthetic_type_params: Vec<(usize, InternedStructural)> = Vec::new();
-        for (i, param) in func.params.iter().enumerate() {
-            if let Some(structural) = self.extract_structural_from_type_expr_with_scope(
-                &param.ty,
-                interner,
-                explicit_type_param_scope.as_ref(),
-            ) {
-                let func_name = interner.resolve(func.name);
-                tracing::debug!(
-                    ?func_name,
-                    param_idx = i,
-                    ?structural,
-                    "implicit generification: found structural type param"
-                );
-                synthetic_type_params.push((i, structural));
-            }
-        }
+        // Collect structural types for implicit generification
+        let structural_params =
+            self.collect_structural_params(func, interner, explicit_type_param_scope.as_ref());
 
         let has_explicit_type_params = !func.type_params.is_empty();
-        let has_synthetic_type_params = !synthetic_type_params.is_empty();
+        let has_synthetic_type_params = !structural_params.is_empty();
 
         if !has_explicit_type_params && !has_synthetic_type_params {
-            // Non-generic function: resolve types directly to TypeId
-            let params_id: Vec<_> = func
-                .params
-                .iter()
-                .map(|p| {
-                    let type_id = self.resolve_type_id(&p.ty, interner);
-                    self.check_never_not_allowed(type_id, p.span);
-                    self.check_union_simplification(&p.ty, p.span);
-                    self.check_combination_not_allowed(&p.ty, p.span);
-                    type_id
-                })
-                .collect();
-            let return_type_id = func
-                .return_type
-                .as_ref()
-                .map(|t| self.resolve_type_id(t, interner))
-                .unwrap_or_else(|| self.type_arena().void());
-            if let Some(rt) = &func.return_type {
-                self.check_union_simplification(rt, func.span);
-                self.check_combination_not_allowed(rt, func.span);
-            }
-
-            let signature = FunctionType::from_ids(&params_id, return_type_id, false);
-
-            self.functions.insert(func.name, signature.clone());
-
-            // Register in EntityRegistry with default expressions
-            self.entity_registry_mut().register_function_full(
-                name_id,
-                name_id, // For top-level functions, name_id == full_name_id
-                self.current_module,
-                signature,
-                required_params,
-                param_defaults,
-            );
+            self.register_non_generic_function(func, interner, reg_data);
         } else {
-            // Generic function (explicit or via implicit generification)
-            // Build explicit type params with resolved constraints
+            // Build type param scope with constraints and synthetic params
             let mut type_param_scope =
                 self.build_type_params_with_constraints(&func.type_params, interner);
+            let synthetic_param_map =
+                self.build_synthetic_type_params(structural_params, &mut type_param_scope);
 
-            // Create synthetic type parameters for structural types in parameters
-            // Map: param index -> synthetic type param name_id
-            let builtin_mod = self.name_table_mut().builtin_module();
-            let mut synthetic_param_map: FxHashMap<usize, NameId> = FxHashMap::default();
-            for (i, (param_idx, structural)) in synthetic_type_params.into_iter().enumerate() {
-                // Generate synthetic type param name like __T0, __T1, etc.
-                let synthetic_name = format!("__T{}", i);
-                let synthetic_name_id = self
-                    .name_table_mut()
-                    .intern_raw(builtin_mod, &[&synthetic_name]);
-
-                // Create a synthetic Symbol for the type param
-                // Use a high value that won't collide with user symbols.
-                // This is safe because synthetic type params are never looked up by Symbol,
-                // only by name_id during monomorphization/codegen.
-                let synthetic_symbol = Symbol(0x8000_0000 + i as u32);
-
-                tracing::debug!(
-                    ?synthetic_name,
-                    ?synthetic_name_id,
-                    ?param_idx,
-                    "created synthetic type param for structural constraint"
-                );
-
-                type_param_scope.add(TypeParamInfo {
-                    name: synthetic_symbol,
-                    name_id: synthetic_name_id,
-                    constraint: Some(TypeConstraint::Structural(structural)),
-                    type_param_id: None,
-                    variance: TypeParamVariance::default(),
-                });
-                synthetic_param_map.insert(param_idx, synthetic_name_id);
-            }
-
-            // Resolve param types with type params in scope
-            // For synthetic type params, use the type param instead of the structural type
-            let module_id = self.current_module;
-            let mut ctx = TypeResolutionContext::with_type_params(
-                &self.ctx.db,
+            self.register_generic_function(
+                func,
                 interner,
-                module_id,
-                &type_param_scope,
-            );
-
-            let param_type_ids: Vec<ArenaTypeId> = func
-                .params
-                .iter()
-                .enumerate()
-                .map(|(i, p)| {
-                    if let Some(&synthetic_name_id) = synthetic_param_map.get(&i) {
-                        // Use the synthetic type parameter instead of the structural type
-                        ctx.type_arena_mut().type_param(synthetic_name_id)
-                    } else {
-                        resolve_type_to_id(&p.ty, &mut ctx)
-                    }
-                })
-                .collect();
-
-            let return_type_id = func
-                .return_type
-                .as_ref()
-                .map(|t| resolve_type_to_id(t, &mut ctx))
-                .unwrap_or_else(|| self.type_arena().void());
-
-            // Check that never is not used in function parameters (after ctx is no longer borrowed)
-            for (param, &type_id) in func.params.iter().zip(&param_type_ids) {
-                self.check_never_not_allowed(type_id, param.span);
-                self.check_union_simplification(&param.ty, param.span);
-                self.check_combination_not_allowed(&param.ty, param.span);
-            }
-            if let Some(rt) = &func.return_type {
-                self.check_combination_not_allowed(rt, func.span);
-            }
-
-            // Create a FunctionType from TypeIds
-            let signature = FunctionType::from_ids(&param_type_ids, return_type_id, false);
-
-            // Register in EntityRegistry with default expressions
-            let func_id = self.entity_registry_mut().register_function_full(
-                name_id,
-                name_id, // For top-level functions, name_id == full_name_id
-                self.current_module,
-                signature,
-                required_params,
-                param_defaults,
-            );
-            // Extract type params from scope (consumes scope, avoids clone)
-            let type_params = type_param_scope.into_params();
-            self.entity_registry_mut().set_function_generic_info(
-                func_id,
-                GenericFuncInfo {
-                    type_params,
-                    param_types: param_type_ids,
-                    return_type: return_type_id,
-                },
+                reg_data,
+                type_param_scope,
+                synthetic_param_map,
             );
         }
     }
