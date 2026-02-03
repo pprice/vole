@@ -240,6 +240,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         //   reaches zero. Field values are rc_inc'd at construction time when
         //   borrowed, so the instance owns its references.
         // Handles: opaque RC pointers (Map, Set, Rng, etc.) with their own drop fns.
+        // Iterators: iterator_drop frees source iterators, closures, and
+        //   underlying arrays via iterator_drop_sources when refcount hits zero.
         //
         // NOT enabled for:
         // - Structs: stack-allocated value types.
@@ -250,6 +252,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             || arena.is_class(type_id)
             || arena.is_handle(type_id)
             || arena.is_interface(type_id)
+            || arena.is_runtime_iterator(type_id)
     }
 
     /// Get or create a runtime type_id for a monomorphized generic class instance.

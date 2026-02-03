@@ -919,14 +919,11 @@ impl Cg<'_, '_, '_> {
 
         self.finalize_for_loop(header, body_block, continue_block, exit_block);
 
-        // Free the iterator after the loop. We call rc_dec directly rather
-        // than consume_rc_value because RuntimeIterator types are not tracked
-        // as owned by the general RC lifecycle (they use transfer-of-ownership
-        // semantics in the runtime). This rc_dec cascades through the iterator
-        // chain via iterator_drop_sources, freeing source iterators, closures,
-        // and the underlying array.
-        self.call_runtime_void(RuntimeFn::RcDec, &[iter.value])?;
-        iter.mark_consumed();
+        // Free the iterator after the loop. For owned temporaries (e.g.
+        // `for x in arr.iter()`), consume_rc_value emits rc_dec. For borrowed
+        // values (e.g. `let it = arr.iter(); for x in it`), the variable's
+        // scope-exit cleanup handles the rc_dec instead.
+        self.consume_rc_value(&mut iter)?;
 
         Ok(false)
     }

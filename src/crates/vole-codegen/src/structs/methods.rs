@@ -956,6 +956,18 @@ impl Cg<'_, '_, '_> {
         // functions return raw iterator pointers, not boxed interface values
         let return_type_id = self.convert_iterator_return_type(return_type_id, iter_type_id);
 
+        // When the iterator comes from a variable (borrowed), rc_inc it before
+        // pipeline and terminal method calls. Both categories assume ownership
+        // transfer — pipeline methods store the source pointer, terminal methods
+        // dec_ref it. The variable's scope-exit cleanup will emit a separate
+        // rc_dec, so we need an extra reference to avoid a double-free.
+        // Non-consuming methods like `next` just borrow the iterator and don't
+        // need an rc_inc.
+        let consumes_iterator = method_name != "next";
+        if obj.is_borrowed() && consumes_iterator {
+            self.emit_rc_inc(obj.value)?;
+        }
+
         // Build args: self (iterator ptr) + method args
         let mut args: ArgVec = smallvec![obj.value];
         let mut rc_temps: Vec<CompiledValue> = Vec::new();
