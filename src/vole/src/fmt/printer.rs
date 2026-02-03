@@ -9,6 +9,16 @@ use crate::frontend::ast::*;
 /// Indent width for formatting (4 spaces)
 const INDENT: isize = 4;
 
+/// Groups arguments for printing a class-like body (class, struct).
+struct ClassLikeBody<'a, 'b> {
+    name: &'b str,
+    implements: DocBuilder<'a, Arena<'a>>,
+    fields: &'b [FieldDef],
+    external: Option<&'b ExternalBlock>,
+    methods: &'b [FuncDecl],
+    keyword: &'b str,
+}
+
 /// Pretty-print a program to a Doc.
 pub fn print_program<'a>(
     arena: &'a Arena<'a>,
@@ -1334,13 +1344,15 @@ fn print_class_decl<'a>(
 
     print_class_like_body(
         arena,
-        &name,
-        implements,
-        &class.fields,
-        class.external.as_ref(),
-        &class.methods,
+        ClassLikeBody {
+            name: &name,
+            implements,
+            fields: &class.fields,
+            external: class.external.as_ref(),
+            methods: &class.methods,
+            keyword: "class",
+        },
         interner,
-        "class",
     )
 }
 
@@ -1353,13 +1365,15 @@ fn print_struct_decl<'a>(
 
     print_class_like_body(
         arena,
-        &name,
-        arena.nil(),
-        &struct_decl.fields,
-        None,
-        &struct_decl.methods,
+        ClassLikeBody {
+            name: &name,
+            implements: arena.nil(),
+            fields: &struct_decl.fields,
+            external: None,
+            methods: &struct_decl.methods,
+            keyword: "struct",
+        },
         interner,
-        "struct",
     )
 }
 
@@ -1408,17 +1422,20 @@ fn print_sentinel_decl<'a>(
 }
 
 /// Print the body of a class-like declaration.
-#[allow(clippy::too_many_arguments)]
-fn print_class_like_body<'a>(
+fn print_class_like_body<'a, 'b>(
     arena: &'a Arena<'a>,
-    name: &str,
-    implements: DocBuilder<'a, Arena<'a>>,
-    fields: &[FieldDef],
-    external: Option<&ExternalBlock>,
-    methods: &[FuncDecl],
+    body: ClassLikeBody<'a, 'b>,
     interner: &Interner,
-    keyword: &str,
 ) -> DocBuilder<'a, Arena<'a>> {
+    let ClassLikeBody {
+        name,
+        implements,
+        fields,
+        external,
+        methods,
+        keyword,
+    } = body;
+
     if fields.is_empty() && external.is_none() && methods.is_empty() {
         return arena
             .text(keyword.to_string())
