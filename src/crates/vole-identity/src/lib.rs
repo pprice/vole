@@ -65,50 +65,59 @@ pub struct DefLocation {
     pub span: Span,
 }
 
-/// Cached NameIds for language primitives.
-/// Registered at NameTable creation, always available.
-#[derive(Debug, Clone)]
-pub struct Primitives {
-    pub i8: NameId,
-    pub i16: NameId,
-    pub i32: NameId,
-    pub i64: NameId,
-    pub i128: NameId,
-    pub u8: NameId,
-    pub u16: NameId,
-    pub u32: NameId,
-    pub u64: NameId,
-    pub f32: NameId,
-    pub f64: NameId,
-    pub bool: NameId,
-    pub string: NameId,
-    pub handle: NameId,
-    pub nil: NameId,
+/// Macro for defining name-based primitives with a single source of truth.
+/// Each entry defines the field name (which is also used as the string key for by_name lookup).
+macro_rules! define_name_primitives {
+    ($($name:ident),* $(,)?) => {
+        /// Cached NameIds for language primitives.
+        /// Registered at NameTable creation, always available.
+        #[derive(Debug, Clone)]
+        pub struct Primitives {
+            $(pub $name: NameId),*
+        }
+
+        impl Primitives {
+            /// Look up a primitive by name
+            pub fn by_name(&self, name: &str) -> Option<NameId> {
+                match name {
+                    $(stringify!($name) => Some(self.$name)),*,
+                    _ => None,
+                }
+            }
+
+            /// Initialize all fields to a placeholder value
+            fn placeholder(placeholder: NameId) -> Self {
+                Self {
+                    $($name: placeholder),*
+                }
+            }
+
+            /// Register all primitives in the given module, interning via the provided closure.
+            /// Returns a new Primitives struct with all NameIds populated.
+            fn register<F>(mut intern: F) -> Self
+            where
+                F: FnMut(&str) -> NameId,
+            {
+                Self {
+                    $($name: intern(stringify!($name))),*
+                }
+            }
+
+            /// Iterate over all primitive NameIds.
+            /// Useful for registering all primitives in bulk.
+            pub fn iter(&self) -> impl Iterator<Item = NameId> + '_ {
+                [$(self.$name),*].into_iter()
+            }
+        }
+    };
 }
 
-impl Primitives {
-    /// Look up a primitive by name
-    pub fn by_name(&self, name: &str) -> Option<NameId> {
-        match name {
-            "i8" => Some(self.i8),
-            "i16" => Some(self.i16),
-            "i32" => Some(self.i32),
-            "i64" => Some(self.i64),
-            "i128" => Some(self.i128),
-            "u8" => Some(self.u8),
-            "u16" => Some(self.u16),
-            "u32" => Some(self.u32),
-            "u64" => Some(self.u64),
-            "f32" => Some(self.f32),
-            "f64" => Some(self.f64),
-            "bool" => Some(self.bool),
-            "string" => Some(self.string),
-            "handle" => Some(self.handle),
-            "nil" => Some(self.nil),
-            _ => None,
-        }
-    }
+// Define all name-based primitives (15 types that have NameIds)
+define_name_primitives!(
+    i8, i16, i32, i64, i128, u8, u16, u32, u64, f32, f64, bool, string, handle, nil
+);
 
+impl Primitives {
     /// Map AST PrimitiveType to NameId
     pub fn from_ast(&self, prim: vole_frontend::ast::PrimitiveType) -> NameId {
         use vole_frontend::ast::PrimitiveType;
@@ -203,7 +212,6 @@ pub struct NameTable {
 impl NameTable {
     pub fn new() -> Self {
         // Use placeholder NameIds - they'll be overwritten before new() returns
-        let placeholder = NameId(0);
         let mut table = Self {
             modules: Vec::new(),
             module_lookup: FxHashMap::default(),
@@ -211,23 +219,7 @@ impl NameTable {
             name_lookup: FxHashMap::default(),
             main_module: ModuleId(0),
             diagnostics: FxHashMap::default(),
-            primitives: Primitives {
-                i8: placeholder,
-                i16: placeholder,
-                i32: placeholder,
-                i64: placeholder,
-                i128: placeholder,
-                u8: placeholder,
-                u16: placeholder,
-                u32: placeholder,
-                u64: placeholder,
-                f32: placeholder,
-                f64: placeholder,
-                bool: placeholder,
-                string: placeholder,
-                handle: placeholder,
-                nil: placeholder,
-            },
+            primitives: Primitives::placeholder(NameId(0)),
             well_known: WellKnownTypes::new(),
         };
         let main_module = table.module_id("main");
@@ -254,23 +246,7 @@ impl NameTable {
 
     fn register_primitives(&mut self) -> Primitives {
         let builtin = self.builtin_module();
-        Primitives {
-            i8: self.intern_raw(builtin, &["i8"]),
-            i16: self.intern_raw(builtin, &["i16"]),
-            i32: self.intern_raw(builtin, &["i32"]),
-            i64: self.intern_raw(builtin, &["i64"]),
-            i128: self.intern_raw(builtin, &["i128"]),
-            u8: self.intern_raw(builtin, &["u8"]),
-            u16: self.intern_raw(builtin, &["u16"]),
-            u32: self.intern_raw(builtin, &["u32"]),
-            u64: self.intern_raw(builtin, &["u64"]),
-            f32: self.intern_raw(builtin, &["f32"]),
-            f64: self.intern_raw(builtin, &["f64"]),
-            bool: self.intern_raw(builtin, &["bool"]),
-            string: self.intern_raw(builtin, &["string"]),
-            handle: self.intern_raw(builtin, &["handle"]),
-            nil: self.intern_raw(builtin, &["nil"]),
-        }
+        Primitives::register(|name| self.intern_raw(builtin, &[name]))
     }
 
     pub fn main_module(&self) -> ModuleId {

@@ -333,36 +333,47 @@ pub enum SemaType {
     Placeholder(PlaceholderKind),
 }
 
-/// Pre-interned primitive and common types for O(1) access
-#[derive(Debug, Clone, Copy)]
-pub struct PrimitiveTypes {
-    // Signed integers
-    pub i8: TypeId,
-    pub i16: TypeId,
-    pub i32: TypeId,
-    pub i64: TypeId,
-    pub i128: TypeId,
-    // Unsigned integers
-    pub u8: TypeId,
-    pub u16: TypeId,
-    pub u32: TypeId,
-    pub u64: TypeId,
-    // Floating point
-    pub f32: TypeId,
-    pub f64: TypeId,
-    // Other primitives
-    pub bool: TypeId,
-    pub string: TypeId,
-    // Opaque handle type
-    pub handle: TypeId,
-    // Special types
-    pub void: TypeId,
-    pub nil: TypeId,
-    pub done: TypeId,
-    pub range: TypeId,
-    pub metatype: TypeId,
-    pub invalid: TypeId,
+/// Macro for defining primitive TypeId fields and accessors with a single source of truth.
+/// Each entry defines the field name used in PrimitiveTypes and the corresponding accessor.
+macro_rules! define_primitive_types {
+    ($($name:ident),* $(,)?) => {
+        /// Pre-interned primitive and common types for O(1) access
+        #[derive(Debug, Clone, Copy)]
+        pub struct PrimitiveTypes {
+            $(pub $name: TypeId),*
+        }
+
+        impl PrimitiveTypes {
+            /// Initialize all fields to a placeholder value
+            fn placeholder() -> Self {
+                Self {
+                    $($name: TypeId(0)),*
+                }
+            }
+        }
+
+        // Generate accessor methods for TypeArena
+        impl TypeArena {
+            $(
+                pub fn $name(&self) -> TypeId {
+                    self.primitives.$name
+                }
+            )*
+        }
+    };
 }
+
+// Define all TypeId-based primitives (20 types)
+// Note: never and unknown are handled specially as they return TypeId constants directly
+define_primitive_types!(
+    // Signed integers
+    i8, i16, i32, i64, i128, // Unsigned integers
+    u8, u16, u32, u64, // Floating point
+    f32, f64, // Other primitives
+    bool, string, // Opaque handle type
+    handle, // Special types
+    void, nil, done, range, metatype, invalid
+);
 
 /// Per-compilation type arena with automatic interning/deduplication.
 #[derive(Clone)]
@@ -398,29 +409,8 @@ impl TypeArena {
             intern_map: FxHashMap::default(),
             module_metadata: FxHashMap::default(),
             sentinel_ids: FxHashSet::default(),
-            primitives: PrimitiveTypes {
-                // Temporary placeholders - will be filled in below
-                i8: TypeId(0),
-                i16: TypeId(0),
-                i32: TypeId(0),
-                i64: TypeId(0),
-                i128: TypeId(0),
-                u8: TypeId(0),
-                u16: TypeId(0),
-                u32: TypeId(0),
-                u64: TypeId(0),
-                f32: TypeId(0),
-                f64: TypeId(0),
-                bool: TypeId(0),
-                string: TypeId(0),
-                handle: TypeId(0),
-                void: TypeId(0),
-                nil: TypeId(0),
-                done: TypeId(0),
-                range: TypeId(0),
-                metatype: TypeId(0),
-                invalid: TypeId(0),
-            },
+            // Temporary placeholders - will be filled in below
+            primitives: PrimitiveTypes::placeholder(),
         };
 
         // Pre-intern all primitive types in the order defined by TypeId constants.
@@ -541,66 +531,9 @@ impl TypeArena {
     }
 
     // ========================================================================
-    // Primitive accessors - O(1) lookup from pre-cached table
+    // Special type accessors (not covered by the define_primitive_types macro)
     // ========================================================================
 
-    pub fn i8(&self) -> TypeId {
-        self.primitives.i8
-    }
-    pub fn i16(&self) -> TypeId {
-        self.primitives.i16
-    }
-    pub fn i32(&self) -> TypeId {
-        self.primitives.i32
-    }
-    pub fn i64(&self) -> TypeId {
-        self.primitives.i64
-    }
-    pub fn i128(&self) -> TypeId {
-        self.primitives.i128
-    }
-    pub fn u8(&self) -> TypeId {
-        self.primitives.u8
-    }
-    pub fn u16(&self) -> TypeId {
-        self.primitives.u16
-    }
-    pub fn u32(&self) -> TypeId {
-        self.primitives.u32
-    }
-    pub fn u64(&self) -> TypeId {
-        self.primitives.u64
-    }
-    pub fn f32(&self) -> TypeId {
-        self.primitives.f32
-    }
-    pub fn f64(&self) -> TypeId {
-        self.primitives.f64
-    }
-    pub fn bool(&self) -> TypeId {
-        self.primitives.bool
-    }
-    pub fn string(&self) -> TypeId {
-        self.primitives.string
-    }
-    pub fn void(&self) -> TypeId {
-        self.primitives.void
-    }
-    pub fn nil(&self) -> TypeId {
-        self.primitives.nil
-    }
-    pub fn done(&self) -> TypeId {
-        self.primitives.done
-    }
-    pub fn range(&self) -> TypeId {
-        self.primitives.range
-    }
-    pub fn metatype(&self) -> TypeId {
-        self.primitives.metatype
-    }
-    pub fn invalid(&self) -> TypeId {
-        self.primitives.invalid
-    }
     pub fn never(&self) -> TypeId {
         TypeId::NEVER
     }
@@ -608,7 +541,7 @@ impl TypeArena {
         TypeId::UNKNOWN
     }
 
-    /// Get TypeId for a PrimitiveType
+    /// Get TypeId for a PrimitiveType enum variant
     pub fn primitive(&self, p: PrimitiveType) -> TypeId {
         match p {
             PrimitiveType::I8 => self.primitives.i8,

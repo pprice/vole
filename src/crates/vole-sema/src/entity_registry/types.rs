@@ -46,27 +46,14 @@ impl EntityRegistry {
 
     /// Register all primitive types from the NameTable
     pub fn register_primitives(&mut self, name_table: &vole_identity::NameTable) {
-        let primitives = &name_table.primitives;
         let Some(builtin_module) = name_table.builtin_module_id() else {
             return; // No builtin module yet - primitives can't be registered
         };
 
-        // Register each primitive type
-        self.register_type(primitives.i8, TypeDefKind::Primitive, builtin_module);
-        self.register_type(primitives.i16, TypeDefKind::Primitive, builtin_module);
-        self.register_type(primitives.i32, TypeDefKind::Primitive, builtin_module);
-        self.register_type(primitives.i64, TypeDefKind::Primitive, builtin_module);
-        self.register_type(primitives.i128, TypeDefKind::Primitive, builtin_module);
-        self.register_type(primitives.u8, TypeDefKind::Primitive, builtin_module);
-        self.register_type(primitives.u16, TypeDefKind::Primitive, builtin_module);
-        self.register_type(primitives.u32, TypeDefKind::Primitive, builtin_module);
-        self.register_type(primitives.u64, TypeDefKind::Primitive, builtin_module);
-        self.register_type(primitives.f32, TypeDefKind::Primitive, builtin_module);
-        self.register_type(primitives.f64, TypeDefKind::Primitive, builtin_module);
-        self.register_type(primitives.bool, TypeDefKind::Primitive, builtin_module);
-        self.register_type(primitives.string, TypeDefKind::Primitive, builtin_module);
-        self.register_type(primitives.handle, TypeDefKind::Primitive, builtin_module);
-        self.register_type(primitives.nil, TypeDefKind::Primitive, builtin_module);
+        // Register each primitive type using the iterator from Primitives
+        for name_id in name_table.primitives.iter() {
+            self.register_type(name_id, TypeDefKind::Primitive, builtin_module);
+        }
     }
 
     /// Get a type definition by ID
