@@ -24,6 +24,9 @@ rustc-hash = "2.1"
 # Small vector optimization
 smallvec = "1.13"
 
+# Identifier concatenation for macros
+paste = "1.0"
+
 # Tracing/observability
 tracing = "0.1"
 

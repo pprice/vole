@@ -4,7 +4,130 @@
 //! This allows float intrinsics (nan, infinity, epsilon, etc.) to be looked up
 //! and compiled in a uniform way.
 
+use paste::paste;
 use rustc_hash::FxHashMap;
+
+// =============================================================================
+// Macros for generating integer intrinsic enums and registration
+// =============================================================================
+
+/// Macro for defining integer operation enums with type-prefixed variants.
+///
+/// Usage:
+/// ```ignore
+/// define_int_op_enum! {
+///     /// Doc comment for the enum.
+///     pub enum UnaryIntOp {
+///         signed: [Abs],                    // Only i8, i16, i32, i64
+///         all: [Clz, Ctz, Popcnt, Bitrev],  // All 8 integer types
+///     }
+/// }
+/// ```
+macro_rules! define_int_op_enum {
+    // Only signed operations
+    (
+        $(#[$enum_meta:meta])*
+        $vis:vis enum $name:ident {
+            signed: [$($signed_op:ident),* $(,)?] $(,)?
+        }
+    ) => {
+        paste! {
+            $(#[$enum_meta])*
+            #[derive(Debug, Clone, Copy)]
+            $vis enum $name {
+                $(
+                    [<I8 $signed_op>],
+                    [<I16 $signed_op>],
+                    [<I32 $signed_op>],
+                    [<I64 $signed_op>],
+                )*
+            }
+        }
+    };
+    // Only all operations
+    (
+        $(#[$enum_meta:meta])*
+        $vis:vis enum $name:ident {
+            all: [$($all_op:ident),* $(,)?] $(,)?
+        }
+    ) => {
+        paste! {
+            $(#[$enum_meta])*
+            #[derive(Debug, Clone, Copy)]
+            $vis enum $name {
+                $(
+                    [<I8 $all_op>],
+                    [<I16 $all_op>],
+                    [<I32 $all_op>],
+                    [<I64 $all_op>],
+                    [<U8 $all_op>],
+                    [<U16 $all_op>],
+                    [<U32 $all_op>],
+                    [<U64 $all_op>],
+                )*
+            }
+        }
+    };
+    // Both signed and all operations
+    (
+        $(#[$enum_meta:meta])*
+        $vis:vis enum $name:ident {
+            signed: [$($signed_op:ident),* $(,)?],
+            all: [$($all_op:ident),* $(,)?] $(,)?
+        }
+    ) => {
+        paste! {
+            $(#[$enum_meta])*
+            #[derive(Debug, Clone, Copy)]
+            $vis enum $name {
+                // Signed-only variants
+                $(
+                    [<I8 $signed_op>],
+                    [<I16 $signed_op>],
+                    [<I32 $signed_op>],
+                    [<I64 $signed_op>],
+                )*
+                // All-type variants
+                $(
+                    [<I8 $all_op>],
+                    [<I16 $all_op>],
+                    [<I32 $all_op>],
+                    [<I64 $all_op>],
+                    [<U8 $all_op>],
+                    [<U16 $all_op>],
+                    [<U32 $all_op>],
+                    [<U64 $all_op>],
+                )*
+            }
+        }
+    };
+}
+
+/// Macro for registering integer intrinsics for all or signed-only types.
+macro_rules! register_int_intrinsics {
+    // All integer types
+    ($self:ident, all, $handler:ident, $method:literal, $op:ident) => {
+        paste! {
+            $self.register(IntrinsicKey::from(concat!("i8_", $method)), IntrinsicHandler::$handler($handler::[<I8 $op>]));
+            $self.register(IntrinsicKey::from(concat!("i16_", $method)), IntrinsicHandler::$handler($handler::[<I16 $op>]));
+            $self.register(IntrinsicKey::from(concat!("i32_", $method)), IntrinsicHandler::$handler($handler::[<I32 $op>]));
+            $self.register(IntrinsicKey::from(concat!("i64_", $method)), IntrinsicHandler::$handler($handler::[<I64 $op>]));
+            $self.register(IntrinsicKey::from(concat!("u8_", $method)), IntrinsicHandler::$handler($handler::[<U8 $op>]));
+            $self.register(IntrinsicKey::from(concat!("u16_", $method)), IntrinsicHandler::$handler($handler::[<U16 $op>]));
+            $self.register(IntrinsicKey::from(concat!("u32_", $method)), IntrinsicHandler::$handler($handler::[<U32 $op>]));
+            $self.register(IntrinsicKey::from(concat!("u64_", $method)), IntrinsicHandler::$handler($handler::[<U64 $op>]));
+        }
+    };
+    // Signed integer types only
+    ($self:ident, signed, $handler:ident, $method:literal, $op:ident) => {
+        paste! {
+            $self.register(IntrinsicKey::from(concat!("i8_", $method)), IntrinsicHandler::$handler($handler::[<I8 $op>]));
+            $self.register(IntrinsicKey::from(concat!("i16_", $method)), IntrinsicHandler::$handler($handler::[<I16 $op>]));
+            $self.register(IntrinsicKey::from(concat!("i32_", $method)), IntrinsicHandler::$handler($handler::[<I32 $op>]));
+            $self.register(IntrinsicKey::from(concat!("i64_", $method)), IntrinsicHandler::$handler($handler::[<I64 $op>]));
+        }
+    };
+}
 
 /// A unique key identifying an intrinsic.
 ///
@@ -93,203 +216,35 @@ pub enum BinaryFloatOp {
     F64Max,
 }
 
-/// Unary integer operations.
-#[derive(Debug, Clone, Copy)]
-pub enum UnaryIntOp {
-    // Absolute value (signed types only)
-    I8Abs,
-    I16Abs,
-    I32Abs,
-    I64Abs,
-    // Count leading zeros
-    I8Clz,
-    I16Clz,
-    I32Clz,
-    I64Clz,
-    U8Clz,
-    U16Clz,
-    U32Clz,
-    U64Clz,
-    // Count trailing zeros
-    I8Ctz,
-    I16Ctz,
-    I32Ctz,
-    I64Ctz,
-    U8Ctz,
-    U16Ctz,
-    U32Ctz,
-    U64Ctz,
-    // Population count (count 1 bits)
-    I8Popcnt,
-    I16Popcnt,
-    I32Popcnt,
-    I64Popcnt,
-    U8Popcnt,
-    U16Popcnt,
-    U32Popcnt,
-    U64Popcnt,
-    // Bit reverse
-    I8Bitrev,
-    I16Bitrev,
-    I32Bitrev,
-    I64Bitrev,
-    U8Bitrev,
-    U16Bitrev,
-    U32Bitrev,
-    U64Bitrev,
+define_int_op_enum! {
+    /// Unary integer operations.
+    pub enum UnaryIntOp {
+        signed: [Abs],
+        all: [Clz, Ctz, Popcnt, Bitrev],
+    }
 }
 
-/// Binary integer operations.
-#[derive(Debug, Clone, Copy)]
-pub enum BinaryIntOp {
-    // Signed minimum
-    I8Min,
-    I16Min,
-    I32Min,
-    I64Min,
-    // Unsigned minimum
-    U8Min,
-    U16Min,
-    U32Min,
-    U64Min,
-    // Signed maximum
-    I8Max,
-    I16Max,
-    I32Max,
-    I64Max,
-    // Unsigned maximum
-    U8Max,
-    U16Max,
-    U32Max,
-    U64Max,
-    // Rotate left
-    I8Rotl,
-    I16Rotl,
-    I32Rotl,
-    I64Rotl,
-    U8Rotl,
-    U16Rotl,
-    U32Rotl,
-    U64Rotl,
-    // Rotate right
-    I8Rotr,
-    I16Rotr,
-    I32Rotr,
-    I64Rotr,
-    U8Rotr,
-    U16Rotr,
-    U32Rotr,
-    U64Rotr,
-    // Wrapping add
-    I8WrappingAdd,
-    I16WrappingAdd,
-    I32WrappingAdd,
-    I64WrappingAdd,
-    U8WrappingAdd,
-    U16WrappingAdd,
-    U32WrappingAdd,
-    U64WrappingAdd,
-    // Wrapping sub
-    I8WrappingSub,
-    I16WrappingSub,
-    I32WrappingSub,
-    I64WrappingSub,
-    U8WrappingSub,
-    U16WrappingSub,
-    U32WrappingSub,
-    U64WrappingSub,
-    // Wrapping mul
-    I8WrappingMul,
-    I16WrappingMul,
-    I32WrappingMul,
-    I64WrappingMul,
-    U8WrappingMul,
-    U16WrappingMul,
-    U32WrappingMul,
-    U64WrappingMul,
-    // Saturating add
-    I8SaturatingAdd,
-    I16SaturatingAdd,
-    I32SaturatingAdd,
-    I64SaturatingAdd,
-    U8SaturatingAdd,
-    U16SaturatingAdd,
-    U32SaturatingAdd,
-    U64SaturatingAdd,
-    // Saturating sub
-    I8SaturatingSub,
-    I16SaturatingSub,
-    I32SaturatingSub,
-    I64SaturatingSub,
-    U8SaturatingSub,
-    U16SaturatingSub,
-    U32SaturatingSub,
-    U64SaturatingSub,
-    // Saturating mul
-    I8SaturatingMul,
-    I16SaturatingMul,
-    I32SaturatingMul,
-    I64SaturatingMul,
-    U8SaturatingMul,
-    U16SaturatingMul,
-    U32SaturatingMul,
-    U64SaturatingMul,
+define_int_op_enum! {
+    /// Binary integer operations.
+    pub enum BinaryIntOp {
+        all: [Min, Max, Rotl, Rotr, WrappingAdd, WrappingSub, WrappingMul,
+              SaturatingAdd, SaturatingSub, SaturatingMul],
+    }
 }
 
-/// Unary integer wrapping operations.
-#[derive(Debug, Clone, Copy)]
-#[allow(clippy::enum_variant_names)] // All variants are WrappingNeg by design for consistency
-pub enum UnaryIntWrappingOp {
-    // Wrapping negation (signed types only)
-    I8WrappingNeg,
-    I16WrappingNeg,
-    I32WrappingNeg,
-    I64WrappingNeg,
+define_int_op_enum! {
+    /// Unary integer wrapping operations.
+    #[allow(clippy::enum_variant_names)] // All variants are WrappingNeg by design for consistency
+    pub enum UnaryIntWrappingOp {
+        signed: [WrappingNeg],
+    }
 }
 
-/// Checked integer operations (return Optional<T> - nil on overflow).
-#[derive(Debug, Clone, Copy)]
-pub enum CheckedIntOp {
-    // Checked add - signed
-    I8CheckedAdd,
-    I16CheckedAdd,
-    I32CheckedAdd,
-    I64CheckedAdd,
-    // Checked add - unsigned
-    U8CheckedAdd,
-    U16CheckedAdd,
-    U32CheckedAdd,
-    U64CheckedAdd,
-    // Checked sub - signed
-    I8CheckedSub,
-    I16CheckedSub,
-    I32CheckedSub,
-    I64CheckedSub,
-    // Checked sub - unsigned
-    U8CheckedSub,
-    U16CheckedSub,
-    U32CheckedSub,
-    U64CheckedSub,
-    // Checked mul - signed
-    I8CheckedMul,
-    I16CheckedMul,
-    I32CheckedMul,
-    I64CheckedMul,
-    // Checked mul - unsigned
-    U8CheckedMul,
-    U16CheckedMul,
-    U32CheckedMul,
-    U64CheckedMul,
-    // Checked div - signed (returns nil on div-by-zero or MIN/-1)
-    I8CheckedDiv,
-    I16CheckedDiv,
-    I32CheckedDiv,
-    I64CheckedDiv,
-    // Checked div - unsigned (returns nil on div-by-zero)
-    U8CheckedDiv,
-    U16CheckedDiv,
-    U32CheckedDiv,
-    U64CheckedDiv,
+define_int_op_enum! {
+    /// Checked integer operations (return Optional<T> - nil on overflow).
+    pub enum CheckedIntOp {
+        all: [CheckedAdd, CheckedSub, CheckedMul, CheckedDiv],
+    }
 }
 
 /// Float constant intrinsic values.
@@ -481,284 +436,50 @@ impl IntrinsicsRegistry {
         self.register(IntrinsicKey::from("f64_max"), BF(F64Max));
     }
 
-    /// Register unary integer operation intrinsics (abs, clz, ctz, popcnt).
+    /// Register unary integer operation intrinsics (abs, clz, ctz, popcnt, bitrev).
     fn register_int_operations(&mut self) {
-        use IntrinsicHandler::UnaryIntOp as UI;
-        use UnaryIntOp::*;
-
-        // abs (signed only)
-        self.register(IntrinsicKey::from("i8_abs"), UI(I8Abs));
-        self.register(IntrinsicKey::from("i16_abs"), UI(I16Abs));
-        self.register(IntrinsicKey::from("i32_abs"), UI(I32Abs));
-        self.register(IntrinsicKey::from("i64_abs"), UI(I64Abs));
-
-        // clz (all int types)
-        self.register(IntrinsicKey::from("i8_clz"), UI(I8Clz));
-        self.register(IntrinsicKey::from("i16_clz"), UI(I16Clz));
-        self.register(IntrinsicKey::from("i32_clz"), UI(I32Clz));
-        self.register(IntrinsicKey::from("i64_clz"), UI(I64Clz));
-        self.register(IntrinsicKey::from("u8_clz"), UI(U8Clz));
-        self.register(IntrinsicKey::from("u16_clz"), UI(U16Clz));
-        self.register(IntrinsicKey::from("u32_clz"), UI(U32Clz));
-        self.register(IntrinsicKey::from("u64_clz"), UI(U64Clz));
-
-        // ctz (all int types)
-        self.register(IntrinsicKey::from("i8_ctz"), UI(I8Ctz));
-        self.register(IntrinsicKey::from("i16_ctz"), UI(I16Ctz));
-        self.register(IntrinsicKey::from("i32_ctz"), UI(I32Ctz));
-        self.register(IntrinsicKey::from("i64_ctz"), UI(I64Ctz));
-        self.register(IntrinsicKey::from("u8_ctz"), UI(U8Ctz));
-        self.register(IntrinsicKey::from("u16_ctz"), UI(U16Ctz));
-        self.register(IntrinsicKey::from("u32_ctz"), UI(U32Ctz));
-        self.register(IntrinsicKey::from("u64_ctz"), UI(U64Ctz));
-
-        // popcnt (all int types)
-        self.register(IntrinsicKey::from("i8_popcnt"), UI(I8Popcnt));
-        self.register(IntrinsicKey::from("i16_popcnt"), UI(I16Popcnt));
-        self.register(IntrinsicKey::from("i32_popcnt"), UI(I32Popcnt));
-        self.register(IntrinsicKey::from("i64_popcnt"), UI(I64Popcnt));
-        self.register(IntrinsicKey::from("u8_popcnt"), UI(U8Popcnt));
-        self.register(IntrinsicKey::from("u16_popcnt"), UI(U16Popcnt));
-        self.register(IntrinsicKey::from("u32_popcnt"), UI(U32Popcnt));
-        self.register(IntrinsicKey::from("u64_popcnt"), UI(U64Popcnt));
-
-        // bitrev (all int types)
-        self.register(IntrinsicKey::from("i8_bitrev"), UI(I8Bitrev));
-        self.register(IntrinsicKey::from("i16_bitrev"), UI(I16Bitrev));
-        self.register(IntrinsicKey::from("i32_bitrev"), UI(I32Bitrev));
-        self.register(IntrinsicKey::from("i64_bitrev"), UI(I64Bitrev));
-        self.register(IntrinsicKey::from("u8_bitrev"), UI(U8Bitrev));
-        self.register(IntrinsicKey::from("u16_bitrev"), UI(U16Bitrev));
-        self.register(IntrinsicKey::from("u32_bitrev"), UI(U32Bitrev));
-        self.register(IntrinsicKey::from("u64_bitrev"), UI(U64Bitrev));
+        register_int_intrinsics!(self, signed, UnaryIntOp, "abs", Abs);
+        register_int_intrinsics!(self, all, UnaryIntOp, "clz", Clz);
+        register_int_intrinsics!(self, all, UnaryIntOp, "ctz", Ctz);
+        register_int_intrinsics!(self, all, UnaryIntOp, "popcnt", Popcnt);
+        register_int_intrinsics!(self, all, UnaryIntOp, "bitrev", Bitrev);
     }
 
-    /// Register binary integer operation intrinsics (min, max).
+    /// Register binary integer operation intrinsics (min, max, rotl, rotr, wrapping_add/sub/mul).
     fn register_binary_int_operations(&mut self) {
-        use BinaryIntOp::*;
-        use IntrinsicHandler::BinaryIntOp as BI;
-
-        // min (signed)
-        self.register(IntrinsicKey::from("i8_min"), BI(I8Min));
-        self.register(IntrinsicKey::from("i16_min"), BI(I16Min));
-        self.register(IntrinsicKey::from("i32_min"), BI(I32Min));
-        self.register(IntrinsicKey::from("i64_min"), BI(I64Min));
-
-        // min (unsigned)
-        self.register(IntrinsicKey::from("u8_min"), BI(U8Min));
-        self.register(IntrinsicKey::from("u16_min"), BI(U16Min));
-        self.register(IntrinsicKey::from("u32_min"), BI(U32Min));
-        self.register(IntrinsicKey::from("u64_min"), BI(U64Min));
-
-        // max (signed)
-        self.register(IntrinsicKey::from("i8_max"), BI(I8Max));
-        self.register(IntrinsicKey::from("i16_max"), BI(I16Max));
-        self.register(IntrinsicKey::from("i32_max"), BI(I32Max));
-        self.register(IntrinsicKey::from("i64_max"), BI(I64Max));
-
-        // max (unsigned)
-        self.register(IntrinsicKey::from("u8_max"), BI(U8Max));
-        self.register(IntrinsicKey::from("u16_max"), BI(U16Max));
-        self.register(IntrinsicKey::from("u32_max"), BI(U32Max));
-        self.register(IntrinsicKey::from("u64_max"), BI(U64Max));
-
-        // rotl (all int types)
-        self.register(IntrinsicKey::from("i8_rotl"), BI(I8Rotl));
-        self.register(IntrinsicKey::from("i16_rotl"), BI(I16Rotl));
-        self.register(IntrinsicKey::from("i32_rotl"), BI(I32Rotl));
-        self.register(IntrinsicKey::from("i64_rotl"), BI(I64Rotl));
-        self.register(IntrinsicKey::from("u8_rotl"), BI(U8Rotl));
-        self.register(IntrinsicKey::from("u16_rotl"), BI(U16Rotl));
-        self.register(IntrinsicKey::from("u32_rotl"), BI(U32Rotl));
-        self.register(IntrinsicKey::from("u64_rotl"), BI(U64Rotl));
-
-        // rotr (all int types)
-        self.register(IntrinsicKey::from("i8_rotr"), BI(I8Rotr));
-        self.register(IntrinsicKey::from("i16_rotr"), BI(I16Rotr));
-        self.register(IntrinsicKey::from("i32_rotr"), BI(I32Rotr));
-        self.register(IntrinsicKey::from("i64_rotr"), BI(I64Rotr));
-        self.register(IntrinsicKey::from("u8_rotr"), BI(U8Rotr));
-        self.register(IntrinsicKey::from("u16_rotr"), BI(U16Rotr));
-        self.register(IntrinsicKey::from("u32_rotr"), BI(U32Rotr));
-        self.register(IntrinsicKey::from("u64_rotr"), BI(U64Rotr));
-
-        // wrapping_add (all int types)
-        self.register(IntrinsicKey::from("i8_wrapping_add"), BI(I8WrappingAdd));
-        self.register(IntrinsicKey::from("i16_wrapping_add"), BI(I16WrappingAdd));
-        self.register(IntrinsicKey::from("i32_wrapping_add"), BI(I32WrappingAdd));
-        self.register(IntrinsicKey::from("i64_wrapping_add"), BI(I64WrappingAdd));
-        self.register(IntrinsicKey::from("u8_wrapping_add"), BI(U8WrappingAdd));
-        self.register(IntrinsicKey::from("u16_wrapping_add"), BI(U16WrappingAdd));
-        self.register(IntrinsicKey::from("u32_wrapping_add"), BI(U32WrappingAdd));
-        self.register(IntrinsicKey::from("u64_wrapping_add"), BI(U64WrappingAdd));
-
-        // wrapping_sub (all int types)
-        self.register(IntrinsicKey::from("i8_wrapping_sub"), BI(I8WrappingSub));
-        self.register(IntrinsicKey::from("i16_wrapping_sub"), BI(I16WrappingSub));
-        self.register(IntrinsicKey::from("i32_wrapping_sub"), BI(I32WrappingSub));
-        self.register(IntrinsicKey::from("i64_wrapping_sub"), BI(I64WrappingSub));
-        self.register(IntrinsicKey::from("u8_wrapping_sub"), BI(U8WrappingSub));
-        self.register(IntrinsicKey::from("u16_wrapping_sub"), BI(U16WrappingSub));
-        self.register(IntrinsicKey::from("u32_wrapping_sub"), BI(U32WrappingSub));
-        self.register(IntrinsicKey::from("u64_wrapping_sub"), BI(U64WrappingSub));
-
-        // wrapping_mul (all int types)
-        self.register(IntrinsicKey::from("i8_wrapping_mul"), BI(I8WrappingMul));
-        self.register(IntrinsicKey::from("i16_wrapping_mul"), BI(I16WrappingMul));
-        self.register(IntrinsicKey::from("i32_wrapping_mul"), BI(I32WrappingMul));
-        self.register(IntrinsicKey::from("i64_wrapping_mul"), BI(I64WrappingMul));
-        self.register(IntrinsicKey::from("u8_wrapping_mul"), BI(U8WrappingMul));
-        self.register(IntrinsicKey::from("u16_wrapping_mul"), BI(U16WrappingMul));
-        self.register(IntrinsicKey::from("u32_wrapping_mul"), BI(U32WrappingMul));
-        self.register(IntrinsicKey::from("u64_wrapping_mul"), BI(U64WrappingMul));
+        register_int_intrinsics!(self, all, BinaryIntOp, "min", Min);
+        register_int_intrinsics!(self, all, BinaryIntOp, "max", Max);
+        register_int_intrinsics!(self, all, BinaryIntOp, "rotl", Rotl);
+        register_int_intrinsics!(self, all, BinaryIntOp, "rotr", Rotr);
+        register_int_intrinsics!(self, all, BinaryIntOp, "wrapping_add", WrappingAdd);
+        register_int_intrinsics!(self, all, BinaryIntOp, "wrapping_sub", WrappingSub);
+        register_int_intrinsics!(self, all, BinaryIntOp, "wrapping_mul", WrappingMul);
     }
 
     /// Register wrapping integer operation intrinsics (wrapping_neg).
     fn register_wrapping_int_operations(&mut self) {
-        use IntrinsicHandler::UnaryIntWrappingOp as UW;
-        use UnaryIntWrappingOp::*;
-
-        // wrapping_neg (signed types only)
-        self.register(IntrinsicKey::from("i8_wrapping_neg"), UW(I8WrappingNeg));
-        self.register(IntrinsicKey::from("i16_wrapping_neg"), UW(I16WrappingNeg));
-        self.register(IntrinsicKey::from("i32_wrapping_neg"), UW(I32WrappingNeg));
-        self.register(IntrinsicKey::from("i64_wrapping_neg"), UW(I64WrappingNeg));
+        register_int_intrinsics!(
+            self,
+            signed,
+            UnaryIntWrappingOp,
+            "wrapping_neg",
+            WrappingNeg
+        );
     }
 
     /// Register saturating integer operation intrinsics (saturating_add, saturating_sub, saturating_mul).
     fn register_saturating_int_operations(&mut self) {
-        use BinaryIntOp::*;
-        use IntrinsicHandler::BinaryIntOp as BI;
-
-        // saturating_add (all int types)
-        self.register(IntrinsicKey::from("i8_saturating_add"), BI(I8SaturatingAdd));
-        self.register(
-            IntrinsicKey::from("i16_saturating_add"),
-            BI(I16SaturatingAdd),
-        );
-        self.register(
-            IntrinsicKey::from("i32_saturating_add"),
-            BI(I32SaturatingAdd),
-        );
-        self.register(
-            IntrinsicKey::from("i64_saturating_add"),
-            BI(I64SaturatingAdd),
-        );
-        self.register(IntrinsicKey::from("u8_saturating_add"), BI(U8SaturatingAdd));
-        self.register(
-            IntrinsicKey::from("u16_saturating_add"),
-            BI(U16SaturatingAdd),
-        );
-        self.register(
-            IntrinsicKey::from("u32_saturating_add"),
-            BI(U32SaturatingAdd),
-        );
-        self.register(
-            IntrinsicKey::from("u64_saturating_add"),
-            BI(U64SaturatingAdd),
-        );
-
-        // saturating_sub (all int types)
-        self.register(IntrinsicKey::from("i8_saturating_sub"), BI(I8SaturatingSub));
-        self.register(
-            IntrinsicKey::from("i16_saturating_sub"),
-            BI(I16SaturatingSub),
-        );
-        self.register(
-            IntrinsicKey::from("i32_saturating_sub"),
-            BI(I32SaturatingSub),
-        );
-        self.register(
-            IntrinsicKey::from("i64_saturating_sub"),
-            BI(I64SaturatingSub),
-        );
-        self.register(IntrinsicKey::from("u8_saturating_sub"), BI(U8SaturatingSub));
-        self.register(
-            IntrinsicKey::from("u16_saturating_sub"),
-            BI(U16SaturatingSub),
-        );
-        self.register(
-            IntrinsicKey::from("u32_saturating_sub"),
-            BI(U32SaturatingSub),
-        );
-        self.register(
-            IntrinsicKey::from("u64_saturating_sub"),
-            BI(U64SaturatingSub),
-        );
-
-        // saturating_mul (all int types)
-        self.register(IntrinsicKey::from("i8_saturating_mul"), BI(I8SaturatingMul));
-        self.register(
-            IntrinsicKey::from("i16_saturating_mul"),
-            BI(I16SaturatingMul),
-        );
-        self.register(
-            IntrinsicKey::from("i32_saturating_mul"),
-            BI(I32SaturatingMul),
-        );
-        self.register(
-            IntrinsicKey::from("i64_saturating_mul"),
-            BI(I64SaturatingMul),
-        );
-        self.register(IntrinsicKey::from("u8_saturating_mul"), BI(U8SaturatingMul));
-        self.register(
-            IntrinsicKey::from("u16_saturating_mul"),
-            BI(U16SaturatingMul),
-        );
-        self.register(
-            IntrinsicKey::from("u32_saturating_mul"),
-            BI(U32SaturatingMul),
-        );
-        self.register(
-            IntrinsicKey::from("u64_saturating_mul"),
-            BI(U64SaturatingMul),
-        );
+        register_int_intrinsics!(self, all, BinaryIntOp, "saturating_add", SaturatingAdd);
+        register_int_intrinsics!(self, all, BinaryIntOp, "saturating_sub", SaturatingSub);
+        register_int_intrinsics!(self, all, BinaryIntOp, "saturating_mul", SaturatingMul);
     }
 
     /// Register checked integer operation intrinsics (checked_add, checked_sub, checked_mul, checked_div).
     fn register_checked_int_operations(&mut self) {
-        use CheckedIntOp::*;
-        use IntrinsicHandler::CheckedIntOp as CI;
-
-        // checked_add (all int types)
-        self.register(IntrinsicKey::from("i8_checked_add"), CI(I8CheckedAdd));
-        self.register(IntrinsicKey::from("i16_checked_add"), CI(I16CheckedAdd));
-        self.register(IntrinsicKey::from("i32_checked_add"), CI(I32CheckedAdd));
-        self.register(IntrinsicKey::from("i64_checked_add"), CI(I64CheckedAdd));
-        self.register(IntrinsicKey::from("u8_checked_add"), CI(U8CheckedAdd));
-        self.register(IntrinsicKey::from("u16_checked_add"), CI(U16CheckedAdd));
-        self.register(IntrinsicKey::from("u32_checked_add"), CI(U32CheckedAdd));
-        self.register(IntrinsicKey::from("u64_checked_add"), CI(U64CheckedAdd));
-
-        // checked_sub (all int types)
-        self.register(IntrinsicKey::from("i8_checked_sub"), CI(I8CheckedSub));
-        self.register(IntrinsicKey::from("i16_checked_sub"), CI(I16CheckedSub));
-        self.register(IntrinsicKey::from("i32_checked_sub"), CI(I32CheckedSub));
-        self.register(IntrinsicKey::from("i64_checked_sub"), CI(I64CheckedSub));
-        self.register(IntrinsicKey::from("u8_checked_sub"), CI(U8CheckedSub));
-        self.register(IntrinsicKey::from("u16_checked_sub"), CI(U16CheckedSub));
-        self.register(IntrinsicKey::from("u32_checked_sub"), CI(U32CheckedSub));
-        self.register(IntrinsicKey::from("u64_checked_sub"), CI(U64CheckedSub));
-
-        // checked_mul (all int types)
-        self.register(IntrinsicKey::from("i8_checked_mul"), CI(I8CheckedMul));
-        self.register(IntrinsicKey::from("i16_checked_mul"), CI(I16CheckedMul));
-        self.register(IntrinsicKey::from("i32_checked_mul"), CI(I32CheckedMul));
-        self.register(IntrinsicKey::from("i64_checked_mul"), CI(I64CheckedMul));
-        self.register(IntrinsicKey::from("u8_checked_mul"), CI(U8CheckedMul));
-        self.register(IntrinsicKey::from("u16_checked_mul"), CI(U16CheckedMul));
-        self.register(IntrinsicKey::from("u32_checked_mul"), CI(U32CheckedMul));
-        self.register(IntrinsicKey::from("u64_checked_mul"), CI(U64CheckedMul));
-
-        // checked_div (all int types)
-        self.register(IntrinsicKey::from("i8_checked_div"), CI(I8CheckedDiv));
-        self.register(IntrinsicKey::from("i16_checked_div"), CI(I16CheckedDiv));
-        self.register(IntrinsicKey::from("i32_checked_div"), CI(I32CheckedDiv));
-        self.register(IntrinsicKey::from("i64_checked_div"), CI(I64CheckedDiv));
-        self.register(IntrinsicKey::from("u8_checked_div"), CI(U8CheckedDiv));
-        self.register(IntrinsicKey::from("u16_checked_div"), CI(U16CheckedDiv));
-        self.register(IntrinsicKey::from("u32_checked_div"), CI(U32CheckedDiv));
-        self.register(IntrinsicKey::from("u64_checked_div"), CI(U64CheckedDiv));
+        register_int_intrinsics!(self, all, CheckedIntOp, "checked_add", CheckedAdd);
+        register_int_intrinsics!(self, all, CheckedIntOp, "checked_sub", CheckedSub);
+        register_int_intrinsics!(self, all, CheckedIntOp, "checked_mul", CheckedMul);
+        register_int_intrinsics!(self, all, CheckedIntOp, "checked_div", CheckedDiv);
     }
 
     /// Register built-in intrinsics (panic, etc.).

@@ -1646,6 +1646,7 @@ dependencies = [
  "cranelift-jit",
  "cranelift-module",
  "cranelift-native",
+ "paste",
  "rustc-hash",
  "smallvec",
  "tracing",
