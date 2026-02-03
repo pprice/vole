@@ -8,6 +8,9 @@ description = "Runtime library for the Vole programming language"
 # C library interop (for longjmp in test assertions)
 libc = "0.2"
 
+# Macro for concatenating identifiers (used in to_string_ffi! macro)
+paste = "1"
+
 # High-performance hash map for Map<K,V> and Set<T> collections
 hashbrown = "0.16"
 

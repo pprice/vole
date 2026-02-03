@@ -1,9 +1,13 @@
 // src/runtime/stdlib/intrinsics.rs
 //! Native intrinsic functions for primitive types.
 
-use crate::RcString;
 use crate::iterator;
 use crate::native_registry::{NativeModule, NativeSignature, NativeType};
+
+// Re-use to_string functions from builtins (consolidated)
+use crate::builtins::{
+    bool_to_string, f64_to_string, i32_to_string, i64_to_string, i128_to_string,
+};
 
 /// Create the vole:std:runtime native module
 pub fn module() -> NativeModule {
@@ -678,11 +682,7 @@ pub extern "C" fn i64_compare(a: i64, b: i64) -> i32 {
     }
 }
 
-/// Convert an i64 to a string
-#[unsafe(no_mangle)]
-pub extern "C" fn i64_to_string(n: i64) -> *const RcString {
-    RcString::new(&n.to_string())
-}
+// i64_to_string is imported from builtins
 
 // =============================================================================
 // i32 functions
@@ -704,11 +704,7 @@ pub extern "C" fn i32_compare(a: i32, b: i32) -> i32 {
     }
 }
 
-/// Convert an i32 to a string
-#[unsafe(no_mangle)]
-pub extern "C" fn i32_to_string(n: i32) -> *const RcString {
-    RcString::new(&n.to_string())
-}
+// i32_to_string is imported from builtins
 
 /// Thomas Wang's 64-bit integer hash function (from V8/Wren)
 /// Provides excellent bit mixing for hash table distribution
@@ -756,11 +752,7 @@ pub extern "C" fn f64_compare(a: f64, b: f64) -> i32 {
     }
 }
 
-/// Convert an f64 to a string
-#[unsafe(no_mangle)]
-pub extern "C" fn f64_to_string(n: f64) -> *const RcString {
-    RcString::new(&n.to_string())
-}
+// f64_to_string is imported from builtins
 
 // =============================================================================
 // bool functions
@@ -772,11 +764,7 @@ pub extern "C" fn bool_equals(a: i8, b: i8) -> i8 {
     if a == b { 1 } else { 0 }
 }
 
-/// Convert a bool to a string
-#[unsafe(no_mangle)]
-pub extern "C" fn bool_to_string(b: i8) -> *const RcString {
-    RcString::new(if b != 0 { "true" } else { "false" })
-}
+// bool_to_string is imported from builtins
 
 // =============================================================================
 // i8 functions
@@ -954,11 +942,7 @@ pub extern "C" fn i128_compare(a: i128, b: i128) -> i32 {
     }
 }
 
-/// Convert an i128 to a string
-#[unsafe(no_mangle)]
-pub extern "C" fn i128_to_string(n: i128) -> *const RcString {
-    RcString::new(&n.to_string())
-}
+// i128_to_string is imported from builtins
 
 /// Hash an i128 value using Thomas Wang's hash (hashes both halves and combines)
 #[unsafe(no_mangle)]
@@ -995,6 +979,7 @@ pub extern "C" fn f32_compare(a: f32, b: f32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::RcString;
 
     // =========================================================================
     // i64 function tests

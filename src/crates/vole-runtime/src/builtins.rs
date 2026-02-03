@@ -1,11 +1,70 @@
 // src/runtime/builtins.rs
-// src/runtime/builtins.rs
+//!
+//! Core runtime FFI functions for the Vole JIT compiler.
+//! Includes I/O, string conversion, and array operations.
 
 use crate::RcString;
 use crate::array::RcArray;
 use crate::value::TaggedValue;
 use std::cell::{Cell, RefCell};
 use std::io::{self, Write};
+
+// =============================================================================
+// Macro for generating to_string FFI functions
+// =============================================================================
+
+/// Macro to generate numeric to_string FFI functions.
+/// Creates a `vole_{type}_to_string` function and a non-prefixed alias.
+macro_rules! to_string_ffi {
+    ($type:ty, $name:ident) => {
+        paste::paste! {
+            #[doc = concat!("Convert ", stringify!($type), " to string (FFI entry point)")]
+            #[unsafe(no_mangle)]
+            pub extern "C" fn [<vole_ $name _to_string>](value: $type) -> *mut RcString {
+                RcString::new(&value.to_string())
+            }
+
+            #[doc = concat!("Convert ", stringify!($type), " to string (alias for intrinsics)")]
+            #[unsafe(no_mangle)]
+            pub extern "C" fn [<$name _to_string>](value: $type) -> *mut RcString {
+                [<vole_ $name _to_string>](value)
+            }
+        }
+    };
+}
+
+// Generate to_string functions for numeric types
+to_string_ffi!(i64, i64);
+to_string_ffi!(i32, i32);
+to_string_ffi!(f64, f64);
+to_string_ffi!(f32, f32);
+to_string_ffi!(i128, i128);
+
+/// Convert bool to string (FFI entry point)
+/// Uses i8 representation (0 = false, non-0 = true)
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_bool_to_string(value: i8) -> *mut RcString {
+    let s = if value != 0 { "true" } else { "false" };
+    RcString::new(s)
+}
+
+/// Convert bool to string (alias for intrinsics)
+#[unsafe(no_mangle)]
+pub extern "C" fn bool_to_string(value: i8) -> *mut RcString {
+    vole_bool_to_string(value)
+}
+
+/// Convert nil to string (FFI entry point)
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_nil_to_string() -> *mut RcString {
+    RcString::new("nil")
+}
+
+/// Convert nil to string (alias for intrinsics)
+#[unsafe(no_mangle)]
+pub extern "C" fn nil_to_string() -> *mut RcString {
+    vole_nil_to_string()
+}
 
 thread_local! {
     static STDOUT_CAPTURE: RefCell<Option<Box<dyn Write + Send>>> = const { RefCell::new(None) };
@@ -160,47 +219,6 @@ pub extern "C" fn vole_string_concat(a: *const RcString, b: *const RcString) -> 
         let bytes_b: &[u8] = if b.is_null() { &[] } else { (*b).data() };
         RcString::from_two_parts(bytes_a, bytes_b)
     }
-}
-
-/// Convert i64 to string
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_i64_to_string(value: i64) -> *mut RcString {
-    let s = value.to_string();
-    RcString::new(&s)
-}
-
-/// Convert f64 to string
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_f64_to_string(value: f64) -> *mut RcString {
-    let s = value.to_string();
-    RcString::new(&s)
-}
-
-/// Convert f32 to string
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_f32_to_string(value: f32) -> *mut RcString {
-    let s = value.to_string();
-    RcString::new(&s)
-}
-
-/// Convert i128 to string
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_i128_to_string(value: i128) -> *mut RcString {
-    let s = value.to_string();
-    RcString::new(&s)
-}
-
-/// Convert bool to string
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_bool_to_string(value: i8) -> *mut RcString {
-    let s = if value != 0 { "true" } else { "false" };
-    RcString::new(s)
-}
-
-/// Convert nil to string
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_nil_to_string() -> *mut RcString {
-    RcString::new("nil")
 }
 
 /// Convert an i64 array to string representation
