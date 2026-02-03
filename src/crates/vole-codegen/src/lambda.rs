@@ -295,7 +295,7 @@ impl Cg<'_, '_, '_> {
             let is_rc = if is_self_capture {
                 false
             } else {
-                self.is_capture_rc(vole_type_id)
+                self.rc_state(vole_type_id).is_capture()
             };
 
             // If the capture is RC, increment its refcount (the closure now shares ownership)

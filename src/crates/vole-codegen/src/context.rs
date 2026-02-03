@@ -406,15 +406,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Check if a captured variable type is RC-managed and needs rc_inc/rc_dec.
     ///
-    /// This is used by closure compilation to set capture_kinds. A capture is
-    /// considered RC if its runtime representation is a pointer to an RcHeader-
-    /// managed heap object (string, array, function/closure, class instance).
+    /// DEPRECATED: Use `self.rc_state(type_id).is_capture()` instead.
+    /// TODO(vol-e052): Remove this method entirely.
+    #[allow(dead_code)]
+    #[inline]
     pub fn is_capture_rc(&self, type_id: TypeId) -> bool {
-        let arena = self.arena();
-        arena.is_string(type_id)
-            || arena.is_array(type_id)
-            || arena.is_function(type_id)
-            || arena.is_class(type_id)
+        self.rc_state(type_id).is_capture()
     }
 
     /// Push a new RC scope (called when entering a block).
