@@ -439,25 +439,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// `skip_var` optionally specifies a variable whose ownership is being
     /// transferred out (e.g., the block result) and should NOT be dec'd.
     pub fn pop_rc_scope_with_cleanup(&mut self, skip_var: Option<Variable>) -> CodegenResult<()> {
-        let scope = self.rc_scopes.pop_scope();
-        if let Some(scope) = scope {
-            let rc_dec_ref = self.runtime_func_ref(RuntimeFn::RcDec)?;
-            // Unions first: their payloads may reference values owned by
-            // containers (arrays, classes) tracked as regular RC locals.
-            // Decrementing the union payload before the container prevents
-            // use-after-free when the container's drop cascades to free the
-            // same value.
-            if !scope.unions.is_empty() {
-                super::rc_cleanup::emit_union_rc_cleanup(self.builder, &scope.unions, rc_dec_ref);
-            }
-            self.emit_rc_locals_cleanup(&scope.locals, skip_var, rc_dec_ref);
-            if !scope.composites.is_empty() {
-                super::rc_cleanup::emit_composite_rc_cleanup(
-                    self.builder,
-                    &scope.composites,
-                    rc_dec_ref,
-                );
-            }
+        if let Some(scope) = self.rc_scopes.pop_scope() {
+            self.emit_rc_cleanup_for_collections(
+                &scope.locals,
+                &scope.composites,
+                &scope.unions,
+                skip_var,
+            )?;
         }
         Ok(())
     }
@@ -480,18 +468,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .all_unions_innermost_first()
             .cloned()
             .collect();
-        let has_work = !locals.is_empty() || !composites.is_empty() || !unions.is_empty();
-        if has_work {
-            let rc_dec_ref = self.runtime_func_ref(RuntimeFn::RcDec)?;
-            if !unions.is_empty() {
-                super::rc_cleanup::emit_union_rc_cleanup(self.builder, &unions, rc_dec_ref);
-            }
-            self.emit_rc_locals_cleanup(&locals, skip_var, rc_dec_ref);
-            if !composites.is_empty() {
-                super::rc_cleanup::emit_composite_rc_cleanup(self.builder, &composites, rc_dec_ref);
-            }
-        }
-        Ok(())
+        self.emit_rc_cleanup_for_collections(&locals, &composites, &unions, skip_var)
     }
 
     /// Emit cleanup for scopes from the given depth upward (for break/continue).
@@ -512,28 +489,41 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .unions_from_depth(target_depth)
             .cloned()
             .collect();
-        let has_work = !locals.is_empty() || !composites.is_empty() || !unions.is_empty();
-        if has_work {
-            let rc_dec_ref = self.runtime_func_ref(RuntimeFn::RcDec)?;
-            if !unions.is_empty() {
-                super::rc_cleanup::emit_union_rc_cleanup(self.builder, &unions, rc_dec_ref);
-            }
-            self.emit_rc_locals_cleanup(&locals, None, rc_dec_ref);
-            if !composites.is_empty() {
-                super::rc_cleanup::emit_composite_rc_cleanup(self.builder, &composites, rc_dec_ref);
-            }
-        }
-        Ok(())
+        self.emit_rc_cleanup_for_collections(&locals, &composites, &unions, None)
     }
 
-    /// Emit conditional rc_dec for a list of RC locals, optionally skipping one variable.
-    fn emit_rc_locals_cleanup(
+    /// Emit RC cleanup for a collection of locals, composites, and unions.
+    ///
+    /// This is the centralized helper for all RC cleanup scenarios. The cleanup
+    /// ordering is critical: unions must be cleaned up first, before locals and
+    /// composites. This is because union payloads may reference values owned by
+    /// containers (arrays, classes) tracked as regular RC locals. Decrementing
+    /// the union payload before the container prevents use-after-free when the
+    /// container's drop cascades to free the same value.
+    ///
+    /// `skip_var` optionally specifies a variable whose ownership is being
+    /// transferred out (e.g., the block/function result) and should NOT be dec'd.
+    fn emit_rc_cleanup_for_collections(
         &mut self,
         locals: &[super::rc_cleanup::RcLocal],
+        composites: &[super::rc_cleanup::CompositeRcLocal],
+        unions: &[super::rc_cleanup::UnionRcLocal],
         skip_var: Option<Variable>,
-        rc_dec_ref: cranelift::codegen::ir::FuncRef,
-    ) {
-        let filtered: Vec<_> = if let Some(skip) = skip_var {
+    ) -> CodegenResult<()> {
+        let has_work = !locals.is_empty() || !composites.is_empty() || !unions.is_empty();
+        if !has_work {
+            return Ok(());
+        }
+
+        let rc_dec_ref = self.runtime_func_ref(RuntimeFn::RcDec)?;
+
+        // 1. Unions first: payloads may reference container-owned values.
+        if !unions.is_empty() {
+            super::rc_cleanup::emit_union_rc_cleanup(self.builder, unions, rc_dec_ref);
+        }
+
+        // 2. Locals (optionally filtering out skip_var).
+        let filtered_locals: Vec<_> = if let Some(skip) = skip_var {
             locals
                 .iter()
                 .filter(|l| l.variable != skip)
@@ -542,7 +532,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         } else {
             locals.to_vec()
         };
-        super::rc_cleanup::emit_rc_cleanup(self.builder, &filtered, rc_dec_ref);
+        super::rc_cleanup::emit_rc_cleanup(self.builder, &filtered_locals, rc_dec_ref);
+
+        // 3. Composites last.
+        if !composites.is_empty() {
+            super::rc_cleanup::emit_composite_rc_cleanup(self.builder, composites, rc_dec_ref);
+        }
+
+        Ok(())
     }
 
     /// Emit rc_inc(value) to increment the reference count.
