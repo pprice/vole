@@ -216,6 +216,7 @@ impl Analyzer {
                             Variable {
                                 ty: var_type_id,
                                 mutable: let_stmt.mutable,
+                                declaration_span: let_stmt.span,
                             },
                         );
 

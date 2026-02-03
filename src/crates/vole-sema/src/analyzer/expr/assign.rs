@@ -10,7 +10,7 @@ impl Analyzer {
         interner: &Interner,
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
         // First, determine the expected type from the target (bidirectional type checking)
-        let (target_ty_id, is_mutable, target_valid) = match &assign.target {
+        let (target_ty_id, is_mutable, declaration_span, target_valid) = match &assign.target {
             AssignTarget::Discard => {
                 // Discard pattern: _ = expr
                 // Just type-check the RHS for errors, then return VOID
@@ -19,7 +19,7 @@ impl Analyzer {
             }
             AssignTarget::Variable(sym) => {
                 if let Some(var) = self.scope.get(*sym) {
-                    (var.ty, var.mutable, true)
+                    (var.ty, var.mutable, Some(var.declaration_span), true)
                 } else {
                     let name = interner.resolve(*sym);
                     self.add_error(
@@ -29,7 +29,7 @@ impl Analyzer {
                         },
                         expr.span,
                     );
-                    (ArenaTypeId::INVALID, false, false)
+                    (ArenaTypeId::INVALID, false, None, false)
                 }
             }
             AssignTarget::Field {
@@ -75,7 +75,7 @@ impl Analyzer {
                                     .collect();
                                 self.type_arena_mut().substitute(field_type_id, &subs_id)
                             };
-                            (resolved_type_id, true, true)
+                            (resolved_type_id, true, None, true)
                         } else {
                             self.add_error(
                                 SemanticError::UnknownField {
@@ -85,7 +85,7 @@ impl Analyzer {
                                 },
                                 *field_span,
                             );
-                            (ArenaTypeId::INVALID, false, false)
+                            (ArenaTypeId::INVALID, false, None, false)
                         }
                     } else {
                         self.add_error(
@@ -96,7 +96,7 @@ impl Analyzer {
                             },
                             *field_span,
                         );
-                        (ArenaTypeId::INVALID, false, false)
+                        (ArenaTypeId::INVALID, false, None, false)
                     }
                 } else {
                     if !obj_ty_id.is_invalid() {
@@ -110,7 +110,7 @@ impl Analyzer {
                             *field_span,
                         );
                     }
-                    (ArenaTypeId::INVALID, false, false)
+                    (ArenaTypeId::INVALID, false, None, false)
                 }
             }
             AssignTarget::Index { object, index } => {
@@ -133,7 +133,7 @@ impl Analyzer {
 
                 // Get element type using TypeId
                 if let Some(elem_id) = self.unwrap_indexable_element_id(obj_type_id) {
-                    (elem_id, true, true)
+                    (elem_id, true, None, true)
                 } else {
                     if !obj_type_id.is_invalid() {
                         let found = self.type_display_id(obj_type_id);
@@ -146,7 +146,7 @@ impl Analyzer {
                             object.span,
                         );
                     }
-                    (ArenaTypeId::INVALID, false, false)
+                    (ArenaTypeId::INVALID, false, None, false)
                 }
             }
         };
@@ -172,11 +172,13 @@ impl Analyzer {
 
             if !is_mutable {
                 let name = interner.resolve(*sym);
+                // Use the stored declaration span if available, otherwise fall back to expr span
+                let decl_span = declaration_span.unwrap_or(expr.span);
                 self.add_error(
                     SemanticError::ImmutableAssignment {
                         name: name.to_string(),
                         span: expr.span.into(),
-                        declaration: expr.span.into(), // TODO: track declaration span
+                        declaration: decl_span.into(),
                     },
                     expr.span,
                 );
@@ -214,6 +216,7 @@ impl Analyzer {
                 if let Some(var) = self.scope.get(*sym) {
                     let is_mutable = var.mutable;
                     let var_ty = var.ty;
+                    let decl_span = var.declaration_span;
 
                     // Check if this is a mutation of a captured variable
                     if self.in_lambda() && !self.is_lambda_local(*sym) {
@@ -227,7 +230,7 @@ impl Analyzer {
                             SemanticError::ImmutableAssignment {
                                 name: name.to_string(),
                                 span: expr.span.into(),
-                                declaration: expr.span.into(),
+                                declaration: decl_span.into(),
                             },
                             expr.span,
                         );

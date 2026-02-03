@@ -2,12 +2,13 @@
 
 use crate::type_arena::TypeId;
 use rustc_hash::FxHashMap;
-use vole_frontend::Symbol;
+use vole_frontend::{Span, Symbol};
 
 #[derive(Debug)]
 pub struct Variable {
     pub ty: TypeId,
     pub mutable: bool,
+    pub declaration_span: Span,
 }
 
 #[derive(Debug, Default)]

@@ -173,6 +173,7 @@ impl Analyzer {
                                     Variable {
                                         ty: fn_type_id,
                                         mutable: let_stmt.mutable,
+                                        declaration_span: let_stmt.span,
                                     },
                                 );
                                 true
@@ -218,6 +219,7 @@ impl Analyzer {
                                 Variable {
                                     ty: var_type_id,
                                     mutable: let_stmt.mutable,
+                                    declaration_span: let_stmt.span,
                                 },
                             );
                         }
@@ -416,6 +418,7 @@ impl Analyzer {
                     Variable {
                         ty: elem_ty_id,
                         mutable: false,
+                        declaration_span: for_stmt.span,
                     },
                 );
 
@@ -524,7 +527,14 @@ impl Analyzer {
     ) {
         match &pattern.kind {
             PatternKind::Identifier { name } => {
-                self.scope.define(*name, Variable { ty: ty_id, mutable });
+                self.scope.define(
+                    *name,
+                    Variable {
+                        ty: ty_id,
+                        mutable,
+                        declaration_span: pattern.span,
+                    },
+                );
                 self.add_lambda_local(*name);
             }
             PatternKind::Wildcard => {
@@ -918,6 +928,7 @@ impl Analyzer {
                     Variable {
                         ty: field_type_id,
                         mutable,
+                        declaration_span: field_pattern.span,
                     },
                 );
                 self.add_lambda_local(field_pattern.binding);
@@ -1011,6 +1022,7 @@ impl Analyzer {
                     Variable {
                         ty: *export_type_id,
                         mutable,
+                        declaration_span: field_pattern.span,
                     },
                 );
                 self.add_lambda_local(field_pattern.binding);

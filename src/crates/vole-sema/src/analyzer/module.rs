@@ -23,6 +23,7 @@ impl Analyzer {
                         Variable {
                             ty: module_type_id,
                             mutable: false,
+                            declaration_span: let_stmt.span,
                         },
                     );
                     // Also register in globals for consistency

@@ -71,7 +71,10 @@ pub(crate) fn get_field_slot_and_type_id(
         }
     }
 
-    Err(CodegenError::not_found("field", format!("{} in type", field_name)))
+    Err(CodegenError::not_found(
+        "field",
+        format!("{} in type", field_name),
+    ))
 }
 
 /// Get field slot and type for a field access (Cg API - uses TypeCtx internally).
@@ -154,7 +157,10 @@ pub(crate) fn get_field_slot_and_type_id_cg(
         }
     }
 
-    Err(CodegenError::not_found("field", format!("{} in type", field_name)))
+    Err(CodegenError::not_found(
+        "field",
+        format!("{} in type", field_name),
+    ))
 }
 
 /// Convert a raw i64 field value to the appropriate Cranelift type.

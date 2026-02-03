@@ -153,6 +153,7 @@ impl Analyzer {
                 Variable {
                     ty: ty_id,
                     mutable: false,
+                    declaration_span: param.span,
                 },
             );
         }
@@ -263,6 +264,7 @@ impl Analyzer {
                 Variable {
                     ty: ty_id,
                     mutable: false,
+                    declaration_span: param.span,
                 },
             );
         }
@@ -451,6 +453,7 @@ impl Analyzer {
             Variable {
                 ty: self_type_id,
                 mutable: false,
+                declaration_span: method.span, // 'self' is implicitly declared by the method
             },
         );
 
@@ -461,6 +464,7 @@ impl Analyzer {
                 Variable {
                     ty: ty_id,
                     mutable: false,
+                    declaration_span: param.span,
                 },
             );
         }
@@ -662,6 +666,7 @@ impl Analyzer {
                 Variable {
                     ty: ty_id,
                     mutable: false,
+                    declaration_span: param.span,
                 },
             );
         }

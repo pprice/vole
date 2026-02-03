@@ -99,6 +99,7 @@ impl Analyzer {
                                 Variable {
                                     ty: scrutinee_type_id,
                                     mutable: false,
+                                    declaration_span: pattern.span,
                                 },
                             );
                             None
@@ -111,6 +112,7 @@ impl Analyzer {
                         Variable {
                             ty: scrutinee_type_id,
                             mutable: false,
+                            declaration_span: pattern.span,
                         },
                     );
                     None
@@ -447,6 +449,7 @@ impl Analyzer {
                     Variable {
                         ty: field_type_id,
                         mutable: false,
+                        declaration_span: field_pat.span,
                     },
                 );
             } else {

@@ -94,6 +94,7 @@ impl Analyzer {
                 Variable {
                     ty: ty_id,
                     mutable: false,
+                    declaration_span: param.span,
                 },
             );
             // Parameters are locals, not captures
