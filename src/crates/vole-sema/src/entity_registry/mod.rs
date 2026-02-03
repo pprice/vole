@@ -71,6 +71,11 @@ pub struct EntityRegistry {
 
     /// Cache of substituted field types for generic type instantiations
     pub field_substitution_cache: FieldSubstitutionCache,
+
+    /// Lazy cache: short name (last segment) → TypeDefIds for class/interface/sentinel lookups.
+    /// Built on first use, invalidated when new types are registered.
+    /// Uses `RefCell` for interior mutability so `&self` lookup methods can populate lazily.
+    pub(crate) short_name_cache: std::cell::RefCell<Option<FxHashMap<String, Vec<TypeDefId>>>>,
 }
 
 impl EntityRegistry {
@@ -96,6 +101,7 @@ impl EntityRegistry {
             class_method_monomorph_cache: ClassMethodMonomorphCache::new(),
             static_method_monomorph_cache: StaticMethodMonomorphCache::new(),
             field_substitution_cache: FieldSubstitutionCache::new(),
+            short_name_cache: std::cell::RefCell::new(None),
         }
     }
 
@@ -362,6 +368,7 @@ impl EntityRegistry {
         self.methods_by_type.insert(id, FxHashMap::default());
         self.fields_by_type.insert(id, FxHashMap::default());
         self.static_methods_by_type.insert(id, FxHashMap::default());
+        *self.short_name_cache.borrow_mut() = None; // Invalidate short name cache
 
         // Update the alias index for inverse lookups (use TypeId directly as key)
         self.alias_index.entry(aliased_type).or_default().push(id);
@@ -530,6 +537,9 @@ impl EntityRegistry {
 
         // Monomorph cache: take other's (it was cloned from ours, so it has all our instances plus new ones)
         self.monomorph_cache = other.monomorph_cache.clone();
+
+        // Invalidate short name cache since types were merged
+        *self.short_name_cache.borrow_mut() = None;
     }
 
     // ===== Primitive/Array Names =====
