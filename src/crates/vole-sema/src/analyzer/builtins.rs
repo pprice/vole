@@ -69,36 +69,24 @@ impl Analyzer {
             self.implement_registry_mut().register_method(
                 type_id,
                 method_len,
-                MethodImpl {
-                    trait_name: None,
-                    func_type: FunctionType::from_ids(&[], i64_type, false),
-                    is_builtin: true,
-                    external_info: None,
-                },
+                MethodImpl::builtin(FunctionType::from_ids(&[], i64_type, false)),
             );
             self.implement_registry_mut().register_method(
                 type_id,
                 method_iter,
-                MethodImpl {
-                    trait_name: None,
-                    func_type: FunctionType::from_ids(&[], unknown_type, false),
-                    is_builtin: true,
-                    external_info: Some(ExternalMethodInfo {
+                MethodImpl::external_builtin(
+                    FunctionType::from_ids(&[], unknown_type, false),
+                    ExternalMethodInfo {
                         module_path: std_intrinsics,
                         native_name: array_iter_name,
-                    }),
-                },
+                    },
+                ),
             );
             // push(value) -> void - adds element to end of array
             self.implement_registry_mut().register_method(
                 type_id,
                 method_push,
-                MethodImpl {
-                    trait_name: None,
-                    func_type: FunctionType::from_ids(&[unknown_type], void_type, false),
-                    is_builtin: true,
-                    external_info: None,
-                },
+                MethodImpl::builtin(FunctionType::from_ids(&[unknown_type], void_type, false)),
             );
         }
 
@@ -106,25 +94,18 @@ impl Analyzer {
             self.implement_registry_mut().register_method(
                 type_id,
                 method_len,
-                MethodImpl {
-                    trait_name: None,
-                    func_type: FunctionType::from_ids(&[], i64_type, false),
-                    is_builtin: true,
-                    external_info: None,
-                },
+                MethodImpl::builtin(FunctionType::from_ids(&[], i64_type, false)),
             );
             self.implement_registry_mut().register_method(
                 type_id,
                 method_iter,
-                MethodImpl {
-                    trait_name: None,
-                    func_type: FunctionType::from_ids(&[], unknown_type, false),
-                    is_builtin: true,
-                    external_info: Some(ExternalMethodInfo {
+                MethodImpl::external_builtin(
+                    FunctionType::from_ids(&[], unknown_type, false),
+                    ExternalMethodInfo {
                         module_path: std_intrinsics,
                         native_name: string_chars_iter_name,
-                    }),
-                },
+                    },
+                ),
             );
         }
 
@@ -132,15 +113,13 @@ impl Analyzer {
             self.implement_registry_mut().register_method(
                 type_id,
                 method_iter,
-                MethodImpl {
-                    trait_name: None,
-                    func_type: FunctionType::from_ids(&[], unknown_type, false),
-                    is_builtin: true,
-                    external_info: Some(ExternalMethodInfo {
+                MethodImpl::external_builtin(
+                    FunctionType::from_ids(&[], unknown_type, false),
+                    ExternalMethodInfo {
                         module_path: std_intrinsics,
                         native_name: range_iter_name,
-                    }),
-                },
+                    },
+                ),
             );
         }
 

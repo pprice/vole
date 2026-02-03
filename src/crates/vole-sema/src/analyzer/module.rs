@@ -125,16 +125,13 @@ impl Analyzer {
                 module_path,
                 native_name,
             };
-            self.implement_registry_mut().register_method(
-                impl_type_id,
-                method_id,
-                MethodImpl {
-                    trait_name,
-                    func_type: func_type.clone(),
-                    is_builtin: false,
-                    external_info: Some(external_info),
-                },
-            );
+            let method_impl = MethodImpl::external(func_type.clone(), external_info);
+            let method_impl = match trait_name {
+                Some(name) => method_impl.with_trait_name(name),
+                None => method_impl,
+            };
+            self.implement_registry_mut()
+                .register_method(impl_type_id, method_id, method_impl);
 
             // Register in EntityRegistry for method resolution
             if let Some(entity_type_id) = entity_type_id {

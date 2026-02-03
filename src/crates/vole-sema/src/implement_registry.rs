@@ -155,6 +155,54 @@ pub struct MethodImpl {
     pub external_info: Option<ExternalMethodInfo>, // External (native) method info
 }
 
+impl MethodImpl {
+    /// Create a simple builtin method (e.g., array.length())
+    pub fn builtin(func_type: FunctionType) -> Self {
+        Self {
+            trait_name: None,
+            func_type,
+            is_builtin: true,
+            external_info: None,
+        }
+    }
+
+    /// Create an external builtin method with native function info
+    pub fn external_builtin(func_type: FunctionType, info: ExternalMethodInfo) -> Self {
+        Self {
+            trait_name: None,
+            func_type,
+            is_builtin: true,
+            external_info: Some(info),
+        }
+    }
+
+    /// Create an external method (non-builtin, from external implement blocks)
+    pub fn external(func_type: FunctionType, info: ExternalMethodInfo) -> Self {
+        Self {
+            trait_name: None,
+            func_type,
+            is_builtin: false,
+            external_info: Some(info),
+        }
+    }
+
+    /// Create a user-defined method (non-builtin, from implement blocks)
+    pub fn user_defined(func_type: FunctionType) -> Self {
+        Self {
+            trait_name: None,
+            func_type,
+            is_builtin: false,
+            external_info: None,
+        }
+    }
+
+    /// Set the trait name for this method
+    pub fn with_trait_name(mut self, trait_name: Symbol) -> Self {
+        self.trait_name = Some(trait_name);
+        self
+    }
+}
+
 /// Registry of methods added to types via `implement` blocks
 #[derive(Debug, Default, Clone)]
 pub struct ImplementRegistry {
@@ -257,12 +305,8 @@ mod tests {
         registry.register_method(
             type_id,
             method_id,
-            MethodImpl {
-                trait_name: Some(sym(2)), // "Sized"
-                func_type: FunctionType::from_ids(&[], arena.i64(), false),
-                is_builtin: true,
-                external_info: None,
-            },
+            MethodImpl::builtin(FunctionType::from_ids(&[], arena.i64(), false))
+                .with_trait_name(sym(2)), // "Sized"
         );
 
         let method = registry.get_method(&type_id, method_id);
@@ -336,23 +380,13 @@ mod tests {
         registry.register_method(
             type_id,
             length_id,
-            MethodImpl {
-                trait_name: None,
-                func_type: FunctionType::from_ids(&[], arena.i64(), false),
-                is_builtin: true,
-                external_info: None,
-            },
+            MethodImpl::builtin(FunctionType::from_ids(&[], arena.i64(), false)),
         );
 
         registry.register_method(
             type_id,
             to_upper_id,
-            MethodImpl {
-                trait_name: None,
-                func_type: FunctionType::from_ids(&[], arena.string(), false),
-                is_builtin: true,
-                external_info: None,
-            },
+            MethodImpl::builtin(FunctionType::from_ids(&[], arena.string(), false)),
         );
 
         let methods = registry.get_methods_for_type(&type_id);
@@ -381,24 +415,15 @@ mod tests {
         registry1.register_method(
             ImplTypeId(i64_name),
             equals_id,
-            MethodImpl {
-                trait_name: Some(sym(20)), // "Equatable"
-                func_type: FunctionType::from_ids(&[arena.i64()], arena.bool(), false),
-                is_builtin: false,
-                external_info: None,
-            },
+            MethodImpl::user_defined(FunctionType::from_ids(&[arena.i64()], arena.bool(), false))
+                .with_trait_name(sym(20)), // "Equatable"
         );
 
         // Add different method to registry2
         registry2.register_method(
             ImplTypeId(string_name),
             length_id,
-            MethodImpl {
-                trait_name: None,
-                func_type: FunctionType::from_ids(&[], arena.i64(), false),
-                is_builtin: false,
-                external_info: None,
-            },
+            MethodImpl::user_defined(FunctionType::from_ids(&[], arena.i64(), false)),
         );
 
         // Merge registry2 into registry1
@@ -415,5 +440,47 @@ mod tests {
                 .get_method(&ImplTypeId(string_name), length_id)
                 .is_some()
         );
+    }
+
+    #[test]
+    fn method_impl_constructors() {
+        let arena = TypeArena::new();
+        let func_type = FunctionType::from_ids(&[], arena.i64(), false);
+
+        // Test builtin constructor
+        let builtin = MethodImpl::builtin(func_type.clone());
+        assert!(builtin.is_builtin);
+        assert!(builtin.trait_name.is_none());
+        assert!(builtin.external_info.is_none());
+
+        // Test user_defined constructor
+        let user_def = MethodImpl::user_defined(func_type.clone());
+        assert!(!user_def.is_builtin);
+        assert!(user_def.trait_name.is_none());
+        assert!(user_def.external_info.is_none());
+
+        // Test with_trait_name builder
+        let with_trait = MethodImpl::builtin(func_type.clone()).with_trait_name(sym(5));
+        assert!(with_trait.is_builtin);
+        assert_eq!(with_trait.trait_name, Some(sym(5)));
+
+        // Test external_builtin constructor
+        let mut names = vole_identity::NameTable::new();
+        let builtin_mod = names.builtin_module();
+        let module_path = names.intern_raw(builtin_mod, &["test_module"]);
+        let native_name = names.intern_raw(builtin_mod, &["test_func"]);
+        let info = ExternalMethodInfo {
+            module_path,
+            native_name,
+        };
+        let ext_builtin = MethodImpl::external_builtin(func_type.clone(), info);
+        assert!(ext_builtin.is_builtin);
+        assert!(ext_builtin.external_info.is_some());
+        assert_eq!(ext_builtin.external_info.unwrap().module_path, module_path);
+
+        // Test external constructor (non-builtin)
+        let ext = MethodImpl::external(func_type, info);
+        assert!(!ext.is_builtin);
+        assert!(ext.external_info.is_some());
     }
 }

@@ -2178,15 +2178,15 @@ impl Analyzer {
                 let func_type = FunctionType::from_ids(&params_id, return_type_id, false);
 
                 let method_name_id = self.method_name_id(method.name, interner);
+                let method_impl = MethodImpl::user_defined(func_type.clone());
+                let method_impl = match trait_name {
+                    Some(name) => method_impl.with_trait_name(name),
+                    None => method_impl,
+                };
                 self.implement_registry_mut().register_method(
                     impl_type_id,
                     method_name_id,
-                    MethodImpl {
-                        trait_name,
-                        func_type: func_type.clone(),
-                        is_builtin: false,
-                        external_info: None,
-                    },
+                    method_impl,
                 );
 
                 // Register in EntityRegistry.methods_by_type for all implement blocks
