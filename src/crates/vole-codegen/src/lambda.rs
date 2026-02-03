@@ -31,18 +31,24 @@ impl CaptureBinding {
     }
 }
 
-/// Build capture bindings from a list of captures and variable types
+/// Build capture bindings from a list of captures, variable types, and parent captures
+///
+/// For transitive captures (nested closures), the type may be in parent_captures
+/// rather than in variables.
 pub(crate) fn build_capture_bindings(
     captures: &[vole_frontend::Capture],
     variables: &FxHashMap<Symbol, (Variable, TypeId)>,
+    parent_captures: Option<&FxHashMap<Symbol, CaptureBinding>>,
     arena: &TypeArena,
 ) -> FxHashMap<Symbol, CaptureBinding> {
     let mut bindings = FxHashMap::default();
     let default_type_id = arena.primitives.i64;
     for (i, capture) in captures.iter().enumerate() {
+        // First check local variables, then parent captures, finally fall back to i64
         let vole_type_id = variables
             .get(&capture.name)
             .map(|(_, ty)| *ty)
+            .or_else(|| parent_captures?.get(&capture.name).map(|b| b.vole_type))
             .unwrap_or(default_type_id);
         bindings.insert(capture.name, CaptureBinding::new(i, vole_type_id));
     }
@@ -209,7 +215,9 @@ impl Cg<'_, '_, '_> {
         self.funcs().set_func_id(func_key, func_id);
         self.funcs().set_return_type(func_key, return_type_id);
 
-        let capture_bindings = build_capture_bindings(&captures, &self.vars, self.arena());
+        let parent_captures = self.captures.as_ref().map(|c| c.bindings);
+        let capture_bindings =
+            build_capture_bindings(&captures, &self.vars, parent_captures, self.arena());
 
         let mut lambda_ctx = self.jit_module().make_context();
         lambda_ctx.func.signature = sig.clone();
@@ -281,13 +289,15 @@ impl Cg<'_, '_, '_> {
                     format!("Self-captured variable not found: {:?}", capture.name)
                 })?;
                 (closure_ptr, *ty)
-            } else {
-                // Normal capture: load from the variable
-                let (var, ty) = self
-                    .vars
-                    .get(&capture.name)
-                    .ok_or_else(|| format!("Captured variable not found: {:?}", capture.name))?;
+            } else if let Some((var, ty)) = self.vars.get(&capture.name) {
+                // Normal capture: load from local variable
                 (self.builder.use_var(*var), *ty)
+            } else if let Some(binding) = self.get_capture(&capture.name).copied() {
+                // Transitive capture: load from parent closure's captures
+                let captured = self.load_capture(&binding)?;
+                (captured.value, captured.type_id)
+            } else {
+                return Err(format!("Captured variable not found: {:?}", capture.name).into());
             };
 
             // Self-captures are weak references (no rc_inc, no rc_dec on drop)

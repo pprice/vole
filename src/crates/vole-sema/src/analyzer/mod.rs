@@ -715,24 +715,46 @@ impl Analyzer {
         }
     }
 
-    /// Record a captured variable in the current lambda
+    /// Record a captured variable in the current lambda and all enclosing lambdas.
+    ///
+    /// For transitive captures (nested closures capturing from outer scope),
+    /// all intermediate lambdas must also capture the variable to pass it through.
     fn record_capture(&mut self, sym: Symbol, is_mutable: bool) {
-        if let Some(captures) = self.lambda_captures.last_mut() {
-            // Only add if not already captured
-            captures.entry(sym).or_insert(CaptureInfo {
-                name: sym,
-                is_mutable,
-                is_mutated: false,
-            });
+        // Propagate capture from innermost to outermost lambda
+        // Stop when we find a lambda where the variable is a local
+        for i in (0..self.lambda_captures.len()).rev() {
+            // Check if this variable is a local at this lambda level
+            if let Some(locals) = self.lambda_locals.get(i)
+                && locals.contains(&sym) {
+                    // Variable is defined at this level, no need to capture
+                    break;
+                }
+
+            // Not a local at this level, so it must be captured
+            if let Some(captures) = self.lambda_captures.get_mut(i) {
+                captures.entry(sym).or_insert(CaptureInfo {
+                    name: sym,
+                    is_mutable,
+                    is_mutated: false,
+                });
+            }
         }
     }
 
-    /// Mark a captured variable as mutated
+    /// Mark a captured variable as mutated in all lambdas that capture it
     fn mark_capture_mutated(&mut self, sym: Symbol) {
-        if let Some(captures) = self.lambda_captures.last_mut()
-            && let Some(info) = captures.get_mut(&sym)
-        {
-            info.is_mutated = true;
+        for i in (0..self.lambda_captures.len()).rev() {
+            // Stop if variable is a local at this level
+            if let Some(locals) = self.lambda_locals.get(i)
+                && locals.contains(&sym) {
+                    break;
+                }
+
+            // Mark as mutated if captured at this level
+            if let Some(captures) = self.lambda_captures.get_mut(i)
+                && let Some(info) = captures.get_mut(&sym) {
+                    info.is_mutated = true;
+                }
         }
     }
 

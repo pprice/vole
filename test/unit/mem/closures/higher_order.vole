@@ -593,3 +593,107 @@ tests "complex higher-order patterns" {
         assert(outer("x") == "([<x>])")
     }
 }
+
+tests "nested closures with transitive captures" {
+    // Tests for closures defined inside closures, where inner closure
+    // captures variables from an outer scope (beyond its immediate parent).
+
+    test "inner closure captures variable from grandparent scope" {
+        let outer = "outer"
+        let f1 = () -> string => {
+            let f2 = () -> string => outer
+            return f2()
+        }
+        assert(f1() == "outer")
+    }
+
+    test "nested closure with string interpolation" {
+        let name = "vole"
+        let f1 = () -> string => {
+            let f2 = () -> string => "hello {name}"
+            return f2()
+        }
+        assert(f1() == "hello vole")
+    }
+
+    test "deeply nested closures (3 levels)" {
+        let value = "deep"
+        let f1 = () -> string => {
+            let f2 = () -> string => {
+                let f3 = () -> string => value
+                return f3()
+            }
+            return f2()
+        }
+        assert(f1() == "deep")
+    }
+
+    test "nested closure captures multiple variables" {
+        let prefix = "["
+        let suffix = "]"
+        let f1 = () -> string => {
+            let f2 = (s: string) -> string => prefix + s + suffix
+            return f2("item")
+        }
+        assert(f1() == "[item]")
+    }
+
+    test "nested closure with intermediate local variable" {
+        let outer = "outer"
+        let f1 = () -> string => {
+            let local = "local"
+            let f2 = () -> string => outer + "-" + local
+            return f2()
+        }
+        assert(f1() == "outer-local")
+    }
+
+    test "nested closure captures string and int" {
+        let label = "count"
+        let n = 42
+        let f1 = () -> string => {
+            let f2 = () -> string => label + "=" + n
+            return f2()
+        }
+        assert(f1() == "count=42")
+    }
+
+    test "nested closure with array capture" {
+        let items = ["a", "b", "c"]
+        let f1 = () -> string => {
+            let f2 = (i: i64) -> string => items[i]
+            return f2(1)
+        }
+        assert(f1() == "b")
+    }
+
+    test "nested closure returned from outer" {
+        let prefix = "tag:"
+        let f1 = () -> (() -> string) => {
+            return () -> string => prefix + "value"
+        }
+        let inner = f1()
+        assert(inner() == "tag:value")
+    }
+
+    test "nested closure with mutable capture in outer" {
+        let mut count = 0
+        let outer = () -> string => {
+            count = count + 1
+            let inner = () -> string => "count=" + count
+            return inner()
+        }
+        assert(outer() == "count=1")
+        assert(outer() == "count=2")
+    }
+
+    test "multiple nested closures capture same variable" {
+        let shared = "shared"
+        let f1 = () -> string => {
+            let inner1 = () -> string => shared + "-1"
+            let inner2 = () -> string => shared + "-2"
+            return inner1() + "|" + inner2()
+        }
+        assert(f1() == "shared-1|shared-2")
+    }
+}
