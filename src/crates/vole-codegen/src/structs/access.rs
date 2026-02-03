@@ -4,7 +4,7 @@ use super::helpers::{convert_to_i64_for_storage, get_field_slot_and_type_id_cg};
 use crate::RuntimeFn;
 use crate::context::Cg;
 use crate::errors::CodegenError;
-use crate::types::{CompiledValue, module_name_id};
+use crate::types::{CompiledValue, RcLifecycle, module_name_id};
 use cranelift::prelude::*;
 use vole_frontend::{Expr, FieldAccessExpr, NodeId, OptionalChainExpr, Symbol};
 use vole_sema::type_arena::TypeId;
@@ -98,7 +98,23 @@ impl Cg<'_, '_, '_> {
 
         let result_raw = self.get_field_cached(obj.value, slot as u32)?;
         let mut cv = self.convert_field_value(result_raw, field_type_id);
-        self.mark_borrowed_if_rc(&mut cv);
+
+        // If the object is an owned RC temporary (e.g., method call result used
+        // inline: `obj.method().field`), we must clean it up after extracting
+        // the field. If the field itself is RC, we must rc_inc it first so the
+        // field value survives the container's rc_dec (which may free the container
+        // and cascade to its fields).
+        if obj.is_owned() && self.needs_rc_cleanup(obj.type_id) {
+            if self.needs_rc_cleanup(field_type_id) {
+                self.emit_rc_inc_for_type(cv.value, field_type_id)?;
+                // The field is now an owned reference (we inc'd it out of the container)
+                cv.rc_lifecycle = RcLifecycle::Owned;
+            }
+            self.emit_rc_dec_for_type(obj.value, obj.type_id)?;
+        } else {
+            self.mark_borrowed_if_rc(&mut cv);
+        }
+
         Ok(cv)
     }
 

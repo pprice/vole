@@ -176,6 +176,9 @@ impl Cg<'_, '_, '_> {
                     } else {
                         // Not all type params found in substitutions - class type params
                         // don't match function type params. Fall back to result_type_id.
+                        // But first try substituting result_type_id's type args through
+                        // the function's substitution map to get correct concrete args.
+                        let result_type_id = self.substitute_type(result_type_id);
                         self.mono_instance_type_id(base_type_id, result_type_id)
                     }
                 } else {

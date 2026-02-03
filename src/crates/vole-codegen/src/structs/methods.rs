@@ -508,9 +508,13 @@ impl Cg<'_, '_, '_> {
                 .map(|(params, _, _)| params.clone())
         });
         let mut args: ArgVec = smallvec![obj.value];
+        let mut rc_temps: Vec<CompiledValue> = Vec::new();
         if let Some(param_type_ids) = &param_type_ids {
             for (arg, &param_type_id) in mc.args.iter().zip(param_type_ids.iter()) {
                 let compiled = self.expr(arg)?;
+                if compiled.is_owned() {
+                    rc_temps.push(compiled);
+                }
                 // Check if param is interface type using arena
                 let is_interface = self.arena().unwrap_interface(param_type_id).is_some();
                 let compiled = if is_interface {
@@ -540,6 +544,9 @@ impl Cg<'_, '_, '_> {
         } else {
             for arg in &mc.args {
                 let compiled = self.expr(arg)?;
+                if compiled.is_owned() {
+                    rc_temps.push(compiled);
+                }
                 // Generic class methods expect i64 for TypeParam, convert if needed
                 let arg_value = if is_generic_class && compiled.ty != types::I64 {
                     let ptr_type = self.ptr_type();
@@ -623,19 +630,23 @@ impl Cg<'_, '_, '_> {
                 let ptr_type = self.ptr_type();
                 let local_ptr = self.builder.ins().stack_addr(ptr_type, local_slot, 0);
 
-                // Now consume RC receiver and temps
+                // Now consume RC receiver and arg temps
                 let mut obj = obj;
                 self.consume_rc_value(&mut obj)?;
+                self.consume_rc_args(&mut rc_temps)?;
 
                 return Ok(self.compiled(local_ptr, return_type_id));
             }
         }
 
-        // Consume RC receiver after the call completes. In chained calls
-        // like s.trim().to_upper(), the intermediate string from trim() is
-        // Owned but was never rc_dec'd, causing leaks/heap corruption.
+        // Consume RC receiver and arg temps after the call completes.
+        // In chained calls like s.trim().to_upper(), the intermediate string
+        // from trim() is Owned but was never rc_dec'd, causing leaks/heap
+        // corruption. Similarly, Owned class arguments (e.g., b.equals(Id{n:5}))
+        // need cleanup after the callee has consumed them.
         let mut obj = obj;
         self.consume_rc_value(&mut obj)?;
+        self.consume_rc_args(&mut rc_temps)?;
 
         if is_sret {
             // Sret: result[0] is the sret pointer we passed in
@@ -1328,8 +1339,14 @@ impl Cg<'_, '_, '_> {
                 // call_result must run before consume_rc_args to copy union data
                 // from callee's stack before rc_dec calls can clobber it
                 let return_type_id = instance.func_type.return_type_id;
-                let result = self.call_result(call, return_type_id);
+                let mut result = self.call_result(call, return_type_id);
                 self.consume_rc_args(&mut rc_temps)?;
+
+                // Mark RC-typed results as Owned so they get properly cleaned up
+                if self.needs_rc_cleanup(return_type_id) {
+                    result.rc_lifecycle = RcLifecycle::Owned;
+                }
+
                 return Ok(result);
             }
         }
