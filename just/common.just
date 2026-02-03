@@ -27,6 +27,14 @@ unit:
 unit-verbose:
     cargo run --bin vole {{cargo_profile}} -- test test/unit/
 
+# Run memory leak tests
+mem:
+    cargo run -p vole-leak {{cargo_profile}} -- test/unit/mem/
+
+# Run memory leak tests on all unit tests
+mem-all:
+    cargo run -p vole-leak {{cargo_profile}} -- test/unit/
+
 # Format code
 fmt:
     cargo fmt
