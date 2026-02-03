@@ -93,7 +93,7 @@ pub extern "C" fn crypto_sha256_bytes(input: *const RcString) -> *mut RcArray {
     let result = hasher.finalize();
 
     // Push each byte as an i64 value
-    for byte in result.iter() {
+    for byte in &result {
         unsafe {
             RcArray::push(
                 arr,

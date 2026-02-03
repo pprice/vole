@@ -601,7 +601,7 @@ impl Analyzer {
                                 span,
                             );
                         } else {
-                            for elem_pattern in elements.iter() {
+                            for elem_pattern in elements {
                                 self.check_destructure_pattern_id(
                                     elem_pattern,
                                     elem_id,

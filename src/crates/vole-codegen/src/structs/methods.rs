@@ -1113,9 +1113,9 @@ impl Cg<'_, '_, '_> {
             // First param is the closure pointer, then the user params
             let mut sig = self.jit_module().make_signature();
             sig.params.push(AbiParam::new(self.ptr_type())); // Closure pointer
-            for param_id in param_ids.iter() {
+            for &param_id in &param_ids {
                 sig.params.push(AbiParam::new(type_id_to_cranelift(
-                    *param_id,
+                    param_id,
                     self.arena(),
                     self.ptr_type(),
                 )));
@@ -1144,9 +1144,9 @@ impl Cg<'_, '_, '_> {
         } else {
             // It's a pure function - call directly
             let mut sig = self.jit_module().make_signature();
-            for param_id in param_ids.iter() {
+            for &param_id in &param_ids {
                 sig.params.push(AbiParam::new(type_id_to_cranelift(
-                    *param_id,
+                    param_id,
                     self.arena(),
                     self.ptr_type(),
                 )));

@@ -627,7 +627,7 @@ impl TypeArena {
 
         // Flatten nested unions
         let mut flattened: Vec<TypeId> = Vec::new();
-        for &v in variants.iter() {
+        for &v in &variants {
             if let SemaType::Union(inner) = self.get(v) {
                 flattened.extend(inner.iter().copied());
             } else {

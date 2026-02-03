@@ -1197,7 +1197,7 @@ impl Cg<'_, '_, '_> {
         // Build signature (closure ptr + params)
         let mut sig = self.jit_module().make_signature();
         sig.params.push(AbiParam::new(self.ptr_type())); // closure ptr
-        for &param_type_id in params.iter() {
+        for &param_type_id in &params {
             sig.params
                 .push(AbiParam::new(self.cranelift_type(param_type_id)));
         }

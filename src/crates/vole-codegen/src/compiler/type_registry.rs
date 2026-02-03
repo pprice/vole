@@ -26,7 +26,7 @@ fn type_id_to_field_tag(ty: TypeId, arena: &vole_sema::type_arena::TypeArena) ->
         FieldTypeTag::Rc
     } else if let Some(variants) = arena.unwrap_union(ty) {
         // If any variant is a reference type, mark as needing cleanup
-        for &variant in variants.iter() {
+        for &variant in variants {
             if type_id_to_field_tag(variant, arena).needs_cleanup() {
                 return FieldTypeTag::Rc;
             }

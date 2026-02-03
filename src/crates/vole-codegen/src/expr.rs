@@ -603,7 +603,7 @@ impl Cg<'_, '_, '_> {
         let arr_ptr = self.call_runtime(RuntimeFn::ArrayNew, &[])?;
         let array_push_ref = self.runtime_func_ref(RuntimeFn::ArrayPush)?;
 
-        for elem in elements.iter() {
+        for elem in elements {
             let compiled = self.expr(elem)?;
 
             // Structs are stack-allocated; copy to heap so the data survives
@@ -2635,7 +2635,7 @@ impl Cg<'_, '_, '_> {
         // For multi-field errors, the payload is a pointer to field data
         let single_field = error_fields.len() == 1;
 
-        for field_pattern in fields.iter() {
+        for field_pattern in fields {
             let field_name = self.interner().resolve(field_pattern.field_name);
 
             // Find the field index and type in the error type

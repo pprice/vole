@@ -494,7 +494,7 @@ fn compile_function_wrapper<C: VtableCtx>(
             arena,
             ctx.ptr_type(),
         )));
-        for &param_type_id in param_type_ids.iter() {
+        for &param_type_id in param_type_ids {
             sig.params.push(AbiParam::new(type_id_to_cranelift(
                 param_type_id,
                 arena,
@@ -516,7 +516,7 @@ fn compile_function_wrapper<C: VtableCtx>(
     } else {
         let mut sig = ctx.jit_module().make_signature();
         let arena = ctx.arena();
-        for &param_type_id in param_type_ids.iter() {
+        for &param_type_id in param_type_ids {
             sig.params.push(AbiParam::new(type_id_to_cranelift(
                 param_type_id,
                 arena,
@@ -684,7 +684,7 @@ fn compile_external_wrapper<C: VtableCtx>(
     };
     native_sig.params.push(AbiParam::new(self_param_type));
     // Use type_id_to_cranelift for param types (handles Invalid gracefully via fallback)
-    for &param_type_id in param_type_ids.iter() {
+    for &param_type_id in param_type_ids {
         native_sig.params.push(AbiParam::new(type_id_to_cranelift(
             param_type_id,
             arena,

@@ -268,7 +268,7 @@ impl Analyzer {
     ) -> bool {
         let name = interner.resolve(sym);
         let programs = self.ctx.module_programs.borrow();
-        for (path, (_, module_interner)) in programs.iter() {
+        for (path, (_, module_interner)) in &*programs {
             if !path.starts_with("std:prelude/") {
                 continue;
             }

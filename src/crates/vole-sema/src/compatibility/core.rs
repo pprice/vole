@@ -34,7 +34,7 @@ pub fn types_compatible_core_id(from: TypeId, to: TypeId, arena: &TypeArena) -> 
             return true;
         }
         // Also check if from can widen into a union variant
-        for &variant in variants.iter() {
+        for &variant in variants {
             if can_widen_to_id(from, variant, arena) {
                 return true;
             }
