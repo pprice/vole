@@ -2,6 +2,19 @@
 //!
 //! Provides runtime representation for iterators.
 //! Uses a unified IteratorSource enum to support chaining (e.g., map().map()).
+//!
+//! # Iterator Kind Definitions
+//!
+//! All iterator kinds are defined in one place using the `for_all_iterator_kinds!` macro.
+//! This ensures that drop logic, next dispatch, and ownership inference stay in sync.
+//! When adding a new iterator kind:
+//! 1. Add it to `for_all_iterator_kinds!` with its properties
+//! 2. Add the corresponding `*Source` struct
+//! 3. Add the union field to `IteratorSource`
+//! 4. Implement the `vole_*_iter_next` function
+//!
+//! The macro will automatically generate the enum variant, drop logic, next dispatch,
+//! and ownership inference based on the provided properties.
 
 use crate::alloc_track;
 use crate::array::RcArray;
@@ -11,39 +24,304 @@ use crate::value::{RcHeader, TYPE_ITERATOR, TYPE_STRING, rc_dec, rc_inc};
 use std::alloc::{Layout, alloc, dealloc};
 use std::ptr;
 
-/// Enum discriminant for iterator sources
-#[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum IteratorKind {
-    Array = 0,
-    Map = 1,
-    Filter = 2,
-    Take = 3,
-    Skip = 4,
-    Chain = 5,
-    Flatten = 6,
-    FlatMap = 7,
-    Unique = 8,
-    Chunks = 9,
-    Windows = 10,
-    Repeat = 11,
-    Once = 12,
-    Empty = 13,
-    FromFn = 14,
-    Range = 15,
-    StringChars = 16,
-    /// Interface iterator - wraps a boxed interface implementing Iterator
-    Interface = 17,
-    /// Enumerate iterator - yields (index, value) pairs
-    Enumerate = 18,
-    /// Zip iterator - combines two iterators into pairs
-    Zip = 19,
-    /// String split iterator - splits string by delimiter
-    StringSplit = 20,
-    /// String lines iterator - splits string by newlines
-    StringLines = 21,
-    /// String codepoints iterator - yields unicode codepoints as i32
-    StringCodepoints = 22,
+// =============================================================================
+// Central Iterator Kind Definitions
+// =============================================================================
+//
+// This macro is the SINGLE SOURCE OF TRUTH for all iterator kinds.
+// It invokes a callback macro with all iterator information.
+//
+// Format for each kind:
+//   $kind:ident = $discriminant:literal,
+//   source: $source_field:ident,
+//   next: $next_fn:ident,
+//   owned: $owned:tt,
+//   drop: { $($drop_logic:tt)* }
+//
+// The `owned` field can be:
+//   - `true`  : always produces owned values
+//   - `false` : always produces borrowed values
+//   - `passthrough($source_accessor:expr)` : recurse on source iterator
+//
+// The `drop` block contains the unsafe code to release resources.
+// It has access to `iter_ref.source.$source_field` for the source data.
+
+/// Invokes the callback macro for each iterator kind with its properties.
+/// This is the single source of truth for iterator kind definitions.
+///
+/// # Adding a New Iterator Kind
+///
+/// When adding a new iterator kind, you must:
+/// 1. Add it here with: discriminant, source field name, next function, and owned behavior
+/// 2. Add a corresponding `*Source` struct
+/// 3. Add a union field to `IteratorSource`
+/// 4. Implement the `vole_*_iter_next` function
+/// 5. Add a drop arm to `drop_iter_source!` macro below
+///
+/// The compiler will catch missing cases via exhaustive matching.
+macro_rules! for_all_iterator_kinds {
+    ($callback:ident) => {
+        $callback! {
+            // Leaf sources: values are borrowed from the source container
+            Array = 0, source: array, next: vole_array_iter_next_impl, owned: [false];
+            // Transform iterators with closure
+            Map = 1, source: map, next: vole_map_iter_next, owned: [true];
+            // Pass-through iterators: ownership depends on source
+            Filter = 2, source: filter, next: vole_filter_iter_next, owned: [passthrough(filter.source)];
+            Take = 3, source: take, next: vole_take_iter_next, owned: [passthrough(take.source)];
+            Skip = 4, source: skip, next: vole_skip_iter_next, owned: [passthrough(skip.source)];
+            // Dual source iterators
+            Chain = 5, source: chain, next: vole_chain_iter_next, owned: [false];
+            // Flatten yields elements from inner arrays - these are borrowed
+            Flatten = 6, source: flatten, next: vole_flatten_iter_next, owned: [false];
+            FlatMap = 7, source: flat_map, next: vole_flat_map_iter_next, owned: [true];
+            Unique = 8, source: unique, next: vole_unique_iter_next, owned: [passthrough(unique.source)];
+            // Collected element iterators
+            Chunks = 9, source: chunks, next: vole_chunks_iter_next, owned: [true];
+            Windows = 10, source: windows, next: vole_windows_iter_next, owned: [true];
+            // Value-producing iterators (no resources to free)
+            Repeat = 11, source: repeat, next: vole_repeat_iter_next, owned: [true];
+            Once = 12, source: once, next: vole_once_iter_next, owned: [true];
+            Empty = 13, source: empty, next: vole_empty_iter_next, owned: [false];
+            // Generator iterators
+            FromFn = 14, source: from_fn, next: vole_from_fn_iter_next, owned: [true];
+            Range = 15, source: range, next: vole_range_iter_next, owned: [true];
+            // String iterators
+            StringChars = 16, source: string_chars, next: vole_string_chars_iter_next, owned: [true];
+            // Interface iterator - wraps a boxed interface implementing Iterator
+            Interface = 17, source: interface, next: vole_interface_iter_next, owned: [true];
+            // Enumerate iterator - yields (index, value) pairs
+            Enumerate = 18, source: enumerate, next: vole_enumerate_iter_next, owned: [true];
+            // Zip iterator - combines two iterators into pairs
+            Zip = 19, source: zip, next: vole_zip_iter_next, owned: [true];
+            // String split iterator - splits string by delimiter
+            StringSplit = 20, source: string_split, next: vole_string_split_iter_next, owned: [true];
+            // String lines iterator - splits string by newlines
+            StringLines = 21, source: string_lines, next: vole_string_lines_iter_next, owned: [true];
+            // String codepoints iterator - yields unicode codepoints as i32
+            StringCodepoints = 22, source: string_codepoints, next: vole_string_codepoints_iter_next, owned: [true];
+        }
+    };
+}
+
+/// Generate the IteratorKind enum from the central definitions.
+macro_rules! generate_iterator_kind_enum {
+    ($(
+        $kind:ident = $discriminant:literal,
+        source: $source_field:ident,
+        next: $next_fn:ident,
+        owned: [ $($owned:tt)* ];
+    )*) => {
+        /// Enum discriminant for iterator sources
+        #[repr(u8)]
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub enum IteratorKind {
+            $($kind = $discriminant,)*
+        }
+    };
+}
+
+for_all_iterator_kinds!(generate_iterator_kind_enum);
+
+/// Helper macro to perform drop logic for each kind.
+/// This macro exists to avoid hygiene issues with expanding drop code
+/// that references `iter_ref` from within the callback pattern.
+macro_rules! drop_iter_source {
+    (Array, $iter_ref:expr) => {
+        let array = $iter_ref.source.array.array;
+        if !array.is_null() {
+            RcArray::dec_ref(array as *mut RcArray);
+        }
+    };
+    (Map, $iter_ref:expr) => {
+        RcIterator::dec_ref($iter_ref.source.map.source);
+        Closure::free($iter_ref.source.map.transform as *mut Closure);
+    };
+    (Filter, $iter_ref:expr) => {
+        RcIterator::dec_ref($iter_ref.source.filter.source);
+        Closure::free($iter_ref.source.filter.predicate as *mut Closure);
+    };
+    (Take, $iter_ref:expr) => {
+        RcIterator::dec_ref($iter_ref.source.take.source);
+    };
+    (Skip, $iter_ref:expr) => {
+        RcIterator::dec_ref($iter_ref.source.skip.source);
+    };
+    (Chain, $iter_ref:expr) => {
+        RcIterator::dec_ref($iter_ref.source.chain.first);
+        RcIterator::dec_ref($iter_ref.source.chain.second);
+    };
+    (Flatten, $iter_ref:expr) => {
+        RcIterator::dec_ref($iter_ref.source.flatten.outer);
+        let inner = $iter_ref.source.flatten.inner;
+        if !inner.is_null() {
+            RcIterator::dec_ref(inner);
+        }
+    };
+    (FlatMap, $iter_ref:expr) => {
+        RcIterator::dec_ref($iter_ref.source.flat_map.source);
+        Closure::free($iter_ref.source.flat_map.transform as *mut Closure);
+        let inner = $iter_ref.source.flat_map.inner;
+        if !inner.is_null() {
+            RcIterator::dec_ref(inner);
+        }
+    };
+    (Unique, $iter_ref:expr) => {
+        RcIterator::dec_ref($iter_ref.source.unique.source);
+    };
+    (Chunks, $iter_ref:expr) => {
+        let elements = $iter_ref.source.chunks.elements;
+        if !elements.is_null() {
+            RcArray::dec_ref(elements);
+        }
+    };
+    (Windows, $iter_ref:expr) => {
+        let elements = $iter_ref.source.windows.elements;
+        if !elements.is_null() {
+            RcArray::dec_ref(elements);
+        }
+    };
+    (Repeat, $iter_ref:expr) => {};
+    (Once, $iter_ref:expr) => {};
+    (Empty, $iter_ref:expr) => {};
+    (FromFn, $iter_ref:expr) => {
+        Closure::free($iter_ref.source.from_fn.generator as *mut Closure);
+    };
+    (Range, $iter_ref:expr) => {};
+    (StringChars, $iter_ref:expr) => {
+        let string = $iter_ref.source.string_chars.string;
+        if !string.is_null() {
+            RcString::dec_ref(string as *mut RcString);
+        }
+    };
+    (Interface, $iter_ref:expr) => {
+        let boxed = $iter_ref.source.interface.boxed_interface;
+        if !boxed.is_null() {
+            let data_ptr = *(boxed as *const *mut u8);
+            if !data_ptr.is_null() {
+                rc_dec(data_ptr);
+            }
+            let layout = Layout::from_size_align(16, 8).unwrap();
+            dealloc(boxed as *mut u8, layout);
+        }
+    };
+    (Enumerate, $iter_ref:expr) => {
+        RcIterator::dec_ref($iter_ref.source.enumerate.source);
+    };
+    (Zip, $iter_ref:expr) => {
+        RcIterator::dec_ref($iter_ref.source.zip.first);
+        RcIterator::dec_ref($iter_ref.source.zip.second);
+    };
+    (StringSplit, $iter_ref:expr) => {
+        let string = $iter_ref.source.string_split.string;
+        let delimiter = $iter_ref.source.string_split.delimiter;
+        if !string.is_null() {
+            RcString::dec_ref(string as *mut RcString);
+        }
+        if !delimiter.is_null() {
+            RcString::dec_ref(delimiter as *mut RcString);
+        }
+    };
+    (StringLines, $iter_ref:expr) => {
+        let string = $iter_ref.source.string_lines.string;
+        if !string.is_null() {
+            RcString::dec_ref(string as *mut RcString);
+        }
+    };
+    (StringCodepoints, $iter_ref:expr) => {
+        let string = $iter_ref.source.string_codepoints.string;
+        if !string.is_null() {
+            RcString::dec_ref(string as *mut RcString);
+        }
+    };
+}
+
+/// Generate the iterator_drop_sources match arms from the central definitions.
+macro_rules! generate_drop_sources {
+    ($(
+        $kind:ident = $discriminant:literal,
+        source: $source_field:ident,
+        next: $next_fn:ident,
+        owned: [ $($owned:tt)* ];
+    )*) => {
+        /// Release resources owned by an iterator's source (without freeing the iterator itself).
+        ///
+        /// # Safety
+        /// `iter_ref` must reference a valid `UnifiedIterator`. Union accesses are gated by `kind`.
+        fn iterator_drop_sources(iter_ref: &UnifiedIterator) {
+            // Safety: all union field accesses are gated by the kind discriminant.
+            unsafe {
+                match iter_ref.kind {
+                    $(IteratorKind::$kind => { drop_iter_source!($kind, iter_ref); })*
+                }
+            }
+        }
+    };
+}
+
+/// Generate the vole_array_iter_next dispatch match from the central definitions.
+macro_rules! generate_next_dispatch {
+    ($(
+        $kind:ident = $discriminant:literal,
+        source: $source_field:ident,
+        next: $next_fn:ident,
+        owned: [ $($owned:tt)* ];
+    )*) => {
+        /// Get next value from any iterator (array or map)
+        /// Returns 1 and stores value in out_value if available
+        /// Returns 0 if iterator exhausted (Done)
+        #[unsafe(no_mangle)]
+        pub extern "C" fn vole_array_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
+            if iter.is_null() {
+                return 0;
+            }
+            let iter_ref = unsafe { &mut (*iter).iter };
+            match iter_ref.kind {
+                $(IteratorKind::$kind => $next_fn(iter, out_value),)*
+            }
+        }
+    };
+}
+
+/// Helper macro to compute produces_owned for a single owned specification.
+/// Note: This is always called within an unsafe block, so pointer dereferences are allowed.
+macro_rules! compute_produces_owned {
+    // Literal true/false
+    (true, $iter:expr) => {
+        true
+    };
+    (false, $iter:expr) => {
+        false
+    };
+    // Passthrough: recurse on source (caller already in unsafe block)
+    (passthrough($source_accessor:ident . $field:ident), $iter:expr) => {
+        iter_produces_owned((*$iter).iter.source.$source_accessor.$field)
+    };
+}
+
+/// Generate the iter_produces_owned function from the central definitions.
+macro_rules! generate_produces_owned {
+    ($(
+        $kind:ident = $discriminant:literal,
+        source: $source_field:ident,
+        next: $next_fn:ident,
+        owned: [ $($owned:tt)+ ];
+    )*) => {
+        /// Check if an iterator chain produces "owned" values (from map/string_chars/etc.)
+        /// vs "borrowed" values (from array source with only filter/take/skip in between).
+        /// This determines whether collect needs to rc_inc values before storing.
+        fn iter_produces_owned(iter: *mut RcIterator) -> bool {
+            if iter.is_null() {
+                return false;
+            }
+            unsafe {
+                let kind = (*iter).iter.kind;
+                match kind {
+                    $(IteratorKind::$kind => compute_produces_owned!($($owned)+, iter),)*
+                }
+            }
+        }
+    };
 }
 
 /// Unified iterator source - can be either an array, map, filter, take, skip, chain, flatten, flat_map, unique, chunks, windows, repeat, once, empty, from_fn, range, string_chars, or interface iterator
@@ -519,243 +797,39 @@ unsafe extern "C" fn iterator_drop(ptr: *mut u8) {
     }
 }
 
-/// Release resources owned by an iterator's source (without freeing the iterator itself).
-///
-/// # Safety
-/// `iter_ref` must reference a valid `UnifiedIterator`. Union accesses are gated by `kind`.
-fn iterator_drop_sources(iter_ref: &UnifiedIterator) {
-    // Safety: all union field accesses are gated by the kind discriminant.
-    unsafe {
-        match iter_ref.kind {
-            IteratorKind::Array => {
-                let array = iter_ref.source.array.array;
-                if !array.is_null() {
-                    RcArray::dec_ref(array as *mut RcArray);
-                }
-            }
-            IteratorKind::Map => {
-                RcIterator::dec_ref(iter_ref.source.map.source);
-                Closure::free(iter_ref.source.map.transform as *mut Closure);
-            }
-            IteratorKind::Filter => {
-                RcIterator::dec_ref(iter_ref.source.filter.source);
-                Closure::free(iter_ref.source.filter.predicate as *mut Closure);
-            }
-            IteratorKind::Take => {
-                RcIterator::dec_ref(iter_ref.source.take.source);
-            }
-            IteratorKind::Skip => {
-                RcIterator::dec_ref(iter_ref.source.skip.source);
-            }
-            IteratorKind::Chain => {
-                RcIterator::dec_ref(iter_ref.source.chain.first);
-                RcIterator::dec_ref(iter_ref.source.chain.second);
-            }
-            IteratorKind::Flatten => {
-                RcIterator::dec_ref(iter_ref.source.flatten.outer);
-                let inner = iter_ref.source.flatten.inner;
-                if !inner.is_null() {
-                    RcIterator::dec_ref(inner);
-                }
-            }
-            IteratorKind::FlatMap => {
-                RcIterator::dec_ref(iter_ref.source.flat_map.source);
-                Closure::free(iter_ref.source.flat_map.transform as *mut Closure);
-                let inner = iter_ref.source.flat_map.inner;
-                if !inner.is_null() {
-                    RcIterator::dec_ref(inner);
-                }
-            }
-            IteratorKind::Unique => {
-                RcIterator::dec_ref(iter_ref.source.unique.source);
-            }
-            IteratorKind::Chunks => {
-                let elements = iter_ref.source.chunks.elements;
-                if !elements.is_null() {
-                    RcArray::dec_ref(elements);
-                }
-            }
-            IteratorKind::Windows => {
-                let elements = iter_ref.source.windows.elements;
-                if !elements.is_null() {
-                    RcArray::dec_ref(elements);
-                }
-            }
-            IteratorKind::Repeat | IteratorKind::Once | IteratorKind::Empty => {}
-            IteratorKind::FromFn => {
-                Closure::free(iter_ref.source.from_fn.generator as *mut Closure);
-            }
-            IteratorKind::Range => {}
-            IteratorKind::StringChars => {
-                let string = iter_ref.source.string_chars.string;
-                if !string.is_null() {
-                    RcString::dec_ref(string as *mut RcString);
-                }
-            }
-            IteratorKind::Interface => {
-                // The boxed interface layout is [data_ptr, vtable_ptr].
-                // We need to rc_dec the data_ptr (the actual instance) so the
-                // underlying object (e.g., generator state machine) is freed.
-                let boxed = iter_ref.source.interface.boxed_interface;
-                if !boxed.is_null() {
-                    let data_ptr = *(boxed as *const *mut u8);
-                    if !data_ptr.is_null() {
-                        rc_dec(data_ptr);
-                    }
-                    // Free the interface box itself (heap-allocated 2-word struct)
-                    let layout = Layout::from_size_align(16, 8).unwrap();
-                    dealloc(boxed as *mut u8, layout);
-                }
-            }
-            IteratorKind::Enumerate => {
-                RcIterator::dec_ref(iter_ref.source.enumerate.source);
-            }
-            IteratorKind::Zip => {
-                RcIterator::dec_ref(iter_ref.source.zip.first);
-                RcIterator::dec_ref(iter_ref.source.zip.second);
-            }
-            IteratorKind::StringSplit => {
-                let string = iter_ref.source.string_split.string;
-                let delimiter = iter_ref.source.string_split.delimiter;
-                if !string.is_null() {
-                    RcString::dec_ref(string as *mut RcString);
-                }
-                if !delimiter.is_null() {
-                    RcString::dec_ref(delimiter as *mut RcString);
-                }
-            }
-            IteratorKind::StringLines => {
-                let string = iter_ref.source.string_lines.string;
-                if !string.is_null() {
-                    RcString::dec_ref(string as *mut RcString);
-                }
-            }
-            IteratorKind::StringCodepoints => {
-                let string = iter_ref.source.string_codepoints.string;
-                if !string.is_null() {
-                    RcString::dec_ref(string as *mut RcString);
-                }
-            }
-        }
-    }
-}
+// Generate iterator_drop_sources from the central definition
+for_all_iterator_kinds!(generate_drop_sources);
 
-/// Get next value from any iterator (array or map)
+/// Get next value from array iterator (implementation for macro dispatch)
 /// Returns 1 and stores value in out_value if available
 /// Returns 0 if iterator exhausted (Done)
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_array_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
+fn vole_array_iter_next_impl(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
     if iter.is_null() {
         return 0;
     }
-
     let iter_ref = unsafe { &mut (*iter).iter };
-
-    match iter_ref.kind {
-        IteratorKind::Array => {
-            let src = unsafe { &mut iter_ref.source.array };
-            if src.index >= unsafe { (*src.array).len } as i64 {
-                return 0; // Done
-            }
-            let tagged_value = unsafe {
-                let data = (*src.array).data;
-                *data.add(src.index as usize)
-            };
-            // Store the value part (ignoring tag for now - iterators return element type)
-            unsafe { *out_value = tagged_value.value as i64 };
-            src.index += 1;
-            1 // Has value
-        }
-        IteratorKind::Map => {
-            // For map iterators, delegate to map_next logic
-            vole_map_iter_next(iter, out_value)
-        }
-        IteratorKind::Filter => {
-            // For filter iterators, delegate to filter_next logic
-            vole_filter_iter_next(iter, out_value)
-        }
-        IteratorKind::Take => {
-            // For take iterators, delegate to take_next logic
-            vole_take_iter_next(iter, out_value)
-        }
-        IteratorKind::Skip => {
-            // For skip iterators, delegate to skip_next logic
-            vole_skip_iter_next(iter, out_value)
-        }
-        IteratorKind::Chain => {
-            // For chain iterators, delegate to chain_next logic
-            vole_chain_iter_next(iter, out_value)
-        }
-        IteratorKind::Flatten => {
-            // For flatten iterators, delegate to flatten_next logic
-            vole_flatten_iter_next(iter, out_value)
-        }
-        IteratorKind::FlatMap => {
-            // For flat_map iterators, delegate to flat_map_next logic
-            vole_flat_map_iter_next(iter, out_value)
-        }
-        IteratorKind::Unique => {
-            // For unique iterators, delegate to unique_next logic
-            vole_unique_iter_next(iter, out_value)
-        }
-        IteratorKind::Chunks => {
-            // For chunks iterators, delegate to chunks_next logic
-            vole_chunks_iter_next(iter, out_value)
-        }
-        IteratorKind::Windows => {
-            // For windows iterators, delegate to windows_next logic
-            vole_windows_iter_next(iter, out_value)
-        }
-        IteratorKind::Repeat => {
-            // For repeat iterators, delegate to repeat_next logic
-            vole_repeat_iter_next(iter, out_value)
-        }
-        IteratorKind::Once => {
-            // For once iterators, delegate to once_next logic
-            vole_once_iter_next(iter, out_value)
-        }
-        IteratorKind::Empty => {
-            // Empty iterator always returns Done
-            0
-        }
-        IteratorKind::FromFn => {
-            // For from_fn iterators, delegate to from_fn_next logic
-            vole_from_fn_iter_next(iter, out_value)
-        }
-        IteratorKind::Range => {
-            // For range iterators, delegate to range_next logic
-            vole_range_iter_next(iter, out_value)
-        }
-        IteratorKind::StringChars => {
-            // For string chars iterators, delegate to string_chars_next logic
-            vole_string_chars_iter_next(iter, out_value)
-        }
-        IteratorKind::Interface => {
-            // For interface iterators, call through the vtable
-            vole_interface_iter_next(iter, out_value)
-        }
-        IteratorKind::Enumerate => {
-            // For enumerate iterators, delegate to enumerate_next logic
-            vole_enumerate_iter_next(iter, out_value)
-        }
-        IteratorKind::Zip => {
-            // For zip iterators, delegate to zip_next logic
-            vole_zip_iter_next(iter, out_value)
-        }
-        IteratorKind::StringSplit => {
-            // For string split iterators, delegate to string_split_next logic
-            vole_string_split_iter_next(iter, out_value)
-        }
-        IteratorKind::StringLines => {
-            // For string lines iterators, delegate to string_lines_next logic
-            vole_string_lines_iter_next(iter, out_value)
-        }
-        IteratorKind::StringCodepoints => {
-            // For string codepoints iterators, delegate to string_codepoints_next logic
-            vole_string_codepoints_iter_next(iter, out_value)
-        }
+    let src = unsafe { &mut iter_ref.source.array };
+    if src.index >= unsafe { (*src.array).len } as i64 {
+        return 0; // Done
     }
+    let tagged_value = unsafe {
+        let data = (*src.array).data;
+        *data.add(src.index as usize)
+    };
+    // Store the value part (ignoring tag for now - iterators return element type)
+    unsafe { *out_value = tagged_value.value as i64 };
+    src.index += 1;
+    1 // Has value
 }
+
+/// Get next value from empty iterator - always returns Done (0)
+#[inline]
+fn vole_empty_iter_next(_iter: *mut RcIterator, _out_value: *mut i64) -> i64 {
+    0
+}
+
+// Generate vole_array_iter_next dispatch from the central definition
+for_all_iterator_kinds!(generate_next_dispatch);
 
 /// Get next value from interface iterator by calling through the vtable.
 /// The boxed interface has layout: [data_ptr, vtable_ptr]
@@ -836,54 +910,8 @@ pub extern "C" fn vole_iter_next(iter: *mut RcIterator) -> *mut u8 {
     ptr
 }
 
-/// Check if an iterator chain produces "owned" values (from map/string_chars/etc.)
-/// vs "borrowed" values (from array source with only filter/take/skip in between).
-/// This determines whether collect needs to rc_inc values before storing.
-fn iter_produces_owned(iter: *mut RcIterator) -> bool {
-    if iter.is_null() {
-        return false;
-    }
-    unsafe {
-        let kind = (*iter).iter.kind;
-        match kind {
-            // Creating sources: values are newly created (owned)
-            IteratorKind::Map
-            | IteratorKind::FlatMap
-            | IteratorKind::StringChars
-            | IteratorKind::StringSplit
-            | IteratorKind::StringLines
-            | IteratorKind::StringCodepoints
-            | IteratorKind::Chunks
-            | IteratorKind::Windows
-            | IteratorKind::Enumerate
-            | IteratorKind::Zip
-            | IteratorKind::FromFn
-            | IteratorKind::Repeat
-            | IteratorKind::Once
-            | IteratorKind::Range => true,
-
-            // Pass-through sources: check what they pass through
-            IteratorKind::Filter => iter_produces_owned((*iter).iter.source.filter.source),
-            IteratorKind::Take => iter_produces_owned((*iter).iter.source.take.source),
-            IteratorKind::Skip => iter_produces_owned((*iter).iter.source.skip.source),
-            IteratorKind::Unique => iter_produces_owned((*iter).iter.source.unique.source),
-            IteratorKind::Chain => {
-                // Chain: both branches must produce owned for us to say owned
-                // In practice, if either is borrowed, we need to rc_inc
-                false
-            }
-            IteratorKind::Flatten => {
-                // Flatten yields elements from inner arrays - these are borrowed
-                false
-            }
-
-            // Leaf sources: values are borrowed from the source container
-            IteratorKind::Array | IteratorKind::Empty => false,
-            // Interface: next() is a function call that returns owned values
-            IteratorKind::Interface => true,
-        }
-    }
-}
+// Generate iter_produces_owned from the central definition
+for_all_iterator_kinds!(generate_produces_owned);
 
 /// Collect all remaining iterator values into a new array with proper element type tags.
 /// Reads `elem_tag` from the iterator's stored tag (set by codegen or
