@@ -1175,6 +1175,11 @@ impl Cg<'_, '_, '_> {
         &mut self,
         nc: &vole_frontend::NullCoalesceExpr,
     ) -> Result<CompiledValue, String> {
+        // Check if the source is a variable (needs rc_inc because union cleanup
+        // will also dec the payload) vs a temporary (ownership transfers directly).
+        let source_is_variable =
+            matches!(&nc.value.kind, ExprKind::Identifier(sym) if self.vars.contains_key(sym));
+
         let value = self.expr(&nc.value)?;
         let nil_tag = self.find_nil_variant(value.type_id).ok_or_else(|| {
             CodegenError::type_mismatch("null coalesce operator", "optional type", "non-optional")
@@ -1235,9 +1240,11 @@ impl Cg<'_, '_, '_> {
                 .builder
                 .ins()
                 .load(cranelift_type, MemFlags::new(), value.value, 8);
-            // RC: the payload is a borrow from the optional — inc it so the
-            // result owns its reference independently.
-            if result_needs_rc {
+            // RC: if the source is a variable, its union cleanup will dec the
+            // payload at scope exit, so we need rc_inc to keep the extracted
+            // value alive. If the source is a temporary (function call, etc.),
+            // ownership transfers directly — no inc needed.
+            if result_needs_rc && source_is_variable {
                 self.emit_rc_inc_for_type(loaded, inner_type_id)?;
             }
             loaded

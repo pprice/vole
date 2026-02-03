@@ -7,7 +7,7 @@ use crate::alloc_track;
 use crate::array::RcArray;
 use crate::closure::Closure;
 use crate::string::RcString;
-use crate::value::{RcHeader, TYPE_ITERATOR, rc_dec, rc_inc};
+use crate::value::{RcHeader, TYPE_ITERATOR, TYPE_STRING, rc_dec, rc_inc};
 use std::alloc::{Layout, alloc, dealloc};
 use std::ptr;
 
@@ -1330,6 +1330,8 @@ pub extern "C" fn vole_iter_for_each(iter: *mut RcIterator, callback: *const Clo
         return;
     }
 
+    let owned_rc = iter_produces_owned_rc(iter);
+
     loop {
         let mut value: i64 = 0;
         let has_value = vole_array_iter_next(iter, &mut value);
@@ -1344,6 +1346,11 @@ pub extern "C" fn vole_iter_for_each(iter: *mut RcIterator, callback: *const Clo
             let func_ptr = Closure::get_func(callback);
             let callback_fn: extern "C" fn(*const Closure, i64) = std::mem::transmute(func_ptr);
             callback_fn(callback, value);
+        }
+
+        // Free owned RC values after the callback has used them (callback borrows, doesn't own)
+        if owned_rc && value != 0 {
+            rc_dec(value as *mut u8);
         }
     }
 
@@ -2118,6 +2125,11 @@ pub extern "C" fn vole_flatten_iter_next(iter: *mut RcIterator, out_value: *mut 
         return 0;
     }
 
+    // Check if the outer iterator produces owned arrays (e.g. from chunks/windows).
+    // If so, we must dec_ref each array after wrapping it in an inner iterator,
+    // because vole_array_iter inc_ref's the array.
+    let outer_owns_arrays = unsafe { iter_produces_owned(iter_ref.source.flatten.outer) };
+
     let flatten_src = unsafe { &mut iter_ref.source.flatten };
 
     loop {
@@ -2144,6 +2156,12 @@ pub extern "C" fn vole_flatten_iter_next(iter: *mut RcIterator, out_value: *mut 
         // Create an iterator for the inner array
         let inner_array = array_ptr as *const RcArray;
         flatten_src.inner = vole_array_iter(inner_array);
+        // vole_array_iter inc_ref'd the array. If the outer iterator produced
+        // an owned array (e.g. from chunks/windows), dec_ref to transfer sole
+        // ownership to the inner iterator.
+        if outer_owns_arrays {
+            unsafe { RcArray::dec_ref(inner_array as *mut RcArray) };
+        }
         // Continue loop to get first element from this inner iterator
     }
 }
@@ -2995,7 +3013,7 @@ pub extern "C" fn vole_string_chars_iter(string: *const RcString) -> *mut RcIter
         }
     }
 
-    RcIterator::new(
+    RcIterator::new_with_tag(
         IteratorKind::StringChars,
         IteratorSource {
             string_chars: StringCharsSource {
@@ -3003,6 +3021,7 @@ pub extern "C" fn vole_string_chars_iter(string: *const RcString) -> *mut RcIter
                 byte_pos: 0,
             },
         },
+        TYPE_STRING as u64,
     )
 }
 
@@ -3230,7 +3249,7 @@ pub extern "C" fn vole_string_split_iter(
         }
     }
 
-    RcIterator::new(
+    RcIterator::new_with_tag(
         IteratorKind::StringSplit,
         IteratorSource {
             string_split: StringSplitSource {
@@ -3240,6 +3259,7 @@ pub extern "C" fn vole_string_split_iter(
                 exhausted: 0,
             },
         },
+        TYPE_STRING as u64,
     )
 }
 
@@ -3325,7 +3345,7 @@ pub extern "C" fn vole_string_lines_iter(string: *const RcString) -> *mut RcIter
         }
     }
 
-    RcIterator::new(
+    RcIterator::new_with_tag(
         IteratorKind::StringLines,
         IteratorSource {
             string_lines: StringLinesSource {
@@ -3334,6 +3354,7 @@ pub extern "C" fn vole_string_lines_iter(string: *const RcString) -> *mut RcIter
                 exhausted: 0,
             },
         },
+        TYPE_STRING as u64,
     )
 }
 
