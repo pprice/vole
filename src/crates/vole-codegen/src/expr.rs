@@ -186,6 +186,15 @@ impl Cg<'_, '_, '_> {
 
             let mut cv = CompiledValue::new(val, ty, *type_id);
             self.mark_borrowed_if_rc(&mut cv);
+            // Union variables with RC variants are managed by scope-level
+            // union cleanup (UnionRcLocal). Mark them Borrowed so that
+            // optional_chain knows the inner payload will be dec'd at scope
+            // exit and does not emit a redundant rc_dec.
+            if cv.rc_lifecycle == RcLifecycle::Untracked
+                && self.union_rc_variant_tags(*type_id).is_some()
+            {
+                cv.mark_borrowed();
+            }
             Ok(cv)
         } else if let Some(&(module_id, export_name, export_type_id)) =
             self.module_bindings.get(&sym)

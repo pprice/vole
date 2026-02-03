@@ -90,6 +90,19 @@ impl Cg<'_, '_, '_> {
         let field_name = self.interner().resolve(fa.field);
         let (slot, field_type_id) = get_field_slot_and_type_id_cg(obj.type_id, field_name, self)?;
 
+        self.extract_field(obj, slot, field_type_id)
+    }
+
+    /// Extract a field from a container object, handling struct/instance dispatch
+    /// and RC cleanup. If the container is an owned RC temporary, the field is
+    /// rc_inc'd (if RC) and the container is rc_dec'd so intermediate objects
+    /// don't leak.
+    fn extract_field(
+        &mut self,
+        obj: CompiledValue,
+        slot: usize,
+        field_type_id: TypeId,
+    ) -> Result<CompiledValue, String> {
         // Struct types are stack-allocated: load field directly from pointer + offset
         let is_struct = self.arena().is_struct(obj.type_id);
         if is_struct {
@@ -204,19 +217,25 @@ impl Cg<'_, '_, '_> {
             self.builder.ins().iconst(inner_cranelift_type, 0)
         };
 
-        // Get field from the inner object
-        let is_struct = self.arena().is_struct(inner_type_id);
-        let field_compiled = if is_struct {
-            // Struct was auto-boxed: inner_obj is a raw heap pointer
-            self.struct_field_load(inner_obj, slot, field_type_id, inner_type_id)?
-        } else {
-            let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
-            let field_raw =
-                self.call_runtime(RuntimeFn::InstanceGetField, &[inner_obj, slot_val])?;
-            let mut cv = self.convert_field_value(field_raw, field_type_id);
-            self.mark_borrowed_if_rc(&mut cv);
+        // Construct a CompiledValue for the inner object with lifecycle
+        // inherited from the original optional. When the optional is
+        // borrowed (e.g. from a variable with union scope cleanup), the
+        // inner object is also borrowed — scope cleanup handles the dec.
+        // When the optional is a temporary (lifecycle None — e.g. result
+        // of a prior optional chain like `c?.ceo`), and the inner type
+        // needs RC, mark it as Owned so extract_field will rc_inc the
+        // field and rc_dec this container, preventing the leak.
+        let inner_cv = {
+            let needs_rc = self.needs_rc_cleanup(inner_type_id);
+            let mut cv = CompiledValue::new(inner_obj, inner_cranelift_type, inner_type_id);
+            if obj.is_owned() || (!obj.is_borrowed() && needs_rc) {
+                cv.rc_lifecycle = RcLifecycle::Owned;
+            }
             cv
         };
+
+        // Extract field with RC cleanup (rc_inc field + rc_dec container if owned)
+        let field_compiled = self.extract_field(inner_cv, slot, field_type_id)?;
 
         // Wrap the field value in an optional (using construct_union_id)
         // But if field type is already optional, it's already a union - just use it directly
