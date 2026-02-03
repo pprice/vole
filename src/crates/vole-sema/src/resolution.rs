@@ -230,7 +230,7 @@ mod tests {
     fn resolved_method_func_type_id() {
         let mut arena = TypeArena::new();
         let ret_type = arena.bool();
-        let ft = FunctionType::from_ids(&[arena.i32()], ret_type, false);
+        let ft = FunctionType::unary(arena.i32(), ret_type);
         let ft_id = ft.intern(&mut arena);
         let method_name_id = test_method_name_id();
 
@@ -291,9 +291,9 @@ mod tests {
         let node_id = NodeId(42);
         let method_name_id = test_method_name_id();
 
-        let ret_type = arena.void();
-        let ft = FunctionType::from_ids(&[], ret_type, false);
+        let ft = FunctionType::void(&arena);
         let ft_id = ft.intern(&mut arena);
+        let ret_type = arena.void();
         resolutions.insert(
             node_id,
             ResolvedMethod::Direct {

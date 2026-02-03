@@ -69,6 +69,66 @@ impl FunctionType {
         }
     }
 
+    /// Create a nullary (no arguments) function type.
+    ///
+    /// Equivalent to `FunctionType::from_ids(&[], return_type, false)`.
+    #[inline]
+    pub fn nullary(return_type: TypeId) -> Self {
+        Self {
+            is_closure: false,
+            params_id: TypeIdVec::new(),
+            return_type_id: return_type,
+        }
+    }
+
+    /// Create a unary (one argument) function type.
+    ///
+    /// Equivalent to `FunctionType::from_ids(&[arg], return_type, false)`.
+    #[inline]
+    pub fn unary(arg: TypeId, return_type: TypeId) -> Self {
+        Self {
+            is_closure: false,
+            params_id: smallvec::smallvec![arg],
+            return_type_id: return_type,
+        }
+    }
+
+    /// Create a binary (two arguments) function type.
+    ///
+    /// Equivalent to `FunctionType::from_ids(&[arg1, arg2], return_type, false)`.
+    #[inline]
+    pub fn binary(arg1: TypeId, arg2: TypeId, return_type: TypeId) -> Self {
+        Self {
+            is_closure: false,
+            params_id: smallvec::smallvec![arg1, arg2],
+            return_type_id: return_type,
+        }
+    }
+
+    /// Create a void function type (no arguments, returns void).
+    ///
+    /// Equivalent to `FunctionType::from_ids(&[], arena.void(), false)`.
+    #[inline]
+    pub fn void(arena: &TypeArena) -> Self {
+        Self {
+            is_closure: false,
+            params_id: TypeIdVec::new(),
+            return_type_id: arena.void(),
+        }
+    }
+
+    /// Create a predicate function type (one argument, returns bool).
+    ///
+    /// Equivalent to `FunctionType::from_ids(&[arg], arena.bool(), false)`.
+    #[inline]
+    pub fn predicate(arg: TypeId, arena: &TypeArena) -> Self {
+        Self {
+            is_closure: false,
+            params_id: smallvec::smallvec![arg],
+            return_type_id: arena.bool(),
+        }
+    }
+
     /// Intern this FunctionType into the arena, returning its TypeId.
     /// This consolidates the function type internment logic that was spread
     /// across codegen. Use this instead of calling arena.function() directly.

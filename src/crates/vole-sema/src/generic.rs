@@ -766,7 +766,7 @@ mod tests {
                 original_name: func_name,
                 mangled_name: names.intern_raw(names.main_module(), &["foo__mono_0"]),
                 instance_id: 0,
-                func_type: FunctionType::from_ids(&[arena.i64()], arena.i64(), false),
+                func_type: FunctionType::unary(arena.i64(), arena.i64()),
                 substitutions: FxHashMap::default(),
             },
         );

@@ -305,8 +305,7 @@ mod tests {
         registry.register_method(
             type_id,
             method_id,
-            MethodImpl::builtin(FunctionType::from_ids(&[], arena.i64(), false))
-                .with_trait_name(sym(2)), // "Sized"
+            MethodImpl::builtin(FunctionType::nullary(arena.i64())).with_trait_name(sym(2)), // "Sized"
         );
 
         let method = registry.get_method(&type_id, method_id);
@@ -380,13 +379,13 @@ mod tests {
         registry.register_method(
             type_id,
             length_id,
-            MethodImpl::builtin(FunctionType::from_ids(&[], arena.i64(), false)),
+            MethodImpl::builtin(FunctionType::nullary(arena.i64())),
         );
 
         registry.register_method(
             type_id,
             to_upper_id,
-            MethodImpl::builtin(FunctionType::from_ids(&[], arena.string(), false)),
+            MethodImpl::builtin(FunctionType::nullary(arena.string())),
         );
 
         let methods = registry.get_methods_for_type(&type_id);
@@ -415,7 +414,7 @@ mod tests {
         registry1.register_method(
             ImplTypeId(i64_name),
             equals_id,
-            MethodImpl::user_defined(FunctionType::from_ids(&[arena.i64()], arena.bool(), false))
+            MethodImpl::user_defined(FunctionType::predicate(arena.i64(), &arena))
                 .with_trait_name(sym(20)), // "Equatable"
         );
 
@@ -423,7 +422,7 @@ mod tests {
         registry2.register_method(
             ImplTypeId(string_name),
             length_id,
-            MethodImpl::user_defined(FunctionType::from_ids(&[], arena.i64(), false)),
+            MethodImpl::user_defined(FunctionType::nullary(arena.i64())),
         );
 
         // Merge registry2 into registry1
@@ -445,7 +444,7 @@ mod tests {
     #[test]
     fn method_impl_constructors() {
         let arena = TypeArena::new();
-        let func_type = FunctionType::from_ids(&[], arena.i64(), false);
+        let func_type = FunctionType::nullary(arena.i64());
 
         // Test builtin constructor
         let builtin = MethodImpl::builtin(func_type.clone());

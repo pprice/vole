@@ -20,7 +20,7 @@ impl Analyzer {
                     if !args.is_empty() {
                         self.add_wrong_arg_count(0, args.len(), args[0].span);
                     }
-                    Some(FunctionType::from_ids(&[], self.ty_i64_id(), false))
+                    Some(FunctionType::nullary(self.ty_i64_id()))
                 }
                 // Array.iter() -> Iterator<T>
                 "iter" => {
@@ -29,7 +29,7 @@ impl Analyzer {
                     }
                     let iter_type_id =
                         self.interface_type_id("Iterator", &[elem_ty_id], interner)?;
-                    Some(FunctionType::from_ids(&[], iter_type_id, false))
+                    Some(FunctionType::nullary(iter_type_id))
                 }
                 _ => None,
             };
@@ -45,7 +45,7 @@ impl Analyzer {
                     }
                     let iter_type_id =
                         self.interface_type_id("Iterator", &[self.ty_i64_id()], interner)?;
-                    Some(FunctionType::from_ids(&[], iter_type_id, false))
+                    Some(FunctionType::nullary(iter_type_id))
                 }
                 _ => None,
             };
@@ -59,7 +59,7 @@ impl Analyzer {
                     if !args.is_empty() {
                         self.add_wrong_arg_count(0, args.len(), args[0].span);
                     }
-                    Some(FunctionType::from_ids(&[], self.ty_i64_id(), false))
+                    Some(FunctionType::nullary(self.ty_i64_id()))
                 }
                 // String.iter() -> Iterator<string>
                 "iter" => {
@@ -68,7 +68,7 @@ impl Analyzer {
                     }
                     let iter_type_id =
                         self.interface_type_id("Iterator", &[self.ty_string_id()], interner)?;
-                    Some(FunctionType::from_ids(&[], iter_type_id, false))
+                    Some(FunctionType::nullary(iter_type_id))
                 }
                 _ => None,
             };

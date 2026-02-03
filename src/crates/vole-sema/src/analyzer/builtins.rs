@@ -69,13 +69,13 @@ impl Analyzer {
             self.implement_registry_mut().register_method(
                 type_id,
                 method_len,
-                MethodImpl::builtin(FunctionType::from_ids(&[], i64_type, false)),
+                MethodImpl::builtin(FunctionType::nullary(i64_type)),
             );
             self.implement_registry_mut().register_method(
                 type_id,
                 method_iter,
                 MethodImpl::external_builtin(
-                    FunctionType::from_ids(&[], unknown_type, false),
+                    FunctionType::nullary(unknown_type),
                     ExternalMethodInfo {
                         module_path: std_intrinsics,
                         native_name: array_iter_name,
@@ -86,7 +86,7 @@ impl Analyzer {
             self.implement_registry_mut().register_method(
                 type_id,
                 method_push,
-                MethodImpl::builtin(FunctionType::from_ids(&[unknown_type], void_type, false)),
+                MethodImpl::builtin(FunctionType::unary(unknown_type, void_type)),
             );
         }
 
@@ -94,13 +94,13 @@ impl Analyzer {
             self.implement_registry_mut().register_method(
                 type_id,
                 method_len,
-                MethodImpl::builtin(FunctionType::from_ids(&[], i64_type, false)),
+                MethodImpl::builtin(FunctionType::nullary(i64_type)),
             );
             self.implement_registry_mut().register_method(
                 type_id,
                 method_iter,
                 MethodImpl::external_builtin(
-                    FunctionType::from_ids(&[], unknown_type, false),
+                    FunctionType::nullary(unknown_type),
                     ExternalMethodInfo {
                         module_path: std_intrinsics,
                         native_name: string_chars_iter_name,
@@ -114,7 +114,7 @@ impl Analyzer {
                 type_id,
                 method_iter,
                 MethodImpl::external_builtin(
-                    FunctionType::from_ids(&[], unknown_type, false),
+                    FunctionType::nullary(unknown_type),
                     ExternalMethodInfo {
                         module_path: std_intrinsics,
                         native_name: range_iter_name,

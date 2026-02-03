@@ -623,7 +623,7 @@ mod tests {
         let mut registry = EntityRegistry::new();
         let type_id = registry.register_type(type_name, TypeDefKind::Interface, main_mod);
 
-        let signature = FunctionType::from_ids(&[], arena.i32(), false);
+        let signature = FunctionType::nullary(arena.i32());
         let signature_id = signature.intern(&mut arena);
 
         let method_id =
@@ -679,7 +679,7 @@ mod tests {
 
         let mut registry = EntityRegistry::new();
 
-        let signature = FunctionType::from_ids(&[arena.f64()], arena.f64(), false);
+        let signature = FunctionType::unary(arena.f64(), arena.f64());
 
         let func_id = registry.register_function(
             func_name, func_name, // For simple functions, name_id == full_name_id
@@ -724,7 +724,7 @@ mod tests {
         let base_id = registry.register_type(base_name, TypeDefKind::Interface, main_mod);
         let derived_id = registry.register_type(derived_name, TypeDefKind::Interface, main_mod);
 
-        let signature = FunctionType::from_ids(&[], arena.void(), false);
+        let signature = FunctionType::void(&arena);
         let signature_id = signature.intern(&mut arena);
 
         let method_id =
