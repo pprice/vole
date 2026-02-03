@@ -3233,10 +3233,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         start_index: usize,
         expected_type_ids: &[TypeId],
         is_generic_class: bool,
-    ) -> Result<Vec<Value>, String> {
+    ) -> Result<(Vec<Value>, Vec<CompiledValue>), String> {
         use crate::types::value_to_word;
 
         let mut args = Vec::new();
+        let mut rc_owned = Vec::new();
         for (i, &param_type_id) in expected_type_ids.iter().enumerate() {
             let param_idx = start_index + i;
             if let Some(Some(default_ptr)) = default_ptrs.get(param_idx) {
@@ -3245,6 +3246,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 // The data is not moved or modified, so the pointer remains valid.
                 let default_expr: &Expr = unsafe { &**default_ptr };
                 let compiled = self.expr(default_expr)?;
+
+                // Track owned RC values for cleanup after the call
+                if compiled.is_owned() {
+                    rc_owned.push(compiled);
+                }
 
                 // Coerce to the expected param type (handles interface boxing, union construction)
                 let compiled = self.coerce_to_type(compiled, param_type_id)?;
@@ -3285,7 +3291,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             }
         }
 
-        Ok(args)
+        Ok((args, rc_owned))
     }
 }
 

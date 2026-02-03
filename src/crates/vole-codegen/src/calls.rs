@@ -828,9 +828,10 @@ impl Cg<'_, '_, '_> {
             let provided_args = total_user_args;
             let remaining_start = user_param_offset + provided_args;
             let remaining_expected_types = expected_types[remaining_start..].to_vec();
-            let default_args =
+            let (default_args, rc_owned) =
                 self.compile_default_args(callee_sym, provided_args, &remaining_expected_types)?;
             args.extend(default_args);
+            rc_temp_args.extend(rc_owned);
         }
 
         let call_inst = self.builder.ins().call(func_ref, &args);
@@ -981,12 +982,13 @@ impl Cg<'_, '_, '_> {
             let provided_args = total_user_args;
             let remaining_start = user_param_offset + provided_args;
             let remaining_expected_types = expected_types[remaining_start..].to_vec();
-            let default_args = self.compile_default_args_by_name_id(
+            let (default_args, rc_owned) = self.compile_default_args_by_name_id(
                 name_id,
                 provided_args,
                 &remaining_expected_types,
             )?;
             args.extend(default_args);
+            rc_temp_args.extend(rc_owned);
         }
 
         let call_inst = self.builder.ins().call(func_ref, &args);
@@ -1043,10 +1045,10 @@ impl Cg<'_, '_, '_> {
         name_id: NameId,
         start_index: usize,
         _expected_types: &[Type],
-    ) -> Result<Vec<Value>, String> {
+    ) -> Result<(Vec<Value>, Vec<CompiledValue>), String> {
         let func_id = self.query().registry().function_by_name(name_id);
         let Some(func_id) = func_id else {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), Vec::new()));
         };
 
         let (default_ptrs, param_type_ids): (Vec<Option<*const Expr>>, Vec<TypeId>) = {
@@ -1077,7 +1079,7 @@ impl Cg<'_, '_, '_> {
         callee_sym: Symbol,
         start_index: usize,
         _expected_types: &[Type], // Kept for API compatibility, but we use TypeIds from FunctionDef
-    ) -> Result<Vec<Value>, String> {
+    ) -> Result<(Vec<Value>, Vec<CompiledValue>), String> {
         let module_id = self.current_module().unwrap_or(self.env.analyzed.module_id);
 
         // Get the function ID
@@ -1087,7 +1089,7 @@ impl Cg<'_, '_, '_> {
         };
 
         let Some(func_id) = func_id else {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), Vec::new()));
         };
 
         // Get raw pointers to default expressions and param TypeIds from FunctionDef.

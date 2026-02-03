@@ -582,7 +582,7 @@ impl Cg<'_, '_, '_> {
             if provided_args < expected_params {
                 // Get method_id from resolution to look up param_defaults
                 if let Some(method_id) = resolution.and_then(|r| r.method_id()) {
-                    let default_args = self.compile_method_default_args(
+                    let (default_args, _rc_owned) = self.compile_method_default_args(
                         method_id,
                         provided_args,
                         &param_type_ids[provided_args..],
@@ -1416,7 +1416,7 @@ impl Cg<'_, '_, '_> {
 
         // If there are fewer provided args than expected, compile default expressions
         if args.len() < param_ids.len() {
-            let default_args =
+            let (default_args, _rc_owned) =
                 self.compile_static_method_default_args(method_id, args.len(), &param_ids)?;
             args.extend(default_args);
         }
@@ -1447,7 +1447,7 @@ impl Cg<'_, '_, '_> {
         method_id: MethodId,
         start_index: usize,
         param_type_ids: &[TypeId],
-    ) -> Result<Vec<Value>, String> {
+    ) -> Result<(Vec<Value>, Vec<CompiledValue>), String> {
         // Get raw pointers to default expressions from MethodDef.
         let default_ptrs: Vec<Option<*const Expr>> = {
             let method_def = self.query().registry().get_method(method_id);
@@ -1477,7 +1477,7 @@ impl Cg<'_, '_, '_> {
         start_index: usize,
         expected_types: &[TypeId],
         is_generic_class: bool,
-    ) -> Result<Vec<Value>, String> {
+    ) -> Result<(Vec<Value>, Vec<CompiledValue>), String> {
         // Get raw pointers to default expressions from MethodDef.
         let default_ptrs: Vec<Option<*const Expr>> = {
             let method_def = self.query().registry().get_method(method_id);
