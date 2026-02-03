@@ -131,7 +131,7 @@ pub fn inspect_files(
                 let options = JitOptions::disasm();
                 let mut jit = JitContext::with_options(options);
                 let mut compiler = Compiler::new(&mut jit, &analyzed);
-                let _include_tests = !no_tests; // TODO: filter tests from asm output
+                let include_tests = !no_tests;
 
                 if let Err(e) = compiler.compile_program(&analyzed.program) {
                     eprintln!("error: {}", e);
@@ -143,6 +143,11 @@ pub fn inspect_files(
                 for (func_name, asm) in jit.get_disasm() {
                     // Skip prelude/std functions unless --all is specified
                     if !show_all && is_prelude_function(func_name) {
+                        continue;
+                    }
+
+                    // Skip test functions when --no-tests is specified
+                    if !include_tests && is_test_function(func_name) {
                         continue;
                     }
 
@@ -168,4 +173,10 @@ fn is_prelude_function(name: &str) -> bool {
         || name.contains("::default_value")
         || name.contains("::min_value")
         || name.contains("::max_value")
+}
+
+/// Check if a function name is a test function.
+fn is_test_function(name: &str) -> bool {
+    // Test functions are named "__test_{idx}" by the compiler
+    name.starts_with("__test_")
 }
