@@ -895,6 +895,22 @@ fn iter_produces_owned(iter: *mut RcIterator) -> bool {
 }
 
 /// Collect all remaining iterator values into a new array with proper element type tags.
+/// Reads `elem_tag` from the iterator's stored tag (set by codegen or
+/// `interface_iter_tagged`). Used by vtable dispatch where the extra tag
+/// parameter is not available in the interface signature.
+/// Frees the iterator after collecting.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_iter_collect(iter: *mut RcIterator) -> *mut RcArray {
+    let tag = if iter.is_null() {
+        0
+    } else {
+        unsafe { (*iter).elem_tag }
+    };
+    vole_iter_collect_tagged(iter, tag)
+}
+
+/// Collect all remaining iterator values into a new array with proper element type tags.
 /// `elem_tag` is the runtime type tag for the element type (e.g. TYPE_STRING, TYPE_INSTANCE).
 /// This ensures the resulting array properly tracks RC types for cleanup.
 /// Handles both "owned" values (from map/string_chars) and "borrowed" values (from array)

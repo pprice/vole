@@ -986,13 +986,10 @@ impl Cg<'_, '_, '_> {
             args.push(compiled.value);
         }
 
-        // For collect and reduce, append element type tag so the runtime can
-        // properly tag RC values in the resulting array / clean up intermediates.
-        if method_name == "collect" {
-            let elem_tag = crate::types::unknown_type_tag(elem_type_id, self.arena());
-            let tag_val = self.builder.ins().iconst(types::I64, elem_tag as i64);
-            args.push(tag_val);
-        }
+        // Note: collect reads elem_tag from the iterator's stored tag
+        // (set by vole_iter_set_elem_tag after pipeline methods or by
+        // interface_iter_tagged in vtable wrappers), so no extra argument
+        // is needed here.
 
         // Call the external function directly. For reduce, use the tagged
         // variant (IterReduceTagged) which accepts explicit acc/elem type
