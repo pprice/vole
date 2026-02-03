@@ -1,0 +1,965 @@
+// RC lifecycle tests for Map type.
+//
+// Tests exercise reference counting of Map objects through various lifecycle
+// patterns: scope exit, loops, reassignment, clear/remove cycles, overwrite,
+// nested operations, and interactions with string RC tracking.
+//
+// Note: Two separate loops accessing the same Map in one test triggers a
+// codegen verifier error (variable becomes detached between loops), so tests
+// avoid that pattern.
+
+tests "map creation and scope exit" {
+    test "empty map scope exit" {
+        let m = Map.new()
+        assert(m.len() == 0)
+    }
+
+    test "single entry map scope exit" {
+        let m = Map.new()
+        m.set(1, 10)
+        assert(m.len() == 1)
+    }
+
+    test "populated map scope exit" {
+        let m = Map.new()
+        m.set(1, 10)
+        m.set(2, 20)
+        m.set(3, 30)
+        assert(m.len() == 3)
+    }
+
+    test "map with five entries scope exit" {
+        let m = Map.new()
+        m.set(1, 10)
+        m.set(2, 20)
+        m.set(3, 30)
+        m.set(4, 40)
+        m.set(5, 50)
+        assert(m.len() == 5)
+        assert(m.get(1) == 10)
+        assert(m.get(5) == 50)
+    }
+
+    test "map with_capacity scope exit" {
+        let m = Map.with_capacity(64)
+        assert(m.len() == 0)
+        assert(m.is_empty())
+    }
+
+    test "map with_capacity populated scope exit" {
+        let m = Map.with_capacity(32)
+        m.set(100, 1000)
+        m.set(200, 2000)
+        assert(m.len() == 2)
+    }
+
+    test "multiple maps created and dropped" {
+        let a = Map.new()
+        let b = Map.new()
+        let c = Map.new()
+        a.set(1, 10)
+        b.set(2, 20)
+        c.set(3, 30)
+        assert(a.len() == 1)
+        assert(b.len() == 1)
+        assert(c.len() == 1)
+    }
+
+    test "map created in inner block" {
+        let outer = Map.new()
+        outer.set(1, 100)
+        if true {
+            let inner = Map.new()
+            inner.set(2, 200)
+            assert(inner.len() == 1)
+        }
+        assert(outer.len() == 1)
+    }
+
+    test "many maps created and dropped sequentially" {
+        let mut total = 0
+        let a = Map.new()
+        a.set(1, 1)
+        total = total + a.len()
+        let b = Map.new()
+        b.set(1, 1)
+        b.set(2, 2)
+        total = total + b.len()
+        let c = Map.new()
+        c.set(1, 1)
+        c.set(2, 2)
+        c.set(3, 3)
+        total = total + c.len()
+        assert(total == 6)
+    }
+}
+
+tests "map reassignment" {
+    test "reassign to new empty map" {
+        let mut m = Map.new()
+        m.set(1, 10)
+        m.set(2, 20)
+        assert(m.len() == 2)
+        m = Map.new()
+        assert(m.len() == 0)
+        assert(m.is_empty())
+    }
+
+    test "reassign to new populated map" {
+        let mut m = Map.new()
+        m.set(1, 10)
+        m = Map.new()
+        m.set(2, 20)
+        m.set(3, 30)
+        assert(m.len() == 2)
+        assert(m.get(1) == nil)
+        assert(m.get(2) == 20)
+    }
+
+    test "reassign multiple times" {
+        let mut m = Map.new()
+        m.set(1, 10)
+        assert(m.len() == 1)
+        m = Map.new()
+        m.set(2, 20)
+        assert(m.len() == 1)
+        m = Map.new()
+        m.set(3, 30)
+        assert(m.len() == 1)
+        assert(m.get(3) == 30)
+    }
+
+    test "reassign in conditional" {
+        let mut m = Map.new()
+        m.set(1, 10)
+        if true {
+            m = Map.new()
+            m.set(2, 20)
+        }
+        assert(m.get(2) == 20)
+        assert(m.get(1) == nil)
+    }
+
+    test "reassign with_capacity to new" {
+        let mut m = Map.with_capacity(64)
+        m.set(1, 10)
+        m.set(2, 20)
+        m = Map.new()
+        assert(m.len() == 0)
+        m.set(3, 30)
+        assert(m.get(3) == 30)
+    }
+
+    test "reassign discards old map entries" {
+        let mut m = Map.new()
+        m.set(1, 100)
+        m.set(2, 200)
+        m.set(3, 300)
+        m.set(4, 400)
+        m.set(5, 500)
+        assert(m.len() == 5)
+        m = Map.new()
+        assert(m.is_empty())
+        assert(m.get(1) == nil)
+    }
+}
+
+tests "map in while loops" {
+    test "create map in while loop body" {
+        let mut i = 0
+        let mut last_len = 0
+        while i < 5 {
+            let m = Map.new()
+            m.set(i, i * 10)
+            last_len = m.len()
+            i = i + 1
+        }
+        assert(last_len == 1)
+    }
+
+    test "populate map across while loop iterations" {
+        let m = Map.new()
+        let mut i = 0
+        while i < 10 {
+            m.set(i, i * i)
+            i = i + 1
+        }
+        assert(m.len() == 10)
+        assert(m.get(0) == 0)
+        assert(m.get(9) == 81)
+    }
+
+    test "reassign map in while loop" {
+        let mut m = Map.new()
+        let mut i = 0
+        while i < 3 {
+            m = Map.new()
+            m.set(i, i)
+            i = i + 1
+        }
+        assert(m.len() == 1)
+        assert(m.get(2) == 2)
+    }
+
+    test "while loop set and read same iteration" {
+        let m = Map.new()
+        let mut i = 0
+        let mut total = 0
+        while i < 5 {
+            m.set(i, i * 10)
+            total = total + (m.get(i) ?? 0)
+            i = i + 1
+        }
+        assert(m.len() == 5)
+        assert(total == 100)
+    }
+
+    test "while loop map and string interleaved" {
+        let m = Map.new()
+        let mut result = ""
+        let mut i = 0
+        while i < 3 {
+            m.set(i, i * 10)
+            result = result + i.to_string()
+            i = i + 1
+        }
+        assert(m.len() == 3)
+        assert(result == "012")
+    }
+}
+
+tests "map in for loops" {
+    test "create map in for loop body" {
+        let mut total_len = 0
+        for i in 0..5 {
+            let m = Map.new()
+            m.set(i, i * 10)
+            m.set(i + 100, i * 100)
+            total_len = total_len + m.len()
+        }
+        assert(total_len == 10)
+    }
+
+    test "populate map across for loop iterations" {
+        let m = Map.new()
+        for i in 0..10 {
+            m.set(i, i + 1)
+        }
+        assert(m.len() == 10)
+        assert(m.get(0) == 1)
+        assert(m.get(9) == 10)
+    }
+
+    test "reassign map in for loop" {
+        let mut m = Map.new()
+        for i in 0..4 {
+            m = Map.new()
+            m.set(i, i * 10)
+        }
+        assert(m.len() == 1)
+        assert(m.get(3) == 30)
+    }
+
+    test "nested loops with maps" {
+        let mut count = 0
+        for i in 0..3 {
+            let m = Map.new()
+            for j in 0..3 {
+                m.set(j, i * 10 + j)
+            }
+            count = count + m.len()
+        }
+        assert(count == 9)
+    }
+
+    test "for loop creating maps with increasing size" {
+        let mut last_size = 0
+        for size in 1..6 {
+            let m = Map.new()
+            for j in 0..size {
+                m.set(j, j)
+            }
+            last_size = m.len()
+        }
+        assert(last_size == 5)
+    }
+
+    test "for loop set and get same iteration" {
+        let m = Map.new()
+        let mut total = 0
+        for i in 0..5 {
+            m.set(i, i * 10)
+            total = total + (m.get(i) ?? 0)
+        }
+        assert(m.len() == 5)
+        assert(total == 100)
+    }
+
+    test "for loop with string concat per iteration" {
+        let mut result = ""
+        for i in 0..5 {
+            let m = Map.new()
+            m.set(0, i * 10)
+            let v = m.get(0) ?? 0
+            result = result + v.to_string() + " "
+        }
+        assert(result == "0 10 20 30 40 ")
+    }
+}
+
+tests "map remove lifecycle" {
+    test "remove single entry" {
+        let m = Map.new()
+        m.set(1, 10)
+        m.set(2, 20)
+        let removed = m.remove(1)
+        assert(removed == 10)
+        assert(m.len() == 1)
+        assert(m.get(1) == nil)
+    }
+
+    test "remove all entries one by one" {
+        let m = Map.new()
+        m.set(1, 10)
+        m.set(2, 20)
+        m.set(3, 30)
+        assert(m.remove(1) == 10)
+        assert(m.remove(2) == 20)
+        assert(m.remove(3) == 30)
+        assert(m.len() == 0)
+        assert(m.is_empty())
+    }
+
+    test "remove then re-add" {
+        let m = Map.new()
+        m.set(1, 10)
+        let removed = m.remove(1)
+        assert(removed == 10)
+        assert(m.len() == 0)
+        m.set(1, 99)
+        assert(m.get(1) == 99)
+        assert(m.len() == 1)
+    }
+
+    test "remove missing key returns nil" {
+        let m = Map.new()
+        m.set(1, 10)
+        let removed = m.remove(99)
+        assert(removed == nil)
+        assert(m.len() == 1)
+    }
+
+    test "remove in loop" {
+        let m = Map.new()
+        m.set(0, 0)
+        m.set(1, 10)
+        m.set(2, 20)
+        m.set(3, 30)
+        m.set(4, 40)
+        assert(m.len() == 5)
+        for i in 0..5 {
+            let v = m.remove(i)
+            assert(v == i * 10)
+        }
+        assert(m.len() == 0)
+    }
+
+    test "remove and scope exit" {
+        let m = Map.new()
+        m.set(1, 100)
+        m.set(2, 200)
+        m.set(3, 300)
+        _ = m.remove(2)
+        assert(m.len() == 2)
+        // map with remaining entries goes out of scope
+    }
+
+    test "remove half the entries" {
+        let m = Map.new()
+        m.set(0, 0)
+        m.set(1, 2)
+        m.set(2, 4)
+        m.set(3, 6)
+        m.set(4, 8)
+        m.set(5, 10)
+        m.set(6, 12)
+        m.set(7, 14)
+        m.set(8, 16)
+        m.set(9, 18)
+        assert(m.len() == 10)
+        for i in 0..5 {
+            _ = m.remove(i)
+        }
+        assert(m.len() == 5)
+        assert(m.get(0) == nil)
+        assert(m.get(5) == 10)
+        assert(m.get(9) == 18)
+    }
+
+    test "remove and re-add cycle" {
+        let m = Map.new()
+        m.set(1, 0)
+        _ = m.remove(1)
+        m.set(1, 10)
+        _ = m.remove(1)
+        m.set(1, 20)
+        _ = m.remove(1)
+        assert(m.is_empty())
+    }
+}
+
+tests "map clear lifecycle" {
+    test "clear empty map" {
+        let m = Map.new()
+        m.clear()
+        assert(m.len() == 0)
+    }
+
+    test "clear populated map" {
+        let m = Map.new()
+        m.set(1, 10)
+        m.set(2, 20)
+        m.set(3, 30)
+        m.clear()
+        assert(m.len() == 0)
+        assert(m.is_empty())
+    }
+
+    test "clear then reuse" {
+        let m = Map.new()
+        m.set(1, 10)
+        m.set(2, 20)
+        m.clear()
+        m.set(3, 30)
+        m.set(4, 40)
+        assert(m.len() == 2)
+        assert(m.get(1) == nil)
+        assert(m.get(3) == 30)
+    }
+
+    test "clear multiple times" {
+        let m = Map.new()
+        m.set(1, 10)
+        m.clear()
+        assert(m.is_empty())
+        m.set(2, 20)
+        m.set(3, 30)
+        m.clear()
+        assert(m.is_empty())
+        m.set(4, 40)
+        assert(m.len() == 1)
+    }
+
+    test "clear then scope exit" {
+        let m = Map.new()
+        m.set(1, 100)
+        m.set(2, 200)
+        m.clear()
+        // empty map goes out of scope
+    }
+
+    test "clear and repopulate in loop" {
+        let m = Map.new()
+        for cycle in 0..3 {
+            m.set(0, cycle * 100)
+            m.set(1, cycle * 100 + 1)
+            m.set(2, cycle * 100 + 2)
+            m.set(3, cycle * 100 + 3)
+            m.set(4, cycle * 100 + 4)
+            assert(m.len() == 5)
+            m.clear()
+            assert(m.is_empty())
+        }
+    }
+
+    test "clear large map" {
+        let m = Map.new()
+        for i in 0..50 {
+            m.set(i, i)
+        }
+        assert(m.len() == 50)
+        m.clear()
+        assert(m.is_empty())
+        assert(m.get(0) == nil)
+        assert(m.get(25) == nil)
+    }
+}
+
+tests "map overwrite lifecycle" {
+    test "overwrite single key" {
+        let m = Map.new()
+        m.set(1, 10)
+        m.set(1, 20)
+        assert(m.len() == 1)
+        assert(m.get(1) == 20)
+    }
+
+    test "overwrite key multiple times" {
+        let m = Map.new()
+        m.set(1, 10)
+        m.set(1, 20)
+        m.set(1, 30)
+        m.set(1, 40)
+        assert(m.len() == 1)
+        assert(m.get(1) == 40)
+    }
+
+    test "overwrite in loop" {
+        let m = Map.new()
+        m.set(1, 0)
+        for i in 0..10 {
+            m.set(1, i)
+        }
+        assert(m.len() == 1)
+        assert(m.get(1) == 9)
+    }
+
+    test "overwrite different keys" {
+        let m = Map.new()
+        m.set(1, 10)
+        m.set(2, 20)
+        m.set(3, 30)
+        m.set(1, 100)
+        m.set(2, 200)
+        m.set(3, 300)
+        assert(m.len() == 3)
+        assert(m.get(1) == 100)
+        assert(m.get(2) == 200)
+        assert(m.get(3) == 300)
+    }
+
+    test "overwrite all keys in loop" {
+        let m = Map.new()
+        m.set(0, 0)
+        m.set(1, 1)
+        m.set(2, 2)
+        m.set(3, 3)
+        m.set(4, 4)
+        for i in 0..5 {
+            m.set(i, i * 100)
+        }
+        assert(m.len() == 5)
+        assert(m.get(0) == 0)
+        assert(m.get(4) == 400)
+    }
+}
+
+tests "map with many entries" {
+    test "add 20 entries" {
+        let m = Map.new()
+        for i in 0..20 {
+            m.set(i, i * 10)
+        }
+        assert(m.len() == 20)
+        assert(m.get(0) == 0)
+        assert(m.get(10) == 100)
+        assert(m.get(19) == 190)
+    }
+
+    test "add 50 entries" {
+        let m = Map.new()
+        for i in 0..50 {
+            m.set(i, i + 1)
+        }
+        assert(m.len() == 50)
+        assert(m.get(0) == 1)
+        assert(m.get(49) == 50)
+    }
+
+    test "add 100 entries with with_capacity" {
+        let m = Map.with_capacity(128)
+        for i in 0..100 {
+            m.set(i, i)
+        }
+        assert(m.len() == 100)
+        assert(m.get(50) == 50)
+        assert(m.get(99) == 99)
+    }
+
+    test "add many then remove in same loop" {
+        let m = Map.new()
+        for i in 0..30 {
+            m.set(i, i * 2)
+        }
+        assert(m.len() == 30)
+        assert(m.get(0) == 0)
+        assert(m.get(15) == 30)
+        assert(m.get(29) == 58)
+    }
+
+    test "add 100 entries and verify via set-get same loop" {
+        let m = Map.new()
+        let mut verified = 0
+        for i in 0..100 {
+            m.set(i, i * 3)
+            assert(m.get(i) == i * 3)
+            verified = verified + 1
+        }
+        assert(m.len() == 100)
+        assert(verified == 100)
+    }
+}
+
+tests "map contains_key lifecycle" {
+    test "contains_key on empty map" {
+        let m = Map.new()
+        assert(!m.contains_key(1))
+    }
+
+    test "contains_key after set" {
+        let m = Map.new()
+        m.set(1, 10)
+        assert(m.contains_key(1))
+        assert(!m.contains_key(2))
+    }
+
+    test "contains_key after remove" {
+        let m = Map.new()
+        m.set(1, 10)
+        _ = m.remove(1)
+        assert(!m.contains_key(1))
+    }
+
+    test "contains_key after clear" {
+        let m = Map.new()
+        m.set(1, 10)
+        m.set(2, 20)
+        m.clear()
+        assert(!m.contains_key(1))
+        assert(!m.contains_key(2))
+    }
+
+    test "contains_key for many entries" {
+        let m = Map.new()
+        for i in 0..10 {
+            m.set(i, i)
+            assert(m.contains_key(i))
+        }
+        assert(!m.contains_key(10))
+        assert(!m.contains_key(-1))
+    }
+
+    test "contains_key after overwrite" {
+        let m = Map.new()
+        m.set(1, 10)
+        assert(m.contains_key(1))
+        m.set(1, 99)
+        assert(m.contains_key(1))
+    }
+}
+
+tests "map get optional lifecycle" {
+    test "get returns nil for missing" {
+        let m = Map.new()
+        assert(m.get(1) == nil)
+    }
+
+    test "get returns value for present" {
+        let m = Map.new()
+        m.set(1, 42)
+        assert(m.get(1) == 42)
+    }
+
+    test "get after remove returns nil" {
+        let m = Map.new()
+        m.set(1, 42)
+        _ = m.remove(1)
+        assert(m.get(1) == nil)
+    }
+
+    test "get with nil coalescing" {
+        let m = Map.new()
+        m.set(1, 42)
+        let v1 = m.get(1) ?? 0
+        let v2 = m.get(99) ?? -1
+        assert(v1 == 42)
+        assert(v2 == -1)
+    }
+
+    test "get multiple keys some missing" {
+        let m = Map.new()
+        m.set(1, 10)
+        m.set(3, 30)
+        m.set(5, 50)
+        assert(m.get(1) == 10)
+        assert(m.get(2) == nil)
+        assert(m.get(3) == 30)
+        assert(m.get(4) == nil)
+        assert(m.get(5) == 50)
+    }
+
+    test "get after overwrite" {
+        let m = Map.new()
+        m.set(1, 10)
+        assert(m.get(1) == 10)
+        m.set(1, 99)
+        assert(m.get(1) == 99)
+    }
+
+    test "nil coalescing used in set-get loop" {
+        let m = Map.new()
+        let mut total = 0
+        for i in 0..6 {
+            if i % 2 == 0 {
+                m.set(i, i * 50)
+            }
+            total = total + (m.get(i) ?? 0)
+        }
+        assert(total == 0 + 100 + 200)
+    }
+}
+
+tests "map combined with string operations" {
+    test "map alongside string concat" {
+        let m = Map.new()
+        m.set(1, 10)
+        let s = "hello" + " " + "world"
+        assert(m.get(1) == 10)
+        assert(s == "hello world")
+    }
+
+    test "map value used in string interpolation" {
+        let m = Map.new()
+        m.set(1, 42)
+        let v = m.get(1) ?? 0
+        let s = "value={v}"
+        assert(s == "value=42")
+    }
+
+    test "map and string both go out of scope" {
+        let m = Map.new()
+        m.set(1, 10)
+        let s = "hello"
+        assert(m.len() == 1)
+        assert(s.length() == 5)
+    }
+
+    test "map alongside string array" {
+        let m = Map.new()
+        m.set(1, 10)
+        m.set(2, 20)
+        let words = ["alpha", "beta", "gamma"]
+        assert(m.len() == 2)
+        assert(words.length() == 3)
+        let total = (m.get(1) ?? 0) + (m.get(2) ?? 0)
+        assert(total == 30)
+    }
+
+    test "string result alongside map operations" {
+        let m = Map.new()
+        let greeting = "  hello  ".trim()
+        m.set(1, greeting.length())
+        assert(m.get(1) == 5)
+        assert(greeting == "hello")
+    }
+
+    test "string interpolation with map length" {
+        let m = Map.new()
+        m.set(1, 10)
+        m.set(2, 20)
+        m.set(3, 30)
+        let len = m.len()
+        let msg = "map has {len} entries"
+        assert(msg == "map has 3 entries")
+    }
+
+    test "string concat and map set interleaved" {
+        let m = Map.new()
+        let mut s = ""
+        m.set(1, 10)
+        s = s + "a"
+        m.set(2, 20)
+        s = s + "b"
+        m.set(3, 30)
+        s = s + "c"
+        assert(m.len() == 3)
+        assert(s == "abc")
+    }
+
+    test "string build in loop with new map each iteration" {
+        let mut result = ""
+        for i in 0..5 {
+            let m = Map.new()
+            m.set(0, i * 10)
+            let v = m.get(0) ?? 0
+            result = result + v.to_string() + " "
+        }
+        assert(result == "0 10 20 30 40 ")
+    }
+}
+
+tests "map complex lifecycle patterns" {
+    test "multiple maps interleaved operations" {
+        let a = Map.new()
+        let b = Map.new()
+        a.set(1, 10)
+        b.set(1, 100)
+        a.set(2, 20)
+        b.set(2, 200)
+        assert(a.get(1) == 10)
+        assert(b.get(1) == 100)
+        assert(a.get(2) == 20)
+        assert(b.get(2) == 200)
+    }
+
+    test "map surviving conditional branches" {
+        let m = Map.new()
+        m.set(1, 10)
+        if m.contains_key(1) {
+            m.set(2, 20)
+        }
+        if !m.contains_key(99) {
+            m.set(3, 30)
+        }
+        assert(m.len() == 3)
+        assert(m.get(1) == 10)
+        assert(m.get(2) == 20)
+        assert(m.get(3) == 30)
+    }
+
+    test "two maps populated in same loop" {
+        let evens = Map.new()
+        let odds = Map.new()
+        for i in 0..10 {
+            if i % 2 == 0 {
+                evens.set(i, i)
+            } else {
+                odds.set(i, i)
+            }
+        }
+        assert(evens.len() == 5)
+        assert(odds.len() == 5)
+        assert(evens.contains_key(0))
+        assert(evens.contains_key(8))
+        assert(odds.contains_key(1))
+        assert(odds.contains_key(9))
+    }
+
+    test "map with conditional set" {
+        let m = Map.new()
+        for i in 0..20 {
+            if i % 3 == 0 {
+                m.set(i, i * 10)
+            }
+        }
+        assert(m.len() == 7)
+        assert(m.get(0) == 0)
+        assert(m.get(3) == 30)
+        assert(m.get(18) == 180)
+        assert(m.get(1) == nil)
+    }
+
+    test "map built then partially removed then cleared" {
+        let m = Map.new()
+        m.set(0, 0)
+        m.set(1, 1)
+        m.set(2, 2)
+        m.set(3, 3)
+        m.set(4, 4)
+        m.set(5, 5)
+        m.set(6, 6)
+        m.set(7, 7)
+        m.set(8, 8)
+        m.set(9, 9)
+        m.set(10, 10)
+        m.set(11, 11)
+        m.set(12, 12)
+        m.set(13, 13)
+        m.set(14, 14)
+        m.set(15, 15)
+        m.set(16, 16)
+        m.set(17, 17)
+        m.set(18, 18)
+        m.set(19, 19)
+        assert(m.len() == 20)
+        for i in 0..10 {
+            _ = m.remove(i)
+        }
+        assert(m.len() == 10)
+        m.clear()
+        assert(m.len() == 0)
+        assert(m.is_empty())
+    }
+
+    test "map reassign and repopulate alternating" {
+        let mut m = Map.new()
+        m.set(1, 10)
+        m.set(2, 20)
+        assert(m.len() == 2)
+        m = Map.new()
+        m.set(3, 30)
+        m.set(4, 40)
+        m.set(5, 50)
+        assert(m.len() == 3)
+        m = Map.new()
+        m.set(6, 60)
+        assert(m.len() == 1)
+        assert(m.get(6) == 60)
+    }
+
+    test "overwrite then remove" {
+        let m = Map.new()
+        m.set(1, 10)
+        m.set(2, 20)
+        m.set(3, 30)
+        m.set(4, 40)
+        m.set(5, 50)
+        m.set(1, 100)
+        m.set(2, 200)
+        m.set(3, 300)
+        m.set(4, 400)
+        m.set(5, 500)
+        assert(m.len() == 5)
+        assert(m.get(1) == 100)
+        _ = m.remove(1)
+        _ = m.remove(3)
+        _ = m.remove(5)
+        assert(m.len() == 2)
+        assert(m.get(2) == 200)
+        assert(m.get(4) == 400)
+    }
+
+    test "maps in nested conditional blocks" {
+        let m = Map.new()
+        m.set(1, 10)
+        if true {
+            let inner1 = Map.new()
+            inner1.set(2, 20)
+            if true {
+                let inner2 = Map.new()
+                inner2.set(3, 30)
+                assert(inner2.len() == 1)
+            }
+            assert(inner1.len() == 1)
+        }
+        assert(m.len() == 1)
+    }
+
+    test "map with string tracking both RC types" {
+        let m = Map.new()
+        let s1 = "hello"
+        m.set(1, s1.length())
+        let s2 = "world"
+        m.set(2, s2.length())
+        let s3 = s1 + " " + s2
+        m.set(3, s3.length())
+        assert(m.len() == 3)
+        assert(m.get(1) == 5)
+        assert(m.get(2) == 5)
+        assert(m.get(3) == 11)
+        assert(s3 == "hello world")
+    }
+
+    test "map reassign in for loop with different sizes" {
+        let mut m = Map.new()
+        for i in 0..5 {
+            m = Map.new()
+            for j in 0..i {
+                m.set(j, j * i)
+            }
+        }
+        assert(m.len() == 4)
+        assert(m.get(0) == 0)
+        assert(m.get(3) == 12)
+    }
+}

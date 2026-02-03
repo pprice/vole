@@ -141,7 +141,7 @@ leak-check-all:
     cargo run -p vole-leak -- test/unit/
 
 # Run valgrind on a small RC test suite
-valgrind file="test/unit/codegen/rc_cleanup_basic.vole":
+valgrind file="test/unit/mem/basics/cleanup.vole":
     #!/usr/bin/env bash
     cargo build --bin vole 2>&1
     valgrind --leak-check=full --error-exitcode=1 ./target/debug/vole test "{{file}}"

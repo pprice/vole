@@ -1,0 +1,595 @@
+// RC tests for higher-order functions and closure returns.
+//
+// Isolates closure leaks in higher-order function patterns: closures returned
+// from functions, closures accepting closures, closure reassignment, closures
+// in loops, and multiple closures sharing captured values.
+// The leak checker tool validates no leaks; these tests verify correctness.
+
+func identity_str(s: string) -> string {
+    return s
+}
+
+func apply_fn(f: () -> string) -> string {
+    return f()
+}
+
+func apply_str_fn(f: (string) -> string, arg: string) -> string {
+    return f(arg)
+}
+
+func make_greeter(name: string) -> () -> string {
+    return () -> string => "hello " + name
+}
+
+func make_prefixer(prefix: string) -> (string) -> string {
+    return (s: string) -> string => prefix + s
+}
+
+func make_suffixer(suffix: string) -> (string) -> string {
+    return (s: string) -> string => s + suffix
+}
+
+func make_wrapper(left: string, right: string) -> (string) -> string {
+    return (s: string) -> string => left + s + right
+}
+
+func make_formatter(template: string) -> (string) -> string {
+    return (value: string) -> string => template.replace_all("_X_", value)
+}
+
+func call_twice(f: () -> string) -> string {
+    let first = f()
+    let second = f()
+    return first + "|" + second
+}
+
+func compose_str(f: (string) -> string, g: (string) -> string) -> (string) -> string {
+    return (s: string) -> string => f(g(s))
+}
+
+func apply_n_times(f: (string) -> string, s: string, n: i64) -> string {
+    let mut result = s
+    let mut i = 0
+    while i < n {
+        result = f(result)
+        i = i + 1
+    }
+    return result
+}
+
+tests "function returning closure that captures string" {
+    test "make_greeter returns closure capturing name" {
+        let greet = make_greeter("world")
+        let result = greet()
+        assert(result == "hello world")
+    }
+
+    test "make_greeter with different names" {
+        let greet_alice = make_greeter("alice")
+        let greet_bob = make_greeter("bob")
+        assert(greet_alice() == "hello alice")
+        assert(greet_bob() == "hello bob")
+    }
+
+    test "make_greeter with concatenated name" {
+        let first = "jane"
+        let last = "doe"
+        let greet = make_greeter(first + " " + last)
+        assert(greet() == "hello jane doe")
+    }
+
+    test "make_prefixer returns working closure" {
+        let add_prefix = make_prefixer("pre_")
+        assert(add_prefix("test") == "pre_test")
+        assert(add_prefix("fix") == "pre_fix")
+    }
+
+    test "make_suffixer returns working closure" {
+        let add_suffix = make_suffixer("_end")
+        assert(add_suffix("start") == "start_end")
+        assert(add_suffix("middle") == "middle_end")
+    }
+
+    test "make_wrapper returns closure capturing two strings" {
+        let wrap = make_wrapper("[", "]")
+        assert(wrap("item") == "[item]")
+        assert(wrap("data") == "[data]")
+    }
+
+    test "make_formatter with template substitution" {
+        let fmt = make_formatter("value=_X_")
+        assert(fmt("42") == "value=42")
+        assert(fmt("hello") == "value=hello")
+    }
+}
+
+tests "function accepting closure parameter" {
+    test "apply_fn calls closure returning string" {
+        let f = () -> string => "hello"
+        let result = apply_fn(f)
+        assert(result == "hello")
+    }
+
+    test "apply_fn with closure capturing string" {
+        let greeting = "hi there"
+        let f = () -> string => greeting
+        let result = apply_fn(f)
+        assert(result == "hi there")
+    }
+
+    test "apply_fn with closure doing string concat" {
+        let a = "hello"
+        let b = "world"
+        let f = () -> string => a + " " + b
+        let result = apply_fn(f)
+        assert(result == "hello world")
+    }
+
+    test "apply_str_fn with closure transforming string" {
+        let f = (s: string) -> string => s.to_upper()
+        let result = apply_str_fn(f, "hello")
+        assert(result == "HELLO")
+    }
+
+    test "apply_str_fn with closure capturing prefix" {
+        let prefix = "tag:"
+        let f = (s: string) -> string => prefix + s
+        let result = apply_str_fn(f, "value")
+        assert(result == "tag:value")
+    }
+
+    test "apply_str_fn called multiple times with same closure" {
+        let wrap = (s: string) -> string => "[" + s + "]"
+        assert(apply_str_fn(wrap, "a") == "[a]")
+        assert(apply_str_fn(wrap, "b") == "[b]")
+        assert(apply_str_fn(wrap, "c") == "[c]")
+    }
+}
+
+tests "closure returned from function, called from caller" {
+    test "returned closure captures and returns string" {
+        let greet = make_greeter("vole")
+        let msg = greet()
+        assert(msg == "hello vole")
+    }
+
+    test "returned closure used in expression" {
+        let greet = make_greeter("world")
+        let result = "result: " + greet()
+        assert(result == "result: hello world")
+    }
+
+    test "returned closure result passed to function" {
+        let greet = make_greeter("there")
+        let result = identity_str(greet())
+        assert(result == "hello there")
+    }
+
+    test "returned closure result used in interpolation" {
+        let greet = make_greeter("vole")
+        let msg = "greeting=" + greet()
+        assert(msg == "greeting=hello vole")
+    }
+
+    test "two returned closures interleaved calls" {
+        let prefix_a = make_prefixer("a:")
+        let prefix_b = make_prefixer("b:")
+        let r1 = prefix_a("1")
+        let r2 = prefix_b("1")
+        let r3 = prefix_a("2")
+        let r4 = prefix_b("2")
+        assert(r1 == "a:1")
+        assert(r2 == "b:1")
+        assert(r3 == "a:2")
+        assert(r4 == "b:2")
+    }
+}
+
+tests "closure stored in variable then scope exit" {
+    test "simple closure stored and called" {
+        let f = () -> string => "hello"
+        let result = f()
+        assert(result == "hello")
+    }
+
+    test "closure with string capture stored and called" {
+        let msg = "captured"
+        let f = () -> string => msg
+        let result = f()
+        assert(result == "captured")
+    }
+
+    test "closure with concat stored and called" {
+        let a = "hello"
+        let b = "world"
+        let f = () -> string => a + " " + b
+        let result = f()
+        assert(result == "hello world")
+    }
+
+    test "closure stored, called, result compared" {
+        let expected = "test_value"
+        let f = () -> string => "test_value"
+        assert(f() == expected)
+    }
+}
+
+tests "closure reassignment" {
+    test "reassign closure variable to different closure" {
+        let mut f = () -> string => "hello"
+        assert(f() == "hello")
+        f = () -> string => "world"
+        assert(f() == "world")
+    }
+
+    test "reassign closure capturing different strings" {
+        let a = "first"
+        let b = "second"
+        let mut f = () -> string => a
+        assert(f() == "first")
+        f = () -> string => b
+        assert(f() == "second")
+    }
+
+    test "reassign closure variable multiple times" {
+        let mut f = () -> string => "one"
+        assert(f() == "one")
+        f = () -> string => "two"
+        assert(f() == "two")
+        f = () -> string => "three"
+        assert(f() == "three")
+    }
+
+    test "reassign closure with string param" {
+        let mut f = (s: string) -> string => "[" + s + "]"
+        assert(f("a") == "[a]")
+        f = (s: string) -> string => "(" + s + ")"
+        assert(f("a") == "(a)")
+    }
+
+    test "reassign with returned closure from function" {
+        let mut f = make_prefixer("x:")
+        assert(f("1") == "x:1")
+        f = make_prefixer("y:")
+        assert(f("1") == "y:1")
+    }
+}
+
+tests "returned closure called multiple times" {
+    test "call_twice invokes closure two times" {
+        let f = () -> string => "ping"
+        let result = call_twice(f)
+        assert(result == "ping|ping")
+    }
+
+    test "call_twice with closure capturing string" {
+        let word = "echo"
+        let f = () -> string => word
+        let result = call_twice(f)
+        assert(result == "echo|echo")
+    }
+
+    test "returned closure called in loop" {
+        let greet = make_greeter("vole")
+        let mut result = ""
+        let mut i = 0
+        while i < 5 {
+            if i > 0 {
+                result = result + ","
+            }
+            result = result + greet()
+            i = i + 1
+        }
+        assert(result == "hello vole,hello vole,hello vole,hello vole,hello vole")
+    }
+
+    test "make_prefixer closure called many times" {
+        let add_tag = make_prefixer("tag:")
+        let mut result = ""
+        let items = ["a", "b", "c", "d"]
+        for item in items {
+            result = result + add_tag(item) + " "
+        }
+        assert(result == "tag:a tag:b tag:c tag:d ")
+    }
+
+    test "apply_n_times applies closure repeatedly" {
+        let wrap = (s: string) -> string => "(" + s + ")"
+        let result = apply_n_times(wrap, "x", 3)
+        assert(result == "(((x)))")
+    }
+
+    test "apply_n_times with make_wrapper closure" {
+        let bracket = make_wrapper("[", "]")
+        let result = apply_n_times(bracket, "core", 2)
+        assert(result == "[[core]]")
+    }
+}
+
+tests "closure capturing mutable variable" {
+    test "closure mutates captured int and returns string" {
+        let mut count = 0
+        let next = () -> string => {
+            count = count + 1
+            return "item-" + count.to_string()
+        }
+        assert(next() == "item-1")
+        assert(next() == "item-2")
+        assert(next() == "item-3")
+    }
+
+    test "closure mutates captured int, string result varies" {
+        let mut n = 0
+        let label = "step"
+        let advance = () -> string => {
+            n = n + 1
+            return label + "-" + n.to_string()
+        }
+        assert(advance() == "step-1")
+        assert(advance() == "step-2")
+        assert(advance() == "step-3")
+    }
+
+    test "closure mutates captured int in loop" {
+        let mut count = 0
+        let inc = () -> string => {
+            count = count + 1
+            return "count=" + count.to_string()
+        }
+        let mut result = ""
+        let mut i = 0
+        while i < 3 {
+            result = result + inc() + " "
+            i = i + 1
+        }
+        assert(result == "count=1 count=2 count=3 ")
+    }
+
+    test "closure with mutable counter returns string with state" {
+        let mut n = 0
+        let inc = () -> string => {
+            n = n + 1
+            return "n=" + n.to_string()
+        }
+        assert(inc() == "n=1")
+        assert(inc() == "n=2")
+        assert(inc() == "n=3")
+        assert(inc() == "n=4")
+    }
+}
+
+tests "closure in a loop" {
+    test "create closure each iteration and call it" {
+        let mut result = ""
+        let items = ["a", "b", "c"]
+        for item in items {
+            let f = () -> string => item
+            result = result + f() + " "
+        }
+        assert(result == "a b c ")
+    }
+
+    test "create closure with string concat each iteration" {
+        let mut result = ""
+        let mut i = 0
+        while i < 4 {
+            let label = "item-" + i.to_string()
+            let f = () -> string => label
+            result = result + f() + " "
+            i = i + 1
+        }
+        assert(result == "item-0 item-1 item-2 item-3 ")
+    }
+
+    test "create and call closure capturing loop var with prefix" {
+        let prefix = "tag"
+        let mut result = ""
+        let items = ["x", "y", "z"]
+        for item in items {
+            let f = () -> string => prefix + ":" + item
+            result = result + f() + " "
+        }
+        assert(result == "tag:x tag:y tag:z ")
+    }
+
+    test "closure from factory function in loop" {
+        let mut result = ""
+        let names = ["alice", "bob", "carol"]
+        for name in names {
+            let greet = make_greeter(name)
+            result = result + greet() + "|"
+        }
+        assert(result == "hello alice|hello bob|hello carol|")
+    }
+
+    test "returned closure reassigned in loop" {
+        let mut f = make_prefixer("init:")
+        let mut result = ""
+        let prefixes = ["a:", "b:", "c:"]
+        for prefix in prefixes {
+            f = make_prefixer(prefix)
+            result = result + f("x") + " "
+        }
+        assert(result == "a:x b:x c:x ")
+    }
+
+    test "multiple closures created per loop iteration" {
+        let mut result = ""
+        let items = ["p", "q"]
+        for item in items {
+            let f1 = () -> string => item + "1"
+            let f2 = () -> string => item + "2"
+            result = result + f1() + " " + f2() + " "
+        }
+        assert(result == "p1 p2 q1 q2 ")
+    }
+}
+
+tests "closure passed to another closure" {
+    test "closure accepts closure param and calls it" {
+        let runner = (f: () -> string) -> string => "result:" + f()
+        let provider = () -> string => "hello"
+        assert(runner(provider) == "result:hello")
+    }
+
+    test "closure accepting string closure with capture" {
+        let tag = "wrapped"
+        let transform = (f: (string) -> string) -> string => f(tag)
+        let upper = (s: string) -> string => s.to_upper()
+        assert(transform(upper) == "WRAPPED")
+    }
+
+    test "nested closure calls" {
+        let outer = (f: () -> string) -> string => "[" + f() + "]"
+        let inner = () -> string => "core"
+        let result = outer(inner)
+        assert(result == "[core]")
+    }
+
+    test "compose two string functions" {
+        let upper = (s: string) -> string => s.to_upper()
+        let wrap = (s: string) -> string => "(" + s + ")"
+        let composed = compose_str(wrap, upper)
+        assert(composed("hello") == "(HELLO)")
+    }
+
+    test "compose with make_prefixer and make_suffixer" {
+        let pre = make_prefixer("[")
+        let suf = make_suffixer("]")
+        let wrapped = compose_str(suf, pre)
+        assert(wrapped("item") == "[item]")
+    }
+
+    test "compose three functions via chained compose" {
+        let f1 = (s: string) -> string => "(" + s + ")"
+        let f2 = (s: string) -> string => "[" + s + "]"
+        let f3 = (s: string) -> string => "<" + s + ">"
+        let c1 = compose_str(f2, f3)
+        let c2 = compose_str(f1, c1)
+        assert(c2("x") == "([<x>])")
+    }
+}
+
+tests "multiple closures capturing same value" {
+    test "two closures capture same string" {
+        let shared = "hello"
+        let f1 = () -> string => shared + " world"
+        let f2 = () -> string => shared + " vole"
+        assert(f1() == "hello world")
+        assert(f2() == "hello vole")
+    }
+
+    test "three closures capture same string" {
+        let base = "item"
+        let a = () -> string => base + "-a"
+        let b = () -> string => base + "-b"
+        let c = () -> string => base + "-c"
+        assert(a() == "item-a")
+        assert(b() == "item-b")
+        assert(c() == "item-c")
+    }
+
+    test "closures capture same string and use differently" {
+        let name = "vole"
+        let greet = () -> string => "hello " + name
+        let shout = () -> string => name.to_upper()
+        let wrap = () -> string => "[" + name + "]"
+        assert(greet() == "hello vole")
+        assert(shout() == "VOLE")
+        assert(wrap() == "[vole]")
+    }
+
+    test "two closures capture same immutable string independently" {
+        let shared = "base"
+        let f1 = () -> string => shared + "-one"
+        let f2 = () -> string => shared + "-two"
+        let r1 = f1()
+        let r2 = f2()
+        let r3 = f1()
+        assert(r1 == "base-one")
+        assert(r2 == "base-two")
+        assert(r3 == "base-one")
+    }
+
+    test "two closures capture same string, passed to apply" {
+        let msg = "shared"
+        let f1 = () -> string => msg + "-1"
+        let f2 = () -> string => msg + "-2"
+        assert(apply_fn(f1) == "shared-1")
+        assert(apply_fn(f2) == "shared-2")
+    }
+}
+
+tests "complex higher-order patterns" {
+    test "function returning closure, closure passed to function" {
+        let greet = make_greeter("world")
+        let result = apply_fn(greet)
+        assert(result == "hello world")
+    }
+
+    test "function returning closure, closure called in loop via apply" {
+        let greet = make_greeter("test")
+        let mut result = ""
+        let mut i = 0
+        while i < 3 {
+            result = result + apply_fn(greet) + " "
+            i = i + 1
+        }
+        assert(result == "hello test hello test hello test ")
+    }
+
+    test "compose returned closures" {
+        let pre = make_prefixer("<")
+        let suf = make_suffixer(">")
+        let tag = compose_str(suf, pre)
+        assert(tag("em") == "<em>")
+        assert(tag("b") == "<b>")
+    }
+
+    test "apply_n_times with returned closure" {
+        let pre = make_prefixer(">")
+        let result = apply_n_times(pre, "end", 4)
+        assert(result == ">>>>end")
+    }
+
+    test "create multiple returned closures, collect results" {
+        let tags = ["a", "b", "c"]
+        let mut result = ""
+        for tag in tags {
+            let wrap = make_wrapper("<" + tag + ">", "</" + tag + ">")
+            result = result + wrap("x") + " "
+        }
+        assert(result == "<a>x</a> <b>x</b> <c>x</c> ")
+    }
+
+    test "returned closure result fed to another returned closure" {
+        let bracket = make_wrapper("[", "]")
+        let paren = make_wrapper("(", ")")
+        let result = paren(bracket("inner"))
+        assert(result == "([inner])")
+    }
+
+    test "call_twice with returned closure" {
+        let greet = make_greeter("world")
+        let result = call_twice(greet)
+        assert(result == "hello world|hello world")
+    }
+
+    test "closure factory called in loop, closures used after loop" {
+        let prefixes = ["x:", "y:", "z:"]
+        let mut last_fn = make_prefixer("init:")
+        for p in prefixes {
+            last_fn = make_prefixer(p)
+        }
+        assert(last_fn("test") == "z:test")
+    }
+
+    test "deeply nested higher-order: compose of compose" {
+        let wrap1 = (s: string) -> string => "(" + s + ")"
+        let wrap2 = (s: string) -> string => "[" + s + "]"
+        let wrap3 = (s: string) -> string => "<" + s + ">"
+        let inner = compose_str(wrap1, wrap2)
+        let outer = compose_str(inner, wrap3)
+        assert(outer("x") == "([<x>])")
+    }
+}
