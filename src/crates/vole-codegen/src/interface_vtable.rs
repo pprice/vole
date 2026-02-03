@@ -6,7 +6,7 @@ use cranelift_codegen::ir::FuncRef;
 use cranelift_module::{DataDescription, DataId, Linkage, Module};
 
 use crate::RuntimeFn;
-use crate::errors::CodegenError;
+use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CodegenCtx, CompileEnv};
 use crate::types::{
     CompiledValue, MethodInfo, method_name_id_by_str, type_id_to_cranelift,
@@ -102,7 +102,7 @@ impl InterfaceVtableRegistry {
         interface_type_def_id: TypeDefId,
         interface_type_arg_ids: &[TypeId],
         concrete_type_id: TypeId,
-    ) -> Result<DataId, String> {
+    ) -> CodegenResult<DataId> {
         // Build key for lookup using arena unwraps
         let concrete_key = {
             let arena = ctx.arena();
@@ -176,7 +176,7 @@ impl InterfaceVtableRegistry {
         let data_id = ctx
             .jit_module()
             .declare_data(&vtable_name, Linkage::Local, false, false)
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| CodegenError::internal_with_context("cranelift error", e.to_string()))?;
 
         tracing::debug!(
             interface = %ctx.interner().resolve(interface_name),
@@ -208,7 +208,7 @@ impl InterfaceVtableRegistry {
         ctx: &mut C,
         interface_name: Symbol,
         concrete_type_id: TypeId,
-    ) -> Result<DataId, String> {
+    ) -> CodegenResult<DataId> {
         // Build key for lookup using arena unwraps
         let concrete_key = {
             let arena = ctx.arena();
@@ -302,7 +302,7 @@ impl InterfaceVtableRegistry {
         // Phase 3: Define data
         ctx.jit_module()
             .define_data(state.data_id, &data)
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| CodegenError::internal_with_context("cranelift error", e.to_string()))?;
 
         tracing::debug!(
             interface = %interface_name_str,
@@ -321,7 +321,7 @@ impl InterfaceVtableRegistry {
         concrete_type_id: TypeId,
         method: &VtableMethod,
         iter_elem_tag: Option<u64>,
-    ) -> Result<cranelift_module::FuncId, String> {
+    ) -> CodegenResult<cranelift_module::FuncId> {
         // Build wrapper signature using param_count and returns_void directly
         let word_type = ctx.ptr_type();
         let mut sig = ctx.jit_module().make_signature();
@@ -342,7 +342,7 @@ impl InterfaceVtableRegistry {
         let func_id = ctx
             .jit_module()
             .declare_function(&wrapper_name, Linkage::Local, &sig)
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| CodegenError::internal_with_context("cranelift error", e.to_string()))?;
 
         let mut func_ctx = ctx.jit_module().make_context();
         func_ctx.func.signature = sig;
@@ -399,9 +399,9 @@ impl InterfaceVtableRegistry {
                 builder.ins().return_(&[]);
             } else {
                 let Some(result) = results.first().copied() else {
-                    return Err(
-                        CodegenError::internal("interface wrapper missing return value").into(),
-                    );
+                    return Err(CodegenError::internal(
+                        "interface wrapper missing return value",
+                    ));
                 };
                 let heap_alloc_ref = runtime_heap_alloc_ref(ctx, &mut builder)?;
                 let arena = ctx.arena();
@@ -425,7 +425,7 @@ impl InterfaceVtableRegistry {
 
         ctx.jit_module()
             .define_function(func_id, &mut func_ctx)
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| CodegenError::internal_with_context("cranelift error", e.to_string()))?;
         ctx.jit_module().clear_context(&mut func_ctx);
 
         Ok(func_id)
@@ -440,7 +440,7 @@ fn compile_function_wrapper<C: VtableCtx>(
     data_word: Value,
     params: &[Value],
     param_type_ids: &[TypeId],
-) -> Result<Vec<Value>, String> {
+) -> CodegenResult<Vec<Value>> {
     // For function wrappers, concrete_type_id is the function type itself.
     // Try to extract is_closure and ret_type from it, falling back to defaults.
     let (ret_type_id, is_closure) = {
@@ -547,7 +547,7 @@ fn compile_method_wrapper<C: VtableCtx>(
     params: &[Value],
     method_info: &MethodInfo,
     param_type_ids: &[TypeId],
-) -> Result<Vec<Value>, String> {
+) -> CodegenResult<Vec<Value>> {
     let self_val = word_to_value_type_id(
         builder,
         data_word,
@@ -591,7 +591,7 @@ fn compile_external_wrapper<C: VtableCtx>(
     param_type_ids: &[TypeId],
     return_type_id: TypeId,
     iter_elem_tag: Option<u64>,
-) -> Result<Vec<Value>, String> {
+) -> CodegenResult<Vec<Value>> {
     // For Iterator interface, wrap the boxed interface in a RcIterator
     // so external functions like vole_iter_collect can iterate via vtable.
     let self_val = if interface_name == "Iterator" {
@@ -716,7 +716,7 @@ pub(crate) fn interface_method_slot_by_type_def_id(
     interface_id: TypeDefId,
     method_name_id: NameId,
     entity_registry: &EntityRegistry,
-) -> Result<usize, String> {
+) -> CodegenResult<usize> {
     // Collect all methods from the interface and its parents
     let methods = collect_interface_methods_via_entity_registry(interface_id, entity_registry)?;
 
@@ -728,9 +728,12 @@ pub(crate) fn interface_method_slot_by_type_def_id(
             method.name_id == method_name_id
         })
         .ok_or_else(|| {
-            format!(
-                "method with name_id {:?} not found on interface {:?}",
-                method_name_id, interface_id
+            CodegenError::not_found(
+                "interface method",
+                format!(
+                    "name_id {:?} on interface {:?}",
+                    method_name_id, interface_id
+                ),
             )
         })
 }
@@ -744,14 +747,15 @@ pub(crate) fn interface_method_slot_by_type_def_id(
 pub(crate) fn collect_interface_methods_via_entity_registry(
     interface_id: TypeDefId,
     entity_registry: &EntityRegistry,
-) -> Result<Vec<MethodId>, String> {
+) -> CodegenResult<Vec<MethodId>> {
     let interface = entity_registry.get_type(interface_id);
 
     // Verify this is an interface
     if interface.kind != TypeDefKind::Interface {
-        return Err(format!(
-            "TypeDefId {:?} is not an interface (kind: {:?})",
-            interface_id, interface.kind
+        return Err(CodegenError::type_mismatch(
+            "interface vtable",
+            "interface",
+            format!("{:?}", interface.kind),
         ));
     }
 
@@ -814,7 +818,7 @@ pub(crate) fn box_interface_value_id<'a, 'ctx>(
     env: &'a CompileEnv<'ctx>,
     value: CompiledValue,
     interface_type_id: TypeId,
-) -> Result<CompiledValue, String> {
+) -> CodegenResult<CompiledValue> {
     // Extract interface info using arena
     let (type_def_id, type_args_ids) = {
         let arena = env.analyzed.type_arena();
@@ -910,7 +914,7 @@ fn resolve_vtable_target<C: VtableCtx>(
     concrete_type_id: TypeId,
     interface_method_id: MethodId,
     substitutions: &FxHashMap<NameId, TypeId>,
-) -> Result<VtableMethod, String> {
+) -> CodegenResult<VtableMethod> {
     // Get method info from EntityRegistry
     let interface_method = ctx.query().get_method(interface_method_id);
     let method_name_str = ctx
@@ -1077,14 +1081,13 @@ fn resolve_vtable_target<C: VtableCtx>(
     Err(CodegenError::not_found(
         "method implementation",
         format!("{} on type {:?}", method_name_str, concrete_type_id),
-    )
-    .into())
+    ))
 }
 
 fn runtime_heap_alloc_ref<C: VtableCtx>(
     ctx: &mut C,
     builder: &mut FunctionBuilder,
-) -> Result<FuncRef, String> {
+) -> CodegenResult<FuncRef> {
     let key = ctx
         .funcs()
         .runtime_key(RuntimeFn::HeapAlloc)

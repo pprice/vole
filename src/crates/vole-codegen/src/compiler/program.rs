@@ -13,6 +13,7 @@ use super::{Compiler, TestInfo};
 
 use crate::FunctionKey;
 use crate::context::Cg;
+use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CodegenCtx, CompileEnv, function_name_id_with_interner, type_id_to_cranelift};
 use vole_frontend::{
     Block, Decl, Expr, ExprKind, FuncDecl, InterfaceMethod, Interner, LetInit, LetTupleStmt,
@@ -120,7 +121,7 @@ impl Compiler<'_> {
     }
 
     /// Compile a complete program
-    pub fn compile_program(&mut self, program: &Program) -> Result<(), String> {
+    pub fn compile_program(&mut self, program: &Program) -> CodegenResult<()> {
         // Compile module functions first (before main program)
         self.compile_module_functions()?;
         self.compile_program_body(program)
@@ -128,24 +129,24 @@ impl Compiler<'_> {
 
     /// Compile only module functions (prelude, imports).
     /// Call this once before compile_program_only for batched compilation.
-    pub fn compile_modules_only(&mut self) -> Result<(), String> {
+    pub fn compile_modules_only(&mut self) -> CodegenResult<()> {
         self.compile_module_functions()
     }
 
     /// Import pre-compiled module functions without compiling them.
     /// Use this when modules were already compiled in a shared CompiledModules cache.
-    pub fn import_modules(&mut self) -> Result<(), String> {
+    pub fn import_modules(&mut self) -> CodegenResult<()> {
         self.import_module_functions()
     }
 
     /// Compile a program without recompiling module functions.
     /// Use with compile_modules_only for batched compilation.
-    pub fn compile_program_only(&mut self, program: &Program) -> Result<(), String> {
+    pub fn compile_program_only(&mut self, program: &Program) -> CodegenResult<()> {
         self.compile_program_body(program)
     }
 
     /// Compile the main program body (functions, tests, classes, etc.)
-    fn compile_program_body(&mut self, program: &Program) -> Result<(), String> {
+    fn compile_program_body(&mut self, program: &Program) -> CodegenResult<()> {
         // Count total tests to assign unique IDs
         let mut test_count = 0usize;
 
@@ -341,7 +342,7 @@ impl Compiler<'_> {
 
     /// Compile pure Vole functions from imported modules.
     /// These are functions defined in module files (not external FFI functions).
-    fn compile_module_functions(&mut self) -> Result<(), String> {
+    fn compile_module_functions(&mut self) -> CodegenResult<()> {
         // Collect module paths first to avoid borrow issues
         let module_paths: Vec<_> = self.query().module_paths().map(String::from).collect();
         tracing::debug!(
@@ -567,7 +568,7 @@ impl Compiler<'_> {
     /// Import pre-compiled module functions as external symbols.
     /// This declares the functions so they can be called, but doesn't compile them.
     /// Used when modules are already compiled in a shared CompiledModules cache.
-    fn import_module_functions(&mut self) -> Result<(), String> {
+    fn import_module_functions(&mut self) -> CodegenResult<()> {
         let module_paths: Vec<_> = self.query().module_paths().map(String::from).collect();
 
         for module_path in &module_paths {
@@ -674,7 +675,7 @@ impl Compiler<'_> {
         func: &FuncDecl,
         module_interner: &Interner,
         module_global_inits: &FxHashMap<Symbol, Rc<Expr>>,
-    ) -> Result<(), String> {
+    ) -> CodegenResult<()> {
         let func_key = self.func_registry.intern_name_id(name_id);
         let display_name = self.query().display_name(name_id);
         let jit_func_id = self
@@ -752,7 +753,7 @@ impl Compiler<'_> {
         Ok(())
     }
 
-    fn compile_function(&mut self, func: &FuncDecl) -> Result<(), String> {
+    fn compile_function(&mut self, func: &FuncDecl) -> CodegenResult<()> {
         let program_module = self.program_module();
         let (func_key, display_name) = self.main_function_key_and_name(func.name);
         let jit_func_id = self
@@ -829,7 +830,7 @@ impl Compiler<'_> {
         tests_decl: &TestsDecl,
         program: &Program,
         test_count: &mut usize,
-    ) -> Result<(), String> {
+    ) -> CodegenResult<()> {
         // Phase 1: Compile scoped function/class bodies (and nested tests)
         self.compile_tests_scoped_bodies(tests_decl, program, test_count)?;
 
@@ -1010,7 +1011,7 @@ impl Compiler<'_> {
         tests_decl: &TestsDecl,
         program: &Program,
         test_count: &mut usize,
-    ) -> Result<(), String> {
+    ) -> CodegenResult<()> {
         let program_module = self.program_module();
         // Scoped types are registered under the virtual module in sema
         let virtual_module_id = self
@@ -1071,7 +1072,7 @@ impl Compiler<'_> {
         program: &Program,
         writer: &mut W,
         include_tests: bool,
-    ) -> Result<(), String> {
+    ) -> CodegenResult<()> {
         // Compile module functions first (prelude, imports) so module variables are available
         self.compile_module_functions()?;
 
@@ -1135,15 +1136,23 @@ impl Compiler<'_> {
                 Decl::Function(func) => {
                     let name = self.analyzed.interner.resolve(func.name);
                     self.build_function_ir(func)?;
-                    writeln!(writer, "// func {}", name).map_err(|e| e.to_string())?;
-                    writeln!(writer, "{}", self.jit.ctx.func).map_err(|e| e.to_string())?;
+                    writeln!(writer, "// func {}", name).map_err(|e| {
+                        CodegenError::internal_with_context("io error", e.to_string())
+                    })?;
+                    writeln!(writer, "{}", self.jit.ctx.func).map_err(|e| {
+                        CodegenError::internal_with_context("io error", e.to_string())
+                    })?;
                     self.jit.clear();
                 }
                 Decl::Tests(tests_decl) if include_tests => {
                     for test in &tests_decl.tests {
                         self.build_test_ir(test)?;
-                        writeln!(writer, "// test \"{}\"", test.name).map_err(|e| e.to_string())?;
-                        writeln!(writer, "{}", self.jit.ctx.func).map_err(|e| e.to_string())?;
+                        writeln!(writer, "// test \"{}\"", test.name).map_err(|e| {
+                            CodegenError::internal_with_context("io error", e.to_string())
+                        })?;
+                        writeln!(writer, "{}", self.jit.ctx.func).map_err(|e| {
+                            CodegenError::internal_with_context("io error", e.to_string())
+                        })?;
                         self.jit.clear();
                     }
                 }
@@ -1156,7 +1165,7 @@ impl Compiler<'_> {
 
     /// Build IR for a single function without defining it.
     /// Similar to compile_function but doesn't call define_function.
-    fn build_function_ir(&mut self, func: &FuncDecl) -> Result<(), String> {
+    fn build_function_ir(&mut self, func: &FuncDecl) -> CodegenResult<()> {
         let program_module = self.program_module();
 
         // Get FunctionId and extract pre-resolved signature data
@@ -1237,7 +1246,7 @@ impl Compiler<'_> {
 
     /// Build IR for a single test case without defining it.
     /// Similar to test compilation in compile_tests but doesn't call define_function.
-    fn build_test_ir(&mut self, test: &TestCase) -> Result<(), String> {
+    fn build_test_ir(&mut self, test: &TestCase) -> CodegenResult<()> {
         // Create function signature: () -> i64
         let sig = self.jit.create_signature(&[], Some(types::I64));
         self.jit.ctx.func.signature = sig;
@@ -1317,7 +1326,7 @@ impl Compiler<'_> {
     }
 
     /// Declare all monomorphized function instances
-    fn declare_monomorphized_instances(&mut self) -> Result<(), String> {
+    fn declare_monomorphized_instances(&mut self) -> CodegenResult<()> {
         // Collect instances to avoid borrow issues
         let instances = self
             .analyzed
@@ -1339,7 +1348,7 @@ impl Compiler<'_> {
     }
 
     /// Compile all monomorphized function instances
-    fn compile_monomorphized_instances(&mut self, program: &Program) -> Result<(), String> {
+    fn compile_monomorphized_instances(&mut self, program: &Program) -> CodegenResult<()> {
         // Build a map of generic function names to their ASTs
         // Include both explicit generics (type_params in AST) and implicit generics
         // (structural type params that create generic_info in entity registry)
@@ -1376,9 +1385,9 @@ impl Compiler<'_> {
             let found = self.compile_monomorphized_module_function(&instance)?;
             if !found {
                 let func_name = self.query().display_name(instance.original_name);
-                return Err(format!(
-                    "Internal error: generic function AST not found for {}",
-                    func_name
+                return Err(CodegenError::internal_with_context(
+                    "generic function AST not found",
+                    func_name,
                 ));
             }
         }
@@ -1391,7 +1400,7 @@ impl Compiler<'_> {
     fn compile_monomorphized_module_function(
         &mut self,
         instance: &MonomorphInstance,
-    ) -> Result<bool, String> {
+    ) -> CodegenResult<bool> {
         // Find which module contains this function
         let module_id = self.analyzed.name_table().module_of(instance.original_name);
         let module_path = self
@@ -1483,7 +1492,7 @@ impl Compiler<'_> {
         &mut self,
         func: &FuncDecl,
         instance: &MonomorphInstance,
-    ) -> Result<(), String> {
+    ) -> CodegenResult<()> {
         let mangled_name = self.query().display_name(instance.mangled_name);
         let func_key = self.func_registry.intern_name_id(instance.mangled_name);
         let func_id = self
@@ -1534,7 +1543,7 @@ impl Compiler<'_> {
     }
 
     /// Declare all monomorphized class method instances
-    fn declare_class_method_monomorphized_instances(&mut self) -> Result<(), String> {
+    fn declare_class_method_monomorphized_instances(&mut self) -> CodegenResult<()> {
         // Collect instances to avoid borrow issues
         let instances = self
             .analyzed
@@ -1564,7 +1573,7 @@ impl Compiler<'_> {
     fn compile_class_method_monomorphized_instances(
         &mut self,
         program: &Program,
-    ) -> Result<(), String> {
+    ) -> CodegenResult<()> {
         let class_asts = self.build_generic_type_asts(program);
 
         // Collect instances to avoid borrow issues
@@ -1625,9 +1634,9 @@ impl Compiler<'_> {
 
             // Method not found - this shouldn't happen if sema was correct
             let class_name = self.query().display_name(instance.class_name);
-            return Err(format!(
-                "Internal error: method {} not found in class {}",
-                method_name_str, class_name
+            return Err(CodegenError::not_found(
+                "method",
+                format!("{} in class {}", method_name_str, class_name),
             ));
         }
 
@@ -1639,7 +1648,7 @@ impl Compiler<'_> {
         &mut self,
         method: &FuncDecl,
         instance: &ClassMethodMonomorphInstance,
-    ) -> Result<(), String> {
+    ) -> CodegenResult<()> {
         let mangled_name = self.query().display_name(instance.mangled_name);
         let func_key = self.func_registry.intern_name_id(instance.mangled_name);
         let func_id = self
@@ -1702,7 +1711,7 @@ impl Compiler<'_> {
     }
 
     /// Declare all monomorphized static method instances
-    fn declare_static_method_monomorphized_instances(&mut self) -> Result<(), String> {
+    fn declare_static_method_monomorphized_instances(&mut self) -> CodegenResult<()> {
         // Collect instances to avoid borrow issues
         let instances = self
             .analyzed
@@ -1727,7 +1736,7 @@ impl Compiler<'_> {
     fn compile_static_method_monomorphized_instances(
         &mut self,
         program: &Program,
-    ) -> Result<(), String> {
+    ) -> CodegenResult<()> {
         let class_asts = self.build_generic_type_asts(program);
 
         // Collect instances to avoid borrow issues
@@ -1769,9 +1778,9 @@ impl Compiler<'_> {
             // Method not found - this shouldn't happen if sema was correct
             let class_name = self.query().display_name(instance.class_name);
             let method_name = self.query().display_name(instance.method_name);
-            return Err(format!(
-                "Internal error: static method {} not found in class {}",
-                method_name, class_name
+            return Err(CodegenError::not_found(
+                "static method",
+                format!("{} in class {}", method_name, class_name),
             ));
         }
 
@@ -1783,7 +1792,7 @@ impl Compiler<'_> {
         &mut self,
         method: &InterfaceMethod,
         instance: &StaticMethodMonomorphInstance,
-    ) -> Result<(), String> {
+    ) -> CodegenResult<()> {
         let mangled_name = self.query().display_name(instance.mangled_name);
         let func_key = self.func_registry.intern_name_id(instance.mangled_name);
         let func_id = self
@@ -1996,7 +2005,7 @@ impl Compiler<'_> {
     // ═══════════════════════════════════════════════════════════════════════
 
     /// Declare all monomorphized instances (functions, class methods, static methods)
-    fn declare_all_monomorphized_instances(&mut self, _program: &Program) -> Result<(), String> {
+    fn declare_all_monomorphized_instances(&mut self, _program: &Program) -> CodegenResult<()> {
         // Note: Nested generic calls are now discovered during sema analysis,
         // so we don't need to expand instances here.
         self.declare_monomorphized_instances()?;
@@ -2006,7 +2015,7 @@ impl Compiler<'_> {
     }
 
     /// Compile all monomorphized instances (functions, class methods, static methods)
-    fn compile_all_monomorphized_instances(&mut self, program: &Program) -> Result<(), String> {
+    fn compile_all_monomorphized_instances(&mut self, program: &Program) -> CodegenResult<()> {
         self.compile_monomorphized_instances(program)?;
         self.compile_class_method_monomorphized_instances(program)?;
         self.compile_static_method_monomorphized_instances(program)?;

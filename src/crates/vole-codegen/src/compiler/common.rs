@@ -11,6 +11,7 @@ use vole_frontend::{ExprKind, FuncBody, Symbol};
 use vole_sema::type_arena::TypeId;
 
 use crate::context::{Captures, Cg};
+use crate::errors::CodegenResult;
 use crate::lambda::CaptureBinding;
 use crate::types::{CodegenCtx, CompileEnv};
 
@@ -205,7 +206,7 @@ pub fn compile_function_body_with_cg(
     cg: &mut Cg,
     body: &FuncBody,
     default_return: DefaultReturn,
-) -> Result<(), String> {
+) -> CodegenResult<()> {
     // Push function-level RC scope for tracking RC locals
     cg.push_rc_scope();
 
@@ -367,7 +368,7 @@ pub fn compile_function_inner_with_params<'ctx>(
     config: FunctionCompileConfig,
     module_id: Option<vole_identity::ModuleId>,
     substitutions: Option<&FxHashMap<vole_identity::NameId, TypeId>>,
-) -> Result<(), String> {
+) -> CodegenResult<()> {
     // Auto-detect sret convention: if return type is a large struct (3+ flat slots),
     // the signature has a hidden sret pointer as the first parameter.
     let config = if let Some(ret_type_id) = config.return_type_id {

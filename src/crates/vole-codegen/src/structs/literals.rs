@@ -7,7 +7,7 @@ use rustc_hash::FxHashMap;
 use super::helpers::convert_to_i64_for_storage;
 use crate::RuntimeFn;
 use crate::context::Cg;
-use crate::errors::CodegenError;
+use crate::errors::{CodegenError, CodegenResult};
 use crate::types::CompiledValue;
 use cranelift::prelude::*;
 use cranelift_codegen::ir::StackSlot;
@@ -41,7 +41,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         sl: &StructLiteralExpr,
         expr: &Expr,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         // Get the resolved type from semantic analysis, which handles:
         // - Simple types like `Point`
         // - Module-qualified types like `time.Duration`
@@ -420,7 +420,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         value: CompiledValue,
         union_type_id: TypeId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         let arena = self.arena();
         let variants = arena.unwrap_union(union_type_id).ok_or_else(|| {
             CodegenError::type_mismatch("union construction", "union type", "non-union").to_string()
@@ -475,7 +475,7 @@ impl Cg<'_, '_, '_> {
         result_type_id: TypeId,
         path_str: &str,
         type_def_id: vole_identity::TypeDefId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         // Use flat total size to account for nested struct fields
         let total_size = {
             let arena = self.arena();
@@ -574,7 +574,7 @@ impl Cg<'_, '_, '_> {
         value: CompiledValue,
         slot: StackSlot,
         offset: i32,
-    ) -> Result<(), String> {
+    ) -> CodegenResult<()> {
         let field_flat_slots = {
             let arena = self.arena();
             let entities = self.query().registry();

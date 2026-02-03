@@ -7,6 +7,7 @@ use cranelift_module::Module;
 
 use super::common::{FunctionCompileConfig, compile_function_inner_with_params};
 use super::{Compiler, SelfParam};
+use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{
     CodegenCtx, MethodInfo, TypeMetadata, method_name_id_with_interner, type_id_to_cranelift,
 };
@@ -55,7 +56,7 @@ impl Compiler<'_> {
         &mut self,
         class: &ClassDecl,
         program: &vole_frontend::Program,
-    ) -> Result<(), String> {
+    ) -> CodegenResult<()> {
         let module_id = self.program_module();
         self.compile_class_methods_in_module(class, program, module_id)
     }
@@ -65,7 +66,7 @@ impl Compiler<'_> {
         &mut self,
         struct_decl: &StructDecl,
         program: &vole_frontend::Program,
-    ) -> Result<(), String> {
+    ) -> CodegenResult<()> {
         let module_id = self.program_module();
         self.compile_type_methods(
             TypeMethodsData {
@@ -85,7 +86,7 @@ impl Compiler<'_> {
         class: &ClassDecl,
         program: &vole_frontend::Program,
         module_id: ModuleId,
-    ) -> Result<(), String> {
+    ) -> CodegenResult<()> {
         // Skip generic classes - they're compiled via monomorphized instances
         if !class.type_params.is_empty() {
             return Ok(());
@@ -108,7 +109,7 @@ impl Compiler<'_> {
         data: TypeMethodsData<'_>,
         program: &vole_frontend::Program,
         module_id: ModuleId,
-    ) -> Result<(), String> {
+    ) -> CodegenResult<()> {
         // Look up TypeDefId from name (needed as key for type_metadata)
         let query = self.query();
         let type_def_id = query
@@ -624,7 +625,7 @@ impl Compiler<'_> {
     pub(super) fn compile_implement_block(
         &mut self,
         impl_block: &ImplementBlock,
-    ) -> Result<(), String> {
+    ) -> CodegenResult<()> {
         let module_id = self.program_module();
         self.compile_implement_block_in_module(impl_block, module_id)
     }
@@ -634,7 +635,7 @@ impl Compiler<'_> {
         &mut self,
         impl_block: &ImplementBlock,
         module_id: ModuleId,
-    ) -> Result<(), String> {
+    ) -> CodegenResult<()> {
         // Get type name string (works for primitives and named types)
         let Some(type_name) = self.get_type_name_from_expr(&impl_block.target_type) else {
             return Ok(()); // Unsupported type for implement block
@@ -724,7 +725,7 @@ impl Compiler<'_> {
         interner: &Interner,
         module_id: ModuleId,
         module_path: Option<&str>,
-    ) -> Result<(), String> {
+    ) -> CodegenResult<()> {
         let Some(type_name) = self.get_type_name_from_expr(&impl_block.target_type) else {
             return Ok(());
         };
@@ -803,7 +804,7 @@ impl Compiler<'_> {
         method_info: Option<MethodInfo>,
         interner: &Interner,
         module_id: ModuleId,
-    ) -> Result<(), String> {
+    ) -> CodegenResult<()> {
         let impl_type_id = self.impl_type_id_from_type_id(self_type_id);
         let type_def_id =
             impl_type_id.and_then(|impl_id| self.query().try_type_def_id(impl_id.name_id()));
@@ -914,7 +915,7 @@ impl Compiler<'_> {
         type_name: &str,
         module_path: Option<&str>,
         interner: &Interner,
-    ) -> Result<(), String> {
+    ) -> CodegenResult<()> {
         let module_id = self.program_module();
         // Try to get TypeDefId for looking up pre-resolved method signatures
         let type_def_id = self.query().resolve_type_def_by_str(module_id, type_name);
@@ -1016,7 +1017,7 @@ impl Compiler<'_> {
         method: &FuncDecl,
         self_type_id: TypeId,
         method_info: Option<MethodInfo>,
-    ) -> Result<(), String> {
+    ) -> CodegenResult<()> {
         // Look up MethodId from entity_registry first (needed for func_key and signature)
         let type_def_id = self
             .impl_type_id_from_type_id(self_type_id)
@@ -1121,7 +1122,7 @@ impl Compiler<'_> {
         self.jit
             .module
             .define_function(func_id, &mut self.jit.ctx)
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| CodegenError::internal_with_context("cranelift error", e.to_string()))?;
         self.jit.module.clear_context(&mut self.jit.ctx);
 
         Ok(())
@@ -1133,7 +1134,7 @@ impl Compiler<'_> {
         method: &FuncDecl,
         type_name: Symbol,
         metadata: &TypeMetadata,
-    ) -> Result<(), String> {
+    ) -> CodegenResult<()> {
         let type_name_str = self.query().resolve_symbol(type_name).to_string();
         let method_name_str = self.query().resolve_symbol(method.name).to_string();
 
@@ -1237,7 +1238,7 @@ impl Compiler<'_> {
         method: &InterfaceMethod,
         type_name: Symbol,
         metadata: &TypeMetadata,
-    ) -> Result<(), String> {
+    ) -> CodegenResult<()> {
         let type_name_str = self.query().resolve_symbol(type_name).to_string();
         let method_name_str = self.query().resolve_symbol(method.name).to_string();
 
@@ -1335,7 +1336,7 @@ impl Compiler<'_> {
         statics: &StaticsBlock,
         type_name: Symbol,
         module_id: ModuleId,
-    ) -> Result<(), String> {
+    ) -> CodegenResult<()> {
         // Get the TypeDefId for looking up method info
         let type_name_id = self.query().name_id(module_id, &[type_name]);
         let type_def_id = self
@@ -1442,7 +1443,7 @@ impl Compiler<'_> {
         module_interner: &Interner,
         module_path: &str,
         module_global_inits: &FxHashMap<Symbol, Rc<Expr>>,
-    ) -> Result<(), String> {
+    ) -> CodegenResult<()> {
         let type_name_str = module_interner.resolve(class.name);
         // Look up the actual module_id from the module_path (not main_module!)
         let module_id = self
@@ -1681,7 +1682,7 @@ impl Compiler<'_> {
         module_interner: &Interner,
         module_path: &str,
         module_global_inits: &FxHashMap<Symbol, Rc<Expr>>,
-    ) -> Result<(), String> {
+    ) -> CodegenResult<()> {
         let type_name_str = module_interner.resolve(struct_decl.name);
         let module_id = self
             .analyzed

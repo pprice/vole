@@ -169,10 +169,25 @@ impl fmt::Display for CodegenError {
 
 impl std::error::Error for CodegenError {}
 
+/// Result type alias for codegen operations.
+pub type CodegenResult<T> = Result<T, CodegenError>;
+
 // Convenience conversion from CodegenError to String
 impl From<CodegenError> for String {
     fn from(err: CodegenError) -> String {
         err.to_string()
+    }
+}
+
+// Convenience conversion from String to CodegenError (for legacy error strings)
+// This wraps arbitrary strings as internal errors during migration.
+impl From<String> for CodegenError {
+    fn from(msg: String) -> Self {
+        // Parse common patterns into appropriate variants, otherwise InternalError
+        CodegenError::InternalError {
+            message: "legacy error",
+            context: Some(msg),
+        }
     }
 }
 

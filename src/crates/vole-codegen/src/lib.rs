@@ -30,7 +30,7 @@ pub use jit::{CompiledModules, JitContext, JitOptions};
 pub use types::CompiledValue;
 
 // Error types
-pub use errors::CodegenError;
+pub use errors::{CodegenError, CodegenResult};
 
 // Analysis types
 pub use analyzed::AnalyzedProgram;

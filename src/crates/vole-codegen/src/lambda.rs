@@ -14,6 +14,7 @@ use super::RuntimeFn;
 use super::compiler::common::{FunctionCompileConfig, compile_function_inner_with_params};
 use super::context::Cg;
 use super::types::CompiledValue;
+use crate::errors::{CodegenError, CodegenResult};
 
 /// Information about a captured variable for lambda compilation
 #[derive(Clone, Copy)]
@@ -53,7 +54,7 @@ impl Cg<'_, '_, '_> {
     ///
     /// Returns the function type ID and decomposed param/return types from sema.
     /// Errors if sema did not store the lambda's type (which would be a bug).
-    fn get_lambda_types(&self, node_id: NodeId) -> Result<(TypeId, Vec<TypeId>, TypeId), String> {
+    fn get_lambda_types(&self, node_id: NodeId) -> CodegenResult<(TypeId, Vec<TypeId>, TypeId)> {
         let lambda_type_id = self
             .get_expr_type(&node_id)
             .ok_or_else(|| format!("Lambda type not found in sema for node {:?}", node_id))?;
@@ -74,7 +75,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         lambda: &LambdaExpr,
         node_id: NodeId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         let lambda_id = self.next_lambda_id();
 
         // Get param and return types from sema
@@ -103,7 +104,7 @@ impl Cg<'_, '_, '_> {
         let func_id = self
             .jit_module()
             .declare_function(&lambda_name, cranelift_module::Linkage::Local, &sig)
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| CodegenError::internal_with_context("cranelift error", e.to_string()))?;
 
         self.funcs().set_func_id(func_key, func_id);
         self.funcs().set_return_type(func_key, return_type_id);
@@ -170,7 +171,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         lambda: &LambdaExpr,
         node_id: NodeId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         let captures = lambda.captures.borrow();
         let num_captures = captures.len();
 
@@ -203,7 +204,7 @@ impl Cg<'_, '_, '_> {
         let func_id = self
             .jit_module()
             .declare_function(&lambda_name, cranelift_module::Linkage::Local, &sig)
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| CodegenError::internal_with_context("cranelift error", e.to_string()))?;
 
         self.funcs().set_func_id(func_key, func_id);
         self.funcs().set_return_type(func_key, return_type_id);
@@ -329,11 +330,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile a lambda expression
-    pub fn lambda(
-        &mut self,
-        lambda: &LambdaExpr,
-        node_id: NodeId,
-    ) -> Result<CompiledValue, String> {
+    pub fn lambda(&mut self, lambda: &LambdaExpr, node_id: NodeId) -> CodegenResult<CompiledValue> {
         let captures = lambda.captures.borrow();
         let has_captures = !captures.is_empty();
         drop(captures);

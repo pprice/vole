@@ -5,7 +5,7 @@
 use cranelift::prelude::*;
 
 use crate::RuntimeFn;
-use crate::errors::CodegenError;
+use crate::errors::{CodegenError, CodegenResult};
 use vole_frontend::{self, ExprKind, LetInit, Pattern, PatternKind, RaiseStmt, Stmt, Symbol};
 use vole_sema::IsCheckResult;
 use vole_sema::type_arena::TypeId;
@@ -86,7 +86,7 @@ impl Cg<'_, '_, '_> {
     pub fn compile_body(
         &mut self,
         body: &vole_frontend::FuncBody,
-    ) -> Result<(bool, Option<CompiledValue>), String> {
+    ) -> CodegenResult<(bool, Option<CompiledValue>)> {
         match body {
             vole_frontend::FuncBody::Block(block) => {
                 let terminated = self.block(block)?;
@@ -105,7 +105,7 @@ impl Cg<'_, '_, '_> {
     /// do not introduce new variable scopes in Vole — variables declared inside are
     /// visible to the enclosing scope. RC cleanup for these variables happens when
     /// their enclosing function or block_expr scope exits.
-    pub fn block(&mut self, block: &vole_frontend::Block) -> Result<bool, String> {
+    pub fn block(&mut self, block: &vole_frontend::Block) -> CodegenResult<bool> {
         let mut terminated = false;
         for stmt in &block.stmts {
             if terminated {
@@ -117,7 +117,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile a statement. Returns true if terminated (return/break).
-    pub fn stmt(&mut self, stmt: &Stmt) -> Result<bool, String> {
+    pub fn stmt(&mut self, stmt: &Stmt) -> CodegenResult<bool> {
         match stmt {
             Stmt::Let(let_stmt) => {
                 // Type aliases don't generate code
@@ -653,7 +653,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         for_stmt: &vole_frontend::ForStmt,
         range: &vole_frontend::RangeExpr,
-    ) -> Result<bool, String> {
+    ) -> CodegenResult<bool> {
         let start_val = self.expr(&range.start)?;
         let end_val = self.expr(&range.end)?;
 
@@ -683,7 +683,7 @@ impl Cg<'_, '_, '_> {
         range: &vole_frontend::RangeExpr,
         var: Variable,
         end_val: Value,
-    ) -> Result<bool, String> {
+    ) -> CodegenResult<bool> {
         let header = self.builder.create_block();
         let body_block = self.builder.create_block();
         let exit_block = self.builder.create_block();
@@ -748,7 +748,7 @@ impl Cg<'_, '_, '_> {
         range: &vole_frontend::RangeExpr,
         var: Variable,
         end_val: Value,
-    ) -> Result<bool, String> {
+    ) -> CodegenResult<bool> {
         let header = self.builder.create_block();
         let body_block = self.builder.create_block();
         let continue_block = self.builder.create_block();
@@ -789,7 +789,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile a for loop over an array
-    fn for_array(&mut self, for_stmt: &vole_frontend::ForStmt) -> Result<bool, String> {
+    fn for_array(&mut self, for_stmt: &vole_frontend::ForStmt) -> CodegenResult<bool> {
         let mut arr = self.expr(&for_stmt.iterable)?;
 
         // Get element type using arena method
@@ -861,7 +861,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile a for loop over an iterator
-    fn for_iterator(&mut self, for_stmt: &vole_frontend::ForStmt) -> Result<bool, String> {
+    fn for_iterator(&mut self, for_stmt: &vole_frontend::ForStmt) -> CodegenResult<bool> {
         let mut iter = self.expr(&for_stmt.iterable)?;
 
         // Get element type using arena methods
@@ -929,7 +929,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile a for loop over a string (iterating characters)
-    fn for_string(&mut self, for_stmt: &vole_frontend::ForStmt) -> Result<bool, String> {
+    fn for_string(&mut self, for_stmt: &vole_frontend::ForStmt) -> CodegenResult<bool> {
         // Compile the string expression
         let mut string_val = self.expr(&for_stmt.iterable)?;
 
@@ -1000,7 +1000,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         value: CompiledValue,
         union_type_id: TypeId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         let arena = self.arena();
         let variants = arena.unwrap_union(union_type_id).ok_or_else(|| {
             CodegenError::type_mismatch("union construction", "union type", "non-union").to_string()
@@ -1055,8 +1055,7 @@ impl Cg<'_, '_, '_> {
                             "union variant",
                             "compatible type",
                             "incompatible type",
-                        )
-                        .into());
+                        ));
                     }
                 }
             };
@@ -1083,7 +1082,7 @@ impl Cg<'_, '_, '_> {
         pattern: &Pattern,
         value: Value,
         ty_id: TypeId,
-    ) -> Result<(), String> {
+    ) -> CodegenResult<()> {
         match &pattern.kind {
             PatternKind::Identifier { name } => {
                 let cr_type = self.cranelift_type(ty_id);
@@ -1180,7 +1179,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         fields: &[vole_frontend::RecordFieldPattern],
         module_info: &vole_sema::type_arena::InternedModule,
-    ) -> Result<(), String> {
+    ) -> CodegenResult<()> {
         for field_pattern in fields {
             let export_name = field_pattern.field_name;
             let export_name_str = self.interner().resolve(export_name);
@@ -1201,7 +1200,7 @@ impl Cg<'_, '_, '_> {
                     (module_info.module_id, export_name, export_type_id),
                 );
             } else {
-                return Err(format!("Module export '{}' not found", export_name_str));
+                return Err(CodegenError::not_found("module export", export_name_str));
             }
         }
         Ok(())
@@ -1215,11 +1214,11 @@ impl Cg<'_, '_, '_> {
     ///   a pointer to stack-allocated error data.
     ///
     /// Then returns from the function with (tag, payload).
-    fn raise_stmt(&mut self, raise_stmt: &RaiseStmt) -> Result<bool, String> {
+    fn raise_stmt(&mut self, raise_stmt: &RaiseStmt) -> CodegenResult<bool> {
         // Get the current function's return type - must be Fallible
-        let return_type_id = self
-            .return_type
-            .ok_or("raise statement used outside of a function with declared return type")?;
+        let return_type_id = self.return_type.ok_or(CodegenError::internal(
+            "raise statement used outside of a function with declared return type",
+        ))?;
 
         // Extract the error type from the fallible return type
         let (_success_type_id, error_type_id) = self

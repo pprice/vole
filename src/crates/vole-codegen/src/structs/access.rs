@@ -3,7 +3,7 @@
 use super::helpers::{convert_to_i64_for_storage, get_field_slot_and_type_id_cg};
 use crate::RuntimeFn;
 use crate::context::Cg;
-use crate::errors::CodegenError;
+use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, RcLifecycle, module_name_id};
 use cranelift::prelude::*;
 use vole_frontend::{Expr, FieldAccessExpr, NodeId, OptionalChainExpr, Symbol};
@@ -12,7 +12,7 @@ use vole_sema::types::ConstantValue;
 
 impl Cg<'_, '_, '_> {
     #[tracing::instrument(skip(self, fa), fields(field = %self.interner().resolve(fa.field)))]
-    pub fn field_access(&mut self, fa: &FieldAccessExpr) -> Result<CompiledValue, String> {
+    pub fn field_access(&mut self, fa: &FieldAccessExpr) -> CodegenResult<CompiledValue> {
         let obj = self.expr(&fa.object)?;
 
         let module_info = {
@@ -68,22 +68,19 @@ impl Cg<'_, '_, '_> {
                     return Err(CodegenError::unsupported_with_context(
                         "function as field value",
                         format!("use {}() to call the function", field_name),
-                    )
-                    .into());
+                    ));
                 }
 
                 return Err(CodegenError::unsupported_with_context(
                     "non-constant module export",
                     format!("{} cannot be accessed at compile time", field_name),
-                )
-                .into());
+                ));
             }
 
             return Err(CodegenError::not_found(
                 "module export",
                 format!("{}.{}", module_path, field_name),
-            )
-            .into());
+            ));
         }
 
         // Non-module field access - use TypeId-based helpers
@@ -102,7 +99,7 @@ impl Cg<'_, '_, '_> {
         obj: CompiledValue,
         slot: usize,
         field_type_id: TypeId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         // Struct types are stack-allocated: load field directly from pointer + offset
         let is_struct = self.arena().is_struct(obj.type_id);
         if is_struct {
@@ -135,7 +132,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         oc: &OptionalChainExpr,
         expr_id: NodeId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         let obj = self.expr(&oc.object)?;
 
         // The object should be an optional type (union with nil)
@@ -262,7 +259,7 @@ impl Cg<'_, '_, '_> {
         object: &Expr,
         field: Symbol,
         value_expr: &Expr,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         let obj = self.expr(object)?;
         let value = self.expr(value_expr)?;
 
@@ -365,7 +362,7 @@ impl Cg<'_, '_, '_> {
         slot: usize,
         field_type_id: TypeId,
         parent_type_id: TypeId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         // Compute byte offset accounting for nested struct sizes
         let offset = {
             let arena = self.arena();

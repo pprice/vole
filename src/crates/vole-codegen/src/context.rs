@@ -14,7 +14,7 @@ use cranelift_codegen::ir::StackSlot;
 use cranelift_module::{FuncId, Module};
 use rustc_hash::FxHashMap;
 
-use crate::errors::CodegenError;
+use crate::errors::{CodegenError, CodegenResult};
 use crate::{FunctionKey, RuntimeFn};
 use smallvec::SmallVec;
 use vole_frontend::{Expr, Symbol};
@@ -391,7 +391,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Pop the current RC scope and emit cleanup for its RC locals and composites.
     /// `skip_var` optionally specifies a variable whose ownership is being
     /// transferred out (e.g., the block result) and should NOT be dec'd.
-    pub fn pop_rc_scope_with_cleanup(&mut self, skip_var: Option<Variable>) -> Result<(), String> {
+    pub fn pop_rc_scope_with_cleanup(&mut self, skip_var: Option<Variable>) -> CodegenResult<()> {
         let scope = self.rc_scopes.pop_scope();
         if let Some(scope) = scope {
             let rc_dec_ref = self.runtime_func_ref(RuntimeFn::RcDec)?;
@@ -417,7 +417,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Emit cleanup for ALL active RC scopes (for return statements).
     /// `skip_var` optionally specifies a variable being returned.
-    pub fn emit_rc_cleanup_all_scopes(&mut self, skip_var: Option<Variable>) -> Result<(), String> {
+    pub fn emit_rc_cleanup_all_scopes(&mut self, skip_var: Option<Variable>) -> CodegenResult<()> {
         let locals: Vec<_> = self
             .rc_scopes
             .all_locals_innermost_first()
@@ -449,7 +449,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Emit cleanup for scopes from the given depth upward (for break/continue).
     /// `target_depth` is the depth of the loop scope.
-    pub fn emit_rc_cleanup_from_depth(&mut self, target_depth: usize) -> Result<(), String> {
+    pub fn emit_rc_cleanup_from_depth(&mut self, target_depth: usize) -> CodegenResult<()> {
         let locals: Vec<_> = self
             .rc_scopes
             .locals_from_depth(target_depth)
@@ -500,13 +500,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Emit rc_inc(value) to increment the reference count.
     /// Used when creating a new reference to an existing RC value.
-    pub fn emit_rc_inc(&mut self, value: Value) -> Result<(), String> {
+    pub fn emit_rc_inc(&mut self, value: Value) -> CodegenResult<()> {
         self.call_runtime_void(RuntimeFn::RcInc, &[value])
     }
 
     /// Emit rc_inc for a value, handling interface fat pointers by loading the
     /// data word at offset 0 before incrementing.
-    pub fn emit_rc_inc_for_type(&mut self, value: Value, type_id: TypeId) -> Result<(), String> {
+    pub fn emit_rc_inc_for_type(&mut self, value: Value, type_id: TypeId) -> CodegenResult<()> {
         if self.arena().is_interface(type_id) {
             let data_word = self
                 .builder
@@ -527,7 +527,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &mut self,
         union_ptr: Value,
         rc_tags: &[(u8, bool)],
-    ) -> Result<(), String> {
+    ) -> CodegenResult<()> {
         use cranelift::prelude::{InstBuilder, IntCC, MemFlags, types};
 
         let tag = self
@@ -578,7 +578,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &mut self,
         union_ptr: Value,
         rc_tags: &[(u8, bool)],
-    ) -> Result<(), String> {
+    ) -> CodegenResult<()> {
         use cranelift::prelude::{InstBuilder, IntCC, MemFlags, types};
 
         let tag = self
@@ -624,13 +624,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Emit rc_dec(value) to decrement the reference count.
     /// Used when destroying a reference (e.g., reassignment).
-    pub fn emit_rc_dec(&mut self, value: Value) -> Result<(), String> {
+    pub fn emit_rc_dec(&mut self, value: Value) -> CodegenResult<()> {
         self.call_runtime_void(RuntimeFn::RcDec, &[value])
     }
 
     /// Emit rc_dec for a value, handling interface fat pointers by loading the
     /// data word at offset 0 before decrementing.
-    pub fn emit_rc_dec_for_type(&mut self, value: Value, type_id: TypeId) -> Result<(), String> {
+    pub fn emit_rc_dec_for_type(&mut self, value: Value, type_id: TypeId) -> CodegenResult<()> {
         if self.arena().is_interface(type_id) {
             let data_word = self
                 .builder
@@ -645,7 +645,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Emit rc_dec for an owned RC value and mark it as consumed.
     /// No-op if the value is not Owned (Borrowed, Consumed, or Untracked).
     /// For interface types, extracts the data word before decrementing.
-    pub fn consume_rc_value(&mut self, cv: &mut CompiledValue) -> Result<(), String> {
+    pub fn consume_rc_value(&mut self, cv: &mut CompiledValue) -> CodegenResult<()> {
         if cv.is_owned() {
             self.emit_rc_dec_for_type(cv.value, cv.type_id)?;
             cv.mark_consumed();
@@ -654,7 +654,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Consume all tracked RC values in a slice.
-    pub fn consume_rc_args(&mut self, args: &mut [CompiledValue]) -> Result<(), String> {
+    pub fn consume_rc_args(&mut self, args: &mut [CompiledValue]) -> CodegenResult<()> {
         for cv in args.iter_mut() {
             self.consume_rc_value(cv)?;
         }
@@ -1201,17 +1201,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     // ========== Runtime function helpers ==========
 
     /// Get a function ID by key
-    pub fn func_id(&self, key: FunctionKey) -> Result<FuncId, String> {
+    pub fn func_id(&self, key: FunctionKey) -> CodegenResult<FuncId> {
         self.funcs_ref()
             .func_id(key)
-            .ok_or_else(|| "function id not found".to_string())
+            .ok_or(CodegenError::not_found("function id", ""))
     }
 
     /// Get a function reference for calling
-    pub fn func_ref(
-        &mut self,
-        key: FunctionKey,
-    ) -> Result<cranelift::codegen::ir::FuncRef, String> {
+    pub fn func_ref(&mut self, key: FunctionKey) -> CodegenResult<cranelift::codegen::ir::FuncRef> {
         let func_id = self.func_id(key)?;
         // Use codegen_ctx directly to avoid borrowing self twice
         let module = self.codegen_ctx.jit_module();
@@ -1222,7 +1219,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     pub fn runtime_func_ref(
         &mut self,
         runtime: RuntimeFn,
-    ) -> Result<cranelift::codegen::ir::FuncRef, String> {
+    ) -> CodegenResult<cranelift::codegen::ir::FuncRef> {
         let key = self.funcs().runtime_key(runtime).ok_or_else(|| {
             CodegenError::not_found("runtime function", runtime.name()).to_string()
         })?;
@@ -1230,7 +1227,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Call a runtime function and return the first result (or error if no results)
-    pub fn call_runtime(&mut self, runtime: RuntimeFn, args: &[Value]) -> Result<Value, String> {
+    pub fn call_runtime(&mut self, runtime: RuntimeFn, args: &[Value]) -> CodegenResult<Value> {
         let func_ref = self.runtime_func_ref(runtime)?;
         let call = self.builder.ins().call(func_ref, args);
         let results = self.builder.inst_results(call);
@@ -1238,19 +1235,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             Err(CodegenError::internal_with_context(
                 "runtime function returned no value",
                 runtime.name(),
-            )
-            .into())
+            ))
         } else {
             Ok(results[0])
         }
     }
 
     /// Call a pure runtime function with caching (CSE)
-    pub fn call_runtime_cached(
-        &mut self,
-        func: RuntimeFn,
-        args: &[Value],
-    ) -> Result<Value, String> {
+    pub fn call_runtime_cached(&mut self, func: RuntimeFn, args: &[Value]) -> CodegenResult<Value> {
         let key = (func, SmallVec::from_slice(args));
         if let Some(&cached) = self.call_cache.get(&key) {
             return Ok(cached);
@@ -1261,7 +1253,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Get cached field value or call runtime and cache result
-    pub fn get_field_cached(&mut self, instance: Value, slot: u32) -> Result<Value, String> {
+    pub fn get_field_cached(&mut self, instance: Value, slot: u32) -> CodegenResult<Value> {
         let key = (instance, slot);
         if let Some(&cached) = self.field_cache.get(&key) {
             return Ok(cached);
@@ -1273,7 +1265,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     }
 
     /// Call a runtime function that returns void
-    pub fn call_runtime_void(&mut self, runtime: RuntimeFn, args: &[Value]) -> Result<(), String> {
+    pub fn call_runtime_void(&mut self, runtime: RuntimeFn, args: &[Value]) -> CodegenResult<()> {
         let func_ref = self.runtime_func_ref(runtime)?;
         self.builder.ins().call(func_ref, args);
         Ok(())
@@ -1497,7 +1489,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Compile a list of expression arguments into Cranelift values.
     /// This is the common pattern for function/method calls.
-    pub fn compile_call_args(&mut self, args: &[Expr]) -> Result<Vec<Value>, String> {
+    pub fn compile_call_args(&mut self, args: &[Expr]) -> CodegenResult<Vec<Value>> {
         let mut values = Vec::with_capacity(args.len());
         for arg in args {
             let compiled = self.expr(arg)?;
@@ -1511,7 +1503,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     pub fn compile_call_args_tracking_rc(
         &mut self,
         args: &[Expr],
-    ) -> Result<(Vec<Value>, Vec<CompiledValue>), String> {
+    ) -> CodegenResult<(Vec<Value>, Vec<CompiledValue>)> {
         let mut values = Vec::with_capacity(args.len());
         let mut rc_temps = Vec::new();
         for arg in args {
@@ -1549,7 +1541,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         body: &vole_frontend::Block,
         exit_block: cranelift::prelude::Block,
         continue_block: cranelift::prelude::Block,
-    ) -> Result<bool, String> {
+    ) -> CodegenResult<bool> {
         let rc_depth = self.rc_scope_depth();
         self.cf.push_loop(exit_block, continue_block, rc_depth);
         // Push a per-iteration RC scope so temps created in the loop body
@@ -1645,7 +1637,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Copy a struct value to a new stack slot (value semantics).
     /// Copies all flat slots (8 bytes each), accounting for nested structs.
-    pub fn copy_struct_value(&mut self, src: CompiledValue) -> Result<CompiledValue, String> {
+    pub fn copy_struct_value(&mut self, src: CompiledValue) -> CodegenResult<CompiledValue> {
         let flat_count = self
             .struct_flat_slot_count(src.type_id)
             .ok_or_else(|| "copy_struct_value: expected struct type".to_string())?;
@@ -1671,7 +1663,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Copy a struct value to a heap allocation.
     /// Used when storing structs into arrays so the data survives the current stack frame.
-    pub fn copy_struct_to_heap(&mut self, src: CompiledValue) -> Result<CompiledValue, String> {
+    pub fn copy_struct_to_heap(&mut self, src: CompiledValue) -> CodegenResult<CompiledValue> {
         let flat_count = self
             .struct_flat_slot_count(src.type_id)
             .ok_or_else(|| "copy_struct_to_heap: expected struct type".to_string())?;
@@ -1978,7 +1970,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         arg1: Value,
         arg2: Value,
         return_type_id: TypeId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         use crate::intrinsics::CheckedIntOp;
 
         // Determine the operation and type
@@ -2170,7 +2162,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         ty: Type,
         value_type_id: TypeId,
         return_type_id: TypeId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         // Find the nil and value variant positions in the union
         let nil_tag = self.find_nil_variant(return_type_id).ok_or_else(|| {
             "checked arithmetic intrinsic: return type is not an optional".to_string()
@@ -2221,7 +2213,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         ty: Type,
         value_type_id: TypeId,
         return_type_id: TypeId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         let bits = ty.bits();
         let min_val = match bits {
             8 => i8::MIN as i64,
@@ -2270,7 +2262,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         ty: Type,
         value_type_id: TypeId,
         return_type_id: TypeId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         let zero = self.builder.ins().iconst(ty, 0);
         let one = self.builder.ins().iconst(ty, 1);
 
@@ -2298,7 +2290,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         external_info: &ExternalMethodInfo,
         args: &[Value],
         return_type_id: TypeId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         // Get string names from NameId
         let (module_path, native_name) = {
             let name_table = self.name_table();
@@ -2375,7 +2367,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         intrinsic_key: &str,
         args: &[Value],
         _return_type_id: TypeId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         self.call_compiler_intrinsic_with_line(intrinsic_key, args, _return_type_id, 0)
     }
 
@@ -2386,19 +2378,19 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         args: &[Value],
         _return_type_id: TypeId,
         call_line: u32,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         use crate::intrinsics::{FloatConstant, IntrinsicHandler, IntrinsicKey, UnaryFloatOp};
 
         let key = IntrinsicKey::from(intrinsic_key);
-        let handler = self
-            .intrinsics_registry()
-            .lookup(&key)
-            .ok_or_else(|| {
+        let handler = self.intrinsics_registry().lookup(&key).ok_or_else(|| {
+            CodegenError::not_found(
+                "intrinsic handler",
                 format!(
-                    "intrinsic \"{}\" declared but no handler registered\n  note: add handler in codegen/intrinsics.rs",
+                    "\"{}\" (add handler in codegen/intrinsics.rs)",
                     intrinsic_key
-                )
-            })?;
+                ),
+            )
+        })?;
 
         match handler {
             IntrinsicHandler::FloatConstant(fc) => {
@@ -2440,9 +2432,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             }
             IntrinsicHandler::UnaryFloatOp(op) => {
                 if args.is_empty() {
-                    return Err(format!(
-                        "unary float intrinsic \"{}\" requires 1 argument",
-                        intrinsic_key
+                    return Err(CodegenError::internal_with_context(
+                        "wrong argument count",
+                        format!("{} expects 1 argument, got {}", intrinsic_key, args.len()),
                     ));
                 }
                 let arg = args[0];
@@ -2501,9 +2493,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             IntrinsicHandler::BinaryFloatOp(op) => {
                 use crate::intrinsics::BinaryFloatOp;
                 if args.len() < 2 {
-                    return Err(format!(
-                        "binary float intrinsic \"{}\" requires 2 arguments",
-                        intrinsic_key
+                    return Err(CodegenError::internal_with_context(
+                        "wrong argument count",
+                        format!("{} expects 2 arguments, got {}", intrinsic_key, args.len()),
                     ));
                 }
                 let arg1 = args[0];
@@ -2531,9 +2523,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             IntrinsicHandler::UnaryIntOp(op) => {
                 use crate::intrinsics::UnaryIntOp;
                 if args.is_empty() {
-                    return Err(format!(
-                        "unary int intrinsic \"{}\" requires 1 argument",
-                        intrinsic_key
+                    return Err(CodegenError::internal_with_context(
+                        "wrong argument count",
+                        format!("{} expects 1 argument, got {}", intrinsic_key, args.len()),
                     ));
                 }
                 let arg = args[0];
@@ -2646,9 +2638,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             IntrinsicHandler::BinaryIntOp(op) => {
                 use crate::intrinsics::BinaryIntOp;
                 if args.len() < 2 {
-                    return Err(format!(
-                        "binary int intrinsic \"{}\" requires 2 arguments",
-                        intrinsic_key
+                    return Err(CodegenError::internal_with_context(
+                        "wrong argument count",
+                        format!("{} expects 2 arguments, got {}", intrinsic_key, args.len()),
                     ));
                 }
                 let arg1 = args[0];
@@ -3012,9 +3004,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             IntrinsicHandler::UnaryIntWrappingOp(op) => {
                 use crate::intrinsics::UnaryIntWrappingOp;
                 if args.is_empty() {
-                    return Err(format!(
-                        "unary int wrapping intrinsic \"{}\" requires 1 argument",
-                        intrinsic_key
+                    return Err(CodegenError::internal_with_context(
+                        "wrong argument count",
+                        format!("{} expects 1 argument, got {}", intrinsic_key, args.len()),
                     ));
                 }
                 let arg = args[0];
@@ -3041,9 +3033,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             }
             IntrinsicHandler::CheckedIntOp(op) => {
                 if args.len() < 2 {
-                    return Err(format!(
-                        "checked int intrinsic \"{}\" requires 2 arguments",
-                        intrinsic_key
+                    return Err(CodegenError::internal_with_context(
+                        "wrong argument count",
+                        format!("{} expects 2 arguments, got {}", intrinsic_key, args.len()),
                     ));
                 }
                 let arg1 = args[0];
@@ -3055,9 +3047,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             }
             IntrinsicHandler::BuiltinPanic => {
                 if args.is_empty() {
-                    return Err(
-                        "panic intrinsic requires 1 argument (message: string), got 0".to_string(),
-                    );
+                    return Err(CodegenError::arg_count("panic", 1, 0));
                 }
 
                 // vole_panic(msg, file_ptr, file_len, line)
@@ -3096,7 +3086,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &mut self,
         value: CompiledValue,
         target_type_id: TypeId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         let (
             is_target_interface,
             is_value_interface,
@@ -3133,7 +3123,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// - Offset 8: value (u64) - the actual value (or pointer for reference types)
     ///
     /// Returns a pointer to the TaggedValue.
-    pub fn box_to_unknown(&mut self, value: CompiledValue) -> Result<CompiledValue, String> {
+    pub fn box_to_unknown(&mut self, value: CompiledValue) -> CodegenResult<CompiledValue> {
         use crate::types::unknown_type_tag;
 
         // Get the runtime tag for this type
@@ -3191,7 +3181,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &mut self,
         value: CompiledValue,
         interface_type_id: TypeId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         crate::interface_vtable::box_interface_value_id(
             self.builder,
             self.codegen_ctx,
@@ -3233,7 +3223,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         start_index: usize,
         expected_type_ids: &[TypeId],
         is_generic_class: bool,
-    ) -> Result<(Vec<Value>, Vec<CompiledValue>), String> {
+    ) -> CodegenResult<(Vec<Value>, Vec<CompiledValue>)> {
         use crate::types::value_to_word;
 
         let mut args = Vec::new();

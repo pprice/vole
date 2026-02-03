@@ -13,6 +13,7 @@ use vole_sema::type_arena::TypeId;
 use super::context::Cg;
 use super::structs::{convert_to_i64_for_storage, get_field_slot_and_type_id_cg};
 use super::types::{CompiledValue, array_element_tag_id, convert_to_type};
+use crate::errors::{CodegenError, CodegenResult};
 
 /// Convert a numeric TypeId to its corresponding Cranelift type.
 /// Only handles numeric types; other types will default to I64.
@@ -98,7 +99,7 @@ fn integer_result_type_id(left: TypeId, right: TypeId) -> TypeId {
 
 impl Cg<'_, '_, '_> {
     /// Compile a binary expression
-    pub fn binary(&mut self, bin: &BinaryExpr, line: u32) -> Result<CompiledValue, String> {
+    pub fn binary(&mut self, bin: &BinaryExpr, line: u32) -> CodegenResult<CompiledValue> {
         // Handle short-circuit evaluation for And/Or
         match bin.op {
             BinaryOp::And => return self.binary_and(bin),
@@ -131,7 +132,7 @@ impl Cg<'_, '_, '_> {
 
     /// Try to emit FMA instruction for patterns like (x * y) + z or z + (x * y)
     /// Returns Some(result) if FMA was emitted, None otherwise
-    fn try_emit_fma(&mut self, bin: &BinaryExpr) -> Result<Option<CompiledValue>, String> {
+    fn try_emit_fma(&mut self, bin: &BinaryExpr) -> CodegenResult<Option<CompiledValue>> {
         // Only handle Add and Sub for FMA patterns
         if !matches!(bin.op, BinaryOp::Add | BinaryOp::Sub) {
             return Ok(None);
@@ -215,7 +216,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         bin: &BinaryExpr,
         _line: u32,
-    ) -> Result<Option<CompiledValue>, String> {
+    ) -> CodegenResult<Option<CompiledValue>> {
         // Only handle Mul, Div, Mod for power-of-2 optimization
         if !matches!(bin.op, BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod) {
             return Ok(None);
@@ -337,7 +338,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         mut left: CompiledValue,
         mut right: CompiledValue,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         // Get the right operand as a string
         let right_converted = if right.type_id == TypeId::STRING {
             // Right is already a string, use it directly
@@ -367,7 +368,7 @@ impl Cg<'_, '_, '_> {
 
     /// Call to_string() on a value via the Stringable interface.
     /// Returns the resulting string value.
-    fn call_to_string(&mut self, val: &CompiledValue) -> Result<Value, String> {
+    fn call_to_string(&mut self, val: &CompiledValue) -> CodegenResult<Value> {
         let arena = self.arena();
         let impl_type_id = ImplTypeId::from_type_id(val.type_id, arena, self.query().registry())
             .ok_or_else(|| format!("Cannot find ImplTypeId for type_id {:?}", val.type_id))?;
@@ -408,14 +409,13 @@ impl Cg<'_, '_, '_> {
         let call = self.builder.ins().call(func_ref, &[val.value]);
         let results = self.builder.inst_results(call);
 
-        results
-            .first()
-            .copied()
-            .ok_or_else(|| "to_string method did not return a value".to_string())
+        results.first().copied().ok_or(CodegenError::internal(
+            "to_string method did not return a value",
+        ))
     }
 
     /// Short-circuit AND evaluation
-    fn binary_and(&mut self, bin: &BinaryExpr) -> Result<CompiledValue, String> {
+    fn binary_and(&mut self, bin: &BinaryExpr) -> CodegenResult<CompiledValue> {
         let left = self.expr(&bin.left)?;
 
         let then_block = self.builder.create_block();
@@ -447,7 +447,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Short-circuit OR evaluation
-    fn binary_or(&mut self, bin: &BinaryExpr) -> Result<CompiledValue, String> {
+    fn binary_or(&mut self, bin: &BinaryExpr) -> CodegenResult<CompiledValue> {
         let left = self.expr(&bin.left)?;
 
         let then_block = self.builder.create_block();
@@ -485,7 +485,7 @@ impl Cg<'_, '_, '_> {
         mut right: CompiledValue,
         op: BinaryOp,
         line: u32,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         // Handle optional/nil comparisons specially
         // When comparing optional == nil or optional != nil, we need to check the tag
         if matches!(op, BinaryOp::Eq | BinaryOp::Ne) {
@@ -686,7 +686,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// String equality comparison
-    fn string_eq(&mut self, left: Value, right: Value) -> Result<Value, String> {
+    fn string_eq(&mut self, left: Value, right: Value) -> CodegenResult<Value> {
         if self.funcs().has_runtime(RuntimeFn::StringEq) {
             self.call_runtime(RuntimeFn::StringEq, &[left, right])
         } else {
@@ -701,7 +701,7 @@ impl Cg<'_, '_, '_> {
         left: CompiledValue,
         right: CompiledValue,
         op: BinaryOp,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         let flat_count = self
             .struct_flat_slot_count(left.type_id)
             .ok_or_else(|| "struct_equality: expected struct type".to_string())?;
@@ -738,11 +738,15 @@ impl Cg<'_, '_, '_> {
         &mut self,
         optional: CompiledValue,
         op: BinaryOp,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         // Find the position of nil in the variants (this is the nil tag value)
-        let nil_tag = self
-            .find_nil_variant(optional.type_id)
-            .ok_or("optional_nil_compare called on non-optional type")?;
+        let nil_tag =
+            self.find_nil_variant(optional.type_id)
+                .ok_or(CodegenError::type_mismatch(
+                    "optional_nil_compare",
+                    "optional type",
+                    "non-optional",
+                ))?;
 
         // Compare tag with nil_tag
         let result = match op {
@@ -761,11 +765,15 @@ impl Cg<'_, '_, '_> {
         optional: CompiledValue,
         value: CompiledValue,
         op: BinaryOp,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         // Find the position of nil in the variants (this is the nil tag value)
-        let nil_tag = self
-            .find_nil_variant(optional.type_id)
-            .ok_or("optional_value_compare called on non-optional type")?;
+        let nil_tag =
+            self.find_nil_variant(optional.type_id)
+                .ok_or(CodegenError::type_mismatch(
+                    "optional_value_compare",
+                    "optional type",
+                    "non-optional",
+                ))?;
 
         // Check if not nil (tag != nil_tag)
         let is_not_nil = self.tag_ne(optional.value, nil_tag as i64);
@@ -839,12 +847,14 @@ impl Cg<'_, '_, '_> {
         &mut self,
         compound: &CompoundAssignExpr,
         line: u32,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         match &compound.target {
             AssignTarget::Discard => {
                 // Compound assignment to discard doesn't make sense
                 // Sema should catch this, but handle it gracefully
-                Err("cannot use compound assignment with discard pattern".to_string())
+                Err(CodegenError::unsupported(
+                    "compound assignment with discard pattern",
+                ))
             }
             AssignTarget::Variable(sym) => self.compound_assign_var(*sym, compound, line),
             AssignTarget::Index { object, index } => {
@@ -862,7 +872,7 @@ impl Cg<'_, '_, '_> {
         sym: vole_frontend::Symbol,
         compound: &CompoundAssignExpr,
         line: u32,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         let (var, var_type_id) = self
             .vars
             .get(&sym)
@@ -893,7 +903,7 @@ impl Cg<'_, '_, '_> {
         index: &vole_frontend::Expr,
         compound: &CompoundAssignExpr,
         line: u32,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         let arr = self.expr(object)?;
         let idx = self.expr(index)?;
 
@@ -936,7 +946,7 @@ impl Cg<'_, '_, '_> {
         field: vole_frontend::Symbol,
         compound: &CompoundAssignExpr,
         line: u32,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         let obj = self.expr(object)?;
 
         let field_name = self.interner().resolve(field);
@@ -987,7 +997,7 @@ impl Cg<'_, '_, '_> {
     /// Emit division by zero check for integer division/remainder.
     /// Creates a branch: if divisor == 0, panic; else continue.
     /// Returns the continue block that should be used for subsequent code.
-    fn emit_div_by_zero_check(&mut self, divisor: Value, line: u32) -> Result<Block, String> {
+    fn emit_div_by_zero_check(&mut self, divisor: Value, line: u32) -> CodegenResult<Block> {
         let is_zero = self.builder.ins().icmp_imm(IntCC::Equal, divisor, 0);
 
         let panic_block = self.builder.create_block();
@@ -1016,7 +1026,7 @@ impl Cg<'_, '_, '_> {
         divisor: Value,
         result_ty: Type,
         line: u32,
-    ) -> Result<(), String> {
+    ) -> CodegenResult<()> {
         // Get MIN value for the integer type
         let min_val = match result_ty {
             types::I8 => i8::MIN as i64,

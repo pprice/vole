@@ -5,6 +5,8 @@ use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{FuncId, Linkage, Module};
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::errors::{CodegenError, CodegenResult};
+
 /// Cache of compiled module functions that can be shared across JitContexts.
 /// The JitContext that compiled these functions must be kept alive.
 pub struct CompiledModules {
@@ -26,7 +28,7 @@ impl CompiledModules {
     /// Create a new CompiledModules from a finalized JitContext.
     /// Extracts function pointers for all declared functions.
     /// `module_paths` is the list of module paths that were processed.
-    pub fn new(mut jit: JitContext, module_paths: Vec<String>) -> Result<Self, String> {
+    pub fn new(mut jit: JitContext, module_paths: Vec<String>) -> CodegenResult<Self> {
         // Finalize to get function pointers
         jit.finalize()?;
 
@@ -1120,7 +1122,7 @@ impl JitContext {
     }
 
     /// Define a function (after building IR)
-    pub fn define_function(&mut self, func_id: FuncId) -> Result<(), String> {
+    pub fn define_function(&mut self, func_id: FuncId) -> CodegenResult<()> {
         // Run CFG cleanup to eliminate trampoline blocks before Cranelift compilation
         crate::cfg_cleanup::cleanup_cfg(&mut self.ctx.func);
 
@@ -1168,10 +1170,10 @@ impl JitContext {
 
     /// Finalize all functions and get code pointers
     /// Returns Ok(()) on success, Err on finalization failure (safe to ignore)
-    pub fn finalize(&mut self) -> Result<(), String> {
-        self.module
-            .finalize_definitions()
-            .map_err(|e| format!("Finalization error: {:?}", e))
+    pub fn finalize(&mut self) -> CodegenResult<()> {
+        self.module.finalize_definitions().map_err(|e| {
+            CodegenError::internal_with_context("finalization error", format!("{:?}", e))
+        })
     }
 
     /// Get a function pointer by name

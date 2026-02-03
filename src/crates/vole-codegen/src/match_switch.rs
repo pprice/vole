@@ -12,6 +12,7 @@ use vole_sema::type_arena::TypeId;
 
 use super::context::Cg;
 use super::types::CompiledValue;
+use crate::errors::CodegenResult;
 
 /// Minimum number of non-default arms required to use the Switch optimization.
 const MIN_SWITCH_ARMS: usize = 4;
@@ -120,7 +121,7 @@ pub(crate) fn emit_switch_match(
     match_expr: &MatchExpr,
     analysis: SwitchAnalysis,
     scrutinee: CompiledValue,
-) -> Result<CompiledValue, String> {
+) -> CodegenResult<CompiledValue> {
     let merge_block = cg.builder.create_block();
     cg.builder.append_block_param(merge_block, types::I64);
 

@@ -7,7 +7,7 @@ use cranelift_codegen::ir::FuncRef;
 use rustc_hash::FxHashMap;
 
 use crate::AnalyzedProgram;
-use crate::errors::CodegenError;
+use crate::errors::{CodegenError, CodegenResult};
 use vole_frontend::{Interner, Symbol};
 use vole_identity::{ModuleId, NameId, NameTable, NamerLookup, TypeDefId};
 use vole_runtime::native_registry::NativeType;
@@ -548,7 +548,7 @@ pub(crate) fn value_to_word_with_ctx(
     value: &CompiledValue,
     type_ctx: &TypeCtx,
     heap_alloc_ref: Option<FuncRef>,
-) -> Result<Value, String> {
+) -> CodegenResult<Value> {
     value_to_word(
         builder,
         value,
@@ -567,7 +567,7 @@ pub(crate) fn value_to_word(
     heap_alloc_ref: Option<FuncRef>,
     arena: &TypeArena,
     entity_registry: &EntityRegistry,
-) -> Result<Value, String> {
+) -> CodegenResult<Value> {
     let word_type = pointer_type;
     let word_bytes = word_type.bytes();
     let value_size = type_id_size(value.type_id, pointer_type, entity_registry, arena);
@@ -581,9 +581,9 @@ pub(crate) fn value_to_word(
             return Ok(value.value);
         }
         let Some(heap_alloc_ref) = heap_alloc_ref else {
-            return Err(
-                CodegenError::missing_resource("heap allocator for interface boxing").into(),
-            );
+            return Err(CodegenError::missing_resource(
+                "heap allocator for interface boxing",
+            ));
         };
         let size_val = builder.ins().iconst(pointer_type, value_size as i64);
         let alloc_call = builder.ins().call(heap_alloc_ref, &[size_val]);

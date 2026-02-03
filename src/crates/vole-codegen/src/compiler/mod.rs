@@ -46,6 +46,7 @@ use rustc_hash::FxHashMap;
 use cranelift::prelude::types as clif_types;
 
 use crate::context::ModuleExportBinding;
+use crate::errors::CodegenResult;
 use crate::types::CodegenState;
 
 use crate::AnalyzedProgram;
@@ -209,7 +210,7 @@ impl<'a> Compiler<'a> {
 
     /// Define a function and clear the JIT context.
     /// This is the common teardown after function compilation.
-    fn finalize_function(&mut self, func_id: cranelift_module::FuncId) -> Result<(), String> {
+    fn finalize_function(&mut self, func_id: cranelift_module::FuncId) -> CodegenResult<()> {
         self.jit.define_function(func_id)?;
         self.jit.clear();
         Ok(())

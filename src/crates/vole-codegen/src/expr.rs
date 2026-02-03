@@ -7,7 +7,7 @@ use cranelift::prelude::*;
 use cranelift_module::Module;
 
 use crate::RuntimeFn;
-use crate::errors::CodegenError;
+use crate::errors::{CodegenError, CodegenResult};
 use rustc_hash::FxHashMap;
 
 use vole_frontend::{
@@ -30,7 +30,7 @@ use super::types::{
 
 impl Cg<'_, '_, '_> {
     /// Compile an expression.
-    pub fn expr(&mut self, expr: &Expr) -> Result<CompiledValue, String> {
+    pub fn expr(&mut self, expr: &Expr) -> CodegenResult<CompiledValue> {
         // Check for captures first if in closure context
         if self.has_captures()
             && let ExprKind::Identifier(sym) = &expr.kind
@@ -81,9 +81,9 @@ impl Cg<'_, '_, '_> {
                 let result = self.lambda(lambda, expr.id)?;
                 Ok(self.mark_rc_owned(result))
             }
-            ExprKind::TypeLiteral(_) => {
-                Err(CodegenError::unsupported("type expressions as runtime values").into())
-            }
+            ExprKind::TypeLiteral(_) => Err(CodegenError::unsupported(
+                "type expressions as runtime values",
+            )),
             ExprKind::StructLiteral(sl) => {
                 let result = self.struct_literal(sl, expr)?;
                 Ok(self.mark_rc_owned(result))
@@ -111,7 +111,9 @@ impl Cg<'_, '_, '_> {
             }
             ExprKind::Yield(_) => {
                 // Yield should be caught in semantic analysis
-                Err(CodegenError::unsupported("yield expression outside generator context").into())
+                Err(CodegenError::unsupported(
+                    "yield expression outside generator context",
+                ))
             }
             ExprKind::Block(block_expr) => self.block_expr(block_expr),
             ExprKind::If(if_expr) => self.if_expr(if_expr, expr.id),
@@ -121,7 +123,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile an identifier lookup
-    fn identifier(&mut self, sym: Symbol, expr: &Expr) -> Result<CompiledValue, String> {
+    fn identifier(&mut self, sym: Symbol, expr: &Expr) -> CodegenResult<CompiledValue> {
         // Sentinel values (nil, Done, user-defined) are always available as i8(0).
         // First try the sema-provided type, then fall back to name resolution.
         {
@@ -228,7 +230,10 @@ impl Cg<'_, '_, '_> {
             let value = self.builder.ins().iconst(types::I8, 0);
             Ok(CompiledValue::new(value, types::I8, sentinel_type_id))
         } else {
-            Err(CodegenError::not_found("variable", self.interner().resolve(sym)).into())
+            Err(CodegenError::not_found(
+                "variable",
+                self.interner().resolve(sym),
+            ))
         }
     }
 
@@ -239,7 +244,7 @@ impl Cg<'_, '_, '_> {
         module_id: ModuleId,
         export_name: Symbol,
         export_type_id: TypeId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         let export_name_str = self.interner().resolve(export_name);
         let module_path = self.name_table().module_path(module_id).to_string();
 
@@ -281,14 +286,12 @@ impl Cg<'_, '_, '_> {
             Err(CodegenError::unsupported_with_context(
                 "function as value",
                 format!("use {}() to call the function", export_name_str),
-            )
-            .into())
+            ))
         } else {
             Err(CodegenError::not_found(
                 "module export constant",
                 format!("{}.{}", module_path, export_name_str),
-            )
-            .into())
+            ))
         }
     }
 
@@ -298,7 +301,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         sym: Symbol,
         func_type_id: TypeId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         use cranelift::prelude::FunctionBuilderContext;
 
         // Look up the original function's FuncId using the name table
@@ -350,7 +353,7 @@ impl Cg<'_, '_, '_> {
                 cranelift_module::Linkage::Local,
                 &wrapper_sig,
             )
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| CodegenError::internal_with_context("cranelift error", e.to_string()))?;
 
         self.funcs().set_func_id(wrapper_func_key, wrapper_func_id);
         self.funcs()
@@ -421,7 +424,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile a unary expression
-    fn unary(&mut self, un: &vole_frontend::UnaryExpr) -> Result<CompiledValue, String> {
+    fn unary(&mut self, un: &vole_frontend::UnaryExpr) -> CodegenResult<CompiledValue> {
         let operand = self.expr(&un.operand)?;
         let result = match un.op {
             UnaryOp::Neg => {
@@ -441,7 +444,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile an assignment expression
-    fn assign(&mut self, assign: &vole_frontend::AssignExpr) -> Result<CompiledValue, String> {
+    fn assign(&mut self, assign: &vole_frontend::AssignExpr) -> CodegenResult<CompiledValue> {
         match &assign.target {
             AssignTarget::Discard => {
                 // Discard pattern: _ = expr
@@ -570,7 +573,7 @@ impl Cg<'_, '_, '_> {
 
     /// Compile an unreachable expression (never type / bottom type)
     /// This emits a panic with file:line info if reached at runtime.
-    fn unreachable_expr(&mut self, line: u32) -> Result<CompiledValue, String> {
+    fn unreachable_expr(&mut self, line: u32) -> CodegenResult<CompiledValue> {
         // Emit panic with location - this code should never be reached at runtime
         self.emit_panic_static("unreachable code reached", line)?;
 
@@ -584,7 +587,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile an array or tuple literal
-    fn array_literal(&mut self, elements: &[Expr], expr: &Expr) -> Result<CompiledValue, String> {
+    fn array_literal(&mut self, elements: &[Expr], expr: &Expr) -> CodegenResult<CompiledValue> {
         // Check the inferred type from semantic analysis (module-aware)
         let inferred_type_id = self.get_expr_type(&expr.id);
 
@@ -653,7 +656,7 @@ impl Cg<'_, '_, '_> {
         elements: &[Expr],
         elem_type_ids: &[TypeId],
         tuple_type_id: TypeId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         // Calculate layout using TypeId-based function
         let (total_size, offsets) = tuple_layout_id(
             elem_type_ids,
@@ -701,7 +704,7 @@ impl Cg<'_, '_, '_> {
         element: &Expr,
         count: usize,
         expr: &Expr,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         // Compile the element once
         let mut elem_value = self.expr(element)?;
 
@@ -748,7 +751,7 @@ impl Cg<'_, '_, '_> {
     /// Compile a range expression (start..end or start..=end)
     /// Returns a pointer to a stack slot containing (start: i64, end: i64)
     /// For inclusive ranges, we store end + 1 so the iterator uses exclusive end
-    fn range(&mut self, range: &RangeExpr) -> Result<CompiledValue, String> {
+    fn range(&mut self, range: &RangeExpr) -> CodegenResult<CompiledValue> {
         let start = self.expr(&range.start)?;
         let end_val = self.expr(&range.end)?;
 
@@ -776,7 +779,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile an index expression
-    fn index(&mut self, object: &Expr, index: &Expr) -> Result<CompiledValue, String> {
+    fn index(&mut self, object: &Expr, index: &Expr) -> CodegenResult<CompiledValue> {
         let obj = self.expr(object)?;
 
         let arena = self.arena();
@@ -806,7 +809,7 @@ impl Cg<'_, '_, '_> {
                 self.mark_borrowed_if_rc(&mut cv);
                 return Ok(cv);
             } else {
-                return Err("tuple index must be a constant".to_string());
+                return Err(CodegenError::unsupported("non-constant tuple index"));
             }
         }
 
@@ -821,9 +824,9 @@ impl Cg<'_, '_, '_> {
                 // Constant index - bounds check at compile time already done in sema
                 let i = *i as usize;
                 if i >= size {
-                    return Err(format!(
-                        "index {} out of bounds for fixed array of size {}",
-                        i, size
+                    return Err(CodegenError::internal_with_context(
+                        "array index out of bounds",
+                        format!("index {} for array of size {}", i, size),
                     ));
                 }
                 self.builder.ins().iconst(types::I64, (i as i64) * 8)
@@ -872,7 +875,11 @@ impl Cg<'_, '_, '_> {
         }
 
         let type_name = self.arena().display_basic(obj.type_id);
-        Err(format!("cannot index type {}", type_name))
+        Err(CodegenError::type_mismatch(
+            "index expression",
+            "array or string",
+            type_name,
+        ))
     }
 
     /// Compile an index assignment
@@ -881,7 +888,7 @@ impl Cg<'_, '_, '_> {
         object: &Expr,
         index: &Expr,
         value: &Expr,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         let arr = self.expr(object)?;
         let val = self.expr(value)?;
 
@@ -897,9 +904,9 @@ impl Cg<'_, '_, '_> {
             let offset = if let ExprKind::IntLiteral(i, _) = &index.kind {
                 let i = *i as usize;
                 if i >= size {
-                    return Err(format!(
-                        "index {} out of bounds for fixed array of size {}",
-                        i, size
+                    return Err(CodegenError::internal_with_context(
+                        "array index out of bounds",
+                        format!("index {} for array of size {}", i, size),
                     ));
                 }
                 self.builder.ins().iconst(types::I64, (i as i64) * 8)
@@ -982,7 +989,11 @@ impl Cg<'_, '_, '_> {
         } else {
             // Error: not an indexable type
             let type_name = self.arena().display_basic(arr.type_id);
-            Err(format!("cannot assign to index of type {}", type_name))
+            Err(CodegenError::type_mismatch(
+                "index assignment",
+                "array",
+                type_name,
+            ))
         }
     }
 
@@ -1077,7 +1088,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         is_expr: &vole_frontend::IsExpr,
         expr_id: NodeId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         let value = self.expr(&is_expr.value)?;
 
         // Look up pre-computed type check result from sema (module-aware).
@@ -1125,7 +1136,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         scrutinee: &CompiledValue,
         pattern_id: NodeId,
-    ) -> Result<Option<Value>, String> {
+    ) -> CodegenResult<Option<Value>> {
         // Look up pre-computed type check result from sema (module-aware)
         let is_check_result = self
             .get_is_check_result(pattern_id)
@@ -1164,7 +1175,7 @@ impl Cg<'_, '_, '_> {
         type_id: TypeId,
         left: Value,
         right: Value,
-    ) -> Result<Value, String> {
+    ) -> CodegenResult<Value> {
         let arena = self.arena();
         Ok(if arena.is_string(type_id) {
             if self.funcs().has_runtime(RuntimeFn::StringEq) {
@@ -1183,7 +1194,7 @@ impl Cg<'_, '_, '_> {
     fn null_coalesce(
         &mut self,
         nc: &vole_frontend::NullCoalesceExpr,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         // Check if the source is a variable (needs rc_inc because union cleanup
         // will also dec the payload) vs a temporary (ownership transfers directly).
         let source_is_variable =
@@ -1273,7 +1284,7 @@ impl Cg<'_, '_, '_> {
     pub(crate) fn load_capture(
         &mut self,
         binding: &super::lambda::CaptureBinding,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         let closure_var = self
             .closure_var()
             .ok_or_else(|| "Closure variable not available for capture access".to_string())?;
@@ -1302,7 +1313,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         binding: &super::lambda::CaptureBinding,
         mut value: CompiledValue,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         let closure_var = self
             .closure_var()
             .ok_or_else(|| "Closure variable not available for capture access".to_string())?;
@@ -1329,7 +1340,7 @@ impl Cg<'_, '_, '_> {
 
     /// Compile a match expression
     #[tracing::instrument(skip(self, match_expr), fields(arms = match_expr.arms.len()))]
-    pub fn match_expr(&mut self, match_expr: &MatchExpr) -> Result<CompiledValue, String> {
+    pub fn match_expr(&mut self, match_expr: &MatchExpr) -> CodegenResult<CompiledValue> {
         let scrutinee = self.expr(&match_expr.scrutinee)?;
         let scrutinee_type_id = scrutinee.type_id;
         let scrutinee_type_str = self.arena().display_basic(scrutinee_type_id);
@@ -1718,7 +1729,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         scrutinee: &CompiledValue,
         scrutinee_type_id: TypeId,
-    ) -> Result<(), String> {
+    ) -> CodegenResult<()> {
         let fallible_types = self.arena().unwrap_fallible(scrutinee_type_id);
         let Some((success_type_id, error_type_id)) = fallible_types else {
             return Ok(());
@@ -1852,7 +1863,7 @@ impl Cg<'_, '_, '_> {
     ///
     /// On success: returns unwrapped value
     /// On error: propagates by returning from function with (tag: i64, payload: i64)
-    fn try_propagate(&mut self, inner: &Expr) -> Result<CompiledValue, String> {
+    fn try_propagate(&mut self, inner: &Expr) -> CodegenResult<CompiledValue> {
         // Compile the inner fallible expression
         let fallible = self.expr(inner)?;
 
@@ -1865,8 +1876,7 @@ impl Cg<'_, '_, '_> {
                         "try operator",
                         "fallible type",
                         "non-fallible",
-                    )
-                    .into());
+                    ));
                 }
             }
         };
@@ -1917,7 +1927,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile a block expression: { stmts; trailing_expr }
-    fn block_expr(&mut self, block: &BlockExpr) -> Result<CompiledValue, String> {
+    fn block_expr(&mut self, block: &BlockExpr) -> CodegenResult<CompiledValue> {
         self.push_rc_scope();
 
         // Compile statements
@@ -1952,7 +1962,7 @@ impl Cg<'_, '_, '_> {
     /// Optimization: Uses Cranelift's `select` instruction for simple conditionals
     /// where both branches are pure expressions (no side effects, no control flow).
     /// This avoids creating 4 separate blocks and enables better register allocation.
-    fn if_expr(&mut self, if_expr: &IfExpr, expr_id: NodeId) -> Result<CompiledValue, String> {
+    fn if_expr(&mut self, if_expr: &IfExpr, expr_id: NodeId) -> CodegenResult<CompiledValue> {
         // Get the result type from semantic analysis (stored on the if expression itself)
         let result_type_id = self
             .get_expr_type(&expr_id)
@@ -2015,7 +2025,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         if_expr: &IfExpr,
         result_type_id: TypeId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         // Compile condition
         let condition = self.expr(&if_expr.condition)?;
 
@@ -2084,7 +2094,7 @@ impl Cg<'_, '_, '_> {
         if_expr: &IfExpr,
         result_type_id: TypeId,
         is_void: bool,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         let condition = self.expr(&if_expr.condition)?;
 
         let result_cranelift_type =
@@ -2174,11 +2184,7 @@ impl Cg<'_, '_, '_> {
     ///
     /// Optimization: For binary when expressions (one condition + wildcard),
     /// uses Cranelift's `select` instruction if both bodies are selectable.
-    fn when_expr(
-        &mut self,
-        when_expr: &WhenExpr,
-        expr_id: NodeId,
-    ) -> Result<CompiledValue, String> {
+    fn when_expr(&mut self, when_expr: &WhenExpr, expr_id: NodeId) -> CodegenResult<CompiledValue> {
         // Get the result type from semantic analysis (stored on the when expression itself)
         let result_type_id = self
             .get_expr_type(&expr_id)
@@ -2222,7 +2228,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         when_expr: &WhenExpr,
         result_type_id: TypeId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         // Compile condition (first arm)
         let condition = self.expr(
             when_expr.arms[0]
@@ -2267,7 +2273,7 @@ impl Cg<'_, '_, '_> {
         when_expr: &WhenExpr,
         result_type_id: TypeId,
         is_void: bool,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         let result_cranelift_type =
             type_id_to_cranelift(result_type_id, self.arena(), self.ptr_type());
 
@@ -2395,7 +2401,7 @@ impl Cg<'_, '_, '_> {
         scrutinee: &CompiledValue,
         tag: Value,
         arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
-    ) -> Result<Option<Value>, String> {
+    ) -> CodegenResult<Option<Value>> {
         let Some(inner_pat) = inner else {
             // Bare error pattern: error => ...
             let is_error = self
@@ -2432,7 +2438,7 @@ impl Cg<'_, '_, '_> {
         scrutinee: &CompiledValue,
         tag: Value,
         arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
-    ) -> Result<Option<Value>, String> {
+    ) -> CodegenResult<Option<Value>> {
         // Check if this is an error type name by looking in the fallible's error union.
         // This handles error types from imported modules that aren't in the consumer's scope.
         let is_error_type = self
@@ -2490,7 +2496,7 @@ impl Cg<'_, '_, '_> {
         name: Symbol,
         scrutinee: &CompiledValue,
         tag: Value,
-    ) -> Result<Option<Value>, String> {
+    ) -> CodegenResult<Option<Value>> {
         let arena = self.arena();
         let Some((_success_type_id, error_type_id)) = arena.unwrap_fallible(scrutinee.type_id)
         else {
@@ -2526,7 +2532,7 @@ impl Cg<'_, '_, '_> {
         field_source: Value,
         field_source_type_id: TypeId,
         arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
-    ) -> Result<(), String> {
+    ) -> CodegenResult<()> {
         let is_struct = self.arena().is_struct(field_source_type_id);
         for field_pattern in fields {
             let field_name = self.interner().resolve(field_pattern.field_name);
@@ -2559,7 +2565,7 @@ impl Cg<'_, '_, '_> {
         scrutinee: &CompiledValue,
         tag: Value,
         arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
-    ) -> Result<Option<Value>, String> {
+    ) -> CodegenResult<Option<Value>> {
         // Look up error type_def_id via EntityRegistry, with fallback to
         // searching the fallible's error union for imported module error types
         let error_type_id = self

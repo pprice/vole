@@ -7,7 +7,7 @@ use cranelift_jit::JITModule;
 use cranelift_module::{DataDescription, FuncId, Linkage, Module};
 use smallvec::{SmallVec, smallvec};
 
-use crate::errors::CodegenError;
+use crate::errors::{CodegenError, CodegenResult};
 
 /// SmallVec for call arguments - most calls have <= 8 args
 type ArgVec = SmallVec<[Value; 8]>;
@@ -34,7 +34,7 @@ pub(crate) fn compile_string_literal(
     pointer_type: Type,
     module: &mut JITModule,
     func_registry: &mut FunctionRegistry,
-) -> Result<Value, String> {
+) -> CodegenResult<Value> {
     use vole_runtime::{RC_PINNED, TYPE_STRING, fnv1a_hash};
 
     // Build complete RcString struct as bytes:
@@ -56,14 +56,14 @@ pub(crate) fn compile_string_literal(
     let data_name = func_registry.next_string_data_name();
     let data_id = module
         .declare_data(&data_name, Linkage::Local, false, false)
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| CodegenError::internal_with_context("cranelift error", e.to_string()))?;
 
     let mut data_desc = DataDescription::new();
     data_desc.define(data.into_boxed_slice());
     data_desc.set_align(8);
     module
         .define_data(data_id, &data_desc)
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| CodegenError::internal_with_context("cranelift error", e.to_string()))?;
 
     // The data section pointer IS the RcString pointer
     let data_gv = module.declare_data_in_func(data_id, builder.func);
@@ -71,7 +71,7 @@ pub(crate) fn compile_string_literal(
 }
 impl Cg<'_, '_, '_> {
     /// Compile a string literal
-    pub fn string_literal(&mut self, s: &str) -> Result<CompiledValue, String> {
+    pub fn string_literal(&mut self, s: &str) -> CodegenResult<CompiledValue> {
         let value = compile_string_literal(
             self.builder,
             s,
@@ -83,7 +83,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile an interpolated string using StringBuilder for efficient single-allocation
-    pub fn interpolated_string(&mut self, parts: &[StringPart]) -> Result<CompiledValue, String> {
+    pub fn interpolated_string(&mut self, parts: &[StringPart]) -> CodegenResult<CompiledValue> {
         if parts.is_empty() {
             return self.string_literal("");
         }
@@ -135,7 +135,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Convert a value to a string
-    fn value_to_string(&mut self, val: CompiledValue) -> Result<Value, String> {
+    fn value_to_string(&mut self, val: CompiledValue) -> CodegenResult<Value> {
         if val.type_id == TypeId::STRING {
             return Ok(val.value);
         }
@@ -185,7 +185,7 @@ impl Cg<'_, '_, '_> {
         ptr: Value,
         variants: &[TypeId],
         nil_idx: usize,
-    ) -> Result<Value, String> {
+    ) -> CodegenResult<Value> {
         // Check if the tag equals nil
         let is_nil = self.tag_eq(ptr, nil_idx as i64);
 
@@ -245,7 +245,7 @@ impl Cg<'_, '_, '_> {
         call: &CallExpr,
         call_line: u32,
         call_expr_id: NodeId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         let callee_sym = match &call.callee.kind {
             ExprKind::Identifier(sym) => *sym,
             _ => return self.indirect_call(call),
@@ -516,7 +516,7 @@ impl Cg<'_, '_, '_> {
             }
         }
 
-        Err(CodegenError::not_found("function", callee_name).into())
+        Err(CodegenError::not_found("function", callee_name))
     }
 
     /// Call a function via destructured module binding.
@@ -528,7 +528,7 @@ impl Cg<'_, '_, '_> {
         export_type_id: TypeId,
         call: &CallExpr,
         call_expr_id: NodeId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         let module_path = self.name_table().module_path(module_id).to_string();
         let export_name_str = self.interner().resolve(export_name);
 
@@ -565,8 +565,7 @@ impl Cg<'_, '_, '_> {
         Err(CodegenError::not_found(
             "module function",
             format!("{}.{}", module_path, export_name_str),
-        )
-        .into())
+        ))
     }
 
     /// Helper to call a function by its FuncId
@@ -576,7 +575,7 @@ impl Cg<'_, '_, '_> {
         func_id: FuncId,
         call: &CallExpr,
         callee_sym: Symbol,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         let func_ref = self
             .codegen_ctx
             .jit_module()
@@ -735,7 +734,7 @@ impl Cg<'_, '_, '_> {
         func_id: FuncId,
         call: &CallExpr,
         name_id: NameId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         let func_ref = self
             .codegen_ctx
             .jit_module()
@@ -888,7 +887,7 @@ impl Cg<'_, '_, '_> {
         name_id: NameId,
         start_index: usize,
         _expected_types: &[Type],
-    ) -> Result<(Vec<Value>, Vec<CompiledValue>), String> {
+    ) -> CodegenResult<(Vec<Value>, Vec<CompiledValue>)> {
         let func_id = self.query().registry().function_by_name(name_id);
         let Some(func_id) = func_id else {
             return Ok((Vec::new(), Vec::new()));
@@ -922,7 +921,7 @@ impl Cg<'_, '_, '_> {
         callee_sym: Symbol,
         start_index: usize,
         _expected_types: &[Type], // Kept for API compatibility, but we use TypeIds from FunctionDef
-    ) -> Result<(Vec<Value>, Vec<CompiledValue>), String> {
+    ) -> CodegenResult<(Vec<Value>, Vec<CompiledValue>)> {
         let module_id = self.current_module().unwrap_or(self.env.analyzed.module_id);
 
         // Get the function ID
@@ -964,7 +963,7 @@ impl Cg<'_, '_, '_> {
         callee_sym: Symbol,
         call: &CallExpr,
         expected_types: &[Type],
-    ) -> Result<Vec<Value>, String> {
+    ) -> CodegenResult<Vec<Value>> {
         // Compile provided arguments
         let mut args = self.compile_call_args(&call.args)?;
 
@@ -1037,7 +1036,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile an indirect call (closure or function value)
-    fn indirect_call(&mut self, call: &CallExpr) -> Result<CompiledValue, String> {
+    fn indirect_call(&mut self, call: &CallExpr) -> CodegenResult<CompiledValue> {
         let callee = self.expr(&call.callee)?;
 
         if self.arena().is_function(callee.type_id) {
@@ -1045,13 +1044,17 @@ impl Cg<'_, '_, '_> {
             return self.call_closure_value(callee.value, callee.type_id, call, call.callee.id);
         }
 
-        Err(CodegenError::type_mismatch("call expression", "function", "non-function").into())
+        Err(CodegenError::type_mismatch(
+            "call expression",
+            "function",
+            "non-function",
+        ))
     }
 
     /// Compile print_char builtin for ASCII output
-    fn call_print_char(&mut self, call: &CallExpr) -> Result<CompiledValue, String> {
+    fn call_print_char(&mut self, call: &CallExpr) -> CodegenResult<CompiledValue> {
         if call.args.len() != 1 {
-            return Err(CodegenError::arg_count("print_char", 1, call.args.len()).into());
+            return Err(CodegenError::arg_count("print_char", 1, call.args.len()));
         }
 
         let arg = self.expr(&call.args[0])?;
@@ -1066,8 +1069,7 @@ impl Cg<'_, '_, '_> {
                 "print_char argument",
                 "i32 or i64",
                 "non-integer",
-            )
-            .into());
+            ));
         };
 
         self.call_runtime_void(RuntimeFn::PrintChar, &[char_val])?;
@@ -1077,9 +1079,9 @@ impl Cg<'_, '_, '_> {
     /// Compile assert as inline codegen.
     /// Uses brif + assert_fail instead of a function call to avoid
     /// a pre-existing class-field-access register clobber bug (v-a1f9).
-    fn call_assert(&mut self, call: &CallExpr, call_line: u32) -> Result<CompiledValue, String> {
+    fn call_assert(&mut self, call: &CallExpr, call_line: u32) -> CodegenResult<CompiledValue> {
         if call.args.is_empty() {
-            return Err(CodegenError::arg_count("assert", 1, 0).into());
+            return Err(CodegenError::arg_count("assert", 1, 0));
         }
 
         let cond = self.expr(&call.args[0])?;
@@ -1116,7 +1118,7 @@ impl Cg<'_, '_, '_> {
     /// Used for runtime errors like division by zero that don't have a user-provided message.
     /// Returns Ok(()) on success, but note that control flow doesn't continue after this
     /// (an unreachable block is created for any following code).
-    pub fn emit_panic_static(&mut self, msg: &str, line: u32) -> Result<(), String> {
+    pub fn emit_panic_static(&mut self, msg: &str, line: u32) -> CodegenResult<()> {
         // Create the message string constant
         let msg_val = self.string_literal(msg)?;
 
@@ -1149,7 +1151,7 @@ impl Cg<'_, '_, '_> {
         func_type_id: TypeId,
         call: &CallExpr,
         call_expr_id: NodeId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         let func_ptr_or_closure = self.builder.use_var(func_var);
         self.call_closure_value(func_ptr_or_closure, func_type_id, call, call_expr_id)
     }
@@ -1162,7 +1164,7 @@ impl Cg<'_, '_, '_> {
         func_type_id: TypeId,
         call: &CallExpr,
         call_expr_id: NodeId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         // Always use closure calling convention since all lambdas are now
         // wrapped in Closure structs for consistency with interface dispatch
         self.call_actual_closure(func_ptr_or_closure, func_type_id, call, call_expr_id)
@@ -1175,15 +1177,20 @@ impl Cg<'_, '_, '_> {
         func_type_id: TypeId,
         call: &CallExpr,
         call_expr_id: NodeId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         let func_ptr = self.call_runtime(RuntimeFn::ClosureGetFunc, &[closure_ptr])?;
 
         // Get function components from arena
         let (params, ret, _is_closure) = {
             let arena = self.arena();
-            let (params, ret, is_closure) = arena
-                .unwrap_function(func_type_id)
-                .ok_or_else(|| "call_actual_closure called with non-function type".to_string())?;
+            let (params, ret, is_closure) =
+                arena.unwrap_function(func_type_id).ok_or_else(|| {
+                    CodegenError::type_mismatch(
+                        "call_actual_closure",
+                        "function type",
+                        "non-function type",
+                    )
+                })?;
             (params.clone(), ret, is_closure)
         };
 
@@ -1249,9 +1256,9 @@ impl Cg<'_, '_, '_> {
                         .map(|p| p.default_value.as_ref().map(|e| e.as_ref() as *const Expr))
                         .collect()
                 } else {
-                    return Err(format!(
-                        "Could not find lambda expression for NodeId {:?}",
-                        lambda_node_id
+                    return Err(CodegenError::internal_with_context(
+                        "lambda expression not found",
+                        format!("NodeId {:?}", lambda_node_id),
                     ));
                 }
             };
@@ -1271,9 +1278,9 @@ impl Cg<'_, '_, '_> {
                     let compiled = self.coerce_to_type(compiled, param_type_id)?;
                     args.push(compiled.value);
                 } else {
-                    return Err(
-                        "Missing default expression for parameter in lambda call".to_string()
-                    );
+                    return Err(CodegenError::internal(
+                        "missing default expression for parameter in lambda call",
+                    ));
                 }
             }
         }
@@ -1497,7 +1504,7 @@ impl Cg<'_, '_, '_> {
         native_func: &NativeFunction,
         call: &CallExpr,
         return_type_id: TypeId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         let args = self.compile_call_args(&call.args)?;
         let call_inst = self.call_native_indirect(native_func, &args);
         let type_id = self.substitute_type(return_type_id);
@@ -1532,7 +1539,7 @@ impl Cg<'_, '_, '_> {
         intrinsic_key: &str,
         call: &CallExpr,
         return_type_id: TypeId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         self.call_generic_external_intrinsic_args(
             module_path,
             intrinsic_key,
@@ -1549,7 +1556,7 @@ impl Cg<'_, '_, '_> {
         intrinsic_key: &str,
         args_exprs: &[Expr],
         return_type_id: TypeId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         // Check if this is a compiler intrinsic module
         if module_path == Self::COMPILER_INTRINSIC_MODULE {
             // Compile arguments (for intrinsics that take args)
@@ -1558,9 +1565,12 @@ impl Cg<'_, '_, '_> {
         }
 
         // Otherwise, look up in native registry (not supported for args-only version)
-        Err(format!(
-            "generic external intrinsic \"{}::{}\" not found (non-intrinsic native calls not supported via method syntax)",
-            module_path, intrinsic_key
+        Err(CodegenError::not_found(
+            "generic external intrinsic",
+            format!(
+                "{}::{} (non-intrinsic native calls not supported via method syntax)",
+                module_path, intrinsic_key
+            ),
         ))
     }
 
@@ -1570,7 +1580,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         call_expr_id: NodeId,
         call: &CallExpr,
-    ) -> Result<Option<CompiledValue>, String> {
+    ) -> CodegenResult<Option<CompiledValue>> {
         let Some(monomorph_key) = self.query().monomorph_for(call_expr_id) else {
             return Ok(None);
         };
@@ -1622,7 +1632,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         obj: &CompiledValue,
         args: &[Expr],
-    ) -> Result<Option<CompiledValue>, String> {
+    ) -> CodegenResult<Option<CompiledValue>> {
         let Some(iface_type_def_id) = self.interface_type_def_id(obj.type_id) else {
             return Ok(None);
         };
@@ -1653,7 +1663,7 @@ impl Cg<'_, '_, '_> {
         call: &CallExpr,
         callee_sym: Symbol,
         callee_name: &str,
-    ) -> Result<Option<CompiledValue>, String> {
+    ) -> CodegenResult<Option<CompiledValue>> {
         let Some(monomorph_key) = self.query().monomorph_for(call_expr_id) else {
             return Ok(None);
         };

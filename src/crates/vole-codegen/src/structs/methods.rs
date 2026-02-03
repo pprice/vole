@@ -10,7 +10,7 @@ use crate::RuntimeFn;
 type ArgVec = SmallVec<[Value; 8]>;
 use super::helpers::convert_to_i64_for_storage;
 use crate::context::Cg;
-use crate::errors::CodegenError;
+use crate::errors::{CodegenError, CodegenResult};
 use crate::method_resolution::get_type_def_id_from_type_id;
 use crate::types::{
     CompiledValue, RcLifecycle, array_element_tag_id, module_name_id, type_id_to_cranelift,
@@ -40,7 +40,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         mc: &MethodCallExpr,
         expr_id: NodeId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         // Check for static method call FIRST - don't try to compile the receiver
         // Convert ModuleId to module path string for method_at_in_module
         let current_module_path = self
@@ -201,8 +201,7 @@ impl Cg<'_, '_, '_> {
                 return Err(CodegenError::not_found(
                     "module method",
                     format!("{}::{}", module_path, method_name_str),
-                )
-                .into());
+                ));
             }
         }
 
@@ -366,8 +365,7 @@ impl Cg<'_, '_, '_> {
                 return Err(CodegenError::internal_with_context(
                     "unhandled builtin method",
                     method_name_str,
-                )
-                .into());
+                ));
             }
         }
 
@@ -466,9 +464,9 @@ impl Cg<'_, '_, '_> {
 
                 (func_key, return_type_id)
             } else {
-                return Err(format!(
-                    "Method {} not found in method_func_keys (fallback path)",
-                    method_name_str
+                return Err(CodegenError::not_found(
+                    "method",
+                    format!("{} (fallback path)", method_name_str),
                 ));
             }
         };
@@ -742,7 +740,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         range: &vole_frontend::RangeExpr,
         iter_type_hint: Option<TypeId>,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         // Compile start and end expressions
         let start = self.expr(&range.start)?;
         let end_val = self.expr(&range.end)?;
@@ -770,7 +768,7 @@ impl Cg<'_, '_, '_> {
         obj: &CompiledValue,
         method_name: &str,
         iter_type_hint: Option<TypeId>,
-    ) -> Result<Option<CompiledValue>, String> {
+    ) -> CodegenResult<Option<CompiledValue>> {
         let arena = self.arena();
 
         // Array methods
@@ -872,13 +870,10 @@ impl Cg<'_, '_, '_> {
         &mut self,
         arr_obj: &CompiledValue,
         mc: &MethodCallExpr,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         // We expect exactly one argument
         if mc.args.len() != 1 {
-            return Err(format!(
-                "array.push() expects 1 argument, got {}",
-                mc.args.len()
-            ));
+            return Err(CodegenError::arg_count("array.push", 1, mc.args.len()));
         }
 
         // Compile the argument
@@ -927,7 +922,7 @@ impl Cg<'_, '_, '_> {
         method_name: &str,
         elem_type_id: TypeId,
         expr_id: NodeId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         // Look up the Iterator interface
         let iter_type_id = self
             .resolve_type_str_or_interface("Iterator")
@@ -1096,7 +1091,7 @@ impl Cg<'_, '_, '_> {
         func_type_id: TypeId,
         is_closure: bool,
         mc: &MethodCallExpr,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         // Extract function type components from the arena
         let (param_ids, return_type_id) = {
             let arena = self.arena();
@@ -1182,7 +1177,7 @@ impl Cg<'_, '_, '_> {
         interface_type_id: TypeDefId,
         method_name_id: NameId,
         func_type_id: TypeId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         let slot = crate::interface_vtable::interface_method_slot_by_type_def_id(
             interface_type_id,
             method_name_id,
@@ -1199,7 +1194,7 @@ impl Cg<'_, '_, '_> {
         args: &[Expr],
         slot: u32,
         func_type_id: TypeId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         self.interface_dispatch_call_args_inner(obj, args, slot as usize, func_type_id)
     }
 
@@ -1209,7 +1204,7 @@ impl Cg<'_, '_, '_> {
         args: &[Expr],
         slot: usize,
         func_type_id: TypeId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         let word_type = self.ptr_type();
         let word_bytes = word_type.bytes() as i32;
 
@@ -1314,7 +1309,7 @@ impl Cg<'_, '_, '_> {
         func_type_id: TypeId,
         mc: &MethodCallExpr,
         expr_id: NodeId,
-    ) -> Result<CompiledValue, String> {
+    ) -> CodegenResult<CompiledValue> {
         // Check for float intrinsics (nan, infinity, neg_infinity, epsilon)
         // These are compiled directly to constants, no function call needed.
         if mc.args.is_empty()
@@ -1444,7 +1439,7 @@ impl Cg<'_, '_, '_> {
         method_id: MethodId,
         start_index: usize,
         param_type_ids: &[TypeId],
-    ) -> Result<(Vec<Value>, Vec<CompiledValue>), String> {
+    ) -> CodegenResult<(Vec<Value>, Vec<CompiledValue>)> {
         // Get raw pointers to default expressions from MethodDef.
         let default_ptrs: Vec<Option<*const Expr>> = {
             let method_def = self.query().registry().get_method(method_id);
@@ -1474,7 +1469,7 @@ impl Cg<'_, '_, '_> {
         start_index: usize,
         expected_types: &[TypeId],
         is_generic_class: bool,
-    ) -> Result<(Vec<Value>, Vec<CompiledValue>), String> {
+    ) -> CodegenResult<(Vec<Value>, Vec<CompiledValue>)> {
         // Get raw pointers to default expressions from MethodDef.
         let default_ptrs: Vec<Option<*const Expr>> = {
             let method_def = self.query().registry().get_method(method_id);
@@ -1500,7 +1495,7 @@ impl Cg<'_, '_, '_> {
         &mut self,
         type_def_id: TypeDefId,
         method_sym: Symbol,
-    ) -> Result<Option<CompiledValue>, String> {
+    ) -> CodegenResult<Option<CompiledValue>> {
         // Get type name_id and check if it's f32 or f64
         let type_name_id = self.query().get_type(type_def_id).name_id;
         let name_table = self.name_table();

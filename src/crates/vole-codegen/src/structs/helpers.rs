@@ -3,7 +3,7 @@
 use cranelift::prelude::*;
 use rustc_hash::FxHashMap;
 
-use crate::errors::CodegenError;
+use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, FunctionCtx, TypeCtx};
 use vole_sema::type_arena::{SemaType as ArenaType, TypeArena, TypeId};
 use vole_sema::{EntityRegistry, PrimitiveType};
@@ -15,7 +15,7 @@ pub(crate) fn get_field_slot_and_type_id(
     field_name: &str,
     type_ctx: &TypeCtx,
     func_ctx: &FunctionCtx,
-) -> Result<(usize, TypeId), String> {
+) -> CodegenResult<(usize, TypeId)> {
     let arena = type_ctx.arena();
 
     // Apply function-level substitutions first (for monomorphized generics)
@@ -71,7 +71,7 @@ pub(crate) fn get_field_slot_and_type_id(
         }
     }
 
-    Err(CodegenError::not_found("field", format!("{} in type", field_name)).into())
+    Err(CodegenError::not_found("field", format!("{} in type", field_name)))
 }
 
 /// Get field slot and type for a field access (Cg API - uses TypeCtx internally).
@@ -80,7 +80,7 @@ pub(crate) fn get_field_slot_and_type_id_cg(
     type_id: TypeId,
     field_name: &str,
     cg: &crate::context::Cg,
-) -> Result<(usize, TypeId), String> {
+) -> CodegenResult<(usize, TypeId)> {
     let type_ctx = cg.type_ctx();
     let arena = type_ctx.arena();
 
@@ -154,7 +154,7 @@ pub(crate) fn get_field_slot_and_type_id_cg(
         }
     }
 
-    Err(CodegenError::not_found("field", format!("{} in type", field_name)).into())
+    Err(CodegenError::not_found("field", format!("{} in type", field_name)))
 }
 
 /// Convert a raw i64 field value to the appropriate Cranelift type.
