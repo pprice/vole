@@ -267,47 +267,10 @@ impl Cg<'_, '_, '_> {
             self.module_bindings.get(&callee_sym)
         {
             // Check if this is a generic external function that needs monomorphization
-            if let Some(monomorph_key) = self.query().monomorph_for(call_expr_id) {
-                let instance_data = self.monomorph_cache().get(monomorph_key).map(|inst| {
-                    (
-                        inst.original_name,
-                        inst.func_type.return_type_id,
-                        inst.substitutions.clone(),
-                    )
-                });
-
-                if let Some((original_name, return_type_id, substitutions)) = instance_data {
-                    let original_name_str = self.name_table().last_segment_str(original_name);
-                    if let Some(callee_name) = original_name_str {
-                        // Check for generic external function with type mappings
-                        if let Some(generic_ext_info) = self
-                            .analyzed()
-                            .implement_registry()
-                            .get_generic_external(&callee_name)
-                        {
-                            let intrinsic_key = self.find_intrinsic_key_for_monomorph(
-                                &generic_ext_info.type_mappings,
-                                &substitutions,
-                            );
-
-                            if let Some(key) = intrinsic_key {
-                                let module_path = self
-                                    .name_table()
-                                    .last_segment_str(generic_ext_info.module_path)
-                                    .unwrap_or_default();
-
-                                let return_type_id = self.substitute_type(return_type_id);
-
-                                return self.call_generic_external_intrinsic(
-                                    &module_path,
-                                    &key,
-                                    call,
-                                    return_type_id,
-                                );
-                            }
-                        }
-                    }
-                }
+            if let Some(result) =
+                self.try_call_generic_external_intrinsic_from_monomorph(call_expr_id, call)?
+            {
+                return Ok(result);
             }
 
             return self.call_module_binding(
@@ -336,22 +299,12 @@ impl Cg<'_, '_, '_> {
         }
 
         // Check if it's a functional interface variable
-        if let Some((var, type_id)) = self.vars.get(&callee_sym)
-            && let Some(iface_type_def_id) = self.interface_type_def_id(*type_id)
-            && let Some(method_id) = self.query().is_functional_interface(iface_type_def_id)
-        {
-            let method = self.query().get_method(method_id);
-            let func_type_id = method.signature_id;
-            let method_name_id = method.name_id;
+        if let Some((var, type_id)) = self.vars.get(&callee_sym) {
             let value = self.builder.use_var(*var);
             let obj = CompiledValue::new(value, self.cranelift_type(*type_id), *type_id);
-            return self.interface_dispatch_call_args_by_type_def_id(
-                &obj,
-                &call.args,
-                iface_type_def_id,
-                method_name_id,
-                func_type_id,
-            );
+            if let Some(result) = self.try_call_functional_interface(&obj, &call.args)? {
+                return Ok(result);
+            }
         }
 
         // Check if it's a global lambda or global functional interface
@@ -372,12 +325,7 @@ impl Cg<'_, '_, '_> {
 
             if let Some(declared_type_id) = global_type_id {
                 // If declared as functional interface, call via vtable dispatch
-                let iface_info = {
-                    let arena = self.arena();
-                    arena
-                        .unwrap_interface(declared_type_id)
-                        .map(|(type_def_id, _type_args)| type_def_id)
-                };
+                let iface_info = self.interface_type_def_id(declared_type_id);
                 if let Some(type_def_id) = iface_info
                     && let Some(method_id) = self.query().is_functional_interface(type_def_id)
                 {
@@ -417,19 +365,7 @@ impl Cg<'_, '_, '_> {
             }
 
             // If it's an interface type (functional interface), call via vtable
-            if let Some(type_def_id) = self.interface_type_def_id(lambda_val.type_id)
-                && let Some(method_id) = self.query().is_functional_interface(type_def_id)
-            {
-                let method = self.query().get_method(method_id);
-                let func_type_id = method.signature_id;
-                let method_name_id = method.name_id;
-                let result = self.interface_dispatch_call_args_by_type_def_id(
-                    &lambda_val,
-                    &call.args,
-                    type_def_id,
-                    method_name_id,
-                    func_type_id,
-                )?;
+            if let Some(result) = self.try_call_functional_interface(&lambda_val, &call.args)? {
                 // Dec the interface instance created by the global init.
                 self.emit_rc_dec_for_type(lambda_val.value, lambda_val.type_id)?;
                 return Ok(result);
@@ -440,105 +376,12 @@ impl Cg<'_, '_, '_> {
         // IMPORTANT: Only check monomorph_for in main program context, not module context.
         // Module code doesn't have generic function calls that need monomorphization,
         // and NodeIds can collide between module code and main program code.
-        let monomorph_key = if self.current_module.is_none() {
-            self.query().monomorph_for(call_expr_id)
-        } else {
-            None
-        };
-        tracing::trace!(
-            call_expr_id = ?call_expr_id,
-            callee = callee_name,
-            has_monomorph = monomorph_key.is_some(),
-            "checking for generic function call"
-        );
-        if let Some(monomorph_key) = monomorph_key {
-            // Extract what we need from the monomorph cache before any mutable borrows.
-            // We need original_name, mangled_name, return_type_id, and a clone of substitutions.
-            let instance_data = self.monomorph_cache().get(monomorph_key).map(|inst| {
-                (
-                    inst.original_name,
-                    inst.mangled_name,
-                    inst.func_type.return_type_id,
-                    inst.substitutions.clone(),
-                )
-            });
-
-            if let Some((original_name, mangled_name, return_type_id, substitutions)) =
-                instance_data
+        if self.current_module.is_none()
+            && let Some(result) =
+                self.try_call_monomorphized_function(call_expr_id, call, callee_sym, callee_name)?
             {
-                tracing::trace!(
-                    instance_name = ?original_name,
-                    mangled_name = ?mangled_name,
-                    "found monomorph instance"
-                );
-                let func_key = self.funcs().intern_name_id(mangled_name);
-                if let Some(func_id) = self.funcs().func_id(func_key) {
-                    tracing::trace!("found func_id, using regular path");
-                    return self.call_func_id(func_key, func_id, call, callee_sym);
-                }
-                tracing::trace!("no func_id, checking for external function");
-
-                // For generic external functions with type mappings, look up intrinsic by concrete type
-                if let Some(generic_ext_info) = self
-                    .analyzed()
-                    .implement_registry()
-                    .get_generic_external(callee_name)
-                {
-                    // Find the intrinsic key for the concrete type
-                    // For functions like sqrt<T>, we need to match the substituted T type
-                    let intrinsic_key = self.find_intrinsic_key_for_monomorph(
-                        &generic_ext_info.type_mappings,
-                        &substitutions,
-                    );
-
-                    if let Some(key) = intrinsic_key {
-                        // Get the module path
-                        let module_path = self
-                            .name_table()
-                            .last_segment_str(generic_ext_info.module_path)
-                            .unwrap_or_default();
-
-                        // The func_type from the monomorph instance may have TypeParams that weren't
-                        // inferred from arguments (like return type params). Apply class type
-                        // substitutions to fully resolve the type.
-                        let return_type_id = self.substitute_type(return_type_id);
-
-                        return self.call_generic_external_intrinsic(
-                            &module_path,
-                            &key,
-                            call,
-                            return_type_id,
-                        );
-                    }
-                }
-
-                // Fallback: For generic external functions without type mappings,
-                // call them directly with type erasure via native_registry
-                if let Some(ext_info) = self
-                    .analyzed()
-                    .implement_registry()
-                    .get_external_func(callee_name)
-                {
-                    let name_table = self.name_table();
-                    let module_path = name_table.last_segment_str(ext_info.module_path);
-                    let native_name = name_table.last_segment_str(ext_info.native_name);
-                    if let (Some(module_path), Some(native_name)) = (module_path, native_name)
-                        && let Some(native_func) =
-                            self.native_funcs().lookup(&module_path, &native_name)
-                    {
-                        // The func_type from the monomorph instance may have TypeParams that weren't
-                        // inferred from arguments (like return type params). Apply class type
-                        // substitutions to fully resolve the type.
-                        let return_type_id = self.substitute_type(return_type_id);
-                        return self.compile_native_call_with_types(
-                            native_func,
-                            call,
-                            return_type_id,
-                        );
-                    }
-                }
+                return Ok(result);
             }
-        }
 
         // Regular function call - handle module context
         // 1. Try direct function lookup
@@ -1719,6 +1562,180 @@ impl Cg<'_, '_, '_> {
             "generic external intrinsic \"{}::{}\" not found (non-intrinsic native calls not supported via method syntax)",
             module_path, intrinsic_key
         ))
+    }
+
+    /// Try to call a generic external function via monomorphization intrinsic resolution.
+    /// Returns Some(result) if the call was handled, None if it should fall through.
+    fn try_call_generic_external_intrinsic_from_monomorph(
+        &mut self,
+        call_expr_id: NodeId,
+        call: &CallExpr,
+    ) -> Result<Option<CompiledValue>, String> {
+        let Some(monomorph_key) = self.query().monomorph_for(call_expr_id) else {
+            return Ok(None);
+        };
+
+        let instance_data = self.monomorph_cache().get(monomorph_key).map(|inst| {
+            (
+                inst.original_name,
+                inst.func_type.return_type_id,
+                inst.substitutions.clone(),
+            )
+        });
+
+        let Some((original_name, return_type_id, substitutions)) = instance_data else {
+            return Ok(None);
+        };
+
+        let Some(callee_name) = self.name_table().last_segment_str(original_name) else {
+            return Ok(None);
+        };
+
+        let Some(generic_ext_info) = self
+            .analyzed()
+            .implement_registry()
+            .get_generic_external(&callee_name)
+        else {
+            return Ok(None);
+        };
+
+        let Some(key) =
+            self.find_intrinsic_key_for_monomorph(&generic_ext_info.type_mappings, &substitutions)
+        else {
+            return Ok(None);
+        };
+
+        let module_path = self
+            .name_table()
+            .last_segment_str(generic_ext_info.module_path)
+            .unwrap_or_default();
+
+        let return_type_id = self.substitute_type(return_type_id);
+
+        self.call_generic_external_intrinsic(&module_path, &key, call, return_type_id)
+            .map(Some)
+    }
+
+    /// Try to call a value as a functional interface.
+    /// Returns Some(result) if the value is a functional interface, None otherwise.
+    fn try_call_functional_interface(
+        &mut self,
+        obj: &CompiledValue,
+        args: &[Expr],
+    ) -> Result<Option<CompiledValue>, String> {
+        let Some(iface_type_def_id) = self.interface_type_def_id(obj.type_id) else {
+            return Ok(None);
+        };
+
+        let Some(method_id) = self.query().is_functional_interface(iface_type_def_id) else {
+            return Ok(None);
+        };
+
+        let method = self.query().get_method(method_id);
+        let func_type_id = method.signature_id;
+        let method_name_id = method.name_id;
+
+        self.interface_dispatch_call_args_by_type_def_id(
+            obj,
+            args,
+            iface_type_def_id,
+            method_name_id,
+            func_type_id,
+        )
+        .map(Some)
+    }
+
+    /// Try to call a monomorphized function.
+    /// Returns Some(result) if the call was handled, None if it should fall through.
+    fn try_call_monomorphized_function(
+        &mut self,
+        call_expr_id: NodeId,
+        call: &CallExpr,
+        callee_sym: Symbol,
+        callee_name: &str,
+    ) -> Result<Option<CompiledValue>, String> {
+        let Some(monomorph_key) = self.query().monomorph_for(call_expr_id) else {
+            return Ok(None);
+        };
+
+        tracing::trace!(
+            call_expr_id = ?call_expr_id,
+            callee = callee_name,
+            has_monomorph = true,
+            "checking for generic function call"
+        );
+
+        let instance_data = self.monomorph_cache().get(monomorph_key).map(|inst| {
+            (
+                inst.original_name,
+                inst.mangled_name,
+                inst.func_type.return_type_id,
+                inst.substitutions.clone(),
+            )
+        });
+
+        let Some((original_name, mangled_name, return_type_id, substitutions)) = instance_data
+        else {
+            return Ok(None);
+        };
+
+        tracing::trace!(
+            instance_name = ?original_name,
+            mangled_name = ?mangled_name,
+            "found monomorph instance"
+        );
+
+        let func_key = self.funcs().intern_name_id(mangled_name);
+        if let Some(func_id) = self.funcs().func_id(func_key) {
+            tracing::trace!("found func_id, using regular path");
+            return self
+                .call_func_id(func_key, func_id, call, callee_sym)
+                .map(Some);
+        }
+
+        tracing::trace!("no func_id, checking for external function");
+
+        // For generic external functions with type mappings, look up intrinsic by concrete type
+        if let Some(generic_ext_info) = self
+            .analyzed()
+            .implement_registry()
+            .get_generic_external(callee_name)
+            && let Some(key) = self
+                .find_intrinsic_key_for_monomorph(&generic_ext_info.type_mappings, &substitutions)
+            {
+                let module_path = self
+                    .name_table()
+                    .last_segment_str(generic_ext_info.module_path)
+                    .unwrap_or_default();
+
+                let return_type_id = self.substitute_type(return_type_id);
+
+                return self
+                    .call_generic_external_intrinsic(&module_path, &key, call, return_type_id)
+                    .map(Some);
+            }
+
+        // Fallback: For generic external functions without type mappings,
+        // call them directly with type erasure via native_registry
+        if let Some(ext_info) = self
+            .analyzed()
+            .implement_registry()
+            .get_external_func(callee_name)
+        {
+            let name_table = self.name_table();
+            let module_path = name_table.last_segment_str(ext_info.module_path);
+            let native_name = name_table.last_segment_str(ext_info.native_name);
+            if let (Some(module_path), Some(native_name)) = (module_path, native_name)
+                && let Some(native_func) = self.native_funcs().lookup(&module_path, &native_name)
+            {
+                let return_type_id = self.substitute_type(return_type_id);
+                return self
+                    .compile_native_call_with_types(native_func, call, return_type_id)
+                    .map(Some);
+            }
+        }
+
+        Ok(None)
     }
 }
 
