@@ -7,6 +7,14 @@ use super::parser::{ParseError, Parser};
 use super::token::TokenType;
 use crate::errors::ParserError;
 
+/// Result of parsing a class body.
+struct ClassBodyParseResult {
+    fields: Vec<FieldDef>,
+    external: Option<ExternalBlock>,
+    methods: Vec<FuncDecl>,
+    statics: Option<StaticsBlock>,
+}
+
 impl<'src> Parser<'src> {
     pub(super) fn declaration(&mut self) -> Result<Decl, ParseError> {
         match self.current.ty {
@@ -217,7 +225,7 @@ impl<'src> Parser<'src> {
         self.consume(TokenType::LBrace, "expected '{' after class name")?;
         self.skip_newlines();
 
-        let (fields, external, methods, statics) = self.parse_class_body()?;
+        let body = self.parse_class_body()?;
 
         self.consume(TokenType::RBrace, "expected '}' to close class")?;
         let span = start_span.merge(self.previous.span);
@@ -226,10 +234,10 @@ impl<'src> Parser<'src> {
             name,
             type_params,
             implements,
-            fields,
-            external,
-            methods,
-            statics,
+            fields: body.fields,
+            external: body.external,
+            methods: body.methods,
+            statics: body.statics,
             span,
         }))
     }
@@ -801,18 +809,7 @@ impl<'src> Parser<'src> {
         Ok(TypeExpr::Named(first_sym))
     }
 
-    #[allow(clippy::type_complexity)]
-    fn parse_class_body(
-        &mut self,
-    ) -> Result<
-        (
-            Vec<FieldDef>,
-            Option<ExternalBlock>,
-            Vec<FuncDecl>,
-            Option<StaticsBlock>,
-        ),
-        ParseError,
-    > {
+    fn parse_class_body(&mut self) -> Result<ClassBodyParseResult, ParseError> {
         let mut fields = Vec::new();
         let mut methods = Vec::new();
         let mut external = None;
@@ -884,7 +881,12 @@ impl<'src> Parser<'src> {
             self.skip_newlines();
         }
 
-        Ok((fields, external, methods, statics))
+        Ok(ClassBodyParseResult {
+            fields,
+            external,
+            methods,
+            statics,
+        })
     }
 
     fn test_case(&mut self) -> Result<TestCase, ParseError> {
