@@ -698,6 +698,163 @@ fn alloc_rc_set(set: VoleSet) -> *mut RcSet {
 }
 
 // =============================================================================
+// FFI Macros
+// =============================================================================
+
+/// Macro to define an FFI function that takes an immutable reference to a Map.
+/// Usage: `map_ffi_ref!(fn_name(ptr) => map, (arg: type, ...) -> RetType { body })`
+macro_rules! map_ffi_ref {
+    (
+        $(#[$attr:meta])*
+        $fn_name:ident($ptr:ident) => $map:ident, ($($arg:ident : $arg_ty:ty),*) -> $ret:ty { $($body:tt)* }
+    ) => {
+        $(#[$attr])*
+        #[unsafe(no_mangle)]
+        pub extern "C" fn $fn_name($ptr: *mut RcMap $(, $arg: $arg_ty)*) -> $ret {
+            let $map = unsafe { &(*$ptr).map };
+            $($body)*
+        }
+    };
+    // Variant without extra arguments
+    (
+        $(#[$attr:meta])*
+        $fn_name:ident($ptr:ident) => $map:ident -> $ret:ty { $($body:tt)* }
+    ) => {
+        $(#[$attr])*
+        #[unsafe(no_mangle)]
+        pub extern "C" fn $fn_name($ptr: *mut RcMap) -> $ret {
+            let $map = unsafe { &(*$ptr).map };
+            $($body)*
+        }
+    };
+}
+
+/// Macro to define an FFI function that takes a mutable reference to a Map.
+/// Usage: `map_ffi_mut!(fn_name(ptr) => map, (arg: type, ...) -> RetType { body })`
+macro_rules! map_ffi_mut {
+    (
+        $(#[$attr:meta])*
+        $fn_name:ident($ptr:ident) => $map:ident, ($($arg:ident : $arg_ty:ty),*) -> $ret:ty { $($body:tt)* }
+    ) => {
+        $(#[$attr])*
+        #[unsafe(no_mangle)]
+        pub extern "C" fn $fn_name($ptr: *mut RcMap $(, $arg: $arg_ty)*) -> $ret {
+            let $map = unsafe { &mut (*$ptr).map };
+            $($body)*
+        }
+    };
+    // Variant without return type
+    (
+        $(#[$attr:meta])*
+        $fn_name:ident($ptr:ident) => $map:ident, ($($arg:ident : $arg_ty:ty),*) { $($body:tt)* }
+    ) => {
+        $(#[$attr])*
+        #[unsafe(no_mangle)]
+        pub extern "C" fn $fn_name($ptr: *mut RcMap $(, $arg: $arg_ty)*) {
+            let $map = unsafe { &mut (*$ptr).map };
+            $($body)*
+        }
+    };
+    // Variant without extra arguments
+    (
+        $(#[$attr:meta])*
+        $fn_name:ident($ptr:ident) => $map:ident { $($body:tt)* }
+    ) => {
+        $(#[$attr])*
+        #[unsafe(no_mangle)]
+        pub extern "C" fn $fn_name($ptr: *mut RcMap) {
+            let $map = unsafe { &mut (*$ptr).map };
+            $($body)*
+        }
+    };
+}
+
+/// Macro to define an FFI function that takes an immutable reference to a Set.
+/// Usage: `set_ffi_ref!(fn_name(ptr) => set, (arg: type, ...) -> RetType { body })`
+macro_rules! set_ffi_ref {
+    (
+        $(#[$attr:meta])*
+        $fn_name:ident($ptr:ident) => $set:ident, ($($arg:ident : $arg_ty:ty),*) -> $ret:ty { $($body:tt)* }
+    ) => {
+        $(#[$attr])*
+        #[unsafe(no_mangle)]
+        pub extern "C" fn $fn_name($ptr: *mut RcSet $(, $arg: $arg_ty)*) -> $ret {
+            let $set = unsafe { &(*$ptr).set };
+            $($body)*
+        }
+    };
+    // Variant without extra arguments
+    (
+        $(#[$attr:meta])*
+        $fn_name:ident($ptr:ident) => $set:ident -> $ret:ty { $($body:tt)* }
+    ) => {
+        $(#[$attr])*
+        #[unsafe(no_mangle)]
+        pub extern "C" fn $fn_name($ptr: *mut RcSet) -> $ret {
+            let $set = unsafe { &(*$ptr).set };
+            $($body)*
+        }
+    };
+}
+
+/// Macro to define an FFI function that takes a mutable reference to a Set.
+/// Usage: `set_ffi_mut!(fn_name(ptr) => set, (arg: type, ...) -> RetType { body })`
+macro_rules! set_ffi_mut {
+    (
+        $(#[$attr:meta])*
+        $fn_name:ident($ptr:ident) => $set:ident, ($($arg:ident : $arg_ty:ty),*) -> $ret:ty { $($body:tt)* }
+    ) => {
+        $(#[$attr])*
+        #[unsafe(no_mangle)]
+        pub extern "C" fn $fn_name($ptr: *mut RcSet $(, $arg: $arg_ty)*) -> $ret {
+            let $set = unsafe { &mut (*$ptr).set };
+            $($body)*
+        }
+    };
+    // Variant without return type
+    (
+        $(#[$attr:meta])*
+        $fn_name:ident($ptr:ident) => $set:ident, ($($arg:ident : $arg_ty:ty),*) { $($body:tt)* }
+    ) => {
+        $(#[$attr])*
+        #[unsafe(no_mangle)]
+        pub extern "C" fn $fn_name($ptr: *mut RcSet $(, $arg: $arg_ty)*) {
+            let $set = unsafe { &mut (*$ptr).set };
+            $($body)*
+        }
+    };
+    // Variant without extra arguments
+    (
+        $(#[$attr:meta])*
+        $fn_name:ident($ptr:ident) => $set:ident { $($body:tt)* }
+    ) => {
+        $(#[$attr])*
+        #[unsafe(no_mangle)]
+        pub extern "C" fn $fn_name($ptr: *mut RcSet) {
+            let $set = unsafe { &mut (*$ptr).set };
+            $($body)*
+        }
+    };
+}
+
+/// Macro to define an FFI function that takes two immutable set references.
+/// Usage: `set_ffi_binary!(fn_name(a_ptr, b_ptr) => (a, b) -> RetType { body })`
+macro_rules! set_ffi_binary {
+    (
+        $(#[$attr:meta])*
+        $fn_name:ident($a_ptr:ident, $b_ptr:ident) => ($a:ident, $b:ident) -> $ret:ty { $($body:tt)* }
+    ) => {
+        $(#[$attr])*
+        #[unsafe(no_mangle)]
+        pub extern "C" fn $fn_name($a_ptr: *mut RcSet, $b_ptr: *mut RcSet) -> $ret {
+            let $a = unsafe { &(*$a_ptr).set };
+            let $b = unsafe { &(*$b_ptr).set };
+            $($body)*
+        }
+    };
+}
+
+// =============================================================================
 // FFI Functions for Map<K, V>
 // =============================================================================
 
@@ -788,65 +945,57 @@ pub extern "C" fn map_with_capacity_eq_rc(
     ))
 }
 
-/// Get a value from the map. Returns a tagged optional (0 = nil, non-zero = Some).
-/// The value is returned in the high bits if present.
-#[unsafe(no_mangle)]
-pub extern "C" fn map_get(map_ptr: *mut RcMap, key: i64, key_hash: i64) -> i64 {
-    let map = unsafe { &(*map_ptr).map };
-    match map.get(key, key_hash) {
-        Some(value) => value,
-        None => 0, // nil sentinel - caller should check tag
+map_ffi_ref! {
+    /// Get a value from the map. Returns a tagged optional (0 = nil, non-zero = Some).
+    /// The value is returned in the high bits if present.
+    map_get(map_ptr) => map, (key: i64, key_hash: i64) -> i64 {
+        match map.get(key, key_hash) {
+            Some(value) => value,
+            None => 0, // nil sentinel - caller should check tag
+        }
     }
 }
 
-/// Check if map has a value for the given key (for optional return)
-#[unsafe(no_mangle)]
-pub extern "C" fn map_has(map_ptr: *mut RcMap, key: i64, key_hash: i64) -> i8 {
-    let map = unsafe { &(*map_ptr).map };
-    if map.contains_key(key, key_hash) {
-        1
-    } else {
-        0
+map_ffi_ref! {
+    /// Check if map has a value for the given key (for optional return)
+    map_has(map_ptr) => map, (key: i64, key_hash: i64) -> i8 {
+        if map.contains_key(key, key_hash) { 1 } else { 0 }
     }
 }
 
-/// Set a value in the map
-#[unsafe(no_mangle)]
-pub extern "C" fn map_set(map_ptr: *mut RcMap, key: i64, key_hash: i64, value: i64) {
-    let map = unsafe { &mut (*map_ptr).map };
-    map.set(key, key_hash, value);
-}
-
-/// Remove a key from the map, returning the old value if present
-#[unsafe(no_mangle)]
-pub extern "C" fn map_remove(map_ptr: *mut RcMap, key: i64, key_hash: i64) -> i64 {
-    let map = unsafe { &mut (*map_ptr).map };
-    map.remove(key, key_hash).unwrap_or(0)
-}
-
-/// Check if map contains a key
-#[unsafe(no_mangle)]
-pub extern "C" fn map_contains_key(map_ptr: *mut RcMap, key: i64, key_hash: i64) -> i8 {
-    let map = unsafe { &(*map_ptr).map };
-    if map.contains_key(key, key_hash) {
-        1
-    } else {
-        0
+map_ffi_mut! {
+    /// Set a value in the map
+    map_set(map_ptr) => map, (key: i64, key_hash: i64, value: i64) {
+        map.set(key, key_hash, value);
     }
 }
 
-/// Get the number of entries in the map
-#[unsafe(no_mangle)]
-pub extern "C" fn map_len(map_ptr: *mut RcMap) -> i64 {
-    let map = unsafe { &(*map_ptr).map };
-    map.len() as i64
+map_ffi_mut! {
+    /// Remove a key from the map, returning the old value if present
+    map_remove(map_ptr) => map, (key: i64, key_hash: i64) -> i64 {
+        map.remove(key, key_hash).unwrap_or(0)
+    }
 }
 
-/// Clear all entries from the map
-#[unsafe(no_mangle)]
-pub extern "C" fn map_clear(map_ptr: *mut RcMap) {
-    let map = unsafe { &mut (*map_ptr).map };
-    map.clear();
+map_ffi_ref! {
+    /// Check if map contains a key
+    map_contains_key(map_ptr) => map, (key: i64, key_hash: i64) -> i8 {
+        if map.contains_key(key, key_hash) { 1 } else { 0 }
+    }
+}
+
+map_ffi_ref! {
+    /// Get the number of entries in the map
+    map_len(map_ptr) => map -> i64 {
+        map.len() as i64
+    }
+}
+
+map_ffi_mut! {
+    /// Clear all entries from the map
+    map_clear(map_ptr) => map {
+        map.clear();
+    }
 }
 
 /// Helper to create an array from a Vec<i64>
@@ -860,61 +1009,61 @@ fn vec_to_array(values: Vec<i64>) -> *mut RcArray {
     array
 }
 
-/// Get an iterator over the map's keys
-#[unsafe(no_mangle)]
-pub extern "C" fn map_keys_iter(map_ptr: *mut RcMap) -> *mut RcIterator {
-    let map = unsafe { &(*map_ptr).map };
-    let keys: Vec<i64> = map.keys();
-    let array = vec_to_array(keys);
-    RcIterator::new(
-        IteratorKind::Array,
-        IteratorSource {
-            array: ArraySource { array, index: 0 },
-        },
-    )
+map_ffi_ref! {
+    /// Get an iterator over the map's keys
+    map_keys_iter(map_ptr) => map -> *mut RcIterator {
+        let keys: Vec<i64> = map.keys();
+        let array = vec_to_array(keys);
+        RcIterator::new(
+            IteratorKind::Array,
+            IteratorSource {
+                array: ArraySource { array, index: 0 },
+            },
+        )
+    }
 }
 
-/// Get an iterator over the map's values
-#[unsafe(no_mangle)]
-pub extern "C" fn map_values_iter(map_ptr: *mut RcMap) -> *mut RcIterator {
-    let map = unsafe { &(*map_ptr).map };
-    let values: Vec<i64> = map.values();
-    let array = vec_to_array(values);
-    RcIterator::new(
-        IteratorKind::Array,
-        IteratorSource {
-            array: ArraySource { array, index: 0 },
-        },
-    )
+map_ffi_ref! {
+    /// Get an iterator over the map's values
+    map_values_iter(map_ptr) => map -> *mut RcIterator {
+        let values: Vec<i64> = map.values();
+        let array = vec_to_array(values);
+        RcIterator::new(
+            IteratorKind::Array,
+            IteratorSource {
+                array: ArraySource { array, index: 0 },
+            },
+        )
+    }
 }
 
-/// Get an iterator over the map's entries as [key, value] tuples
-#[unsafe(no_mangle)]
-pub extern "C" fn map_entries_iter(map_ptr: *mut RcMap) -> *mut RcIterator {
-    let map = unsafe { &(*map_ptr).map };
-    let entries: Vec<(i64, i64)> = map.entries();
+map_ffi_ref! {
+    /// Get an iterator over the map's entries as [key, value] tuples
+    map_entries_iter(map_ptr) => map -> *mut RcIterator {
+        let entries: Vec<(i64, i64)> = map.entries();
 
-    // Create an array of tuple pointers
-    let tuples: Vec<i64> = entries
-        .into_iter()
-        .map(|(k, v)| {
-            // Create a 2-element tuple as an RcArray
-            let tuple = RcArray::with_capacity(2);
-            unsafe {
-                RcArray::push(tuple, TaggedValue::from_i64(k));
-                RcArray::push(tuple, TaggedValue::from_i64(v));
-            }
-            tuple as i64
-        })
-        .collect();
+        // Create an array of tuple pointers
+        let tuples: Vec<i64> = entries
+            .into_iter()
+            .map(|(k, v)| {
+                // Create a 2-element tuple as an RcArray
+                let tuple = RcArray::with_capacity(2);
+                unsafe {
+                    RcArray::push(tuple, TaggedValue::from_i64(k));
+                    RcArray::push(tuple, TaggedValue::from_i64(v));
+                }
+                tuple as i64
+            })
+            .collect();
 
-    let array = vec_to_array(tuples);
-    RcIterator::new(
-        IteratorKind::Array,
-        IteratorSource {
-            array: ArraySource { array, index: 0 },
-        },
-    )
+        let array = vec_to_array(tuples);
+        RcIterator::new(
+            IteratorKind::Array,
+            IteratorSource {
+                array: ArraySource { array, index: 0 },
+            },
+        )
+    }
 }
 
 // =============================================================================
@@ -988,109 +1137,102 @@ pub extern "C" fn set_with_capacity_eq_rc(
     ))
 }
 
-/// Add a value to the set, returns true if it was newly inserted
-#[unsafe(no_mangle)]
-pub extern "C" fn set_add(set_ptr: *mut RcSet, value: i64, hash: i64) -> i8 {
-    let set = unsafe { &mut (*set_ptr).set };
-    if set.add(value, hash) { 1 } else { 0 }
+set_ffi_mut! {
+    /// Add a value to the set, returns true if it was newly inserted
+    set_add(set_ptr) => set, (value: i64, hash: i64) -> i8 {
+        if set.add(value, hash) { 1 } else { 0 }
+    }
 }
 
-/// Remove a value from the set, returns true if it was present
-#[unsafe(no_mangle)]
-pub extern "C" fn set_remove(set_ptr: *mut RcSet, value: i64, hash: i64) -> i8 {
-    let set = unsafe { &mut (*set_ptr).set };
-    if set.remove(value, hash) { 1 } else { 0 }
+set_ffi_mut! {
+    /// Remove a value from the set, returns true if it was present
+    set_remove(set_ptr) => set, (value: i64, hash: i64) -> i8 {
+        if set.remove(value, hash) { 1 } else { 0 }
+    }
 }
 
-/// Check if set contains a value
-#[unsafe(no_mangle)]
-pub extern "C" fn set_contains(set_ptr: *mut RcSet, value: i64, hash: i64) -> i8 {
-    let set = unsafe { &(*set_ptr).set };
-    if set.contains(value, hash) { 1 } else { 0 }
+set_ffi_ref! {
+    /// Check if set contains a value
+    set_contains(set_ptr) => set, (value: i64, hash: i64) -> i8 {
+        if set.contains(value, hash) { 1 } else { 0 }
+    }
 }
 
-/// Get the number of elements in the set
-#[unsafe(no_mangle)]
-pub extern "C" fn set_len(set_ptr: *mut RcSet) -> i64 {
-    let set = unsafe { &(*set_ptr).set };
-    set.len() as i64
+set_ffi_ref! {
+    /// Get the number of elements in the set
+    set_len(set_ptr) => set -> i64 {
+        set.len() as i64
+    }
 }
 
-/// Clear all elements from the set
-#[unsafe(no_mangle)]
-pub extern "C" fn set_clear(set_ptr: *mut RcSet) {
-    let set = unsafe { &mut (*set_ptr).set };
-    set.clear();
+set_ffi_mut! {
+    /// Clear all elements from the set
+    set_clear(set_ptr) => set {
+        set.clear();
+    }
 }
 
-/// Get an iterator over the set's values
-#[unsafe(no_mangle)]
-pub extern "C" fn set_iter(set_ptr: *mut RcSet) -> *mut RcIterator {
-    let set = unsafe { &(*set_ptr).set };
-    let values: Vec<i64> = set.values();
-    let array = vec_to_array(values);
-    RcIterator::new(
-        IteratorKind::Array,
-        IteratorSource {
-            array: ArraySource { array, index: 0 },
-        },
-    )
+set_ffi_ref! {
+    /// Get an iterator over the set's values
+    set_iter(set_ptr) => set -> *mut RcIterator {
+        let values: Vec<i64> = set.values();
+        let array = vec_to_array(values);
+        RcIterator::new(
+            IteratorKind::Array,
+            IteratorSource {
+                array: ArraySource { array, index: 0 },
+            },
+        )
+    }
 }
 
-/// Compute union of two sets
-#[unsafe(no_mangle)]
-pub extern "C" fn set_union(a_ptr: *mut RcSet, b_ptr: *mut RcSet) -> *mut RcSet {
-    let a = unsafe { &(*a_ptr).set };
-    let b = unsafe { &(*b_ptr).set };
-    alloc_rc_set(a.union(b))
+set_ffi_binary! {
+    /// Compute union of two sets
+    set_union(a_ptr, b_ptr) => (a, b) -> *mut RcSet {
+        alloc_rc_set(a.union(b))
+    }
 }
 
-/// Compute intersection of two sets
-#[unsafe(no_mangle)]
-pub extern "C" fn set_intersection(a_ptr: *mut RcSet, b_ptr: *mut RcSet) -> *mut RcSet {
-    let a = unsafe { &(*a_ptr).set };
-    let b = unsafe { &(*b_ptr).set };
-    alloc_rc_set(a.intersection(b))
+set_ffi_binary! {
+    /// Compute intersection of two sets
+    set_intersection(a_ptr, b_ptr) => (a, b) -> *mut RcSet {
+        alloc_rc_set(a.intersection(b))
+    }
 }
 
-/// Compute difference of two sets (a - b)
-#[unsafe(no_mangle)]
-pub extern "C" fn set_difference(a_ptr: *mut RcSet, b_ptr: *mut RcSet) -> *mut RcSet {
-    let a = unsafe { &(*a_ptr).set };
-    let b = unsafe { &(*b_ptr).set };
-    alloc_rc_set(a.difference(b))
+set_ffi_binary! {
+    /// Compute difference of two sets (a - b)
+    set_difference(a_ptr, b_ptr) => (a, b) -> *mut RcSet {
+        alloc_rc_set(a.difference(b))
+    }
 }
 
-/// Compute symmetric difference of two sets
-#[unsafe(no_mangle)]
-pub extern "C" fn set_symmetric_difference(a_ptr: *mut RcSet, b_ptr: *mut RcSet) -> *mut RcSet {
-    let a = unsafe { &(*a_ptr).set };
-    let b = unsafe { &(*b_ptr).set };
-    alloc_rc_set(a.symmetric_difference(b))
+set_ffi_binary! {
+    /// Compute symmetric difference of two sets
+    set_symmetric_difference(a_ptr, b_ptr) => (a, b) -> *mut RcSet {
+        alloc_rc_set(a.symmetric_difference(b))
+    }
 }
 
-/// Check if a is subset of b
-#[unsafe(no_mangle)]
-pub extern "C" fn set_is_subset(a_ptr: *mut RcSet, b_ptr: *mut RcSet) -> i8 {
-    let a = unsafe { &(*a_ptr).set };
-    let b = unsafe { &(*b_ptr).set };
-    if a.is_subset(b) { 1 } else { 0 }
+set_ffi_binary! {
+    /// Check if a is subset of b
+    set_is_subset(a_ptr, b_ptr) => (a, b) -> i8 {
+        if a.is_subset(b) { 1 } else { 0 }
+    }
 }
 
-/// Check if a is superset of b
-#[unsafe(no_mangle)]
-pub extern "C" fn set_is_superset(a_ptr: *mut RcSet, b_ptr: *mut RcSet) -> i8 {
-    let a = unsafe { &(*a_ptr).set };
-    let b = unsafe { &(*b_ptr).set };
-    if a.is_superset(b) { 1 } else { 0 }
+set_ffi_binary! {
+    /// Check if a is superset of b
+    set_is_superset(a_ptr, b_ptr) => (a, b) -> i8 {
+        if a.is_superset(b) { 1 } else { 0 }
+    }
 }
 
-/// Check if two sets are disjoint (no common elements)
-#[unsafe(no_mangle)]
-pub extern "C" fn set_is_disjoint(a_ptr: *mut RcSet, b_ptr: *mut RcSet) -> i8 {
-    let a = unsafe { &(*a_ptr).set };
-    let b = unsafe { &(*b_ptr).set };
-    if a.is_disjoint(b) { 1 } else { 0 }
+set_ffi_binary! {
+    /// Check if two sets are disjoint (no common elements)
+    set_is_disjoint(a_ptr, b_ptr) => (a, b) -> i8 {
+        if a.is_disjoint(b) { 1 } else { 0 }
+    }
 }
 
 #[cfg(test)]
