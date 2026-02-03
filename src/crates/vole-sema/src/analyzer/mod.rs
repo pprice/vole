@@ -555,21 +555,21 @@ impl Analyzer {
         let module_expr_types = self.ctx.module_expr_types.borrow().clone();
         let module_method_resolutions = self.ctx.module_method_resolutions.borrow().clone();
         let module_is_check_results = self.ctx.module_is_check_results.borrow().clone();
-        let expression_data = ExpressionData::from_analysis(
-            self.expr_types,
-            self.method_resolutions.into_inner(),
-            self.generic_calls,
-            self.class_method_calls,
-            self.static_method_calls,
-            module_expr_types,
-            module_method_resolutions,
-            module_is_check_results,
-            self.substituted_return_types,
-            self.lambda_defaults,
-            self.tests_virtual_modules,
-            self.is_check_results,
-            self.declared_var_types,
-        );
+        let expression_data = ExpressionData::builder()
+            .types(self.expr_types)
+            .methods(self.method_resolutions.into_inner())
+            .generics(self.generic_calls)
+            .class_method_generics(self.class_method_calls)
+            .static_method_generics(self.static_method_calls)
+            .module_types(module_expr_types)
+            .module_methods(module_method_resolutions)
+            .module_is_check_results(module_is_check_results)
+            .substituted_return_types(self.substituted_return_types)
+            .lambda_defaults(self.lambda_defaults)
+            .tests_virtual_modules(self.tests_virtual_modules)
+            .is_check_results(self.is_check_results)
+            .declared_var_types(self.declared_var_types)
+            .build();
         AnalysisOutput {
             expression_data,
             module_programs: self.ctx.module_programs.borrow().clone(),

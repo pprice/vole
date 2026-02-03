@@ -62,44 +62,170 @@ pub struct ExpressionData {
     declared_var_types: FxHashMap<NodeId, TypeId>,
 }
 
+/// Builder for `ExpressionData` to reduce construction boilerplate.
+///
+/// Provides a fluent API for setting analysis results, with all fields
+/// defaulting to empty collections.
+///
+/// # Example
+/// ```ignore
+/// let data = ExpressionDataBuilder::new()
+///     .types(expr_types)
+///     .methods(method_resolutions)
+///     .generics(generic_calls)
+///     .build();
+/// ```
+#[derive(Default)]
+pub struct ExpressionDataBuilder {
+    types: FxHashMap<NodeId, TypeId>,
+    methods: FxHashMap<NodeId, ResolvedMethod>,
+    generics: FxHashMap<NodeId, MonomorphKey>,
+    class_method_generics: FxHashMap<NodeId, ClassMethodMonomorphKey>,
+    static_method_generics: FxHashMap<NodeId, StaticMethodMonomorphKey>,
+    module_types: FxHashMap<String, FxHashMap<NodeId, TypeId>>,
+    module_methods: FxHashMap<String, FxHashMap<NodeId, ResolvedMethod>>,
+    module_is_check_results: FxHashMap<String, FxHashMap<NodeId, IsCheckResult>>,
+    substituted_return_types: FxHashMap<NodeId, TypeId>,
+    lambda_defaults: FxHashMap<NodeId, LambdaDefaults>,
+    tests_virtual_modules: FxHashMap<Span, ModuleId>,
+    is_check_results: FxHashMap<NodeId, IsCheckResult>,
+    declared_var_types: FxHashMap<NodeId, TypeId>,
+}
+
+impl ExpressionDataBuilder {
+    /// Create a new builder with all fields set to empty defaults.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set expression types (NodeId -> TypeId mappings).
+    pub fn types(mut self, types: FxHashMap<NodeId, TypeId>) -> Self {
+        self.types = types;
+        self
+    }
+
+    /// Set method resolutions for method calls.
+    pub fn methods(mut self, methods: FxHashMap<NodeId, ResolvedMethod>) -> Self {
+        self.methods = methods;
+        self
+    }
+
+    /// Set monomorphization keys for generic function calls.
+    pub fn generics(mut self, generics: FxHashMap<NodeId, MonomorphKey>) -> Self {
+        self.generics = generics;
+        self
+    }
+
+    /// Set monomorphization keys for generic class method calls.
+    pub fn class_method_generics(
+        mut self,
+        class_method_generics: FxHashMap<NodeId, ClassMethodMonomorphKey>,
+    ) -> Self {
+        self.class_method_generics = class_method_generics;
+        self
+    }
+
+    /// Set monomorphization keys for generic static method calls.
+    pub fn static_method_generics(
+        mut self,
+        static_method_generics: FxHashMap<NodeId, StaticMethodMonomorphKey>,
+    ) -> Self {
+        self.static_method_generics = static_method_generics;
+        self
+    }
+
+    /// Set per-module type mappings.
+    pub fn module_types(
+        mut self,
+        module_types: FxHashMap<String, FxHashMap<NodeId, TypeId>>,
+    ) -> Self {
+        self.module_types = module_types;
+        self
+    }
+
+    /// Set per-module method resolutions.
+    pub fn module_methods(
+        mut self,
+        module_methods: FxHashMap<String, FxHashMap<NodeId, ResolvedMethod>>,
+    ) -> Self {
+        self.module_methods = module_methods;
+        self
+    }
+
+    /// Set per-module is_check_results.
+    pub fn module_is_check_results(
+        mut self,
+        module_is_check_results: FxHashMap<String, FxHashMap<NodeId, IsCheckResult>>,
+    ) -> Self {
+        self.module_is_check_results = module_is_check_results;
+        self
+    }
+
+    /// Set substituted return types for generic method calls.
+    pub fn substituted_return_types(
+        mut self,
+        substituted_return_types: FxHashMap<NodeId, TypeId>,
+    ) -> Self {
+        self.substituted_return_types = substituted_return_types;
+        self
+    }
+
+    /// Set lambda defaults for closure calls.
+    pub fn lambda_defaults(mut self, lambda_defaults: FxHashMap<NodeId, LambdaDefaults>) -> Self {
+        self.lambda_defaults = lambda_defaults;
+        self
+    }
+
+    /// Set virtual module IDs for tests blocks.
+    pub fn tests_virtual_modules(
+        mut self,
+        tests_virtual_modules: FxHashMap<Span, ModuleId>,
+    ) -> Self {
+        self.tests_virtual_modules = tests_virtual_modules;
+        self
+    }
+
+    /// Set type check results for `is` expressions and type patterns.
+    pub fn is_check_results(mut self, is_check_results: FxHashMap<NodeId, IsCheckResult>) -> Self {
+        self.is_check_results = is_check_results;
+        self
+    }
+
+    /// Set declared variable types for let statements with explicit type annotations.
+    pub fn declared_var_types(mut self, declared_var_types: FxHashMap<NodeId, TypeId>) -> Self {
+        self.declared_var_types = declared_var_types;
+        self
+    }
+
+    /// Build the `ExpressionData` from this builder.
+    pub fn build(self) -> ExpressionData {
+        ExpressionData {
+            types: self.types,
+            methods: self.methods,
+            generics: self.generics,
+            class_method_generics: self.class_method_generics,
+            static_method_generics: self.static_method_generics,
+            module_types: self.module_types,
+            module_methods: self.module_methods,
+            module_is_check_results: self.module_is_check_results,
+            substituted_return_types: self.substituted_return_types,
+            lambda_defaults: self.lambda_defaults,
+            tests_virtual_modules: self.tests_virtual_modules,
+            is_check_results: self.is_check_results,
+            declared_var_types: self.declared_var_types,
+        }
+    }
+}
+
 impl ExpressionData {
     /// Create a new empty ExpressionData
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Create ExpressionData from analysis results
-    #[allow(clippy::too_many_arguments)]
-    pub fn from_analysis(
-        types: FxHashMap<NodeId, TypeId>,
-        methods: FxHashMap<NodeId, ResolvedMethod>,
-        generics: FxHashMap<NodeId, MonomorphKey>,
-        class_method_generics: FxHashMap<NodeId, ClassMethodMonomorphKey>,
-        static_method_generics: FxHashMap<NodeId, StaticMethodMonomorphKey>,
-        module_types: FxHashMap<String, FxHashMap<NodeId, TypeId>>,
-        module_methods: FxHashMap<String, FxHashMap<NodeId, ResolvedMethod>>,
-        module_is_check_results: FxHashMap<String, FxHashMap<NodeId, IsCheckResult>>,
-        substituted_return_types: FxHashMap<NodeId, TypeId>,
-        lambda_defaults: FxHashMap<NodeId, LambdaDefaults>,
-        tests_virtual_modules: FxHashMap<Span, ModuleId>,
-        is_check_results: FxHashMap<NodeId, IsCheckResult>,
-        declared_var_types: FxHashMap<NodeId, TypeId>,
-    ) -> Self {
-        Self {
-            types,
-            methods,
-            generics,
-            class_method_generics,
-            static_method_generics,
-            module_types,
-            module_methods,
-            module_is_check_results,
-            substituted_return_types,
-            lambda_defaults,
-            tests_virtual_modules,
-            is_check_results,
-            declared_var_types,
-        }
+    /// Returns a builder for constructing `ExpressionData` with a fluent API.
+    pub fn builder() -> ExpressionDataBuilder {
+        ExpressionDataBuilder::new()
     }
 
     /// Get the type of an expression by its NodeId (returns interned TypeId handle).

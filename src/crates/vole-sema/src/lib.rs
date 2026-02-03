@@ -28,7 +28,7 @@ pub use analyzer::{AnalysisOutput, Analyzer, AnalyzerBuilder, TypeError, TypeWar
 pub use compilation_db::{CodegenDb, CompilationDb};
 pub use entity_defs::{FieldDef, FunctionDef, MethodDef, TypeDef, TypeDefKind};
 pub use entity_registry::{EntityRegistry, MethodDefBuilder};
-pub use expression_data::ExpressionData;
+pub use expression_data::{ExpressionData, ExpressionDataBuilder};
 pub use implement_registry::{
     ImplTypeId, ImplementRegistry, MethodImpl, MethodKey, PrimitiveTypeId,
 };
