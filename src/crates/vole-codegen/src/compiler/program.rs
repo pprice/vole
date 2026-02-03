@@ -372,7 +372,7 @@ impl Compiler<'_> {
                         module_id,
                         func.name,
                     )
-                    .expect("module function name_id should be registered");
+                    .expect("INTERNAL: module function: name_id not registered");
 
                     // Check for implicit generics (structural type params)
                     let has_implicit_generic_info = self
@@ -490,7 +490,7 @@ impl Compiler<'_> {
                         module_id,
                         func.name,
                     )
-                    .expect("module function name_id should be registered");
+                    .expect("INTERNAL: module function: name_id not registered");
 
                     // Check for implicit generics (structural type params)
                     let has_implicit_generic_info = self
@@ -584,7 +584,7 @@ impl Compiler<'_> {
                         module_id,
                         func.name,
                     )
-                    .expect("module function name_id should be registered");
+                    .expect("INTERNAL: module function: name_id not registered");
                     let display_name = self.query().display_name(name_id);
 
                     // Get FunctionId and build signature from pre-resolved types

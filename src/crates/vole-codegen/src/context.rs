@@ -1620,7 +1620,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ) -> CompiledValue {
         let flat_count = self
             .struct_flat_slot_count(type_id)
-            .expect("reconstruct_struct_from_regs: expected struct type");
+            .expect("INTERNAL: reconstruct_struct_from_regs: expected struct type");
         let total_size = (flat_count as u32) * 8;
         let slot = self.alloc_stack(total_size);
 

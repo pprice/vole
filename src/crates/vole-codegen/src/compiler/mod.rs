@@ -136,7 +136,7 @@ impl<'a> Compiler<'a> {
         self.analyzed
             .interner
             .lookup("self")
-            .expect("'self' keyword should always be interned")
+            .expect("INTERNAL: 'self' keyword not interned")
     }
 
     /// Look up a method NameId by Symbol (panics if not found)

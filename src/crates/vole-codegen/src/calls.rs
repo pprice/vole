@@ -429,7 +429,7 @@ impl Cg<'_, '_, '_> {
                 // Sema records return types for all module external calls.
                 let type_id = self
                     .get_expr_type(&call_expr_id)
-                    .expect("module external call must have sema-recorded return type");
+                    .expect("INTERNAL: external call: missing sema return type");
                 let type_id = self.maybe_convert_iterator_return_type(type_id);
                 return Ok(self.native_call_result(call_inst, native_func, type_id));
             }
@@ -493,7 +493,7 @@ impl Cg<'_, '_, '_> {
             // Sema records return types for all prelude external calls.
             let type_id = self
                 .get_expr_type(&call_expr_id)
-                .expect("prelude external call must have sema-recorded return type");
+                .expect("INTERNAL: prelude call: missing sema return type");
             let type_id = self.maybe_convert_iterator_return_type(type_id);
             return Ok(self.native_call_result(call_inst, native_func, type_id));
         }
@@ -601,7 +601,7 @@ impl Cg<'_, '_, '_> {
         let sret_slot = if is_sret {
             let flat_count = self
                 .struct_flat_slot_count(return_type_id)
-                .expect("sret struct must have flat slot count");
+                .expect("INTERNAL: sret call: missing flat slot count");
             let total_size = (flat_count as u32) * 8;
             let slot = self.alloc_stack(total_size);
             let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
@@ -760,7 +760,7 @@ impl Cg<'_, '_, '_> {
         let sret_slot = if is_sret {
             let flat_count = self
                 .struct_flat_slot_count(return_type_id)
-                .expect("sret struct must have flat slot count");
+                .expect("INTERNAL: sret call: missing flat slot count");
             let total_size = (flat_count as u32) * 8;
             let slot = self.alloc_stack(total_size);
             let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);

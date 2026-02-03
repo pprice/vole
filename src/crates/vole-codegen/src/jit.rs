@@ -155,26 +155,26 @@ impl JitContext {
         let mut flag_builder = settings::builder();
         flag_builder
             .set("use_colocated_libcalls", "false")
-            .expect("Cranelift flag 'use_colocated_libcalls' should be valid");
+            .expect("INTERNAL: Cranelift config: invalid 'use_colocated_libcalls' flag");
         flag_builder
             .set("is_pic", "false")
-            .expect("Cranelift flag 'is_pic' should be valid");
+            .expect("INTERNAL: Cranelift config: invalid 'is_pic' flag");
         // Enable LLVM ABI extensions for i128 support in function signatures
         flag_builder
             .set("enable_llvm_abi_extensions", "true")
-            .expect("Cranelift flag 'enable_llvm_abi_extensions' should be valid");
+            .expect("INTERNAL: Cranelift config: invalid 'enable_llvm_abi_extensions' flag");
 
         // Always enable speed optimizations for better codegen
         flag_builder
             .set("opt_level", "speed")
-            .expect("Cranelift flag 'opt_level' should be valid");
+            .expect("INTERNAL: Cranelift config: invalid 'opt_level' flag");
 
         // Apply release mode settings
         if options.release {
             // Disable IR verifier for faster compilation
             flag_builder
                 .set("enable_verifier", "false")
-                .expect("Cranelift flag 'enable_verifier' should be valid");
+                .expect("INTERNAL: Cranelift config: invalid 'enable_verifier' flag");
         }
 
         let isa_builder = cranelift_native::builder().unwrap_or_else(|msg| {
@@ -183,7 +183,7 @@ impl JitContext {
 
         let isa = isa_builder
             .finish(settings::Flags::new(flag_builder))
-            .expect("failed to build Cranelift ISA from native target");
+            .expect("INTERNAL: Cranelift config: failed to build ISA from native target");
 
         let mut builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
 
@@ -1246,7 +1246,7 @@ mod tests {
         builder.finalize();
 
         jit.define_function(func_id).unwrap();
-        jit.finalize().expect("finalization should succeed");
+        jit.finalize().expect("INTERNAL: JIT finalization failed");
 
         // Get and call the function
         let fn_ptr = jit.get_function_ptr("answer").unwrap();
@@ -1280,7 +1280,7 @@ mod tests {
         builder.finalize();
 
         jit.define_function(func_id).unwrap();
-        jit.finalize().expect("finalization should succeed");
+        jit.finalize().expect("INTERNAL: JIT finalization failed");
 
         let fn_ptr = jit.get_function_ptr("add").unwrap();
         let add: extern "C" fn(i64, i64) -> i64 = unsafe { std::mem::transmute(fn_ptr) };

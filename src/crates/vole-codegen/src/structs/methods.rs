@@ -120,7 +120,7 @@ impl Cg<'_, '_, '_> {
                     let arena = self.arena();
                     let (_, ret, _) = arena
                         .unwrap_function(*func_type_id)
-                        .expect("module method must have function type");
+                        .expect("INTERNAL: module method: missing function type");
                     ret
                 };
 
@@ -598,7 +598,7 @@ impl Cg<'_, '_, '_> {
             let ptr_type = self.ptr_type();
             let flat_count = self
                 .struct_flat_slot_count(return_type_id)
-                .expect("sret struct must have flat slot count");
+                .expect("INTERNAL: sret method call: missing flat slot count");
             let total_size = (flat_count as u32) * 8;
             let slot = self.alloc_stack(total_size);
             let sret_ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
@@ -756,8 +756,8 @@ impl Cg<'_, '_, '_> {
         let result = self.call_runtime(RuntimeFn::RangeIter, &[start.value, end_value])?;
 
         // Use sema's pre-computed RuntimeIterator type
-        let iter_type_id =
-            iter_type_hint.expect("sema must provide concrete_return_hint for range iterator");
+        let iter_type_id = iter_type_hint
+            .expect("INTERNAL: range iterator: missing concrete_return_hint from sema");
         Ok(CompiledValue::owned(result, self.ptr_type(), iter_type_id))
     }
 
@@ -784,9 +784,9 @@ impl Cg<'_, '_, '_> {
                     // the element type (needed for monomorphized generic functions where
                     // sema resolution is skipped).
                     let iter_type_id = iter_type_hint.unwrap_or_else(|| {
-                        self.arena()
-                            .lookup_runtime_iterator(elem_type_id)
-                            .expect("RuntimeIterator type must be pre-created by sema")
+                        self.arena().lookup_runtime_iterator(elem_type_id).expect(
+                            "INTERNAL: array iterator: RuntimeIterator type not pre-created",
+                        )
                     });
                     // Set elem_tag on the array iterator so pipeline operations
                     // can properly manage RC values
@@ -815,8 +815,9 @@ impl Cg<'_, '_, '_> {
                 "iter" => {
                     let result = self.call_runtime(RuntimeFn::StringCharsIter, &[obj.value])?;
                     // Use sema's pre-computed RuntimeIterator type
-                    let iter_type_id = iter_type_hint
-                        .expect("sema must provide concrete_return_hint for string.iter()");
+                    let iter_type_id = iter_type_hint.expect(
+                        "INTERNAL: string iterator: missing concrete_return_hint from sema",
+                    );
                     // Set elem_tag to TYPE_STRING so terminal methods can properly
                     // free owned char strings produced by the string chars iterator.
                     let string_tag = crate::types::unknown_type_tag(TypeId::STRING, self.arena());
@@ -852,7 +853,7 @@ impl Cg<'_, '_, '_> {
                 let result = self.call_runtime(RuntimeFn::RangeIter, &[start, end])?;
                 // Use sema's pre-computed RuntimeIterator type
                 let iter_type_id = iter_type_hint
-                    .expect("sema must provide concrete_return_hint for range.iter()");
+                    .expect("INTERNAL: range.iter(): missing concrete_return_hint from sema");
                 return Ok(Some(CompiledValue::owned(
                     result,
                     self.ptr_type(),
@@ -952,7 +953,7 @@ impl Cg<'_, '_, '_> {
         // Get the substituted return type from sema
         let return_type_id = self
             .get_substituted_return_type(&expr_id)
-            .expect("sema must provide substituted_return_type for iterator method calls");
+            .expect("INTERNAL: iterator method: missing substituted_return_type from sema");
 
         // Convert Iterator<T> return types to RuntimeIterator(T) since the runtime
         // functions return raw iterator pointers, not boxed interface values

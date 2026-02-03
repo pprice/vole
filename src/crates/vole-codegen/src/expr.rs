@@ -1140,7 +1140,7 @@ impl Cg<'_, '_, '_> {
         // Look up pre-computed type check result from sema (module-aware)
         let is_check_result = self
             .get_is_check_result(pattern_id)
-            .expect("type pattern missing IsCheckResult from sema");
+            .expect("INTERNAL: type pattern: missing IsCheckResult from sema");
 
         match is_check_result {
             IsCheckResult::AlwaysTrue => Ok(None), // Always matches
@@ -1214,7 +1214,7 @@ impl Cg<'_, '_, '_> {
         let inner_type_id = self
             .arena()
             .unwrap_optional(value.type_id)
-            .expect("unwrap expression requires optional type");
+            .expect("INTERNAL: unwrap expr: expected optional type");
         let cranelift_type = type_id_to_cranelift(inner_type_id, self.arena(), self.ptr_type());
         self.builder.append_block_param(merge_block, cranelift_type);
 
@@ -1546,7 +1546,7 @@ impl Cg<'_, '_, '_> {
 
                         // Branch: if pattern matches -> extract_block, else -> next_block
                         let cond = pattern_check
-                            .expect("pattern_check must be Some for conditional extraction");
+                            .expect("INTERNAL: match pattern: missing pattern_check condition");
                         let cond_i32 = self.cond_to_i32(cond);
                         self.builder
                             .ins()
@@ -2035,7 +2035,7 @@ impl Cg<'_, '_, '_> {
             if_expr
                 .else_branch
                 .as_ref()
-                .expect("select-style if must have else branch"),
+                .expect("INTERNAL: select-style if: missing else branch"),
         )?;
 
         let result_cranelift_type =
@@ -2234,7 +2234,7 @@ impl Cg<'_, '_, '_> {
             when_expr.arms[0]
                 .condition
                 .as_ref()
-                .expect("first when arm must have a condition"),
+                .expect("INTERNAL: when expr: first arm has no condition"),
         )?;
 
         // Compile both bodies (they're pure, so order doesn't matter)
@@ -2319,7 +2319,7 @@ impl Cg<'_, '_, '_> {
             let cond_result = self.expr(
                 arm.condition
                     .as_ref()
-                    .expect("non-wildcard when arm must have a condition"),
+                    .expect("INTERNAL: when expr: non-wildcard arm has no condition"),
             )?;
 
             // Determine "else" target (where to go if condition is false)

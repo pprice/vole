@@ -174,7 +174,7 @@ impl Cg<'_, '_, '_> {
         // Sema handles the double-wrapping logic in check_optional_chain_expr
         let result_type_id = self
             .get_expr_type(&expr_id)
-            .expect("optional_chain: sema must record type for optional chain expression");
+            .expect("INTERNAL: optional_chain: sema did not record expression type");
         let is_field_optional = self.arena().is_optional(field_type_id);
 
         let cranelift_type = {

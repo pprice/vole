@@ -927,7 +927,7 @@ fn resolve_vtable_target<C: VtableCtx>(
         let arena = ctx.arena();
         let (params, ret, _) = arena
             .unwrap_function(interface_method.signature_id)
-            .expect("method signature must be a function type");
+            .expect("INTERNAL: vtable method: signature is not a function type");
         let param_ids: Vec<TypeId> = params
             .iter()
             .map(|&p| arena.expect_substitute(p, substitutions, "vtable method param"))
@@ -1026,7 +1026,7 @@ fn resolve_vtable_target<C: VtableCtx>(
                 let arena = ctx.arena();
                 let (params, ret, _) = arena
                     .unwrap_function(method.signature_id)
-                    .expect("method signature must be a function type");
+                    .expect("INTERNAL: vtable method: signature is not a function type");
                 (params.to_vec(), ret)
             })
             .unwrap_or_else(|| {
@@ -1063,7 +1063,7 @@ fn resolve_vtable_target<C: VtableCtx>(
                 let arena = ctx.arena();
                 let (params, ret, _) = arena
                     .unwrap_function(interface_method.signature_id)
-                    .expect("interface method signature must be a function type");
+                    .expect("INTERNAL: interface vtable: method signature is not a function type");
                 (params.to_vec(), ret)
             };
             let returns_void = matches!(ctx.arena().get(return_type_id), SemaType::Void);

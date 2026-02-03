@@ -67,14 +67,14 @@ impl Compiler<'_> {
         let type_def_id = self
             .query()
             .try_type_def_id(name_id)
-            .expect("class should be registered in entity registry");
+            .expect("INTERNAL: pre_register_class: class not in entity registry");
 
         // Use pre-computed base_type_id from sema (no mutable arena access needed)
         let vole_type_id = self
             .query()
             .get_type(type_def_id)
             .base_type_id
-            .expect("sema should pre-compute base_type_id for classes");
+            .expect("INTERNAL: pre_register_class: missing base_type_id from sema");
 
         self.state.type_metadata.insert(
             type_def_id,
@@ -97,14 +97,14 @@ impl Compiler<'_> {
             .query()
             .try_name_id(module_id, &[class.name])
             .and_then(|name_id| self.query().try_type_def_id(name_id))
-            .expect("class should be registered in entity registry");
+            .expect("INTERNAL: finalize_class: class not in entity registry");
 
         // Get the pre-registered type_id
         let type_id = self
             .state
             .type_metadata
             .get(&type_def_id)
-            .expect("class should be pre-registered")
+            .expect("INTERNAL: finalize_class: class not pre-registered")
             .type_id;
 
         // Build field slots map using sema's pre-resolved field types
@@ -122,7 +122,7 @@ impl Compiler<'_> {
                 let name = self
                     .query()
                     .last_segment(field_def.name_id)
-                    .expect("field should have a name");
+                    .expect("INTERNAL: field lookup: field has no name");
                 (name, field_def.slot, field_def.ty)
             };
             field_slots.insert(field_name, field_slot);
@@ -146,7 +146,7 @@ impl Compiler<'_> {
                 .analyzed
                 .entity_registry()
                 .find_method_on_type(type_def_id, method_name_id)
-                .expect("method should be registered in entity registry");
+                .expect("INTERNAL: finalize_class: method not in entity registry");
             let sig = self.build_signature_for_method(method_id, SelfParam::Pointer);
             let full_name_id = self
                 .analyzed
@@ -241,7 +241,7 @@ impl Compiler<'_> {
             .state
             .type_metadata
             .get(&type_def_id)
-            .expect("class should be pre-registered")
+            .expect("INTERNAL: finalize_class: class not pre-registered for vole_type")
             .vole_type;
         self.state.type_metadata.insert(
             type_def_id,
@@ -265,13 +265,13 @@ impl Compiler<'_> {
         let type_def_id = self
             .query()
             .try_type_def_id(name_id)
-            .expect("struct should be registered in entity registry");
+            .expect("INTERNAL: pre_register_struct: struct not in entity registry");
 
         let vole_type_id = self
             .query()
             .get_type(type_def_id)
             .base_type_id
-            .expect("sema should pre-compute base_type_id for structs");
+            .expect("INTERNAL: pre_register_struct: missing base_type_id from sema");
 
         // Structs don't need a runtime type_id since they're stack-allocated,
         // but we still need type_metadata for field slot lookup during codegen.
@@ -298,13 +298,13 @@ impl Compiler<'_> {
         let type_def_id = self
             .query()
             .try_type_def_id(name_id)
-            .expect("sentinel should be registered in entity registry");
+            .expect("INTERNAL: pre_register_sentinel: sentinel not in entity registry");
 
         let vole_type_id = self
             .query()
             .get_type(type_def_id)
             .base_type_id
-            .expect("sema should pre-compute base_type_id for sentinels");
+            .expect("INTERNAL: pre_register_sentinel: missing base_type_id from sema");
 
         // Sentinels are zero-field structs, use type_id 0 as a placeholder.
         self.state.type_metadata.insert(
@@ -348,7 +348,7 @@ impl Compiler<'_> {
             .query()
             .get_type(type_def_id)
             .base_type_id
-            .expect("sema should pre-compute base_type_id for module sentinels");
+            .expect("INTERNAL: finalize_module_sentinel: missing base_type_id from sema");
 
         // Sentinels are zero-field structs, use type_id 0 as a placeholder.
         self.state.type_metadata.insert(
@@ -371,7 +371,7 @@ impl Compiler<'_> {
             .query()
             .try_name_id(module_id, &[struct_decl.name])
             .and_then(|name_id| self.query().try_type_def_id(name_id))
-            .expect("struct should be registered in entity registry");
+            .expect("INTERNAL: finalize_struct: struct not in entity registry");
 
         // Build field slots map using sema's pre-resolved field types
         let mut field_slots = FxHashMap::default();
@@ -386,7 +386,7 @@ impl Compiler<'_> {
                 let name = self
                     .query()
                     .last_segment(field_def.name_id)
-                    .expect("field should have a name");
+                    .expect("INTERNAL: field lookup: field has no name");
                 (name, field_def.slot)
             };
             field_slots.insert(field_name, field_slot);
@@ -400,7 +400,7 @@ impl Compiler<'_> {
                 .analyzed
                 .entity_registry()
                 .find_method_on_type(type_def_id, method_name_id)
-                .expect("method should be registered in entity registry");
+                .expect("INTERNAL: finalize_struct: method not in entity registry");
             let sig = self.build_signature_for_method(method_id, SelfParam::Pointer);
             let full_name_id = self
                 .analyzed
@@ -428,7 +428,7 @@ impl Compiler<'_> {
             .state
             .type_metadata
             .get(&type_def_id)
-            .expect("struct should be pre-registered")
+            .expect("INTERNAL: finalize_struct: struct not pre-registered")
             .vole_type;
         self.state.type_metadata.insert(
             type_def_id,
@@ -450,7 +450,7 @@ impl Compiler<'_> {
         let type_name_id = query.name_id(module_id, &[type_name]);
         let type_def_id = query
             .try_type_def_id(type_name_id)
-            .expect("type should be registered in entity registry");
+            .expect("INTERNAL: register_static_methods: type not in entity registry");
 
         for method in &statics.methods {
             // Only register methods with bodies (not abstract ones)
@@ -465,7 +465,7 @@ impl Compiler<'_> {
                 .analyzed
                 .entity_registry()
                 .find_static_method_on_type(type_def_id, method_name_id)
-                .expect("static method should be registered in entity registry");
+                .expect("INTERNAL: register_static_methods: static method not in entity registry");
             let sig = self.build_signature_for_method(method_id, SelfParam::None);
 
             // Function key from entity registry
@@ -533,7 +533,7 @@ impl Compiler<'_> {
                 let name = self
                     .query()
                     .last_segment(field_def.name_id)
-                    .expect("field should have a name");
+                    .expect("INTERNAL: field lookup: field has no name");
                 (name, field_def.slot, field_def.ty)
             };
             field_slots.insert(field_name, field_slot);
@@ -602,7 +602,7 @@ impl Compiler<'_> {
             .query()
             .get_type(type_def_id)
             .base_type_id
-            .expect("sema should pre-compute base_type_id for module classes");
+            .expect("INTERNAL: finalize_module_class: missing base_type_id from sema");
         self.state.type_metadata.insert(
             type_def_id,
             TypeMetadata {
@@ -710,7 +710,7 @@ impl Compiler<'_> {
                 let name = self
                     .query()
                     .last_segment(field_def.name_id)
-                    .expect("field should have a name");
+                    .expect("INTERNAL: field lookup: field has no name");
                 (name, field_def.slot)
             };
             field_slots.insert(field_name, field_slot);
@@ -764,7 +764,7 @@ impl Compiler<'_> {
             .query()
             .get_type(type_def_id)
             .base_type_id
-            .expect("sema should pre-compute base_type_id for module structs");
+            .expect("INTERNAL: finalize_module_struct: missing base_type_id from sema");
         self.state.type_metadata.insert(
             type_def_id,
             TypeMetadata {

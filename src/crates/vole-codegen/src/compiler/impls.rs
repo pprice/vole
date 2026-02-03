@@ -378,15 +378,18 @@ impl Compiler<'_> {
             let jit_func_id = self.jit.import_function(&display_name, &sig);
             self.func_registry.set_func_id(func_key, jit_func_id);
 
-            let type_name_id = self
-                .query()
-                .get_type(type_def_id.expect("type_def_id must exist for static method lookup"))
-                .name_id;
+            let type_name_id =
+                self.query()
+                    .get_type(type_def_id.expect(
+                        "INTERNAL: register_interface_default_methods: missing type_def_id",
+                    ))
+                    .name_id;
             self.state.method_func_keys.insert(
                 (
                     type_name_id,
-                    method_name_id
-                        .expect("method_name_id must exist for static method registration"),
+                    method_name_id.expect(
+                        "INTERNAL: register_interface_default_methods: missing method_name_id",
+                    ),
                 ),
                 func_key,
             );
@@ -606,14 +609,15 @@ impl Compiler<'_> {
                 let type_name_id = self
                     .query()
                     .get_type(
-                        type_def_id.expect("type_def_id must exist for static method registration"),
+                        type_def_id
+                            .expect("INTERNAL: register_implement_block: missing type_def_id"),
                     )
                     .name_id;
                 self.state.method_func_keys.insert(
                     (
                         type_name_id,
                         method_name_id
-                            .expect("method_name_id must exist for static method registration"),
+                            .expect("INTERNAL: register_implement_block: missing method_name_id"),
                     ),
                     func_key,
                 );
@@ -856,7 +860,7 @@ impl Compiler<'_> {
             let arena = self.analyzed.type_arena();
             let (param_type_ids, _, _) = arena
                 .unwrap_function(method_def.signature_id)
-                .expect("method should have function signature");
+                .expect("INTERNAL: method compilation: missing function signature");
             method
                 .params
                 .iter()
@@ -962,7 +966,7 @@ impl Compiler<'_> {
             let arena = self.analyzed.type_arena();
             let (params, ret, _) = arena
                 .unwrap_function(method_def.signature_id)
-                .expect("method should have function signature");
+                .expect("INTERNAL: method compilation: missing function signature");
             let sig = self.build_signature_for_method(method_id, SelfParam::None);
             let (param_type_ids, return_type_id) =
                 (params.to_vec(), Some(ret).filter(|r| !r.is_void()));
@@ -1067,7 +1071,7 @@ impl Compiler<'_> {
             let arena = self.analyzed.type_arena();
             let (param_type_ids, _, _) = arena
                 .unwrap_function(method_def.signature_id)
-                .expect("method should have function signature");
+                .expect("INTERNAL: method compilation: missing function signature");
             method
                 .params
                 .iter()
@@ -1177,7 +1181,7 @@ impl Compiler<'_> {
             let arena = self.analyzed.type_arena();
             let (params, ret, _) = arena
                 .unwrap_function(method_def.signature_id)
-                .expect("method signature should be a function type");
+                .expect("INTERNAL: method signature: expected function type");
             (params.to_vec(), Some(ret))
         };
 
@@ -1278,7 +1282,7 @@ impl Compiler<'_> {
             let arena = self.analyzed.type_arena();
             let (params, ret, _) = arena
                 .unwrap_function(method_def.signature_id)
-                .expect("method signature should be a function type");
+                .expect("INTERNAL: method signature: expected function type");
             (params.to_vec(), ret)
         };
 
@@ -1396,7 +1400,7 @@ impl Compiler<'_> {
                 let arena = self.analyzed.type_arena();
                 let (params, ret, _) = arena
                     .unwrap_function(method_def.signature_id)
-                    .expect("static method signature should be a function type");
+                    .expect("INTERNAL: static method signature: expected function type");
                 (params.to_vec(), ret)
             };
 
@@ -1522,7 +1526,7 @@ impl Compiler<'_> {
                 let arena = self.analyzed.type_arena();
                 let (params, ret, _) = arena
                     .unwrap_function(method_def.signature_id)
-                    .expect("method signature should be a function type");
+                    .expect("INTERNAL: method signature: expected function type");
                 (params.to_vec(), Some(ret))
             };
 
@@ -1536,7 +1540,7 @@ impl Compiler<'_> {
                 .collect();
             let self_sym = module_interner
                 .lookup("self")
-                .expect("'self' should be interned in module");
+                .expect("INTERNAL: method compilation: 'self' not interned");
             let self_binding = (self_sym, metadata.vole_type, self.pointer_type);
 
             // Create function builder and compile
@@ -1627,7 +1631,7 @@ impl Compiler<'_> {
                     let arena = self.analyzed.type_arena();
                     let (params, ret, _) = arena
                         .unwrap_function(method_def.signature_id)
-                        .expect("static method signature should be a function type");
+                        .expect("INTERNAL: static method signature: expected function type");
                     (params.to_vec(), Some(ret))
                 };
 
@@ -1757,7 +1761,7 @@ impl Compiler<'_> {
                 let arena = self.analyzed.type_arena();
                 let (params, ret, _) = arena
                     .unwrap_function(method_def.signature_id)
-                    .expect("method signature should be a function type");
+                    .expect("INTERNAL: method signature: expected function type");
                 (params.to_vec(), Some(ret))
             };
 
@@ -1771,7 +1775,7 @@ impl Compiler<'_> {
                 .collect();
             let self_sym = module_interner
                 .lookup("self")
-                .expect("'self' should be interned in module");
+                .expect("INTERNAL: method compilation: 'self' not interned");
             let self_binding = (self_sym, metadata.vole_type, self.pointer_type);
 
             let source_file_ptr = self.source_file_ptr();
@@ -1857,7 +1861,7 @@ impl Compiler<'_> {
                     let arena = self.analyzed.type_arena();
                     let (params, ret, _) = arena
                         .unwrap_function(method_def.signature_id)
-                        .expect("static method signature should be a function type");
+                        .expect("INTERNAL: static method signature: expected function type");
                     (params.to_vec(), Some(ret))
                 };
 

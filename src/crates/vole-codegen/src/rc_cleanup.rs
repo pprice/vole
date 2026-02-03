@@ -97,7 +97,7 @@ impl RcScopeStack {
         let scope = self
             .scopes
             .last_mut()
-            .expect("register_rc_local called with no active RC scope");
+            .expect("INTERNAL: register_rc_local: no active RC scope");
         scope.locals.push(RcLocal {
             variable,
             drop_flag,
@@ -158,7 +158,7 @@ impl RcScopeStack {
         let scope = self
             .scopes
             .last_mut()
-            .expect("register_composite called with no active RC scope");
+            .expect("INTERNAL: register_composite: no active RC scope");
         scope.composites.push(CompositeRcLocal {
             variable,
             drop_flag,
@@ -206,7 +206,7 @@ impl RcScopeStack {
         let scope = self
             .scopes
             .last_mut()
-            .expect("register_union called with no active RC scope");
+            .expect("INTERNAL: register_union: no active RC scope");
         scope.unions.push(UnionRcLocal {
             variable,
             drop_flag,

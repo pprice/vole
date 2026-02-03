@@ -285,7 +285,7 @@ pub fn compile_function_body_with_cg(
             // Small struct (1-2 flat slots): return field values in registers
             let flat_count = cg
                 .struct_flat_slot_count(ret_type_id)
-                .expect("small struct return must have flat slot count");
+                .expect("INTERNAL: struct return: missing flat slot count");
             let struct_ptr = value.value;
             let mut return_vals = Vec::with_capacity(2);
             for i in 0..flat_count {
@@ -309,11 +309,11 @@ pub fn compile_function_body_with_cg(
                 .func
                 .layout
                 .entry_block()
-                .expect("function must have an entry block");
+                .expect("INTERNAL: sret return: function has no entry block");
             let sret_ptr = cg.builder.block_params(entry_block)[0];
             let flat_count = cg
                 .struct_flat_slot_count(ret_type_id)
-                .expect("sret struct return must have flat slot count");
+                .expect("INTERNAL: sret return: missing flat slot count");
             let struct_ptr = value.value;
             for i in 0..flat_count {
                 let offset = (i as i32) * 8;

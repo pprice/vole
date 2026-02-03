@@ -430,7 +430,7 @@ impl Cg<'_, '_, '_> {
                         // Small struct (1-2 flat slots): return values in registers
                         let flat_count = self
                             .struct_flat_slot_count(ret_type_id)
-                            .expect("small struct return must have flat slot count");
+                            .expect("INTERNAL: struct return: missing flat slot count");
                         let struct_ptr = compiled.value;
                         let mut return_vals = Vec::with_capacity(2);
                         for i in 0..flat_count {
@@ -457,11 +457,11 @@ impl Cg<'_, '_, '_> {
                             .func
                             .layout
                             .entry_block()
-                            .expect("function must have an entry block");
+                            .expect("INTERNAL: sret return: function has no entry block");
                         let sret_ptr = self.builder.block_params(entry_block)[0];
                         let flat_count = self
                             .struct_flat_slot_count(ret_type_id)
-                            .expect("sret struct return must have flat slot count");
+                            .expect("INTERNAL: sret return: missing flat slot count");
                         let struct_ptr = compiled.value;
                         for i in 0..flat_count {
                             let offset = (i as i32) * 8;
@@ -585,7 +585,7 @@ impl Cg<'_, '_, '_> {
                 if then_terminated && else_terminated {
                     self.builder
                         .ins()
-                        .trap(TrapCode::user(1).expect("trap code 1 must be valid"));
+                        .trap(TrapCode::user(1).expect("INTERNAL: trap code 1 is invalid"));
                 }
 
                 self.builder.seal_block(then_block);

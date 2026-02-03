@@ -159,7 +159,7 @@ impl Compiler<'_> {
         let arena = self.analyzed.type_arena();
         let (params, ret, _) = arena
             .unwrap_function(method_def.signature_id)
-            .expect("method should have function signature");
+            .expect("INTERNAL: method signature: missing function signature");
         self.build_signature_from_type_ids(params, Some(ret), self_param)
     }
 }
