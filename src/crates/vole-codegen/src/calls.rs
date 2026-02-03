@@ -386,25 +386,34 @@ impl Cg<'_, '_, '_> {
                     let method_name_id = method.name_id;
                     // Box the lambda value to create the interface representation
                     let boxed = self.box_interface_value(lambda_val, declared_type_id)?;
-                    return self.interface_dispatch_call_args_by_type_def_id(
+                    let result = self.interface_dispatch_call_args_by_type_def_id(
                         &boxed,
                         &call.args,
                         type_def_id,
                         method_name_id,
                         func_type_id,
-                    );
+                    )?;
+                    // Dec the boxed interface instance (which transitively frees
+                    // the closure via instance_drop).
+                    self.emit_rc_dec_for_type(boxed.value, boxed.type_id)?;
+                    return Ok(result);
                 }
             }
 
             // If it's a function type, call as closure
             // Note: Global lambdas don't support default params lookup (use call.callee.id as placeholder)
             if self.arena().is_function(lambda_val.type_id) {
-                return self.call_closure_value(
+                let result = self.call_closure_value(
                     lambda_val.value,
                     lambda_val.type_id,
                     call,
                     call.callee.id,
-                );
+                )?;
+                // The global init re-compiles the lambda each call, creating a
+                // fresh closure allocation. Dec it now that the call has finished.
+                let mut tmp = lambda_val;
+                self.consume_rc_value(&mut tmp)?;
+                return Ok(result);
             }
 
             // If it's an interface type (functional interface), call via vtable
@@ -414,13 +423,16 @@ impl Cg<'_, '_, '_> {
                 let method = self.query().get_method(method_id);
                 let func_type_id = method.signature_id;
                 let method_name_id = method.name_id;
-                return self.interface_dispatch_call_args_by_type_def_id(
+                let result = self.interface_dispatch_call_args_by_type_def_id(
                     &lambda_val,
                     &call.args,
                     type_def_id,
                     method_name_id,
                     func_type_id,
-                );
+                )?;
+                // Dec the interface instance created by the global init.
+                self.emit_rc_dec_for_type(lambda_val.value, lambda_val.type_id)?;
+                return Ok(result);
             }
         }
 

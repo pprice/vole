@@ -273,7 +273,8 @@ impl Cg<'_, '_, '_> {
 
         for (i, capture) in captures.iter().enumerate() {
             // For self-captures (recursive lambdas), use the closure pointer itself
-            let (current_value, vole_type_id) = if Some(capture.name) == self.self_capture {
+            let is_self_capture = Some(capture.name) == self.self_capture;
+            let (current_value, vole_type_id) = if is_self_capture {
                 // Self-capture: use the closure pointer we just created
                 let (_, ty) = self.vars.get(&capture.name).ok_or_else(|| {
                     format!("Self-captured variable not found: {:?}", capture.name)
@@ -288,7 +289,13 @@ impl Cg<'_, '_, '_> {
                 (self.builder.use_var(*var), *ty)
             };
 
-            let is_rc = self.is_capture_rc(vole_type_id);
+            // Self-captures are weak references (no rc_inc, no rc_dec on drop)
+            // to break the reference cycle: closure -> self-capture -> closure.
+            let is_rc = if is_self_capture {
+                false
+            } else {
+                self.is_capture_rc(vole_type_id)
+            };
 
             // If the capture is RC, increment its refcount (the closure now shares ownership)
             if is_rc {

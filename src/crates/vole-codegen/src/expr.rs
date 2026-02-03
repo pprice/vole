@@ -404,12 +404,11 @@ impl Cg<'_, '_, '_> {
             .call(alloc_ref, &[wrapper_func_addr, zero_captures]);
         let closure_ptr = self.builder.inst_results(alloc_call)[0];
 
-        // Use closure type from sema (already has is_closure: true)
-        Ok(CompiledValue::new(
-            closure_ptr,
-            self.ptr_type(),
-            func_type_id,
-        ))
+        // Use closure type from sema (already has is_closure: true).
+        // Mark as Owned: the closure allocation is a fresh +1 reference that
+        // must be rc_dec'd when it goes out of scope or is consumed as an arg.
+        let cv = CompiledValue::new(closure_ptr, self.ptr_type(), func_type_id);
+        Ok(self.mark_rc_owned(cv))
     }
 
     /// Compile a unary expression

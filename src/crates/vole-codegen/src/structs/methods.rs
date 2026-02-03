@@ -81,6 +81,15 @@ impl Cg<'_, '_, '_> {
             }
         }
 
+        // Track whether the receiver is a global init producing an RC interface.
+        // Global inits re-compile the expression each time, creating a temporary
+        // allocation (closure boxed to interface) that must be freed after the call.
+        let receiver_is_global_init_rc_iface = if let ExprKind::Identifier(sym) = &mc.object.kind {
+            self.global_init(*sym).is_some()
+        } else {
+            false
+        };
+
         let obj = self.expr(&mc.object)?;
         let method_name_str = self.interner().resolve(mc.method);
 
@@ -228,12 +237,17 @@ impl Cg<'_, '_, '_> {
                 ..
             } = resolved
             {
-                return self.interface_dispatch_call_args_by_slot(
+                let result = self.interface_dispatch_call_args_by_slot(
                     &obj,
                     &mc.args,
                     *method_index,
                     *func_type_id,
-                );
+                )?;
+                // For global init receivers, free the temporary interface+closure.
+                if receiver_is_global_init_rc_iface {
+                    self.emit_rc_dec_for_type(obj.value, obj.type_id)?;
+                }
+                return Ok(result);
             }
 
             // Interface dispatch - check if object is an interface type and dispatch via vtable
@@ -248,13 +262,17 @@ impl Cg<'_, '_, '_> {
                 }
             };
             if let Some(interface_type_id) = interface_info {
-                return self.interface_dispatch_call_args_by_type_def_id(
+                let result = self.interface_dispatch_call_args_by_type_def_id(
                     &obj,
                     &mc.args,
                     interface_type_id,
                     method_name_id,
                     resolved.func_type_id(),
-                );
+                )?;
+                if receiver_is_global_init_rc_iface {
+                    self.emit_rc_dec_for_type(obj.value, obj.type_id)?;
+                }
+                return Ok(result);
             }
 
             // Functional interface calls
@@ -265,13 +283,17 @@ impl Cg<'_, '_, '_> {
                     arena.unwrap_interface(obj.type_id).map(|(id, _)| id)
                 };
                 if let Some(interface_type_def_id) = interface_type_def_id {
-                    return self.interface_dispatch_call_args_by_type_def_id(
+                    let result = self.interface_dispatch_call_args_by_type_def_id(
                         &obj,
                         &mc.args,
                         interface_type_def_id,
                         method_name_id,
                         *func_type_id,
-                    );
+                    )?;
+                    if receiver_is_global_init_rc_iface {
+                        self.emit_rc_dec_for_type(obj.value, obj.type_id)?;
+                    }
+                    return Ok(result);
                 }
                 // For functional interfaces, the object holds the function ptr or closure
                 let is_closure = {
@@ -925,8 +947,12 @@ impl Cg<'_, '_, '_> {
 
         // Build args: self (iterator ptr) + method args
         let mut args: ArgVec = smallvec![obj.value];
+        let mut rc_temps: Vec<CompiledValue> = Vec::new();
         for arg in &mc.args {
             let compiled = self.expr(arg)?;
+            if compiled.is_owned() {
+                rc_temps.push(compiled);
+            }
             args.push(compiled.value);
         }
 
@@ -955,6 +981,17 @@ impl Cg<'_, '_, '_> {
         } else {
             self.call_external_id(&external_info, &args, return_type_id)?
         };
+
+        // Free predicate closures for terminal methods that don't take ownership.
+        // find/any/all borrow the closure — codegen must free it after the call.
+        // for_each/reduce free the closure themselves via Closure::free in the runtime.
+        // Pipeline methods (map, filter, etc.) store closures in the iterator.
+        let codegen_frees_closure = matches!(method_name, "find" | "any" | "all");
+        if codegen_frees_closure {
+            for mut tmp in rc_temps {
+                self.consume_rc_value(&mut tmp)?;
+            }
+        }
 
         // Mark RC-typed results as Owned so they get properly cleaned up
         if self.needs_rc_cleanup(return_type_id) {
