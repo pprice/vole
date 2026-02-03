@@ -983,6 +983,11 @@ impl Analyzer {
                     self.check_type_body(class, interner)?;
                 }
                 Decl::Interface(interface_decl) => {
+                    // Note: Interface default method bodies are NOT checked here because they
+                    // are compiled in the context of implementing types, not the interface.
+                    // The fallback to I64/F64 for literals in codegen handles these cases.
+                    // A proper fix would analyze default methods when inherited by implementing types.
+
                     // Check static method default bodies
                     if let Some(ref statics) = interface_decl.statics {
                         for method in &statics.methods {
@@ -991,6 +996,25 @@ impl Analyzer {
                     }
                 }
                 Decl::Implement(impl_block) => {
+                    // Skip generator-transformed implement blocks - their method bodies
+                    // reference variables that only exist at codegen time after full
+                    // generator state machine transformation
+                    let is_generated = match &impl_block.target_type {
+                        TypeExpr::Named(sym) => interner.resolve(*sym).starts_with("__Generator_"),
+                        _ => false,
+                    };
+
+                    if !is_generated {
+                        // Resolve target type to TypeId for checking instance methods
+                        let target_type_id =
+                            self.resolve_type_id(&impl_block.target_type, interner);
+
+                        // Check instance methods in implement blocks
+                        for method in &impl_block.methods {
+                            self.check_implement_method(method, target_type_id, interner)?;
+                        }
+                    }
+
                     // Check static methods in implement blocks
                     if let Some(ref statics) = impl_block.statics {
                         match &impl_block.target_type {

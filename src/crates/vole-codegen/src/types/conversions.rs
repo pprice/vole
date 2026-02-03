@@ -364,7 +364,8 @@ pub(crate) fn type_id_size(
         }
         // Struct types: use flat slot count to account for nested struct fields
         ArenaType::Struct { .. } => {
-            crate::structs::struct_total_byte_size(ty, arena, entity_registry).unwrap_or(8) // fallback: shouldn't happen for valid struct types
+            crate::structs::struct_total_byte_size(ty, arena, entity_registry)
+                .expect("INTERNAL: valid struct must have computable size")
         }
         // Unknown type uses TaggedValue representation: 8-byte tag + 8-byte value = 16 bytes
         ArenaType::Unknown => 16,

@@ -409,15 +409,15 @@ impl Analyzer {
         return_type_id
     }
 
-    /// Resolve parameter types for a generic function with type params in scope.
+    /// Resolve parameter and return types for a generic function with type params in scope.
     /// Synthetic type params are substituted for their corresponding structural types.
-    fn resolve_generic_params(
+    fn resolve_generic_signature(
         &mut self,
         func: &FuncDecl,
         interner: &Interner,
         type_param_scope: &TypeParamScope,
         synthetic_param_map: &FxHashMap<usize, NameId>,
-    ) -> Vec<ArenaTypeId> {
+    ) -> (Vec<ArenaTypeId>, ArenaTypeId) {
         let module_id = self.current_module;
         let mut ctx = TypeResolutionContext::with_type_params(
             &self.ctx.db,
@@ -426,7 +426,8 @@ impl Analyzer {
             type_param_scope,
         );
 
-        func.params
+        let param_types = func
+            .params
             .iter()
             .enumerate()
             .map(|(i, p)| {
@@ -437,28 +438,15 @@ impl Analyzer {
                     resolve_type_to_id(&p.ty, &mut ctx)
                 }
             })
-            .collect()
-    }
+            .collect();
 
-    /// Resolve return type for a generic function with type params in scope.
-    fn resolve_generic_return(
-        &mut self,
-        func: &FuncDecl,
-        interner: &Interner,
-        type_param_scope: &TypeParamScope,
-    ) -> ArenaTypeId {
-        let module_id = self.current_module;
-        let mut ctx = TypeResolutionContext::with_type_params(
-            &self.ctx.db,
-            interner,
-            module_id,
-            type_param_scope,
-        );
-
-        func.return_type
+        let return_type = func
+            .return_type
             .as_ref()
             .map(|t| resolve_type_to_id(t, &mut ctx))
-            .unwrap_or_else(|| self.type_arena().void())
+            .unwrap_or_else(|| self.type_arena().void());
+
+        (param_types, return_type)
     }
 
     /// Validate parameter and return types after resolution (for generic functions).
@@ -507,9 +495,8 @@ impl Analyzer {
         synthetic_param_map: FxHashMap<usize, NameId>,
     ) {
         // Resolve param and return types with type params in scope
-        let param_type_ids =
-            self.resolve_generic_params(func, interner, &type_param_scope, &synthetic_param_map);
-        let return_type_id = self.resolve_generic_return(func, interner, &type_param_scope);
+        let (param_type_ids, return_type_id) =
+            self.resolve_generic_signature(func, interner, &type_param_scope, &synthetic_param_map);
 
         // Validate types after resolution
         self.validate_generic_function_types(func, &param_type_ids);
@@ -2419,6 +2406,13 @@ impl Analyzer {
                 // Create signature from TypeIds
                 let signature = FunctionType::from_ids(&param_type_ids, return_type_id, false);
 
+                // Type-check parameter default expressions so their types are recorded for codegen
+                if let Err(errs) =
+                    self.check_param_defaults(&func.params, &signature.params_id, interner)
+                {
+                    self.errors.extend(errs);
+                }
+
                 // Register in EntityRegistry with default expressions (like regular generic functions)
                 let func_id = self.entity_registry_mut().register_function_full(
                     name_id,
@@ -2492,6 +2486,13 @@ impl Analyzer {
                     .unwrap_or_else(|| self.type_arena().void());
 
                 let func_type = FunctionType::from_ids(&params_id, return_type_id, false);
+
+                // Type-check parameter default expressions so their types are recorded for codegen
+                if let Err(errs) =
+                    self.check_param_defaults(&func.params, &func_type.params_id, interner)
+                {
+                    self.errors.extend(errs);
+                }
 
                 // Register the function with its Vole name (Symbol)
                 self.functions.insert(func.vole_name, func_type.clone());

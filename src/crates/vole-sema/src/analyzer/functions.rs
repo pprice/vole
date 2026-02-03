@@ -704,4 +704,95 @@ impl Analyzer {
 
         Ok(())
     }
+
+    /// Check an implement block method body.
+    /// This is called for instance methods defined in implement blocks.
+    /// The method signature should already be registered in the implement registry.
+    pub(super) fn check_implement_method(
+        &mut self,
+        method: &FuncDecl,
+        target_type_id: ArenaTypeId,
+        interner: &Interner,
+    ) -> Result<(), Vec<TypeError>> {
+        use crate::implement_registry::ImplTypeId;
+
+        // Get the impl_type_id for looking up method signature
+        let impl_type_id = {
+            let arena = self.type_arena();
+            ImplTypeId::from_type_id(target_type_id, &arena, &self.entity_registry())
+        };
+        let Some(impl_type_id) = impl_type_id else {
+            return Ok(()); // Can't check if we can't identify the type
+        };
+
+        // Get method signature from implement registry
+        let method_name_id = self.method_name_id(method.name, interner);
+        let (params_id, return_type_id) = {
+            let registry = self.implement_registry();
+            let method_impl = registry.get_method(&impl_type_id, method_name_id);
+            let Some(method_impl) = method_impl else {
+                return Ok(()); // Method not found in registry, skip
+            };
+            (
+                method_impl.func_type.params_id.clone(),
+                method_impl.func_type.return_type_id,
+            )
+        };
+
+        // Determine if we need to infer the return type
+        let needs_inference = method.return_type.is_none();
+
+        let saved_ctx = if needs_inference {
+            self.enter_function_context_inferring()
+        } else {
+            self.enter_function_context(return_type_id)
+        };
+
+        // Create scope with 'self' and parameters
+        let parent_scope = std::mem::take(&mut self.scope);
+        self.scope = Scope::with_parent(parent_scope);
+
+        // Add 'self' to scope
+        let self_sym = interner
+            .lookup("self")
+            .expect("'self' should be interned during parsing");
+        self.scope.define(
+            self_sym,
+            Variable {
+                ty: target_type_id,
+                mutable: false,
+                declaration_span: method.span,
+            },
+        );
+
+        // Add parameters
+        for (param, &ty_id) in method.params.iter().zip(params_id.iter()) {
+            self.scope.define(
+                param.name,
+                Variable {
+                    ty: ty_id,
+                    mutable: false,
+                    declaration_span: param.span,
+                },
+            );
+        }
+
+        // Type-check parameter default expressions
+        self.check_param_defaults(&method.params, &params_id, interner)?;
+
+        // Check body
+        let _body_info = self.check_func_body(&method.body, interner)?;
+
+        // Note: We don't update inferred return types for implement block methods
+        // since they're stored in the implement registry, not entity registry.
+        // This could be enhanced later if needed.
+
+        // Restore scope and context
+        if let Some(parent) = std::mem::take(&mut self.scope).into_parent() {
+            self.scope = parent;
+        }
+        self.exit_function_context(saved_ctx);
+
+        Ok(())
+    }
 }

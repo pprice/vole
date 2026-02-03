@@ -546,6 +546,26 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         }
     }
 
+    /// Increment RC for a borrowed value being stored into a container.
+    ///
+    /// When placing a borrowed value into an array, tuple, or similar container,
+    /// the container needs its own reference. Without this, the element's original
+    /// binding and the container would share a single refcount, causing double-free
+    /// on scope exit.
+    ///
+    /// After calling this, the caller should store the value and then call
+    /// `compiled.mark_consumed()` to indicate the value has been transferred
+    /// to the container.
+    pub fn rc_inc_borrowed_for_container(&mut self, compiled: &CompiledValue) -> CodegenResult<()> {
+        if self.rc_scopes.has_active_scope()
+            && self.rc_state(compiled.type_id).needs_cleanup()
+            && compiled.is_borrowed()
+        {
+            self.emit_rc_inc_for_type(compiled.value, compiled.type_id)?;
+        }
+        Ok(())
+    }
+
     /// Emit rc_inc for the RC payload inside a union value.
     ///
     /// Loads the tag, checks each RC variant, and rc_inc's the payload at

@@ -146,7 +146,7 @@ impl Cg<'_, '_, '_> {
             let nil_tag = variants
                 .iter()
                 .position(|&v| v == nil_id)
-                .unwrap_or(usize::MAX);
+                .expect("INTERNAL: optional type must have nil variant");
             let inner_type_id = arena.unwrap_optional(obj.type_id).ok_or_else(|| {
                 CodegenError::type_mismatch(
                     "optional chain",
@@ -272,8 +272,9 @@ impl Cg<'_, '_, '_> {
             let offset = {
                 let arena = self.arena();
                 let entities = self.registry();
-                super::helpers::struct_field_byte_offset(obj.type_id, slot, arena, entities)
-                    .unwrap_or((slot as i32) * 8)
+                super::helpers::struct_field_byte_offset(obj.type_id, slot, arena, entities).expect(
+                    "INTERNAL: struct field offset must be computable for valid struct type",
+                )
             };
 
             // If assigning a nested struct, copy all flat slots inline
@@ -368,7 +369,7 @@ impl Cg<'_, '_, '_> {
             let arena = self.arena();
             let entities = self.registry();
             super::helpers::struct_field_byte_offset(parent_type_id, slot, arena, entities)
-                .unwrap_or((slot as i32) * 8)
+                .expect("INTERNAL: struct field offset must be computable for valid struct type")
         };
 
         // If the field is itself a struct, return a pointer into the parent data

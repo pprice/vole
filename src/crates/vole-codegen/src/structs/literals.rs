@@ -481,7 +481,7 @@ impl Cg<'_, '_, '_> {
             let arena = self.arena();
             let entities = self.registry();
             super::helpers::struct_total_byte_size(result_type_id, arena, entities)
-                .unwrap_or_else(|| (field_slots.len() as u32) * 8)
+                .expect("INTERNAL: valid struct must have computable size")
         };
 
         // Allocate stack slot for the struct
@@ -503,7 +503,7 @@ impl Cg<'_, '_, '_> {
                     arena,
                     entities,
                 )
-                .unwrap_or((field_slot as i32) * 8)
+                .expect("INTERNAL: struct field offset must be computable for valid struct type")
             };
 
             let mut value = self.expr(&init.value)?;
@@ -552,7 +552,7 @@ impl Cg<'_, '_, '_> {
                     arena,
                     entities,
                 )
-                .unwrap_or((field_slot as i32) * 8)
+                .expect("INTERNAL: struct field offset must be computable for valid struct type")
             };
 
             // SAFETY: See collect_field_default_ptrs documentation

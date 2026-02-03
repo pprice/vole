@@ -41,13 +41,17 @@ impl Cg<'_, '_, '_> {
 
         match &expr.kind {
             ExprKind::IntLiteral(n, _) => {
-                // Look up inferred type from semantic analysis for bidirectional type inference
-                // Uses get_expr_type helper to check module-specific expr_types when compiling prelude
+                // Look up inferred type from semantic analysis for bidirectional type inference.
+                // Uses get_expr_type helper to check module-specific expr_types when compiling prelude.
+                // Falls back to I64 for interface default methods which are analyzed once but
+                // compiled multiple times for different implementing types - the single recorded
+                // type from sema may not match the compilation context.
                 let type_id = self.get_expr_type(&expr.id).unwrap_or(TypeId::I64);
                 Ok(self.int_const(*n, type_id))
             }
             ExprKind::FloatLiteral(n, _) => {
-                // Look up inferred type from semantic analysis for bidirectional type inference
+                // Look up inferred type from semantic analysis for bidirectional type inference.
+                // Falls back to F64 for interface default methods (see IntLiteral comment above).
                 let type_id = self.get_expr_type(&expr.id).unwrap_or(TypeId::F64);
                 Ok(self.float_const(*n, type_id))
             }
@@ -615,14 +619,7 @@ impl Cg<'_, '_, '_> {
             };
 
             // RC: inc borrowed RC elements so the array gets its own reference.
-            // Without this, the element's original binding and the array would
-            // share a single refcount, causing double-free on scope exit.
-            if self.rc_scopes.has_active_scope()
-                && self.rc_state(compiled.type_id).needs_cleanup()
-                && compiled.is_borrowed()
-            {
-                self.emit_rc_inc_for_type(compiled.value, compiled.type_id)?;
-            }
+            self.rc_inc_borrowed_for_container(&compiled)?;
 
             // Compute tag before using builder to avoid borrow conflict
             let tag = {
@@ -674,14 +671,7 @@ impl Cg<'_, '_, '_> {
             let offset = offsets[i];
 
             // RC: inc borrowed RC elements so the tuple gets its own reference.
-            // Without this, the element's original binding and the tuple would
-            // share a single refcount, causing double-free on scope exit.
-            if self.rc_scopes.has_active_scope()
-                && self.rc_state(compiled.type_id).needs_cleanup()
-                && compiled.is_borrowed()
-            {
-                self.emit_rc_inc_for_type(compiled.value, compiled.type_id)?;
-            }
+            self.rc_inc_borrowed_for_container(&compiled)?;
 
             // Store the value at its offset in the tuple
             self.builder.ins().stack_store(compiled.value, slot, offset);

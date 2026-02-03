@@ -51,7 +51,15 @@ impl Analyzer {
             ExprKind::FloatLiteral(_, suffix) => Ok(self.check_float_literal(*suffix)),
             ExprKind::BoolLiteral(_) => Ok(ArenaTypeId::BOOL),
             ExprKind::StringLiteral(_) => Ok(ArenaTypeId::STRING),
-            ExprKind::InterpolatedString(_) => Ok(ArenaTypeId::STRING),
+            ExprKind::InterpolatedString(parts) => {
+                // Type-check each embedded expression so their types are recorded for codegen
+                for part in parts {
+                    if let StringPart::Expr(expr) = part {
+                        self.check_expr(expr, interner)?;
+                    }
+                }
+                Ok(ArenaTypeId::STRING)
+            }
             ExprKind::TypeLiteral(_) => Ok(ArenaTypeId::METATYPE),
             // Identifier and variable access
             ExprKind::Identifier(sym) => self.check_identifier_expr(expr, *sym, interner),

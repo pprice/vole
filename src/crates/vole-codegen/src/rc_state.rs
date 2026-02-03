@@ -370,7 +370,8 @@ fn compute_type_size_aligned(arena: &TypeArena, registry: &EntityRegistry, type_
         }
         SemaType::Struct { .. } => {
             // Use struct_total_byte_size helper
-            crate::structs::struct_total_byte_size(type_id, arena, registry).unwrap_or(8) as i32
+            crate::structs::struct_total_byte_size(type_id, arena, registry)
+                .expect("INTERNAL: valid struct must have computable size") as i32
         }
         SemaType::Unknown => 16, // TaggedValue: 8-byte tag + 8-byte value
         _ => 8,                  // Default to pointer size for other types
