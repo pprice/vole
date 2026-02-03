@@ -324,6 +324,80 @@ macro_rules! generate_produces_owned {
     };
 }
 
+/// Helper macro for defining iterator next functions.
+///
+/// This macro standardizes the common boilerplate for `vole_*_iter_next` functions:
+/// - Null check on the iterator pointer
+/// - Kind check to ensure we're operating on the correct iterator type
+/// - Access to the typed source data
+///
+/// # Usage
+///
+/// ```rust,ignore
+/// iter_next_fn!(
+///     /// Optional doc comments
+///     filter, Filter, filter, mut |src, iter, out_value| {
+///         // src: &mut FilterSource
+///         // iter: *mut RcIterator (the outer iterator pointer)
+///         // out_value: *mut i64 (where to store the result)
+///         // Returns i64 (1 for has value, 0 for done)
+///     }
+/// );
+/// ```
+///
+/// The `mut` modifier indicates whether the source needs mutable access.
+/// Without `mut`, the source is borrowed immutably.
+macro_rules! iter_next_fn {
+    // Mutable source access variant
+    (
+        $(#[$attr:meta])*
+        $name:ident, $kind:ident, $source_field:ident, mut |$src:ident, $iter:ident, $out:ident| $body:block
+    ) => {
+        $(#[$attr])*
+        #[unsafe(no_mangle)]
+        pub extern "C" fn $name(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
+            if iter.is_null() {
+                return 0;
+            }
+
+            let iter_ref = unsafe { &mut (*iter).iter };
+
+            if iter_ref.kind != IteratorKind::$kind {
+                return 0;
+            }
+
+            let $src = unsafe { &mut iter_ref.source.$source_field };
+            let $iter = iter;
+            let $out = out_value;
+            $body
+        }
+    };
+    // Immutable source access variant
+    (
+        $(#[$attr:meta])*
+        $name:ident, $kind:ident, $source_field:ident, |$src:ident, $iter:ident, $out:ident| $body:block
+    ) => {
+        $(#[$attr])*
+        #[unsafe(no_mangle)]
+        pub extern "C" fn $name(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
+            if iter.is_null() {
+                return 0;
+            }
+
+            let iter_ref = unsafe { &(*iter).iter };
+
+            if iter_ref.kind != IteratorKind::$kind {
+                return 0;
+            }
+
+            let $src = unsafe { iter_ref.source.$source_field };
+            let $iter = iter;
+            let $out = out_value;
+            $body
+        }
+    };
+}
+
 /// Unified iterator source - can be either an array, map, filter, take, skip, chain, flatten, flat_map, unique, chunks, windows, repeat, once, empty, from_fn, range, string_chars, or interface iterator
 /// This allows chaining (e.g., arr.iter().map(f).filter(p).take(5))
 #[repr(C)]
@@ -831,55 +905,46 @@ fn vole_empty_iter_next(_iter: *mut RcIterator, _out_value: *mut i64) -> i64 {
 // Generate vole_array_iter_next dispatch from the central definition
 for_all_iterator_kinds!(generate_next_dispatch);
 
-/// Get next value from interface iterator by calling through the vtable.
-/// The boxed interface has layout: [data_ptr, vtable_ptr]
-/// The vtable has method pointers, with next() at slot 0.
-/// The next() wrapper returns a tagged union pointer.
-/// Union variants are sorted descending: Primitive(T) > Done, so tag 0 = value, tag 1 = Done.
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_interface_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
-    if iter.is_null() {
-        return 0;
-    }
+iter_next_fn!(
+    /// Get next value from interface iterator by calling through the vtable.
+    /// The boxed interface has layout: [data_ptr, vtable_ptr]
+    /// The vtable has method pointers, with next() at slot 0.
+    /// The next() wrapper returns a tagged union pointer.
+    /// Union variants are sorted descending: Primitive(T) > Done, so tag 0 = value, tag 1 = Done.
+    vole_interface_iter_next, Interface, interface, |src, _iter, out| {
+        let boxed = src.boxed_interface;
+        if boxed.is_null() {
+            return 0;
+        }
 
-    let iter_ref = unsafe { &(*iter).iter };
-    if iter_ref.kind != IteratorKind::Interface {
-        return 0;
-    }
+        unsafe {
+            // Load vtable pointer from the boxed interface (layout: [data_ptr, vtable_ptr])
+            let vtable_ptr = *((boxed as *const i64).add(1));
 
-    let interface_src = unsafe { iter_ref.source.interface };
-    let boxed = interface_src.boxed_interface;
-    if boxed.is_null() {
-        return 0;
-    }
+            // Get the next() method pointer from vtable slot 0
+            let next_fn_ptr = *(vtable_ptr as *const usize);
 
-    unsafe {
-        // Load vtable pointer from the boxed interface (layout: [data_ptr, vtable_ptr])
-        let vtable_ptr = *((boxed as *const i64).add(1));
+            // Call the next() wrapper: fn(box_ptr) -> tagged_union_ptr
+            // The wrapper expects the full boxed interface pointer so it can extract data_ptr
+            let next_fn: extern "C" fn(i64) -> *mut u8 = std::mem::transmute(next_fn_ptr);
+            let result_ptr = next_fn(boxed as i64);
 
-        // Get the next() method pointer from vtable slot 0
-        let next_fn_ptr = *(vtable_ptr as *const usize);
-
-        // Call the next() wrapper: fn(box_ptr) -> tagged_union_ptr
-        // The wrapper expects the full boxed interface pointer so it can extract data_ptr
-        let next_fn: extern "C" fn(i64) -> *mut u8 = std::mem::transmute(next_fn_ptr);
-        let result_ptr = next_fn(boxed as i64);
-
-        // Parse the tagged union result
-        // Layout: [tag:1][pad:7][payload:8]
-        // Tag 0 = value, Tag 1 = Done (descending sort order)
-        let tag = *result_ptr;
-        if tag == 1 {
-            // Done - no more values
-            0
-        } else {
-            // Has value - extract payload
-            let payload = *(result_ptr.add(8) as *const i64);
-            *out_value = payload;
-            1
+            // Parse the tagged union result
+            // Layout: [tag:1][pad:7][payload:8]
+            // Tag 0 = value, Tag 1 = Done (descending sort order)
+            let tag = *result_ptr;
+            if tag == 1 {
+                // Done - no more values
+                0
+            } else {
+                // Has value - extract payload
+                let payload = *(result_ptr.add(8) as *const i64);
+                *out = payload;
+                1
+            }
         }
     }
-}
+);
 
 /// Get next value from any iterator and return a tagged union pointer.
 /// Layout: [tag:1][pad:7][payload:8].
@@ -1051,59 +1116,47 @@ pub extern "C" fn vole_map_iter(
     )
 }
 
-/// Get next value from map iterator
-/// Calls the source iterator's next, applies the transform function, returns result
-/// Returns 1 and stores transformed value in out_value if available
-/// Returns 0 if iterator exhausted (Done)
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_map_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
-    if iter.is_null() {
-        return 0;
+iter_next_fn!(
+    /// Get next value from map iterator.
+    /// Calls the source iterator's next, applies the transform function, returns result.
+    /// Returns 1 and stores transformed value in out_value if available.
+    /// Returns 0 if iterator exhausted (Done).
+    vole_map_iter_next, Map, map, |src, _iter, out| {
+        // Check if source values are owned RC values that need rc_dec after consumption.
+        // The source iterator's elem_tag tells us the type of values it produces.
+        // If the source produces owned RC values (from another map, string_chars, etc.),
+        // we need to rc_dec them after the transform closure consumes them.
+        let source_elem_tag = unsafe { (*src.source).elem_tag };
+        let source_needs_rc_dec =
+            crate::value::tag_needs_rc(source_elem_tag) && iter_produces_owned(src.source);
+
+        // Get next value from source iterator (could be Array or Map)
+        let mut source_value: i64 = 0;
+        let has_value = vole_array_iter_next(src.source, &mut source_value);
+
+        if has_value == 0 {
+            return 0; // Done
+        }
+
+        // Apply transform function
+        // All lambdas now use closure calling convention (closure ptr as first arg)
+        unsafe {
+            let func_ptr = Closure::get_func(src.transform);
+            let transform_fn: extern "C" fn(*const Closure, i64) -> i64 =
+                std::mem::transmute(func_ptr);
+            let result = transform_fn(src.transform, source_value);
+            *out = result;
+        }
+
+        // rc_dec the consumed source value if it was an owned RC value (from another map, etc.).
+        // The closure has consumed the value (used it to produce the result).
+        if source_needs_rc_dec && source_value != 0 {
+            rc_dec(source_value as *mut u8);
+        }
+
+        1 // Has value
     }
-
-    let iter_ref = unsafe { &(*iter).iter };
-
-    // This function should only be called for Map iterators
-    // but vole_array_iter_next delegates here for Map kind
-    if iter_ref.kind != IteratorKind::Map {
-        return 0;
-    }
-
-    let map_src = unsafe { iter_ref.source.map };
-
-    // Check if source values are owned RC values that need rc_dec after consumption.
-    // The source iterator's elem_tag tells us the type of values it produces.
-    // If the source produces owned RC values (from another map, string_chars, etc.),
-    // we need to rc_dec them after the transform closure consumes them.
-    let source_elem_tag = unsafe { (*map_src.source).elem_tag };
-    let source_needs_rc_dec =
-        crate::value::tag_needs_rc(source_elem_tag) && iter_produces_owned(map_src.source);
-
-    // Get next value from source iterator (could be Array or Map)
-    let mut source_value: i64 = 0;
-    let has_value = vole_array_iter_next(map_src.source, &mut source_value);
-
-    if has_value == 0 {
-        return 0; // Done
-    }
-
-    // Apply transform function
-    // All lambdas now use closure calling convention (closure ptr as first arg)
-    unsafe {
-        let func_ptr = Closure::get_func(map_src.transform);
-        let transform_fn: extern "C" fn(*const Closure, i64) -> i64 = std::mem::transmute(func_ptr);
-        let result = transform_fn(map_src.transform, source_value);
-        *out_value = result;
-    }
-
-    // rc_dec the consumed source value if it was an owned RC value (from another map, etc.).
-    // The closure has consumed the value (used it to produce the result).
-    if source_needs_rc_dec && source_value != 0 {
-        rc_dec(source_value as *mut u8);
-    }
-
-    1 // Has value
-}
+);
 
 /// Collect all remaining map iterator values into a new array
 /// Returns pointer to newly allocated array
@@ -1164,62 +1217,50 @@ pub extern "C" fn vole_filter_iter(
     )
 }
 
-/// Get next value from filter iterator
-/// Calls the source iterator's next, applies the predicate function, skips non-matching elements
-/// Returns 1 and stores value in out_value if a matching element is found
-/// Returns 0 if iterator exhausted (Done)
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_filter_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
-    if iter.is_null() {
-        return 0;
-    }
+iter_next_fn!(
+    /// Get next value from filter iterator.
+    /// Calls the source iterator's next, applies the predicate function, skips non-matching elements.
+    /// Returns 1 and stores value in out_value if a matching element is found.
+    /// Returns 0 if iterator exhausted (Done).
+    vole_filter_iter_next, Filter, filter, |src, iter, out| {
+        // Check if rejected values need rc_dec (source produces owned RC values)
+        let elem_tag = unsafe { (*iter).elem_tag };
+        let rc_dec_rejects =
+            crate::value::tag_needs_rc(elem_tag) && iter_produces_owned(src.source);
 
-    let iter_ref = unsafe { &(*iter).iter };
+        // Keep getting values from source until we find one that passes the predicate
+        loop {
+            // Get next value from source iterator (could be Array, Map, or Filter)
+            let mut source_value: i64 = 0;
+            let has_value = vole_array_iter_next(src.source, &mut source_value);
 
-    // This function should only be called for Filter iterators
-    if iter_ref.kind != IteratorKind::Filter {
-        return 0;
-    }
+            if has_value == 0 {
+                return 0; // Done - source exhausted
+            }
 
-    let filter_src = unsafe { iter_ref.source.filter };
+            // Apply predicate function
+            // Check if this is a closure (has captures) or a pure function (no captures)
+            // Note: Vole bools are i8, so predicate returns i8 (0 or 1)
+            // All lambdas now use closure calling convention (closure ptr as first arg)
+            let passes: i8 = unsafe {
+                let func_ptr = Closure::get_func(src.predicate);
+                let predicate_fn: extern "C" fn(*const Closure, i64) -> i8 =
+                    std::mem::transmute(func_ptr);
+                predicate_fn(src.predicate, source_value)
+            };
 
-    // Check if rejected values need rc_dec (source produces owned RC values)
-    let elem_tag = unsafe { (*iter).elem_tag };
-    let rc_dec_rejects =
-        crate::value::tag_needs_rc(elem_tag) && iter_produces_owned(filter_src.source);
-
-    // Keep getting values from source until we find one that passes the predicate
-    loop {
-        // Get next value from source iterator (could be Array, Map, or Filter)
-        let mut source_value: i64 = 0;
-        let has_value = vole_array_iter_next(filter_src.source, &mut source_value);
-
-        if has_value == 0 {
-            return 0; // Done - source exhausted
-        }
-
-        // Apply predicate function
-        // Check if this is a closure (has captures) or a pure function (no captures)
-        // Note: Vole bools are i8, so predicate returns i8 (0 or 1)
-        // All lambdas now use closure calling convention (closure ptr as first arg)
-        let passes: i8 = unsafe {
-            let func_ptr = Closure::get_func(filter_src.predicate);
-            let predicate_fn: extern "C" fn(*const Closure, i64) -> i8 =
-                std::mem::transmute(func_ptr);
-            predicate_fn(filter_src.predicate, source_value)
-        };
-
-        // If predicate returns non-zero (true), yield this value
-        if passes != 0 {
-            unsafe { *out_value = source_value };
-            return 1; // Has value
-        }
-        // Rejected value: rc_dec if it's an owned RC value (from map/etc.)
-        if rc_dec_rejects && source_value != 0 {
-            rc_dec(source_value as *mut u8);
+            // If predicate returns non-zero (true), yield this value
+            if passes != 0 {
+                unsafe { *out = source_value };
+                return 1; // Has value
+            }
+            // Rejected value: rc_dec if it's an owned RC value (from map/etc.)
+            if rc_dec_rejects && source_value != 0 {
+                rc_dec(source_value as *mut u8);
+            }
         }
     }
-}
+);
 
 /// Collect all remaining filter iterator values into a new array
 /// Returns pointer to newly allocated array
@@ -1669,43 +1710,31 @@ pub extern "C" fn vole_take_iter(source: *mut RcIterator, count: i64) -> *mut Rc
     )
 }
 
-/// Get next value from take iterator
-/// Returns 1 and stores value in out_value if available (and remaining > 0)
-/// Returns 0 if remaining is 0 or source iterator exhausted (Done)
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_take_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
-    if iter.is_null() {
-        return 0;
+iter_next_fn!(
+    /// Get next value from take iterator.
+    /// Returns 1 and stores value in out_value if available (and remaining > 0).
+    /// Returns 0 if remaining is 0 or source iterator exhausted (Done).
+    vole_take_iter_next, Take, take, mut |src, _iter, out| {
+        // If we've taken enough elements, return Done
+        if src.remaining <= 0 {
+            return 0;
+        }
+
+        // Get next value from source iterator
+        let mut source_value: i64 = 0;
+        let has_value = vole_array_iter_next(src.source, &mut source_value);
+
+        if has_value == 0 {
+            return 0; // Source exhausted
+        }
+
+        // Decrement remaining count
+        src.remaining -= 1;
+
+        unsafe { *out = source_value };
+        1 // Has value
     }
-
-    let iter_ref = unsafe { &mut (*iter).iter };
-
-    // This function should only be called for Take iterators
-    if iter_ref.kind != IteratorKind::Take {
-        return 0;
-    }
-
-    let take_src = unsafe { &mut iter_ref.source.take };
-
-    // If we've taken enough elements, return Done
-    if take_src.remaining <= 0 {
-        return 0;
-    }
-
-    // Get next value from source iterator
-    let mut source_value: i64 = 0;
-    let has_value = vole_array_iter_next(take_src.source, &mut source_value);
-
-    if has_value == 0 {
-        return 0; // Source exhausted
-    }
-
-    // Decrement remaining count
-    take_src.remaining -= 1;
-
-    unsafe { *out_value = source_value };
-    1 // Has value
-}
+);
 
 /// Collect all remaining take iterator values into a new array
 /// Returns pointer to newly allocated array
@@ -1765,48 +1794,36 @@ pub extern "C" fn vole_skip_iter(source: *mut RcIterator, count: i64) -> *mut Rc
     )
 }
 
-/// Get next value from skip iterator
-/// On first call, skips skip_count elements, then returns remaining elements
-/// Returns 1 and stores value in out_value if available
-/// Returns 0 if iterator exhausted (Done)
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_skip_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
-    if iter.is_null() {
-        return 0;
-    }
-
-    let iter_ref = unsafe { &mut (*iter).iter };
-
-    // This function should only be called for Skip iterators
-    if iter_ref.kind != IteratorKind::Skip {
-        return 0;
-    }
-
-    let skip_src = unsafe { &mut iter_ref.source.skip };
-
-    // If we haven't skipped yet, do the initial skip
-    if skip_src.skipped == 0 {
-        skip_src.skipped = 1;
-        let owned_rc = iter_produces_owned_rc(skip_src.source);
-        let mut skipped: i64 = 0;
-        while skipped < skip_src.skip_count {
-            let mut dummy: i64 = 0;
-            let has_value = vole_array_iter_next(skip_src.source, &mut dummy);
-            if has_value == 0 {
-                // Source exhausted during skip
-                return 0;
+iter_next_fn!(
+    /// Get next value from skip iterator.
+    /// On first call, skips skip_count elements, then returns remaining elements.
+    /// Returns 1 and stores value in out_value if available.
+    /// Returns 0 if iterator exhausted (Done).
+    vole_skip_iter_next, Skip, skip, mut |src, _iter, out| {
+        // If we haven't skipped yet, do the initial skip
+        if src.skipped == 0 {
+            src.skipped = 1;
+            let owned_rc = iter_produces_owned_rc(src.source);
+            let mut skipped: i64 = 0;
+            while skipped < src.skip_count {
+                let mut dummy: i64 = 0;
+                let has_value = vole_array_iter_next(src.source, &mut dummy);
+                if has_value == 0 {
+                    // Source exhausted during skip
+                    return 0;
+                }
+                // Free skipped owned RC values
+                if owned_rc && dummy != 0 {
+                    rc_dec(dummy as *mut u8);
+                }
+                skipped += 1;
             }
-            // Free skipped owned RC values
-            if owned_rc && dummy != 0 {
-                rc_dec(dummy as *mut u8);
-            }
-            skipped += 1;
         }
-    }
 
-    // Now just pass through from source
-    vole_array_iter_next(skip_src.source, out_value)
-}
+        // Now just pass through from source
+        vole_array_iter_next(src.source, out)
+    }
+);
 
 /// Collect all remaining skip iterator values into a new array
 /// Returns pointer to newly allocated array
@@ -2022,38 +2039,26 @@ pub extern "C" fn vole_chain_iter(
     )
 }
 
-/// Get next value from chain iterator
-/// First exhausts the first iterator, then yields from the second
-/// Returns 1 and stores value in out_value if available
-/// Returns 0 if both iterators exhausted (Done)
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_chain_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
-    if iter.is_null() {
-        return 0;
-    }
-
-    let iter_ref = unsafe { &mut (*iter).iter };
-
-    // This function should only be called for Chain iterators
-    if iter_ref.kind != IteratorKind::Chain {
-        return 0;
-    }
-
-    let chain_src = unsafe { &mut iter_ref.source.chain };
-
-    // If we're still on the first iterator
-    if chain_src.on_second == 0 {
-        let has_value = vole_array_iter_next(chain_src.first, out_value);
-        if has_value != 0 {
-            return 1; // Got value from first
+iter_next_fn!(
+    /// Get next value from chain iterator.
+    /// First exhausts the first iterator, then yields from the second.
+    /// Returns 1 and stores value in out_value if available.
+    /// Returns 0 if both iterators exhausted (Done).
+    vole_chain_iter_next, Chain, chain, mut |src, _iter, out| {
+        // If we're still on the first iterator
+        if src.on_second == 0 {
+            let has_value = vole_array_iter_next(src.first, out);
+            if has_value != 0 {
+                return 1; // Got value from first
+            }
+            // First exhausted, switch to second
+            src.on_second = 1;
         }
-        // First exhausted, switch to second
-        chain_src.on_second = 1;
-    }
 
-    // Now try the second iterator
-    vole_array_iter_next(chain_src.second, out_value)
-}
+        // Now try the second iterator
+        vole_array_iter_next(src.second, out)
+    }
+);
 
 /// Collect all remaining chain iterator values into a new array
 /// Returns pointer to newly allocated array
@@ -2112,63 +2117,51 @@ pub extern "C" fn vole_flatten_iter(source: *mut RcIterator) -> *mut RcIterator 
     )
 }
 
-/// Get next value from flatten iterator
-/// Yields elements from each inner array until all are exhausted
-/// Returns 1 and stores value in out_value if available
-/// Returns 0 if iterator exhausted (Done)
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_flatten_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
-    if iter.is_null() {
-        return 0;
-    }
+iter_next_fn!(
+    /// Get next value from flatten iterator.
+    /// Yields elements from each inner array until all are exhausted.
+    /// Returns 1 and stores value in out_value if available.
+    /// Returns 0 if iterator exhausted (Done).
+    vole_flatten_iter_next, Flatten, flatten, mut |src, _iter, out| {
+        // Check if the outer iterator produces owned arrays (e.g. from chunks/windows).
+        // If so, we must dec_ref each array after wrapping it in an inner iterator,
+        // because vole_array_iter inc_ref's the array.
+        let outer_owns_arrays = iter_produces_owned(src.outer);
 
-    let iter_ref = unsafe { &mut (*iter).iter };
-
-    // This function should only be called for Flatten iterators
-    if iter_ref.kind != IteratorKind::Flatten {
-        return 0;
-    }
-
-    // Check if the outer iterator produces owned arrays (e.g. from chunks/windows).
-    // If so, we must dec_ref each array after wrapping it in an inner iterator,
-    // because vole_array_iter inc_ref's the array.
-    let outer_owns_arrays = unsafe { iter_produces_owned(iter_ref.source.flatten.outer) };
-
-    let flatten_src = unsafe { &mut iter_ref.source.flatten };
-
-    loop {
-        // If we have an inner iterator, try to get the next value from it
-        if !flatten_src.inner.is_null() {
-            let mut value: i64 = 0;
-            let has_value = vole_array_iter_next(flatten_src.inner, &mut value);
-            if has_value != 0 {
-                unsafe { *out_value = value };
-                return 1;
+        loop {
+            // If we have an inner iterator, try to get the next value from it
+            if !src.inner.is_null() {
+                let mut value: i64 = 0;
+                let has_value = vole_array_iter_next(src.inner, &mut value);
+                if has_value != 0 {
+                    unsafe { *out = value };
+                    return 1;
+                }
+                // Inner iterator exhausted, free it and get next outer element
+                RcIterator::dec_ref(src.inner);
+                src.inner = ptr::null_mut();
             }
-            // Inner iterator exhausted, free it and get next outer element
-            RcIterator::dec_ref(flatten_src.inner);
-            flatten_src.inner = ptr::null_mut();
-        }
 
-        // Get next array from outer iterator
-        let mut array_ptr: i64 = 0;
-        let has_array = vole_array_iter_next(flatten_src.outer, &mut array_ptr);
-        if has_array == 0 {
-            return 0; // Outer iterator exhausted
-        }
+            // Get next array from outer iterator
+            let mut array_ptr: i64 = 0;
+            let has_array = vole_array_iter_next(src.outer, &mut array_ptr);
+            if has_array == 0 {
+                return 0; // Outer iterator exhausted
+            }
 
-        // Create an iterator for the inner array
-        let inner_array = array_ptr as *const RcArray;
-        flatten_src.inner = vole_array_iter(inner_array);
-        // vole_array_iter inc_ref'd the array. If the outer iterator produced
-        // an owned array (e.g. from chunks/windows), dec_ref to transfer sole
-        // ownership to the inner iterator.
-        if outer_owns_arrays {
-            unsafe { RcArray::dec_ref(inner_array as *mut RcArray) };
+            // Create an iterator for the inner array
+            let inner_array = array_ptr as *const RcArray;
+            src.inner = vole_array_iter(inner_array);
+            // vole_array_iter inc_ref'd the array. If the outer iterator produced
+            // an owned array (e.g. from chunks/windows), dec_ref to transfer sole
+            // ownership to the inner iterator.
+            if outer_owns_arrays {
+                unsafe { RcArray::dec_ref(inner_array as *mut RcArray) };
+            }
+            // Continue loop to get first element from this inner iterator
         }
-        // Continue loop to get first element from this inner iterator
     }
-}
+);
 
 /// Collect all remaining flatten iterator values into a new array
 /// Returns pointer to newly allocated array
@@ -2232,64 +2225,52 @@ pub extern "C" fn vole_flat_map_iter(
     )
 }
 
-/// Get next value from flat_map iterator
-/// Applies transform to each source element, then yields elements from resulting arrays
-/// Returns 1 and stores value in out_value if available
-/// Returns 0 if iterator exhausted (Done)
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_flat_map_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
-    if iter.is_null() {
-        return 0;
-    }
-
-    let iter_ref = unsafe { &mut (*iter).iter };
-
-    // This function should only be called for FlatMap iterators
-    if iter_ref.kind != IteratorKind::FlatMap {
-        return 0;
-    }
-
-    let flat_map_src = unsafe { &mut iter_ref.source.flat_map };
-
-    loop {
-        // If we have an inner iterator, try to get the next value from it
-        if !flat_map_src.inner.is_null() {
-            let mut value: i64 = 0;
-            let has_value = vole_array_iter_next(flat_map_src.inner, &mut value);
-            if has_value != 0 {
-                unsafe { *out_value = value };
-                return 1;
+iter_next_fn!(
+    /// Get next value from flat_map iterator.
+    /// Applies transform to each source element, then yields elements from resulting arrays.
+    /// Returns 1 and stores value in out_value if available.
+    /// Returns 0 if iterator exhausted (Done).
+    vole_flat_map_iter_next, FlatMap, flat_map, mut |src, _iter, out| {
+        loop {
+            // If we have an inner iterator, try to get the next value from it
+            if !src.inner.is_null() {
+                let mut value: i64 = 0;
+                let has_value = vole_array_iter_next(src.inner, &mut value);
+                if has_value != 0 {
+                    unsafe { *out = value };
+                    return 1;
+                }
+                // Inner iterator exhausted, free it and get next source element
+                RcIterator::dec_ref(src.inner);
+                src.inner = ptr::null_mut();
             }
-            // Inner iterator exhausted, free it and get next source element
-            RcIterator::dec_ref(flat_map_src.inner);
-            flat_map_src.inner = ptr::null_mut();
+
+            // Get next value from source iterator
+            let mut source_value: i64 = 0;
+            let has_source = vole_array_iter_next(src.source, &mut source_value);
+            if has_source == 0 {
+                return 0; // Source iterator exhausted
+            }
+
+            // Apply transform function to get an array
+            let array_ptr: i64 = unsafe {
+                let func_ptr = Closure::get_func(src.transform);
+                let transform_fn: extern "C" fn(*const Closure, i64) -> i64 =
+                    std::mem::transmute(func_ptr);
+                transform_fn(src.transform, source_value)
+            };
+
+            // Create an iterator for the resulting array.
+            // vole_array_iter rc_inc's the array (for user arrays).
+            // The transform created this array (refcount 1), so dec_ref after wrapping
+            // to transfer sole ownership to the inner iterator.
+            let inner_array = array_ptr as *mut RcArray;
+            src.inner = vole_array_iter(inner_array);
+            unsafe { RcArray::dec_ref(inner_array) };
+            // Continue loop to get first element from this inner iterator
         }
-
-        // Get next value from source iterator
-        let mut source_value: i64 = 0;
-        let has_source = vole_array_iter_next(flat_map_src.source, &mut source_value);
-        if has_source == 0 {
-            return 0; // Source iterator exhausted
-        }
-
-        // Apply transform function to get an array
-        let array_ptr: i64 = unsafe {
-            let func_ptr = Closure::get_func(flat_map_src.transform);
-            let transform_fn: extern "C" fn(*const Closure, i64) -> i64 =
-                std::mem::transmute(func_ptr);
-            transform_fn(flat_map_src.transform, source_value)
-        };
-
-        // Create an iterator for the resulting array.
-        // vole_array_iter rc_inc's the array (for user arrays).
-        // The transform created this array (refcount 1), so dec_ref after wrapping
-        // to transfer sole ownership to the inner iterator.
-        let inner_array = array_ptr as *mut RcArray;
-        flat_map_src.inner = vole_array_iter(inner_array);
-        unsafe { RcArray::dec_ref(inner_array) };
-        // Continue loop to get first element from this inner iterator
     }
-}
+);
 
 /// Collect all remaining flat_map iterator values into a new array
 /// Returns pointer to newly allocated array
@@ -2452,51 +2433,39 @@ pub extern "C" fn vole_unique_iter(source: *mut RcIterator) -> *mut RcIterator {
     )
 }
 
-/// Get next value from unique iterator
-/// Skips consecutive duplicate values
-/// Returns 1 and stores value in out_value if available
-/// Returns 0 if iterator exhausted (Done)
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_unique_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
-    if iter.is_null() {
-        return 0;
-    }
+iter_next_fn!(
+    /// Get next value from unique iterator.
+    /// Skips consecutive duplicate values.
+    /// Returns 1 and stores value in out_value if available.
+    /// Returns 0 if iterator exhausted (Done).
+    vole_unique_iter_next, Unique, unique, mut |src, _iter, out| {
+        loop {
+            // Get next value from source iterator
+            let mut value: i64 = 0;
+            let has_value = vole_array_iter_next(src.source, &mut value);
 
-    let iter_ref = unsafe { &mut (*iter).iter };
+            if has_value == 0 {
+                return 0; // Source exhausted
+            }
 
-    // This function should only be called for Unique iterators
-    if iter_ref.kind != IteratorKind::Unique {
-        return 0;
-    }
+            // If this is the first element, always yield it
+            if src.has_prev == 0 {
+                src.has_prev = 1;
+                src.prev = value;
+                unsafe { *out = value };
+                return 1;
+            }
 
-    let unique_src = unsafe { &mut iter_ref.source.unique };
-
-    loop {
-        // Get next value from source iterator
-        let mut value: i64 = 0;
-        let has_value = vole_array_iter_next(unique_src.source, &mut value);
-
-        if has_value == 0 {
-            return 0; // Source exhausted
+            // If value differs from previous, yield it
+            if value != src.prev {
+                src.prev = value;
+                unsafe { *out = value };
+                return 1;
+            }
+            // Otherwise, skip this duplicate and continue
         }
-
-        // If this is the first element, always yield it
-        if unique_src.has_prev == 0 {
-            unique_src.has_prev = 1;
-            unique_src.prev = value;
-            unsafe { *out_value = value };
-            return 1;
-        }
-
-        // If value differs from previous, yield it
-        if value != unique_src.prev {
-            unique_src.prev = value;
-            unsafe { *out_value = value };
-            return 1;
-        }
-        // Otherwise, skip this duplicate and continue
     }
-}
+);
 
 // =============================================================================
 // ChunksIterator - splits into non-overlapping chunks
@@ -2549,51 +2518,40 @@ pub extern "C" fn vole_chunks_iter(source: *mut RcIterator, chunk_size: i64) -> 
     )
 }
 
-/// Get next chunk from chunks iterator
-/// Returns 1 and stores array pointer in out_value if available
-/// Returns 0 if iterator exhausted (Done)
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_chunks_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
-    use crate::value::TaggedValue;
+iter_next_fn!(
+    /// Get next chunk from chunks iterator.
+    /// Returns 1 and stores array pointer in out_value if available.
+    /// Returns 0 if iterator exhausted (Done).
+    vole_chunks_iter_next, Chunks, chunks, mut |src, _iter, out| {
+        use crate::value::TaggedValue;
 
-    if iter.is_null() {
-        return 0;
-    }
+        let elements_len = unsafe { (*src.elements).len } as i64;
 
-    let iter_ref = unsafe { &mut (*iter).iter };
-
-    if iter_ref.kind != IteratorKind::Chunks {
-        return 0;
-    }
-
-    let chunks_src = unsafe { &mut iter_ref.source.chunks };
-
-    let elements_len = unsafe { (*chunks_src.elements).len } as i64;
-
-    // Check if we've exhausted all elements
-    if chunks_src.position >= elements_len {
-        return 0;
-    }
-
-    // Create a new array for this chunk
-    let chunk = RcArray::new();
-    let end_pos = std::cmp::min(chunks_src.position + chunks_src.chunk_size, elements_len);
-
-    for i in chunks_src.position..end_pos {
-        let value = unsafe {
-            let data = (*chunks_src.elements).data;
-            (*data.add(i as usize)).value
-        };
-        unsafe {
-            RcArray::push(chunk, TaggedValue { tag: 0, value });
+        // Check if we've exhausted all elements
+        if src.position >= elements_len {
+            return 0;
         }
+
+        // Create a new array for this chunk
+        let chunk = RcArray::new();
+        let end_pos = std::cmp::min(src.position + src.chunk_size, elements_len);
+
+        for i in src.position..end_pos {
+            let value = unsafe {
+                let data = (*src.elements).data;
+                (*data.add(i as usize)).value
+            };
+            unsafe {
+                RcArray::push(chunk, TaggedValue { tag: 0, value });
+            }
+        }
+
+        src.position = end_pos;
+
+        unsafe { *out = chunk as i64 };
+        1
     }
-
-    chunks_src.position = end_pos;
-
-    unsafe { *out_value = chunk as i64 };
-    1
-}
+);
 
 /// Collect all remaining chunks into a new array of arrays
 /// Returns pointer to newly allocated array
@@ -2685,51 +2643,40 @@ pub extern "C" fn vole_windows_iter(source: *mut RcIterator, window_size: i64) -
     )
 }
 
-/// Get next window from windows iterator
-/// Returns 1 and stores array pointer in out_value if available
-/// Returns 0 if iterator exhausted (Done)
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_windows_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
-    use crate::value::TaggedValue;
+iter_next_fn!(
+    /// Get next window from windows iterator.
+    /// Returns 1 and stores array pointer in out_value if available.
+    /// Returns 0 if iterator exhausted (Done).
+    vole_windows_iter_next, Windows, windows, mut |src, _iter, out| {
+        use crate::value::TaggedValue;
 
-    if iter.is_null() {
-        return 0;
-    }
+        let elements_len = unsafe { (*src.elements).len } as i64;
 
-    let iter_ref = unsafe { &mut (*iter).iter };
-
-    if iter_ref.kind != IteratorKind::Windows {
-        return 0;
-    }
-
-    let windows_src = unsafe { &mut iter_ref.source.windows };
-
-    let elements_len = unsafe { (*windows_src.elements).len } as i64;
-
-    // Check if we can produce another window
-    // We need at least window_size elements starting from position
-    if windows_src.position + windows_src.window_size > elements_len {
-        return 0;
-    }
-
-    // Create a new array for this window
-    let window = RcArray::new();
-    for i in 0..windows_src.window_size {
-        let value = unsafe {
-            let data = (*windows_src.elements).data;
-            (*data.add((windows_src.position + i) as usize)).value
-        };
-        unsafe {
-            RcArray::push(window, TaggedValue { tag: 0, value });
+        // Check if we can produce another window
+        // We need at least window_size elements starting from position
+        if src.position + src.window_size > elements_len {
+            return 0;
         }
+
+        // Create a new array for this window
+        let window = RcArray::new();
+        for i in 0..src.window_size {
+            let value = unsafe {
+                let data = (*src.elements).data;
+                (*data.add((src.position + i) as usize)).value
+            };
+            unsafe {
+                RcArray::push(window, TaggedValue { tag: 0, value });
+            }
+        }
+
+        // Move position forward by 1 for sliding window
+        src.position += 1;
+
+        unsafe { *out = window as i64 };
+        1
     }
-
-    // Move position forward by 1 for sliding window
-    windows_src.position += 1;
-
-    unsafe { *out_value = window as i64 };
-    1
-}
+);
 
 /// Collect all remaining windows into a new array of arrays
 /// Returns pointer to newly allocated array
@@ -2787,24 +2734,14 @@ pub extern "C" fn vole_repeat_iter(value: i64) -> *mut RcIterator {
     )
 }
 
-/// Get next value from repeat iterator
-/// Always returns 1 with the same value (infinite iterator)
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_repeat_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
-    if iter.is_null() {
-        return 0;
+iter_next_fn!(
+    /// Get next value from repeat iterator.
+    /// Always returns 1 with the same value (infinite iterator).
+    vole_repeat_iter_next, Repeat, repeat, |src, _iter, out| {
+        unsafe { *out = src.value };
+        1 // Always has a value (infinite iterator)
     }
-
-    let iter_ref = unsafe { &(*iter).iter };
-
-    if iter_ref.kind != IteratorKind::Repeat {
-        return 0;
-    }
-
-    let repeat_src = unsafe { iter_ref.source.repeat };
-    unsafe { *out_value = repeat_src.value };
-    1 // Always has a value (infinite iterator)
-}
+);
 
 // =============================================================================
 // OnceIterator - iterator that yields a single value
@@ -2825,30 +2762,19 @@ pub extern "C" fn vole_once_iter(value: i64) -> *mut RcIterator {
     )
 }
 
-/// Get next value from once iterator
-/// Returns 1 with the value on first call, 0 on subsequent calls
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_once_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
-    if iter.is_null() {
-        return 0;
+iter_next_fn!(
+    /// Get next value from once iterator.
+    /// Returns 1 with the value on first call, 0 on subsequent calls.
+    vole_once_iter_next, Once, once, mut |src, _iter, out| {
+        if src.exhausted != 0 {
+            return 0; // Already yielded the value
+        }
+
+        src.exhausted = 1;
+        unsafe { *out = src.value };
+        1 // Has value
     }
-
-    let iter_ref = unsafe { &mut (*iter).iter };
-
-    if iter_ref.kind != IteratorKind::Once {
-        return 0;
-    }
-
-    let once_src = unsafe { &mut iter_ref.source.once };
-
-    if once_src.exhausted != 0 {
-        return 0; // Already yielded the value
-    }
-
-    once_src.exhausted = 1;
-    unsafe { *out_value = once_src.value };
-    1 // Has value
-}
+);
 
 // =============================================================================
 // EmptyIterator - iterator that yields nothing
@@ -2886,52 +2812,42 @@ pub extern "C" fn vole_from_fn_iter(generator: *const Closure) -> *mut RcIterato
     )
 }
 
-/// Get next value from from_fn iterator
-/// Calls the generator function - returns 1 with value if not nil, 0 if nil
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_from_fn_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
-    if iter.is_null() {
-        return 0;
-    }
+iter_next_fn!(
+    /// Get next value from from_fn iterator.
+    /// Calls the generator function - returns 1 with value if not nil, 0 if nil.
+    vole_from_fn_iter_next, FromFn, from_fn, |src, _iter, out| {
+        // Call the generator function
+        // The generator returns T? which is a tagged union with layout [tag:1][pad:7][payload:8]
+        // Tag 0 = I64 (value present), Tag 1 = Nil
+        unsafe {
+            let func_ptr = Closure::get_func(src.generator);
+            let generator_fn: extern "C" fn(*const Closure) -> *mut u8 =
+                std::mem::transmute(func_ptr);
+            let result_ptr = generator_fn(src.generator);
 
-    let iter_ref = unsafe { &(*iter).iter };
+            if result_ptr.is_null() {
+                return 0;
+            }
 
-    if iter_ref.kind != IteratorKind::FromFn {
-        return 0;
-    }
+            // Read the tag
+            let tag = ptr::read(result_ptr);
+            let payload_ptr = result_ptr.add(8) as *const i64;
+            let payload = ptr::read(payload_ptr);
 
-    let from_fn_src = unsafe { iter_ref.source.from_fn };
+            // Free the result (it was allocated by the generator)
+            let layout = Layout::from_size_align(16, 8).expect("valid layout");
+            dealloc(result_ptr, layout);
 
-    // Call the generator function
-    // The generator returns T? which is a tagged union with layout [tag:1][pad:7][payload:8]
-    // Tag 0 = I64 (value present), Tag 1 = Nil
-    unsafe {
-        let func_ptr = Closure::get_func(from_fn_src.generator);
-        let generator_fn: extern "C" fn(*const Closure) -> *mut u8 = std::mem::transmute(func_ptr);
-        let result_ptr = generator_fn(from_fn_src.generator);
-
-        if result_ptr.is_null() {
-            return 0;
-        }
-
-        // Read the tag
-        let tag = ptr::read(result_ptr);
-        let payload_ptr = result_ptr.add(8) as *const i64;
-        let payload = ptr::read(payload_ptr);
-
-        // Free the result (it was allocated by the generator)
-        let layout = Layout::from_size_align(16, 8).expect("valid layout");
-        dealloc(result_ptr, layout);
-
-        // Tag 0 = I64 (value), Tag 1 = Nil
-        if tag == 0 {
-            *out_value = payload;
-            1 // Has value
-        } else {
-            0 // Nil - end iteration
+            // Tag 0 = I64 (value), Tag 1 = Nil
+            if tag == 0 {
+                *out = payload;
+                1 // Has value
+            } else {
+                0 // Nil - end iteration
+            }
         }
     }
-}
+);
 
 // =============================================================================
 // RangeIterator - iterator over a range of integers (start..end)
@@ -2952,32 +2868,21 @@ pub extern "C" fn vole_range_iter(start: i64, end: i64) -> *mut RcIterator {
     )
 }
 
-/// Get next value from range iterator
-/// Returns 1 with the value if current < end, 0 if done
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_range_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
-    if iter.is_null() {
-        return 0;
+iter_next_fn!(
+    /// Get next value from range iterator.
+    /// Returns 1 with the value if current < end, 0 if done.
+    vole_range_iter_next, Range, range, mut |src, _iter, out| {
+        // Check if we've reached the end
+        if src.current >= src.end {
+            return 0; // Done
+        }
+
+        // Yield current value and increment
+        unsafe { *out = src.current };
+        src.current += 1;
+        1 // Has value
     }
-
-    let iter_ref = unsafe { &mut (*iter).iter };
-
-    if iter_ref.kind != IteratorKind::Range {
-        return 0;
-    }
-
-    let range_src = unsafe { &mut iter_ref.source.range };
-
-    // Check if we've reached the end
-    if range_src.current >= range_src.end {
-        return 0; // Done
-    }
-
-    // Yield current value and increment
-    unsafe { *out_value = range_src.current };
-    range_src.current += 1;
-    1 // Has value
-}
+);
 
 // =============================================================================
 // StringCharsIterator - iterator over unicode characters of a string
@@ -3006,65 +2911,54 @@ pub extern "C" fn vole_string_chars_iter(string: *const RcString) -> *mut RcIter
     )
 }
 
-/// Get next character from string chars iterator
-/// Returns 1 and stores the character string pointer in out_value if available
-/// Returns 0 if iterator exhausted (Done)
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_string_chars_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
-    if iter.is_null() {
-        return 0;
-    }
-
-    let iter_ref = unsafe { &mut (*iter).iter };
-
-    if iter_ref.kind != IteratorKind::StringChars {
-        return 0;
-    }
-
-    let string_chars_src = unsafe { &mut iter_ref.source.string_chars };
-
-    if string_chars_src.string.is_null() {
-        return 0;
-    }
-
-    unsafe {
-        let string_ref = &*string_chars_src.string;
-        let byte_len = string_ref.len as i64;
-
-        // Check if we've exhausted the string
-        if string_chars_src.byte_pos >= byte_len {
-            return 0; // Done
+iter_next_fn!(
+    /// Get next character from string chars iterator.
+    /// Returns 1 and stores the character string pointer in out_value if available.
+    /// Returns 0 if iterator exhausted (Done).
+    vole_string_chars_iter_next, StringChars, string_chars, mut |src, _iter, out| {
+        if src.string.is_null() {
+            return 0;
         }
 
-        // Get the string data starting at current byte position
-        let data = string_ref.data();
-        let remaining = &data[string_chars_src.byte_pos as usize..];
+        unsafe {
+            let string_ref = &*src.string;
+            let byte_len = string_ref.len as i64;
 
-        // Get the next UTF-8 character
-        // Safety: RcString stores valid UTF-8
-        let remaining_str = std::str::from_utf8_unchecked(remaining);
-        let next_char = remaining_str.chars().next();
+            // Check if we've exhausted the string
+            if src.byte_pos >= byte_len {
+                return 0; // Done
+            }
 
-        if let Some(ch) = next_char {
-            // Get the byte length of this character
-            let char_len = ch.len_utf8();
+            // Get the string data starting at current byte position
+            let data = string_ref.data();
+            let remaining = &data[src.byte_pos as usize..];
 
-            // Create a new RcString containing just this character
-            let mut char_buf = [0u8; 4]; // Max UTF-8 bytes per char
-            let char_str = ch.encode_utf8(&mut char_buf);
-            let new_string = RcString::new(char_str);
+            // Get the next UTF-8 character
+            // Safety: RcString stores valid UTF-8
+            let remaining_str = std::str::from_utf8_unchecked(remaining);
+            let next_char = remaining_str.chars().next();
 
-            // Update byte position
-            string_chars_src.byte_pos += char_len as i64;
+            if let Some(ch) = next_char {
+                // Get the byte length of this character
+                let char_len = ch.len_utf8();
 
-            // Return the new string pointer as i64
-            *out_value = new_string as i64;
-            1 // Has value
-        } else {
-            0 // Done - should not happen if byte_pos < byte_len
+                // Create a new RcString containing just this character
+                let mut char_buf = [0u8; 4]; // Max UTF-8 bytes per char
+                let char_str = ch.encode_utf8(&mut char_buf);
+                let new_string = RcString::new(char_str);
+
+                // Update byte position
+                src.byte_pos += char_len as i64;
+
+                // Return the new string pointer as i64
+                *out = new_string as i64;
+                1 // Has value
+            } else {
+                0 // Done - should not happen if byte_pos < byte_len
+            }
         }
     }
-}
+);
 
 // =============================================================================
 // EnumerateIterator - yields (index, value) pairs
@@ -3082,53 +2976,42 @@ pub extern "C" fn vole_enumerate_iter(source: *mut RcIterator) -> *mut RcIterato
     )
 }
 
-/// Get next (index, value) tuple from enumerate iterator.
-/// Returns 1 and stores tuple pointer in out_value if available.
-/// Returns 0 if iterator exhausted (Done).
-/// The tuple layout is: [index:i64][value:i64] (16 bytes total, 8-byte aligned)
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_enumerate_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
-    if iter.is_null() {
-        return 0;
+iter_next_fn!(
+    /// Get next (index, value) tuple from enumerate iterator.
+    /// Returns 1 and stores tuple pointer in out_value if available.
+    /// Returns 0 if iterator exhausted (Done).
+    /// The tuple layout is: [index:i64][value:i64] (16 bytes total, 8-byte aligned).
+    vole_enumerate_iter_next, Enumerate, enumerate, mut |src, _iter, out| {
+        // Get next value from source iterator
+        let mut source_value: i64 = 0;
+        let has_value = vole_array_iter_next(src.source, &mut source_value);
+
+        if has_value == 0 {
+            return 0; // Source exhausted
+        }
+
+        // Allocate tuple: (i64, T) where T is also i64 for simplicity
+        // Layout: [index:8][value:8] = 16 bytes
+        let layout = Layout::from_size_align(16, 8).expect("valid tuple layout");
+        let tuple_ptr = unsafe { alloc(layout) };
+        if tuple_ptr.is_null() {
+            std::alloc::handle_alloc_error(layout);
+        }
+
+        // Write index and value to tuple
+        unsafe {
+            ptr::write(tuple_ptr as *mut i64, src.index);
+            ptr::write((tuple_ptr as *mut i64).add(1), source_value);
+        }
+
+        // Increment index for next call
+        src.index += 1;
+
+        // Return tuple pointer
+        unsafe { *out = tuple_ptr as i64 };
+        1 // Has value
     }
-
-    let iter_ref = unsafe { &mut (*iter).iter };
-
-    if iter_ref.kind != IteratorKind::Enumerate {
-        return 0;
-    }
-
-    let enum_src = unsafe { &mut iter_ref.source.enumerate };
-
-    // Get next value from source iterator
-    let mut source_value: i64 = 0;
-    let has_value = vole_array_iter_next(enum_src.source, &mut source_value);
-
-    if has_value == 0 {
-        return 0; // Source exhausted
-    }
-
-    // Allocate tuple: (i64, T) where T is also i64 for simplicity
-    // Layout: [index:8][value:8] = 16 bytes
-    let layout = Layout::from_size_align(16, 8).expect("valid tuple layout");
-    let tuple_ptr = unsafe { alloc(layout) };
-    if tuple_ptr.is_null() {
-        std::alloc::handle_alloc_error(layout);
-    }
-
-    // Write index and value to tuple
-    unsafe {
-        ptr::write(tuple_ptr as *mut i64, enum_src.index);
-        ptr::write((tuple_ptr as *mut i64).add(1), source_value);
-    }
-
-    // Increment index for next call
-    enum_src.index += 1;
-
-    // Return tuple pointer
-    unsafe { *out_value = tuple_ptr as i64 };
-    1 // Has value
-}
+);
 
 // =============================================================================
 // ZipIterator - combines two iterators into (a, b) pairs
@@ -3150,58 +3033,47 @@ pub extern "C" fn vole_zip_iter(
     )
 }
 
-/// Get next (a, b) tuple from zip iterator.
-/// Returns 1 and stores tuple pointer in out_value if both iterators have values.
-/// Returns 0 if either iterator is exhausted (Done).
-/// The tuple layout is: [first:i64][second:i64] (16 bytes total, 8-byte aligned)
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_zip_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
-    if iter.is_null() {
-        return 0;
+iter_next_fn!(
+    /// Get next (a, b) tuple from zip iterator.
+    /// Returns 1 and stores tuple pointer in out_value if both iterators have values.
+    /// Returns 0 if either iterator is exhausted (Done).
+    /// The tuple layout is: [first:i64][second:i64] (16 bytes total, 8-byte aligned).
+    vole_zip_iter_next, Zip, zip, mut |src, _iter, out| {
+        // Get next value from first iterator
+        let mut first_value: i64 = 0;
+        let has_first = vole_array_iter_next(src.first, &mut first_value);
+
+        if has_first == 0 {
+            return 0; // First iterator exhausted
+        }
+
+        // Get next value from second iterator
+        let mut second_value: i64 = 0;
+        let has_second = vole_array_iter_next(src.second, &mut second_value);
+
+        if has_second == 0 {
+            return 0; // Second iterator exhausted
+        }
+
+        // Allocate tuple: (T, U) where both are i64 for simplicity
+        // Layout: [first:8][second:8] = 16 bytes
+        let layout = Layout::from_size_align(16, 8).expect("valid tuple layout");
+        let tuple_ptr = unsafe { alloc(layout) };
+        if tuple_ptr.is_null() {
+            std::alloc::handle_alloc_error(layout);
+        }
+
+        // Write values to tuple
+        unsafe {
+            ptr::write(tuple_ptr as *mut i64, first_value);
+            ptr::write((tuple_ptr as *mut i64).add(1), second_value);
+        }
+
+        // Return tuple pointer
+        unsafe { *out = tuple_ptr as i64 };
+        1 // Has value
     }
-
-    let iter_ref = unsafe { &mut (*iter).iter };
-
-    if iter_ref.kind != IteratorKind::Zip {
-        return 0;
-    }
-
-    let zip_src = unsafe { &mut iter_ref.source.zip };
-
-    // Get next value from first iterator
-    let mut first_value: i64 = 0;
-    let has_first = vole_array_iter_next(zip_src.first, &mut first_value);
-
-    if has_first == 0 {
-        return 0; // First iterator exhausted
-    }
-
-    // Get next value from second iterator
-    let mut second_value: i64 = 0;
-    let has_second = vole_array_iter_next(zip_src.second, &mut second_value);
-
-    if has_second == 0 {
-        return 0; // Second iterator exhausted
-    }
-
-    // Allocate tuple: (T, U) where both are i64 for simplicity
-    // Layout: [first:8][second:8] = 16 bytes
-    let layout = Layout::from_size_align(16, 8).expect("valid tuple layout");
-    let tuple_ptr = unsafe { alloc(layout) };
-    if tuple_ptr.is_null() {
-        std::alloc::handle_alloc_error(layout);
-    }
-
-    // Write values to tuple
-    unsafe {
-        ptr::write(tuple_ptr as *mut i64, first_value);
-        ptr::write((tuple_ptr as *mut i64).add(1), second_value);
-    }
-
-    // Return tuple pointer
-    unsafe { *out_value = tuple_ptr as i64 };
-    1 // Has value
-}
+);
 
 // =============================================================================
 // StringSplitIterator - splits string by delimiter
@@ -3238,70 +3110,59 @@ pub extern "C" fn vole_string_split_iter(
     )
 }
 
-/// Get next substring from string split iterator
-/// Returns 1 and stores the substring pointer in out_value if available
-/// Returns 0 if iterator exhausted (Done)
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_string_split_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
-    if iter.is_null() {
-        return 0;
-    }
-
-    let iter_ref = unsafe { &mut (*iter).iter };
-
-    if iter_ref.kind != IteratorKind::StringSplit {
-        return 0;
-    }
-
-    let split_src = unsafe { &mut iter_ref.source.string_split };
-
-    if split_src.string.is_null() || split_src.exhausted != 0 {
-        return 0;
-    }
-
-    unsafe {
-        let string_ref = &*split_src.string;
-        let delim_ref = if split_src.delimiter.is_null() {
-            ""
-        } else {
-            (*split_src.delimiter).as_str()
-        };
-
-        let byte_len = string_ref.len as i64;
-
-        // Check if we've exhausted the string
-        if split_src.byte_pos > byte_len {
+iter_next_fn!(
+    /// Get next substring from string split iterator.
+    /// Returns 1 and stores the substring pointer in out_value if available.
+    /// Returns 0 if iterator exhausted (Done).
+    vole_string_split_iter_next, StringSplit, string_split, mut |src, _iter, out| {
+        if src.string.is_null() || src.exhausted != 0 {
             return 0;
         }
 
-        // Get the string data starting at current byte position
-        let data = string_ref.data();
-        let remaining = &data[split_src.byte_pos as usize..];
+        unsafe {
+            let string_ref = &*src.string;
+            let delim_ref = if src.delimiter.is_null() {
+                ""
+            } else {
+                (*src.delimiter).as_str()
+            };
 
-        // Safety: RcString stores valid UTF-8
-        let remaining_str = std::str::from_utf8_unchecked(remaining);
+            let byte_len = string_ref.len as i64;
 
-        // Find the next delimiter
-        if let Some(delim_pos) = remaining_str.find(delim_ref) {
-            // Found delimiter - yield substring before it
-            let substring = &remaining_str[..delim_pos];
-            let new_string = RcString::new(substring);
+            // Check if we've exhausted the string
+            if src.byte_pos > byte_len {
+                return 0;
+            }
 
-            // Update byte position to after the delimiter
-            split_src.byte_pos += delim_pos as i64 + delim_ref.len() as i64;
+            // Get the string data starting at current byte position
+            let data = string_ref.data();
+            let remaining = &data[src.byte_pos as usize..];
 
-            *out_value = new_string as i64;
-            1 // Has value
-        } else {
-            // No more delimiters - yield remaining string and mark exhausted
-            let new_string = RcString::new(remaining_str);
-            split_src.exhausted = 1;
+            // Safety: RcString stores valid UTF-8
+            let remaining_str = std::str::from_utf8_unchecked(remaining);
 
-            *out_value = new_string as i64;
-            1 // Has value
+            // Find the next delimiter
+            if let Some(delim_pos) = remaining_str.find(delim_ref) {
+                // Found delimiter - yield substring before it
+                let substring = &remaining_str[..delim_pos];
+                let new_string = RcString::new(substring);
+
+                // Update byte position to after the delimiter
+                src.byte_pos += delim_pos as i64 + delim_ref.len() as i64;
+
+                *out = new_string as i64;
+                1 // Has value
+            } else {
+                // No more delimiters - yield remaining string and mark exhausted
+                let new_string = RcString::new(remaining_str);
+                src.exhausted = 1;
+
+                *out = new_string as i64;
+                1 // Has value
+            }
         }
     }
-}
+);
 
 // =============================================================================
 // StringLinesIterator - splits string by newlines
@@ -3331,79 +3192,68 @@ pub extern "C" fn vole_string_lines_iter(string: *const RcString) -> *mut RcIter
     )
 }
 
-/// Get next line from string lines iterator
-/// Returns 1 and stores the line pointer in out_value if available
-/// Returns 0 if iterator exhausted (Done)
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_string_lines_iter_next(iter: *mut RcIterator, out_value: *mut i64) -> i64 {
-    if iter.is_null() {
-        return 0;
-    }
-
-    let iter_ref = unsafe { &mut (*iter).iter };
-
-    if iter_ref.kind != IteratorKind::StringLines {
-        return 0;
-    }
-
-    let lines_src = unsafe { &mut iter_ref.source.string_lines };
-
-    if lines_src.string.is_null() || lines_src.exhausted != 0 {
-        return 0;
-    }
-
-    unsafe {
-        let string_ref = &*lines_src.string;
-        let byte_len = string_ref.len as i64;
-
-        // Check if we've exhausted the string
-        if lines_src.byte_pos > byte_len {
+iter_next_fn!(
+    /// Get next line from string lines iterator.
+    /// Returns 1 and stores the line pointer in out_value if available.
+    /// Returns 0 if iterator exhausted (Done).
+    vole_string_lines_iter_next, StringLines, string_lines, mut |src, _iter, out| {
+        if src.string.is_null() || src.exhausted != 0 {
             return 0;
         }
 
-        // Get the string data starting at current byte position
-        let data = string_ref.data();
-        let remaining = &data[lines_src.byte_pos as usize..];
+        unsafe {
+            let string_ref = &*src.string;
+            let byte_len = string_ref.len as i64;
 
-        // Safety: RcString stores valid UTF-8
-        let remaining_str = std::str::from_utf8_unchecked(remaining);
-
-        // Find the next newline
-        if let Some(newline_pos) = remaining_str.find('\n') {
-            // Check for \r\n (Windows line endings)
-            let line_end = if newline_pos > 0
-                && remaining_str.as_bytes().get(newline_pos - 1) == Some(&b'\r')
-            {
-                newline_pos - 1
-            } else {
-                newline_pos
-            };
-
-            let line = &remaining_str[..line_end];
-            let new_string = RcString::new(line);
-
-            // Update byte position to after the newline
-            lines_src.byte_pos += newline_pos as i64 + 1;
-
-            *out_value = new_string as i64;
-            1 // Has value
-        } else {
-            // No more newlines - yield remaining string and mark exhausted
-            // But only if there's content (don't yield empty string at end)
-            if remaining_str.is_empty() {
+            // Check if we've exhausted the string
+            if src.byte_pos > byte_len {
                 return 0;
             }
 
-            // Strip trailing \r if present
-            let line = remaining_str.strip_suffix('\r').unwrap_or(remaining_str);
-            let new_string = RcString::new(line);
-            lines_src.exhausted = 1;
+            // Get the string data starting at current byte position
+            let data = string_ref.data();
+            let remaining = &data[src.byte_pos as usize..];
 
-            *out_value = new_string as i64;
-            1 // Has value
+            // Safety: RcString stores valid UTF-8
+            let remaining_str = std::str::from_utf8_unchecked(remaining);
+
+            // Find the next newline
+            if let Some(newline_pos) = remaining_str.find('\n') {
+                // Check for \r\n (Windows line endings)
+                let line_end = if newline_pos > 0
+                    && remaining_str.as_bytes().get(newline_pos - 1) == Some(&b'\r')
+                {
+                    newline_pos - 1
+                } else {
+                    newline_pos
+                };
+
+                let line = &remaining_str[..line_end];
+                let new_string = RcString::new(line);
+
+                // Update byte position to after the newline
+                src.byte_pos += newline_pos as i64 + 1;
+
+                *out = new_string as i64;
+                1 // Has value
+            } else {
+                // No more newlines - yield remaining string and mark exhausted
+                // But only if there's content (don't yield empty string at end)
+                if remaining_str.is_empty() {
+                    return 0;
+                }
+
+                // Strip trailing \r if present
+                let line = remaining_str.strip_suffix('\r').unwrap_or(remaining_str);
+                let new_string = RcString::new(line);
+                src.exhausted = 1;
+
+                *out = new_string as i64;
+                1 // Has value
+            }
         }
     }
-}
+);
 
 // =============================================================================
 // StringCodepointsIterator - yields unicode codepoints as i32
@@ -3431,60 +3281,46 @@ pub extern "C" fn vole_string_codepoints_iter(string: *const RcString) -> *mut R
     )
 }
 
-/// Get next codepoint from string codepoints iterator
-/// Returns 1 and stores the codepoint (as i32) in out_value if available
-/// Returns 0 if iterator exhausted (Done)
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_string_codepoints_iter_next(
-    iter: *mut RcIterator,
-    out_value: *mut i64,
-) -> i64 {
-    if iter.is_null() {
-        return 0;
-    }
-
-    let iter_ref = unsafe { &mut (*iter).iter };
-
-    if iter_ref.kind != IteratorKind::StringCodepoints {
-        return 0;
-    }
-
-    let codepoints_src = unsafe { &mut iter_ref.source.string_codepoints };
-
-    if codepoints_src.string.is_null() {
-        return 0;
-    }
-
-    unsafe {
-        let string_ref = &*codepoints_src.string;
-        let byte_len = string_ref.len as i64;
-
-        // Check if we've exhausted the string
-        if codepoints_src.byte_pos >= byte_len {
-            return 0; // Done
+iter_next_fn!(
+    /// Get next codepoint from string codepoints iterator.
+    /// Returns 1 and stores the codepoint (as i32) in out_value if available.
+    /// Returns 0 if iterator exhausted (Done).
+    vole_string_codepoints_iter_next, StringCodepoints, string_codepoints, mut |src, _iter, out| {
+        if src.string.is_null() {
+            return 0;
         }
 
-        // Get the string data starting at current byte position
-        let data = string_ref.data();
-        let remaining = &data[codepoints_src.byte_pos as usize..];
+        unsafe {
+            let string_ref = &*src.string;
+            let byte_len = string_ref.len as i64;
 
-        // Get the next UTF-8 character
-        // Safety: RcString stores valid UTF-8
-        let remaining_str = std::str::from_utf8_unchecked(remaining);
-        let next_char = remaining_str.chars().next();
+            // Check if we've exhausted the string
+            if src.byte_pos >= byte_len {
+                return 0; // Done
+            }
 
-        if let Some(ch) = next_char {
-            // Get the byte length of this character
-            let char_len = ch.len_utf8();
+            // Get the string data starting at current byte position
+            let data = string_ref.data();
+            let remaining = &data[src.byte_pos as usize..];
 
-            // Update byte position
-            codepoints_src.byte_pos += char_len as i64;
+            // Get the next UTF-8 character
+            // Safety: RcString stores valid UTF-8
+            let remaining_str = std::str::from_utf8_unchecked(remaining);
+            let next_char = remaining_str.chars().next();
 
-            // Return the codepoint as i32 (cast to i64 for storage)
-            *out_value = ch as i32 as i64;
-            1 // Has value
-        } else {
-            0 // Done - should not happen if byte_pos < byte_len
+            if let Some(ch) = next_char {
+                // Get the byte length of this character
+                let char_len = ch.len_utf8();
+
+                // Update byte position
+                src.byte_pos += char_len as i64;
+
+                // Return the codepoint as i32 (cast to i64 for storage)
+                *out = ch as i32 as i64;
+                1 // Has value
+            } else {
+                0 // Done - should not happen if byte_pos < byte_len
+            }
         }
     }
-}
+);
