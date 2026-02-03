@@ -26,6 +26,7 @@ use vole_sema::type_arena::{SemaType as ArenaType, TypeId};
 
 use super::lambda::CaptureBinding;
 use super::rc_cleanup::RcScopeStack;
+use super::rc_state::{RcState, compute_rc_state};
 use super::types::{
     CodegenCtx, CompileEnv, CompiledValue, RcLifecycle, TypeMetadataMap, native_type_to_cranelift,
     type_id_size, type_id_to_cranelift,
@@ -138,6 +139,10 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     pub substitutions: Option<&'a FxHashMap<NameId, TypeId>>,
     /// Cache for substituted types
     substitution_cache: RefCell<FxHashMap<TypeId, TypeId>>,
+    /// Cache for RC state computations
+    /// TODO(vol-eund): Remove #[allow(dead_code)] once callers are migrated
+    #[allow(dead_code)]
+    rc_state_cache: RefCell<FxHashMap<TypeId, RcState>>,
     /// Module export bindings from destructuring imports: local_name -> (module_id, export_name, type_id)
     pub module_bindings: FxHashMap<Symbol, ModuleExportBinding>,
     /// RC scope stack for drop flag tracking and cleanup emission
@@ -228,6 +233,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             current_module: None,
             substitutions: None,
             substitution_cache: RefCell::new(FxHashMap::default()),
+            rc_state_cache: RefCell::new(FxHashMap::default()),
             // Initialize with global module bindings from top-level destructuring imports
             module_bindings: env.global_module_bindings.clone(),
             rc_scopes: RcScopeStack::new(),
@@ -885,6 +891,29 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         } else {
             ty
         }
+    }
+
+    /// Get the RC state for a type. Results are cached.
+    ///
+    /// Returns information about how this type handles reference counting:
+    /// - `RcState::None`: Type does not need RC cleanup
+    /// - `RcState::Simple`: Direct RC type (String, Array, closure, etc.)
+    /// - `RcState::Composite`: Struct/tuple with RC fields
+    /// - `RcState::Union`: Union with some RC variants
+    ///
+    /// TODO(vol-eund): Remove #[allow(dead_code)] once callers are migrated
+    #[allow(dead_code)]
+    pub fn rc_state(&self, type_id: TypeId) -> RcState {
+        // Check cache first
+        if let Some(state) = self.rc_state_cache.borrow().get(&type_id) {
+            return state.clone();
+        }
+        // Compute and cache
+        let state = compute_rc_state(self.arena(), self.registry(), type_id);
+        self.rc_state_cache
+            .borrow_mut()
+            .insert(type_id, state.clone());
+        state
     }
 
     /// Get current module (as ModuleId)
