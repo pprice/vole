@@ -109,34 +109,38 @@ pub struct VoleMap {
 }
 
 impl VoleMap {
-    /// Create a new map with a native equality function (fast path).
-    pub fn new(eq_fn: EqFn) -> Self {
+    /// Internal constructor taking all options.
+    fn new_internal(
+        capacity: Option<usize>,
+        eq_mode: EqMode,
+        key_is_rc: bool,
+        value_is_rc: bool,
+    ) -> Self {
+        let table = match capacity {
+            Some(cap) => HashTable::with_capacity(cap),
+            None => HashTable::new(),
+        };
         Self {
-            table: HashTable::new(),
-            eq_mode: EqMode::Native(eq_fn),
-            key_is_rc: false,
-            value_is_rc: false,
-        }
-    }
-
-    /// Create a new map with a native equality function and RC flags.
-    pub fn new_with_rc(eq_fn: EqFn, key_is_rc: bool, value_is_rc: bool) -> Self {
-        Self {
-            table: HashTable::new(),
-            eq_mode: EqMode::Native(eq_fn),
+            table,
+            eq_mode,
             key_is_rc,
             value_is_rc,
         }
     }
 
+    /// Create a new map with a native equality function (fast path).
+    pub fn new(eq_fn: EqFn) -> Self {
+        Self::new_internal(None, EqMode::Native(eq_fn), false, false)
+    }
+
+    /// Create a new map with a native equality function and RC flags.
+    pub fn new_with_rc(eq_fn: EqFn, key_is_rc: bool, value_is_rc: bool) -> Self {
+        Self::new_internal(None, EqMode::Native(eq_fn), key_is_rc, value_is_rc)
+    }
+
     /// Create a new map with a closure-based equality (generic path).
     pub fn new_with_closure(eq_closure: *const Closure) -> Self {
-        Self {
-            table: HashTable::new(),
-            eq_mode: EqMode::Closure(eq_closure),
-            key_is_rc: false,
-            value_is_rc: false,
-        }
+        Self::new_internal(None, EqMode::Closure(eq_closure), false, false)
     }
 
     /// Create a new map with closure-based equality and RC flags.
@@ -145,22 +149,12 @@ impl VoleMap {
         key_is_rc: bool,
         value_is_rc: bool,
     ) -> Self {
-        Self {
-            table: HashTable::new(),
-            eq_mode: EqMode::Closure(eq_closure),
-            key_is_rc,
-            value_is_rc,
-        }
+        Self::new_internal(None, EqMode::Closure(eq_closure), key_is_rc, value_is_rc)
     }
 
     /// Create a new map with capacity and a native equality function.
     pub fn with_capacity(capacity: usize, eq_fn: EqFn) -> Self {
-        Self {
-            table: HashTable::with_capacity(capacity),
-            eq_mode: EqMode::Native(eq_fn),
-            key_is_rc: false,
-            value_is_rc: false,
-        }
+        Self::new_internal(Some(capacity), EqMode::Native(eq_fn), false, false)
     }
 
     /// Create a new map with capacity, native equality, and RC flags.
@@ -170,22 +164,17 @@ impl VoleMap {
         key_is_rc: bool,
         value_is_rc: bool,
     ) -> Self {
-        Self {
-            table: HashTable::with_capacity(capacity),
-            eq_mode: EqMode::Native(eq_fn),
+        Self::new_internal(
+            Some(capacity),
+            EqMode::Native(eq_fn),
             key_is_rc,
             value_is_rc,
-        }
+        )
     }
 
     /// Create a new map with capacity and closure-based equality.
     pub fn with_capacity_closure(capacity: usize, eq_closure: *const Closure) -> Self {
-        Self {
-            table: HashTable::with_capacity(capacity),
-            eq_mode: EqMode::Closure(eq_closure),
-            key_is_rc: false,
-            value_is_rc: false,
-        }
+        Self::new_internal(Some(capacity), EqMode::Closure(eq_closure), false, false)
     }
 
     /// Create a new map with capacity, closure-based equality, and RC flags.
@@ -195,12 +184,12 @@ impl VoleMap {
         key_is_rc: bool,
         value_is_rc: bool,
     ) -> Self {
-        Self {
-            table: HashTable::with_capacity(capacity),
-            eq_mode: EqMode::Closure(eq_closure),
+        Self::new_internal(
+            Some(capacity),
+            EqMode::Closure(eq_closure),
             key_is_rc,
             value_is_rc,
-        }
+        )
     }
 
     pub fn get(&self, key: i64, key_hash: i64) -> Option<i64> {
@@ -392,67 +381,52 @@ pub struct VoleSet {
 }
 
 impl VoleSet {
+    /// Internal constructor taking all options.
+    fn new_internal(capacity: Option<usize>, eq_mode: EqMode, elem_is_rc: bool) -> Self {
+        let table = match capacity {
+            Some(cap) => HashTable::with_capacity(cap),
+            None => HashTable::new(),
+        };
+        Self {
+            table,
+            eq_mode,
+            elem_is_rc,
+        }
+    }
+
     /// Create a new set with a native equality function (fast path).
     pub fn new(eq_fn: EqFn) -> Self {
-        Self {
-            table: HashTable::new(),
-            eq_mode: EqMode::Native(eq_fn),
-            elem_is_rc: false,
-        }
+        Self::new_internal(None, EqMode::Native(eq_fn), false)
     }
 
     /// Create a new set with a native equality function and RC flag.
     pub fn new_with_rc(eq_fn: EqFn, elem_is_rc: bool) -> Self {
-        Self {
-            table: HashTable::new(),
-            eq_mode: EqMode::Native(eq_fn),
-            elem_is_rc,
-        }
+        Self::new_internal(None, EqMode::Native(eq_fn), elem_is_rc)
     }
 
     /// Create a new set with closure-based equality (generic path).
     pub fn new_with_closure(eq_closure: *const Closure) -> Self {
-        Self {
-            table: HashTable::new(),
-            eq_mode: EqMode::Closure(eq_closure),
-            elem_is_rc: false,
-        }
+        Self::new_internal(None, EqMode::Closure(eq_closure), false)
     }
 
     /// Create a new set with closure-based equality and RC flag.
     pub fn new_with_closure_rc(eq_closure: *const Closure, elem_is_rc: bool) -> Self {
-        Self {
-            table: HashTable::new(),
-            eq_mode: EqMode::Closure(eq_closure),
-            elem_is_rc,
-        }
+        Self::new_internal(None, EqMode::Closure(eq_closure), elem_is_rc)
     }
 
     /// Create a new set with capacity and native equality function.
     pub fn with_capacity(capacity: usize, eq_fn: EqFn) -> Self {
-        Self {
-            table: HashTable::with_capacity(capacity),
-            eq_mode: EqMode::Native(eq_fn),
-            elem_is_rc: false,
-        }
+        Self::new_internal(Some(capacity), EqMode::Native(eq_fn), false)
     }
 
     /// Create a new set with capacity, native equality, and RC flag.
     pub fn with_capacity_rc(capacity: usize, eq_fn: EqFn, elem_is_rc: bool) -> Self {
-        Self {
-            table: HashTable::with_capacity(capacity),
-            eq_mode: EqMode::Native(eq_fn),
-            elem_is_rc,
-        }
+        Self::new_internal(Some(capacity), EqMode::Native(eq_fn), elem_is_rc)
     }
 
     /// Create a new set with capacity and closure-based equality.
     pub fn with_capacity_closure(capacity: usize, eq_closure: *const Closure) -> Self {
-        Self {
-            table: HashTable::with_capacity(capacity),
-            eq_mode: EqMode::Closure(eq_closure),
-            elem_is_rc: false,
-        }
+        Self::new_internal(Some(capacity), EqMode::Closure(eq_closure), false)
     }
 
     /// Create a new set with capacity, closure-based equality, and RC flag.
@@ -461,11 +435,7 @@ impl VoleSet {
         eq_closure: *const Closure,
         elem_is_rc: bool,
     ) -> Self {
-        Self {
-            table: HashTable::with_capacity(capacity),
-            eq_mode: EqMode::Closure(eq_closure),
-            elem_is_rc,
-        }
+        Self::new_internal(Some(capacity), EqMode::Closure(eq_closure), elem_is_rc)
     }
 
     pub fn add(&mut self, value: i64, hash: i64) -> bool {
@@ -562,11 +532,7 @@ impl VoleSet {
 
     /// Internal helper to create a result set with the same eq_mode and RC flag.
     fn new_result(&self) -> VoleSet {
-        VoleSet {
-            table: HashTable::new(),
-            eq_mode: self.eq_mode,
-            elem_is_rc: self.elem_is_rc,
-        }
+        Self::new_internal(None, self.eq_mode, self.elem_is_rc)
     }
 
     // Set operations - these use self's eq_mode for the result.
