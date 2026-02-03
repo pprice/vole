@@ -24,7 +24,7 @@ pub use crate::ResolverEntityExt;
 use crate::analysis_cache::{IsCheckResult, ModuleCache};
 use crate::compilation_db::CompilationDb;
 use crate::entity_defs::{GenericFuncInfo, TypeDefKind};
-use crate::entity_registry::EntityRegistry;
+use crate::entity_registry::{EntityRegistry, MethodDefBuilder};
 use crate::errors::{SemanticError, SemanticWarning};
 use crate::expression_data::LambdaDefaults;
 use crate::generic::{

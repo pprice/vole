@@ -14,8 +14,11 @@ mod accessors;
 mod fields;
 mod functions;
 mod globals;
+mod method_builder;
 mod methods;
 mod types;
+
+pub use method_builder::MethodDefBuilder;
 
 use std::collections::HashSet;
 

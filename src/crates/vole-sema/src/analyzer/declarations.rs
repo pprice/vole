@@ -880,16 +880,15 @@ impl Analyzer {
             .map(|p| p.default_value.clone())
             .collect();
 
-        self.entity_registry_mut().register_method_with_defaults(
+        MethodDefBuilder::new(
             entity_type_id,
             method_name_id,
             full_method_name_id,
             signature_id,
-            false, // instance methods don't have defaults (implementation defaults)
-            None,  // no external binding
-            required_params,
-            param_defaults,
-        );
+        )
+        .has_default(false) // instance methods don't have defaults (implementation defaults)
+        .param_defaults(required_params, param_defaults)
+        .register(&mut self.entity_registry_mut());
     }
 
     /// Register a static method from an InterfaceMethod.
@@ -946,18 +945,17 @@ impl Analyzer {
             .map(|p| p.default_value.clone())
             .collect();
 
-        self.entity_registry_mut()
-            .register_static_method_with_defaults(
-                entity_type_id,
-                method_name_id,
-                full_method_name_id,
-                signature_id,
-                has_default,
-                None, // no external binding
-                method_type_params,
-                required_params,
-                param_defaults,
-            );
+        MethodDefBuilder::new(
+            entity_type_id,
+            method_name_id,
+            full_method_name_id,
+            signature_id,
+        )
+        .is_static(true)
+        .has_default(has_default)
+        .method_type_params(method_type_params)
+        .param_defaults(required_params, param_defaults)
+        .register(&mut self.entity_registry_mut());
     }
 
     /// Build method type params with resolved constraints for a static method.
@@ -1860,16 +1858,16 @@ impl Analyzer {
                     .intern(&mut self.type_arena_mut());
 
                 let external_binding = static_external_methods.get(&method_name_str).copied();
-                self.entity_registry_mut()
-                    .register_static_method_with_binding(
-                        entity_type_id,
-                        method_name_id,
-                        full_method_name_id,
-                        signature_id,
-                        has_default,
-                        external_binding,
-                        Vec::new(), // Interface static methods, no method type params
-                    );
+                MethodDefBuilder::new(
+                    entity_type_id,
+                    method_name_id,
+                    full_method_name_id,
+                    signature_id,
+                )
+                .is_static(true)
+                .has_default(has_default)
+                .external_binding(external_binding)
+                .register(&mut self.entity_registry_mut());
             }
         }
 
@@ -2296,18 +2294,16 @@ impl Analyzer {
                             .iter()
                             .map(|p| p.default_value.clone())
                             .collect();
-                        self.entity_registry_mut()
-                            .register_static_method_with_defaults(
-                                entity_type_id,
-                                method_name_id,
-                                full_method_name_id,
-                                signature_id,
-                                false, // has_default refers to interface method default body
-                                None,  // no external binding
-                                Vec::new(), // implement block static methods, no method type params
-                                required_params,
-                                param_defaults,
-                            );
+                        MethodDefBuilder::new(
+                            entity_type_id,
+                            method_name_id,
+                            full_method_name_id,
+                            signature_id,
+                        )
+                        .is_static(true)
+                        .has_default(false) // has_default refers to interface method default body
+                        .param_defaults(required_params, param_defaults)
+                        .register(&mut self.entity_registry_mut());
                     }
 
                     // Register external static methods
@@ -2351,19 +2347,19 @@ impl Analyzer {
                                 .name_table_mut()
                                 .intern_raw(builtin_mod, &[&native_name_str]);
 
-                            self.entity_registry_mut()
-                                .register_static_method_with_binding(
-                                    entity_type_id,
-                                    method_name_id,
-                                    full_method_name_id,
-                                    signature_id,
-                                    false,
-                                    Some(ExternalMethodInfo {
-                                        module_path: module_path_id,
-                                        native_name: native_name_id,
-                                    }),
-                                    Vec::new(), // External static methods, no method type params
-                                );
+                            MethodDefBuilder::new(
+                                entity_type_id,
+                                method_name_id,
+                                full_method_name_id,
+                                signature_id,
+                            )
+                            .is_static(true)
+                            .has_default(false)
+                            .external_binding(Some(ExternalMethodInfo {
+                                module_path: module_path_id,
+                                native_name: native_name_id,
+                            }))
+                            .register(&mut self.entity_registry_mut());
                         }
                     }
                 }
