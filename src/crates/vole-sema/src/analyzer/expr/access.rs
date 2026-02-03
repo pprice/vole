@@ -70,20 +70,20 @@ impl Analyzer {
             })
         };
         if let Some((module_id, field_name, export_type_id)) = module_info {
-            if let Some(type_id) = export_type_id {
-                return Ok(type_id);
-            }
-            // Export not found - emit error
-            let module_path = self.name_table().module_path(module_id).to_string();
-            self.add_error(
-                SemanticError::ModuleNoExport {
-                    module: module_path,
-                    name: field_name,
-                    span: field_access.field_span.into(),
-                },
-                field_access.field_span,
-            );
-            return Ok(self.ty_invalid_traced_id("module_no_export"));
+            let Some(type_id) = export_type_id else {
+                // Export not found - emit error
+                let module_path = self.name_table().module_path(module_id).to_string();
+                self.add_error(
+                    SemanticError::ModuleNoExport {
+                        module: module_path,
+                        name: field_name,
+                        span: field_access.field_span.into(),
+                    },
+                    field_access.field_span,
+                );
+                return Ok(self.ty_invalid_traced_id("module_no_export"));
+            };
+            return Ok(type_id);
         }
 
         // Handle Invalid type early - propagate

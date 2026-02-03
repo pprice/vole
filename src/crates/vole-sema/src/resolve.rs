@@ -443,14 +443,13 @@ fn precompute_field_substitutions(
     let (field_types, type_params): (Vec<TypeId>, Vec<vole_identity::NameId>) = {
         let registry = ctx.entity_registry();
         let type_def = registry.get_type(type_def_id);
-        if let Some(generic_info) = &type_def.generic_info {
-            (
-                generic_info.field_types.clone(),
-                type_def.type_params.clone(),
-            )
-        } else {
+        let Some(generic_info) = &type_def.generic_info else {
             return;
-        }
+        };
+        (
+            generic_info.field_types.clone(),
+            type_def.type_params.clone(),
+        )
     };
 
     // Build substitution map: type param NameId -> concrete TypeId

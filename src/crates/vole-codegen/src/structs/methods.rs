@@ -109,100 +109,100 @@ impl Cg<'_, '_, '_> {
                 .analyzed()
                 .query()
                 .method_at_in_module(expr_id, current_module_path.as_deref());
-            if let Some(ResolvedMethod::Implemented {
+            let Some(ResolvedMethod::Implemented {
                 external_info,
                 func_type_id,
                 ..
             }) = resolution
-            {
-                // Get return type from arena
-                let return_type_id = {
-                    let arena = self.arena();
-                    let (_, ret, _) = arena
-                        .unwrap_function(*func_type_id)
-                        .expect("INTERNAL: module method: missing function type");
-                    ret
-                };
-
-                // Compile arguments, tracking owned RC temps for cleanup
-                let (args, mut rc_temps) = self.compile_call_args_tracking_rc(&mc.args)?;
-
-                if let Some(ext_info) = external_info {
-                    // External FFI function
-                    let result = self.call_external_id(ext_info, &args, return_type_id)?;
-                    self.consume_rc_args(&mut rc_temps)?;
-                    return Ok(result);
-                }
-
-                // Check if this is a generic external intrinsic (e.g., math.sqrt<f64>)
-                if let Some(monomorph_key) = self.query().monomorph_for(expr_id) {
-                    let instance_data = self.monomorph_cache().get(monomorph_key).map(|inst| {
-                        (
-                            inst.original_name,
-                            inst.func_type.return_type_id,
-                            inst.substitutions.clone(),
-                        )
-                    });
-
-                    if let Some((original_name, mono_return_type_id, substitutions)) = instance_data
-                        && let Some(callee_name) = self.name_table().last_segment_str(original_name)
-                        && let Some(generic_ext_info) = self
-                            .analyzed()
-                            .implement_registry()
-                            .get_generic_external(&callee_name)
-                        && let Some(key) = self.find_intrinsic_key_for_monomorph(
-                            &generic_ext_info.type_mappings,
-                            &substitutions,
-                        )
-                    {
-                        let ext_module_path = self
-                            .name_table()
-                            .last_segment_str(generic_ext_info.module_path)
-                            .unwrap_or_default();
-
-                        let return_type_id = self.substitute_type(mono_return_type_id);
-
-                        // Clean up rc_temps from initial arg compilation
-                        // (generic intrinsic recompiles args internally)
-                        self.consume_rc_args(&mut rc_temps)?;
-                        return self.call_generic_external_intrinsic_args(
-                            &ext_module_path,
-                            &key,
-                            &mc.args,
-                            return_type_id,
-                        );
-                    }
-                }
-
-                // Pure Vole function - call by mangled name
-                let name_id = name_id.ok_or_else(|| {
-                    format!(
-                        "Module method {}::{} not interned",
-                        module_path, method_name_str
-                    )
-                })?;
-                let func_key = self.funcs().intern_name_id(name_id);
-                let func_id = self.funcs().func_id(func_key).ok_or_else(|| {
-                    format!(
-                        "Module function {}::{} not found",
-                        module_path, method_name_str
-                    )
-                })?;
-                let func_ref = self
-                    .codegen_ctx
-                    .jit_module()
-                    .declare_func_in_func(func_id, self.builder.func);
-                let call_inst = self.builder.ins().call(func_ref, &args);
-                self.field_cache.clear(); // Callee may mutate instance fields
-                let result = self.call_result(call_inst, return_type_id);
-                self.consume_rc_args(&mut rc_temps)?;
-                return Ok(result);
-            } else {
+            else {
                 return Err(CodegenError::not_found(
                     "module method",
                     format!("{}::{}", module_path, method_name_str),
                 ));
+            };
+
+            // Get return type from arena
+            let return_type_id = {
+                let arena = self.arena();
+                let (_, ret, _) = arena
+                    .unwrap_function(*func_type_id)
+                    .expect("INTERNAL: module method: missing function type");
+                ret
+            };
+
+            // Compile arguments, tracking owned RC temps for cleanup
+            let (args, mut rc_temps) = self.compile_call_args_tracking_rc(&mc.args)?;
+
+            if let Some(ext_info) = external_info {
+                // External FFI function
+                let result = self.call_external_id(ext_info, &args, return_type_id)?;
+                self.consume_rc_args(&mut rc_temps)?;
+                return Ok(result);
             }
+
+            // Check if this is a generic external intrinsic (e.g., math.sqrt<f64>)
+            if let Some(monomorph_key) = self.query().monomorph_for(expr_id) {
+                let instance_data = self.monomorph_cache().get(monomorph_key).map(|inst| {
+                    (
+                        inst.original_name,
+                        inst.func_type.return_type_id,
+                        inst.substitutions.clone(),
+                    )
+                });
+
+                if let Some((original_name, mono_return_type_id, substitutions)) = instance_data
+                    && let Some(callee_name) = self.name_table().last_segment_str(original_name)
+                    && let Some(generic_ext_info) = self
+                        .analyzed()
+                        .implement_registry()
+                        .get_generic_external(&callee_name)
+                    && let Some(key) = self.find_intrinsic_key_for_monomorph(
+                        &generic_ext_info.type_mappings,
+                        &substitutions,
+                    )
+                {
+                    let ext_module_path = self
+                        .name_table()
+                        .last_segment_str(generic_ext_info.module_path)
+                        .unwrap_or_default();
+
+                    let return_type_id = self.substitute_type(mono_return_type_id);
+
+                    // Clean up rc_temps from initial arg compilation
+                    // (generic intrinsic recompiles args internally)
+                    self.consume_rc_args(&mut rc_temps)?;
+                    return self.call_generic_external_intrinsic_args(
+                        &ext_module_path,
+                        &key,
+                        &mc.args,
+                        return_type_id,
+                    );
+                }
+            }
+
+            // Pure Vole function - call by mangled name
+            let name_id = name_id.ok_or_else(|| {
+                format!(
+                    "Module method {}::{} not interned",
+                    module_path, method_name_str
+                )
+            })?;
+            let func_key = self.funcs().intern_name_id(name_id);
+            let func_id = self.funcs().func_id(func_key).ok_or_else(|| {
+                format!(
+                    "Module function {}::{} not found",
+                    module_path, method_name_str
+                )
+            })?;
+            let func_ref = self
+                .codegen_ctx
+                .jit_module()
+                .declare_func_in_func(func_id, self.builder.func);
+            let call_inst = self.builder.ins().call(func_ref, &args);
+            self.field_cache.clear(); // Callee may mutate instance fields
+            let result = self.call_result(call_inst, return_type_id);
+            self.consume_rc_args(&mut rc_temps)?;
+            return Ok(result);
         }
 
         // Handle built-in methods (passing concrete_return_hint for iter methods)
@@ -434,41 +434,41 @@ impl Cg<'_, '_, '_> {
                 .get(&(type_name_id, method_name_id))
                 .copied();
 
-            if let Some(func_key) = func_key {
-                // Get return type from entity registry
-                let return_type_id = self
-                    .analyzed()
-                    .entity_registry()
-                    .find_method_binding(type_def_id, method_name_id)
-                    .map(|binding| binding.func_type.return_type_id)
-                    .or_else(|| {
-                        self.analyzed()
-                            .entity_registry()
-                            .find_method_on_type(type_def_id, method_name_id)
-                            .map(|mid| {
-                                let method = self.analyzed().entity_registry().get_method(mid);
-                                let arena = self.analyzed().type_arena();
-                                arena
-                                    .unwrap_function(method.signature_id)
-                                    .map(|(_, ret, _)| ret)
-                                    .unwrap_or(TypeId::VOID)
-                            })
-                    })
-                    .unwrap_or(TypeId::VOID);
-
-                // In monomorphized context, the return type may still reference type
-                // parameters (e.g. a method `getItem() -> T`). Apply substitutions to
-                // get the concrete return type so subsequent operations on the returned
-                // value use the correct type.
-                let return_type_id = self.substitute_type(return_type_id);
-
-                (func_key, return_type_id)
-            } else {
+            let Some(func_key) = func_key else {
                 return Err(CodegenError::not_found(
                     "method",
                     format!("{} (fallback path)", method_name_str),
                 ));
-            }
+            };
+
+            // Get return type from entity registry
+            let return_type_id = self
+                .analyzed()
+                .entity_registry()
+                .find_method_binding(type_def_id, method_name_id)
+                .map(|binding| binding.func_type.return_type_id)
+                .or_else(|| {
+                    self.analyzed()
+                        .entity_registry()
+                        .find_method_on_type(type_def_id, method_name_id)
+                        .map(|mid| {
+                            let method = self.analyzed().entity_registry().get_method(mid);
+                            let arena = self.analyzed().type_arena();
+                            arena
+                                .unwrap_function(method.signature_id)
+                                .map(|(_, ret, _)| ret)
+                                .unwrap_or(TypeId::VOID)
+                        })
+                })
+                .unwrap_or(TypeId::VOID);
+
+            // In monomorphized context, the return type may still reference type
+            // parameters (e.g. a method `getItem() -> T`). Apply substitutions to
+            // get the concrete return type so subsequent operations on the returned
+            // value use the correct type.
+            let return_type_id = self.substitute_type(return_type_id);
+
+            (func_key, return_type_id)
         };
 
         // Use sema's cached substituted return type if available (avoids recomputation)

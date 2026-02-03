@@ -1246,42 +1246,38 @@ impl Cg<'_, '_, '_> {
             // Use raw pointers to avoid borrow conflicts (the data lives in Program AST
             // which is owned by AnalyzedProgram and outlives this compilation session)
             let lambda_node_id = defaults_info.lambda_node_id;
-            let default_ptrs: Vec<Option<*const Expr>> = {
-                if let Some(lambda) = self.find_lambda_by_node_id(lambda_node_id) {
-                    // Get raw pointers to the default expressions for params we need
-                    lambda
-                        .params
-                        .iter()
-                        .skip(call.args.len())
-                        .map(|p| p.default_value.as_ref().map(|e| e.as_ref() as *const Expr))
-                        .collect()
-                } else {
-                    return Err(CodegenError::internal_with_context(
-                        "lambda expression not found",
-                        format!("NodeId {:?}", lambda_node_id),
-                    ));
-                }
+            let Some(lambda) = self.find_lambda_by_node_id(lambda_node_id) else {
+                return Err(CodegenError::internal_with_context(
+                    "lambda expression not found",
+                    format!("NodeId {:?}", lambda_node_id),
+                ));
             };
+            // Get raw pointers to the default expressions for params we need
+            let default_ptrs: Vec<Option<*const Expr>> = lambda
+                .params
+                .iter()
+                .skip(call.args.len())
+                .map(|p| p.default_value.as_ref().map(|e| e.as_ref() as *const Expr))
+                .collect();
 
             // Compile defaults for missing params (starting from call.args.len())
             for (default_ptr_opt, &param_type_id) in
                 default_ptrs.iter().zip(params.iter().skip(call.args.len()))
             {
-                if let Some(default_ptr) = default_ptr_opt {
-                    // SAFETY: The pointer points to data in Program AST which is owned by
-                    // AnalyzedProgram. AnalyzedProgram outlives this entire compilation session.
-                    let default_expr = unsafe { &**default_ptr };
-                    let compiled = self.expr(default_expr)?;
-                    if compiled.is_owned() {
-                        rc_temp_args.push(compiled);
-                    }
-                    let compiled = self.coerce_to_type(compiled, param_type_id)?;
-                    args.push(compiled.value);
-                } else {
+                let Some(default_ptr) = default_ptr_opt else {
                     return Err(CodegenError::internal(
                         "missing default expression for parameter in lambda call",
                     ));
+                };
+                // SAFETY: The pointer points to data in Program AST which is owned by
+                // AnalyzedProgram. AnalyzedProgram outlives this entire compilation session.
+                let default_expr = unsafe { &**default_ptr };
+                let compiled = self.expr(default_expr)?;
+                if compiled.is_owned() {
+                    rc_temp_args.push(compiled);
                 }
+                let compiled = self.coerce_to_type(compiled, param_type_id)?;
+                args.push(compiled.value);
             }
         }
 

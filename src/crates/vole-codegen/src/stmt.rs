@@ -1193,15 +1193,14 @@ impl Cg<'_, '_, '_> {
                 })
                 .map(|(_, ty)| *ty);
 
-            if let Some(export_type_id) = export_type_id {
-                // Register the module binding: local_name -> (module_id, export_name, type_id)
-                self.module_bindings.insert(
-                    field_pattern.binding,
-                    (module_info.module_id, export_name, export_type_id),
-                );
-            } else {
+            let Some(export_type_id) = export_type_id else {
                 return Err(CodegenError::not_found("module export", export_name_str));
-            }
+            };
+            // Register the module binding: local_name -> (module_id, export_name, type_id)
+            self.module_bindings.insert(
+                field_pattern.binding,
+                (module_info.module_id, export_name, export_type_id),
+            );
         }
         Ok(())
     }

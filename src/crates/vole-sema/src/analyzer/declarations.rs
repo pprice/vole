@@ -1943,18 +1943,16 @@ impl Analyzer {
 
                         let final_type_def_id = if kind == TypeDefKind::Alias {
                             // For aliases, check the underlying type
-                            if let Some(aliased_type_id) = aliased_type {
-                                let arena = self.type_arena();
-                                if let Some((underlying_def_id, _)) =
-                                    arena.unwrap_interface(aliased_type_id)
-                                {
-                                    underlying_def_id
-                                } else {
-                                    return None; // Alias doesn't point to an interface
-                                }
-                            } else {
+                            let Some(aliased_type_id) = aliased_type else {
                                 return None; // Alias has no underlying type
-                            }
+                            };
+                            let arena = self.type_arena();
+                            let Some((underlying_def_id, _)) =
+                                arena.unwrap_interface(aliased_type_id)
+                            else {
+                                return None; // Alias doesn't point to an interface
+                            };
+                            underlying_def_id
                         } else if kind == TypeDefKind::Interface {
                             type_def_id
                         } else {
@@ -1982,18 +1980,15 @@ impl Analyzer {
                 let aliased_type = self.entity_registry().type_aliased(type_def_id);
                 let final_type_def_id = if kind == TypeDefKind::Alias {
                     // For aliases, check the underlying type
-                    if let Some(aliased_type_id) = aliased_type {
-                        let arena = self.type_arena();
-                        if let Some((underlying_def_id, _)) =
-                            arena.unwrap_interface(aliased_type_id)
-                        {
-                            underlying_def_id
-                        } else {
-                            return None; // Alias doesn't point to an interface
-                        }
-                    } else {
+                    let Some(aliased_type_id) = aliased_type else {
                         return None; // Alias has no underlying type
-                    }
+                    };
+                    let arena = self.type_arena();
+                    let Some((underlying_def_id, _)) = arena.unwrap_interface(aliased_type_id)
+                    else {
+                        return None; // Alias doesn't point to an interface
+                    };
+                    underlying_def_id
                 } else if kind == TypeDefKind::Interface {
                     type_def_id
                 } else {

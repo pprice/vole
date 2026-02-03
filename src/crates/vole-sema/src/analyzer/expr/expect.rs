@@ -126,20 +126,20 @@ impl Analyzer {
                             });
                         }
                     }
-                    if let Some(best) = best_variant {
-                        return Ok(best);
-                    }
-                    // No matching integer variant
-                    let expected_str = self.type_display_id(expected.unwrap());
-                    self.add_error(
-                        SemanticError::TypeMismatch {
-                            expected: expected_str,
-                            found: "integer literal".to_string(),
-                            span: expr.span.into(),
-                        },
-                        expr.span,
-                    );
-                    return Ok(ArenaTypeId::I64);
+                    let Some(best) = best_variant else {
+                        // No matching integer variant
+                        let expected_str = self.type_display_id(expected.unwrap());
+                        self.add_error(
+                            SemanticError::TypeMismatch {
+                                expected: expected_str,
+                                found: "integer literal".to_string(),
+                                span: expr.span.into(),
+                            },
+                            expr.span,
+                        );
+                        return Ok(ArenaTypeId::I64);
+                    };
+                    return Ok(best);
                 }
 
                 if let Some(exp_id) = expected {
