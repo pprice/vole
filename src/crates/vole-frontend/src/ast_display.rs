@@ -3,6 +3,22 @@
 
 use std::fmt::Write;
 
+/// Writes to a String, ignoring the Result since it cannot fail.
+/// Writing to a String only fails if the underlying `Write` impl returns an error,
+/// which String's implementation never does.
+macro_rules! w {
+    ($dst:expr, $($arg:tt)*) => {{
+        let _ = write!($dst, $($arg)*);
+    }};
+}
+
+/// Writes a line to a String, ignoring the Result since it cannot fail.
+macro_rules! wln {
+    ($dst:expr, $($arg:tt)*) => {{
+        let _ = writeln!($dst, $($arg)*);
+    }};
+}
+
 use crate::{
     AssignTarget, BinaryOp, Block, ClassDecl, CompoundOp, Decl, ErrorDecl, Expr, ExprKind,
     ExternalBlock, FieldAccessExpr, FuncBody, FuncDecl, ImplementBlock, InterfaceDecl, Interner,
@@ -79,7 +95,7 @@ impl<'a> AstPrinter<'a> {
     fn write_func_decl(&self, out: &mut String, func: &FuncDecl) {
         self.write_indent(out);
         let name = self.interner.resolve(func.name);
-        writeln!(out, "FunctionDecl \"{}\"", name).unwrap();
+        wln!(out, "FunctionDecl \"{}\"", name);
 
         let inner = self.indented();
 
@@ -99,7 +115,7 @@ impl<'a> AstPrinter<'a> {
         // Return type
         if let Some(ret) = &func.return_type {
             inner.write_indent(out);
-            write!(out, "return_type: ").unwrap();
+            w!(out, "return_type: ");
             inner.write_type_inline(out, ret);
             out.push('\n');
         }
@@ -116,7 +132,7 @@ impl<'a> AstPrinter<'a> {
     fn write_tests_decl(&self, out: &mut String, tests: &TestsDecl) {
         self.write_indent(out);
         if let Some(label) = &tests.label {
-            writeln!(out, "Tests \"{}\"", label).unwrap();
+            wln!(out, "Tests \"{}\"", label);
         } else {
             out.push_str("Tests\n");
         }
@@ -135,7 +151,7 @@ impl<'a> AstPrinter<'a> {
     fn write_error_decl(&self, out: &mut String, error_decl: &ErrorDecl) {
         self.write_indent(out);
         let name = self.interner.resolve(error_decl.name);
-        writeln!(out, "ErrorDecl \"{}\"", name).unwrap();
+        wln!(out, "ErrorDecl \"{}\"", name);
 
         if !error_decl.fields.is_empty() {
             let inner = self.indented();
@@ -146,7 +162,7 @@ impl<'a> AstPrinter<'a> {
                     out.push_str(", ");
                 }
                 let field_name = self.interner.resolve(field.name);
-                write!(out, "({}: ", field_name).unwrap();
+                w!(out, "({}: ", field_name);
                 self.write_type_inline(out, &field.ty);
                 out.push(')');
             }
@@ -157,13 +173,13 @@ impl<'a> AstPrinter<'a> {
     fn write_sentinel_decl(&self, out: &mut String, sentinel_decl: &SentinelDecl) {
         self.write_indent(out);
         let name = self.interner.resolve(sentinel_decl.name);
-        writeln!(out, "SentinelDecl \"{}\"", name).unwrap();
+        wln!(out, "SentinelDecl \"{}\"", name);
     }
 
     fn write_struct_decl(&self, out: &mut String, struct_decl: &crate::StructDecl) {
         self.write_indent(out);
         let name = self.interner.resolve(struct_decl.name);
-        writeln!(out, "StructDecl \"{}\"", name).unwrap();
+        wln!(out, "StructDecl \"{}\"", name);
 
         let inner = self.indented();
 
@@ -175,7 +191,7 @@ impl<'a> AstPrinter<'a> {
                     out.push_str(", ");
                 }
                 let field_name = self.interner.resolve(field.name);
-                write!(out, "({}: ", field_name).unwrap();
+                w!(out, "({}: ", field_name);
                 self.write_type_inline(out, &field.ty);
                 out.push(')');
             }
@@ -193,7 +209,7 @@ impl<'a> AstPrinter<'a> {
             for method in &statics.methods {
                 statics_inner.write_indent(out);
                 let method_name = self.interner.resolve(method.name);
-                writeln!(out, "StaticMethod \"{}\"", method_name).unwrap();
+                wln!(out, "StaticMethod \"{}\"", method_name);
             }
         }
     }
@@ -218,7 +234,7 @@ impl<'a> AstPrinter<'a> {
     fn write_class_decl(&self, out: &mut String, class_decl: &ClassDecl) {
         self.write_indent(out);
         let name = self.interner.resolve(class_decl.name);
-        writeln!(out, "ClassDecl \"{}\"", name).unwrap();
+        wln!(out, "ClassDecl \"{}\"", name);
 
         let inner = self.indented();
 
@@ -254,7 +270,7 @@ impl<'a> AstPrinter<'a> {
                     out.push_str(", ");
                 }
                 let field_name = self.interner.resolve(field.name);
-                write!(out, "({}: ", field_name).unwrap();
+                w!(out, "({}: ", field_name);
                 self.write_type_inline(out, &field.ty);
                 out.push(')');
             }
@@ -276,7 +292,7 @@ impl<'a> AstPrinter<'a> {
             for method in &statics.methods {
                 statics_inner.write_indent(out);
                 let method_name = self.interner.resolve(method.name);
-                writeln!(out, "StaticMethod \"{}\"", method_name).unwrap();
+                wln!(out, "StaticMethod \"{}\"", method_name);
             }
         }
     }
@@ -284,7 +300,7 @@ impl<'a> AstPrinter<'a> {
     fn write_interface_decl(&self, out: &mut String, iface: &InterfaceDecl) {
         self.write_indent(out);
         let name = self.interner.resolve(iface.name);
-        writeln!(out, "InterfaceDecl \"{}\"", name).unwrap();
+        wln!(out, "InterfaceDecl \"{}\"", name);
 
         let inner = self.indented();
 
@@ -320,7 +336,7 @@ impl<'a> AstPrinter<'a> {
                     out.push_str(", ");
                 }
                 let field_name = self.interner.resolve(field.name);
-                write!(out, "({}: ", field_name).unwrap();
+                w!(out, "({}: ", field_name);
                 self.write_type_inline(out, &field.ty);
                 out.push(')');
             }
@@ -335,11 +351,11 @@ impl<'a> AstPrinter<'a> {
             inner.write_indent(out);
             let method_name = self.interner.resolve(method.name);
             if method.is_default {
-                writeln!(out, "DefaultMethod \"{}\"", method_name).unwrap();
+                wln!(out, "DefaultMethod \"{}\"", method_name);
             } else if method.body.is_some() {
-                writeln!(out, "Method \"{}\"", method_name).unwrap();
+                wln!(out, "Method \"{}\"", method_name);
             } else {
-                writeln!(out, "AbstractMethod \"{}\"", method_name).unwrap();
+                wln!(out, "AbstractMethod \"{}\"", method_name);
             }
         }
 
@@ -350,7 +366,7 @@ impl<'a> AstPrinter<'a> {
             for method in &statics.methods {
                 statics_inner.write_indent(out);
                 let method_name = self.interner.resolve(method.name);
-                writeln!(out, "StaticMethod \"{}\"", method_name).unwrap();
+                wln!(out, "StaticMethod \"{}\"", method_name);
             }
         }
     }
@@ -386,7 +402,7 @@ impl<'a> AstPrinter<'a> {
             for method in &statics.methods {
                 statics_inner.write_indent(out);
                 let method_name = self.interner.resolve(method.name);
-                writeln!(out, "StaticMethod \"{}\"", method_name).unwrap();
+                wln!(out, "StaticMethod \"{}\"", method_name);
             }
         }
     }
@@ -402,27 +418,27 @@ impl<'a> AstPrinter<'a> {
         ext: &ExternalBlock,
     ) {
         printer.write_indent(out);
-        writeln!(out, "External \"{}\"", ext.module_path).unwrap();
+        wln!(out, "External \"{}\"", ext.module_path);
         let inner = printer.indented();
         for func in &ext.functions {
             inner.write_indent(out);
             let func_name = self.interner.resolve(func.vole_name);
             if let Some(ref native_name) = func.native_name {
-                writeln!(
+                wln!(
                     out,
                     "ExternalFunc \"{}\" (native: \"{}\")",
-                    func_name, native_name
-                )
-                .unwrap();
+                    func_name,
+                    native_name
+                );
             } else {
-                writeln!(out, "ExternalFunc \"{}\"", func_name).unwrap();
+                wln!(out, "ExternalFunc \"{}\"", func_name);
             }
         }
     }
 
     fn write_test_case(&self, out: &mut String, test: &TestCase) {
         self.write_indent(out);
-        writeln!(out, "Test \"{}\"", test.name).unwrap();
+        wln!(out, "Test \"{}\"", test.name);
         match &test.body {
             FuncBody::Block(block) => self.indented().write_block(out, block),
             FuncBody::Expr(expr) => self.indented().write_expr(out, expr),
@@ -431,7 +447,7 @@ impl<'a> AstPrinter<'a> {
 
     fn write_param_inline(&self, out: &mut String, param: &Param) {
         let name = self.interner.resolve(param.name);
-        write!(out, "({}: ", name).unwrap();
+        w!(out, "({}: ", name);
         self.write_type_inline(out, &param.ty);
         out.push(')');
     }
@@ -656,7 +672,7 @@ impl<'a> AstPrinter<'a> {
             Stmt::For(f) => {
                 self.write_indent(out);
                 let var_name = self.interner.resolve(f.var_name);
-                writeln!(out, "For \"{}\"", var_name).unwrap();
+                wln!(out, "For \"{}\"", var_name);
                 let inner = self.indented();
                 inner.write_indent(out);
                 out.push_str("iterable:\n");
@@ -685,14 +701,14 @@ impl<'a> AstPrinter<'a> {
         self.write_indent(out);
         let name = self.interner.resolve(l.name);
         if l.mutable {
-            writeln!(out, "LetMut \"{}\"", name).unwrap();
+            wln!(out, "LetMut \"{}\"", name);
         } else {
-            writeln!(out, "Let \"{}\"", name).unwrap();
+            wln!(out, "Let \"{}\"", name);
         }
         let inner = self.indented();
         if let Some(ty) = &l.ty {
             inner.write_indent(out);
-            write!(out, "type: ").unwrap();
+            w!(out, "type: ");
             inner.write_type_inline(out, ty);
             out.push('\n');
         }
@@ -702,7 +718,7 @@ impl<'a> AstPrinter<'a> {
             LetInit::Expr(e) => inner.indented().write_expr(out, e),
             LetInit::TypeAlias(ty) => {
                 inner.indented().write_indent(out);
-                write!(out, "TypeAlias: ").unwrap();
+                w!(out, "TypeAlias: ");
                 inner.indented().write_type_inline(out, ty);
                 out.push('\n');
             }
@@ -712,7 +728,7 @@ impl<'a> AstPrinter<'a> {
     fn write_raise_stmt(&self, out: &mut String, raise: &RaiseStmt) {
         self.write_indent(out);
         let error_name = self.interner.resolve(raise.error_name);
-        writeln!(out, "Raise \"{}\"", error_name).unwrap();
+        wln!(out, "Raise \"{}\"", error_name);
         if !raise.fields.is_empty() {
             let inner = self.indented();
             inner.write_indent(out);
@@ -721,7 +737,7 @@ impl<'a> AstPrinter<'a> {
             for field in &raise.fields {
                 fields_inner.write_indent(out);
                 let field_name = self.interner.resolve(field.name);
-                writeln!(out, "{}:", field_name).unwrap();
+                wln!(out, "{}:", field_name);
                 fields_inner.indented().write_expr(out, &field.value);
             }
         }
@@ -736,26 +752,26 @@ impl<'a> AstPrinter<'a> {
             ExprKind::IntLiteral(n, suffix) => {
                 self.write_indent(out);
                 if let Some(s) = suffix {
-                    writeln!(out, "Int {}_{}", n, s.as_str()).unwrap();
+                    wln!(out, "Int {}_{}", n, s.as_str());
                 } else {
-                    writeln!(out, "Int {}", n).unwrap();
+                    wln!(out, "Int {}", n);
                 }
             }
             ExprKind::FloatLiteral(n, suffix) => {
                 self.write_indent(out);
                 if let Some(s) = suffix {
-                    writeln!(out, "Float {}_{}", n, s.as_str()).unwrap();
+                    wln!(out, "Float {}_{}", n, s.as_str());
                 } else {
-                    writeln!(out, "Float {}", n).unwrap();
+                    wln!(out, "Float {}", n);
                 }
             }
             ExprKind::BoolLiteral(b) => {
                 self.write_indent(out);
-                writeln!(out, "Bool {}", b).unwrap();
+                wln!(out, "Bool {}", b);
             }
             ExprKind::StringLiteral(s) => {
                 self.write_indent(out);
-                writeln!(out, "String {:?}", s).unwrap();
+                wln!(out, "String {:?}", s);
             }
             ExprKind::InterpolatedString(parts) => {
                 self.write_indent(out);
@@ -765,7 +781,7 @@ impl<'a> AstPrinter<'a> {
                     match part {
                         StringPart::Literal(s) => {
                             inner.write_indent(out);
-                            writeln!(out, "Literal {:?}", s).unwrap();
+                            wln!(out, "Literal {:?}", s);
                         }
                         StringPart::Expr(e) => {
                             inner.write_indent(out);
@@ -778,7 +794,7 @@ impl<'a> AstPrinter<'a> {
             ExprKind::Identifier(sym) => {
                 self.write_indent(out);
                 let name = self.interner.resolve(*sym);
-                writeln!(out, "Ident \"{}\"", name).unwrap();
+                wln!(out, "Ident \"{}\"", name);
             }
             ExprKind::Binary(b) => {
                 self.write_indent(out);
@@ -802,7 +818,7 @@ impl<'a> AstPrinter<'a> {
                     BinaryOp::Shl => "Shl",
                     BinaryOp::Shr => "Shr",
                 };
-                writeln!(out, "BinaryOp {}", op).unwrap();
+                wln!(out, "BinaryOp {}", op);
                 let inner = self.indented();
                 inner.write_expr(out, &b.left);
                 inner.write_expr(out, &b.right);
@@ -814,7 +830,7 @@ impl<'a> AstPrinter<'a> {
                     UnaryOp::Not => "Not",
                     UnaryOp::BitNot => "BitNot",
                 };
-                writeln!(out, "UnaryOp {}", op).unwrap();
+                wln!(out, "UnaryOp {}", op);
                 self.indented().write_expr(out, &u.operand);
             }
             ExprKind::Call(c) => {
@@ -843,7 +859,7 @@ impl<'a> AstPrinter<'a> {
                         format!("<field>.{}", self.interner.resolve(*field))
                     }
                 };
-                writeln!(out, "Assign \"{}\"", target_str).unwrap();
+                wln!(out, "Assign \"{}\"", target_str);
                 self.indented().write_expr(out, &a.value);
             }
             ExprKind::CompoundAssign(c) => {
@@ -863,7 +879,7 @@ impl<'a> AstPrinter<'a> {
                         format!("<field>.{}", self.interner.resolve(*field))
                     }
                 };
-                writeln!(out, "CompoundAssign {} {}", target_str, op_str).unwrap();
+                wln!(out, "CompoundAssign {} {}", target_str, op_str);
                 self.indented().write_expr(out, &c.value);
             }
             ExprKind::Grouping(inner) => {
@@ -887,7 +903,7 @@ impl<'a> AstPrinter<'a> {
             }
             ExprKind::ArrayLiteral(elements) => {
                 self.write_indent(out);
-                writeln!(out, "ArrayLiteral (len={})", elements.len()).unwrap();
+                wln!(out, "ArrayLiteral (len={})", elements.len());
                 let inner = self.indented();
                 for elem in elements {
                     inner.write_expr(out, elem);
@@ -895,7 +911,7 @@ impl<'a> AstPrinter<'a> {
             }
             ExprKind::RepeatLiteral { element, count } => {
                 self.write_indent(out);
-                writeln!(out, "RepeatLiteral (count={})", count).unwrap();
+                wln!(out, "RepeatLiteral (count={})", count);
                 let inner = self.indented();
                 inner.write_indent(out);
                 out.push_str("element:\n");
@@ -921,7 +937,7 @@ impl<'a> AstPrinter<'a> {
                 inner.indented().write_expr(out, &m.scrutinee);
                 for (i, arm) in m.arms.iter().enumerate() {
                     inner.write_indent(out);
-                    writeln!(out, "arm[{}]:", i).unwrap();
+                    wln!(out, "arm[{}]:", i);
                     let arm_inner = inner.indented();
                     arm_inner.write_indent(out);
                     out.push_str("pattern: ");
@@ -940,12 +956,12 @@ impl<'a> AstPrinter<'a> {
 
             ExprKind::Unreachable => {
                 self.write_indent(out);
-                writeln!(out, "Unreachable").unwrap();
+                wln!(out, "Unreachable");
             }
 
             ExprKind::NullCoalesce(nc) => {
                 self.write_indent(out);
-                writeln!(out, "NullCoalesce").unwrap();
+                wln!(out, "NullCoalesce");
                 let inner = self.indented();
                 inner.write_indent(out);
                 out.push_str("value:\n");
@@ -957,7 +973,7 @@ impl<'a> AstPrinter<'a> {
 
             ExprKind::Is(is_expr) => {
                 self.write_indent(out);
-                writeln!(out, "Is").unwrap();
+                wln!(out, "Is");
                 let inner = self.indented();
                 inner.write_indent(out);
                 out.push_str("value:\n");
@@ -970,11 +986,11 @@ impl<'a> AstPrinter<'a> {
 
             ExprKind::Lambda(lambda) => {
                 self.write_indent(out);
-                writeln!(out, "Lambda").unwrap();
+                wln!(out, "Lambda");
                 let inner = self.indented();
                 for (i, param) in lambda.params.iter().enumerate() {
                     inner.write_indent(out);
-                    write!(out, "param[{}]: {}", i, self.interner.resolve(param.name)).unwrap();
+                    w!(out, "param[{}]: {}", i, self.interner.resolve(param.name));
                     if let Some(ty) = &param.ty {
                         out.push_str(": ");
                         self.write_type_inline(out, ty);
@@ -1073,7 +1089,7 @@ impl<'a> AstPrinter<'a> {
                 let inner = self.indented();
                 for (i, arm) in when_expr.arms.iter().enumerate() {
                     inner.write_indent(out);
-                    writeln!(out, "arm[{}]:", i).unwrap();
+                    wln!(out, "arm[{}]:", i);
                     let arm_inner = inner.indented();
                     arm_inner.write_indent(out);
                     if let Some(ref cond) = arm.condition {
@@ -1099,7 +1115,7 @@ impl<'a> AstPrinter<'a> {
             .map(|sym| self.interner.resolve(*sym))
             .collect::<Vec<_>>()
             .join(".");
-        writeln!(out, "StructLiteral \"{}\"", path_str).unwrap();
+        wln!(out, "StructLiteral \"{}\"", path_str);
         let inner = self.indented();
 
         if !sl.type_args.is_empty() {
@@ -1122,9 +1138,9 @@ impl<'a> AstPrinter<'a> {
                 fields_inner.write_indent(out);
                 let field_name = self.interner.resolve(field.name);
                 if field.shorthand {
-                    writeln!(out, "{} (shorthand):", field_name).unwrap();
+                    wln!(out, "{} (shorthand):", field_name);
                 } else {
-                    writeln!(out, "{}:", field_name).unwrap();
+                    wln!(out, "{}:", field_name);
                 }
                 fields_inner.indented().write_expr(out, &field.value);
             }
@@ -1134,7 +1150,7 @@ impl<'a> AstPrinter<'a> {
     fn write_field_access(&self, out: &mut String, fa: &FieldAccessExpr) {
         self.write_indent(out);
         let field_name = self.interner.resolve(fa.field);
-        writeln!(out, "FieldAccess \"{}\"", field_name).unwrap();
+        wln!(out, "FieldAccess \"{}\"", field_name);
         let inner = self.indented();
         inner.write_indent(out);
         out.push_str("object:\n");
@@ -1144,7 +1160,7 @@ impl<'a> AstPrinter<'a> {
     fn write_optional_chain(&self, out: &mut String, oc: &OptionalChainExpr) {
         self.write_indent(out);
         let field_name = self.interner.resolve(oc.field);
-        writeln!(out, "OptionalChain \"{}\"", field_name).unwrap();
+        wln!(out, "OptionalChain \"{}\"", field_name);
         let inner = self.indented();
         inner.write_indent(out);
         out.push_str("object:\n");
@@ -1154,7 +1170,7 @@ impl<'a> AstPrinter<'a> {
     fn write_method_call(&self, out: &mut String, mc: &MethodCallExpr) {
         self.write_indent(out);
         let method_name = self.interner.resolve(mc.method);
-        writeln!(out, "MethodCall \"{}\"", method_name).unwrap();
+        wln!(out, "MethodCall \"{}\"", method_name);
         let inner = self.indented();
 
         inner.write_indent(out);
@@ -1188,16 +1204,16 @@ impl<'a> AstPrinter<'a> {
         match &pattern.kind {
             PatternKind::Wildcard => out.push('_'),
             PatternKind::Literal(expr) => match &expr.kind {
-                ExprKind::IntLiteral(n, _) => write!(out, "{}", n).unwrap(),
-                ExprKind::FloatLiteral(n, _) => write!(out, "{}", n).unwrap(),
-                ExprKind::BoolLiteral(b) => write!(out, "{}", b).unwrap(),
-                ExprKind::StringLiteral(s) => write!(out, "{:?}", s).unwrap(),
+                ExprKind::IntLiteral(n, _) => w!(out, "{}", n),
+                ExprKind::FloatLiteral(n, _) => w!(out, "{}", n),
+                ExprKind::BoolLiteral(b) => w!(out, "{}", b),
+                ExprKind::StringLiteral(s) => w!(out, "{:?}", s),
                 ExprKind::Unary(u) => {
                     out.push('-');
                     if let ExprKind::IntLiteral(n, _) = &u.operand.kind {
-                        write!(out, "{}", n).unwrap();
+                        w!(out, "{}", n);
                     } else if let ExprKind::FloatLiteral(n, _) = &u.operand.kind {
-                        write!(out, "{}", n).unwrap();
+                        w!(out, "{}", n);
                     }
                 }
                 _ => out.push_str("<expr>"),
