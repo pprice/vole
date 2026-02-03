@@ -141,75 +141,50 @@ fn writeln_stderr(s: &str) {
     });
 }
 
-/// Print a string to stdout with newline
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_println_string(ptr: *const RcString) {
+// =============================================================================
+// Macro for generating print/println FFI functions
+// =============================================================================
+
+/// Macro to generate print and println FFI functions for a given type.
+/// Creates both `vole_print_{name}` and `vole_println_{name}` functions.
+macro_rules! print_fns {
+    ($name:ident, $arg_type:ty, $to_str:expr) => {
+        paste::paste! {
+            #[doc = concat!("Print a ", stringify!($name), " to stdout with newline")]
+            #[unsafe(no_mangle)]
+            pub extern "C" fn [<vole_println_ $name>](value: $arg_type) {
+                let to_str: fn($arg_type) -> std::borrow::Cow<'static, str> = $to_str;
+                writeln_stdout(&to_str(value));
+            }
+
+            #[doc = concat!("Print a ", stringify!($name), " to stdout without newline")]
+            #[unsafe(no_mangle)]
+            pub extern "C" fn [<vole_print_ $name>](value: $arg_type) {
+                let to_str: fn($arg_type) -> std::borrow::Cow<'static, str> = $to_str;
+                write_stdout(&to_str(value));
+            }
+        }
+    };
+}
+
+// Generate print/println functions for each type
+print_fns!(string, *const RcString, |ptr| {
     if ptr.is_null() {
-        writeln_stdout("");
-        return;
-    }
-    unsafe {
-        let s = (*ptr).as_str();
-        writeln_stdout(s);
-    }
-}
-
-/// Print an i64 to stdout with newline
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_println_i64(value: i64) {
-    writeln_stdout(&value.to_string());
-}
-
-/// Print an f64 to stdout with newline
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_println_f64(value: f64) {
-    writeln_stdout(&value.to_string());
-}
-
-/// Print a bool to stdout with newline
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_println_bool(value: i8) {
-    if value != 0 {
-        writeln_stdout("true");
+        std::borrow::Cow::Borrowed("")
     } else {
-        writeln_stdout("false");
+        std::borrow::Cow::Owned(unsafe { (*ptr).as_str() }.to_string())
     }
-}
+});
 
-/// Print a string to stdout without newline
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_print_string(ptr: *const RcString) {
-    if ptr.is_null() {
-        write_stdout("");
-        return;
-    }
-    unsafe {
-        let s = (*ptr).as_str();
-        write_stdout(s);
-    }
-}
-
-/// Print an i64 to stdout without newline
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_print_i64(value: i64) {
-    write_stdout(&value.to_string());
-}
-
-/// Print an f64 to stdout without newline
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_print_f64(value: f64) {
-    write_stdout(&value.to_string());
-}
-
-/// Print a bool to stdout without newline
-#[unsafe(no_mangle)]
-pub extern "C" fn vole_print_bool(value: i8) {
-    if value != 0 {
-        write_stdout("true");
+print_fns!(i64, i64, |v| std::borrow::Cow::Owned(v.to_string()));
+print_fns!(f64, f64, |v| std::borrow::Cow::Owned(v.to_string()));
+print_fns!(bool, i8, |v| {
+    if v != 0 {
+        std::borrow::Cow::Borrowed("true")
     } else {
-        write_stdout("false");
+        std::borrow::Cow::Borrowed("false")
     }
-}
+});
 
 /// Concatenate two strings
 #[unsafe(no_mangle)]
