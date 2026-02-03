@@ -251,7 +251,7 @@ impl Cg<'_, '_, '_> {
             // instance gets its own reference. instance_drop will rc_dec these fields
             // when the instance refcount reaches zero.
             if self.rc_scopes.has_active_scope()
-                && self.needs_rc_cleanup(value.type_id)
+                && self.rc_state(value.type_id).needs_cleanup()
                 && value.is_borrowed()
             {
                 self.emit_rc_inc_for_type(value.value, value.type_id)?;
@@ -510,7 +510,7 @@ impl Cg<'_, '_, '_> {
             // RC: inc borrowed field values (e.g., reading from another struct's field)
             // so the new struct gets its own reference.
             if self.rc_scopes.has_active_scope()
-                && self.needs_rc_cleanup(value.type_id)
+                && self.rc_state(value.type_id).needs_cleanup()
                 && value.is_borrowed()
             {
                 self.emit_rc_inc_for_type(value.value, value.type_id)?;

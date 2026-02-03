@@ -1017,7 +1017,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Mark RC-typed results as Owned so they get properly cleaned up
-        if self.needs_rc_cleanup(return_type_id) {
+        if self.rc_state(return_type_id).needs_cleanup() {
             result.rc_lifecycle = RcLifecycle::Owned;
         }
 
@@ -1355,7 +1355,7 @@ impl Cg<'_, '_, '_> {
                 self.consume_rc_args(&mut rc_temps)?;
 
                 // Mark RC-typed results as Owned so they get properly cleaned up
-                if self.needs_rc_cleanup(return_type_id) {
+                if self.rc_state(return_type_id).needs_cleanup() {
                     result.rc_lifecycle = RcLifecycle::Owned;
                 }
 
@@ -1424,7 +1424,7 @@ impl Cg<'_, '_, '_> {
         self.consume_rc_args(&mut rc_temps)?;
 
         // Mark RC-typed results as Owned so they get properly cleaned up
-        if self.needs_rc_cleanup(return_type_id) {
+        if self.rc_state(return_type_id).needs_cleanup() {
             result.rc_lifecycle = RcLifecycle::Owned;
         }
 

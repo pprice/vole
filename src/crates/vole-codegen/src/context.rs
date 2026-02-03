@@ -281,31 +281,12 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Check if a type needs RC cleanup in codegen.
     ///
-    /// Scope-exit cleanup is enabled for RC types whose drop functions
-    /// correctly handle recursive cleanup when their refcount reaches zero.
+    /// DEPRECATED: Use `self.rc_state(type_id).needs_cleanup()` instead.
+    /// TODO(vol-e052): Remove this method entirely.
+    #[allow(dead_code)]
+    #[inline]
     pub fn needs_rc_cleanup(&self, type_id: TypeId) -> bool {
-        let arena = self.arena();
-        // Strings: atomic RC values, no child references.
-        // Arrays: drop function handles element cleanup internally.
-        // Functions/Closures: closure_drop decs captured RC values when
-        //   refcount reaches zero, so scope-exit rc_dec cascades correctly.
-        // Classes: instance_drop walks fields and decs RC children when refcount
-        //   reaches zero. Field values are rc_inc'd at construction time when
-        //   borrowed, so the instance owns its references.
-        // Handles: opaque RC pointers (Map, Set, Rng, etc.) with their own drop fns.
-        // Iterators: iterator_drop frees source iterators, closures, and
-        //   underlying arrays via iterator_drop_sources when refcount hits zero.
-        //
-        // NOT enabled for:
-        // - Structs: stack-allocated value types.
-        // - Sentinels: i8 zero values, not heap pointers.
-        arena.is_string(type_id)
-            || arena.is_array(type_id)
-            || arena.is_function(type_id)
-            || arena.is_class(type_id)
-            || arena.is_handle(type_id)
-            || arena.is_interface(type_id)
-            || arena.is_runtime_iterator(type_id)
+        self.rc_state(type_id).needs_cleanup()
     }
 
     /// Get or create a runtime type_id for a monomorphized generic class instance.
@@ -378,11 +359,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let base_tags: Vec<bool> = generic_info
             .field_types
             .iter()
-            .map(|&ft| self.needs_rc_cleanup(ft))
+            .map(|&ft| self.rc_state(ft).needs_cleanup())
             .collect();
         let concrete_tags: Vec<bool> = concrete_field_types
             .iter()
-            .map(|&ft| self.needs_rc_cleanup(ft))
+            .map(|&ft| self.rc_state(ft).needs_cleanup())
             .collect();
         if base_tags == concrete_tags {
             return base_type_id;
@@ -402,7 +383,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let field_type_tags: Vec<vole_runtime::type_registry::FieldTypeTag> = concrete_field_types
             .iter()
             .map(|&ft| {
-                if self.needs_rc_cleanup(ft) {
+                if self.rc_state(ft).needs_cleanup() {
                     vole_runtime::type_registry::FieldTypeTag::Rc
                 } else {
                     vole_runtime::type_registry::FieldTypeTag::Value
@@ -737,7 +718,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             let mut byte_offset = 0i32;
             for field_type in field_types {
                 let slots = super::structs::field_flat_slots(*field_type, arena, entities);
-                if self.needs_rc_cleanup(*field_type) {
+                if self.rc_state(*field_type).needs_cleanup() {
                     offsets.push(byte_offset);
                 }
                 byte_offset += (slots as i32) * 8;
@@ -750,7 +731,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         // Fixed array: if element type is RC, all elements need cleanup
         if let Some((elem_type_id, size)) = arena.unwrap_fixed_array(type_id) {
-            if self.needs_rc_cleanup(elem_type_id) {
+            if self.rc_state(elem_type_id).needs_cleanup() {
                 let offsets: Vec<i32> = (0..size).map(|i| (i as i32) * 8).collect();
                 return Some(offsets);
             }
@@ -765,7 +746,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 super::types::tuple_layout_id(&elem_types, ptr_type, entities, arena);
             let mut rc_offsets = Vec::new();
             for (i, elem_type) in elem_types.iter().enumerate() {
-                if self.needs_rc_cleanup(*elem_type) {
+                if self.rc_state(*elem_type).needs_cleanup() {
                     rc_offsets.push(all_offsets[i]);
                 }
             }
@@ -794,7 +775,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             let mut byte_offset = 0i32;
             for field_type in field_types {
                 let slots = super::structs::field_flat_slots(*field_type, arena, entities);
-                if self.needs_rc_cleanup(*field_type) {
+                if self.rc_state(*field_type).needs_cleanup() {
                     offsets.push(byte_offset);
                 } else if let Some(nested) = self.deep_rc_field_offsets(*field_type) {
                     for off in nested {
@@ -832,7 +813,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let variants = arena.unwrap_union(type_id)?;
         let mut rc_tags = Vec::new();
         for (i, &variant_type_id) in variants.iter().enumerate() {
-            if self.needs_rc_cleanup(variant_type_id) {
+            if self.rc_state(variant_type_id).needs_cleanup() {
                 let is_interface = arena.is_interface(variant_type_id);
                 rc_tags.push((i as u8, is_interface));
             }
@@ -1486,7 +1467,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Use this for fresh allocations (function returns, operator results) — NOT for
     /// borrowed values (variable reads, field access, index operations).
     pub fn mark_rc_owned(&self, mut cv: CompiledValue) -> CompiledValue {
-        if self.needs_rc_cleanup(cv.type_id) {
+        if self.rc_state(cv.type_id).needs_cleanup() {
             cv.rc_lifecycle = RcLifecycle::Owned;
         }
         cv
@@ -1501,7 +1482,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// composite type (tuple, fixed array, struct) with RC fields.
     /// This sets lifecycle metadata without emitting any rc_inc/rc_dec.
     pub fn mark_borrowed_if_rc(&self, cv: &mut CompiledValue) {
-        if self.needs_rc_cleanup(cv.type_id)
+        if self.rc_state(cv.type_id).needs_cleanup()
             || self.composite_rc_field_offsets(cv.type_id).is_some()
         {
             cv.mark_borrowed();

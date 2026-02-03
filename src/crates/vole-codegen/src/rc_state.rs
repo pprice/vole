@@ -60,13 +60,19 @@ pub enum RcState {
 }
 
 impl RcState {
-    /// Returns true if this type requires RC cleanup.
+    /// Returns true if this type itself requires RC cleanup (rc_inc/rc_dec).
     ///
-    /// This is the inverse of `None` - any `Simple`, `Composite`, or `Union`
-    /// state indicates the type has reference-counted data that needs management.
+    /// This returns true ONLY for simple RC types:
+    /// - `Simple`: Direct RC types (String, Array, Class, etc.)
+    ///
+    /// This returns false for:
+    /// - `None`: Non-RC types
+    /// - `Composite`: Structs/tuples with RC fields (stack-allocated; fields managed individually)
+    /// - `Union`: Unions with RC variants (unions themselves are NOT rc_inc/dec'd;
+    ///   cleanup of RC variants is handled by union-specific RC cleanup logic)
     #[inline]
     pub fn needs_cleanup(&self) -> bool {
-        !matches!(self, RcState::None)
+        matches!(self, RcState::Simple { .. })
     }
 
     /// Returns true if this is a capture-eligible RC type.

@@ -114,8 +114,8 @@ impl Cg<'_, '_, '_> {
         // the field. If the field itself is RC, we must rc_inc it first so the
         // field value survives the container's rc_dec (which may free the container
         // and cascade to its fields).
-        if obj.is_owned() && self.needs_rc_cleanup(obj.type_id) {
-            if self.needs_rc_cleanup(field_type_id) {
+        if obj.is_owned() && self.rc_state(obj.type_id).needs_cleanup() {
+            if self.rc_state(field_type_id).needs_cleanup() {
                 self.emit_rc_inc_for_type(cv.value, field_type_id)?;
                 // The field is now an owned reference (we inc'd it out of the container)
                 cv.rc_lifecycle = RcLifecycle::Owned;
@@ -223,7 +223,7 @@ impl Cg<'_, '_, '_> {
         // needs RC, mark it as Owned so extract_field will rc_inc the
         // field and rc_dec this container, preventing the leak.
         let inner_cv = {
-            let needs_rc = self.needs_rc_cleanup(inner_type_id);
+            let needs_rc = self.rc_state(inner_type_id).needs_cleanup();
             let mut cv = CompiledValue::new(inner_obj, inner_cranelift_type, inner_type_id);
             if obj.is_owned() || (!obj.is_borrowed() && needs_rc) {
                 cv.rc_lifecycle = RcLifecycle::Owned;
@@ -301,7 +301,7 @@ impl Cg<'_, '_, '_> {
                 // 3. Store new value
                 // 4. rc_dec old (after store, in case old == new)
                 let rc_old = if self.rc_scopes.has_active_scope()
-                    && self.needs_rc_cleanup(field_type_id)
+                    && self.rc_state(field_type_id).needs_cleanup()
                 {
                     Some(
                         self.builder

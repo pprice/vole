@@ -464,7 +464,7 @@ impl Cg<'_, '_, '_> {
                 // so we can rc_dec it after the assignment.
                 let rc_old = if self.rc_scopes.has_active_scope() {
                     if let Some(&(var, type_id)) = self.vars.get(sym) {
-                        if self.needs_rc_cleanup(type_id) {
+                        if self.rc_state(type_id).needs_cleanup() {
                             Some(self.builder.use_var(var))
                         } else {
                             None
@@ -618,7 +618,7 @@ impl Cg<'_, '_, '_> {
             // Without this, the element's original binding and the array would
             // share a single refcount, causing double-free on scope exit.
             if self.rc_scopes.has_active_scope()
-                && self.needs_rc_cleanup(compiled.type_id)
+                && self.rc_state(compiled.type_id).needs_cleanup()
                 && compiled.is_borrowed()
             {
                 self.emit_rc_inc_for_type(compiled.value, compiled.type_id)?;
@@ -677,7 +677,7 @@ impl Cg<'_, '_, '_> {
             // Without this, the element's original binding and the tuple would
             // share a single refcount, causing double-free on scope exit.
             if self.rc_scopes.has_active_scope()
-                && self.needs_rc_cleanup(compiled.type_id)
+                && self.rc_state(compiled.type_id).needs_cleanup()
                 && compiled.is_borrowed()
             {
                 self.emit_rc_inc_for_type(compiled.value, compiled.type_id)?;
@@ -719,7 +719,7 @@ impl Cg<'_, '_, '_> {
         // For RC elements, each copy beyond the first needs rc_inc since
         // multiple slots share the same pointer.
         let needs_rc =
-            self.rc_scopes.has_active_scope() && self.needs_rc_cleanup(elem_value.type_id);
+            self.rc_scopes.has_active_scope() && self.rc_state(elem_value.type_id).needs_cleanup();
         for i in 0..count {
             if needs_rc && i > 0 {
                 self.emit_rc_inc_for_type(elem_value.value, elem_value.type_id)?;
@@ -937,7 +937,8 @@ impl Cg<'_, '_, '_> {
             // 2. rc_inc new if it's a borrow
             // 3. Store new value
             // 4. rc_dec old (after store, in case old == new)
-            let rc_old = if self.rc_scopes.has_active_scope() && self.needs_rc_cleanup(elem_type_id)
+            let rc_old = if self.rc_scopes.has_active_scope()
+                && self.rc_state(elem_type_id).needs_cleanup()
             {
                 Some(
                     self.builder
@@ -1219,7 +1220,7 @@ impl Cg<'_, '_, '_> {
         self.builder.append_block_param(merge_block, cranelift_type);
 
         let result_needs_rc =
-            self.rc_scopes.has_active_scope() && self.needs_rc_cleanup(inner_type_id);
+            self.rc_scopes.has_active_scope() && self.rc_state(inner_type_id).needs_cleanup();
 
         self.builder
             .ins()
@@ -1659,7 +1660,7 @@ impl Cg<'_, '_, '_> {
             // the match result owns its reference (mirroring if_expr_blocks).
             // Without this, borrowed payloads extracted from unions would be
             // freed by both the union cleanup and the result variable cleanup.
-            let result_needs_rc = self.needs_rc_cleanup(result_type_id);
+            let result_needs_rc = self.rc_state(result_type_id).needs_cleanup();
             if result_needs_rc && body_val.is_borrowed() {
                 self.emit_rc_inc_for_type(body_val.value, result_type_id)?;
             }
@@ -1706,7 +1707,7 @@ impl Cg<'_, '_, '_> {
         };
 
         let mut cv = CompiledValue::new(result, result_ty, result_type_id);
-        if self.needs_rc_cleanup(result_type_id) {
+        if self.rc_state(result_type_id).needs_cleanup() {
             cv.rc_lifecycle = RcLifecycle::Owned;
         }
         Ok(cv)
@@ -1731,12 +1732,12 @@ impl Cg<'_, '_, '_> {
             return Ok(());
         };
 
-        let success_rc = self.needs_rc_cleanup(success_type_id);
+        let success_rc = self.rc_state(success_type_id).needs_cleanup();
         // Error types may have RC payloads even though the error struct itself
         // isn't RC-tracked.  Single-field error structs store their field value
         // directly as the payload (no wrapping pointer), so if that field is RC
         // we must rc_dec the payload.
-        let error_rc = self.needs_rc_cleanup(error_type_id)
+        let error_rc = self.rc_state(error_type_id).needs_cleanup()
             || self.fallible_error_payload_needs_rc(error_type_id);
 
         if !success_rc && !error_rc {
@@ -1832,7 +1833,7 @@ impl Cg<'_, '_, '_> {
             0 => true, // null payload, rc_dec is no-op
             1 => {
                 let field = self.query().get_field(fields[0]);
-                self.needs_rc_cleanup(field.ty)
+                self.rc_state(field.ty).needs_cleanup()
             }
             _ => false, // 2+ fields = stack pointer, NOT safe for rc_dec
         }
@@ -1852,7 +1853,7 @@ impl Cg<'_, '_, '_> {
             return false;
         }
         let field = self.query().get_field(fields[0]);
-        self.needs_rc_cleanup(field.ty)
+        self.rc_state(field.ty).needs_cleanup()
     }
 
     /// Compile a try expression (propagation)
@@ -1992,7 +1993,7 @@ impl Cg<'_, '_, '_> {
         // so the unused RC arm would leak. Block-based if only evaluates the
         // taken branch.
         let can_use_select = !is_void
-            && !self.needs_rc_cleanup(result_type_id)
+            && !self.rc_state(result_type_id).needs_cleanup()
             && if_expr.else_branch.is_some()
             && if_expr.then_branch.is_selectable()
             && if_expr
@@ -2112,7 +2113,7 @@ impl Cg<'_, '_, '_> {
             .ins()
             .brif(condition.value, then_block, &[], else_block, &[]);
 
-        let result_needs_rc = !is_void && self.needs_rc_cleanup(result_type_id);
+        let result_needs_rc = !is_void && self.rc_state(result_type_id).needs_cleanup();
 
         // Compile then branch
         self.switch_and_seal(then_block);
@@ -2196,7 +2197,7 @@ impl Cg<'_, '_, '_> {
         // - Result is not RC-managed (select evaluates both arms, so an unused
         //   RC arm would leak; block-based when only evaluates the taken branch)
         let can_use_select = !is_void
-            && !self.needs_rc_cleanup(result_type_id)
+            && !self.rc_state(result_type_id).needs_cleanup()
             && when_expr.arms.len() == 2
             && when_expr.arms[0].condition.is_some()
             && when_expr.arms[1].condition.is_none()
@@ -2348,7 +2349,7 @@ impl Cg<'_, '_, '_> {
         // ensure the value flowing into the merge block is "owned" (has a +1 ref
         // that the consumer will balance). Borrowed arm results (variable reads)
         // get an rc_inc; Owned arm results (fresh allocations) already have +1.
-        let result_needs_rc = !is_void && self.needs_rc_cleanup(result_type_id);
+        let result_needs_rc = !is_void && self.rc_state(result_type_id).needs_cleanup();
 
         // Compile body blocks
         for (i, arm) in when_expr.arms.iter().enumerate() {
