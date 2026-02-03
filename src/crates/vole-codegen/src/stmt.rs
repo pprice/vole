@@ -524,9 +524,10 @@ impl Cg<'_, '_, '_> {
 
                 self.builder.switch_to_block(exit_block);
 
+                // Seal the header and body blocks now that their predecessors are known.
+                // The exit block is NOT sealed - see finalize_for_loop for explanation.
                 self.builder.seal_block(header_block);
                 self.builder.seal_block(body_block);
-                self.builder.seal_block(exit_block);
 
                 Ok(false)
             }
@@ -730,11 +731,11 @@ impl Cg<'_, '_, '_> {
             self.rc_scopes.pop_scope();
         }
 
-        // Finalize: switch to exit and seal all blocks
+        // Seal header and body now that their predecessors are known.
+        // Exit block is NOT sealed - see finalize_for_loop for explanation.
         self.builder.switch_to_block(exit_block);
         self.builder.seal_block(header);
         self.builder.seal_block(body_block);
-        self.builder.seal_block(exit_block);
 
         Ok(false)
     }

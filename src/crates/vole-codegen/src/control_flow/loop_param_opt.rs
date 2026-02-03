@@ -100,7 +100,49 @@ fn collect_optimizations(func: &Function, loop_info: &FunctionLoopInfo) -> Vec<L
         }
     }
 
+    // Post-process: if any replacement value is itself a parameter that will be removed,
+    // transitively resolve it to the ultimate replacement. This handles nested loops where
+    // an inner loop passes through an outer loop's invariant parameter.
+    resolve_transitive_replacements(&mut optimizations);
+
     optimizations
+}
+
+/// Transitively resolve replacements through the optimization chain.
+///
+/// When multiple loops are optimized, an inner loop's invariant parameter might come from
+/// an outer loop's parameter that is also being removed. For example:
+///
+/// - Loop 1 (block1): remove param v13 -> replacement v0
+/// - Loop 2 (block4): remove param v36 -> replacement v13
+///
+/// After this function, Loop 2's replacement will be v0 (following the chain v36 -> v13 -> v0).
+fn resolve_transitive_replacements(optimizations: &mut [LoopOptimization]) {
+    // Build a map from parameter being removed -> its replacement
+    let mut param_to_replacement: FxHashMap<Value, Value> = FxHashMap::default();
+    for opt in optimizations.iter() {
+        for removal in &opt.params_to_remove {
+            param_to_replacement.insert(removal.param, removal.replacement);
+        }
+    }
+
+    // Transitively resolve each replacement
+    for opt in optimizations.iter_mut() {
+        for removal in &mut opt.params_to_remove {
+            // Follow the chain until we reach a value that's not being removed
+            let mut current = removal.replacement;
+            let mut iterations = 0;
+            while let Some(&next) = param_to_replacement.get(&current) {
+                current = next;
+                iterations += 1;
+                // Safety: prevent infinite loops (shouldn't happen with valid IR)
+                if iterations > 100 {
+                    break;
+                }
+            }
+            removal.replacement = current;
+        }
+    }
 }
 
 /// Find parameters that can be removed from a loop header.
@@ -133,6 +175,10 @@ fn find_removable_params(
 }
 
 /// Find the value passed to a parameter from the loop entry (non-back-edge).
+///
+/// Returns the resolved (de-aliased) value to ensure it's valid in all contexts.
+/// Aliases may reference block parameters that are only valid in specific blocks,
+/// so we resolve them to the underlying value.
 fn find_entry_value(
     func: &Function,
     _loop_info: &FunctionLoopInfo,
@@ -169,7 +215,12 @@ fn find_entry_value(
             if param_idx < args.len()
                 && let Some(val) = args[param_idx].as_value()
             {
-                return Some(val);
+                // Resolve aliases to get the underlying value.
+                // This is important because the entry value might be an alias
+                // to a block parameter (e.g., from an outer loop), and we need
+                // the original value to use as a replacement.
+                let resolved = func.dfg.resolve_aliases(val);
+                return Some(resolved);
             }
         }
     }

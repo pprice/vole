@@ -1168,6 +1168,9 @@ impl Compiler<'_> {
 
             let entry_block = builder.create_block();
             builder.switch_to_block(entry_block);
+            // Seal entry block immediately - it has no predecessors, so SSA
+            // variables defined here can be immediately available to successors.
+            builder.seal_block(entry_block);
 
             // Compile test body (no parameters, no return type)
             let env = CompileEnv {

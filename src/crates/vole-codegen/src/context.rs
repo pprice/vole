@@ -1602,10 +1602,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Ok(terminated)
     }
 
-    /// Finalize a for-loop by switching to exit_block and sealing all loop blocks.
+    /// Finalize a for-loop by switching to exit_block and sealing internal blocks.
     ///
     /// Standard for-loop structure has 4 blocks: header, body, continue, exit.
     /// This must be called after compile_loop_body and any continue-block logic.
+    ///
+    /// Seals header, body, and continue blocks since their predecessors are now known.
+    /// The exit block is NOT sealed - code following the loop may use variables
+    /// defined before the loop (potentially in another loop), and sealing the exit
+    /// block prematurely prevents Cranelift's SSA construction from properly
+    /// threading those values through block parameters. The exit block will be
+    /// sealed by seal_all_blocks() at function finalization.
     pub fn finalize_for_loop(
         &mut self,
         header: cranelift::prelude::Block,
@@ -1617,7 +1624,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.builder.seal_block(header);
         self.builder.seal_block(body_block);
         self.builder.seal_block(continue_block);
-        self.builder.seal_block(exit_block);
+        // exit_block left unsealed - see note above
     }
 
     // ========== Stack allocation ==========

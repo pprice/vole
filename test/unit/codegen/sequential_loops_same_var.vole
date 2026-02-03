@@ -1,0 +1,96 @@
+// Test: Sequential for-loops on same variable
+// Regression test for vol-9zx3: Two sequential for-loops on same Map variable
+// caused Cranelift verifier error "argument is not attached" when loop parameter
+// optimization incorrectly used a parameter that was being removed.
+
+tests {
+    test "two for loops on same map - populate then read" {
+        let m = Map.new()
+
+        // First loop: populate the map
+        for i in 0..5 {
+            m.set(i, i * 10)
+        }
+
+        // Second loop: read from the map
+        let mut total = 0
+        for i in 0..5 {
+            total = total + (m.get(i) ?? 0)
+        }
+
+        assert(total == 100)  // 0 + 10 + 20 + 30 + 40 = 100
+    }
+
+    test "two for loops on same map - read then modify" {
+        let m = Map.new()
+        m.set(0, 10)
+        m.set(1, 20)
+        m.set(2, 30)
+
+        // First loop: read values
+        let mut sum1 = 0
+        for i in 0..3 {
+            sum1 = sum1 + (m.get(i) ?? 0)
+        }
+
+        // Second loop: modify values
+        for i in 0..3 {
+            m.set(i, (m.get(i) ?? 0) * 2)
+        }
+
+        // Third loop: read modified values
+        let mut sum2 = 0
+        for i in 0..3 {
+            sum2 = sum2 + (m.get(i) ?? 0)
+        }
+
+        assert(sum1 == 60)   // 10 + 20 + 30
+        assert(sum2 == 120)  // 20 + 40 + 60
+    }
+
+    test "three sequential loops on same variable" {
+        let m = Map.new()
+
+        // Loop 1
+        for i in 0..3 {
+            m.set(i, i)
+        }
+
+        // Loop 2
+        for i in 0..3 {
+            m.set(i, (m.get(i) ?? 0) + 10)
+        }
+
+        // Loop 3
+        let mut total = 0
+        for i in 0..3 {
+            total = total + (m.get(i) ?? 0)
+        }
+
+        assert(total == 33)  // 10 + 11 + 12
+    }
+
+    test "nested loops with outer variable" {
+        let m = Map.new()
+
+        // Populate with nested loops
+        for i in 0..3 {
+            for j in 0..3 {
+                let key = i * 10 + j
+                m.set(key, key)
+            }
+        }
+
+        // Read with sequential loops
+        let mut total = 0
+        for i in 0..3 {
+            for j in 0..3 {
+                let key = i * 10 + j
+                total = total + (m.get(key) ?? 0)
+            }
+        }
+
+        // 0+1+2 + 10+11+12 + 20+21+22 = 3 + 33 + 63 = 99
+        assert(total == 99)
+    }
+}
