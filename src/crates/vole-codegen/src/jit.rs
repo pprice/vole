@@ -10,8 +10,9 @@ use crate::errors::{CodegenError, CodegenResult};
 /// Cache of compiled module functions that can be shared across JitContexts.
 /// The JitContext that compiled these functions must be kept alive.
 pub struct CompiledModules {
-    /// The JIT context holding the compiled module code (must stay alive)
-    #[allow(dead_code)]
+    /// The JIT context holding the compiled module code. Not accessed directly,
+    /// but must remain alive since function pointers in `functions` point to its code.
+    #[expect(dead_code, reason = "keeps compiled code alive for function pointers")]
     jit: JitContext,
     /// Function name -> function pointer for all compiled module functions
     pub functions: FxHashMap<String, *const u8>,

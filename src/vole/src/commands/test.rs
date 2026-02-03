@@ -336,33 +336,6 @@ fn run_stdin_tests(
     }
 }
 
-/// Parse, type check, compile, and run tests with incremental progress output
-/// Note: Kept for future use; currently we use run_file_tests_with_modules for module caching
-#[allow(dead_code)]
-fn run_file_tests_with_progress(
-    path: &Path,
-    filter: Option<&str>,
-    colors: &TermColors,
-    report: &ReportMode,
-    cache: Rc<RefCell<ModuleCache>>,
-    project_root: Option<&Path>,
-    release: bool,
-) -> Result<TestResults, String> {
-    let source = fs::read_to_string(path).map_err(|e| format!("could not read file: {}", e))?;
-    let file_path = path.to_string_lossy();
-    run_source_tests_with_progress(
-        &source,
-        &file_path,
-        path,
-        filter,
-        colors,
-        report,
-        cache,
-        project_root,
-        release,
-    )
-}
-
 /// Parse, type check, compile, and run tests with shared compiled modules
 #[allow(clippy::too_many_arguments)]
 fn run_file_tests_with_modules(

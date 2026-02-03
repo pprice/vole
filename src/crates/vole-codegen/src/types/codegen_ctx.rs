@@ -2,8 +2,6 @@
 //
 // JIT context with mutable infrastructure for code generation.
 
-#![allow(dead_code)]
-
 use cranelift::prelude::Type;
 use cranelift_jit::JITModule;
 use cranelift_module::Module;

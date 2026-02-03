@@ -22,8 +22,8 @@
 use crate::ExpressionData;
 use std::collections::HashMap;
 use vole_frontend::{
-    BinaryExpr, BinaryOp, Block, Decl, Expr, ExprKind, FuncBody, FuncDecl, Interner, NumericSuffix,
-    Program, Stmt, Symbol,
+    BinaryExpr, BinaryOp, Block, Decl, Expr, ExprKind, FuncBody, FuncDecl, NumericSuffix, Program,
+    Stmt, Symbol,
 };
 
 /// Statistics from constant folding.
@@ -59,20 +59,14 @@ impl ConstValue {
 }
 
 /// Run constant folding on the program.
-pub fn fold_constants(
-    program: &mut Program,
-    interner: &Interner,
-    expr_data: &mut ExpressionData,
-) -> FoldingStats {
-    let mut folder = ConstantFolder::new(interner, expr_data);
+pub fn fold_constants(program: &mut Program, expr_data: &mut ExpressionData) -> FoldingStats {
+    let mut folder = ConstantFolder::new(expr_data);
     folder.fold_program(program);
     folder.stats
 }
 
 /// The constant folder visitor.
 struct ConstantFolder<'a> {
-    #[allow(dead_code)] // Will be used for more complex folding later
-    interner: &'a Interner,
     expr_data: &'a mut ExpressionData,
     stats: FoldingStats,
     /// Map from immutable variable symbols to their constant values.
@@ -81,9 +75,8 @@ struct ConstantFolder<'a> {
 }
 
 impl<'a> ConstantFolder<'a> {
-    fn new(interner: &'a Interner, expr_data: &'a mut ExpressionData) -> Self {
+    fn new(expr_data: &'a mut ExpressionData) -> Self {
         Self {
-            interner,
             expr_data,
             stats: FoldingStats::default(),
             constant_bindings: HashMap::new(),

@@ -23,6 +23,9 @@ use crate::{AnalyzedProgram, FunctionKey, FunctionRegistry};
 ///
 /// This trait allows vtable operations to work with VtableCtxView,
 /// which combines CodegenCtx and CompileEnv.
+///
+/// Note: Some methods may not be called in all contexts but are part of the
+/// complete interface for vtable operations.
 #[allow(dead_code)]
 pub trait VtableCtx {
     /// Get the analyzed program reference

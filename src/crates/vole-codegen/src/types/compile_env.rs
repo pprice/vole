@@ -37,8 +37,9 @@ pub struct CompileEnv<'a> {
     pub global_inits: &'a FxHashMap<Symbol, Rc<Expr>>,
     /// Source file pointer for error reporting
     pub source_file_ptr: (*const u8, usize),
-    /// Module being compiled (None for main program)
-    #[allow(dead_code)] // Reserved for future module-aware codegen
+    /// Module being compiled (None for main program).
+    /// Reserved for future module-aware codegen (e.g., module-scoped error handling).
+    #[expect(dead_code, reason = "reserved for future module-aware codegen")]
     pub current_module: Option<ModuleId>,
     /// Global module bindings from top-level destructuring imports
     pub global_module_bindings: &'a FxHashMap<Symbol, ModuleExportBinding>,

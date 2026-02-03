@@ -236,7 +236,8 @@ pub enum SemanticError {
         interface_name: String,
         method: String,
         expected: String,
-        #[allow(dead_code)]
+        /// The actual signature found. Not currently displayed but stored for
+        /// potential future use in enhanced error messages.
         found: String,
         details: String,
         #[label("signature mismatch")]

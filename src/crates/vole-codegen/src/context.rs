@@ -213,12 +213,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self
     }
 
-    /// Get mutable reference to variables map (for binding params after creation).
-    #[allow(dead_code)]
-    pub fn vars_mut(&mut self) -> &mut FxHashMap<Symbol, (Variable, TypeId)> {
-        &mut self.vars
-    }
-
     /// Check if we're in a closure context with captures
     pub fn has_captures(&self) -> bool {
         self.captures.is_some()
@@ -845,23 +839,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Get current module (as ModuleId)
     #[inline]
-    #[allow(dead_code)]
     pub fn current_module_id(&self) -> Option<ModuleId> {
         self.current_module
-    }
-
-    /// Get type substitutions
-    #[inline]
-    #[allow(dead_code)]
-    pub fn type_substitutions(&self) -> Option<&FxHashMap<NameId, TypeId>> {
-        self.substitutions
-    }
-
-    /// Alias for type_substitutions (backward compat)
-    #[inline]
-    #[allow(dead_code)]
-    pub fn get_substitutions(&self) -> Option<&FxHashMap<NameId, TypeId>> {
-        self.substitutions
     }
 
     /// Get entity registry reference
@@ -1021,15 +1000,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     #[inline]
     pub fn method_func_keys(&self) -> &'ctx FxHashMap<(NameId, NameId), FunctionKey> {
         &self.env.state.method_func_keys
-    }
-
-    /// Get interface vtable registry
-    #[inline]
-    #[allow(dead_code)]
-    pub fn interface_vtables(
-        &self,
-    ) -> &'ctx RefCell<crate::interface_vtable::InterfaceVtableRegistry> {
-        &self.env.state.interface_vtables
     }
 
     /// Get monomorph cache from entity registry
@@ -1426,12 +1396,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let tag = self.builder.ins().load(types::I8, MemFlags::new(), ptr, 0);
         let expected = self.builder.ins().iconst(types::I8, expected_tag);
         self.builder.ins().icmp(IntCC::NotEqual, tag, expected)
-    }
-
-    /// Wrap a Cranelift value as a String CompiledValue (borrowed, not a fresh allocation)
-    #[allow(dead_code)]
-    pub fn string_value(&self, value: Value) -> CompiledValue {
-        CompiledValue::new(value, self.ptr_type(), TypeId::STRING)
     }
 
     /// Wrap a Cranelift value as a String CompiledValue marked as an RC temp

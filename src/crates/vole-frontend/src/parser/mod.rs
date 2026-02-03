@@ -206,18 +206,6 @@ impl<'src> Parser<'src> {
             ))
         }
     }
-
-    /// Create an unexpected token error at the current position
-    #[allow(dead_code)] // Will be used in subsequent refactor tasks
-    pub(super) fn unexpected_token_error(&self) -> ParseError {
-        ParseError::new(
-            ParserError::UnexpectedToken {
-                token: self.current.ty.as_str().to_string(),
-                span: self.current.span.into(),
-            },
-            self.current.span,
-        )
-    }
 }
 
 #[cfg(test)]

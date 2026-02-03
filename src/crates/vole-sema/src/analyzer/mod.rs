@@ -180,7 +180,6 @@ pub struct AnalysisOutput {
 /// - Check for missing returns in non-void functions
 /// - Validate return type consistency across branches
 #[derive(Default, Clone)]
-#[allow(dead_code)] // Infrastructure for return flow analysis (epic v-d409)
 pub(crate) struct ReturnInfo {
     /// Whether this code path definitely returns or raises.
     /// A path "definitely returns" if every control flow path ends in a
@@ -190,19 +189,6 @@ pub(crate) struct ReturnInfo {
     /// Used for return type inference, consistency checking, and error reporting.
     /// Each entry is (type, span) where span points to the return expression.
     pub return_types: Vec<(ArenaTypeId, Span)>,
-}
-
-#[allow(dead_code)] // Infrastructure for return flow analysis (epic v-d409)
-impl ReturnInfo {
-    /// Merge another ReturnInfo into this one.
-    ///
-    /// This combines return types from both paths. The caller is responsible
-    /// for handling `definitely_returns` based on the control flow context
-    /// (e.g., for if/else both branches must return, for loops the merge
-    /// semantics differ).
-    pub fn merge(&mut self, other: ReturnInfo) {
-        self.return_types.extend(other.return_types);
-    }
 }
 
 /// Builder for creating Analyzer instances with various configurations.

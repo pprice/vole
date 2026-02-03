@@ -153,7 +153,7 @@ pub fn compile_source(
     // Optimizer phase (constant folding, algebraic simplifications)
     {
         let _span = tracing::info_span!("optimize").entered();
-        let stats = optimize_all(&mut program, &interner, &mut output.expression_data);
+        let stats = optimize_all(&mut program, &mut output.expression_data);
         tracing::debug!(
             constants_folded = stats.constants_folded,
             div_to_mul = stats.div_to_mul,

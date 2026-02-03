@@ -14,7 +14,6 @@ use vole_runtime::native_registry::NativeType;
 use vole_sema::type_arena::{TypeArena, TypeId};
 use vole_sema::{EntityRegistry, PrimitiveType};
 
-use super::TypeCtx;
 use super::codegen_state::TypeMetadataMap;
 
 /// Lifecycle state for reference-counted values.
@@ -60,12 +59,6 @@ impl CompiledValue {
             type_id,
             rc_lifecycle: RcLifecycle::Owned,
         }
-    }
-
-    /// Alias for `owned`.
-    #[allow(dead_code)]
-    pub fn temp(value: Value, ty: Type, type_id: TypeId) -> Self {
-        Self::owned(value, ty, type_id)
     }
 
     /// Create a new CompiledValue with a different value but the same types
@@ -435,27 +428,6 @@ pub(crate) fn load_fallible_payload(
         .load(payload_ty, MemFlags::new(), value, FALLIBLE_PAYLOAD_OFFSET)
 }
 
-/// Get the error tag for a specific error type within a fallible type.
-/// Get error tag using TypeCtx - preferred API.
-#[allow(dead_code)]
-pub(crate) fn fallible_error_tag_with_ctx(
-    error_type_id: TypeId,
-    error_name: Symbol,
-    type_ctx: &TypeCtx,
-) -> Option<i64> {
-    let arena = type_ctx.arena();
-    let interner = type_ctx.interner();
-    let entity_registry = type_ctx.entities();
-    fallible_error_tag_by_id(
-        error_type_id,
-        error_name,
-        arena,
-        interner,
-        type_ctx.name_table_rc(),
-        entity_registry,
-    )
-}
-
 /// Returns the 1-based index (tag 0 is reserved for success).
 ///
 /// Takes the error part of a fallible type as a TypeId and uses arena queries
@@ -539,24 +511,6 @@ pub(crate) fn convert_to_type(
     }
 
     val.value
-}
-
-/// Convert a value to a uniform word representation using TypeCtx.
-#[allow(dead_code)]
-pub(crate) fn value_to_word_with_ctx(
-    builder: &mut FunctionBuilder,
-    value: &CompiledValue,
-    type_ctx: &TypeCtx,
-    heap_alloc_ref: Option<FuncRef>,
-) -> CodegenResult<Value> {
-    value_to_word(
-        builder,
-        value,
-        type_ctx.pointer_type,
-        heap_alloc_ref,
-        type_ctx.query.arena(),
-        type_ctx.entities(),
-    )
 }
 
 /// Convert a value to a uniform word representation for interface dispatch.
@@ -651,25 +605,6 @@ pub(crate) fn value_to_word(
     };
 
     Ok(word)
-}
-
-/// Convert a word to typed value using TypeCtx.
-#[allow(dead_code)]
-pub(crate) fn word_to_value_with_ctx(
-    builder: &mut FunctionBuilder,
-    word: Value,
-    type_id: TypeId,
-    type_ctx: &TypeCtx,
-) -> Value {
-    let arena = type_ctx.arena();
-    word_to_value_type_id(
-        builder,
-        word,
-        type_id,
-        type_ctx.pointer_type,
-        type_ctx.entities(),
-        arena,
-    )
 }
 
 /// Convert a uniform word representation back into a typed value using TypeId.

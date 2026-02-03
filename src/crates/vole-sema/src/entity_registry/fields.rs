@@ -66,18 +66,6 @@ impl FieldSubstitutionCache {
     pub fn clear(&mut self) {
         self.cache.clear();
     }
-
-    /// Get the number of cached entries (for debugging/testing).
-    #[allow(dead_code)]
-    pub fn len(&self) -> usize {
-        self.cache.len()
-    }
-
-    /// Check if the cache is empty.
-    #[allow(dead_code)]
-    pub fn is_empty(&self) -> bool {
-        self.cache.is_empty()
-    }
 }
 
 impl EntityRegistry {

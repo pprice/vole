@@ -4,78 +4,9 @@ use cranelift::prelude::*;
 use rustc_hash::FxHashMap;
 
 use crate::errors::{CodegenError, CodegenResult};
-use crate::types::{CompiledValue, FunctionCtx, TypeCtx};
+use crate::types::CompiledValue;
 use vole_sema::type_arena::{SemaType as ArenaType, TypeArena, TypeId};
 use vole_sema::{EntityRegistry, PrimitiveType};
-
-/// Get field slot and type for a field access (new context API).
-#[allow(dead_code)]
-pub(crate) fn get_field_slot_and_type_id(
-    type_id: TypeId,
-    field_name: &str,
-    type_ctx: &TypeCtx,
-    func_ctx: &FunctionCtx,
-) -> CodegenResult<(usize, TypeId)> {
-    let arena = type_ctx.arena();
-
-    // Apply function-level substitutions first (for monomorphized generics)
-    // This handles the case where type_id is a TypeParam that needs to be
-    // substituted with a concrete type (e.g., in duck typing with structural constraints)
-    let resolved_type_id = if let Some(func_subs) = func_ctx.substitutions {
-        arena.expect_substitute(type_id, func_subs, "field access type substitution")
-    } else {
-        type_id
-    };
-
-    // Try class first, then struct
-    let (type_def_id, type_args) = arena
-        .unwrap_class(resolved_type_id)
-        .or_else(|| arena.unwrap_struct(resolved_type_id))
-        .ok_or_else(|| {
-            CodegenError::type_mismatch("field access", "class or struct", "other type").to_string()
-        })?;
-
-    let type_def = type_ctx.query.get_type(type_def_id);
-    let generic_info = type_def
-        .generic_info
-        .as_ref()
-        .ok_or_else(|| CodegenError::not_found("generic_info", "type").to_string())?;
-
-    // Build combined substitution map: type params -> type args, plus monomorphization context
-    // This allows a single pass through the type tree instead of two.
-    let mut combined_subs: FxHashMap<vole_identity::NameId, TypeId> = type_def
-        .type_params
-        .iter()
-        .zip(type_args.iter())
-        .map(|(&param, &arg)| (param, arg))
-        .collect();
-
-    // Merge in function-level substitutions (monomorphization context)
-    if let Some(func_subs) = func_ctx.substitutions {
-        for (&k, &v) in func_subs {
-            combined_subs.entry(k).or_insert(v);
-        }
-    }
-
-    for (slot, field_name_id) in generic_info.field_names.iter().enumerate() {
-        let name = type_ctx.query.last_segment(*field_name_id);
-        if name.as_deref() == Some(field_name) {
-            let base_type_id = generic_info.field_types[slot];
-            // Apply combined substitutions in a single pass (read-only lookup)
-            let field_type_id = if !combined_subs.is_empty() {
-                arena.expect_substitute(base_type_id, &combined_subs, "field access substitution")
-            } else {
-                base_type_id
-            };
-            return Ok((slot, field_type_id));
-        }
-    }
-
-    Err(CodegenError::not_found(
-        "field",
-        format!("{} in type", field_name),
-    ))
-}
 
 /// Get field slot and type for a field access (Cg API - uses TypeCtx internally).
 /// This bridges Cg to the new TypeCtx-based API.

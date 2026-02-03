@@ -14,7 +14,6 @@ mod type_ctx;
 pub use codegen_ctx::CodegenCtx;
 pub use codegen_state::{CodegenState, TypeMetadataMap};
 pub use compile_env::{CompileEnv, ModuleExportBinding};
-pub use function_ctx::FunctionCtx;
 pub use type_ctx::TypeCtx;
 
 // Re-export conversion types and functions

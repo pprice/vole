@@ -143,16 +143,15 @@ impl Compiler<'_> {
             self.register_type_instance_methods(type_decl, type_def_id, type_kind);
 
         // Handle interface default methods (classes only, requires program)
-        if is_class
-            && let Some(prog) = program {
-                self.register_interface_default_methods(
-                    type_decl,
-                    type_def_id,
-                    module_id,
-                    prog,
-                    &mut method_infos,
-                );
-            }
+        if is_class && let Some(prog) = program {
+            self.register_interface_default_methods(
+                type_decl,
+                type_def_id,
+                module_id,
+                prog,
+                &mut method_infos,
+            );
+        }
 
         // Register static methods from statics block
         if let Some(statics) = type_decl.statics() {

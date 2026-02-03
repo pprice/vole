@@ -17,8 +17,12 @@ pub(crate) struct RcLocal {
     pub variable: Variable,
     /// A Cranelift i8 Variable: 1 = live (needs rc_dec), 0 = not yet initialized / moved.
     pub drop_flag: Variable,
-    /// The Vole type of this variable (for diagnostics / future use).
-    #[allow(dead_code)]
+    /// The Vole type of this variable, stored for debugging and future type-aware
+    /// cleanup logic (e.g., specialized cleanup for nested RC types).
+    #[expect(
+        dead_code,
+        reason = "stored for debugging and future type-aware cleanup"
+    )]
     pub type_id: TypeId,
     /// True if this is an interface (fat pointer) local. For interfaces, the
     /// actual RC-managed data word is at offset 0 of the fat pointer, so cleanup

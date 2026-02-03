@@ -86,7 +86,7 @@
 pub mod constant_folding;
 
 use crate::ExpressionData;
-use vole_frontend::{Interner, Program};
+use vole_frontend::Program;
 
 /// Configuration for the optimizer.
 #[derive(Debug, Clone, Default)]
@@ -131,7 +131,6 @@ pub struct OptimizerStats {
 /// # Arguments
 ///
 /// * `program` - The parsed program AST (will be modified in place)
-/// * `interner` - String interner for symbol resolution
 /// * `expr_data` - Expression type information from sema (may be updated)
 /// * `config` - Which optimizations to enable
 ///
@@ -140,14 +139,13 @@ pub struct OptimizerStats {
 /// Statistics about what optimizations were applied.
 pub fn optimize(
     program: &mut Program,
-    interner: &Interner,
     expr_data: &mut ExpressionData,
     config: &OptimizerConfig,
 ) -> OptimizerStats {
     let mut stats = OptimizerStats::default();
 
     if config.constant_folding {
-        let folding_stats = constant_folding::fold_constants(program, interner, expr_data);
+        let folding_stats = constant_folding::fold_constants(program, expr_data);
         stats.constants_folded = folding_stats.constants_folded;
         stats.div_to_mul = folding_stats.div_to_mul;
         stats.div_to_shift = folding_stats.div_to_shift;
@@ -158,10 +156,6 @@ pub fn optimize(
 }
 
 /// Run all optimizations with default configuration (all enabled).
-pub fn optimize_all(
-    program: &mut Program,
-    interner: &Interner,
-    expr_data: &mut ExpressionData,
-) -> OptimizerStats {
-    optimize(program, interner, expr_data, &OptimizerConfig::all())
+pub fn optimize_all(program: &mut Program, expr_data: &mut ExpressionData) -> OptimizerStats {
+    optimize(program, expr_data, &OptimizerConfig::all())
 }

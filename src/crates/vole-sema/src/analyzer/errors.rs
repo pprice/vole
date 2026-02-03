@@ -48,19 +48,6 @@ impl Analyzer {
         )
     }
 
-    /// Helper to add a type mismatch error (string version)
-    #[allow(dead_code)]
-    pub(super) fn type_mismatch(&mut self, expected: &str, found: &str, span: Span) {
-        self.add_error(
-            SemanticError::TypeMismatch {
-                expected: expected.to_string(),
-                found: found.to_string(),
-                span: span.into(),
-            },
-            span,
-        );
-    }
-
     /// Helper to add a type mismatch error with TypeId
     pub(crate) fn type_error_id(&mut self, expected: &str, found: ArenaTypeId, span: Span) {
         let found_str = self.type_display_id(found);
