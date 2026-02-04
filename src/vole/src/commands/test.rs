@@ -872,66 +872,57 @@ fn print_error_details(results: &TestResults, colors: &TermColors) {
 }
 
 /// Print overall test summary
+///
+/// Format: `N failed ✘ · N file errors ◌ · N not run · N passed ✔   Xs`
+/// Only show categories with non-zero counts (except passed always shown)
 fn print_summary(results: &TestResults, colors: &TermColors) {
     let duration = format_duration(results.total_duration);
 
+    // Separator line before summary
     println!();
+    println!("────────────────────────────────────────");
 
-    // Show file errors first - these are critical and should not be ignored
-    if results.file_errors > 0 {
-        println!(
-            "{}Files: {} error{}{} (tests in these files did not run)",
-            colors.red(),
-            results.file_errors,
-            if results.file_errors == 1 { "" } else { "s" },
-            colors.reset()
-        );
-    }
+    // Build summary parts - only include non-zero counts (except passed)
+    let mut parts: Vec<String> = Vec::new();
 
-    // Show test results
-    if results.failed == 0 && results.file_errors == 0 {
-        println!(
-            "{}Tests: {} passed{} {}({}){}",
-            colors.green(),
-            results.passed,
-            colors.reset(),
-            colors.dim(),
-            duration,
-            colors.reset()
-        );
-    } else if results.failed == 0 {
-        println!(
-            "Tests: {}{} passed{} {}({}){}",
-            colors.green(),
-            results.passed,
-            colors.reset(),
-            colors.dim(),
-            duration,
-            colors.reset()
-        );
-    } else {
-        println!(
-            "Tests: {}{} failed{}, {}{} passed{} {}({}){}",
+    // Failed (red)
+    if results.failed > 0 {
+        parts.push(format!(
+            "{}{} failed ✘{}",
             colors.red(),
             results.failed,
-            colors.reset(),
-            colors.green(),
-            results.passed,
-            colors.reset(),
-            colors.dim(),
-            duration,
             colors.reset()
-        );
+        ));
     }
 
-    // Show skipped files if failure cap was hit
-    if results.skipped_files > 0 {
-        println!(
-            "{}{} file{} skipped{} (max failures reached)",
-            colors.dim(),
-            results.skipped_files,
-            if results.skipped_files == 1 { "" } else { "s" },
+    // File errors (yellow)
+    if results.file_errors > 0 {
+        parts.push(format!(
+            "{}{} file errors ◌{}",
+            colors.yellow(),
+            results.file_errors,
             colors.reset()
-        );
+        ));
     }
+
+    // Not run (dim)
+    if results.not_run > 0 {
+        parts.push(format!(
+            "{}{} not run{}",
+            colors.dim(),
+            results.not_run,
+            colors.reset()
+        ));
+    }
+
+    // Passed (green) - always shown
+    parts.push(format!(
+        "{}{} passed ✔{}",
+        colors.green(),
+        results.passed,
+        colors.reset()
+    ));
+
+    // Join with separator and add duration
+    println!("{}   {}", parts.join(" · "), duration);
 }
