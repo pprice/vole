@@ -257,7 +257,14 @@ pub fn compile_and_run(
     let fn_ptr = match jit.get_function_ptr("main") {
         Some(ptr) => ptr,
         None => {
-            let _ = writeln!(errors, "error: no 'main' function found");
+            let _ = writeln!(
+                errors,
+                "error: no 'main' function found in {}",
+                opts.file_path
+            );
+            if let Some(hint) = suggest_main_function(&jit) {
+                let _ = writeln!(errors, "hint: {}", hint);
+            }
             return Err(PipelineError::NoMain);
         }
     };
@@ -280,6 +287,52 @@ pub fn compile_and_run(
     clear_test_jmp_buf();
 
     Ok(())
+}
+
+/// Suggest a similar function name when 'main' is not found.
+///
+/// Checks for common mistakes:
+/// - Case variants: Main, MAIN
+/// - Common alternatives: run, Run, start, Start
+/// - Typos: main_
+fn suggest_main_function(jit: &JitContext) -> Option<String> {
+    // Case variants of "main" - most likely mistake
+    let case_variants = ["Main", "MAIN", "mAIN", "maiN"];
+
+    // Common alternative entry point names from other languages
+    let common_alternatives = ["run", "Run", "RUN", "start", "Start", "START"];
+
+    // Common typos
+    let typos = ["main_", "_main", "mainn", "mian", "mains"];
+
+    for &name in &case_variants {
+        if jit.has_function(name) {
+            return Some(format!(
+                "did you mean '{}'? The entry point must be lowercase 'main'.",
+                name
+            ));
+        }
+    }
+
+    for &name in &common_alternatives {
+        if jit.has_function(name) {
+            return Some(format!(
+                "found '{}', but Vole uses 'main' as the entry point.",
+                name
+            ));
+        }
+    }
+
+    for &name in &typos {
+        if jit.has_function(name) {
+            return Some(format!(
+                "did you mean 'main'? Found similar function '{}'.",
+                name
+            ));
+        }
+    }
+
+    None
 }
 
 /// Check if stdout supports color output.

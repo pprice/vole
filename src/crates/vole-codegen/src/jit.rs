@@ -1184,6 +1184,11 @@ impl JitContext {
             .map(|&func_id| self.module.get_finalized_function(func_id))
     }
 
+    /// Check if a function exists by name (exported functions only).
+    pub fn has_function(&self, name: &str) -> bool {
+        self.func_ids.contains_key(name)
+    }
+
     /// Get a function pointer by FuncId
     pub fn get_function_ptr_by_id(&self, func_id: FuncId) -> Option<*const u8> {
         Some(self.module.get_finalized_function(func_id))

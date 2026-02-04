@@ -1,4 +1,4 @@
 [stdout]
 
 [stderr]
-error: no 'main' function found
+error: no 'main' function found in <path>/qualified_class_literals.vole
