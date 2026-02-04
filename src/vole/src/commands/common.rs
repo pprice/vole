@@ -377,6 +377,11 @@ impl TermColors {
         if self.use_color { "\x1b[31m" } else { "" }
     }
 
+    /// Yellow text (for warnings/file errors).
+    pub fn yellow(&self) -> &'static str {
+        if self.use_color { "\x1b[33m" } else { "" }
+    }
+
     /// Dim/gray text (for secondary info like timing).
     pub fn dim(&self) -> &'static str {
         if self.use_color { "\x1b[90m" } else { "" }

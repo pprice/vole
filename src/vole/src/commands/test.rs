@@ -102,6 +102,13 @@ pub struct TestResult {
     pub captured_output: Option<String>,
 }
 
+/// A file that failed to compile, with the formatted error message
+#[derive(Debug, Clone)]
+pub struct FileError {
+    pub file: PathBuf,
+    pub error: String,
+}
+
 /// Aggregated results from running all tests
 #[derive(Debug)]
 pub struct TestResults {
@@ -111,6 +118,8 @@ pub struct TestResults {
     pub total_duration: Duration,
     /// Number of files that failed to compile (critical errors)
     pub file_errors: usize,
+    /// Detailed information about files that failed to compile
+    pub file_error_details: Vec<FileError>,
     /// Number of files skipped due to max_failures cap
     pub skipped_files: usize,
     /// Number of tests that didn't run (due to max-failures or file compile errors)
@@ -125,6 +134,7 @@ impl TestResults {
             results: Vec::new(),
             total_duration: Duration::ZERO,
             file_errors: 0,
+            file_error_details: Vec::new(),
             skipped_files: 0,
             not_run: 0,
         }
@@ -144,8 +154,14 @@ impl TestResults {
         self.results.extend(other.results);
         self.total_duration += other.total_duration;
         self.file_errors += other.file_errors;
+        self.file_error_details.extend(other.file_error_details);
         self.skipped_files += other.skipped_files;
         self.not_run += other.not_run;
+    }
+
+    fn add_file_error(&mut self, file: PathBuf, error: String) {
+        self.file_errors += 1;
+        self.file_error_details.push(FileError { file, error });
     }
 }
 
@@ -266,19 +282,16 @@ pub fn run_tests(paths: &[String], options: TestRunOptions) -> ExitCode {
                 all_results.merge(results);
             }
             Err(e) => {
-                // Empty error means diagnostics were already rendered
-                if !e.is_empty() {
-                    eprintln!("  error: {}", e);
-                }
-                all_results.file_errors += 1;
+                // Store the error for later grouped display
+                all_results.add_file_error(file.to_path_buf(), e);
             }
         }
     }
 
     all_results.total_duration = start.elapsed();
 
-    // In verbose mode, reprint failures at the end
-    if config.verbose && all_results.failed > 0 {
+    // Print failure/error details (in both modes)
+    if all_results.failed > 0 || all_results.file_errors > 0 {
         print_failures_summary(&all_results, &config.colors);
     }
 
@@ -319,17 +332,15 @@ fn run_stdin_tests(config: &TestRunConfig, start: Instant) -> ExitCode {
             all_results.merge(results);
         }
         Err(e) => {
-            if !e.is_empty() {
-                eprintln!("  error: {}", e);
-            }
-            all_results.file_errors += 1;
+            // Store the error for later grouped display
+            all_results.add_file_error(stdin_path.clone(), e);
         }
     }
 
     all_results.total_duration = start.elapsed();
 
-    // In verbose mode, reprint failures at the end
-    if config.verbose && all_results.failed > 0 {
+    // Print failure/error details (in both modes)
+    if all_results.failed > 0 || all_results.file_errors > 0 {
         print_failures_summary(&all_results, &config.colors);
     }
 
@@ -363,8 +374,9 @@ fn run_source_tests_with_modules(
     cache: Rc<RefCell<ModuleCache>>,
     compiled_modules: &mut Option<CompiledModules>,
 ) -> Result<TestResults, String> {
-    // Parse and type check with shared cache
-    let analyzed = compile_source(
+    // Parse and type check with shared cache, capturing errors
+    let mut error_buffer = Vec::new();
+    let analyzed = match compile_source(
         PipelineOptions {
             source,
             file_path,
@@ -373,9 +385,14 @@ fn run_source_tests_with_modules(
             module_cache: Some(cache),
             run_mode: false,
         },
-        &mut io::stderr(),
-    )
-    .map_err(|_| String::new())?;
+        &mut error_buffer,
+    ) {
+        Ok(a) => a,
+        Err(_) => {
+            let error_str = String::from_utf8_lossy(&error_buffer).into_owned();
+            return Err(error_str);
+        }
+    };
 
     // Check if cached modules contain all modules needed by this file
     let can_use_cache = compiled_modules.as_ref().is_some_and(|modules| {
@@ -486,8 +503,9 @@ fn run_source_tests_with_progress(
     config: &TestRunConfig,
     cache: Rc<RefCell<ModuleCache>>,
 ) -> Result<TestResults, String> {
-    // Parse and type check with shared cache
-    let analyzed = compile_source(
+    // Parse and type check with shared cache, capturing errors
+    let mut error_buffer = Vec::new();
+    let analyzed = match compile_source(
         PipelineOptions {
             source,
             file_path,
@@ -496,9 +514,14 @@ fn run_source_tests_with_progress(
             module_cache: Some(cache),
             run_mode: false,
         },
-        &mut io::stderr(),
-    )
-    .map_err(|_| String::new())?;
+        &mut error_buffer,
+    ) {
+        Ok(a) => a,
+        Err(_) => {
+            let error_str = String::from_utf8_lossy(&error_buffer).into_owned();
+            return Err(error_str);
+        }
+    };
 
     // Compile
     let options = if config.release {
@@ -731,94 +754,119 @@ fn execute_tests_with_progress(
     results
 }
 
-/// Print a single test result
-fn print_test_result(result: &TestResult, colors: &TermColors) {
-    let duration = format_duration(result.duration);
+/// Print detailed failure information grouped by file
+fn print_failures_summary(results: &TestResults, colors: &TermColors) {
+    // Print FAILURES section if there are any test failures
+    let has_failures = results
+        .results
+        .iter()
+        .any(|r| matches!(r.status, TestStatus::Failed(_) | TestStatus::Panicked(_)));
 
-    match &result.status {
-        TestStatus::Passed => {
-            println!(
-                "  {}\u{2022}{} {} {}({}){}",
-                colors.green(),
-                colors.reset(),
-                result.info.name,
-                colors.dim(),
-                duration,
-                colors.reset()
-            );
-        }
-        TestStatus::Failed(failure) => {
-            print!(
-                "  {}\u{2718}{} {} {}({}){}",
-                colors.red(),
-                colors.reset(),
-                result.info.name,
-                colors.dim(),
-                duration,
-                colors.reset()
-            );
-            if let Some(info) = failure {
-                println!(" - assertion failed at {}:{}", info.file, info.line);
-            } else {
-                println!();
-            }
-            // Print captured output on failure
-            if let Some(output) = &result.captured_output {
+    if has_failures {
+        println!(
+            "\n{}FAILURES {}────────────────────────────────────{}",
+            colors.red(),
+            colors.reset(),
+            colors.reset()
+        );
+        print_failure_details(results, colors);
+    }
+
+    // Print ERRORS section if there are any file compile errors
+    if !results.file_error_details.is_empty() {
+        println!(
+            "\n{}ERRORS {}──────────────────────────────────────{}",
+            colors.yellow(),
+            colors.reset(),
+            colors.reset()
+        );
+        print_error_details(results, colors);
+    }
+}
+
+/// Print individual failure details grouped by file
+fn print_failure_details(results: &TestResults, colors: &TermColors) {
+    let mut current_file: Option<&Path> = None;
+
+    for result in &results.results {
+        match &result.status {
+            TestStatus::Failed(_) => {
+                // Print file header if changed
+                if current_file != Some(result.file.as_path()) {
+                    println!("{}", result.file.display());
+                    current_file = Some(result.file.as_path());
+                }
+
+                // Print failure line: ✘ test_name · file:line
                 println!(
-                    "    {}--- captured output ---{}",
+                    "  {}\u{2718}{} {} {}· {}:{}{}",
+                    colors.red(),
+                    colors.reset(),
+                    result.info.name,
                     colors.dim(),
+                    result.info.file,
+                    result.info.line,
                     colors.reset()
                 );
-                for line in output.lines() {
-                    println!("    {}", line);
-                }
+
+                // Print message line
+                println!("    assertion failed");
+
+                // Print captured output if present
+                print_captured_output(&result.captured_output, colors);
             }
-        }
-        TestStatus::Panicked(msg) => {
-            println!(
-                "  {}\u{2620}{} {} {}({}){}",
-                colors.red(),
-                colors.reset(),
-                result.info.name,
-                colors.dim(),
-                duration,
-                colors.reset()
-            );
-            eprintln!("    PANIC: {}", msg);
-            // Print captured output on panic
-            if let Some(output) = &result.captured_output {
+            TestStatus::Panicked(msg) => {
+                // Print file header if changed
+                if current_file != Some(result.file.as_path()) {
+                    println!("{}", result.file.display());
+                    current_file = Some(result.file.as_path());
+                }
+
+                // Print failure line: ✘ test_name · file:line
                 println!(
-                    "    {}--- captured output ---{}",
+                    "  {}\u{2718}{} {} {}· {}:{}{}",
+                    colors.red(),
+                    colors.reset(),
+                    result.info.name,
                     colors.dim(),
+                    result.info.file,
+                    result.info.line,
                     colors.reset()
                 );
-                for line in output.lines() {
-                    println!("    {}", line);
-                }
+
+                // Print panic message
+                println!("    panicked: {}", msg);
+
+                // Print captured output if present
+                print_captured_output(&result.captured_output, colors);
             }
+            TestStatus::Passed => {}
         }
     }
 }
 
-/// Print a summary of all failures at the end (for 'all' mode)
-fn print_failures_summary(results: &TestResults, colors: &TermColors) {
-    println!("\n{}Failures:{}", colors.red(), colors.reset());
+/// Print captured output with │ gutter
+fn print_captured_output(output: &Option<String>, colors: &TermColors) {
+    if let Some(output) = output.as_ref().filter(|s| !s.is_empty()) {
+        println!("    {}Output:{}", colors.dim(), colors.reset());
+        for line in output.lines() {
+            println!("    {}\u{2502}{} {}", colors.dim(), colors.reset(), line);
+        }
+    }
+}
 
-    // Group failures by file
-    let mut current_file: Option<&Path> = None;
-
-    for result in &results.results {
-        if matches!(
-            result.status,
-            TestStatus::Failed(_) | TestStatus::Panicked(_)
-        ) {
-            // Print file header if changed
-            if current_file != Some(result.file.as_path()) {
-                println!("\n{}", result.file.display());
-                current_file = Some(result.file.as_path());
-            }
-
-            print_test_result(result, colors);
+/// Print file compile error details
+fn print_error_details(results: &TestResults, colors: &TermColors) {
+    for file_error in &results.file_error_details {
+        println!(
+            "{}{}{}",
+            colors.yellow(),
+            file_error.file.display(),
+            colors.reset()
+        );
+        // The error is already formatted by miette, just print it indented
+        for line in file_error.error.lines() {
+            println!("  {}", line);
         }
     }
 }
