@@ -42,6 +42,7 @@ pub fn available_profiles() -> Vec<&'static str> {
         "deep-nesting",
         "wide-types",
         "many-modules",
+        "generics-heavy",
     ]
 }
 
@@ -55,6 +56,7 @@ pub fn get_profile(name: &str) -> Result<Profile, UnknownProfileError> {
         "deep-nesting" => Ok(deep_nesting_profile()),
         "wide-types" => Ok(wide_types_profile()),
         "many-modules" => Ok(many_modules_profile()),
+        "generics-heavy" => Ok(generics_heavy_profile()),
         _ => Err(UnknownProfileError(name.to_string())),
     }
 }
@@ -358,6 +360,87 @@ fn many_modules_profile() -> Profile {
     Profile { plan, emit }
 }
 
+/// Generics-heavy profile - stress generic instantiation and monomorphization.
+///
+/// This profile generates code that heavily uses generics to test:
+/// - Deeply parameterized types: Foo<Bar<Baz<Qux<T>>>>
+/// - Multiple constraints: T: Hashable + Serializable + Comparable
+/// - Generic methods on generic classes
+/// - Generic lambdas passed to generic functions
+/// - Chained generic method calls
+/// - Many monomorphization sites (same generic with different type args)
+///
+/// Target: stress type inference, constraint checking, monomorph cache.
+fn generics_heavy_profile() -> Profile {
+    let plan = PlanConfig {
+        // Moderate module structure - focus is on generics, not module graph
+        layers: 2,
+        modules_per_layer: 3,
+        // Many classes - each will be generic
+        classes_per_module: (3, 5),
+        // Many interfaces for constraints
+        interfaces_per_module: (3, 5),
+        // A few errors for completeness
+        errors_per_module: (1, 2),
+        // Many generic functions
+        functions_per_module: (4, 6),
+        // Some globals
+        globals_per_module: (1, 2),
+        // Moderate field counts - fields can use type params
+        fields_per_class: (2, 4),
+        // Many methods - methods will also be generic on generic classes
+        methods_per_class: (3, 5),
+        // Many interface methods for constraint satisfaction
+        methods_per_interface: (2, 4),
+        // Simple error fields
+        fields_per_error: (0, 2),
+        // Moderate parameter counts - params can use type params
+        params_per_function: (2, 4),
+        // High type parameter counts for deep generics (2-4 type params)
+        type_params_per_class: (2, 4),
+        type_params_per_interface: (1, 3),
+        type_params_per_function: (2, 4),
+        // Multiple constraints per type param for T: A + B + C patterns
+        constraints_per_type_param: (1, 3),
+        // High interface extends for constraint hierarchies
+        interface_extends_probability: 0.5,
+        // Some implement blocks for generic impl scenarios
+        implement_blocks_per_module: (1, 3),
+        // Standard import behavior
+        cross_layer_import_probability: 0.3,
+        enable_diamond_dependencies: true,
+    };
+
+    let emit = EmitConfig {
+        stmt_config: StmtConfig {
+            expr_config: ExprConfig {
+                // Moderate expression depth
+                max_depth: 3,
+                // Standard binary expression probability
+                binary_probability: 0.3,
+                // Some when expressions
+                when_probability: 0.1,
+                // Some match expressions
+                match_probability: 0.1,
+                // Some if expressions
+                if_expr_probability: 0.1,
+                // Higher lambda probability for generic lambdas
+                lambda_probability: 0.15,
+            },
+            // Moderate statement depth
+            max_depth: 2,
+            // Standard statements per block
+            statements_per_block: (2, 3),
+            // Standard control flow probabilities
+            if_probability: 0.2,
+            while_probability: 0.1,
+            for_probability: 0.15,
+        },
+    };
+
+    Profile { plan, emit }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -575,6 +658,92 @@ mod tests {
         assert!(
             err.to_string().contains("many-modules"),
             "error message should mention many-modules profile"
+        );
+    }
+
+    #[test]
+    fn generics_heavy_profile_exists() {
+        let profile = get_profile("generics-heavy").expect("generics-heavy profile should exist");
+        // Verify generics-heavy characteristics: focus on generic type parameters
+
+        // Multiple type parameters per class (2-4)
+        assert!(
+            profile.plan.type_params_per_class.0 >= 2,
+            "type_params_per_class min should be >= 2 for generics-heavy"
+        );
+        assert!(
+            profile.plan.type_params_per_class.1 >= 4,
+            "type_params_per_class max should be >= 4 for generics-heavy"
+        );
+
+        // Multiple type parameters per function (2-4)
+        assert!(
+            profile.plan.type_params_per_function.0 >= 2,
+            "type_params_per_function min should be >= 2 for generics-heavy"
+        );
+        assert!(
+            profile.plan.type_params_per_function.1 >= 4,
+            "type_params_per_function max should be >= 4 for generics-heavy"
+        );
+
+        // Multiple constraints per type param (1-3)
+        assert!(
+            profile.plan.constraints_per_type_param.0 >= 1,
+            "constraints_per_type_param min should be >= 1 for generics-heavy"
+        );
+        assert!(
+            profile.plan.constraints_per_type_param.1 >= 3,
+            "constraints_per_type_param max should be >= 3 for generics-heavy"
+        );
+
+        // Many interfaces for constraints
+        assert!(
+            profile.plan.interfaces_per_module.0 >= 3,
+            "interfaces_per_module min should be >= 3 for generics-heavy"
+        );
+
+        // Many generic classes
+        assert!(
+            profile.plan.classes_per_module.0 >= 3,
+            "classes_per_module min should be >= 3 for generics-heavy"
+        );
+
+        // Many methods for generic method testing
+        assert!(
+            profile.plan.methods_per_class.0 >= 3,
+            "methods_per_class min should be >= 3 for generics-heavy"
+        );
+
+        // High interface extends probability for constraint hierarchies
+        assert!(
+            profile.plan.interface_extends_probability >= 0.5,
+            "interface_extends_probability should be >= 0.5 for generics-heavy"
+        );
+
+        // Higher lambda probability for generic lambdas
+        assert!(
+            profile.emit.stmt_config.expr_config.lambda_probability >= 0.1,
+            "lambda_probability should be >= 0.1 for generics-heavy"
+        );
+    }
+
+    #[test]
+    fn available_profiles_includes_generics_heavy() {
+        let profiles = available_profiles();
+        assert!(
+            profiles.contains(&"generics-heavy"),
+            "available_profiles should include generics-heavy"
+        );
+    }
+
+    #[test]
+    fn unknown_profile_error_includes_generics_heavy() {
+        let result = get_profile("nonexistent");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("generics-heavy"),
+            "error message should mention generics-heavy profile"
         );
     }
 }
