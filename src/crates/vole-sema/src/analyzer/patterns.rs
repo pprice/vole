@@ -218,6 +218,10 @@ impl Analyzer {
             }
             PatternKind::Tuple { elements } => {
                 let span = pattern.span;
+                // Skip if scrutinee type is INVALID (prior error)
+                if scrutinee_type_id.is_invalid() {
+                    return None;
+                }
                 // Tuple pattern - check against tuple type
                 let tuple_elements = self
                     .type_arena()

@@ -80,22 +80,16 @@ impl Analyzer {
                     }
 
                     // Validate: suffix type matches expected type (if any)
+                    // Skip check if expected is INVALID (prior error)
                     if let Some(exp_id) = expected
+                        && !exp_id.is_invalid()
                         && exp_id != suffix_type_id
                         && !self
                             .type_arena()
                             .unwrap_union(exp_id)
                             .is_some_and(|variants| variants.contains(&suffix_type_id))
                     {
-                        let expected_str = self.type_display_id(exp_id);
-                        self.add_error(
-                            SemanticError::TypeMismatch {
-                                expected: expected_str,
-                                found: s.as_str().to_string(),
-                                span: expr.span.into(),
-                            },
-                            expr.span,
-                        );
+                        self.add_type_mismatch_expected_id(exp_id, s.as_str(), expr.span);
                     }
                     return Ok(suffix_type_id);
                 }
@@ -127,16 +121,9 @@ impl Analyzer {
                         }
                     }
                     let Some(best) = best_variant else {
-                        // No matching integer variant
-                        let expected_str = self.type_display_id(expected.unwrap());
-                        self.add_error(
-                            SemanticError::TypeMismatch {
-                                expected: expected_str,
-                                found: "integer literal".to_string(),
-                                span: expr.span.into(),
-                            },
-                            expr.span,
-                        );
+                        // No matching integer variant - emit error unless expected is INVALID
+                        let exp_id = expected.unwrap();
+                        self.add_type_mismatch_expected_id(exp_id, "integer literal", expr.span);
                         return Ok(ArenaTypeId::I64);
                     };
                     return Ok(best);
@@ -147,35 +134,24 @@ impl Analyzer {
                     if exp_id.is_unknown() {
                         return Ok(ArenaTypeId::I64);
                     }
+                    // For invalid type (from prior error), accept the literal
+                    if exp_id.is_invalid() {
+                        return Ok(ArenaTypeId::I64);
+                    }
                     if self.type_arena().literal_fits_id(*value, exp_id) {
                         return Ok(exp_id);
                     }
-                    let expected_str = self.type_display_id(exp_id);
-                    self.add_error(
-                        SemanticError::TypeMismatch {
-                            expected: expected_str,
-                            found: "integer literal".to_string(),
-                            span: expr.span.into(),
-                        },
-                        expr.span,
-                    );
+                    self.add_type_mismatch_expected_id(exp_id, "integer literal", expr.span);
                     return Ok(exp_id);
                 }
                 Ok(ArenaTypeId::I64)
             }
             ExprKind::TypeLiteral(_) => {
                 if let Some(exp_id) = expected
+                    && !exp_id.is_invalid()
                     && exp_id != ArenaTypeId::METATYPE
                 {
-                    let expected_str = self.type_display_id(exp_id);
-                    self.add_error(
-                        SemanticError::TypeMismatch {
-                            expected: expected_str,
-                            found: "type".to_string(),
-                            span: expr.span.into(),
-                        },
-                        expr.span,
-                    );
+                    self.add_type_mismatch_expected_id(exp_id, "type", expr.span);
                 }
                 Ok(ArenaTypeId::METATYPE)
             }
@@ -200,22 +176,16 @@ impl Analyzer {
                     }
 
                     // Validate: suffix type matches expected type (if any)
+                    // Skip check if expected is INVALID (prior error)
                     if let Some(exp_id) = expected
+                        && !exp_id.is_invalid()
                         && exp_id != suffix_type_id
                         && !self
                             .type_arena()
                             .unwrap_union(exp_id)
                             .is_some_and(|variants| variants.contains(&suffix_type_id))
                     {
-                        let expected_str = self.type_display_id(exp_id);
-                        self.add_error(
-                            SemanticError::TypeMismatch {
-                                expected: expected_str,
-                                found: s.as_str().to_string(),
-                                span: expr.span.into(),
-                            },
-                            expr.span,
-                        );
+                        self.add_type_mismatch_expected_id(exp_id, s.as_str(), expr.span);
                     }
                     return Ok(suffix_type_id);
                 }
@@ -232,21 +202,17 @@ impl Analyzer {
                     if exp_id.is_unknown() {
                         return Ok(ArenaTypeId::F64);
                     }
+                    // Invalid type (from prior error) - accept the literal
+                    if exp_id.is_invalid() {
+                        return Ok(ArenaTypeId::F64);
+                    }
                     // Check if union contains f64
                     if let Some(variants) = self.type_arena().unwrap_union(exp_id)
                         && variants.contains(&ArenaTypeId::F64)
                     {
                         return Ok(ArenaTypeId::F64);
                     }
-                    let expected_str = self.type_display_id(exp_id);
-                    self.add_error(
-                        SemanticError::TypeMismatch {
-                            expected: expected_str,
-                            found: "f64".to_string(),
-                            span: expr.span.into(),
-                        },
-                        expr.span,
-                    );
+                    self.add_type_mismatch_expected_id(exp_id, "f64", expr.span);
                 }
                 Ok(ArenaTypeId::F64)
             }
@@ -286,16 +252,8 @@ impl Analyzer {
                 if let Some(expected_id) = expected
                     && !self.types_compatible_id(inferred_id, expected_id, interner)
                 {
-                    let expected_str = self.type_display_id(expected_id);
-                    let found = self.type_display_id(inferred_id);
-                    self.add_error(
-                        SemanticError::TypeMismatch {
-                            expected: expected_str,
-                            found,
-                            span: expr.span.into(),
-                        },
-                        expr.span,
-                    );
+                    // Use helper that suppresses errors if either type is INVALID
+                    self.add_type_mismatch_id(expected_id, inferred_id, expr.span);
                 }
                 Ok(inferred_id)
             }
@@ -325,14 +283,7 @@ impl Analyzer {
                     } else if self.satisfies_stringable_id(right_id, interner) {
                         return Ok(ArenaTypeId::STRING);
                     } else {
-                        self.add_error(
-                            SemanticError::TypeMismatch {
-                                expected: "Stringable".to_string(),
-                                found: self.type_display_id(right_id),
-                                span: bin.right.span.into(),
-                            },
-                            bin.right.span,
-                        );
+                        self.type_error_id("Stringable", right_id, bin.right.span);
                         return Ok(ArenaTypeId::INVALID);
                     }
                 }
@@ -348,14 +299,7 @@ impl Analyzer {
                     return Ok(self.numeric_result_type(left_id, right_id));
                 }
 
-                self.add_error(
-                    SemanticError::TypeMismatch {
-                        expected: "numeric or string".to_string(),
-                        found: self.type_display_pair_id(left_id, right_id),
-                        span: expr.span.into(),
-                    },
-                    expr.span,
-                );
+                self.type_error_pair_id("numeric or string", left_id, right_id, expr.span);
                 Ok(ArenaTypeId::INVALID)
             }
             // Arithmetic ops
@@ -373,14 +317,7 @@ impl Analyzer {
                     return Ok(self.numeric_result_type(left_id, right_id));
                 }
 
-                self.add_error(
-                    SemanticError::TypeMismatch {
-                        expected: "numeric".to_string(),
-                        found: self.type_display_pair_id(left_id, right_id),
-                        span: expr.span.into(),
-                    },
-                    expr.span,
-                );
+                self.type_error_pair_id("numeric", left_id, right_id, expr.span);
                 Ok(ArenaTypeId::INVALID)
             }
             // Equality ops (handle allowed)
@@ -394,14 +331,7 @@ impl Analyzer {
                 let left_id = self.check_expr_expecting_id(&bin.left, None, interner)?;
                 let right_id = self.check_expr_expecting_id(&bin.right, Some(left_id), interner)?;
                 if left_id == ArenaTypeId::HANDLE || right_id == ArenaTypeId::HANDLE {
-                    self.add_error(
-                        SemanticError::TypeMismatch {
-                            expected: "orderable".to_string(),
-                            found: self.type_display_pair_id(left_id, right_id),
-                            span: expr.span.into(),
-                        },
-                        expr.span,
-                    );
+                    self.type_error_pair_id("orderable", left_id, right_id, expr.span);
                     Ok(ArenaTypeId::INVALID)
                 } else {
                     Ok(ArenaTypeId::BOOL)
@@ -417,14 +347,7 @@ impl Analyzer {
                 if left_id == ArenaTypeId::BOOL && right_id == ArenaTypeId::BOOL {
                     Ok(ArenaTypeId::BOOL)
                 } else {
-                    self.add_error(
-                        SemanticError::TypeMismatch {
-                            expected: "bool".to_string(),
-                            found: self.type_display_pair_id(left_id, right_id),
-                            span: expr.span.into(),
-                        },
-                        expr.span,
-                    );
+                    self.type_error_pair_id("bool", left_id, right_id, expr.span);
                     Ok(ArenaTypeId::INVALID)
                 }
             }
@@ -447,14 +370,7 @@ impl Analyzer {
                     return Ok(self.integer_result_type(left_id, right_id));
                 }
 
-                self.add_error(
-                    SemanticError::TypeMismatch {
-                        expected: "integer".to_string(),
-                        found: self.type_display_pair_id(left_id, right_id),
-                        span: expr.span.into(),
-                    },
-                    expr.span,
-                );
+                self.type_error_pair_id("integer", left_id, right_id, expr.span);
                 Ok(ArenaTypeId::INVALID)
             }
         }
@@ -492,14 +408,7 @@ impl Analyzer {
                 if operand_id.is_numeric() {
                     Ok(operand_id)
                 } else {
-                    self.add_error(
-                        SemanticError::TypeMismatch {
-                            expected: "numeric".to_string(),
-                            found: self.type_display_id(operand_id),
-                            span: expr.span.into(),
-                        },
-                        expr.span,
-                    );
+                    self.type_error_id("numeric", operand_id, expr.span);
                     Ok(ArenaTypeId::INVALID)
                 }
             }
@@ -509,14 +418,7 @@ impl Analyzer {
                 if operand_id == ArenaTypeId::BOOL {
                     Ok(ArenaTypeId::BOOL)
                 } else {
-                    self.add_error(
-                        SemanticError::TypeMismatch {
-                            expected: "bool".to_string(),
-                            found: self.type_display_id(operand_id),
-                            span: expr.span.into(),
-                        },
-                        expr.span,
-                    );
+                    self.type_error_id("bool", operand_id, expr.span);
                     Ok(ArenaTypeId::INVALID)
                 }
             }
@@ -525,14 +427,7 @@ impl Analyzer {
                 if operand_id.is_integer() {
                     Ok(operand_id)
                 } else {
-                    self.add_error(
-                        SemanticError::TypeMismatch {
-                            expected: "integer".to_string(),
-                            found: self.type_display_id(operand_id),
-                            span: expr.span.into(),
-                        },
-                        expr.span,
-                    );
+                    self.type_error_id("integer", operand_id, expr.span);
                     Ok(ArenaTypeId::INVALID)
                 }
             }
@@ -547,7 +442,10 @@ impl Analyzer {
         interner: &Interner,
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
         // Check if expecting a tuple type
-        if let Some(exp_id) = expected {
+        // Skip if expected type is INVALID (prior error)
+        if let Some(exp_id) = expected
+            && !exp_id.is_invalid()
+        {
             // Extract tuple elements upfront to avoid borrow conflict
             let tuple_elems = self.type_arena().unwrap_tuple(exp_id).map(|e| e.to_vec());
             if let Some(expected_elems) = tuple_elems {

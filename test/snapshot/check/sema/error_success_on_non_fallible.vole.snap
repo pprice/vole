@@ -17,11 +17,14 @@
    :                      `-- not found in scope
  6 |         _ => 0
    `----
-  x [E2001]: expected <invalid>, found integer literal
-   ,-[<path>/error_success_on_non_fallible.vole:6:14]
+  x [E2031]: match arms have incompatible types: expected <invalid>, found i64
+   ,-[<path>/error_success_on_non_fallible.vole:5:9]
+ 4 |     let result = match x {
  5 |         success v => v
+   :         ^^^^^^^|^^^^^^
+   :                `-- first arm has type <invalid>
  6 |         _ => 0
    :              |
-   :              `-- type mismatch
+   :              `-- this arm has type i64
  7 |     }
    `----

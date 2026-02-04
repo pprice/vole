@@ -48,8 +48,13 @@ impl Analyzer {
         )
     }
 
-    /// Helper to add a type mismatch error with TypeId
+    /// Helper to add a type mismatch error with TypeId.
+    /// Suppresses the error if the found type is INVALID (indicates prior error).
     pub(crate) fn type_error_id(&mut self, expected: &str, found: ArenaTypeId, span: Span) {
+        // Suppress cascading errors when found type is INVALID (prior error)
+        if found.is_invalid() {
+            return;
+        }
         let found_str = self.type_display_id(found);
         self.add_error(
             SemanticError::TypeMismatch {
@@ -61,7 +66,8 @@ impl Analyzer {
         );
     }
 
-    /// Helper to add a type mismatch error for binary operations with TypeId
+    /// Helper to add a type mismatch error for binary operations with TypeId.
+    /// Suppresses the error if either operand type is INVALID (indicates prior error).
     pub(crate) fn type_error_pair_id(
         &mut self,
         expected: &str,
@@ -69,6 +75,10 @@ impl Analyzer {
         right: ArenaTypeId,
         span: Span,
     ) {
+        // Suppress cascading errors when either type is INVALID (prior error)
+        if left.is_invalid() || right.is_invalid() {
+            return;
+        }
         let found = self.type_display_pair_id(left, right);
         self.add_error(
             SemanticError::TypeMismatch {
@@ -80,19 +90,47 @@ impl Analyzer {
         );
     }
 
-    /// Helper to add a type mismatch error with TypeId arguments
+    /// Helper to add a type mismatch error with TypeId arguments.
+    /// Suppresses the error if either type is INVALID (indicates prior error).
     pub(crate) fn add_type_mismatch_id(
         &mut self,
         expected: ArenaTypeId,
         found: ArenaTypeId,
         span: Span,
     ) {
+        // Suppress cascading errors when either type is INVALID (prior error)
+        if expected.is_invalid() || found.is_invalid() {
+            return;
+        }
         let expected_str = self.type_display_id(expected);
         let found_str = self.type_display_id(found);
         self.add_error(
             SemanticError::TypeMismatch {
                 expected: expected_str,
                 found: found_str,
+                span: span.into(),
+            },
+            span,
+        );
+    }
+
+    /// Helper to add a type mismatch error when expected is a TypeId but found is a string.
+    /// Suppresses the error if the expected type is INVALID (indicates prior error).
+    pub(crate) fn add_type_mismatch_expected_id(
+        &mut self,
+        expected: ArenaTypeId,
+        found: &str,
+        span: Span,
+    ) {
+        // Suppress cascading errors when expected type is INVALID (prior error)
+        if expected.is_invalid() {
+            return;
+        }
+        let expected_str = self.type_display_id(expected);
+        self.add_error(
+            SemanticError::TypeMismatch {
+                expected: expected_str,
+                found: found.to_string(),
                 span: span.into(),
             },
             span,

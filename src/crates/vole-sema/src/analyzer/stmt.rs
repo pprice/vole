@@ -547,6 +547,10 @@ impl Analyzer {
             }
             PatternKind::Tuple { elements } => {
                 let span = pattern.span;
+                // Skip if type is INVALID (prior error)
+                if ty_id.is_invalid() {
+                    return;
+                }
                 // Check for tuple or fixed array using arena (extract info first to avoid borrow conflicts)
                 enum TupleOrArray {
                     Tuple(crate::type_arena::TypeIdVec),

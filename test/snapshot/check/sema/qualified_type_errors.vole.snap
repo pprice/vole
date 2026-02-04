@@ -11,11 +11,3 @@
  19 |     
     `----
   help: type not found
-  x [E2001]: expected <invalid>, found integer literal
-    ,-[<path>/qualified_type_errors.vole:21:18]
- 20 | func main() {
- 21 |     unknown_type(42)
-    :                  ^|
-    :                   `-- type mismatch
- 22 |     let x = unknown_type_return()
-    `----

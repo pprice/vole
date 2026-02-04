@@ -10,14 +10,6 @@
  4 |     let b: Int = 42
    `----
   help: did you mean 'i64'?
-  x [E2001]: expected <invalid>, found integer literal
-   ,-[<path>/unknown_type_int_suggestion.vole:3:18]
- 2 | func main() {
- 3 |     let a: int = 42
-   :                  ^|
-   :                   `-- type mismatch
- 4 |     let b: Int = 42
-   `----
   x [E2020]: unknown type 'Int'
    ,-[<path>/unknown_type_int_suggestion.vole:4:5]
  3 |     let a: int = 42
@@ -27,14 +19,6 @@
  5 |     let c: INT = 42
    `----
   help: did you mean 'i64'?
-  x [E2001]: expected <invalid>, found integer literal
-   ,-[<path>/unknown_type_int_suggestion.vole:4:18]
- 3 |     let a: int = 42
- 4 |     let b: Int = 42
-   :                  ^|
-   :                   `-- type mismatch
- 5 |     let c: INT = 42
-   `----
   x [E2020]: unknown type 'INT'
    ,-[<path>/unknown_type_int_suggestion.vole:5:5]
  4 |     let b: Int = 42
@@ -44,14 +28,6 @@
  6 |     let d: integer = 42
    `----
   help: did you mean 'i64'?
-  x [E2001]: expected <invalid>, found integer literal
-   ,-[<path>/unknown_type_int_suggestion.vole:5:18]
- 4 |     let b: Int = 42
- 5 |     let c: INT = 42
-   :                  ^|
-   :                   `-- type mismatch
- 6 |     let d: integer = 42
-   `----
   x [E2020]: unknown type 'integer'
    ,-[<path>/unknown_type_int_suggestion.vole:6:5]
  5 |     let c: INT = 42
@@ -61,11 +37,3 @@
  7 | }
    `----
   help: did you mean 'i64'?
-  x [E2001]: expected <invalid>, found integer literal
-   ,-[<path>/unknown_type_int_suggestion.vole:6:22]
- 5 |     let c: INT = 42
- 6 |     let d: integer = 42
-   :                      ^|
-   :                       `-- type mismatch
- 7 | }
-   `----

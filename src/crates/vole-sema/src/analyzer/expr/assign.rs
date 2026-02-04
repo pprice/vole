@@ -119,33 +119,17 @@ impl Analyzer {
                 let idx_type_id = self.check_expr(index, interner)?;
 
                 // Check index is integer using TypeId
-                if !self.is_integer_id(idx_type_id) {
-                    let found = self.type_display_id(idx_type_id);
-                    self.add_error(
-                        SemanticError::TypeMismatch {
-                            expected: "integer".to_string(),
-                            found,
-                            span: index.span.into(),
-                        },
-                        index.span,
-                    );
+                // Skip if index type is INVALID (prior error)
+                if !idx_type_id.is_invalid() && !self.is_integer_id(idx_type_id) {
+                    self.type_error_id("integer", idx_type_id, index.span);
                 }
 
                 // Get element type using TypeId
                 if let Some(elem_id) = self.unwrap_indexable_element_id(obj_type_id) {
                     (elem_id, true, None, true)
                 } else {
-                    if !obj_type_id.is_invalid() {
-                        let found = self.type_display_id(obj_type_id);
-                        self.add_error(
-                            SemanticError::TypeMismatch {
-                                expected: "array".to_string(),
-                                found,
-                                span: object.span.into(),
-                            },
-                            object.span,
-                        );
-                    }
+                    // obj_type_id check already in type_error_id helper
+                    self.type_error_id("array", obj_type_id, object.span);
                     (ArenaTypeId::INVALID, false, None, false)
                 }
             }
@@ -254,33 +238,17 @@ impl Analyzer {
                 let idx_type_id = self.check_expr(index, interner)?;
 
                 // Check index is integer using TypeId
-                if !self.is_integer_id(idx_type_id) {
-                    let found = self.type_display_id(idx_type_id);
-                    self.add_error(
-                        SemanticError::TypeMismatch {
-                            expected: "integer".to_string(),
-                            found,
-                            span: index.span.into(),
-                        },
-                        index.span,
-                    );
+                // Skip if index type is INVALID (prior error)
+                if !idx_type_id.is_invalid() && !self.is_integer_id(idx_type_id) {
+                    self.type_error_id("integer", idx_type_id, index.span);
                 }
 
                 // Get element type using TypeId
                 if let Some(elem_id) = self.unwrap_indexable_element_id(obj_type_id) {
                     elem_id
                 } else {
-                    if !obj_type_id.is_invalid() {
-                        let found = self.type_display_id(obj_type_id);
-                        self.add_error(
-                            SemanticError::TypeMismatch {
-                                expected: "array".to_string(),
-                                found,
-                                span: object.span.into(),
-                            },
-                            object.span,
-                        );
-                    }
+                    // obj_type_id check already in type_error_id helper
+                    self.type_error_id("array", obj_type_id, object.span);
                     ArenaTypeId::INVALID
                 }
             }
@@ -376,19 +344,9 @@ impl Analyzer {
 
         // Check operator compatibility - compound assignment operators are arithmetic
         // For +=, -=, *=, /=, %= both operands must be numeric
-        if !target_type_id.is_invalid()
-            && !value_type_id.is_invalid()
-            && (!target_type_id.is_numeric() || !value_type_id.is_numeric())
-        {
-            let found = self.type_display_pair_id(target_type_id, value_type_id);
-            self.add_error(
-                SemanticError::TypeMismatch {
-                    expected: "numeric".to_string(),
-                    found,
-                    span: expr.span.into(),
-                },
-                expr.span,
-            );
+        // type_error_pair_id handles INVALID check internally
+        if !target_type_id.is_numeric() || !value_type_id.is_numeric() {
+            self.type_error_pair_id("numeric", target_type_id, value_type_id, expr.span);
         }
 
         Ok(target_type_id)

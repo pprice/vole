@@ -27,10 +27,3 @@
    :                `-- not a known type
    `----
   help: did you mean 'i64'?
-  x [E2001]: expected <invalid>, found integer literal
-   ,-[<path>/unknown_type_in_return.vole:4:28]
- 3 | func bar() -> str { return "hello" }
- 4 | func baz() -> int { return 42 }
-   :                            ^|
-   :                             `-- type mismatch
-   `----

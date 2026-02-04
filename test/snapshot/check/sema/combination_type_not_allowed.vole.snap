@@ -37,14 +37,6 @@
  21 | 
     `----
   help: use type constraints instead: `<T: A + B>`
-  x [E2001]: expected <invalid>, found integer literal
-    ,-[<path>/combination_type_not_allowed.vole:20:20]
- 19 | // Error: intersection type in variable declaration
- 20 | let x: Foo + Bar = 0
-    :                    |
-    :                    `-- type mismatch
- 21 | 
-    `----
   x [E2083]: missing return statement in function 'bad_return'
     ,-[<path>/combination_type_not_allowed.vole:16:1]
  15 |     // Error: intersection type in return type position
