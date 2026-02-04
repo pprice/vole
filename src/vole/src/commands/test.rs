@@ -113,6 +113,8 @@ pub struct TestResults {
     pub file_errors: usize,
     /// Number of files skipped due to max_failures cap
     pub skipped_files: usize,
+    /// Number of tests that didn't run (due to max-failures or file compile errors)
+    pub not_run: usize,
 }
 
 impl TestResults {
@@ -124,6 +126,7 @@ impl TestResults {
             total_duration: Duration::ZERO,
             file_errors: 0,
             skipped_files: 0,
+            not_run: 0,
         }
     }
 
@@ -142,6 +145,7 @@ impl TestResults {
         self.total_duration += other.total_duration;
         self.file_errors += other.file_errors;
         self.skipped_files += other.skipped_files;
+        self.not_run += other.not_run;
     }
 }
 
