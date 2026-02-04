@@ -112,6 +112,18 @@ impl<'a> ExprContext<'a> {
         }
         vars
     }
+
+    /// Get all variables in scope (any type), for use in string interpolation.
+    pub fn all_vars(&self) -> Vec<(&str, &TypeInfo)> {
+        let mut vars = Vec::new();
+        for (name, ty) in self.locals {
+            vars.push((name.as_str(), ty));
+        }
+        for param in self.params {
+            vars.push((param.name.as_str(), &param.param_type));
+        }
+        vars
+    }
 }
 
 /// Check if two types are compatible for expression generation.
@@ -280,6 +292,10 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                         // Two-arm conditional (if-expression equivalent)
                         self.generate_if_expr(&TypeInfo::Primitive(prim), ctx, depth)
                     }
+                    6..=8 => {
+                        // Interpolated string (~30%)
+                        self.generate_interpolated_string(ctx)
+                    }
                     _ => self.generate_simple(&TypeInfo::Primitive(prim), ctx),
                 }
             }
@@ -395,6 +411,76 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             .collect();
 
         format!("[{}]", elements.join(", "))
+    }
+
+    /// Generate an interpolated string expression.
+    ///
+    /// Produces strings like `"value is {param0}"` or `"sum: {a + 1_i64}"`.
+    /// Falls back to a plain string literal if no variables are in scope.
+    fn generate_interpolated_string(&mut self, ctx: &ExprContext) -> String {
+        let vars = ctx.all_vars();
+        if vars.is_empty() {
+            let id = self.rng.gen_range(0..100);
+            return format!("\"str{}\"", id);
+        }
+
+        let interp_count = self.rng.gen_range(1..=2.min(vars.len()));
+        let mut parts = Vec::new();
+
+        // Optional leading text
+        if self.rng.gen_bool(0.6) {
+            let prefixes = ["val: ", "result: ", "got ", "x=", ""];
+            let idx = self.rng.gen_range(0..prefixes.len());
+            let prefix = prefixes[idx];
+            if !prefix.is_empty() {
+                parts.push(prefix.to_string());
+            }
+        }
+
+        for i in 0..interp_count {
+            let var_idx = self.rng.gen_range(0..vars.len());
+            let (name, ty) = vars[var_idx];
+
+            let interp_expr = self.interp_expr_for_var(name, ty);
+            parts.push(format!("{{{}}}", interp_expr));
+
+            // Add separator text between interpolations
+            if i + 1 < interp_count {
+                let seps = [", ", " | ", " and ", " - "];
+                let idx = self.rng.gen_range(0..seps.len());
+                parts.push(seps[idx].to_string());
+            }
+        }
+
+        // Optional trailing text
+        if self.rng.gen_bool(0.4) {
+            let suffixes = [" done", "!", " ok", ""];
+            let idx = self.rng.gen_range(0..suffixes.len());
+            let suffix = suffixes[idx];
+            if !suffix.is_empty() {
+                parts.push(suffix.to_string());
+            }
+        }
+
+        format!("\"{}\"", parts.join(""))
+    }
+
+    /// Generate an interpolation expression for a variable.
+    ///
+    /// For numeric types, sometimes wraps in arithmetic (e.g. `param0 + 1_i64`).
+    /// For other types, just references the variable directly.
+    fn interp_expr_for_var(&mut self, name: &str, ty: &TypeInfo) -> String {
+        match ty {
+            TypeInfo::Primitive(PrimitiveType::I32) if self.rng.gen_bool(0.3) => {
+                let n = self.rng.gen_range(1..10);
+                format!("{} + {}_i32", name, n)
+            }
+            TypeInfo::Primitive(PrimitiveType::I64) if self.rng.gen_bool(0.3) => {
+                let n = self.rng.gen_range(1..10);
+                format!("{} + {}_i64", name, n)
+            }
+            _ => name.to_string(),
+        }
     }
 
     /// Generate a literal for a primitive type.
@@ -563,6 +649,50 @@ mod tests {
             generator.generate_when_expr(&TypeInfo::Primitive(PrimitiveType::I64), &ctx, 0);
         assert!(when_expr.contains("when"));
         assert!(when_expr.contains("=>"));
+    }
+
+    #[test]
+    fn test_interpolated_string_generation() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(99);
+        let config = ExprConfig::default();
+        let mut generator = ExprGenerator::new(&mut rng, &config);
+
+        let table = SymbolTable::new();
+        let params = vec![
+            ParamInfo {
+                name: "count".to_string(),
+                param_type: TypeInfo::Primitive(PrimitiveType::I64),
+            },
+            ParamInfo {
+                name: "label".to_string(),
+                param_type: TypeInfo::Primitive(PrimitiveType::String),
+            },
+        ];
+        let ctx = ExprContext::new(&params, &[], &table);
+
+        let interp = generator.generate_interpolated_string(&ctx);
+        assert!(interp.starts_with('"'));
+        assert!(interp.ends_with('"'));
+        // Should contain at least one interpolation brace
+        assert!(interp.contains('{'));
+        assert!(interp.contains('}'));
+    }
+
+    #[test]
+    fn test_interpolated_string_no_vars_fallback() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let config = ExprConfig::default();
+        let mut generator = ExprGenerator::new(&mut rng, &config);
+
+        let table = SymbolTable::new();
+        let ctx = ExprContext::new(&[], &[], &table);
+
+        // With no variables in scope, should fall back to plain string
+        let result = generator.generate_interpolated_string(&ctx);
+        assert!(result.starts_with('"'));
+        assert!(result.ends_with('"'));
+        // Should NOT contain interpolation braces (it's a plain "strN" literal)
+        assert!(!result.contains('{'));
     }
 
     #[test]
