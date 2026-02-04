@@ -191,6 +191,14 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
     /// Generate a let statement.
     fn generate_let_statement(&mut self, ctx: &mut StmtContext) -> String {
+        // Occasionally generate a lambda let-binding to exercise closures
+        if self
+            .rng
+            .gen_bool(self.config.expr_config.lambda_probability)
+        {
+            return self.generate_lambda_let(ctx);
+        }
+
         let name = ctx.new_local_name();
         let is_mutable = self.rng.gen_bool(0.3);
         let ty = self.random_primitive_type();
@@ -203,6 +211,34 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         let mutability = if is_mutable { "let mut" } else { "let" };
         format!("{} {} = {}", mutability, name, value)
+    }
+
+    /// Generate a let statement binding a lambda expression.
+    fn generate_lambda_let(&mut self, ctx: &mut StmtContext) -> String {
+        let name = ctx.new_local_name();
+
+        // Pick 0-2 random primitive param types
+        let param_count = self.rng.gen_range(0..=2);
+        let param_types: Vec<TypeInfo> = (0..param_count)
+            .map(|_| self.random_primitive_type())
+            .collect();
+
+        // Pick a random return type (avoiding i32 due to cross-module
+        // lambda codegen bug, see vol-pz4y)
+        let return_type = self.random_lambda_return_type();
+
+        let expr_ctx = ctx.to_expr_context();
+        let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+        // Generate the lambda at a reduced depth so the body is simpler.
+        // Complex bodies (when/match) in lambdas trigger a cross-module
+        // codegen bug (vol-pz4y), so we keep bodies shallow.
+        let depth = self.config.expr_config.max_depth.saturating_sub(1);
+        let value = expr_gen.generate_lambda(&param_types, &return_type, &expr_ctx, depth);
+
+        // Lambda variables are not tracked for reuse since their function
+        // type doesn't match primitive type expectations in the generator.
+
+        format!("let {} = {}", name, value)
     }
 
     /// Generate an if statement.
@@ -336,6 +372,19 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             1 => PrimitiveType::I64,
             2 => PrimitiveType::F64,
             3 => PrimitiveType::Bool,
+            _ => PrimitiveType::String,
+        };
+        TypeInfo::Primitive(prim)
+    }
+
+    /// Generate a random return type for lambdas.
+    ///
+    /// Restricted to i64 and string due to a cross-module lambda codegen
+    /// bug (vol-pz4y) where non-i64 return types get miscompiled when
+    /// the containing module is imported. Expand once fixed.
+    fn random_lambda_return_type(&mut self) -> TypeInfo {
+        let prim = match self.rng.gen_range(0..2) {
+            0 => PrimitiveType::I64,
             _ => PrimitiveType::String,
         };
         TypeInfo::Primitive(prim)

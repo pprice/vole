@@ -448,7 +448,6 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
     }
 
     /// Generate a lambda expression.
-    #[allow(dead_code)]
     pub fn generate_lambda(
         &mut self,
         param_types: &[TypeInfo],
