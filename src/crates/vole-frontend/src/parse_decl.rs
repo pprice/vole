@@ -47,6 +47,45 @@ impl<'src> Parser<'src> {
         Some((keyword, name))
     }
 
+    /// Check if the current identifier is "from" followed by something that looks like
+    /// Python-style `from X import Y` syntax.
+    fn looks_like_python_import(&self) -> bool {
+        if !self.check(TokenType::Identifier) {
+            return false;
+        }
+        if self.current.lexeme != "from" {
+            return false;
+        }
+
+        // Check for: from <something> import
+        let mut lexer_copy = self.lexer.clone();
+
+        // After 'from', skip tokens until we find 'import' keyword or give up
+        let mut depth: i32 = 0;
+        for _ in 0..20 {
+            // Limit lookahead
+            let tok = lexer_copy.next_token();
+            match tok.ty {
+                TokenType::KwImport if depth == 0 => return true,
+                TokenType::LParen | TokenType::LBracket | TokenType::LBrace => depth += 1,
+                TokenType::RParen | TokenType::RBracket | TokenType::RBrace => {
+                    depth = depth.saturating_sub(1)
+                }
+                TokenType::Eof | TokenType::Newline => return false,
+                _ => {}
+            }
+        }
+        false
+    }
+
+    /// Check if the current identifier is "use" which looks like Rust-style import syntax.
+    fn looks_like_rust_use(&self) -> bool {
+        if !self.check(TokenType::Identifier) {
+            return false;
+        }
+        self.current.lexeme == "use"
+    }
+
     /// Check if the current position looks like a function definition missing the `func` keyword.
     /// Pattern: identifier ( ... ) { or identifier ( ... ) -> Type {
     /// Returns the function name if the pattern matches, None otherwise.
@@ -120,7 +159,15 @@ impl<'src> Parser<'src> {
                 let block = self.parse_external_block()?;
                 Ok(Decl::External(block))
             }
+            // Bare import without let assignment
+            TokenType::KwImport => Err(ParseError::new(
+                ParserError::BareImport {
+                    span: self.current.span.into(),
+                },
+                self.current.span,
+            )),
             // Check for foreign func keywords (fn, def, function, void), then missing func keyword
+            // Also check for wrong import syntax (from X import Y, use X)
             TokenType::Identifier => {
                 if let Some((keyword, name)) = self.looks_like_foreign_func_keyword() {
                     Err(ParseError::new(
@@ -135,6 +182,20 @@ impl<'src> Parser<'src> {
                     Err(ParseError::new(
                         ParserError::MissingFuncKeyword {
                             name,
+                            span: self.current.span.into(),
+                        },
+                        self.current.span,
+                    ))
+                } else if self.looks_like_python_import() {
+                    Err(ParseError::new(
+                        ParserError::PythonStyleImport {
+                            span: self.current.span.into(),
+                        },
+                        self.current.span,
+                    ))
+                } else if self.looks_like_rust_use() {
+                    Err(ParseError::new(
+                        ParserError::RustStyleUse {
                             span: self.current.span.into(),
                         },
                         self.current.span,

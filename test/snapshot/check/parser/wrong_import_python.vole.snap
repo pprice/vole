@@ -1,0 +1,10 @@
+[stdout]
+
+[stderr]
+  x [E1035]: `from ... import` is not valid Vole syntax
+   ,-[<path>/wrong_import_python.vole:1:1]
+ 1 | from std import fs
+   : ^^|^
+   :   `-- not valid Vole syntax
+   `----
+  help: use `let { name } = import "module"` to import specific items

@@ -178,4 +178,34 @@ pub enum ParserError {
         #[label("use `func` here")]
         span: SourceSpan,
     },
+
+    #[error("import without assignment")]
+    #[diagnostic(
+        code(E1034),
+        help("in Vole, imports are expressions: `let name = import \"module\"`")
+    )]
+    BareImport {
+        #[label("`import` must be assigned to a variable")]
+        span: SourceSpan,
+    },
+
+    #[error("`from ... import` is not valid Vole syntax")]
+    #[diagnostic(
+        code(E1035),
+        help("use `let {{ name }} = import \"module\"` to import specific items")
+    )]
+    PythonStyleImport {
+        #[label("not valid Vole syntax")]
+        span: SourceSpan,
+    },
+
+    #[error("`use` is not valid Vole syntax")]
+    #[diagnostic(
+        code(E1036),
+        help("in Vole, imports are expressions: `let name = import \"module\"`")
+    )]
+    RustStyleUse {
+        #[label("not valid Vole syntax")]
+        span: SourceSpan,
+    },
 }

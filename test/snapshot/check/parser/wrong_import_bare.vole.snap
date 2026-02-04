@@ -1,0 +1,10 @@
+[stdout]
+
+[stderr]
+  x [E1034]: import without assignment
+   ,-[<path>/wrong_import_bare.vole:1:1]
+ 1 | import "std:fs"
+   : ^^^|^^
+   :    `-- `import` must be assigned to a variable
+   `----
+  help: in Vole, imports are expressions: `let name = import "module"`
