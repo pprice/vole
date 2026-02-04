@@ -430,6 +430,17 @@ impl SymbolTable {
             .flat_map(|m| m.functions().map(move |s| (m.id, s)))
             .collect()
     }
+
+    /// Get leaf modules (modules with no imports).
+    ///
+    /// In the layered module structure, leaf modules are in the highest layer
+    /// and have no imports. They transitively provide access to all lower layers.
+    pub fn leaf_modules(&self) -> Vec<&ModuleSymbols> {
+        self.modules
+            .iter()
+            .filter(|m| m.imports.is_empty())
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -548,5 +559,39 @@ mod tests {
         assert_eq!(beta.name, "beta");
 
         assert!(table.get_module_by_name("gamma").is_none());
+    }
+
+    #[test]
+    fn leaf_modules_returns_modules_without_imports() {
+        let mut table = SymbolTable::new();
+        let leaf_id = table.add_module("leaf".to_string(), "leaf.vole".to_string());
+        let parent_id = table.add_module("parent".to_string(), "parent.vole".to_string());
+
+        // Add import from parent to leaf
+        if let Some(parent) = table.get_module_mut(parent_id) {
+            parent.add_import(leaf_id, "leaf".to_string());
+        }
+
+        let leaves = table.leaf_modules();
+        assert_eq!(leaves.len(), 1);
+        assert_eq!(leaves[0].name, "leaf");
+    }
+
+    #[test]
+    fn leaf_modules_empty_when_all_have_imports() {
+        let mut table = SymbolTable::new();
+        let mod_a = table.add_module("mod_a".to_string(), "mod_a.vole".to_string());
+        let mod_b = table.add_module("mod_b".to_string(), "mod_b.vole".to_string());
+
+        // Circular imports (both have imports)
+        if let Some(a) = table.get_module_mut(mod_a) {
+            a.add_import(mod_b, "mod_b".to_string());
+        }
+        if let Some(b) = table.get_module_mut(mod_b) {
+            b.add_import(mod_a, "mod_a".to_string());
+        }
+
+        let leaves = table.leaf_modules();
+        assert!(leaves.is_empty());
     }
 }
