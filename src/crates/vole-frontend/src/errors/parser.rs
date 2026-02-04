@@ -148,4 +148,14 @@ pub enum ParserError {
         #[label("unexpected body")]
         span: SourceSpan,
     },
+
+    #[error("only declarations are allowed at the top level")]
+    #[diagnostic(
+        code(E1031),
+        help("use func, class, struct, interface, implement, tests, or let")
+    )]
+    StatementAtTopLevel {
+        #[label("expected a declaration, not a statement or expression")]
+        span: SourceSpan,
+    },
 }

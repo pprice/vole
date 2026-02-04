@@ -32,6 +32,36 @@ impl<'src> Parser<'src> {
                 let block = self.parse_external_block()?;
                 Ok(Decl::External(block))
             }
+            // Tokens that start statements or expressions - give a better error
+            TokenType::Identifier
+            | TokenType::IntLiteral
+            | TokenType::FloatLiteral
+            | TokenType::StringLiteral
+            | TokenType::RawStringLiteral
+            | TokenType::StringInterpStart
+            | TokenType::KwIf
+            | TokenType::KwWhile
+            | TokenType::KwFor
+            | TokenType::KwMatch
+            | TokenType::KwReturn
+            | TokenType::KwBreak
+            | TokenType::KwContinue
+            | TokenType::KwRaise
+            | TokenType::KwYield
+            | TokenType::KwTrue
+            | TokenType::KwFalse
+            | TokenType::KwUnreachable
+            | TokenType::LParen
+            | TokenType::LBracket
+            | TokenType::LBrace
+            | TokenType::Minus
+            | TokenType::Bang
+            | TokenType::Tilde => Err(ParseError::new(
+                ParserError::StatementAtTopLevel {
+                    span: self.current.span.into(),
+                },
+                self.current.span,
+            )),
             _ => Err(ParseError::new(
                 ParserError::UnexpectedToken {
                     token: self.current.ty.as_str().to_string(),
