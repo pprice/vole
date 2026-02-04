@@ -310,6 +310,11 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         ctx: &ExprContext,
         depth: usize,
     ) -> String {
+        // For integer types, 25% chance to generate a bitwise op instead
+        if matches!(prim, PrimitiveType::I32 | PrimitiveType::I64) && self.rng.gen_bool(0.25) {
+            return self.generate_binary_bitwise(prim, ctx, depth);
+        }
+
         let ty = TypeInfo::Primitive(prim);
         let left = self.generate(&ty, ctx, depth + 1);
         let right = self.generate(&ty, ctx, depth + 1);
@@ -320,6 +325,48 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             2 => "*",
             // Avoid division by zero by using addition instead
             _ => "+",
+        };
+
+        format!("({} {} {})", left, op, right)
+    }
+
+    /// Generate a binary bitwise expression (integer types only).
+    ///
+    /// Produces `&`, `|`, `^`, `<<`, or `>>`. For shift operators the RHS
+    /// is constrained to a small literal to avoid undefined behaviour.
+    fn generate_binary_bitwise(
+        &mut self,
+        prim: PrimitiveType,
+        ctx: &ExprContext,
+        depth: usize,
+    ) -> String {
+        let ty = TypeInfo::Primitive(prim);
+        let left = self.generate(&ty, ctx, depth + 1);
+
+        let op = match self.rng.gen_range(0..5) {
+            0 => "&",
+            1 => "|",
+            2 => "^",
+            3 => "<<",
+            _ => ">>",
+        };
+
+        // For shift operators, use a small literal RHS to avoid UB
+        let right = if op == "<<" || op == ">>" {
+            let max_shift = match prim {
+                PrimitiveType::I32 => 15,
+                PrimitiveType::I64 => 31,
+                _ => unreachable!(),
+            };
+            let shift_amount = self.rng.gen_range(0..=max_shift);
+            let suffix = match prim {
+                PrimitiveType::I32 => "_i32",
+                PrimitiveType::I64 => "_i64",
+                _ => unreachable!(),
+            };
+            format!("{}{}", shift_amount, suffix)
+        } else {
+            self.generate(&ty, ctx, depth + 1)
         };
 
         format!("({} {} {})", left, op, right)
@@ -693,6 +740,71 @@ mod tests {
         assert!(result.ends_with('"'));
         // Should NOT contain interpolation braces (it's a plain "strN" literal)
         assert!(!result.contains('{'));
+    }
+
+    #[test]
+    fn test_bitwise_generation() {
+        let config = ExprConfig::default();
+        let table = SymbolTable::new();
+        let ctx = ExprContext::new(&[], &[], &table);
+
+        let bitwise_ops = ["&", "|", "^", "<<", ">>"];
+        let mut found = std::collections::HashSet::new();
+
+        // Generate many expressions across different seeds to find bitwise ops
+        for seed in 0..200 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let expr = generator.generate(&TypeInfo::Primitive(PrimitiveType::I64), &ctx, 0);
+            for op in &bitwise_ops {
+                if expr.contains(op) {
+                    found.insert(*op);
+                }
+            }
+        }
+
+        // We should find at least some bitwise ops across 200 seeds
+        assert!(
+            found.len() >= 3,
+            "Expected at least 3 bitwise ops, found: {:?}",
+            found,
+        );
+    }
+
+    #[test]
+    fn test_bitwise_shift_rhs_is_small_literal() {
+        let config = ExprConfig::default();
+        let table = SymbolTable::new();
+        let ctx = ExprContext::new(&[], &[], &table);
+
+        // Generate many bitwise expressions directly and check shift RHS
+        for seed in 0..500 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let expr = generator.generate_binary_bitwise(PrimitiveType::I64, &ctx, 2);
+
+            // If it's a shift expression, the RHS should be a small literal
+            if expr.contains("<<") || expr.contains(">>") {
+                // The expression is like "(LHS << N_i64)" or "(LHS >> N_i64)"
+                let shift_op = if expr.contains("<<") { "<<" } else { ">>" };
+                if let Some(rhs_start) = expr.rfind(shift_op) {
+                    let rhs = &expr[rhs_start + shift_op.len()..].trim();
+                    // RHS should end with "_i64)" and the number should be 0-31
+                    let rhs = rhs.trim_end_matches(')').trim();
+                    let num_str = rhs.trim_end_matches("_i64").trim_end_matches("_i32");
+                    let num: i64 = num_str.parse().expect(&format!(
+                        "Failed to parse shift RHS '{}' from expr '{}'",
+                        num_str, expr
+                    ));
+                    assert!(
+                        num >= 0 && num <= 31,
+                        "Shift amount {} out of range in expr: {}",
+                        num,
+                        expr,
+                    );
+                }
+            }
+        }
     }
 
     #[test]
