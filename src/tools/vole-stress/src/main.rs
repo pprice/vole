@@ -1,4 +1,5 @@
 mod emitter;
+mod entrypoints;
 mod expr;
 mod manifest;
 mod names;
