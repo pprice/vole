@@ -1,0 +1,15 @@
+[package]
+name = "vole-fmt"
+version = "0.1.0"
+edition = "2024"
+description = "Source code formatter for the Vole programming language"
+
+[dependencies]
+# Workspace crates
+vole-frontend = { path = "../vole-frontend" }
+
+# Pretty printing
+pretty = "0.12"
+
+[lints]
+workspace = true

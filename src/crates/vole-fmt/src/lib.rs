@@ -1,4 +1,4 @@
-// src/fmt/mod.rs
+// src/lib.rs
 //! Vole source code formatter.
 //!
 //! Provides canonical formatting for Vole source files.

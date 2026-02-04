@@ -1621,7 +1621,6 @@ dependencies = [
  "glob",
  "libc",
  "miette",
- "pretty",
  "serde",
  "serde_json",
  "sysinfo",
@@ -1632,6 +1631,7 @@ dependencies = [
  "vergen",
  "vergen-gitcl",
  "vole-codegen",
+ "vole-fmt",
  "vole-frontend",
  "vole-identity",
  "vole-runtime",
@@ -1655,6 +1655,14 @@ dependencies = [
  "vole-identity",
  "vole-runtime",
  "vole-sema",
+]
+
+[[package]]
+name = "vole-fmt"
+version = "0.1.0"
+dependencies = [
+ "pretty",
+ "vole-frontend",
 ]
 
 [[package]]

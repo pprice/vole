@@ -21,6 +21,7 @@ path = "src/bin/vole.rs"
 [dependencies]
 # Workspace crates
 vole-frontend = { path = "../crates/vole-frontend" }
+vole-fmt = { path = "../crates/vole-fmt" }
 vole-identity = { path = "../crates/vole-identity" }
 vole-runtime = { path = "../crates/vole-runtime" }
 vole-sema = { path = "../crates/vole-sema" }
@@ -38,8 +39,6 @@ clap = { version = "4.5.54", features = ["derive", "color"] }
 # File globbing for test discovery
 glob = "0.3"
 
-# Pretty printing for formatter
-pretty = "0.12"
 
 # Benchmarking
 sysinfo = { version = "0.37", default-features = false, features = ["system"] }

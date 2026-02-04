@@ -1,5 +1,5 @@
 use super::*;
-use crate::fmt::CANONICAL;
+use crate::CANONICAL;
 
 /// Helper to format and return just the output string
 fn fmt(source: &str) -> String {

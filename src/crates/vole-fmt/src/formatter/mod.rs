@@ -1,4 +1,4 @@
-// src/fmt/formatter/mod.rs
+// src/formatter/mod.rs
 //! Main entry point for the Vole formatter.
 //!
 //! Coordinates parsing and rendering to produce formatted output.
@@ -6,8 +6,8 @@
 
 use super::config::FormatConfig;
 use super::printer;
-use crate::frontend::Parser;
 use pretty::Arena;
+use vole_frontend::Parser;
 
 /// Error type for formatting operations.
 #[derive(Debug, Clone)]

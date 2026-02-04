@@ -4,7 +4,7 @@ pub mod cli;
 pub use vole_codegen as codegen;
 pub mod commands;
 pub mod errors;
-pub mod fmt;
+pub use vole_fmt as fmt;
 pub use vole_frontend as frontend;
 pub use vole_identity as identity;
 pub use vole_runtime as runtime;

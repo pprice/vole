@@ -1,4 +1,4 @@
-// src/fmt/config.rs
+// src/config.rs
 //! Configuration for the Vole formatter.
 //!
 //! The canonical style is not user-configurable - there is only one true style.

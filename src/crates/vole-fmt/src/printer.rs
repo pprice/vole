@@ -2,9 +2,9 @@
 
 use pretty::{Arena, DocAllocator, DocBuilder};
 
-use crate::frontend::Interner;
-use crate::frontend::PatternKind;
-use crate::frontend::ast::*;
+use vole_frontend::Interner;
+use vole_frontend::PatternKind;
+use vole_frontend::ast::*;
 
 /// Indent width for formatting (4 spaces)
 const INDENT: isize = 4;
