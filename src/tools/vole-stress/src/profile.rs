@@ -36,7 +36,7 @@ impl std::error::Error for UnknownProfileError {}
 
 /// Returns a list of available profile names.
 pub fn available_profiles() -> Vec<&'static str> {
-    vec!["minimal", "full", "deep-nesting"]
+    vec!["minimal", "full", "deep-nesting", "wide-types"]
 }
 
 /// Get a profile by name.
@@ -47,6 +47,7 @@ pub fn get_profile(name: &str) -> Result<Profile, UnknownProfileError> {
         "minimal" => Ok(minimal_profile()),
         "full" => Ok(full_profile()),
         "deep-nesting" => Ok(deep_nesting_profile()),
+        "wide-types" => Ok(wide_types_profile()),
         _ => Err(UnknownProfileError(name.to_string())),
     }
 }
@@ -203,6 +204,83 @@ fn deep_nesting_profile() -> Profile {
     Profile { plan, emit }
 }
 
+/// Wide-types profile - stress type system with breadth.
+///
+/// This profile generates code with extreme type widths to test:
+/// - Functions with many parameters (20-50 params)
+/// - Generics with many type parameters (5-10 type params)
+/// - Types with many fields (20-50 fields)
+/// - Interfaces with many methods
+///
+/// Target: stress signature processing, type checking width,
+/// memory for type representations.
+fn wide_types_profile() -> Profile {
+    let plan = PlanConfig {
+        // Moderate module structure - focus is on wide types, not modules
+        layers: 2,
+        modules_per_layer: 3,
+        // Several classes with wide field counts
+        classes_per_module: (2, 4),
+        // Several interfaces with many methods
+        interfaces_per_module: (2, 3),
+        // A few errors for completeness
+        errors_per_module: (1, 2),
+        // Functions with extreme parameter counts
+        functions_per_module: (3, 5),
+        // A few globals
+        globals_per_module: (1, 2),
+        // Wide fields: 20-50 fields per class
+        fields_per_class: (20, 50),
+        // Many methods per class: 10-20
+        methods_per_class: (10, 20),
+        // Many methods per interface: 10-20
+        methods_per_interface: (10, 20),
+        // Wide error fields: 5-15
+        fields_per_error: (5, 15),
+        // Wide parameter counts: 20-50 params per function
+        params_per_function: (20, 50),
+        // Many type parameters for generics: 5-10
+        type_params_per_class: (5, 10),
+        type_params_per_interface: (3, 6),
+        type_params_per_function: (5, 10),
+        // Multiple constraints per type param
+        constraints_per_type_param: (1, 3),
+        // Some interface inheritance
+        interface_extends_probability: 0.3,
+        // Some implement blocks
+        implement_blocks_per_module: (1, 2),
+        // Standard import behavior
+        cross_layer_import_probability: 0.2,
+        enable_diamond_dependencies: true,
+    };
+
+    let emit = EmitConfig {
+        stmt_config: StmtConfig {
+            expr_config: ExprConfig {
+                // Moderate expression depth - focus on width not depth
+                max_depth: 3,
+                // Standard binary expression probability
+                binary_probability: 0.3,
+                // Some complex expressions but not the focus
+                when_probability: 0.1,
+                match_probability: 0.1,
+                if_expr_probability: 0.1,
+                lambda_probability: 0.05,
+            },
+            // Moderate statement depth
+            max_depth: 2,
+            // Standard statements per block
+            statements_per_block: (1, 3),
+            // Standard control flow probabilities
+            if_probability: 0.2,
+            while_probability: 0.1,
+            for_probability: 0.1,
+        },
+    };
+
+    Profile { plan, emit }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -278,6 +356,78 @@ mod tests {
         assert!(
             err.to_string().contains("deep-nesting"),
             "error message should mention deep-nesting profile"
+        );
+    }
+
+    #[test]
+    fn wide_types_profile_exists() {
+        let profile = get_profile("wide-types").expect("wide-types profile should exist");
+        // Verify wide-types characteristics: focus on breadth, not depth
+
+        // Wide parameter counts (20-50)
+        assert!(
+            profile.plan.params_per_function.0 >= 20,
+            "params_per_function min should be >= 20 for wide types"
+        );
+        assert!(
+            profile.plan.params_per_function.1 >= 50,
+            "params_per_function max should be >= 50 for wide types"
+        );
+
+        // Many type parameters (5-10)
+        assert!(
+            profile.plan.type_params_per_class.0 >= 5,
+            "type_params_per_class min should be >= 5 for wide types"
+        );
+        assert!(
+            profile.plan.type_params_per_function.0 >= 5,
+            "type_params_per_function min should be >= 5 for wide types"
+        );
+
+        // Wide field counts (20-50)
+        assert!(
+            profile.plan.fields_per_class.0 >= 20,
+            "fields_per_class min should be >= 20 for wide types"
+        );
+        assert!(
+            profile.plan.fields_per_class.1 >= 50,
+            "fields_per_class max should be >= 50 for wide types"
+        );
+
+        // Many methods per interface (10-20)
+        assert!(
+            profile.plan.methods_per_interface.0 >= 10,
+            "methods_per_interface min should be >= 10 for wide types"
+        );
+
+        // Moderate depth (not the focus)
+        assert!(
+            profile.emit.stmt_config.max_depth <= 5,
+            "statement max_depth should be moderate for wide types"
+        );
+        assert!(
+            profile.emit.stmt_config.expr_config.max_depth <= 5,
+            "expression max_depth should be moderate for wide types"
+        );
+    }
+
+    #[test]
+    fn available_profiles_includes_wide_types() {
+        let profiles = available_profiles();
+        assert!(
+            profiles.contains(&"wide-types"),
+            "available_profiles should include wide-types"
+        );
+    }
+
+    #[test]
+    fn unknown_profile_error_includes_wide_types() {
+        let result = get_profile("nonexistent");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("wide-types"),
+            "error message should mention wide-types profile"
         );
     }
 }
