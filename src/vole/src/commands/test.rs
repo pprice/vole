@@ -24,6 +24,136 @@ use crate::util::format_duration;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+/// Unicode symbols for test output
+mod symbols {
+    /// Pass symbol (bullet)
+    pub const PASS: char = '\u{2022}'; // •
+    /// Fail symbol (heavy X)
+    pub const FAIL: char = '\u{2718}'; // ✘
+    /// File error symbol (circle)
+    pub const FILE_ERROR: char = '\u{25CC}'; // ◌
+}
+
+/// Dot-based progress display for non-verbose test output.
+///
+/// Prints symbols as tests complete:
+/// - • (green) for pass
+/// - ✘ (red) for fail
+/// - ◌ (yellow) for file compile error
+///
+/// When the line reaches terminal width, wraps with a [current/total] counter.
+struct ProgressLine {
+    /// Number of symbols printed on the current line
+    dots_on_line: usize,
+    /// Terminal width (columns)
+    term_width: usize,
+    /// Total number of tests completed so far
+    completed: usize,
+    /// Total number of tests discovered (grows as files are compiled)
+    total_discovered: usize,
+    /// Terminal colors for output
+    colors: TermColors,
+}
+
+impl ProgressLine {
+    /// Create a new progress line with terminal width detection.
+    fn new(colors: TermColors) -> Self {
+        // Get terminal width, defaulting to 80 if unavailable
+        let term_width = terminal_size::terminal_size()
+            .map(|(w, _)| w.0 as usize)
+            .unwrap_or(80);
+
+        // Reserve space for " [current/total]" suffix (about 15 chars for safety)
+        // Minimum usable width is 20
+        let usable_width = term_width.saturating_sub(15).max(20);
+
+        Self {
+            dots_on_line: 0,
+            term_width: usable_width,
+            completed: 0,
+            total_discovered: 0,
+            colors,
+        }
+    }
+
+    /// Add test count from a newly compiled file.
+    fn add_tests(&mut self, count: usize) {
+        self.total_discovered += count;
+    }
+
+    /// Print a pass symbol (green •).
+    fn print_pass(&mut self) {
+        self.completed += 1;
+        print!(
+            "{}{}{}",
+            self.colors.green(),
+            symbols::PASS,
+            self.colors.reset()
+        );
+        self.dots_on_line += 1;
+        self.maybe_wrap();
+    }
+
+    /// Print a fail symbol (red ✘).
+    fn print_fail(&mut self) {
+        self.completed += 1;
+        print!(
+            "{}{}{}",
+            self.colors.red(),
+            symbols::FAIL,
+            self.colors.reset()
+        );
+        self.dots_on_line += 1;
+        self.maybe_wrap();
+    }
+
+    /// Print a file error symbol (yellow ◌).
+    fn print_file_error(&mut self) {
+        print!(
+            "{}{}{}",
+            self.colors.yellow(),
+            symbols::FILE_ERROR,
+            self.colors.reset()
+        );
+        self.dots_on_line += 1;
+        self.maybe_wrap();
+    }
+
+    /// Check if we need to wrap to a new line.
+    fn maybe_wrap(&mut self) {
+        let _ = io::stdout().flush();
+        if self.dots_on_line >= self.term_width {
+            self.wrap_line();
+        }
+    }
+
+    /// Wrap to a new line with counter.
+    fn wrap_line(&mut self) {
+        println!(
+            " {}[{}/{}]{}",
+            self.colors.dim(),
+            self.completed,
+            self.total_discovered,
+            self.colors.reset()
+        );
+        self.dots_on_line = 0;
+    }
+
+    /// Finalize the progress line (print final counter if any dots printed).
+    fn finish(&mut self) {
+        if self.dots_on_line > 0 {
+            println!(
+                " {}[{}/{}]{}",
+                self.colors.dim(),
+                self.completed,
+                self.total_discovered,
+                self.colors.reset()
+            );
+        }
+        let _ = io::stdout().flush();
+    }
+}
+
 /// Options for running tests, used by the public API.
 pub struct TestRunOptions<'a> {
     /// Filter tests by name (substring match)
@@ -260,6 +390,13 @@ pub fn run_tests(paths: &[String], options: TestRunOptions) -> ExitCode {
     // Compiled modules cache (codegen caching) - populated on first file
     let mut compiled_modules: Option<CompiledModules> = None;
 
+    // Create progress line for non-verbose mode
+    let mut progress = if config.verbose {
+        None
+    } else {
+        Some(ProgressLine::new(TermColors::with_mode(options.color)))
+    };
+
     for (idx, file) in files.iter().enumerate() {
         // Check if we've hit the failure cap
         if all_results.failed >= failure_cap {
@@ -277,15 +414,30 @@ pub fn run_tests(paths: &[String], options: TestRunOptions) -> ExitCode {
         // Set current file for signal handler
         set_current_file(&file.display().to_string());
 
-        match run_file_tests_with_modules(file, &config, cache.clone(), &mut compiled_modules) {
+        match run_file_tests_with_modules(
+            file,
+            &config,
+            cache.clone(),
+            &mut compiled_modules,
+            progress.as_mut(),
+        ) {
             Ok(results) => {
                 all_results.merge(results);
             }
             Err(e) => {
+                // Print file error symbol in progress mode
+                if let Some(ref mut p) = progress {
+                    p.print_file_error();
+                }
                 // Store the error for later grouped display
                 all_results.add_file_error(file.to_path_buf(), e);
             }
         }
+    }
+
+    // Finalize progress line
+    if let Some(ref mut p) = progress {
+        p.finish();
     }
 
     all_results.total_duration = start.elapsed();
@@ -359,10 +511,19 @@ fn run_file_tests_with_modules(
     config: &TestRunConfig,
     cache: Rc<RefCell<ModuleCache>>,
     compiled_modules: &mut Option<CompiledModules>,
+    progress: Option<&mut ProgressLine>,
 ) -> Result<TestResults, String> {
     let source = fs::read_to_string(path).map_err(|e| format!("could not read file: {}", e))?;
     let file_path = path.to_string_lossy();
-    run_source_tests_with_modules(&source, &file_path, path, config, cache, compiled_modules)
+    run_source_tests_with_modules(
+        &source,
+        &file_path,
+        path,
+        config,
+        cache,
+        compiled_modules,
+        progress,
+    )
 }
 
 /// Parse, type check, compile, and run tests with shared compiled modules
@@ -373,6 +534,7 @@ fn run_source_tests_with_modules(
     config: &TestRunConfig,
     cache: Rc<RefCell<ModuleCache>>,
     compiled_modules: &mut Option<CompiledModules>,
+    progress: Option<&mut ProgressLine>,
 ) -> Result<TestResults, String> {
     // Parse and type check with shared cache, capturing errors
     let mut error_buffer = Vec::new();
@@ -480,7 +642,7 @@ fn run_source_tests_with_modules(
     jit.finalize()?;
 
     // Filter tests if a filter is provided
-    let tests = if let Some(pattern) = config.filter {
+    let tests: Vec<_> = if let Some(pattern) = config.filter {
         tests
             .into_iter()
             .filter(|t| t.name.contains(pattern))
@@ -489,8 +651,17 @@ fn run_source_tests_with_modules(
         tests
     };
 
-    // Execute tests with progress output
-    let results = execute_tests_with_progress(tests, &jit, path, config);
+    // Update progress line with discovered test count
+    if let Some(p) = progress {
+        p.add_tests(tests.len());
+
+        // Execute tests with progress output
+        let results = execute_tests_with_progress(tests, &jit, path, config, Some(p));
+        return Ok(results);
+    }
+
+    // Execute tests (verbose mode - no progress line)
+    let results = execute_tests_with_progress(tests, &jit, path, config, None);
 
     Ok(results)
 }
@@ -570,8 +741,8 @@ fn run_source_tests_with_progress(
         tests
     };
 
-    // Execute tests with progress output
-    let results = execute_tests_with_progress(tests, &jit, path, config);
+    // Execute tests (stdin mode - no progress line)
+    let results = execute_tests_with_progress(tests, &jit, path, config, None);
 
     Ok(results)
 }
@@ -582,6 +753,7 @@ fn execute_tests_with_progress(
     jit: &JitContext,
     file: &Path,
     config: &TestRunConfig,
+    mut progress: Option<&mut ProgressLine>,
 ) -> TestResults {
     let mut results = TestResults::new();
     let start = Instant::now();
@@ -600,6 +772,9 @@ fn execute_tests_with_progress(
                         test.name,
                     );
                     let _ = io::stdout().flush();
+                } else if let Some(ref mut p) = progress {
+                    // Print fail dot in progress mode
+                    p.print_fail();
                 }
                 results.add(TestResult {
                     info: test,
@@ -738,6 +913,12 @@ fn execute_tests_with_progress(
                     let _ = io::stdout().flush();
                     let _ = io::stderr().flush();
                 }
+            }
+        } else if let Some(ref mut p) = progress {
+            // Print progress dot in non-verbose mode
+            match &status {
+                TestStatus::Passed => p.print_pass(),
+                TestStatus::Failed(_) | TestStatus::Panicked(_) => p.print_fail(),
             }
         }
 
