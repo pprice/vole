@@ -1,0 +1,11 @@
+[stdout]
+
+[stderr]
+  x [E1032]: to define a function, use `func main() { ... }`
+   ,-[<path>/missing_func_keyword.vole:1:1]
+ 1 | main() {
+   : ^^|^
+   :   `-- missing `func` keyword
+ 2 |     println("hello")
+   `----
+  help: add the `func` keyword before the function name

@@ -16,6 +16,63 @@ struct ClassBodyParseResult {
 }
 
 impl<'src> Parser<'src> {
+    /// Check if the current position looks like a function definition missing the `func` keyword.
+    /// Pattern: identifier ( ... ) { or identifier ( ... ) -> Type {
+    /// Returns the function name if the pattern matches, None otherwise.
+    fn looks_like_func_def(&self) -> Option<String> {
+        if !self.check(TokenType::Identifier) {
+            return None;
+        }
+
+        let name = self.current.lexeme.to_string();
+        let mut lexer_copy = self.lexer.clone();
+
+        // After identifier, expect '('
+        let next = lexer_copy.next_token();
+        if next.ty != TokenType::LParen {
+            return None;
+        }
+
+        // Skip balanced parentheses to find the closing ')'
+        let mut paren_depth = 1;
+        loop {
+            let tok = lexer_copy.next_token();
+            match tok.ty {
+                TokenType::LParen => paren_depth += 1,
+                TokenType::RParen => {
+                    paren_depth -= 1;
+                    if paren_depth == 0 {
+                        break;
+                    }
+                }
+                TokenType::Eof => return None,
+                _ => {}
+            }
+        }
+
+        // After ')', could be '{' directly or '-> Type {'
+        let after_paren = lexer_copy.next_token();
+        if after_paren.ty == TokenType::LBrace {
+            return Some(name);
+        }
+
+        // Check for return type annotation: -> Type {
+        if after_paren.ty == TokenType::Arrow {
+            // Skip until we find '{' or something that indicates this isn't a func def
+            loop {
+                let tok = lexer_copy.next_token();
+                match tok.ty {
+                    TokenType::LBrace => return Some(name),
+                    // These indicate this isn't a function def
+                    TokenType::Eof | TokenType::Newline => return None,
+                    _ => {}
+                }
+            }
+        }
+
+        None
+    }
+
     pub(super) fn declaration(&mut self) -> Result<Decl, ParseError> {
         match self.current.ty {
             TokenType::KwFunc => self.function_decl(),
@@ -32,9 +89,27 @@ impl<'src> Parser<'src> {
                 let block = self.parse_external_block()?;
                 Ok(Decl::External(block))
             }
+            // Check for missing func keyword first
+            TokenType::Identifier => {
+                if let Some(name) = self.looks_like_func_def() {
+                    Err(ParseError::new(
+                        ParserError::MissingFuncKeyword {
+                            name,
+                            span: self.current.span.into(),
+                        },
+                        self.current.span,
+                    ))
+                } else {
+                    Err(ParseError::new(
+                        ParserError::StatementAtTopLevel {
+                            span: self.current.span.into(),
+                        },
+                        self.current.span,
+                    ))
+                }
+            }
             // Tokens that start statements or expressions - give a better error
-            TokenType::Identifier
-            | TokenType::IntLiteral
+            TokenType::IntLiteral
             | TokenType::FloatLiteral
             | TokenType::StringLiteral
             | TokenType::RawStringLiteral

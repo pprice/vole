@@ -158,4 +158,12 @@ pub enum ParserError {
         #[label("expected a declaration, not a statement or expression")]
         span: SourceSpan,
     },
+
+    #[error("to define a function, use `func {name}() {{ ... }}`")]
+    #[diagnostic(code(E1032), help("add the `func` keyword before the function name"))]
+    MissingFuncKeyword {
+        name: String,
+        #[label("missing `func` keyword")]
+        span: SourceSpan,
+    },
 }
