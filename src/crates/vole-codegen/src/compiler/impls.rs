@@ -250,6 +250,23 @@ impl Compiler<'_> {
         }
     }
 
+    /// Get the type name string from a TypeExpr using a specific interner
+    /// (for module-specific symbols)
+    fn get_type_name_from_expr_with_interner(
+        &self,
+        ty: &TypeExpr,
+        interner: &Interner,
+    ) -> Option<String> {
+        match ty {
+            TypeExpr::Primitive(p) => Some(primitive_type_name(*p).to_string()),
+            TypeExpr::Handle => Some("handle".to_string()),
+            TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => {
+                Some(interner.resolve(*sym).to_string())
+            }
+            _ => None,
+        }
+    }
+
     /// Register implement block methods (first pass)
     pub(super) fn register_implement_block(&mut self, impl_block: &ImplementBlock) {
         let module_id = self.program_module();
@@ -274,7 +291,10 @@ impl Compiler<'_> {
         interner: &Interner,
         module_id: ModuleId,
     ) {
-        let Some(type_name) = self.get_type_name_from_expr(&impl_block.target_type) else {
+        // Use module-specific interner for symbol resolution
+        let Some(type_name) =
+            self.get_type_name_from_expr_with_interner(&impl_block.target_type, interner)
+        else {
             return;
         };
 
@@ -457,8 +477,10 @@ impl Compiler<'_> {
         interner: &Interner,
         module_id: ModuleId,
     ) {
-        // Get type name string (works for primitives and named types)
-        let Some(type_name) = self.get_type_name_from_expr(&impl_block.target_type) else {
+        // Get type name string using module-specific interner
+        let Some(type_name) =
+            self.get_type_name_from_expr_with_interner(&impl_block.target_type, interner)
+        else {
             return; // Unsupported type for implement block
         };
 
@@ -786,7 +808,10 @@ impl Compiler<'_> {
         module_id: ModuleId,
         module_path: Option<&str>,
     ) -> CodegenResult<()> {
-        let Some(type_name) = self.get_type_name_from_expr(&impl_block.target_type) else {
+        // Use module-specific interner for symbol resolution
+        let Some(type_name) =
+            self.get_type_name_from_expr_with_interner(&impl_block.target_type, interner)
+        else {
             return Ok(());
         };
 
