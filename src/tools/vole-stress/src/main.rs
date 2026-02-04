@@ -9,7 +9,7 @@ mod stmt;
 mod symbols;
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -20,6 +20,38 @@ use emitter::emit_all;
 use manifest::{GenerationOptions, Manifest};
 use planner::plan;
 use profile::{available_profiles, get_profile};
+
+/// Format all .vole files in a directory.
+///
+/// Returns the number of files formatted, or an error if any file fails to parse.
+fn format_vole_files(dir: &Path) -> Result<usize, String> {
+    let mut count = 0;
+
+    for entry in fs::read_dir(dir).map_err(|e| format!("failed to read directory: {}", e))? {
+        let entry = entry.map_err(|e| format!("failed to read directory entry: {}", e))?;
+        let path = entry.path();
+
+        if path.extension().is_some_and(|ext| ext == "vole") {
+            let source = fs::read_to_string(&path)
+                .map_err(|e| format!("failed to read {}: {}", path.display(), e))?;
+
+            let result = vole_fmt::format(&source, vole_fmt::CANONICAL).map_err(|e| {
+                format!(
+                    "format failed for {}: {}\n\nThis indicates a bug in vole-stress code generation.",
+                    path.display(),
+                    e
+                )
+            })?;
+
+            fs::write(&path, &result.output)
+                .map_err(|e| format!("failed to write {}: {}", path.display(), e))?;
+
+            count += 1;
+        }
+    }
+
+    Ok(count)
+}
 
 #[derive(Parser)]
 #[command(name = "vole-stress")]
@@ -52,6 +84,10 @@ struct Cli {
     /// List available profiles and exit
     #[arg(long)]
     list_profiles: bool,
+
+    /// Skip formatting generated files (for debugging)
+    #[arg(long)]
+    no_fmt: bool,
 }
 
 fn main() -> ExitCode {
@@ -148,6 +184,19 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
+    // Format phase: run vole-fmt on all generated files
+    let formatted_count = if cli.no_fmt {
+        0
+    } else {
+        match format_vole_files(&output_dir) {
+            Ok(count) => count,
+            Err(e) => {
+                eprintln!("error: {}", e);
+                return ExitCode::FAILURE;
+            }
+        }
+    };
+
     // Print summary
     let total_modules = symbol_table.module_count();
     println!("vole-stress: Generated synthetic codebase");
@@ -158,6 +207,11 @@ fn main() -> ExitCode {
         "  modules: {} total ({} per layer)",
         total_modules, profile.plan.modules_per_layer
     );
+    if cli.no_fmt {
+        println!("  format:  skipped (--no-fmt)");
+    } else {
+        println!("  format:  {} files", formatted_count);
+    }
     println!("  output:  {}", output_dir.display());
 
     ExitCode::SUCCESS
