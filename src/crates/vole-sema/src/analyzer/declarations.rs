@@ -758,6 +758,7 @@ impl Analyzer {
                     self.add_error(
                         SemanticError::UnknownType {
                             name: name_str.to_string(),
+                            hint: unknown_type_hint(name_str),
                             span: span.into(),
                         },
                         span,

@@ -1,0 +1,6 @@
+// Test 'did you mean' suggestions for str/String -> string
+func main() {
+    let a: str = "hello"
+    let b: Str = "hello"
+    let c: String = "world"
+}

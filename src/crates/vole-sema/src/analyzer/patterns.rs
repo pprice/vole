@@ -351,9 +351,11 @@ impl Analyzer {
                             None
                         }
                     } else {
+                        let type_name = interner.resolve(*name);
                         self.add_error(
                             SemanticError::UnknownType {
-                                name: interner.resolve(*name).to_string(),
+                                name: type_name.to_string(),
+                                hint: unknown_type_hint(type_name),
                                 span: (span).into(),
                             },
                             span,

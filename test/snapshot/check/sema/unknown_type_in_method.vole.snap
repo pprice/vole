@@ -7,6 +7,7 @@
   8 | ,->     func get() -> Int {
   9 | |           return self.value
  10 | |->     }
-    : `---- not a known class
+    : `---- not a known type
  11 |     }
     `----
+  help: did you mean 'i64'?

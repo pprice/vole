@@ -6,6 +6,7 @@
  13 | func main() {
  14 |     let s = ScopedOnly { value: 42 }
     :             ^^^^^^^^^^^^|^^^^^^^^^^^
-    :                         `-- not a known class
+    :                         `-- not a known type
  15 | }
     `----
+  help: type not found

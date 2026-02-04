@@ -7,9 +7,10 @@
  11 | ,->     func get() -> BadType {
  12 | |           return self.value
  13 | |->     }
-    : `---- not a known class
+    : `---- not a known type
  14 |     }
     `----
+  help: type not found
   x [E2001]: expected main::Getter, found main::Counter
     ,-[<path>/unknown_type_interface_call.vole:24:24]
  23 |     let c = Counter { value: 42 }

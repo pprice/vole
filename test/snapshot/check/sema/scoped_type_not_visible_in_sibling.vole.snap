@@ -6,6 +6,7 @@
  14 |     test "cannot use sibling type" {
  15 |         let f = FirstOnly { value: 2 }
     :                 ^^^^^^^^^^^|^^^^^^^^^^
-    :                            `-- not a known class
+    :                            `-- not a known type
  16 |     }
     `----
+  help: type not found

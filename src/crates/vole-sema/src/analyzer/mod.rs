@@ -25,7 +25,7 @@ use crate::analysis_cache::{IsCheckResult, ModuleCache};
 use crate::compilation_db::CompilationDb;
 use crate::entity_defs::{GenericFuncInfo, TypeDefKind};
 use crate::entity_registry::{EntityRegistry, MethodDefBuilder};
-use crate::errors::{SemanticError, SemanticWarning};
+use crate::errors::{SemanticError, SemanticWarning, unknown_type_hint};
 use crate::expression_data::LambdaDefaults;
 use crate::generic::{
     ClassMethodMonomorphKey, MonomorphInstance, MonomorphKey, StaticMethodMonomorphKey,

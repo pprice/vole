@@ -6,28 +6,32 @@
  1 | // Test that unknown types in function parameters produce clear errors
  2 | func foo(x: boolean) { }
    :          |
-   :          `-- not a known class
+   :          `-- not a known type
  3 | func bar(s: str) { }
    `----
+  help: did you mean 'bool'?
   x [E2020]: unknown type 'str'
    ,-[<path>/unknown_type_in_param.vole:3:10]
  2 | func foo(x: boolean) { }
  3 | func bar(s: str) { }
    :          |
-   :          `-- not a known class
+   :          `-- not a known type
  4 | func baz(a: int, b: String) { }
    `----
+  help: did you mean 'string'?
   x [E2020]: unknown type 'int'
    ,-[<path>/unknown_type_in_param.vole:4:10]
  3 | func bar(s: str) { }
  4 | func baz(a: int, b: String) { }
    :          |
-   :          `-- not a known class
+   :          `-- not a known type
    `----
+  help: did you mean 'i64'?
   x [E2020]: unknown type 'String'
    ,-[<path>/unknown_type_in_param.vole:4:18]
  3 | func bar(s: str) { }
  4 | func baz(a: int, b: String) { }
    :                  |
-   :                  `-- not a known class
+   :                  `-- not a known type
    `----
+  help: did you mean 'string'? (lowercase in Vole)

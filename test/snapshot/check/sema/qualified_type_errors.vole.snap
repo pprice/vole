@@ -7,9 +7,10 @@
  16 | ,-> func unknown_generic() -> List<time.Unknown> {
  17 | |       return []
  18 | |-> }
-    : `---- not a known class
+    : `---- not a known type
  19 |     
     `----
+  help: type not found
   x [E2001]: expected <invalid>, found integer literal
     ,-[<path>/qualified_type_errors.vole:21:18]
  20 | func main() {

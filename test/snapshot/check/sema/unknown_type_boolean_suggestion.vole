@@ -1,0 +1,6 @@
+// Test 'did you mean' suggestions for boolean/Boolean -> bool
+func main() {
+    let a: boolean = true
+    let b: Boolean = false
+    let c: Bool = true
+}

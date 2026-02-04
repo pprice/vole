@@ -6,22 +6,25 @@
  2 | func main() {
  3 |     let x: boolean = true
    :     ^^^^^^^^^^|^^^^^^^^^^
-   :               `-- not a known class
+   :               `-- not a known type
  4 |     let y: str = "hello"
    `----
+  help: did you mean 'bool'?
   x [E2020]: unknown type 'str'
    ,-[<path>/unknown_type_in_let.vole:4:5]
  3 |     let x: boolean = true
  4 |     let y: str = "hello"
    :     ^^^^^^^^^^|^^^^^^^^^
-   :               `-- not a known class
+   :               `-- not a known type
  5 |     let z: String = "world"
    `----
+  help: did you mean 'string'?
   x [E2020]: unknown type 'String'
    ,-[<path>/unknown_type_in_let.vole:5:5]
  4 |     let y: str = "hello"
  5 |     let z: String = "world"
    :     ^^^^^^^^^^^|^^^^^^^^^^^
-   :                `-- not a known class
+   :                `-- not a known type
  6 | }
    `----
+  help: did you mean 'string'? (lowercase in Vole)

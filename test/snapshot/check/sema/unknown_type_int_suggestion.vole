@@ -1,0 +1,7 @@
+// Test 'did you mean' suggestions for int variants -> i64
+func main() {
+    let a: int = 42
+    let b: Int = 42
+    let c: INT = 42
+    let d: integer = 42
+}

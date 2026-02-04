@@ -168,10 +168,11 @@ pub enum SemanticError {
     },
 
     #[error("unknown type '{name}'")]
-    #[diagnostic(code(E2020))]
+    #[diagnostic(code(E2020), help("{hint}"))]
     UnknownType {
         name: String,
-        #[label("not a known class")]
+        hint: String,
+        #[label("not a known type")]
         span: SourceSpan,
     },
 
@@ -733,4 +734,38 @@ pub enum SemanticWarning {
         span: SourceSpan,
         label: String,
     },
+}
+
+/// Returns a "did you mean" suggestion for common type typos.
+///
+/// Maps common mistakes to the correct Vole type names:
+/// - `int`, `Int`, `INT` -> `i64`
+/// - `str`, `Str` -> `string`
+/// - `String` -> `string`
+/// - `boolean`, `Boolean` -> `bool`
+/// - `float`, `Float`, `double`, `Double` -> `f64`
+/// - `char`, `Char` -> note about no char type
+/// - `void`, `Void` -> note about using () or no return type
+/// - `array`, `Array` -> `[T]`
+pub fn unknown_type_hint(name: &str) -> String {
+    match name {
+        "int" | "Int" | "INT" | "integer" | "Integer" => "did you mean 'i64'?".to_string(),
+        "str" | "Str" => "did you mean 'string'?".to_string(),
+        "String" => "did you mean 'string'? (lowercase in Vole)".to_string(),
+        "boolean" | "Boolean" | "Bool" => "did you mean 'bool'?".to_string(),
+        "float" | "Float" => "did you mean 'f64'?".to_string(),
+        "double" | "Double" => {
+            "did you mean 'f64'? (Vole uses f64 for double-precision floats)".to_string()
+        }
+        "char" | "Char" | "Character" => {
+            "Vole has no char type; use 'string' for single characters".to_string()
+        }
+        "void" | "Void" => {
+            "Vole has no void type; omit return type for functions that return nothing".to_string()
+        }
+        "array" | "Array" => {
+            "did you mean '[T]'? (e.g., [i64] for an array of integers)".to_string()
+        }
+        _ => "type not found".to_string(),
+    }
 }

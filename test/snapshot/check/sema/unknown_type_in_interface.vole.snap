@@ -6,6 +6,7 @@
  4 | interface Processor {
  5 |     func process() -> BadType
    :     ^^^^^^^^^^^^|^^^^^^^^^^^^
-   :                 `-- not a known class
+   :                 `-- not a known type
  6 | }
    `----
+  help: type not found
