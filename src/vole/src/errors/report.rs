@@ -116,6 +116,81 @@ impl Diagnostic for InlineCodeDiagnostic<'_> {
     }
 }
 
+/// Wrapper that adds additional help text to a diagnostic.
+/// Used to provide context-sensitive hints (e.g., "wrap in func main" for vole run).
+pub struct WithExtraHelp<'a> {
+    inner: &'a dyn Diagnostic,
+    extra_help: String,
+}
+
+impl<'a> WithExtraHelp<'a> {
+    /// Create a wrapper that adds extra help text to the inner diagnostic.
+    pub fn new(inner: &'a dyn Diagnostic, extra_help: impl Into<String>) -> Self {
+        Self {
+            inner,
+            extra_help: extra_help.into(),
+        }
+    }
+}
+
+impl fmt::Debug for WithExtraHelp<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self.inner, f)
+    }
+}
+
+impl fmt::Display for WithExtraHelp<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self.inner, f)
+    }
+}
+
+impl std::error::Error for WithExtraHelp<'_> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.inner.source()
+    }
+}
+
+impl Diagnostic for WithExtraHelp<'_> {
+    fn code<'a>(&'a self) -> Option<Box<dyn fmt::Display + 'a>> {
+        self.inner.code()
+    }
+
+    fn severity(&self) -> Option<Severity> {
+        self.inner.severity()
+    }
+
+    fn help<'a>(&'a self) -> Option<Box<dyn fmt::Display + 'a>> {
+        // Combine original help with extra help
+        let original_help = self.inner.help().map(|h| h.to_string());
+        let combined = match original_help {
+            Some(orig) => format!("{}\n  {}", orig, self.extra_help),
+            None => self.extra_help.clone(),
+        };
+        Some(Box::new(combined))
+    }
+
+    fn url<'a>(&'a self) -> Option<Box<dyn fmt::Display + 'a>> {
+        self.inner.url()
+    }
+
+    fn source_code(&self) -> Option<&dyn SourceCode> {
+        self.inner.source_code()
+    }
+
+    fn labels(&self) -> Option<Box<dyn Iterator<Item = LabeledSpan> + '_>> {
+        self.inner.labels()
+    }
+
+    fn related<'a>(&'a self) -> Option<Box<dyn Iterator<Item = &'a dyn Diagnostic> + 'a>> {
+        self.inner.related()
+    }
+
+    fn diagnostic_source(&self) -> Option<&dyn Diagnostic> {
+        self.inner.diagnostic_source()
+    }
+}
+
 /// Create a handler for terminal output (unicode + colors based on mode).
 fn terminal_handler() -> GraphicalReportHandler {
     let styles = if should_use_color() {

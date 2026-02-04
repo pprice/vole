@@ -85,6 +85,7 @@ pub fn inspect_files(
                         skip_tests: false,
                         project_root: None,
                         module_cache: None,
+                        run_mode: false,
                     },
                     &mut std::io::stderr(),
                 ) {
@@ -119,6 +120,7 @@ pub fn inspect_files(
                         skip_tests: false,
                         project_root: None,
                         module_cache: None,
+                        run_mode: false,
                     },
                     &mut std::io::stderr(),
                 ) {

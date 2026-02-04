@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 use crate::cli::ColorMode;
 use crate::codegen::{Compiler, JitContext, JitOptions};
-use crate::errors::{LexerError, render_to_writer};
+use crate::errors::{LexerError, ParserError, WithExtraHelp, render_to_writer};
 use crate::frontend::{AstPrinter, ParseError, Parser};
 use crate::runtime::{
     JmpBuf, call_setjmp, clear_test_jmp_buf, set_capture_mode, set_stderr_capture,
@@ -56,10 +56,28 @@ fn render_lexer_error(err: &LexerError, file_path: &str, source: &str, w: &mut d
 }
 
 /// Render a parser error to a writer with source context.
-fn render_parser_error(err: &ParseError, file_path: &str, source: &str, w: &mut dyn Write) {
+/// If `run_mode` is true and the error is StatementAtTopLevel, adds a hint
+/// about wrapping code in `func main() { ... }`.
+fn render_parser_error(
+    err: &ParseError,
+    file_path: &str,
+    source: &str,
+    run_mode: bool,
+    w: &mut dyn Write,
+) {
     let report = miette::Report::new(err.error.clone())
         .with_source_code(NamedSource::new(file_path, source.to_string()));
-    let _ = render_to_writer(report.as_ref(), w);
+
+    // Add extra hint for StatementAtTopLevel errors in run mode
+    if run_mode && matches!(err.error, ParserError::StatementAtTopLevel { .. }) {
+        let wrapped = WithExtraHelp::new(
+            report.as_ref(),
+            "wrap your code in `func main() { ... }` to make it runnable",
+        );
+        let _ = render_to_writer(&wrapped, w);
+    } else {
+        let _ = render_to_writer(report.as_ref(), w);
+    }
 }
 
 /// Render a semantic error to a writer with source context.
@@ -83,6 +101,8 @@ pub struct PipelineOptions<'a> {
     pub skip_tests: bool,
     pub project_root: Option<&'a std::path::Path>,
     pub module_cache: Option<Rc<RefCell<ModuleCache>>>,
+    /// When true, adds context-specific hints for `vole run` (e.g., "wrap in func main").
+    pub run_mode: bool,
 }
 
 /// Compile source through the full pipeline: parse -> transform -> analyze -> optimize.
@@ -100,6 +120,7 @@ pub fn compile_source(
         skip_tests,
         project_root,
         module_cache,
+        run_mode,
     } = opts;
 
     // Parse phase
@@ -117,7 +138,7 @@ pub fn compile_source(
                     }
                     return Err(PipelineError::Lex);
                 } else {
-                    render_parser_error(&e, file_path, source, errors);
+                    render_parser_error(&e, file_path, source, run_mode, errors);
                     return Err(PipelineError::Parse);
                 }
             }
@@ -337,6 +358,7 @@ pub fn check_captured<W: Write + Send + 'static>(
             skip_tests: false,
             project_root: None,
             module_cache: None,
+            run_mode: false,
         },
         &mut stderr,
     )?;
@@ -360,6 +382,7 @@ pub fn run_captured<W: Write + Send + 'static>(
             skip_tests: true,
             project_root: None,
             module_cache: None,
+            run_mode: true,
         },
         &mut stderr,
     )?;
@@ -414,7 +437,7 @@ pub fn inspect_ast_captured<W: Write>(
                 }
                 return Err(PipelineError::Lex);
             } else {
-                render_parser_error(&e, file_path, source, &mut stderr);
+                render_parser_error(&e, file_path, source, false, &mut stderr);
                 return Err(PipelineError::Parse);
             }
         }

@@ -369,6 +369,7 @@ fn run_source_tests_with_modules(
             skip_tests: false,
             project_root: config.project_root,
             module_cache: Some(cache),
+            run_mode: false,
         },
         &mut io::stderr(),
     )
@@ -520,6 +521,7 @@ fn run_source_tests_with_progress(
             skip_tests: false,
             project_root: config.project_root,
             module_cache: Some(cache),
+            run_mode: false,
         },
         &mut io::stderr(),
     )

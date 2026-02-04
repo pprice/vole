@@ -61,6 +61,7 @@ fn check_stdin() -> ExitCode {
             skip_tests: false,
             project_root: None,
             module_cache: None,
+            run_mode: false,
         },
         &mut std::io::stderr(),
     ) {
@@ -88,6 +89,7 @@ fn check_single_file(path: &Path) -> Result<(), PipelineError> {
             skip_tests: false,
             project_root: None,
             module_cache: None,
+            run_mode: false,
         },
         &mut std::io::stderr(),
     )?;

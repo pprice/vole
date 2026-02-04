@@ -57,6 +57,7 @@ fn execute(path: &Path, project_root: Option<&Path>, release: bool) -> Result<()
             skip_tests: true,
             project_root,
             module_cache: None,
+            run_mode: true,
         },
         &mut std::io::stderr(),
     )

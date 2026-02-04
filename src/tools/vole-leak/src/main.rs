@@ -157,6 +157,7 @@ fn compile_and_run_tests(
             skip_tests: false,
             project_root: None,
             module_cache: Some(cache),
+            run_mode: false,
         },
         &mut io::stderr(),
     )
