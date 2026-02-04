@@ -6,7 +6,9 @@
 use rand::Rng;
 
 use crate::expr::{ExprConfig, ExprContext, ExprGenerator};
-use crate::symbols::{ParamInfo, PrimitiveType, SymbolTable, TypeInfo};
+use crate::symbols::{
+    ClassInfo, ModuleId, ParamInfo, PrimitiveType, SymbolKind, SymbolTable, TypeInfo,
+};
 
 /// Configuration for statement generation.
 #[derive(Debug, Clone)]
@@ -50,6 +52,8 @@ pub struct StmtContext<'a> {
     pub locals: Vec<(String, TypeInfo, bool)>,
     /// Symbol table for type lookups.
     pub table: &'a SymbolTable,
+    /// The module being generated (for class lookups).
+    pub module_id: Option<ModuleId>,
     /// Whether we're in a loop (break/continue valid).
     pub in_loop: bool,
     /// Whether this function is fallible.
@@ -59,12 +63,31 @@ pub struct StmtContext<'a> {
 }
 
 impl<'a> StmtContext<'a> {
-    /// Create a new statement context.
+    /// Create a new statement context (without module context).
+    #[cfg(test)]
     pub fn new(params: &'a [ParamInfo], table: &'a SymbolTable) -> Self {
         Self {
             params,
             locals: Vec::new(),
             table,
+            module_id: None,
+            in_loop: false,
+            is_fallible: false,
+            local_counter: 0,
+        }
+    }
+
+    /// Create a new statement context with a module ID for class lookups.
+    pub fn with_module(
+        params: &'a [ParamInfo],
+        table: &'a SymbolTable,
+        module_id: ModuleId,
+    ) -> Self {
+        Self {
+            params,
+            locals: Vec::new(),
+            table,
+            module_id: Some(module_id),
             in_loop: false,
             is_fallible: false,
             local_counter: 0,
@@ -119,6 +142,11 @@ fn types_match(a: &TypeInfo, b: &TypeInfo) -> bool {
         (TypeInfo::Array(ea), TypeInfo::Array(eb)) => types_match(ea, eb),
         _ => false,
     }
+}
+
+/// Check if a class has at least one field with a primitive type.
+fn has_primitive_field(info: &ClassInfo) -> bool {
+    info.fields.iter().any(|f| f.field_type.is_primitive())
 }
 
 /// Statement generator.
@@ -205,6 +233,13 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             .gen_bool(self.config.expr_config.lambda_probability)
         {
             return self.generate_lambda_let(ctx);
+        }
+
+        // ~15% chance to generate a class-typed local for field access
+        if self.rng.gen_bool(0.15) {
+            if let Some(stmt) = self.try_generate_class_let(ctx) {
+                return stmt;
+            }
         }
 
         let name = ctx.new_local_name();
@@ -396,6 +431,64 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     /// Get the current indentation string.
     fn indent_str(&self) -> String {
         "    ".repeat(self.indent)
+    }
+
+    /// Try to generate a let statement that constructs a class instance.
+    ///
+    /// Returns `None` if no suitable non-generic class is available in the
+    /// current module. Only constructs classes with primitive-typed fields
+    /// so the resulting local can be used for field access expressions.
+    fn try_generate_class_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let module_id = ctx.module_id?;
+        let module = ctx.table.get_module(module_id)?;
+
+        // Collect non-generic classes with at least one primitive field
+        let candidates: Vec<_> = module
+            .classes()
+            .filter_map(|sym| {
+                if let SymbolKind::Class(ref info) = sym.kind {
+                    if info.type_params.is_empty() && has_primitive_field(info) {
+                        return Some((sym.id, sym.name.clone(), info.clone()));
+                    }
+                }
+                None
+            })
+            .collect();
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..candidates.len());
+        let (sym_id, class_name, class_info) = &candidates[idx];
+
+        let name = ctx.new_local_name();
+
+        // Generate field values for construction
+        let fields = self.generate_field_values(&class_info.fields, ctx);
+        let ty = TypeInfo::Class(module_id, *sym_id);
+
+        ctx.add_local(name.clone(), ty, false);
+
+        Some(format!("let {} = {} {{ {} }}", name, class_name, fields))
+    }
+
+    /// Generate field value expressions for class construction.
+    fn generate_field_values(
+        &mut self,
+        fields: &[crate::symbols::FieldInfo],
+        ctx: &mut StmtContext,
+    ) -> String {
+        let expr_ctx = ctx.to_expr_context();
+        fields
+            .iter()
+            .map(|f| {
+                let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+                let value = expr_gen.generate(&f.field_type, &expr_ctx, 0);
+                format!("{}: {}", f.name, value)
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 
     /// Generate a random primitive type.

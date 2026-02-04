@@ -189,9 +189,10 @@ impl<'a, R: Rng> EmitContext<'a, R> {
                     self.emit_line("assert(result != nil || result == nil)");
                 }
                 _ => {
-                    // Non-void return - store result and assert not nil
-                    self.emit_line(&format!("let result = {}", call));
-                    self.emit_line("assert(result != nil)");
+                    // Non-void, non-optional return - just verify call succeeds
+                    // (non-optional types can't be compared to nil in Vole)
+                    self.emit_line(&format!("let _ = {}", call));
+                    self.emit_line("assert(true)");
                 }
             }
 
@@ -218,7 +219,9 @@ impl<'a, R: Rng> EmitContext<'a, R> {
                 "let instance = {} {{ {} }}",
                 symbol.name, field_values
             ));
-            self.emit_line("assert(instance != nil)");
+            // Construction succeeded if we get here
+            // (non-optional class instances can't be compared to nil in Vole)
+            self.emit_line("assert(true)");
 
             // Test each method that doesn't have type parameters
             for method in &info.methods {
@@ -515,7 +518,7 @@ impl<'a, R: Rng> EmitContext<'a, R> {
     }
 
     fn emit_function_body(&mut self, return_type: &TypeInfo, params: &[ParamInfo]) {
-        let mut stmt_ctx = StmtContext::new(params, self.table);
+        let mut stmt_ctx = StmtContext::with_module(params, self.table, self.module.id);
         let mut stmt_gen = StmtGenerator::new(self.rng, &self.config.stmt_config);
         stmt_gen.set_indent(self.indent);
 

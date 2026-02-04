@@ -5,7 +5,7 @@
 
 use rand::Rng;
 
-use crate::symbols::{ParamInfo, PrimitiveType, SymbolTable, TypeInfo};
+use crate::symbols::{ParamInfo, PrimitiveType, SymbolKind, SymbolTable, TypeInfo};
 
 /// Configuration for expression generation.
 #[derive(Debug, Clone)]
@@ -188,6 +188,49 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         }
     }
 
+    /// Try to generate a field access expression on a class-typed local.
+    ///
+    /// Looks for local variables with class type whose fields match the
+    /// target primitive type. Returns `Some("local.field")` on success.
+    /// Only considers non-generic classes (generic field types are too
+    /// complex to resolve).
+    fn try_generate_field_access(
+        &mut self,
+        prim: PrimitiveType,
+        ctx: &ExprContext,
+    ) -> Option<String> {
+        let target = TypeInfo::Primitive(prim);
+
+        // Collect (local_name, field_name) pairs for matching fields
+        let mut candidates: Vec<(String, String)> = Vec::new();
+
+        for (name, ty) in ctx.locals {
+            if let TypeInfo::Class(mod_id, sym_id) = ty {
+                if let Some(sym) = ctx.table.get_symbol(*mod_id, *sym_id) {
+                    if let SymbolKind::Class(ref info) = sym.kind {
+                        // Skip generic classes
+                        if !info.type_params.is_empty() {
+                            continue;
+                        }
+                        for field in &info.fields {
+                            if field.field_type == target {
+                                candidates.push((name.clone(), field.name.clone()));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..candidates.len());
+        let (local_name, field_name) = &candidates[idx];
+        Some(format!("{}.{}", local_name, field_name))
+    }
+
     /// Generate a simple expression (literal or variable reference).
     fn generate_simple(&mut self, ty: &TypeInfo, ctx: &ExprContext) -> String {
         // Try to find a matching variable first
@@ -213,6 +256,14 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         ctx: &ExprContext,
         depth: usize,
     ) -> String {
+        // ~18% chance to generate a field access if a class-typed local
+        // has a field of the target primitive type
+        if self.rng.gen_bool(0.18) {
+            if let Some(access) = self.try_generate_field_access(prim, ctx) {
+                return access;
+            }
+        }
+
         let choice = self.rng.gen_range(0..10);
 
         match prim {
