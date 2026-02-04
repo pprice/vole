@@ -91,7 +91,7 @@ fn main() -> ExitCode {
         Commands::Test {
             paths,
             filter,
-            report,
+            verbose,
             max_failures,
             include_skipped,
             root,
@@ -99,7 +99,7 @@ fn main() -> ExitCode {
             &paths,
             TestRunOptions {
                 filter: filter.as_deref(),
-                report,
+                verbose,
                 max_failures,
                 include_skipped,
                 project_root: root.as_deref(),

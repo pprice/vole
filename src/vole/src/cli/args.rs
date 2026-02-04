@@ -18,18 +18,6 @@ pub enum ColorMode {
     Never,
 }
 
-/// Test output report mode
-#[derive(Clone, Debug, Default, ValueEnum)]
-pub enum ReportMode {
-    /// Show all tests, reprint failures at end
-    #[default]
-    All,
-    /// Show only failed tests
-    Failures,
-    /// Show only final summary
-    Results,
-}
-
 /// Vole programming language compiler and runtime
 #[derive(Parser)]
 #[command(name = "vole")]
@@ -79,12 +67,12 @@ pub enum Commands {
         #[arg(short, long)]
         filter: Option<String>,
 
-        /// Report mode: all (default), failures, results
-        #[arg(short, long, value_enum, default_value_t = ReportMode::All)]
-        report: ReportMode,
+        /// Show verbose output (per-test results)
+        #[arg(short, long)]
+        verbose: bool,
 
-        /// Stop after N test failures (default: 100, 0 = no limit)
-        #[arg(short = 'x', long, default_value_t = 100)]
+        /// Stop after N test failures (default: 5, 0 = no limit)
+        #[arg(short = 'x', long, default_value_t = 5)]
         max_failures: u32,
 
         /// Include underscore-prefixed files (normally skipped)

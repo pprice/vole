@@ -19,13 +19,13 @@ test:
 snap:
     cargo run -p vole-snap {{cargo_profile}} -- test test/snapshot/
 
-# Run vole unit tests (failures only)
+# Run vole unit tests
 unit:
-    cargo run --bin vole {{cargo_profile}} -- test test/unit/ --report=failures
+    cargo run --bin vole {{cargo_profile}} -- test test/unit/
 
 # Run vole unit tests with verbose output
 unit-verbose:
-    cargo run --bin vole {{cargo_profile}} -- test test/unit/
+    cargo run --bin vole {{cargo_profile}} -- test test/unit/ -v
 
 # Run memory leak tests
 mem:

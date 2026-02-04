@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use super::common::{PipelineOptions, TermColors, compile_source, read_stdin};
-use crate::cli::{ColorMode, ReportMode, expand_paths, should_skip_path};
+use crate::cli::{ColorMode, expand_paths, should_skip_path};
 use crate::codegen::{CompiledModules, Compiler, JitContext, JitOptions, TestInfo};
 use crate::runtime::{
     AssertFailure, JmpBuf, call_setjmp, clear_current_test, clear_test_jmp_buf, set_current_file,
@@ -28,8 +28,8 @@ use std::rc::Rc;
 pub struct TestRunOptions<'a> {
     /// Filter tests by name (substring match)
     pub filter: Option<&'a str>,
-    /// How to report test results
-    pub report: ReportMode,
+    /// Show verbose output (per-test results)
+    pub verbose: bool,
     /// Maximum number of failures before stopping (0 = unlimited)
     pub max_failures: u32,
     /// Whether to include files with `_` prefix in discovery
@@ -46,8 +46,8 @@ pub struct TestRunOptions<'a> {
 struct TestRunConfig<'a> {
     /// Filter tests by name (substring match)
     filter: Option<&'a str>,
-    /// How to report test results
-    report: ReportMode,
+    /// Show verbose output (per-test results)
+    verbose: bool,
     /// Root directory for module resolution
     project_root: Option<&'a Path>,
     /// Use release optimizations
@@ -163,7 +163,7 @@ pub fn run_tests(paths: &[String], options: TestRunOptions) -> ExitCode {
     let start = Instant::now();
     let config = TestRunConfig {
         filter: options.filter,
-        report: options.report,
+        verbose: options.verbose,
         project_root: options.project_root,
         release: options.release,
         colors: TermColors::with_mode(options.color),
@@ -248,8 +248,8 @@ pub fn run_tests(paths: &[String], options: TestRunOptions) -> ExitCode {
         }
 
         // Print file path BEFORE processing for immediate feedback
-        // (only in 'all' mode - failures/results modes show less output)
-        if matches!(config.report, ReportMode::All) {
+        // (verbose mode shows per-test output)
+        if config.verbose {
             println!("\n{}", file.display());
             let _ = io::stdout().flush();
         }
@@ -273,8 +273,8 @@ pub fn run_tests(paths: &[String], options: TestRunOptions) -> ExitCode {
 
     all_results.total_duration = start.elapsed();
 
-    // For 'all' mode, reprint failures at the end
-    if matches!(config.report, ReportMode::All) && all_results.failed > 0 {
+    // In verbose mode, reprint failures at the end
+    if config.verbose && all_results.failed > 0 {
         print_failures_summary(&all_results, &config.colors);
     }
 
@@ -304,8 +304,8 @@ fn run_stdin_tests(config: &TestRunConfig, start: Instant) -> ExitCode {
     // Create cache for stdin test (single file, but still useful for prelude)
     let cache = Rc::new(RefCell::new(ModuleCache::new()));
 
-    // Print file path only in 'all' mode
-    if matches!(config.report, ReportMode::All) {
+    // Print file path in verbose mode
+    if config.verbose {
         println!("\n{}", stdin_path.display());
         let _ = io::stdout().flush();
     }
@@ -324,8 +324,8 @@ fn run_stdin_tests(config: &TestRunConfig, start: Instant) -> ExitCode {
 
     all_results.total_duration = start.elapsed();
 
-    // For 'all' mode, reprint failures at the end
-    if matches!(config.report, ReportMode::All) && all_results.failed > 0 {
+    // In verbose mode, reprint failures at the end
+    if config.verbose && all_results.failed > 0 {
         print_failures_summary(&all_results, &config.colors);
     }
 
@@ -464,8 +464,8 @@ fn run_source_tests_with_modules(
 
     let codegen_time = codegen_start.elapsed();
 
-    // Print compile time in 'all' mode
-    if matches!(config.report, ReportMode::All) {
+    // Print compile time in verbose mode
+    if config.verbose {
         println!(
             "  {}sema: {}, codegen: {} (modules: {}, program: {}){}",
             config.colors.dim(),
@@ -559,8 +559,8 @@ fn run_source_tests_with_progress(
     };
     let codegen_time = codegen_start.elapsed();
 
-    // Print compile time in 'all' mode
-    if matches!(config.report, ReportMode::All) {
+    // Print compile time in verbose mode
+    if config.verbose {
         println!(
             "  {}sema: {}, codegen: {} (modules: {}, program: {}){}",
             config.colors.dim(),
@@ -615,12 +615,8 @@ fn execute_tests_with_progress(
         let func_ptr = match jit.get_function_ptr_by_id(test.func_id) {
             Some(ptr) => ptr,
             None => {
-                // Print failure immediately
-                if !matches!(config.report, ReportMode::Results) {
-                    // In failures mode, print file path before failure
-                    if matches!(config.report, ReportMode::Failures) {
-                        println!("\n{}", file_path.display());
-                    }
+                // Print failure immediately in verbose mode
+                if config.verbose {
                     println!(
                         "  {}\u{2717}{} {} - could not find test function",
                         config.colors.red(),
@@ -698,28 +694,22 @@ fn execute_tests_with_progress(
         let duration = test_start.elapsed();
         let duration_str = format_duration(duration);
 
-        // Print result immediately after test completes
-        if !matches!(config.report, ReportMode::Results) {
+        // Print result immediately after test completes in verbose mode
+        if config.verbose {
             match &status {
                 TestStatus::Passed => {
-                    if !matches!(config.report, ReportMode::Failures) {
-                        println!(
-                            "  {}\u{2713}{} {} {}({}){}",
-                            config.colors.green(),
-                            config.colors.reset(),
-                            test.name,
-                            config.colors.dim(),
-                            duration_str,
-                            config.colors.reset()
-                        );
-                        let _ = io::stdout().flush();
-                    }
+                    println!(
+                        "  {}\u{2713}{} {} {}({}){}",
+                        config.colors.green(),
+                        config.colors.reset(),
+                        test.name,
+                        config.colors.dim(),
+                        duration_str,
+                        config.colors.reset()
+                    );
+                    let _ = io::stdout().flush();
                 }
                 TestStatus::Failed(failure) => {
-                    // In failures mode, print file path before failure
-                    if matches!(config.report, ReportMode::Failures) {
-                        println!("\n{}", file_path.display());
-                    }
                     print!(
                         "  {}\u{2717}{} {} {}({}){}",
                         config.colors.red(),
@@ -748,10 +738,6 @@ fn execute_tests_with_progress(
                     let _ = io::stdout().flush();
                 }
                 TestStatus::Panicked(msg) => {
-                    // In failures mode, print file path before failure
-                    if matches!(config.report, ReportMode::Failures) {
-                        println!("\n{}", file_path.display());
-                    }
                     println!(
                         "  {}\u{2620}{} {} {}({}){}",
                         config.colors.red(),
