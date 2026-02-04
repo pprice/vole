@@ -225,6 +225,11 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                         // when expression (no if expressions - they're statements in Vole)
                         self.generate_when_expr(&TypeInfo::Primitive(prim), ctx, depth)
                     }
+                    7 => {
+                        // Match expression
+                        let ty = TypeInfo::Primitive(prim);
+                        self.generate_match_expr(&ty, &ty, ctx, depth)
+                    }
                     _ => self.generate_simple(&TypeInfo::Primitive(prim), ctx),
                 }
             }
@@ -244,6 +249,11 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                             self.generate_simple(&TypeInfo::Primitive(PrimitiveType::Bool), ctx);
                         format!("(!{})", inner)
                     }
+                    6 => {
+                        // Match expression
+                        let ty = TypeInfo::Primitive(prim);
+                        self.generate_match_expr(&ty, &ty, ctx, depth)
+                    }
                     _ => self.generate_simple(&TypeInfo::Primitive(prim), ctx),
                 }
             }
@@ -252,6 +262,11 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                     0..=1 => {
                         // when expression returning string (no if - it's a statement in Vole)
                         self.generate_when_expr(&TypeInfo::Primitive(prim), ctx, depth)
+                    }
+                    2..=3 => {
+                        // Match expression
+                        let ty = TypeInfo::Primitive(prim);
+                        self.generate_match_expr(&ty, &ty, ctx, depth)
                     }
                     _ => self.generate_simple(&TypeInfo::Primitive(prim), ctx),
                 }
@@ -399,7 +414,6 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
     }
 
     /// Generate a match expression.
-    #[allow(dead_code)]
     pub fn generate_match_expr(
         &mut self,
         subject_type: &TypeInfo,
@@ -426,7 +440,6 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
     }
 
     /// Generate a match pattern.
-    #[allow(dead_code)]
     fn generate_pattern(&mut self, ty: &TypeInfo) -> String {
         match ty {
             TypeInfo::Primitive(prim) => {
