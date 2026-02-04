@@ -13,7 +13,7 @@ use crate::expr::{ExprConfig, ExprGenerator};
 use crate::stmt::{StmtConfig, StmtContext, StmtGenerator};
 use crate::symbols::{
     ClassInfo, FieldInfo, FunctionInfo, ImplementBlockInfo, InterfaceInfo, MethodInfo,
-    ModuleSymbols, ParamInfo, Symbol, SymbolKind, SymbolTable, TypeInfo, TypeParam,
+    ModuleSymbols, ParamInfo, PrimitiveType, Symbol, SymbolKind, SymbolTable, TypeInfo, TypeParam,
 };
 
 /// Configuration for the emitter phase.
@@ -115,6 +115,187 @@ impl<'a, R: Rng> EmitContext<'a, R> {
         for symbol in self.module.implement_blocks() {
             self.emit_implement_block(symbol);
         }
+
+        // Emit module tests
+        self.emit_module_tests();
+    }
+
+    /// Emit a tests block that exercises the module's functions and classes.
+    fn emit_module_tests(&mut self) {
+        // Collect functions and classes to test
+        let functions: Vec<_> = self.module.functions().collect();
+        let classes: Vec<_> = self.module.classes().collect();
+
+        // Skip if nothing to test
+        if functions.is_empty() && classes.is_empty() {
+            return;
+        }
+
+        self.emit_line("");
+        self.emit_line(&format!("tests \"{}\" {{", self.module.name));
+        self.indent += 1;
+
+        // Generate tests for each function
+        for symbol in &functions {
+            self.emit_function_test(symbol);
+        }
+
+        // Generate tests for each class
+        for symbol in &classes {
+            self.emit_class_test(symbol);
+        }
+
+        self.indent -= 1;
+        self.emit_line("}")
+    }
+
+    /// Emit a test for a function.
+    fn emit_function_test(&mut self, symbol: &Symbol) {
+        if let SymbolKind::Function(ref info) = symbol.kind {
+            // Skip functions with type parameters (generics) - too complex to test simply
+            if !info.type_params.is_empty() {
+                return;
+            }
+
+            self.emit_line(&format!("test \"{} works\" {{", symbol.name));
+            self.indent += 1;
+
+            // Generate arguments for the function call
+            let args = self.generate_test_args(&info.params);
+            let call = format!("{}({})", symbol.name, args);
+
+            // Generate the test body based on return type
+            match &info.return_type {
+                TypeInfo::Void => {
+                    // Void function - just call it and assert true
+                    self.emit_line(&call);
+                    self.emit_line("assert(true)");
+                }
+                TypeInfo::Optional(_) => {
+                    // Optional return - check it doesn't panic
+                    self.emit_line(&format!("let result = {}", call));
+                    self.emit_line("assert(result != nil || result == nil)");
+                }
+                _ => {
+                    // Non-void return - store result and assert not nil
+                    self.emit_line(&format!("let result = {}", call));
+                    self.emit_line("assert(result != nil)");
+                }
+            }
+
+            self.indent -= 1;
+            self.emit_line("}");
+            self.emit_line("");
+        }
+    }
+
+    /// Emit a test for a class.
+    fn emit_class_test(&mut self, symbol: &Symbol) {
+        if let SymbolKind::Class(ref info) = symbol.kind {
+            // Skip classes with type parameters (generics) - too complex to test simply
+            if !info.type_params.is_empty() {
+                return;
+            }
+
+            self.emit_line(&format!("test \"{} construction\" {{", symbol.name));
+            self.indent += 1;
+
+            // Generate field values for construction
+            let field_values = self.generate_class_field_values(&info.fields);
+            self.emit_line(&format!(
+                "let instance = {} {{ {} }}",
+                symbol.name, field_values
+            ));
+            self.emit_line("assert(instance != nil)");
+
+            // Test each method that doesn't have type parameters
+            for method in &info.methods {
+                let args = self.generate_test_args(&method.params);
+                match &method.return_type {
+                    TypeInfo::Void => {
+                        self.emit_line(&format!("instance.{}({})", method.name, args));
+                    }
+                    _ => {
+                        self.emit_line(&format!(
+                            "let _{}_result = instance.{}({})",
+                            method.name, method.name, args
+                        ));
+                    }
+                }
+            }
+
+            self.indent -= 1;
+            self.emit_line("}");
+            self.emit_line("");
+        }
+    }
+
+    /// Generate test arguments for function/method parameters.
+    fn generate_test_args(&mut self, params: &[ParamInfo]) -> String {
+        params
+            .iter()
+            .map(|p| self.generate_test_value(&p.param_type))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    /// Generate a test value for a given type.
+    fn generate_test_value(&mut self, ty: &TypeInfo) -> String {
+        match ty {
+            TypeInfo::Primitive(prim) => self.generate_primitive_test_value(*prim),
+            TypeInfo::Optional(_) => "nil".to_string(),
+            TypeInfo::Array(elem) => {
+                let elem_val = self.generate_test_value(elem);
+                format!("[{}]", elem_val)
+            }
+            TypeInfo::Void => "nil".to_string(),
+            TypeInfo::Class(mod_id, sym_id) => {
+                // For class types, construct an instance
+                if let Some(symbol) = self.table.get_symbol(*mod_id, *sym_id) {
+                    if let SymbolKind::Class(ref class_info) = symbol.kind {
+                        if class_info.type_params.is_empty() {
+                            let fields = self.generate_class_field_values(&class_info.fields);
+                            return format!("{} {{ {} }}", symbol.name, fields);
+                        }
+                    }
+                }
+                "nil".to_string()
+            }
+            _ => "nil".to_string(),
+        }
+    }
+
+    /// Generate a primitive test value.
+    fn generate_primitive_test_value(&mut self, prim: PrimitiveType) -> String {
+        match prim {
+            PrimitiveType::I32 => {
+                let val: i32 = self.rng.gen_range(1..50);
+                format!("{}_i32", val)
+            }
+            PrimitiveType::I64 => {
+                let val: i64 = self.rng.gen_range(1..100);
+                format!("{}_i64", val)
+            }
+            PrimitiveType::F64 => {
+                let val: f64 = self.rng.gen_range(1.0..50.0);
+                format!("{:.2}_f64", val)
+            }
+            PrimitiveType::Bool => "true".to_string(),
+            PrimitiveType::String => {
+                let id = self.rng.gen_range(0..100);
+                format!("\"test{}\"", id)
+            }
+            PrimitiveType::Nil => "nil".to_string(),
+        }
+    }
+
+    /// Generate field values for class construction.
+    fn generate_class_field_values(&mut self, fields: &[FieldInfo]) -> String {
+        fields
+            .iter()
+            .map(|f| format!("{}: {}", f.name, self.generate_test_value(&f.field_type)))
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 
     fn emit_imports(&mut self) {
@@ -511,5 +692,83 @@ mod tests {
         let code2 = emit_module(&mut rng2, &table2, module2, &emit_config);
 
         assert_eq!(code1, code2);
+    }
+
+    #[test]
+    fn emit_module_contains_tests_block() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let plan_config = PlanConfig {
+            layers: 1,
+            modules_per_layer: 1,
+            classes_per_module: (1, 1),
+            functions_per_module: (1, 1),
+            interfaces_per_module: (0, 0),
+            errors_per_module: (0, 0),
+            globals_per_module: (0, 0),
+            ..Default::default()
+        };
+
+        let table = plan(&mut rng, &plan_config);
+        let module = table.get_module(ModuleId(0)).unwrap();
+        let emit_config = EmitConfig::default();
+
+        let code = emit_module(&mut rng, &table, module, &emit_config);
+
+        // Should contain a tests block
+        assert!(code.contains("tests \""));
+        // Should contain test declarations
+        assert!(code.contains("test \""));
+        // Should contain assertions
+        assert!(code.contains("assert("));
+    }
+
+    #[test]
+    fn emit_module_tests_for_functions() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let plan_config = PlanConfig {
+            layers: 1,
+            modules_per_layer: 1,
+            classes_per_module: (0, 0),
+            functions_per_module: (2, 2),
+            interfaces_per_module: (0, 0),
+            errors_per_module: (0, 0),
+            globals_per_module: (0, 0),
+            ..Default::default()
+        };
+
+        let table = plan(&mut rng, &plan_config);
+        let module = table.get_module(ModuleId(0)).unwrap();
+        let emit_config = EmitConfig::default();
+
+        let code = emit_module(&mut rng, &table, module, &emit_config);
+
+        // Should contain function tests
+        assert!(code.contains("test \"func"));
+        assert!(code.contains("works\""));
+    }
+
+    #[test]
+    fn emit_module_tests_for_classes() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let plan_config = PlanConfig {
+            layers: 1,
+            modules_per_layer: 1,
+            classes_per_module: (1, 1),
+            functions_per_module: (0, 0),
+            interfaces_per_module: (0, 0),
+            errors_per_module: (0, 0),
+            globals_per_module: (0, 0),
+            ..Default::default()
+        };
+
+        let table = plan(&mut rng, &plan_config);
+        let module = table.get_module(ModuleId(0)).unwrap();
+        let emit_config = EmitConfig::default();
+
+        let code = emit_module(&mut rng, &table, module, &emit_config);
+
+        // Should contain class construction test
+        assert!(code.contains("construction\""));
+        assert!(code.contains("let instance ="));
     }
 }
