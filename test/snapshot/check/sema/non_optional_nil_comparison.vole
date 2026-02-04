@@ -1,0 +1,16 @@
+// Test E2105: cannot compare non-optional type to nil
+
+func get_f64() -> f64 { return 42.0 }
+func get_f32() -> f32 { return 42.0 }
+func get_i32() -> i32 { return 42 }
+func get_string() -> string { return "hello" }
+func get_bool() -> bool { return true }
+
+func main() {
+    // All of these are invalid - comparing non-optional to nil
+    let a = get_f64() == nil
+    let b = get_f32() != nil
+    let c = get_i32() == nil
+    let d = get_string() != nil
+    let e = get_bool() == nil
+}

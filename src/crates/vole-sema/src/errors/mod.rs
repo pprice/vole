@@ -701,6 +701,20 @@ pub enum SemanticError {
         #[label("'{interface}' already implemented here")]
         first_impl: SourceSpan,
     },
+
+    #[error("cannot compare non-optional type '{ty}' to nil")]
+    #[diagnostic(
+        code(E2105),
+        help(
+            "only optional types (T?) can be compared to nil; this comparison is always {result}"
+        )
+    )]
+    NonOptionalNilComparison {
+        ty: String,
+        result: String,
+        #[label("'{ty}' is not optional")]
+        span: SourceSpan,
+    },
 }
 
 /// Semantic warnings (W3xxx) - these don't prevent compilation but indicate potential issues

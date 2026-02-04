@@ -1,0 +1,88 @@
+[stdout]
+
+[stderr]
+  × [E2001]: expected f64, found nil
+    ╭─[<path>/non_optional_nil_comparison.vole:11:26]
+ 10 │     // All of these are invalid - comparing non-optional to nil
+ 11 │     let a = get_f64() == nil
+    ·                          ─┬─
+    ·                           ╰── type mismatch
+ 12 │     let b = get_f32() != nil
+    ╰────
+  × [E2105]: cannot compare non-optional type 'f64' to nil
+    ╭─[<path>/non_optional_nil_comparison.vole:11:13]
+ 10 │     // All of these are invalid - comparing non-optional to nil
+ 11 │     let a = get_f64() == nil
+    ·             ────────┬───────
+    ·                     ╰── 'f64' is not optional
+ 12 │     let b = get_f32() != nil
+    ╰────
+  help: only optional types (T?) can be compared to nil; this comparison is always false
+  × [E2001]: expected f32, found nil
+    ╭─[<path>/non_optional_nil_comparison.vole:12:26]
+ 11 │     let a = get_f64() == nil
+ 12 │     let b = get_f32() != nil
+    ·                          ─┬─
+    ·                           ╰── type mismatch
+ 13 │     let c = get_i32() == nil
+    ╰────
+  × [E2105]: cannot compare non-optional type 'f32' to nil
+    ╭─[<path>/non_optional_nil_comparison.vole:12:13]
+ 11 │     let a = get_f64() == nil
+ 12 │     let b = get_f32() != nil
+    ·             ────────┬───────
+    ·                     ╰── 'f32' is not optional
+ 13 │     let c = get_i32() == nil
+    ╰────
+  help: only optional types (T?) can be compared to nil; this comparison is always true
+  × [E2001]: expected i32, found nil
+    ╭─[<path>/non_optional_nil_comparison.vole:13:26]
+ 12 │     let b = get_f32() != nil
+ 13 │     let c = get_i32() == nil
+    ·                          ─┬─
+    ·                           ╰── type mismatch
+ 14 │     let d = get_string() != nil
+    ╰────
+  × [E2105]: cannot compare non-optional type 'i32' to nil
+    ╭─[<path>/non_optional_nil_comparison.vole:13:13]
+ 12 │     let b = get_f32() != nil
+ 13 │     let c = get_i32() == nil
+    ·             ────────┬───────
+    ·                     ╰── 'i32' is not optional
+ 14 │     let d = get_string() != nil
+    ╰────
+  help: only optional types (T?) can be compared to nil; this comparison is always false
+  × [E2001]: expected string, found nil
+    ╭─[<path>/non_optional_nil_comparison.vole:14:29]
+ 13 │     let c = get_i32() == nil
+ 14 │     let d = get_string() != nil
+    ·                             ─┬─
+    ·                              ╰── type mismatch
+ 15 │     let e = get_bool() == nil
+    ╰────
+  × [E2105]: cannot compare non-optional type 'string' to nil
+    ╭─[<path>/non_optional_nil_comparison.vole:14:13]
+ 13 │     let c = get_i32() == nil
+ 14 │     let d = get_string() != nil
+    ·             ─────────┬─────────
+    ·                      ╰── 'string' is not optional
+ 15 │     let e = get_bool() == nil
+    ╰────
+  help: only optional types (T?) can be compared to nil; this comparison is always true
+  × [E2001]: expected bool, found nil
+    ╭─[<path>/non_optional_nil_comparison.vole:15:27]
+ 14 │     let d = get_string() != nil
+ 15 │     let e = get_bool() == nil
+    ·                           ─┬─
+    ·                            ╰── type mismatch
+ 16 │ }
+    ╰────
+  × [E2105]: cannot compare non-optional type 'bool' to nil
+    ╭─[<path>/non_optional_nil_comparison.vole:15:13]
+ 14 │     let d = get_string() != nil
+ 15 │     let e = get_bool() == nil
+    ·             ────────┬────────
+    ·                     ╰── 'bool' is not optional
+ 16 │ }
+    ╰────
+  help: only optional types (T?) can be compared to nil; this comparison is always false

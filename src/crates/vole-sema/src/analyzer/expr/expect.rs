@@ -323,7 +323,8 @@ impl Analyzer {
             // Equality ops (handle allowed)
             BinaryOp::Eq | BinaryOp::Ne => {
                 let left_id = self.check_expr_expecting_id(&bin.left, None, interner)?;
-                self.check_expr_expecting_id(&bin.right, Some(left_id), interner)?;
+                let right_id = self.check_expr_expecting_id(&bin.right, Some(left_id), interner)?;
+                self.check_nil_comparison(left_id, right_id, bin.op, expr.span);
                 Ok(ArenaTypeId::BOOL)
             }
             // Ordering ops (handle rejected)

@@ -18,7 +18,10 @@ impl Analyzer {
             BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => {
                 self.check_arithmetic_op(left_ty, right_ty, expr.span)
             }
-            BinaryOp::Eq | BinaryOp::Ne => Ok(ArenaTypeId::BOOL),
+            BinaryOp::Eq | BinaryOp::Ne => {
+                self.check_nil_comparison(left_ty, right_ty, bin.op, expr.span);
+                Ok(ArenaTypeId::BOOL)
+            }
             BinaryOp::Lt | BinaryOp::Gt | BinaryOp::Le | BinaryOp::Ge => {
                 self.check_ordering_op(left_ty, right_ty, expr.span)
             }
@@ -106,6 +109,52 @@ impl Analyzer {
             Ok(ArenaTypeId::INVALID)
         } else {
             Ok(ArenaTypeId::BOOL)
+        }
+    }
+
+    /// Check for invalid nil comparisons (non-optional compared to nil).
+    /// This catches cases like `f64 != nil` which are always tautological.
+    pub(crate) fn check_nil_comparison(
+        &mut self,
+        left_ty: ArenaTypeId,
+        right_ty: ArenaTypeId,
+        op: BinaryOp,
+        span: Span,
+    ) {
+        use crate::errors::SemanticError;
+
+        // Check if one side is nil and the other is not optional
+        let (non_nil_ty, is_nil_comparison) = if left_ty.is_nil() {
+            (right_ty, true)
+        } else if right_ty.is_nil() {
+            (left_ty, true)
+        } else {
+            return; // Not a nil comparison
+        };
+
+        if !is_nil_comparison {
+            return;
+        }
+
+        // Check if the non-nil side is optional
+        let is_optional = self.type_arena().is_optional(non_nil_ty);
+
+        // If not optional and not nil itself, emit an error
+        if !is_optional && !non_nil_ty.is_nil() {
+            let ty_str = self.type_display_id(non_nil_ty);
+            let result = match op {
+                BinaryOp::Eq => "false",
+                BinaryOp::Ne => "true",
+                _ => unreachable!(),
+            };
+            self.add_error(
+                SemanticError::NonOptionalNilComparison {
+                    ty: ty_str,
+                    result: result.to_string(),
+                    span: span.into(),
+                },
+                span,
+            );
         }
     }
 
