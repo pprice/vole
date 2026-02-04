@@ -1,15 +1,15 @@
 [stdout]
 
 [stderr]
-  x [E2052]: type 'Partial' does not satisfy interface 'Base': missing method 'base_method'
-    ,-[<path>/missing_parent_interface_method.vole:11:1]
- 10 |     // Missing base_method from parent interface
- 11 | ,-> class Partial implements Extended {
- 12 | |       value: i64,
- 13 | |   
- 14 | |       func extended_method() -> i64 {
- 15 | |           return self.value
- 16 | |       }
- 17 | |-> }
-    : `---- declared to implement Base
-    `----
+  × [E2052]: type 'Partial' does not satisfy interface 'Base': missing method 'base_method'
+    ╭─[<path>/missing_parent_interface_method.vole:11:1]
+ 10 │     // Missing base_method from parent interface
+ 11 │ ╭─▶ class Partial implements Extended {
+ 12 │ │       value: i64,
+ 13 │ │   
+ 14 │ │       func extended_method() -> i64 {
+ 15 │ │           return self.value
+ 16 │ │       }
+ 17 │ ├─▶ }
+    · ╰──── declared to implement Base
+    ╰────

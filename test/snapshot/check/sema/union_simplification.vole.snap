@@ -1,39 +1,39 @@
 [stdout]
 
 [stderr]
-  x [W3004]: union with `never` will be simplified
-    ,-[<path>/union_simplification.vole:15:5]
- 14 | class Foo {
- 15 |     value: i64 | never,
-    :     ^^^^^^^^^|^^^^^^^^^
-    :              `-- `never` in union will be removed
- 16 | }
-    `----
+  × [W3004]: union with `never` will be simplified
+    ╭─[<path>/union_simplification.vole:15:5]
+ 14 │ class Foo {
+ 15 │     value: i64 | never,
+    ·     ─────────┬─────────
+    ·              ╰── `never` in union will be removed
+ 16 │ }
+    ╰────
   help: `never` is the bottom type and is automatically removed from unions; `T | never` simplifies to `T`
-  x [W3004]: union with `never` will be simplified
-   ,-[<path>/union_simplification.vole:1:17]
- 1 | func with_never(x: i64 | never) -> i64 {
-   :                 |
-   :                 `-- `never` in union will be removed
- 2 |     return x
-   `----
+  × [W3004]: union with `never` will be simplified
+   ╭─[<path>/union_simplification.vole:1:17]
+ 1 │ func with_never(x: i64 | never) -> i64 {
+   ·                 ┬
+   ·                 ╰── `never` in union will be removed
+ 2 │     return x
+   ╰────
   help: `never` is the bottom type and is automatically removed from unions; `T | never` simplifies to `T`
-  x [W3004]: union with `unknown` will be simplified
-   ,-[<path>/union_simplification.vole:5:1]
- 4 |     
- 5 | ,-> func returns_unknown() -> string | unknown {
- 6 | |       return "hello"
- 7 | |-> }
-   : `---- `unknown` in union absorbs all other types
- 8 |     
-   `----
+  × [W3004]: union with `unknown` will be simplified
+   ╭─[<path>/union_simplification.vole:5:1]
+ 4 │     
+ 5 │ ╭─▶ func returns_unknown() -> string | unknown {
+ 6 │ │       return "hello"
+ 7 │ ├─▶ }
+   · ╰──── `unknown` in union absorbs all other types
+ 8 │     
+   ╰────
   help: `unknown` is the top type and absorbs all other types; `T | unknown` simplifies to `unknown`
-  x [W3004]: union with `never` will be simplified
-    ,-[<path>/union_simplification.vole:10:5]
-  9 | func with_let() {
- 10 |     let x: i64 | never = 5
-    :     ^^^^^^^^^^^|^^^^^^^^^^
-    :                `-- `never` in union will be removed
- 11 |     _ = x
-    `----
+  × [W3004]: union with `never` will be simplified
+    ╭─[<path>/union_simplification.vole:10:5]
+  9 │ func with_let() {
+ 10 │     let x: i64 | never = 5
+    ·     ───────────┬──────────
+    ·                ╰── `never` in union will be removed
+ 11 │     _ = x
+    ╰────
   help: `never` is the bottom type and is automatically removed from unions; `T | never` simplifies to `T`

@@ -1,13 +1,13 @@
 [stdout]
 
 [stderr]
-  x [E2050]: unknown interface 'FakePreludeTrait'
-    ,-[<path>/cross_interner_trait_lookup.vole:12:1]
- 11 |     
- 12 | ,-> implement FakePreludeTrait for Point {
- 13 | |       func notReal() -> i64 {
- 14 | |           return 0
- 15 | |       }
- 16 | |-> }
-    : `---- not a known interface
-    `----
+  × [E2050]: unknown interface 'FakePreludeTrait'
+    ╭─[<path>/cross_interner_trait_lookup.vole:12:1]
+ 11 │     
+ 12 │ ╭─▶ implement FakePreludeTrait for Point {
+ 13 │ │       func notReal() -> i64 {
+ 14 │ │           return 0
+ 15 │ │       }
+ 16 │ ├─▶ }
+    · ╰──── not a known interface
+    ╰────

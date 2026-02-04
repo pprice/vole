@@ -1,11 +1,11 @@
 [stdout]
 
 [stderr]
-  x [E2064]: try expression outside fallible function
-    ,-[<path>/error_try_outside_fallible.vole:10:17]
-  9 | func normalFunc() {
- 10 |     let x = try mayFail()
-    :                 ^^^^|^^^^
-    :                     `-- try must be in a function with fallible return type
- 11 | }
-    `----
+  × [E2064]: try expression outside fallible function
+    ╭─[<path>/error_try_outside_fallible.vole:10:17]
+  9 │ func normalFunc() {
+ 10 │     let x = try mayFail()
+    ·                 ────┬────
+    ·                     ╰── try must be in a function with fallible return type
+ 11 │ }
+    ╰────

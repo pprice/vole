@@ -12,7 +12,9 @@ use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use super::common::{PipelineOptions, TermColors, compile_source, read_stdin};
+use super::common::{
+    BoxStyle, PipelineOptions, TermColors, compile_source, print_labeled_box, read_stdin,
+};
 use crate::cli::{ColorMode, expand_paths, should_skip_path};
 use crate::codegen::{CompiledModules, Compiler, JitContext, JitOptions, TestInfo};
 use crate::runtime::{
@@ -81,9 +83,17 @@ impl ProgressLine {
         self.total_discovered += count;
     }
 
+    /// Print leading indent if at start of line.
+    fn maybe_indent(&self) {
+        if self.dots_on_line == 0 {
+            print!(" ");
+        }
+    }
+
     /// Print a pass symbol (green •).
     fn print_pass(&mut self) {
         self.completed += 1;
+        self.maybe_indent();
         print!(
             "{}{}{}",
             self.colors.green(),
@@ -97,6 +107,7 @@ impl ProgressLine {
     /// Print a fail symbol (red ✘).
     fn print_fail(&mut self) {
         self.completed += 1;
+        self.maybe_indent();
         print!(
             "{}{}{}",
             self.colors.red(),
@@ -109,6 +120,7 @@ impl ProgressLine {
 
     /// Print a file error symbol (yellow ◌).
     fn print_file_error(&mut self) {
+        self.maybe_indent();
         print!(
             "{}{}{}",
             self.colors.yellow(),
@@ -394,6 +406,7 @@ pub fn run_tests(paths: &[String], options: TestRunOptions) -> ExitCode {
     let mut progress = if config.verbose {
         None
     } else {
+        println!("\nRunning {} test files...\n", files.len());
         Some(ProgressLine::new(TermColors::with_mode(options.color)))
     };
 
@@ -1054,22 +1067,28 @@ fn print_error_details(results: &TestResults, colors: &TermColors) {
 
 /// Print overall test summary
 ///
-/// Format: `N failed ✘ · N file errors ◌ · N not run · N passed ✔   Xs`
+/// Format: `N failed ✘ · N file errors ◌ · N not run · N passed •   Xs`
 /// Only show categories with non-zero counts (except passed always shown)
 fn print_summary(results: &TestResults, colors: &TermColors) {
     let duration = format_duration(results.total_duration);
 
-    // Separator line before summary
     println!();
-    println!("────────────────────────────────────────");
 
     // Build summary parts - only include non-zero counts (except passed)
     let mut parts: Vec<String> = Vec::new();
 
+    // Passed (green) - always shown
+    parts.push(format!(
+        "{}• {} passed{}",
+        colors.green(),
+        results.passed,
+        colors.reset()
+    ));
+
     // Failed (red)
     if results.failed > 0 {
         parts.push(format!(
-            "{}{} failed ✘{}",
+            "{}✘ {} failed{}",
             colors.red(),
             results.failed,
             colors.reset()
@@ -1079,7 +1098,7 @@ fn print_summary(results: &TestResults, colors: &TermColors) {
     // File errors (yellow)
     if results.file_errors > 0 {
         parts.push(format!(
-            "{}{} file errors ◌{}",
+            "{}◌ {} file errors{}",
             colors.yellow(),
             results.file_errors,
             colors.reset()
@@ -1096,14 +1115,22 @@ fn print_summary(results: &TestResults, colors: &TermColors) {
         ));
     }
 
-    // Passed (green) - always shown
-    parts.push(format!(
-        "{}{} passed ✔{}",
-        colors.green(),
-        results.passed,
-        colors.reset()
-    ));
+    let content = format!("{}  Ran in {}", parts.join("  "), duration);
 
-    // Join with separator and add duration
-    println!("{}   {}", parts.join(" · "), duration);
+    // Determine label color based on results
+    let label_color = if results.failed > 0 {
+        colors.red()
+    } else if results.file_errors > 0 {
+        colors.yellow()
+    } else {
+        colors.dim()
+    };
+
+    let style = BoxStyle {
+        border: colors.dim(),
+        label: label_color,
+        reset: colors.reset(),
+    };
+
+    print_labeled_box("Summary", &[&content], 1, style);
 }

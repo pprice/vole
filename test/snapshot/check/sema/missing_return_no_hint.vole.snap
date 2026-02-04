@@ -1,12 +1,12 @@
 [stdout]
 
 [stderr]
-  x [E2083]: missing return statement in function 'without_hint'
-   ,-[<path>/missing_return_no_hint.vole:3:1]
- 2 |     
- 3 | ,-> func without_hint() -> i64 {
- 4 | |       print("hi")
- 5 | |-> }
-   : `---- function expects to return i64
-   `----
+  × [E2083]: missing return statement in function 'without_hint'
+   ╭─[<path>/missing_return_no_hint.vole:3:1]
+ 2 │     
+ 3 │ ╭─▶ func without_hint() -> i64 {
+ 4 │ │       print("hi")
+ 5 │ ├─▶ }
+   · ╰──── function expects to return i64
+   ╰────
   help: add a return statement, or change return type to void

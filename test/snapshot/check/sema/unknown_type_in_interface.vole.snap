@@ -1,12 +1,12 @@
 [stdout]
 
 [stderr]
-  x [E2020]: unknown type 'BadType'
-   ,-[<path>/unknown_type_in_interface.vole:5:5]
- 4 | interface Processor {
- 5 |     func process() -> BadType
-   :     ^^^^^^^^^^^^|^^^^^^^^^^^^
-   :                 `-- not a known type
- 6 | }
-   `----
+  × [E2020]: unknown type 'BadType'
+   ╭─[<path>/unknown_type_in_interface.vole:5:5]
+ 4 │ interface Processor {
+ 5 │     func process() -> BadType
+   ·     ────────────┬────────────
+   ·                 ╰── not a known type
+ 6 │ }
+   ╰────
   help: type not found

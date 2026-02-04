@@ -1,75 +1,75 @@
 [stdout]
 
 [stderr]
-  x [E2001]: expected integer, found handle and handle
-    ,-[<path>/handle_bitwise.vole:12:14]
- 11 |     // handle << handle
- 12 |     let r1 = a << b
-    :              ^^^|^^
-    :                 `-- type mismatch
- 13 | 
-    `----
-  x [E2001]: expected integer, found handle and handle
-    ,-[<path>/handle_bitwise.vole:15:14]
- 14 |     // handle >> handle
- 15 |     let r2 = a >> b
-    :              ^^^|^^
-    :                 `-- type mismatch
- 16 | 
-    `----
-  x [E2001]: expected integer, found handle and handle
-    ,-[<path>/handle_bitwise.vole:18:14]
- 17 |     // handle & handle
- 18 |     let r3 = a & b
-    :              ^^|^^
-    :                `-- type mismatch
- 19 | 
-    `----
-  x [E2001]: expected type, found r4
-    ,-[<path>/handle_bitwise.vole:21:5]
- 20 |     // handle | handle (parsed as union type, produces type error)
- 21 |     let r4 = a | b
-    :     ^^^^^^^|^^^^^^
-    :            `-- type mismatch
- 22 | 
-    `----
-  x [E2001]: expected integer, found handle and handle
-    ,-[<path>/handle_bitwise.vole:24:14]
- 23 |     // handle ^ handle
- 24 |     let r5 = a ^ b
-    :              ^^|^^
-    :                `-- type mismatch
- 25 | 
-    `----
-  x [E2001]: expected integer, found handle and i64
-    ,-[<path>/handle_bitwise.vole:27:14]
- 26 |     // handle << i64
- 27 |     let r6 = a << 1
-    :              ^^^|^^
-    :                 `-- type mismatch
- 28 | 
-    `----
-  x [E2001]: expected integer, found handle and i64
-    ,-[<path>/handle_bitwise.vole:30:14]
- 29 |     // handle >> i64
- 30 |     let r7 = a >> 1
-    :              ^^^|^^
-    :                 `-- type mismatch
- 31 | 
-    `----
-  x [E2001]: expected integer, found handle and i64
-    ,-[<path>/handle_bitwise.vole:33:14]
- 32 |     // handle & i64
- 33 |     let r8 = a & 1
-    :              ^^|^^
-    :                `-- type mismatch
- 34 | 
-    `----
-  x [E2001]: expected integer, found handle and i64
-    ,-[<path>/handle_bitwise.vole:36:14]
- 35 |     // handle ^ i64
- 36 |     let r9 = a ^ 1
-    :              ^^|^^
-    :                `-- type mismatch
- 37 | }
-    `----
+  × [E2001]: expected integer, found handle and handle
+    ╭─[<path>/handle_bitwise.vole:12:14]
+ 11 │     // handle << handle
+ 12 │     let r1 = a << b
+    ·              ───┬──
+    ·                 ╰── type mismatch
+ 13 │ 
+    ╰────
+  × [E2001]: expected integer, found handle and handle
+    ╭─[<path>/handle_bitwise.vole:15:14]
+ 14 │     // handle >> handle
+ 15 │     let r2 = a >> b
+    ·              ───┬──
+    ·                 ╰── type mismatch
+ 16 │ 
+    ╰────
+  × [E2001]: expected integer, found handle and handle
+    ╭─[<path>/handle_bitwise.vole:18:14]
+ 17 │     // handle & handle
+ 18 │     let r3 = a & b
+    ·              ──┬──
+    ·                ╰── type mismatch
+ 19 │ 
+    ╰────
+  × [E2001]: expected type, found r4
+    ╭─[<path>/handle_bitwise.vole:21:5]
+ 20 │     // handle | handle (parsed as union type, produces type error)
+ 21 │     let r4 = a | b
+    ·     ───────┬──────
+    ·            ╰── type mismatch
+ 22 │ 
+    ╰────
+  × [E2001]: expected integer, found handle and handle
+    ╭─[<path>/handle_bitwise.vole:24:14]
+ 23 │     // handle ^ handle
+ 24 │     let r5 = a ^ b
+    ·              ──┬──
+    ·                ╰── type mismatch
+ 25 │ 
+    ╰────
+  × [E2001]: expected integer, found handle and i64
+    ╭─[<path>/handle_bitwise.vole:27:14]
+ 26 │     // handle << i64
+ 27 │     let r6 = a << 1
+    ·              ───┬──
+    ·                 ╰── type mismatch
+ 28 │ 
+    ╰────
+  × [E2001]: expected integer, found handle and i64
+    ╭─[<path>/handle_bitwise.vole:30:14]
+ 29 │     // handle >> i64
+ 30 │     let r7 = a >> 1
+    ·              ───┬──
+    ·                 ╰── type mismatch
+ 31 │ 
+    ╰────
+  × [E2001]: expected integer, found handle and i64
+    ╭─[<path>/handle_bitwise.vole:33:14]
+ 32 │     // handle & i64
+ 33 │     let r8 = a & 1
+    ·              ──┬──
+    ·                ╰── type mismatch
+ 34 │ 
+    ╰────
+  × [E2001]: expected integer, found handle and i64
+    ╭─[<path>/handle_bitwise.vole:36:14]
+ 35 │     // handle ^ i64
+ 36 │     let r9 = a ^ 1
+    ·              ──┬──
+    ·                ╰── type mismatch
+ 37 │ }
+    ╰────

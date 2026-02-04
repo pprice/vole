@@ -1,22 +1,22 @@
 [stdout]
 
 [stderr]
-  x [E2030]: non-exhaustive match
-    ,-[<path>/error_missing_error_arm.vole:10:18]
-  9 |     func check() {
- 10 | ,->     let result = match mayFail() {
- 11 | |           success x => x
- 12 | |->     }
-    : `---- match may not cover all cases
- 13 |     }
-    `----
+  × [E2030]: non-exhaustive match
+    ╭─[<path>/error_missing_error_arm.vole:10:18]
+  9 │     func check() {
+ 10 │ ╭─▶     let result = match mayFail() {
+ 11 │ │           success x => x
+ 12 │ ├─▶     }
+    · ╰──── match may not cover all cases
+ 13 │     }
+    ╰────
   help: add a wildcard pattern '_' or identifier to catch remaining cases
-  x [E2063]: match on fallible type requires at least one error arm
-    ,-[<path>/error_missing_error_arm.vole:10:18]
-  9 |     func check() {
- 10 | ,->     let result = match mayFail() {
- 11 | |           success x => x
- 12 | |->     }
-    : `---- fallible type matched here
- 13 |     }
-    `----
+  × [E2063]: match on fallible type requires at least one error arm
+    ╭─[<path>/error_missing_error_arm.vole:10:18]
+  9 │     func check() {
+ 10 │ ╭─▶     let result = match mayFail() {
+ 11 │ │           success x => x
+ 12 │ ├─▶     }
+    · ╰──── fallible type matched here
+ 13 │     }
+    ╰────

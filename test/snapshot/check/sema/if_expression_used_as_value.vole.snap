@@ -1,75 +1,75 @@
 [stdout]
 
 [stderr]
-  x [E2100]: block expressions cannot have trailing expressions
-   ,-[<path>/if_expression_used_as_value.vole:6:13]
- 5 |     // Error: assigning if expression result to variable
- 6 |     let x = if true { 42 } else { 0 }
-   :             ^^^^^^^|^^^^^^
-   :                    `-- trailing expression not allowed in block
- 7 | 
-   `----
+  × [E2100]: block expressions cannot have trailing expressions
+   ╭─[<path>/if_expression_used_as_value.vole:6:13]
+ 5 │     // Error: assigning if expression result to variable
+ 6 │     let x = if true { 42 } else { 0 }
+   ·             ───────┬──────
+   ·                    ╰── trailing expression not allowed in block
+ 7 │ 
+   ╰────
   help: use explicit `return` in functions, or use `when`/`match` for conditional values
-  x [E2100]: block expressions cannot have trailing expressions
-   ,-[<path>/if_expression_used_as_value.vole:6:13]
- 5 |     // Error: assigning if expression result to variable
- 6 |     let x = if true { 42 } else { 0 }
-   :             ^^^^^^^^^^^^|^^^^^^^^^^^^
-   :                         `-- trailing expression not allowed in block
- 7 | 
-   `----
+  × [E2100]: block expressions cannot have trailing expressions
+   ╭─[<path>/if_expression_used_as_value.vole:6:13]
+ 5 │     // Error: assigning if expression result to variable
+ 6 │     let x = if true { 42 } else { 0 }
+   ·             ────────────┬────────────
+   ·                         ╰── trailing expression not allowed in block
+ 7 │ 
+   ╰────
   help: use explicit `return` in functions, or use `when`/`match` for conditional values
-  x [E2099]: `if` expressions cannot be used as values
-   ,-[<path>/if_expression_used_as_value.vole:6:13]
- 5 |     // Error: assigning if expression result to variable
- 6 |     let x = if true { 42 } else { 0 }
-   :             ^^^^^^^^^^^^|^^^^^^^^^^^^
-   :                         `-- `if` is a statement, not an expression
- 7 | 
-   `----
+  × [E2099]: `if` expressions cannot be used as values
+   ╭─[<path>/if_expression_used_as_value.vole:6:13]
+ 5 │     // Error: assigning if expression result to variable
+ 6 │     let x = if true { 42 } else { 0 }
+   ·             ────────────┬────────────
+   ·                         ╰── `if` is a statement, not an expression
+ 7 │ 
+   ╰────
   help: use `when` for conditional expressions: when { cond => value, _ => other }
-  x [E2040]: cannot use return value of void function
-   ,-[<path>/if_expression_used_as_value.vole:6:13]
- 5 |     // Error: assigning if expression result to variable
- 6 |     let x = if true { 42 } else { 0 }
-   :             ^^^^^^^^^^^^|^^^^^^^^^^^^
-   :                         `-- void function called here
- 7 | 
-   `----
+  × [E2040]: cannot use return value of void function
+   ╭─[<path>/if_expression_used_as_value.vole:6:13]
+ 5 │     // Error: assigning if expression result to variable
+ 6 │     let x = if true { 42 } else { 0 }
+   ·             ────────────┬────────────
+   ·                         ╰── void function called here
+ 7 │ 
+   ╰────
   help: void functions don't return a usable value
-  x [E2100]: block expressions cannot have trailing expressions
-    ,-[<path>/if_expression_used_as_value.vole:9:13]
-  8 |     // Error: using if expression as function argument
-  9 |     let y = if true { "yes" } else { "no" }
-    :             ^^^^^^^^|^^^^^^^^
-    :                     `-- trailing expression not allowed in block
- 10 | }
-    `----
+  × [E2100]: block expressions cannot have trailing expressions
+    ╭─[<path>/if_expression_used_as_value.vole:9:13]
+  8 │     // Error: using if expression as function argument
+  9 │     let y = if true { "yes" } else { "no" }
+    ·             ────────┬────────
+    ·                     ╰── trailing expression not allowed in block
+ 10 │ }
+    ╰────
   help: use explicit `return` in functions, or use `when`/`match` for conditional values
-  x [E2100]: block expressions cannot have trailing expressions
-    ,-[<path>/if_expression_used_as_value.vole:9:13]
-  8 |     // Error: using if expression as function argument
-  9 |     let y = if true { "yes" } else { "no" }
-    :             ^^^^^^^^^^^^^^^|^^^^^^^^^^^^^^^
-    :                            `-- trailing expression not allowed in block
- 10 | }
-    `----
+  × [E2100]: block expressions cannot have trailing expressions
+    ╭─[<path>/if_expression_used_as_value.vole:9:13]
+  8 │     // Error: using if expression as function argument
+  9 │     let y = if true { "yes" } else { "no" }
+    ·             ───────────────┬───────────────
+    ·                            ╰── trailing expression not allowed in block
+ 10 │ }
+    ╰────
   help: use explicit `return` in functions, or use `when`/`match` for conditional values
-  x [E2099]: `if` expressions cannot be used as values
-    ,-[<path>/if_expression_used_as_value.vole:9:13]
-  8 |     // Error: using if expression as function argument
-  9 |     let y = if true { "yes" } else { "no" }
-    :             ^^^^^^^^^^^^^^^|^^^^^^^^^^^^^^^
-    :                            `-- `if` is a statement, not an expression
- 10 | }
-    `----
+  × [E2099]: `if` expressions cannot be used as values
+    ╭─[<path>/if_expression_used_as_value.vole:9:13]
+  8 │     // Error: using if expression as function argument
+  9 │     let y = if true { "yes" } else { "no" }
+    ·             ───────────────┬───────────────
+    ·                            ╰── `if` is a statement, not an expression
+ 10 │ }
+    ╰────
   help: use `when` for conditional expressions: when { cond => value, _ => other }
-  x [E2040]: cannot use return value of void function
-    ,-[<path>/if_expression_used_as_value.vole:9:13]
-  8 |     // Error: using if expression as function argument
-  9 |     let y = if true { "yes" } else { "no" }
-    :             ^^^^^^^^^^^^^^^|^^^^^^^^^^^^^^^
-    :                            `-- void function called here
- 10 | }
-    `----
+  × [E2040]: cannot use return value of void function
+    ╭─[<path>/if_expression_used_as_value.vole:9:13]
+  8 │     // Error: using if expression as function argument
+  9 │     let y = if true { "yes" } else { "no" }
+    ·             ───────────────┬───────────────
+    ·                            ╰── void function called here
+ 10 │ }
+    ╰────
   help: void functions don't return a usable value

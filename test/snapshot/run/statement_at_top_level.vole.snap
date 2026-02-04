@@ -1,12 +1,12 @@
 [stdout]
 
 [stderr]
-  x [E1031]: only declarations are allowed at the top level
-   ,-[<path>/statement_at_top_level.vole:3:1]
- 2 | // Should show the "wrap in func main" hint
- 3 | println("hello")
-   : ^^^|^^^
-   :    `-- expected a declaration, not a statement or expression
-   `----
+  × [E1031]: only declarations are allowed at the top level
+   ╭─[<path>/statement_at_top_level.vole:3:1]
+ 2 │ // Should show the "wrap in func main" hint
+ 3 │ println("hello")
+   · ───┬───
+   ·    ╰── expected a declaration, not a statement or expression
+   ╰────
   help: use func, class, struct, interface, implement, tests, or let
           wrap your code in `func main() { ... }` to make it runnable

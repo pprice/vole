@@ -1,12 +1,12 @@
 [stdout]
 
 [stderr]
-  x [E1020]: invalid external module path
-   ,-[<path>/invalid_path.vole:2:14]
- 1 | implement string {
- 2 |     external("invalid") {
-   :              ^^^^|^^^^
-   :                  `-- invalid module path
- 3 |         func length() -> i64
-   `----
+  × [E1020]: invalid external module path
+   ╭─[<path>/invalid_path.vole:2:14]
+ 1 │ implement string {
+ 2 │     external("invalid") {
+   ·              ────┬────
+   ·                  ╰── invalid module path
+ 3 │         func length() -> i64
+   ╰────
   help: expected format "provider:module" (e.g., "std:string")

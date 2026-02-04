@@ -1,12 +1,12 @@
 [stdout]
 
 [stderr]
-  x [E2073]: cannot call method 'length' on union type 'string | i64'
-   ,-[<path>/method_union.vole:4:11]
- 3 |     let value: i64 | string = 42
- 4 |     value.length()
-   :           ^^^|^^
-   :              `-- method call on union type
- 5 | }
-   `----
+  × [E2073]: cannot call method 'length' on union type 'string | i64'
+   ╭─[<path>/method_union.vole:4:11]
+ 3 │     let value: i64 | string = 42
+ 4 │     value.length()
+   ·           ───┬──
+   ·              ╰── method call on union type
+ 5 │ }
+   ╰────
   help: narrow the type before calling the method

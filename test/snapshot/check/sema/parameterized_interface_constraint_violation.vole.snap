@@ -1,20 +1,20 @@
 [stdout]
 
 [stderr]
-  x [E2074]: type argument for 'P' does not satisfy constraint 'Producer'
-    ,-[<path>/parameterized_interface_constraint_violation.vole:21:5]
- 20 |     let p = StringProducer { value: "hi" }
- 21 |     get_int(p)  // StringProducer implements Producer<string>, not Producer<i64>
-    :     ^^^^^|^^^^
-    :          `-- found 'main::StringProducer'
- 22 | }
-    `----
-  x [E2096]: return type mismatch in function expecting i64
-    ,-[<path>/parameterized_interface_constraint_violation.vole:16:12]
- 15 | func get_int<P: Producer<i64>>(p: P) -> i64 {
- 16 |     return p.produce()
-    :            ^^^^^|^^^^^
-    :                 `-- this returns string
- 17 | }
-    `----
+  × [E2074]: type argument for 'P' does not satisfy constraint 'Producer'
+    ╭─[<path>/parameterized_interface_constraint_violation.vole:21:5]
+ 20 │     let p = StringProducer { value: "hi" }
+ 21 │     get_int(p)  // StringProducer implements Producer<string>, not Producer<i64>
+    ·     ─────┬────
+    ·          ╰── found 'main::StringProducer'
+ 22 │ }
+    ╰────
+  × [E2096]: return type mismatch in function expecting i64
+    ╭─[<path>/parameterized_interface_constraint_violation.vole:16:12]
+ 15 │ func get_int<P: Producer<i64>>(p: P) -> i64 {
+ 16 │     return p.produce()
+    ·            ─────┬─────
+    ·                 ╰── this returns string
+ 17 │ }
+    ╰────
   help: function expects i64

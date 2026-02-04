@@ -1,11 +1,11 @@
 [stdout]
 
 [stderr]
-  x [E2044]: cannot call non-function type 'i64'
-   ,-[<path>/call_non_function.vole:3:5]
- 2 |     let x = 42
- 3 |     x()
-   :     |
-   :     `-- not a function
- 4 | }
-   `----
+  × [E2044]: cannot call non-function type 'i64'
+   ╭─[<path>/call_non_function.vole:3:5]
+ 2 │     let x = 42
+ 3 │     x()
+   ·     ┬
+   ·     ╰── not a function
+ 4 │ }
+   ╰────

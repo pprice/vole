@@ -1,35 +1,35 @@
 [stdout]
 
 [stderr]
-  x [E2001]: expected orderable, found handle and handle
-    ,-[<path>/handle_comparison.vole:14:14]
- 13 |     // handle < handle
- 14 |     let r1 = a < b
-    :              ^^|^^
-    :                `-- type mismatch
- 15 | 
-    `----
-  x [E2001]: expected orderable, found handle and handle
-    ,-[<path>/handle_comparison.vole:17:14]
- 16 |     // handle > handle
- 17 |     let r2 = a > b
-    :              ^^|^^
-    :                `-- type mismatch
- 18 | 
-    `----
-  x [E2001]: expected orderable, found handle and handle
-    ,-[<path>/handle_comparison.vole:20:14]
- 19 |     // handle <= handle
- 20 |     let r3 = a <= b
-    :              ^^^|^^
-    :                 `-- type mismatch
- 21 | 
-    `----
-  x [E2001]: expected orderable, found handle and handle
-    ,-[<path>/handle_comparison.vole:23:14]
- 22 |     // handle >= handle
- 23 |     let r4 = a >= b
-    :              ^^^|^^
-    :                 `-- type mismatch
- 24 | 
-    `----
+  × [E2001]: expected orderable, found handle and handle
+    ╭─[<path>/handle_comparison.vole:14:14]
+ 13 │     // handle < handle
+ 14 │     let r1 = a < b
+    ·              ──┬──
+    ·                ╰── type mismatch
+ 15 │ 
+    ╰────
+  × [E2001]: expected orderable, found handle and handle
+    ╭─[<path>/handle_comparison.vole:17:14]
+ 16 │     // handle > handle
+ 17 │     let r2 = a > b
+    ·              ──┬──
+    ·                ╰── type mismatch
+ 18 │ 
+    ╰────
+  × [E2001]: expected orderable, found handle and handle
+    ╭─[<path>/handle_comparison.vole:20:14]
+ 19 │     // handle <= handle
+ 20 │     let r3 = a <= b
+    ·              ───┬──
+    ·                 ╰── type mismatch
+ 21 │ 
+    ╰────
+  × [E2001]: expected orderable, found handle and handle
+    ╭─[<path>/handle_comparison.vole:23:14]
+ 22 │     // handle >= handle
+ 23 │     let r4 = a >= b
+    ·              ───┬──
+    ·                 ╰── type mismatch
+ 24 │ 
+    ╰────

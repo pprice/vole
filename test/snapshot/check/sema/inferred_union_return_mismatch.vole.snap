@@ -1,11 +1,11 @@
 [stdout]
 
 [stderr]
-  x [E2001]: expected i64, found string | i64
-    ,-[<path>/inferred_union_return_mismatch.vole:9:18]
-  8 | func main() {
-  9 |     let n: i64 = inferred_union(true)
-    :                  ^^^^^^^^^^|^^^^^^^^^
-    :                            `-- type mismatch
- 10 | }
-    `----
+  × [E2001]: expected i64, found string | i64
+    ╭─[<path>/inferred_union_return_mismatch.vole:9:18]
+  8 │ func main() {
+  9 │     let n: i64 = inferred_union(true)
+    ·                  ──────────┬─────────
+    ·                            ╰── type mismatch
+ 10 │ }
+    ╰────

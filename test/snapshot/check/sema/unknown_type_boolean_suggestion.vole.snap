@@ -1,30 +1,30 @@
 [stdout]
 
 [stderr]
-  x [E2020]: unknown type 'boolean'
-   ,-[<path>/unknown_type_boolean_suggestion.vole:3:5]
- 2 | func main() {
- 3 |     let a: boolean = true
-   :     ^^^^^^^^^^|^^^^^^^^^^
-   :               `-- not a known type
- 4 |     let b: Boolean = false
-   `----
+  × [E2020]: unknown type 'boolean'
+   ╭─[<path>/unknown_type_boolean_suggestion.vole:3:5]
+ 2 │ func main() {
+ 3 │     let a: boolean = true
+   ·     ──────────┬──────────
+   ·               ╰── not a known type
+ 4 │     let b: Boolean = false
+   ╰────
   help: did you mean 'bool'?
-  x [E2020]: unknown type 'Boolean'
-   ,-[<path>/unknown_type_boolean_suggestion.vole:4:5]
- 3 |     let a: boolean = true
- 4 |     let b: Boolean = false
-   :     ^^^^^^^^^^^|^^^^^^^^^^
-   :                `-- not a known type
- 5 |     let c: Bool = true
-   `----
+  × [E2020]: unknown type 'Boolean'
+   ╭─[<path>/unknown_type_boolean_suggestion.vole:4:5]
+ 3 │     let a: boolean = true
+ 4 │     let b: Boolean = false
+   ·     ───────────┬──────────
+   ·                ╰── not a known type
+ 5 │     let c: Bool = true
+   ╰────
   help: did you mean 'bool'?
-  x [E2020]: unknown type 'Bool'
-   ,-[<path>/unknown_type_boolean_suggestion.vole:5:5]
- 4 |     let b: Boolean = false
- 5 |     let c: Bool = true
-   :     ^^^^^^^^^|^^^^^^^^
-   :              `-- not a known type
- 6 | }
-   `----
+  × [E2020]: unknown type 'Bool'
+   ╭─[<path>/unknown_type_boolean_suggestion.vole:5:5]
+ 4 │     let b: Boolean = false
+ 5 │     let c: Bool = true
+   ·     ─────────┬────────
+   ·              ╰── not a known type
+ 6 │ }
+   ╰────
   help: did you mean 'bool'?

@@ -1,19 +1,19 @@
 [stdout]
 
 [stderr]
-  x [E2053]: method 'add' has wrong signature for interface 'Adder'
-    ,-[<path>/interface_signature_mismatch.vole:5:1]
-  4 |     
-  5 | ,-> class Calculator implements Adder {
-  6 | |       name: string,
-  7 | |   
-  8 | |       // Wrong signature: takes i32 instead of i64
-  9 | |       func add(a: i32, b: i32) -> i32 {
- 10 | |           return a + b
- 11 | |       }
- 12 | |-> }
-    : `---- signature mismatch
-    `----
+  × [E2053]: method 'add' has wrong signature for interface 'Adder'
+    ╭─[<path>/interface_signature_mismatch.vole:5:1]
+  4 │     
+  5 │ ╭─▶ class Calculator implements Adder {
+  6 │ │       name: string,
+  7 │ │   
+  8 │ │       // Wrong signature: takes i32 instead of i64
+  9 │ │       func add(a: i32, b: i32) -> i32 {
+ 10 │ │           return a + b
+ 11 │ │       }
+ 12 │ ├─▶ }
+    · ╰──── signature mismatch
+    ╰────
   help: parameter 1: expected 'i64', found 'i32'
         parameter 2: expected 'i64', found 'i32'
         return type: expected 'i64', found 'i32'

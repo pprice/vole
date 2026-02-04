@@ -1,12 +1,12 @@
 [stdout]
 
 [stderr]
-  x [E2020]: unknown type 'FirstOnly'
-    ,-[<path>/scoped_type_not_visible_in_sibling.vole:15:17]
- 14 |     test "cannot use sibling type" {
- 15 |         let f = FirstOnly { value: 2 }
-    :                 ^^^^^^^^^^^|^^^^^^^^^^
-    :                            `-- not a known type
- 16 |     }
-    `----
+  × [E2020]: unknown type 'FirstOnly'
+    ╭─[<path>/scoped_type_not_visible_in_sibling.vole:15:17]
+ 14 │     test "cannot use sibling type" {
+ 15 │         let f = FirstOnly { value: 2 }
+    ·                 ───────────┬──────────
+    ·                            ╰── not a known type
+ 16 │     }
+    ╰────
   help: type not found

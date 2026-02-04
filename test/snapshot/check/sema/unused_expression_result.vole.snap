@@ -1,30 +1,30 @@
 [stdout]
 
 [stderr]
-  x [W3002]: unused expression result of type 'i64'
-   ,-[<path>/unused_expression_result.vole:5:5]
- 4 | func unused_arithmetic() {
- 5 |     1 + 2
-   :     ^^|^^
-   :       `-- expression result is not used
- 6 | }
-   `----
+  × [W3002]: unused expression result of type 'i64'
+   ╭─[<path>/unused_expression_result.vole:5:5]
+ 4 │ func unused_arithmetic() {
+ 5 │     1 + 2
+   ·     ──┬──
+   ·       ╰── expression result is not used
+ 6 │ }
+   ╰────
   help: use `_ = expr` to discard explicitly
-  x [W3002]: unused expression result of type 'string'
-    ,-[<path>/unused_expression_result.vole:28:5]
- 27 | func unused_string() {
- 28 |     "hello"
-    :     ^^^|^^^
-    :        `-- expression result is not used
- 29 | }
-    `----
+  × [W3002]: unused expression result of type 'string'
+    ╭─[<path>/unused_expression_result.vole:28:5]
+ 27 │ func unused_string() {
+ 28 │     "hello"
+    ·     ───┬───
+    ·        ╰── expression result is not used
+ 29 │ }
+    ╰────
   help: use `_ = expr` to discard explicitly
-  x [W3002]: unused expression result of type 'bool'
-    ,-[<path>/unused_expression_result.vole:33:5]
- 32 | func unused_bool() {
- 33 |     true
-    :     ^^|^
-    :       `-- expression result is not used
- 34 | }
-    `----
+  × [W3002]: unused expression result of type 'bool'
+    ╭─[<path>/unused_expression_result.vole:33:5]
+ 32 │ func unused_bool() {
+ 33 │     true
+    ·     ──┬─
+    ·       ╰── expression result is not used
+ 34 │ }
+    ╰────
   help: use `_ = expr` to discard explicitly

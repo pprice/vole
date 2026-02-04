@@ -1,11 +1,11 @@
 [stdout]
 
 [stderr]
-  x [E1031]: only declarations are allowed at the top level
-   ,-[<path>/record_keyword_removed.vole:2:1]
- 1 | // Test that 'record' keyword is no longer accepted (use 'class' instead)
- 2 | record Foo { x: i64 }
-   : ^^^|^^
-   :    `-- expected a declaration, not a statement or expression
-   `----
+  × [E1031]: only declarations are allowed at the top level
+   ╭─[<path>/record_keyword_removed.vole:2:1]
+ 1 │ // Test that 'record' keyword is no longer accepted (use 'class' instead)
+ 2 │ record Foo { x: i64 }
+   · ───┬──
+   ·    ╰── expected a declaration, not a statement or expression
+   ╰────
   help: use func, class, struct, interface, implement, tests, or let

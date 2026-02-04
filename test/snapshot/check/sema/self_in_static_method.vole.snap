@@ -1,12 +1,12 @@
 [stdout]
 
 [stderr]
-  x [E2077]: 'self' cannot be used in static method 'bad_static'
-    ,-[<path>/self_in_static_method.vole:9:20]
-  8 |         func bad_static() -> i64 {
-  9 |             return self.x  // ERROR: self in static method
-    :                    ^^|^
-    :                      `-- 'self' is not available in static context
- 10 |         }
-    `----
+  × [E2077]: 'self' cannot be used in static method 'bad_static'
+    ╭─[<path>/self_in_static_method.vole:9:20]
+  8 │         func bad_static() -> i64 {
+  9 │             return self.x  // ERROR: self in static method
+    ·                    ──┬─
+    ·                      ╰── 'self' is not available in static context
+ 10 │         }
+    ╰────
   help: static methods are called on the type, not on an instance

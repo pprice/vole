@@ -1,12 +1,12 @@
 [stdout]
 
 [stderr]
-  x [E1028]: type parameter '1T' starts with a digit
-   ,-[<path>/type_param_starts_with_digit.vole:2:10]
- 1 | // Test: E1028 - type parameter starts with a digit
- 2 | func foo<1T>(x: 1T) -> 1T {
-   :          |
-   :          `-- invalid type parameter name
- 3 |     return x
-   `----
+  × [E1028]: type parameter '1T' starts with a digit
+   ╭─[<path>/type_param_starts_with_digit.vole:2:10]
+ 1 │ // Test: E1028 - type parameter starts with a digit
+ 2 │ func foo<1T>(x: 1T) -> 1T {
+   ·          ┬
+   ·          ╰── invalid type parameter name
+ 3 │     return x
+   ╰────
   help: type parameters must start with a letter, not a digit

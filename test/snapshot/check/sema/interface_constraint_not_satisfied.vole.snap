@@ -1,19 +1,19 @@
 [stdout]
 
 [stderr]
-  x [E2074]: type argument for 'T' does not satisfy constraint 'Printable'
-    ,-[<path>/interface_constraint_not_satisfied.vole:17:5]
- 16 |     let w = Wrapper { value: 42 }
- 17 |     show(w)  // Wrapper doesn't implement Printable
-    :     ^^^|^^^
-    :        `-- found 'main::Wrapper'
- 18 | }
-    `----
-  x [E2023]: unknown method 'print_val' on type 'main::Wrapper'
-    ,-[<path>/interface_constraint_not_satisfied.vole:12:14]
- 11 | func show<T: Printable>(x: T) -> string {
- 12 |     return x.print_val()
-    :              ^^^^|^^^^
-    :                  `-- no such method
- 13 | }
-    `----
+  × [E2074]: type argument for 'T' does not satisfy constraint 'Printable'
+    ╭─[<path>/interface_constraint_not_satisfied.vole:17:5]
+ 16 │     let w = Wrapper { value: 42 }
+ 17 │     show(w)  // Wrapper doesn't implement Printable
+    ·     ───┬───
+    ·        ╰── found 'main::Wrapper'
+ 18 │ }
+    ╰────
+  × [E2023]: unknown method 'print_val' on type 'main::Wrapper'
+    ╭─[<path>/interface_constraint_not_satisfied.vole:12:14]
+ 11 │ func show<T: Printable>(x: T) -> string {
+ 12 │     return x.print_val()
+    ·              ────┬────
+    ·                  ╰── no such method
+ 13 │ }
+    ╰────

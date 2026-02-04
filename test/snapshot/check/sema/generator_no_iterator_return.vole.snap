@@ -1,12 +1,12 @@
 [stdout]
 
 [stderr]
-  x [E2070]: yield in function without Iterator return type
-   ,-[<path>/generator_no_iterator_return.vole:3:5]
- 2 | func not_gen() -> i64 {
- 3 |     yield 1  // Error: yield in function that doesn't return Iterator
-   :     ^^^|^^^
-   :        `-- function returns i64, not Iterator<T>
- 4 |     return 0
-   `----
+  × [E2070]: yield in function without Iterator return type
+   ╭─[<path>/generator_no_iterator_return.vole:3:5]
+ 2 │ func not_gen() -> i64 {
+ 3 │     yield 1  // Error: yield in function that doesn't return Iterator
+   ·     ───┬───
+   ·        ╰── function returns i64, not Iterator<T>
+ 4 │     return 0
+   ╰────
   help: functions that use yield must have return type Iterator<T>

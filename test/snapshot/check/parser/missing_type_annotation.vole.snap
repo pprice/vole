@@ -1,12 +1,12 @@
 [stdout]
 
 [stderr]
-  x [E1025]: missing type annotation for parameter 'a'
-   ,-[<path>/missing_type_annotation.vole:2:10]
- 1 | // Test: E1025 - missing type annotation on function parameter
- 2 | func add(a, b) {
-   :          |
-   :          `-- type annotation required
- 3 |     return a + b
-   `----
+  × [E1025]: missing type annotation for parameter 'a'
+   ╭─[<path>/missing_type_annotation.vole:2:10]
+ 1 │ // Test: E1025 - missing type annotation on function parameter
+ 2 │ func add(a, b) {
+   ·          ┬
+   ·          ╰── type annotation required
+ 3 │     return a + b
+   ╰────
   help: add a type annotation: a: Type

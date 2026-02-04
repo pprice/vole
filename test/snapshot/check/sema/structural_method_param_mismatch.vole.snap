@@ -1,20 +1,20 @@
 [stdout]
 
 [stderr]
-  x [E2001]: expected string, found integer literal
-   ,-[<path>/structural_method_param_mismatch.vole:3:18]
- 2 | func call_add<T: { func add(n: i64) -> i64 }>(x: T) -> i64 {
- 3 |     return x.add(1)
-   :                  |
-   :                  `-- type mismatch
- 4 | }
-   `----
-  x [E2096]: return type mismatch in function expecting i64
-   ,-[<path>/structural_method_param_mismatch.vole:3:12]
- 2 | func call_add<T: { func add(n: i64) -> i64 }>(x: T) -> i64 {
- 3 |     return x.add(1)
-   :            ^^^^|^^^
-   :                `-- this returns string
- 4 | }
-   `----
+  × [E2001]: expected string, found integer literal
+   ╭─[<path>/structural_method_param_mismatch.vole:3:18]
+ 2 │ func call_add<T: { func add(n: i64) -> i64 }>(x: T) -> i64 {
+ 3 │     return x.add(1)
+   ·                  ┬
+   ·                  ╰── type mismatch
+ 4 │ }
+   ╰────
+  × [E2096]: return type mismatch in function expecting i64
+   ╭─[<path>/structural_method_param_mismatch.vole:3:12]
+ 2 │ func call_add<T: { func add(n: i64) -> i64 }>(x: T) -> i64 {
+ 3 │     return x.add(1)
+   ·            ────┬───
+   ·                ╰── this returns string
+ 4 │ }
+   ╰────
   help: function expects i64

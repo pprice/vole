@@ -1,27 +1,27 @@
 [stdout]
 
 [stderr]
-  x [E2021]: missing field 'y' in struct literal for 'Point'
-   ,-[<path>/struct_literal_errors.vole:8:12]
- 7 | func missing_field() -> Point {
- 8 |     return Point { x: 1 }
-   :            ^^^^^^^|^^^^^^
-   :                   `-- this field is required
- 9 | }
-   `----
-  x [E2022]: unknown field 'z' in type 'Point'
-    ,-[<path>/struct_literal_errors.vole:13:32]
- 12 | func extra_field() -> Point {
- 13 |     return Point { x: 1, y: 2, z: 3 }
-    :                                ^^|^
-    :                                  `-- no such field
- 14 | }
-    `----
-  x [E2001]: expected i64, found string
-    ,-[<path>/struct_literal_errors.vole:18:23]
- 17 | func wrong_field_type() -> Point {
- 18 |     return Point { x: "hello", y: 2 }
-    :                       ^^^|^^^
-    :                          `-- type mismatch
- 19 | }
-    `----
+  × [E2021]: missing field 'y' in struct literal for 'Point'
+   ╭─[<path>/struct_literal_errors.vole:8:12]
+ 7 │ func missing_field() -> Point {
+ 8 │     return Point { x: 1 }
+   ·            ───────┬──────
+   ·                   ╰── this field is required
+ 9 │ }
+   ╰────
+  × [E2022]: unknown field 'z' in type 'Point'
+    ╭─[<path>/struct_literal_errors.vole:13:32]
+ 12 │ func extra_field() -> Point {
+ 13 │     return Point { x: 1, y: 2, z: 3 }
+    ·                                ──┬─
+    ·                                  ╰── no such field
+ 14 │ }
+    ╰────
+  × [E2001]: expected i64, found string
+    ╭─[<path>/struct_literal_errors.vole:18:23]
+ 17 │ func wrong_field_type() -> Point {
+ 18 │     return Point { x: "hello", y: 2 }
+    ·                       ───┬───
+    ·                          ╰── type mismatch
+ 19 │ }
+    ╰────

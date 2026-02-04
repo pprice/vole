@@ -1,43 +1,43 @@
 [stdout]
 
 [stderr]
-  x [E2003]: undefined variable in field shorthand
-   ,-[<path>/struct_shorthand_errors.vole:8:21]
- 7 | func test_undefined_shorthand() {
- 8 |     let p = Point { x, y: 10 }
-   :                     |
-   :                     `-- shorthand `x` expands to `x: x`, but `x` is not defined
- 9 | }
-   `----
-  x [E2003]: undefined variable in field shorthand
-    ,-[<path>/struct_shorthand_errors.vole:13:21]
- 12 | func test_multiple_undefined() {
- 13 |     let p = Point { x, y }
-    :                     |
-    :                     `-- shorthand `x` expands to `x: x`, but `x` is not defined
- 14 | }
-    `----
-  x [E2003]: undefined variable in field shorthand
-    ,-[<path>/struct_shorthand_errors.vole:13:24]
- 12 | func test_multiple_undefined() {
- 13 |     let p = Point { x, y }
-    :                        |
-    :                        `-- shorthand `y` expands to `y: y`, but `y` is not defined
- 14 | }
-    `----
-  x [E2003]: undefined variable in field shorthand
-    ,-[<path>/struct_shorthand_errors.vole:20:21]
- 19 | func test_class_shorthand() {
- 20 |     let s = Sized { width, height }
-    :                     ^^|^^
-    :                       `-- shorthand `width` expands to `width: width`, but `width` is not defined
- 21 | }
-    `----
-  x [E2003]: undefined variable in field shorthand
-    ,-[<path>/struct_shorthand_errors.vole:20:28]
- 19 | func test_class_shorthand() {
- 20 |     let s = Sized { width, height }
-    :                            ^^^|^^
-    :                               `-- shorthand `height` expands to `height: height`, but `height` is not defined
- 21 | }
-    `----
+  × [E2003]: undefined variable in field shorthand
+   ╭─[<path>/struct_shorthand_errors.vole:8:21]
+ 7 │ func test_undefined_shorthand() {
+ 8 │     let p = Point { x, y: 10 }
+   ·                     ┬
+   ·                     ╰── shorthand `x` expands to `x: x`, but `x` is not defined
+ 9 │ }
+   ╰────
+  × [E2003]: undefined variable in field shorthand
+    ╭─[<path>/struct_shorthand_errors.vole:13:21]
+ 12 │ func test_multiple_undefined() {
+ 13 │     let p = Point { x, y }
+    ·                     ┬
+    ·                     ╰── shorthand `x` expands to `x: x`, but `x` is not defined
+ 14 │ }
+    ╰────
+  × [E2003]: undefined variable in field shorthand
+    ╭─[<path>/struct_shorthand_errors.vole:13:24]
+ 12 │ func test_multiple_undefined() {
+ 13 │     let p = Point { x, y }
+    ·                        ┬
+    ·                        ╰── shorthand `y` expands to `y: y`, but `y` is not defined
+ 14 │ }
+    ╰────
+  × [E2003]: undefined variable in field shorthand
+    ╭─[<path>/struct_shorthand_errors.vole:20:21]
+ 19 │ func test_class_shorthand() {
+ 20 │     let s = Sized { width, height }
+    ·                     ──┬──
+    ·                       ╰── shorthand `width` expands to `width: width`, but `width` is not defined
+ 21 │ }
+    ╰────
+  × [E2003]: undefined variable in field shorthand
+    ╭─[<path>/struct_shorthand_errors.vole:20:28]
+ 19 │ func test_class_shorthand() {
+ 20 │     let s = Sized { width, height }
+    ·                            ───┬──
+    ·                               ╰── shorthand `height` expands to `height: height`, but `height` is not defined
+ 21 │ }
+    ╰────

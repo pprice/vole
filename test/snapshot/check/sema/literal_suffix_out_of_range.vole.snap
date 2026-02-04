@@ -1,11 +1,11 @@
 [stdout]
 
 [stderr]
-  x [E2095]: literal out of range for `u8`
-   ,-[<path>/literal_suffix_out_of_range.vole:2:9]
- 1 | // Error: value does not fit in suffix type
- 2 | let x = 1000_u8
-   :         ^^^|^^^
-   :            `-- value 1000 does not fit in `u8` (0..255)
-   `----
+  × [E2095]: literal out of range for `u8`
+   ╭─[<path>/literal_suffix_out_of_range.vole:2:9]
+ 1 │ // Error: value does not fit in suffix type
+ 2 │ let x = 1000_u8
+   ·         ───┬───
+   ·            ╰── value 1000 does not fit in `u8` (0..255)
+   ╰────
   help: use a larger type suffix

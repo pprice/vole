@@ -1,14 +1,14 @@
 [stdout]
 
 [stderr]
-  x [E2030]: non-exhaustive match
-   ,-[<path>/match_non_exhaustive.vole:3:13]
- 2 |         let x = 1
- 3 | ,->     let y = match x {
- 4 | |           1 => 100
- 5 | |           2 => 200
- 6 | |->     }
-   : `---- match may not cover all cases
- 7 |     }
-   `----
+  × [E2030]: non-exhaustive match
+   ╭─[<path>/match_non_exhaustive.vole:3:13]
+ 2 │         let x = 1
+ 3 │ ╭─▶     let y = match x {
+ 4 │ │           1 => 100
+ 5 │ │           2 => 200
+ 6 │ ├─▶     }
+   · ╰──── match may not cover all cases
+ 7 │     }
+   ╰────
   help: add a wildcard pattern '_' or identifier to catch remaining cases

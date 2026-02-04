@@ -1,21 +1,21 @@
 [stdout]
 
 [stderr]
-  x [E2020]: unknown type 'BadType'
-    ,-[<path>/unknown_type_method_call.vole:7:5]
-  6 |     
-  7 | ,->     func get() -> BadType {
-  8 | |           return self.value
-  9 | |->     }
-    : `---- not a known type
- 10 |     }
-    `----
+  × [E2020]: unknown type 'BadType'
+    ╭─[<path>/unknown_type_method_call.vole:7:5]
+  6 │     
+  7 │ ╭─▶     func get() -> BadType {
+  8 │ │           return self.value
+  9 │ ├─▶     }
+    · ╰──── not a known type
+ 10 │     }
+    ╰────
   help: type not found
-  x [E2023]: unknown method 'get' on type 'main::Counter'
-    ,-[<path>/unknown_type_method_call.vole:14:15]
- 13 |     let c = Counter { value: 42 }
- 14 |     let x = c.get()  // Should error, not panic
-    :               ^|^
-    :                `-- no such method
- 15 | }
-    `----
+  × [E2023]: unknown method 'get' on type 'main::Counter'
+    ╭─[<path>/unknown_type_method_call.vole:14:15]
+ 13 │     let c = Counter { value: 42 }
+ 14 │     let x = c.get()  // Should error, not panic
+    ·               ─┬─
+    ·                ╰── no such method
+ 15 │ }
+    ╰────

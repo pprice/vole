@@ -1,21 +1,21 @@
 [stdout]
 
 [stderr]
-  x [E2096]: return type mismatch in function expecting i64
-   ,-[<path>/return_type_mismatch.vole:4:12]
- 3 | func wrong_return() -> i64 {
- 4 |     return "oops"
-   :            ^^^|^^
-   :               `-- this returns string
- 5 | }
-   `----
+  × [E2096]: return type mismatch in function expecting i64
+   ╭─[<path>/return_type_mismatch.vole:4:12]
+ 3 │ func wrong_return() -> i64 {
+ 4 │     return "oops"
+   ·            ───┬──
+   ·               ╰── this returns string
+ 5 │ }
+   ╰────
   help: function expects i64
-  x [E2096]: return type mismatch in function expecting i64
-    ,-[<path>/return_type_mismatch.vole:12:16]
- 11 |     } else {
- 12 |         return "not a number"
-    :                ^^^^^^^|^^^^^^
-    :                       `-- this returns string
- 13 |     }
-    `----
+  × [E2096]: return type mismatch in function expecting i64
+    ╭─[<path>/return_type_mismatch.vole:12:16]
+ 11 │     } else {
+ 12 │         return "not a number"
+    ·                ───────┬──────
+    ·                       ╰── this returns string
+ 13 │     }
+    ╰────
   help: function expects i64

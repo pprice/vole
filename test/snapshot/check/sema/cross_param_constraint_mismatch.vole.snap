@@ -1,27 +1,27 @@
 [stdout]
 
 [stderr]
-  x [E2074]: type argument for 'C' does not satisfy constraint 'Consumer'
-    ,-[<path>/cross_param_constraint_mismatch.vole:26:5]
- 25 |     let c = StringConsumer {}
- 26 |     pipe(p, c)
-    :     ^^^^^|^^^^
-    :          `-- found 'main::StringConsumer'
- 27 | }
-    `----
-  x [E2001]: expected string, found i64
-    ,-[<path>/cross_param_constraint_mismatch.vole:20:29]
- 19 | func pipe<T, P: Producer<T>, C: Consumer<T>>(producer: P, consumer: C) -> string {
- 20 |     return consumer.consume(producer.produce())
-    :                             ^^^^^^^^^|^^^^^^^^
-    :                                      `-- type mismatch
- 21 | }
-    `----
-  x [E2001]: expected string, found i64
-    ,-[<path>/cross_param_constraint_mismatch.vole:20:29]
- 19 | func pipe<T, P: Producer<T>, C: Consumer<T>>(producer: P, consumer: C) -> string {
- 20 |     return consumer.consume(producer.produce())
-    :                             ^^^^^^^^^|^^^^^^^^
-    :                                      `-- type mismatch
- 21 | }
-    `----
+  × [E2074]: type argument for 'C' does not satisfy constraint 'Consumer'
+    ╭─[<path>/cross_param_constraint_mismatch.vole:26:5]
+ 25 │     let c = StringConsumer {}
+ 26 │     pipe(p, c)
+    ·     ─────┬────
+    ·          ╰── found 'main::StringConsumer'
+ 27 │ }
+    ╰────
+  × [E2001]: expected string, found i64
+    ╭─[<path>/cross_param_constraint_mismatch.vole:20:29]
+ 19 │ func pipe<T, P: Producer<T>, C: Consumer<T>>(producer: P, consumer: C) -> string {
+ 20 │     return consumer.consume(producer.produce())
+    ·                             ─────────┬────────
+    ·                                      ╰── type mismatch
+ 21 │ }
+    ╰────
+  × [E2001]: expected string, found i64
+    ╭─[<path>/cross_param_constraint_mismatch.vole:20:29]
+ 19 │ func pipe<T, P: Producer<T>, C: Consumer<T>>(producer: P, consumer: C) -> string {
+ 20 │     return consumer.consume(producer.produce())
+    ·                             ─────────┬────────
+    ·                                      ╰── type mismatch
+ 21 │ }
+    ╰────

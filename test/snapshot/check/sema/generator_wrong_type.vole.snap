@@ -1,19 +1,19 @@
 [stdout]
 
 [stderr]
-  x [E2001]: expected i64, found string
-   ,-[<path>/generator_wrong_type.vole:3:11]
- 2 | func gen() -> Iterator<i64> {
- 3 |     yield "hello"  // Error: expected i64, got string
-   :           ^^^|^^^
-   :              `-- type mismatch
- 4 | }
-   `----
-  x [E2071]: yield expression type 'string' doesn't match Iterator element type 'i64'
-   ,-[<path>/generator_wrong_type.vole:3:11]
- 2 | func gen() -> Iterator<i64> {
- 3 |     yield "hello"  // Error: expected i64, got string
-   :           ^^^|^^^
-   :              `-- expected i64
- 4 | }
-   `----
+  × [E2001]: expected i64, found string
+   ╭─[<path>/generator_wrong_type.vole:3:11]
+ 2 │ func gen() -> Iterator<i64> {
+ 3 │     yield "hello"  // Error: expected i64, got string
+   ·           ───┬───
+   ·              ╰── type mismatch
+ 4 │ }
+   ╰────
+  × [E2071]: yield expression type 'string' doesn't match Iterator element type 'i64'
+   ╭─[<path>/generator_wrong_type.vole:3:11]
+ 2 │ func gen() -> Iterator<i64> {
+ 3 │     yield "hello"  // Error: expected i64, got string
+   ·           ───┬───
+   ·              ╰── expected i64
+ 4 │ }
+   ╰────

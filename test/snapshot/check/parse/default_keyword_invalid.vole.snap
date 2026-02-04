@@ -1,11 +1,11 @@
 [stdout]
 
 [stderr]
-  x [E1002]: expected ''func' or 'external' after 'default'', found 'identifier'
-   ,-[<path>/default_keyword_invalid.vole:3:13]
- 2 | interface Invalid {
- 3 |     default x: i64
-   :             |
-   :             `-- unexpected token
- 4 | }
-   `----
+  × [E1002]: expected ''func' or 'external' after 'default'', found 'identifier'
+   ╭─[<path>/default_keyword_invalid.vole:3:13]
+ 2 │ interface Invalid {
+ 3 │     default x: i64
+   ·             ┬
+   ·             ╰── unexpected token
+ 4 │ }
+   ╰────

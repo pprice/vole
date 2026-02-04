@@ -1,10 +1,10 @@
 [stdout]
 
 [stderr]
-  x [E1036]: `use` is not valid Vole syntax
-   ,-[<path>/wrong_import_use.vole:1:1]
- 1 | use std
-   : ^|^
-   :  `-- not valid Vole syntax
-   `----
+  × [E1036]: `use` is not valid Vole syntax
+   ╭─[<path>/wrong_import_use.vole:1:1]
+ 1 │ use std
+   · ─┬─
+   ·  ╰── not valid Vole syntax
+   ╰────
   help: in Vole, imports are expressions: `let name = import "module"`

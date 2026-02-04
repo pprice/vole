@@ -16,5 +16,5 @@ pub use vole_codegen::errors::CodegenError;
 
 pub use report::{
     WithExtraHelp, get_color_mode, render_to_stderr, render_to_string, render_to_writer,
-    set_color_mode,
+    render_to_writer_terminal, set_color_mode,
 };

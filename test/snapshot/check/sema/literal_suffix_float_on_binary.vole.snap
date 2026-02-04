@@ -1,11 +1,11 @@
 [stdout]
 
 [stderr]
-  x [E2094]: invalid literal suffix
-   ,-[<path>/literal_suffix_float_on_binary.vole:2:9]
- 1 | // Error: float suffix on binary literal
- 2 | let x = 0b1010_f32
-   :         ^^^^^|^^^^
-   :              `-- cannot apply float suffix `_f32` to integer literal
-   `----
+  × [E2094]: invalid literal suffix
+   ╭─[<path>/literal_suffix_float_on_binary.vole:2:9]
+ 1 │ // Error: float suffix on binary literal
+ 2 │ let x = 0b1010_f32
+   ·         ─────┬────
+   ·              ╰── cannot apply float suffix `_f32` to integer literal
+   ╰────
   help: use `_f32` or `_f64` only on decimal or float literals

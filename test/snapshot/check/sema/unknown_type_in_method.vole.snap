@@ -1,13 +1,13 @@
 [stdout]
 
 [stderr]
-  x [E2020]: unknown type 'Int'
-    ,-[<path>/unknown_type_in_method.vole:8:5]
-  7 |     
-  8 | ,->     func get() -> Int {
-  9 | |           return self.value
- 10 | |->     }
-    : `---- not a known type
- 11 |     }
-    `----
+  × [E2020]: unknown type 'Int'
+    ╭─[<path>/unknown_type_in_method.vole:8:5]
+  7 │     
+  8 │ ╭─▶     func get() -> Int {
+  9 │ │           return self.value
+ 10 │ ├─▶     }
+    · ╰──── not a known type
+ 11 │     }
+    ╰────
   help: did you mean 'i64'?

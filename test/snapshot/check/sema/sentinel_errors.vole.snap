@@ -1,11 +1,11 @@
 [stdout]
 
 [stderr]
-  x [E1030]: sentinel declarations cannot have a body
-   ,-[<path>/sentinel_errors.vole:2:14]
- 1 | // Error: sentinel cannot have a body
- 2 | sentinel Foo { }
-   :              |
-   :              `-- unexpected body
-   `----
+  × [E1030]: sentinel declarations cannot have a body
+   ╭─[<path>/sentinel_errors.vole:2:14]
+ 1 │ // Error: sentinel cannot have a body
+ 2 │ sentinel Foo { }
+   ·              ┬
+   ·              ╰── unexpected body
+   ╰────
   help: sentinel declarations are body-less: just `sentinel Name`

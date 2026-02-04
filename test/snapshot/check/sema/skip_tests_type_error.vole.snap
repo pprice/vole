@@ -1,11 +1,11 @@
 [stdout]
 
 [stderr]
-  x [E2001]: expected i64, found string
-    ,-[<path>/skip_tests_type_error.vole:10:22]
-  9 |     test "broken" {
- 10 |         let x: i64 = "not an integer"
-    :                      ^^^^^^^^|^^^^^^^
-    :                              `-- type mismatch
- 11 |         assert(x == 42)
-    `----
+  × [E2001]: expected i64, found string
+    ╭─[<path>/skip_tests_type_error.vole:10:22]
+  9 │     test "broken" {
+ 10 │         let x: i64 = "not an integer"
+    ·                      ────────┬───────
+    ·                              ╰── type mismatch
+ 11 │         assert(x == 42)
+    ╰────

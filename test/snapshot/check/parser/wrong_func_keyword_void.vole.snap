@@ -1,11 +1,11 @@
 [stdout]
 
 [stderr]
-  x [E1033]: to define a function, use `func` instead of `void`
-   ,-[<path>/wrong_func_keyword_void.vole:1:1]
- 1 | void main() {
-   : ^^|^
-   :   `-- use `func` here
- 2 |     println("hello")
-   `----
+  × [E1033]: to define a function, use `func` instead of `void`
+   ╭─[<path>/wrong_func_keyword_void.vole:1:1]
+ 1 │ void main() {
+   · ──┬─
+   ·   ╰── use `func` here
+ 2 │     println("hello")
+   ╰────
   help: Vole uses `func` to define functions: `func main() { ... }`

@@ -1,9 +1,9 @@
 [stdout]
 
 [stderr]
-  x [E0001]: unexpected character '`'
-   ,-[<path>/unexpected_char.vole:1:9]
- 1 | let x = `
-   :         |
-   :         `-- unexpected character
-   `----
+  × [E0001]: unexpected character '`'
+   ╭─[<path>/unexpected_char.vole:1:9]
+ 1 │ let x = `
+   ·         ┬
+   ·         ╰── unexpected character
+   ╰────

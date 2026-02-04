@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 use crate::cli::ColorMode;
 use crate::codegen::{Compiler, JitContext, JitOptions};
-use crate::errors::{LexerError, ParserError, WithExtraHelp, render_to_writer};
+use crate::errors::{LexerError, ParserError, WithExtraHelp, render_to_writer_terminal};
 use crate::frontend::{AstPrinter, ParseError, Parser};
 use crate::runtime::{
     JmpBuf, call_setjmp, clear_test_jmp_buf, set_capture_mode, set_stderr_capture,
@@ -52,7 +52,7 @@ pub enum PipelineError {
 fn render_lexer_error(err: &LexerError, file_path: &str, source: &str, w: &mut dyn Write) {
     let report = miette::Report::new(err.clone())
         .with_source_code(NamedSource::new(file_path, source.to_string()));
-    let _ = render_to_writer(report.as_ref(), w);
+    let _ = render_to_writer_terminal(report.as_ref(), w);
 }
 
 /// Render a parser error to a writer with source context.
@@ -74,9 +74,9 @@ fn render_parser_error(
             report.as_ref(),
             "wrap your code in `func main() { ... }` to make it runnable",
         );
-        let _ = render_to_writer(&wrapped, w);
+        let _ = render_to_writer_terminal(&wrapped, w);
     } else {
-        let _ = render_to_writer(report.as_ref(), w);
+        let _ = render_to_writer_terminal(report.as_ref(), w);
     }
 }
 
@@ -84,14 +84,14 @@ fn render_parser_error(
 fn render_sema_error(err: &TypeError, file_path: &str, source: &str, w: &mut dyn Write) {
     let report = miette::Report::new(err.error.clone())
         .with_source_code(NamedSource::new(file_path, source.to_string()));
-    let _ = render_to_writer(report.as_ref(), w);
+    let _ = render_to_writer_terminal(report.as_ref(), w);
 }
 
 /// Render a semantic warning to a writer with source context.
 fn render_sema_warning(warn: &TypeWarning, file_path: &str, source: &str, w: &mut dyn Write) {
     let report = miette::Report::new(warn.warning.clone())
         .with_source_code(NamedSource::new(file_path, source.to_string()));
-    let _ = render_to_writer(report.as_ref(), w);
+    let _ = render_to_writer_terminal(report.as_ref(), w);
 }
 
 /// Options for the compile_source pipeline.
@@ -519,4 +519,115 @@ pub fn inspect_ast_captured<W: Write>(
     let _ = write!(stdout, "{}", printer.print_program(&program));
 
     Ok(())
+}
+
+/// Unicode box-drawing characters (matching miette's style).
+pub mod box_chars {
+    pub const TOP_LEFT: char = '╭';
+    pub const TOP_RIGHT: char = '╮';
+    pub const BOTTOM_LEFT: char = '╰';
+    pub const BOTTOM_RIGHT: char = '╯';
+    pub const HORIZONTAL: char = '─';
+    pub const VERTICAL: char = '│';
+}
+
+/// Calculate the visible width of a string, ignoring ANSI escape codes.
+pub fn visible_width(s: &str) -> usize {
+    let mut width = 0;
+    let mut in_escape = false;
+    for c in s.chars() {
+        if c == '\x1b' {
+            in_escape = true;
+        } else if in_escape {
+            if c == 'm' {
+                in_escape = false;
+            }
+        } else {
+            width += 1;
+        }
+    }
+    width
+}
+
+/// Options for styling a labeled box.
+#[derive(Default)]
+pub struct BoxStyle<'a> {
+    /// Color/style for the border (e.g., dim)
+    pub border: &'a str,
+    /// Color/style for the label
+    pub label: &'a str,
+    /// Reset sequence
+    pub reset: &'a str,
+}
+
+/// Print a labeled box around content lines.
+///
+/// ```text
+/// ╭─ Label ──────────╮
+/// │ content line 1   │
+/// │ content line 2   │
+/// ╰──────────────────╯
+/// ```
+pub fn print_labeled_box(label: &str, lines: &[&str], indent: usize, style: BoxStyle) {
+    use box_chars::*;
+
+    // Calculate the maximum visible width of content
+    let max_content_width = lines.iter().map(|l| visible_width(l)).max().unwrap_or(0);
+
+    // Inner width is the wider of: content or label, no extra padding
+    let inner_width = max_content_width.max(label.len());
+
+    let indent_str = " ".repeat(indent);
+    let h = |n: usize| HORIZONTAL.to_string().repeat(n);
+
+    // Top: ╭─ Label ─────╮
+    // Structure: ╭ + ─ + space + label + space + bars + ╮
+    // Bars needed: inner_width - label.len() to align with content
+    let top_bar_len = inner_width.saturating_sub(label.len());
+    println!(
+        "{}{}{}{} {}{}{} {}{}{}",
+        indent_str,
+        style.border,
+        TOP_LEFT,
+        HORIZONTAL,
+        style.label,
+        label,
+        style.border,
+        h(top_bar_len),
+        TOP_RIGHT,
+        style.reset
+    );
+
+    // Content lines: │ content │
+    for line in lines {
+        let vis_width = visible_width(line);
+        // +1 because top line has: ─ + space + label + space + bars
+        // content line has: space + content + padding + space
+        // need to match the width
+        let padding = inner_width.saturating_sub(vis_width) + 1;
+        println!(
+            "{}{}{}{} {}{} {}{}",
+            indent_str,
+            style.border,
+            VERTICAL,
+            style.reset,
+            line,
+            " ".repeat(padding),
+            style.border,
+            VERTICAL,
+        );
+    }
+
+    // Bottom: ╰──────────────────╯
+    // Width: 1 (space after ╭) + 1 (─) + 1 (space) + label.len() + 1 (space) + top_bar_len
+    let bottom_bar_len = 3 + label.len() + top_bar_len;
+    println!(
+        "{}{}{}{}{}{}",
+        indent_str,
+        style.border,
+        BOTTOM_LEFT,
+        h(bottom_bar_len),
+        BOTTOM_RIGHT,
+        style.reset
+    );
 }

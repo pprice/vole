@@ -1,15 +1,15 @@
 [stdout]
 
 [stderr]
-  x [E2006]: cannot assign to immutable variable 'y'
-   ,-[<path>/immutable_compound_assignment.vole:2:5]
- 1 | func main() {
- 2 |     let y = 10
-   :     ^^^^^|^^^^
-   :          `-- declared as immutable here
- 3 |     y += 5
-   :     ^^^|^^
-   :        `-- cannot assign
- 4 | }
-   `----
+  × [E2006]: cannot assign to immutable variable 'y'
+   ╭─[<path>/immutable_compound_assignment.vole:2:5]
+ 1 │ func main() {
+ 2 │     let y = 10
+   ·     ─────┬────
+   ·          ╰── declared as immutable here
+ 3 │     y += 5
+   ·     ───┬──
+   ·        ╰── cannot assign
+ 4 │ }
+   ╰────
   help: consider declaring with 'let mut' to make it mutable

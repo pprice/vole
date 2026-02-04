@@ -1,22 +1,22 @@
 [stdout]
 
 [stderr]
-  x [E2062]: error pattern used on non-fallible type 'i32'
-   ,-[<path>/error_error_on_non_fallible.vole:5:9]
- 4 |     let result = match x {
- 5 |         error => 0
-   :         ^^|^^
-   :           `-- expected fallible type
- 6 |         _ => x
-   `----
-  x [E2031]: match arms have incompatible types: expected i64, found i32
-   ,-[<path>/error_error_on_non_fallible.vole:5:9]
- 4 |     let result = match x {
- 5 |         error => 0
-   :         ^^^^^|^^^^
-   :              `-- first arm has type i64
- 6 |         _ => x
-   :              |
-   :              `-- this arm has type i32
- 7 |     }
-   `----
+  × [E2062]: error pattern used on non-fallible type 'i32'
+   ╭─[<path>/error_error_on_non_fallible.vole:5:9]
+ 4 │     let result = match x {
+ 5 │         error => 0
+   ·         ──┬──
+   ·           ╰── expected fallible type
+ 6 │         _ => x
+   ╰────
+  × [E2031]: match arms have incompatible types: expected i64, found i32
+   ╭─[<path>/error_error_on_non_fallible.vole:5:9]
+ 4 │     let result = match x {
+ 5 │         error => 0
+   ·         ─────┬────
+   ·              ╰── first arm has type i64
+ 6 │         _ => x
+   ·              ┬
+   ·              ╰── this arm has type i32
+ 7 │     }
+   ╰────

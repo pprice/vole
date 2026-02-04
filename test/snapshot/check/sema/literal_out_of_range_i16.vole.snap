@@ -1,11 +1,11 @@
 [stdout]
 
 [stderr]
-  x [E2001]: expected i16, found integer literal
-   ,-[<path>/literal_out_of_range_i16.vole:2:18]
- 1 | func main() {
- 2 |     let x: i16 = 40000
-   :                  ^^|^^
-   :                    `-- type mismatch
- 3 | }
-   `----
+  × [E2001]: expected i16, found integer literal
+   ╭─[<path>/literal_out_of_range_i16.vole:2:18]
+ 1 │ func main() {
+ 2 │     let x: i16 = 40000
+   ·                  ──┬──
+   ·                    ╰── type mismatch
+ 3 │ }
+   ╰────

@@ -1,30 +1,30 @@
 [stdout]
 
 [stderr]
-  x [E2020]: unknown type 'str'
-   ,-[<path>/unknown_type_str_suggestion.vole:3:5]
- 2 | func main() {
- 3 |     let a: str = "hello"
-   :     ^^^^^^^^^^|^^^^^^^^^
-   :               `-- not a known type
- 4 |     let b: Str = "hello"
-   `----
+  × [E2020]: unknown type 'str'
+   ╭─[<path>/unknown_type_str_suggestion.vole:3:5]
+ 2 │ func main() {
+ 3 │     let a: str = "hello"
+   ·     ──────────┬─────────
+   ·               ╰── not a known type
+ 4 │     let b: Str = "hello"
+   ╰────
   help: did you mean 'string'?
-  x [E2020]: unknown type 'Str'
-   ,-[<path>/unknown_type_str_suggestion.vole:4:5]
- 3 |     let a: str = "hello"
- 4 |     let b: Str = "hello"
-   :     ^^^^^^^^^^|^^^^^^^^^
-   :               `-- not a known type
- 5 |     let c: String = "world"
-   `----
+  × [E2020]: unknown type 'Str'
+   ╭─[<path>/unknown_type_str_suggestion.vole:4:5]
+ 3 │     let a: str = "hello"
+ 4 │     let b: Str = "hello"
+   ·     ──────────┬─────────
+   ·               ╰── not a known type
+ 5 │     let c: String = "world"
+   ╰────
   help: did you mean 'string'?
-  x [E2020]: unknown type 'String'
-   ,-[<path>/unknown_type_str_suggestion.vole:5:5]
- 4 |     let b: Str = "hello"
- 5 |     let c: String = "world"
-   :     ^^^^^^^^^^^|^^^^^^^^^^^
-   :                `-- not a known type
- 6 | }
-   `----
+  × [E2020]: unknown type 'String'
+   ╭─[<path>/unknown_type_str_suggestion.vole:5:5]
+ 4 │     let b: Str = "hello"
+ 5 │     let c: String = "world"
+   ·     ───────────┬───────────
+   ·                ╰── not a known type
+ 6 │ }
+   ╰────
   help: did you mean 'string'? (lowercase in Vole)

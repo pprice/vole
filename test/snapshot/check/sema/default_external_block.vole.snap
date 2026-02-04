@@ -1,11 +1,11 @@
 [stdout]
 
 [stderr]
-  x [E2023]: unknown method 'upper' on type 'Formatter'
-   ,-[<path>/default_external_block.vole:7:9]
- 6 |     default external("std:format") {
- 7 |         func "fmt_upper" as upper(s: string) -> string
-   :         ^^^^^^^^^^^^^^^^^^^^^^^|^^^^^^^^^^^^^^^^^^^^^^
-   :                                `-- no such method
- 8 |     }
-   `----
+  × [E2023]: unknown method 'upper' on type 'Formatter'
+   ╭─[<path>/default_external_block.vole:7:9]
+ 6 │     default external("std:format") {
+ 7 │         func "fmt_upper" as upper(s: string) -> string
+   ·         ───────────────────────┬──────────────────────
+   ·                                ╰── no such method
+ 8 │     }
+   ╰────

@@ -1,12 +1,12 @@
 [stdout]
 
 [stderr]
-  x [E1029]: type parameter '__T' starts with reserved prefix '__'
-   ,-[<path>/type_param_reserved_prefix.vole:2:10]
- 1 | // Test: E1029 - type parameter starts with reserved __ prefix
- 2 | func foo<__T>(x: __T) -> __T {
-   :          ^|^
-   :           `-- reserved prefix
- 3 |     return x
-   `----
+  × [E1029]: type parameter '__T' starts with reserved prefix '__'
+   ╭─[<path>/type_param_reserved_prefix.vole:2:10]
+ 1 │ // Test: E1029 - type parameter starts with reserved __ prefix
+ 2 │ func foo<__T>(x: __T) -> __T {
+   ·          ─┬─
+   ·           ╰── reserved prefix
+ 3 │     return x
+   ╰────
   help: the '__' prefix is reserved for internal use; rename this type parameter

@@ -1,13 +1,13 @@
 [stdout]
 
 [stderr]
-  x [E2020]: unknown type 'List'
-    ,-[<path>/qualified_type_errors.vole:16:1]
- 15 |     // Error: Unknown type in generic position
- 16 | ,-> func unknown_generic() -> List<time.Unknown> {
- 17 | |       return []
- 18 | |-> }
-    : `---- not a known type
- 19 |     
-    `----
+  × [E2020]: unknown type 'List'
+    ╭─[<path>/qualified_type_errors.vole:16:1]
+ 15 │     // Error: Unknown type in generic position
+ 16 │ ╭─▶ func unknown_generic() -> List<time.Unknown> {
+ 17 │ │       return []
+ 18 │ ├─▶ }
+    · ╰──── not a known type
+ 19 │     
+    ╰────
   help: type not found

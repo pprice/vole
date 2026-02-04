@@ -1,11 +1,11 @@
 [stdout]
 
 [stderr]
-  x [E2067]: module 'std:math' has no export 'unknownExport'
-   ,-[<path>/destructuring_import_unknown_export.vole:4:15]
- 3 |     test "unknown export" {
- 4 |         let { unknownExport } = import "std:math"
-   :               ^^^^^^|^^^^^^
-   :                     `-- unknown export
- 5 |     }
-   `----
+  × [E2067]: module 'std:math' has no export 'unknownExport'
+   ╭─[<path>/destructuring_import_unknown_export.vole:4:15]
+ 3 │     test "unknown export" {
+ 4 │         let { unknownExport } = import "std:math"
+   ·               ──────┬──────
+   ·                     ╰── unknown export
+ 5 │     }
+   ╰────

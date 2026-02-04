@@ -1,12 +1,12 @@
 [stdout]
 
 [stderr]
-  x [E2043]: cannot infer type of lambda parameter 'x'
-   ,-[<path>/lambda_param_infer_error.vole:3:14]
- 2 | func main() {
- 3 |     let f = (x) => x + 1
-   :              |
-   :              `-- type cannot be inferred
- 4 | }
-   `----
+  × [E2043]: cannot infer type of lambda parameter 'x'
+   ╭─[<path>/lambda_param_infer_error.vole:3:14]
+ 2 │ func main() {
+ 3 │     let f = (x) => x + 1
+   ·              ┬
+   ·              ╰── type cannot be inferred
+ 4 │ }
+   ╰────
   help: add a type annotation: (x: Type) => ...

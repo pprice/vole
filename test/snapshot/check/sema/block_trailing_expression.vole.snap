@@ -1,75 +1,75 @@
 [stdout]
 
 [stderr]
-  x [E2100]: block expressions cannot have trailing expressions
-   ,-[<path>/block_trailing_expression.vole:6:13]
- 5 |     // Error: if block with trailing expression assigned to variable
- 6 |     let x = if true { 5 } else { 0 }
-   :             ^^^^^^|^^^^^^
-   :                   `-- trailing expression not allowed in block
- 7 | 
-   `----
+  × [E2100]: block expressions cannot have trailing expressions
+   ╭─[<path>/block_trailing_expression.vole:6:13]
+ 5 │     // Error: if block with trailing expression assigned to variable
+ 6 │     let x = if true { 5 } else { 0 }
+   ·             ──────┬──────
+   ·                   ╰── trailing expression not allowed in block
+ 7 │ 
+   ╰────
   help: use explicit `return` in functions, or use `when`/`match` for conditional values
-  x [E2100]: block expressions cannot have trailing expressions
-   ,-[<path>/block_trailing_expression.vole:6:13]
- 5 |     // Error: if block with trailing expression assigned to variable
- 6 |     let x = if true { 5 } else { 0 }
-   :             ^^^^^^^^^^^^|^^^^^^^^^^^
-   :                         `-- trailing expression not allowed in block
- 7 | 
-   `----
+  × [E2100]: block expressions cannot have trailing expressions
+   ╭─[<path>/block_trailing_expression.vole:6:13]
+ 5 │     // Error: if block with trailing expression assigned to variable
+ 6 │     let x = if true { 5 } else { 0 }
+   ·             ────────────┬───────────
+   ·                         ╰── trailing expression not allowed in block
+ 7 │ 
+   ╰────
   help: use explicit `return` in functions, or use `when`/`match` for conditional values
-  x [E2099]: `if` expressions cannot be used as values
-   ,-[<path>/block_trailing_expression.vole:6:13]
- 5 |     // Error: if block with trailing expression assigned to variable
- 6 |     let x = if true { 5 } else { 0 }
-   :             ^^^^^^^^^^^^|^^^^^^^^^^^
-   :                         `-- `if` is a statement, not an expression
- 7 | 
-   `----
+  × [E2099]: `if` expressions cannot be used as values
+   ╭─[<path>/block_trailing_expression.vole:6:13]
+ 5 │     // Error: if block with trailing expression assigned to variable
+ 6 │     let x = if true { 5 } else { 0 }
+   ·             ────────────┬───────────
+   ·                         ╰── `if` is a statement, not an expression
+ 7 │ 
+   ╰────
   help: use `when` for conditional expressions: when { cond => value, _ => other }
-  x [E2040]: cannot use return value of void function
-   ,-[<path>/block_trailing_expression.vole:6:13]
- 5 |     // Error: if block with trailing expression assigned to variable
- 6 |     let x = if true { 5 } else { 0 }
-   :             ^^^^^^^^^^^^|^^^^^^^^^^^
-   :                         `-- void function called here
- 7 | 
-   `----
+  × [E2040]: cannot use return value of void function
+   ╭─[<path>/block_trailing_expression.vole:6:13]
+ 5 │     // Error: if block with trailing expression assigned to variable
+ 6 │     let x = if true { 5 } else { 0 }
+   ·             ────────────┬───────────
+   ·                         ╰── void function called here
+ 7 │ 
+   ╰────
   help: void functions don't return a usable value
-  x [E2100]: block expressions cannot have trailing expressions
-    ,-[<path>/block_trailing_expression.vole:9:13]
-  8 |     // Error: nested if/else with trailing expressions
-  9 |     let y = if true { 100 } else { 200 }
-    :             ^^^^^^^|^^^^^^^
-    :                    `-- trailing expression not allowed in block
- 10 | }
-    `----
+  × [E2100]: block expressions cannot have trailing expressions
+    ╭─[<path>/block_trailing_expression.vole:9:13]
+  8 │     // Error: nested if/else with trailing expressions
+  9 │     let y = if true { 100 } else { 200 }
+    ·             ───────┬───────
+    ·                    ╰── trailing expression not allowed in block
+ 10 │ }
+    ╰────
   help: use explicit `return` in functions, or use `when`/`match` for conditional values
-  x [E2100]: block expressions cannot have trailing expressions
-    ,-[<path>/block_trailing_expression.vole:9:13]
-  8 |     // Error: nested if/else with trailing expressions
-  9 |     let y = if true { 100 } else { 200 }
-    :             ^^^^^^^^^^^^^^|^^^^^^^^^^^^^
-    :                           `-- trailing expression not allowed in block
- 10 | }
-    `----
+  × [E2100]: block expressions cannot have trailing expressions
+    ╭─[<path>/block_trailing_expression.vole:9:13]
+  8 │     // Error: nested if/else with trailing expressions
+  9 │     let y = if true { 100 } else { 200 }
+    ·             ──────────────┬─────────────
+    ·                           ╰── trailing expression not allowed in block
+ 10 │ }
+    ╰────
   help: use explicit `return` in functions, or use `when`/`match` for conditional values
-  x [E2099]: `if` expressions cannot be used as values
-    ,-[<path>/block_trailing_expression.vole:9:13]
-  8 |     // Error: nested if/else with trailing expressions
-  9 |     let y = if true { 100 } else { 200 }
-    :             ^^^^^^^^^^^^^^|^^^^^^^^^^^^^
-    :                           `-- `if` is a statement, not an expression
- 10 | }
-    `----
+  × [E2099]: `if` expressions cannot be used as values
+    ╭─[<path>/block_trailing_expression.vole:9:13]
+  8 │     // Error: nested if/else with trailing expressions
+  9 │     let y = if true { 100 } else { 200 }
+    ·             ──────────────┬─────────────
+    ·                           ╰── `if` is a statement, not an expression
+ 10 │ }
+    ╰────
   help: use `when` for conditional expressions: when { cond => value, _ => other }
-  x [E2040]: cannot use return value of void function
-    ,-[<path>/block_trailing_expression.vole:9:13]
-  8 |     // Error: nested if/else with trailing expressions
-  9 |     let y = if true { 100 } else { 200 }
-    :             ^^^^^^^^^^^^^^|^^^^^^^^^^^^^
-    :                           `-- void function called here
- 10 | }
-    `----
+  × [E2040]: cannot use return value of void function
+    ╭─[<path>/block_trailing_expression.vole:9:13]
+  8 │     // Error: nested if/else with trailing expressions
+  9 │     let y = if true { 100 } else { 200 }
+    ·             ──────────────┬─────────────
+    ·                           ╰── void function called here
+ 10 │ }
+    ╰────
   help: void functions don't return a usable value

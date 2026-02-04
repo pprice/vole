@@ -1,11 +1,11 @@
 [stdout]
 
 [stderr]
-  x [E2001]: expected i8, found integer literal
-   ,-[<path>/literal_out_of_range_i8.vole:2:17]
- 1 | func main() {
- 2 |     let x: i8 = 200
-   :                 ^|^
-   :                  `-- type mismatch
- 3 | }
-   `----
+  × [E2001]: expected i8, found integer literal
+   ╭─[<path>/literal_out_of_range_i8.vole:2:17]
+ 1 │ func main() {
+ 2 │     let x: i8 = 200
+   ·                 ─┬─
+   ·                  ╰── type mismatch
+ 3 │ }
+   ╰────

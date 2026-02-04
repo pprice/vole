@@ -233,10 +233,24 @@ pub fn render_to_string(report: &dyn Diagnostic) -> String {
     output
 }
 
-/// Render to any Write impl.
+/// Render to any Write impl (ASCII, for snapshots).
 pub fn render_to_writer<W: IoWrite>(report: &dyn Diagnostic, mut writer: W) -> std::io::Result<()> {
     let output = render_to_string(report);
     writer.write_all(output.as_bytes())
+}
+
+/// Render to any Write impl with terminal formatting (unicode + colors).
+pub fn render_to_writer_terminal<W: IoWrite>(
+    report: &dyn Diagnostic,
+    mut writer: W,
+) -> std::io::Result<()> {
+    let handler = terminal_handler();
+    let wrapped = InlineCodeDiagnostic::new(report);
+    let mut output = String::new();
+    if handler.render_report(&mut output, &wrapped).is_ok() {
+        writer.write_all(output.as_bytes())?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

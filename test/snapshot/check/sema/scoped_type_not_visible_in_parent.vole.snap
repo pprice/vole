@@ -1,12 +1,12 @@
 [stdout]
 
 [stderr]
-  x [E2020]: unknown type 'ScopedOnly'
-    ,-[<path>/scoped_type_not_visible_in_parent.vole:14:13]
- 13 | func main() {
- 14 |     let s = ScopedOnly { value: 42 }
-    :             ^^^^^^^^^^^^|^^^^^^^^^^^
-    :                         `-- not a known type
- 15 | }
-    `----
+  × [E2020]: unknown type 'ScopedOnly'
+    ╭─[<path>/scoped_type_not_visible_in_parent.vole:14:13]
+ 13 │ func main() {
+ 14 │     let s = ScopedOnly { value: 42 }
+    ·             ────────────┬───────────
+    ·                         ╰── not a known type
+ 15 │ }
+    ╰────
   help: type not found

@@ -1,11 +1,11 @@
 [stdout]
 
 [stderr]
-  x [E2074]: type argument for 'T' does not satisfy constraint 'Describable'
-    ,-[<path>/generic_specialization_constraint_violation.vole:24:9]
- 23 |     let b = Box { value: "hello" }
- 24 |     _ = describe_it(b)
-    :         ^^^^^^^|^^^^^^
-    :                `-- found 'main::Box<string>'
- 25 | }
-    `----
+  × [E2074]: type argument for 'T' does not satisfy constraint 'Describable'
+    ╭─[<path>/generic_specialization_constraint_violation.vole:24:9]
+ 23 │     let b = Box { value: "hello" }
+ 24 │     _ = describe_it(b)
+    ·         ───────┬──────
+    ·                ╰── found 'main::Box<string>'
+ 25 │ }
+    ╰────

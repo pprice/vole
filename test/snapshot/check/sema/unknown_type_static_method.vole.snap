@@ -1,13 +1,13 @@
 [stdout]
 
 [stderr]
-  x [E2020]: unknown type 'BadType'
-   ,-[<path>/unknown_type_static_method.vole:5:9]
- 4 |         statics {
- 5 | ,->         func create() -> BadType {
- 6 | |               return 0
- 7 | |->         }
-   : `---- not a known type
- 8 |         }
-   `----
+  × [E2020]: unknown type 'BadType'
+   ╭─[<path>/unknown_type_static_method.vole:5:9]
+ 4 │         statics {
+ 5 │ ╭─▶         func create() -> BadType {
+ 6 │ │               return 0
+ 7 │ ├─▶         }
+   · ╰──── not a known type
+ 8 │         }
+   ╰────
   help: type not found
