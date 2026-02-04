@@ -763,13 +763,30 @@ fn plan_implement_blocks<R: Rng>(
         let block_count = rng
             .gen_range(config.implement_blocks_per_module.0..=config.implement_blocks_per_module.1);
 
-        for _ in 0..block_count {
+        // Track (interface_id, class_id) pairs that have been used to avoid duplicates
+        let mut used_pairs: std::collections::HashSet<(SymbolId, SymbolId)> =
+            std::collections::HashSet::new();
+
+        // Limit attempts to avoid infinite loop when all combinations are exhausted
+        let max_attempts = block_count * 3;
+        let mut attempts = 0;
+        let mut created = 0;
+
+        while created < block_count && attempts < max_attempts {
+            attempts += 1;
+
             // Pick a random interface and class from this module
             let iface_idx = rng.gen_range(0..interfaces.len());
             let class_idx = rng.gen_range(0..classes.len());
 
             let (iface_id, ref iface_methods) = interfaces[iface_idx];
             let class_id = classes[class_idx];
+
+            // Skip if this pair has already been used
+            if used_pairs.contains(&(iface_id, class_id)) {
+                continue;
+            }
+            used_pairs.insert((iface_id, class_id));
 
             // Generate method implementations
             let methods: Vec<MethodInfo> = iface_methods
@@ -792,6 +809,7 @@ fn plan_implement_blocks<R: Rng>(
 
             if let Some(module) = table.get_module_mut(module_id) {
                 module.add_symbol(impl_name, kind);
+                created += 1;
             }
         }
     }
@@ -1099,5 +1117,37 @@ mod tests {
             "Expected at least 2 imports with cross-layer enabled, got {}",
             imports_count
         );
+    }
+
+    #[test]
+    fn plan_no_duplicate_implement_blocks() {
+        use crate::profile::get_profile;
+
+        // Use the problematic seed that exposed duplicate implement blocks
+        let profile = get_profile("full").unwrap();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(1770226963014480876);
+
+        let table = plan(&mut rng, &profile.plan);
+
+        // Check for duplicate (interface, class) pairs in implement blocks
+        for module in table.modules() {
+            let mut seen_pairs: std::collections::HashSet<(
+                (ModuleId, SymbolId),
+                (ModuleId, SymbolId),
+            )> = std::collections::HashSet::new();
+
+            for symbol in module.implement_blocks() {
+                if let SymbolKind::ImplementBlock(ref info) = symbol.kind {
+                    let pair = (info.interface, info.target_type);
+                    assert!(
+                        seen_pairs.insert(pair),
+                        "Duplicate implement block found: {:?} for {:?} in module {}",
+                        info.interface,
+                        info.target_type,
+                        module.name
+                    );
+                }
+            }
+        }
     }
 }
