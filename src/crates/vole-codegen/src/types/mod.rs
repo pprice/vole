@@ -22,6 +22,7 @@ pub(crate) use conversions::{
     FALLIBLE_PAYLOAD_OFFSET, FALLIBLE_SUCCESS_TAG, MethodInfo, TypeMetadata, array_element_tag_id,
     convert_to_type, fallible_error_tag_by_id, function_name_id_with_interner,
     load_fallible_payload, load_fallible_tag, method_name_id_by_str, method_name_id_with_interner,
-    module_name_id, native_type_to_cranelift, tuple_layout_id, type_id_size, type_id_to_cranelift,
-    type_metadata_by_name_id, unknown_type_tag, value_to_word, word_to_value_type_id,
+    module_name_id, native_type_to_cranelift, try_type_id_to_cranelift, tuple_layout_id,
+    type_id_size, type_id_to_cranelift, type_metadata_by_name_id, unknown_type_tag, value_to_word,
+    word_to_value_type_id,
 };

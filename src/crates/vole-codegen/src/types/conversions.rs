@@ -224,7 +224,20 @@ pub(crate) fn function_name_id_with_interner(
 }
 
 /// Convert a TypeId to a Cranelift type.
+///
+/// # Panics
+///
+/// Panics if the TypeId is INVALID, which indicates a sema bug where an unknown
+/// type was not properly reported as an error.
 pub(crate) fn type_id_to_cranelift(ty: TypeId, arena: &TypeArena, pointer_type: Type) -> Type {
+    // Defensive check: INVALID types should never reach codegen.
+    // If they do, it means sema failed to report an error for an unknown type.
+    if ty.is_invalid() {
+        panic!(
+            "internal error: received invalid type ID (this is a sema bug - \
+             unknown types should be reported as errors before reaching codegen)"
+        );
+    }
     // Sentinel types are always represented as i8 (zero-field struct tag),
     // regardless of whether they've been rebound to SemaType::Struct by the prelude.
     if arena.is_sentinel(ty) {
@@ -265,13 +278,45 @@ pub(crate) fn type_id_to_cranelift(ty: TypeId, arena: &TypeArena, pointer_type: 
     }
 }
 
+/// Convert a TypeId to a Cranelift type, returning an error if the type is INVALID.
+///
+/// This is the fallible version of `type_id_to_cranelift` for use in entry points
+/// where a graceful error is preferred over a panic.
+#[allow(dead_code)] // Defensive utility - available for use when graceful errors are preferred
+pub(crate) fn try_type_id_to_cranelift(
+    ty: TypeId,
+    arena: &TypeArena,
+    pointer_type: Type,
+) -> CodegenResult<Type> {
+    // Defensive check: INVALID types should never reach codegen.
+    if ty.is_invalid() {
+        return Err(CodegenError::internal_with_context(
+            "received invalid type ID (this is a sema bug)",
+            "unknown types should be reported as errors before reaching codegen",
+        ));
+    }
+    Ok(type_id_to_cranelift(ty, arena, pointer_type))
+}
+
 /// Get the size in bytes for a TypeId.
+///
+/// # Panics
+///
+/// Panics if the TypeId is INVALID, which indicates a sema bug where an unknown
+/// type was not properly reported as an error.
 pub(crate) fn type_id_size(
     ty: TypeId,
     pointer_type: Type,
     entity_registry: &EntityRegistry,
     arena: &TypeArena,
 ) -> u32 {
+    // Defensive check: INVALID types should never reach codegen.
+    if ty.is_invalid() {
+        panic!(
+            "internal error: received invalid type ID in type_id_size (this is a sema bug - \
+             unknown types should be reported as errors before reaching codegen)"
+        );
+    }
     // Sentinel types are zero-sized,
     // regardless of whether they've been rebound to SemaType::Struct by the prelude.
     if arena.is_sentinel(ty) {
