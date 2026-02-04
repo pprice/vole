@@ -23,6 +23,8 @@ pub struct StmtConfig {
     pub while_probability: f64,
     /// Probability of generating a for loop.
     pub for_probability: f64,
+    /// Probability of generating break/continue inside loops.
+    pub break_continue_probability: f64,
 }
 
 impl Default for StmtConfig {
@@ -34,6 +36,7 @@ impl Default for StmtConfig {
             if_probability: 0.2,
             while_probability: 0.1,
             for_probability: 0.15,
+            break_continue_probability: 0.12,
         }
     }
 }
@@ -169,6 +172,11 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // At max depth, only generate simple statements
         if depth >= self.config.max_depth {
             return self.generate_let_statement(ctx);
+        }
+
+        // Inside loops, occasionally generate break or continue
+        if ctx.in_loop && self.rng.gen_bool(self.config.break_continue_probability) {
+            return self.generate_break_continue(ctx);
         }
 
         let choice: f64 = self.rng.gen_range(0.0..1.0);
@@ -334,6 +342,31 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         let body_block = self.format_block(&body_stmts);
         format!("for {} in {} {}", iter_name, range, body_block)
+    }
+
+    /// Generate a break or continue statement wrapped in a conditional.
+    ///
+    /// Wraps in `if <condition> { break }` to avoid always exiting on
+    /// the first iteration. Only called when `ctx.in_loop` is true.
+    fn generate_break_continue(&mut self, ctx: &mut StmtContext) -> String {
+        let keyword = if self.rng.gen_bool(0.5) {
+            "break"
+        } else {
+            "continue"
+        };
+
+        let expr_ctx = ctx.to_expr_context();
+        let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+        let cond = expr_gen.generate(&TypeInfo::Primitive(PrimitiveType::Bool), &expr_ctx, 0);
+
+        let indent = "    ".repeat(self.indent + 1);
+        format!(
+            "if {} {{\n{}{}\n{}}}",
+            cond,
+            indent,
+            keyword,
+            "    ".repeat(self.indent)
+        )
     }
 
     /// Generate a block of statements.

@@ -124,6 +124,7 @@ fn minimal_profile() -> Profile {
             if_probability: 0.0,
             while_probability: 0.0,
             for_probability: 0.0,
+            break_continue_probability: 0.0,
         },
     };
 
@@ -201,6 +202,7 @@ fn full_profile() -> Profile {
             if_probability: 0.3,
             while_probability: 0.15,
             for_probability: 0.2,
+            break_continue_probability: 0.12,
         },
     };
 
@@ -273,6 +275,7 @@ fn deep_nesting_profile() -> Profile {
             while_probability: 0.2,
             // for loops add block depth
             for_probability: 0.2,
+            break_continue_probability: 0.12,
         },
     };
 
@@ -350,6 +353,7 @@ fn wide_types_profile() -> Profile {
             if_probability: 0.2,
             while_probability: 0.1,
             for_probability: 0.1,
+            break_continue_probability: 0.12,
         },
     };
 
@@ -420,6 +424,7 @@ fn many_modules_profile() -> Profile {
             if_probability: 0.1,
             while_probability: 0.0,
             for_probability: 0.0,
+            break_continue_probability: 0.0,
         },
     };
 
@@ -501,6 +506,7 @@ fn generics_heavy_profile() -> Profile {
             if_probability: 0.2,
             while_probability: 0.1,
             for_probability: 0.15,
+            break_continue_probability: 0.12,
         },
     };
 
