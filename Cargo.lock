@@ -1741,6 +1741,7 @@ dependencies = [
  "serde_json",
  "vergen",
  "vergen-gitcl",
+ "vole-fmt",
 ]
 
 [[package]]

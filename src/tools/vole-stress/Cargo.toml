@@ -9,6 +9,7 @@ clap = { version = "4", features = ["derive"] }
 rand = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+vole-fmt = { path = "../../crates/vole-fmt" }
 
 [build-dependencies]
 vergen = { version = "9", features = ["build", "cargo"] }
