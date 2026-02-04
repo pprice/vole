@@ -36,7 +36,7 @@ impl std::error::Error for UnknownProfileError {}
 
 /// Returns a list of available profile names.
 pub fn available_profiles() -> Vec<&'static str> {
-    vec!["minimal", "full"]
+    vec!["minimal", "full", "deep-nesting"]
 }
 
 /// Get a profile by name.
@@ -46,6 +46,7 @@ pub fn get_profile(name: &str) -> Result<Profile, UnknownProfileError> {
     match name {
         "minimal" => Ok(minimal_profile()),
         "full" => Ok(full_profile()),
+        "deep-nesting" => Ok(deep_nesting_profile()),
         _ => Err(UnknownProfileError(name.to_string())),
     }
 }
@@ -130,6 +131,78 @@ fn full_profile() -> Profile {
     }
 }
 
+/// Deep-nesting profile - stress parser stack and AST depth.
+///
+/// This profile generates code with extreme nesting to test:
+/// - Parser recursion limits and stack usage
+/// - AST traversal efficiency in all compiler phases
+/// - Memory usage with deeply nested structures
+///
+/// Target: expressions and statements nested 100-500 levels deep.
+fn deep_nesting_profile() -> Profile {
+    let plan = PlanConfig {
+        // Small module structure - focus is on depth, not breadth
+        layers: 1,
+        modules_per_layer: 1,
+        // Few declarations, but each will have deeply nested bodies
+        classes_per_module: (0, 1),
+        interfaces_per_module: (0, 0),
+        errors_per_module: (0, 0),
+        functions_per_module: (3, 5),
+        globals_per_module: (1, 2),
+        // Function parameters to provide variables for nested expressions
+        params_per_function: (2, 4),
+        // No generics - keep focus on nesting
+        type_params_per_class: (0, 0),
+        type_params_per_interface: (0, 0),
+        type_params_per_function: (0, 0),
+        constraints_per_type_param: (0, 0),
+        // No interface relationships
+        interface_extends_probability: 0.0,
+        implement_blocks_per_module: (0, 0),
+        // Single module, no imports
+        cross_layer_import_probability: 0.0,
+        enable_diamond_dependencies: false,
+        // Minimal class structure
+        fields_per_class: (1, 2),
+        methods_per_class: (1, 2),
+        methods_per_interface: (0, 0),
+        fields_per_error: (0, 0),
+    };
+
+    let emit = EmitConfig {
+        stmt_config: StmtConfig {
+            expr_config: ExprConfig {
+                // Very deep expression nesting (100-500 levels target)
+                // Each level can spawn sub-expressions, so effective depth compounds
+                max_depth: 150,
+                // High probability of binary expressions for deep a + (b + (c + ...))
+                binary_probability: 0.8,
+                // when expressions add depth with multiple arms
+                when_probability: 0.3,
+                // match expressions for deep pattern matching
+                match_probability: 0.2,
+                // if expressions for deep conditional chains
+                if_expr_probability: 0.3,
+                // lambda expressions for deep captures
+                lambda_probability: 0.15,
+            },
+            // Deep statement nesting for { { { ... } } }
+            max_depth: 100,
+            // More statements per block to compound nesting
+            statements_per_block: (2, 4),
+            // High probability of control flow for deep if-else chains
+            if_probability: 0.6,
+            // while loops add block depth
+            while_probability: 0.2,
+            // for loops add block depth
+            for_probability: 0.2,
+        },
+    };
+
+    Profile { plan, emit }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -166,5 +239,45 @@ mod tests {
         let profiles = available_profiles();
         assert!(profiles.contains(&"minimal"));
         assert!(profiles.contains(&"full"));
+        assert!(profiles.contains(&"deep-nesting"));
+    }
+
+    #[test]
+    fn deep_nesting_profile_exists() {
+        let profile = get_profile("deep-nesting").expect("deep-nesting profile should exist");
+        // Verify deep nesting characteristics
+        assert_eq!(profile.plan.layers, 1);
+        assert_eq!(profile.plan.modules_per_layer, 1);
+        // Deep expression nesting
+        assert!(
+            profile.emit.stmt_config.expr_config.max_depth >= 100,
+            "expression max_depth should be >= 100 for deep nesting"
+        );
+        // Deep statement nesting
+        assert!(
+            profile.emit.stmt_config.max_depth >= 50,
+            "statement max_depth should be >= 50 for deep nesting"
+        );
+        // High binary probability for deep a + (b + (c + ...))
+        assert!(
+            profile.emit.stmt_config.expr_config.binary_probability >= 0.5,
+            "binary_probability should be high for deep nesting"
+        );
+        // High if probability for deep if-else chains
+        assert!(
+            profile.emit.stmt_config.if_probability >= 0.5,
+            "if_probability should be high for deep nesting"
+        );
+    }
+
+    #[test]
+    fn unknown_profile_error_includes_deep_nesting() {
+        let result = get_profile("nonexistent");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("deep-nesting"),
+            "error message should mention deep-nesting profile"
+        );
     }
 }
