@@ -37,6 +37,8 @@ pub enum TypeInfo {
     Array(Box<TypeInfo>),
     /// Void type (no return value)
     Void,
+    /// A type parameter (e.g., T in Box<T>)
+    TypeParam(String),
 }
 
 /// Primitive types in Vole.
@@ -118,8 +120,19 @@ impl TypeInfo {
                 .join(" | "),
             TypeInfo::Array(elem) => format!("[{}]", elem.to_vole_syntax(table)),
             TypeInfo::Void => "void".to_string(),
+            TypeInfo::TypeParam(name) => name.clone(),
         }
     }
+}
+
+/// A type parameter with optional constraints.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeParam {
+    /// The name of the type parameter (e.g., "T", "A", "K").
+    pub name: String,
+    /// Constraint interfaces that the type parameter must implement.
+    /// Multiple constraints are combined with + (e.g., T: Hashable + Eq).
+    pub constraints: Vec<(ModuleId, SymbolId)>,
 }
 
 /// Kind of symbol declaration.
@@ -135,11 +148,15 @@ pub enum SymbolKind {
     Function(FunctionInfo),
     /// A module-level global variable.
     Global(GlobalInfo),
+    /// A standalone implement block (implements interface for existing type).
+    ImplementBlock(ImplementBlockInfo),
 }
 
 /// Information about a class declaration.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClassInfo {
+    /// Type parameters for generic classes (e.g., T in Box<T>).
+    pub type_params: Vec<TypeParam>,
     /// Fields of the class.
     pub fields: Vec<FieldInfo>,
     /// Methods of the class.
@@ -173,7 +190,22 @@ pub struct ParamInfo {
 /// Information about an interface declaration.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InterfaceInfo {
+    /// Type parameters for generic interfaces.
+    pub type_params: Vec<TypeParam>,
+    /// Parent interfaces this interface extends.
+    pub extends: Vec<(ModuleId, SymbolId)>,
     /// Method signatures required by this interface.
+    pub methods: Vec<MethodInfo>,
+}
+
+/// Information about a standalone implement block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImplementBlockInfo {
+    /// The interface being implemented.
+    pub interface: (ModuleId, SymbolId),
+    /// The type the interface is being implemented for.
+    pub target_type: (ModuleId, SymbolId),
+    /// Method implementations.
     pub methods: Vec<MethodInfo>,
 }
 
@@ -187,6 +219,8 @@ pub struct ErrorInfo {
 /// Information about a function declaration.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunctionInfo {
+    /// Type parameters for generic functions.
+    pub type_params: Vec<TypeParam>,
     pub params: Vec<ParamInfo>,
     pub return_type: TypeInfo,
 }
@@ -303,6 +337,13 @@ impl ModuleSymbols {
             .iter()
             .filter(|s| matches!(s.kind, SymbolKind::Global(_)))
     }
+
+    /// Get all implement blocks in this module.
+    pub fn implement_blocks(&self) -> impl Iterator<Item = &Symbol> {
+        self.symbols
+            .iter()
+            .filter(|s| matches!(s.kind, SymbolKind::ImplementBlock(_)))
+    }
 }
 
 /// The complete symbol table tracking all modules and their symbols.
@@ -418,6 +459,7 @@ mod tests {
         let func_id = module.add_symbol(
             "my_func".to_string(),
             SymbolKind::Function(FunctionInfo {
+                type_params: vec![],
                 params: vec![],
                 return_type: TypeInfo::Primitive(PrimitiveType::I64),
             }),
@@ -456,6 +498,7 @@ mod tests {
         module.add_symbol(
             "MyClass".to_string(),
             SymbolKind::Class(ClassInfo {
+                type_params: vec![],
                 fields: vec![],
                 methods: vec![],
                 implements: vec![],
@@ -465,6 +508,7 @@ mod tests {
         module.add_symbol(
             "my_func".to_string(),
             SymbolKind::Function(FunctionInfo {
+                type_params: vec![],
                 params: vec![],
                 return_type: TypeInfo::Void,
             }),
@@ -472,7 +516,11 @@ mod tests {
 
         module.add_symbol(
             "MyInterface".to_string(),
-            SymbolKind::Interface(InterfaceInfo { methods: vec![] }),
+            SymbolKind::Interface(InterfaceInfo {
+                type_params: vec![],
+                extends: vec![],
+                methods: vec![],
+            }),
         );
 
         assert_eq!(module.classes().count(), 1);

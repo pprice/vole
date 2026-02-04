@@ -10,8 +10,8 @@ use std::io;
 use std::path::Path;
 
 use crate::symbols::{
-    ClassInfo, FieldInfo, MethodInfo, ModuleSymbols, ParamInfo, PrimitiveType, Symbol, SymbolKind,
-    SymbolTable, TypeInfo,
+    ClassInfo, FieldInfo, FunctionInfo, ImplementBlockInfo, InterfaceInfo, MethodInfo,
+    ModuleSymbols, ParamInfo, PrimitiveType, Symbol, SymbolKind, SymbolTable, TypeInfo, TypeParam,
 };
 
 /// Configuration for the emitter phase.
@@ -119,6 +119,11 @@ impl<'a, R: Rng> EmitContext<'a, R> {
         for symbol in self.module.functions() {
             self.emit_function(symbol);
         }
+
+        // Emit implement blocks
+        for symbol in self.module.implement_blocks() {
+            self.emit_implement_block(symbol);
+        }
     }
 
     fn emit_imports(&mut self) {
@@ -152,7 +157,8 @@ impl<'a, R: Rng> EmitContext<'a, R> {
     fn emit_interface(&mut self, symbol: &Symbol) {
         if let SymbolKind::Interface(ref info) = symbol.kind {
             self.emit_line("");
-            self.emit_line(&format!("interface {} {{", symbol.name));
+            let header = self.format_interface_header(&symbol.name, info);
+            self.emit_line(&format!("{} {{", header));
             self.indent += 1;
             for method in &info.methods {
                 self.emit_method_signature(method);
@@ -160,6 +166,37 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             self.indent -= 1;
             self.emit_line("}");
         }
+    }
+
+    fn format_interface_header(&self, name: &str, info: &InterfaceInfo) -> String {
+        let mut header = String::from("interface ");
+        header.push_str(name);
+
+        // Add type parameters
+        if !info.type_params.is_empty() {
+            header.push('<');
+            header.push_str(&self.format_type_params(&info.type_params));
+            header.push('>');
+        }
+
+        // Add extends clause
+        if !info.extends.is_empty() {
+            let parent_names: Vec<String> = info
+                .extends
+                .iter()
+                .filter_map(|(mod_id, sym_id)| {
+                    self.table
+                        .get_symbol(*mod_id, *sym_id)
+                        .map(|s| s.name.clone())
+                })
+                .collect();
+            if !parent_names.is_empty() {
+                header.push_str(" extends ");
+                header.push_str(&parent_names.join(", "));
+            }
+        }
+
+        header
     }
 
     fn emit_error(&mut self, symbol: &Symbol) {
@@ -204,7 +241,15 @@ impl<'a, R: Rng> EmitContext<'a, R> {
     }
 
     fn emit_class_header(&mut self, symbol: &Symbol, info: &ClassInfo) {
-        let mut header = format!("class {}", symbol.name);
+        let mut header = String::from("class ");
+        header.push_str(&symbol.name);
+
+        // Add type parameters
+        if !info.type_params.is_empty() {
+            header.push('<');
+            header.push_str(&self.format_type_params(&info.type_params));
+            header.push('>');
+        }
 
         if !info.implements.is_empty() {
             let iface_names: Vec<String> = info
@@ -257,17 +302,32 @@ impl<'a, R: Rng> EmitContext<'a, R> {
     fn emit_function(&mut self, symbol: &Symbol) {
         if let SymbolKind::Function(ref info) = symbol.kind {
             self.emit_line("");
-            let params = self.format_params(&info.params);
-            let return_type = self.format_return_type(&info.return_type);
-            self.emit_line(&format!(
-                "func {}({}){} {{",
-                symbol.name, params, return_type
-            ));
+            let header = self.format_function_header(&symbol.name, info);
+            self.emit_line(&format!("{} {{", header));
             self.indent += 1;
             self.emit_function_body(&info.return_type, &info.params);
             self.indent -= 1;
             self.emit_line("}");
         }
+    }
+
+    fn format_function_header(&self, name: &str, info: &FunctionInfo) -> String {
+        let mut header = String::from("func ");
+        header.push_str(name);
+
+        // Add type parameters
+        if !info.type_params.is_empty() {
+            header.push('<');
+            header.push_str(&self.format_type_params(&info.type_params));
+            header.push('>');
+        }
+
+        header.push('(');
+        header.push_str(&self.format_params(&info.params));
+        header.push(')');
+        header.push_str(&self.format_return_type(&info.return_type));
+
+        header
     }
 
     fn emit_function_body(&mut self, return_type: &TypeInfo, params: &[ParamInfo]) {
@@ -307,6 +367,61 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             TypeInfo::Void => String::new(),
             _ => format!(" -> {}", return_type.to_vole_syntax(self.table)),
         }
+    }
+
+    fn format_type_params(&self, type_params: &[TypeParam]) -> String {
+        type_params
+            .iter()
+            .map(|tp| {
+                if tp.constraints.is_empty() {
+                    tp.name.clone()
+                } else {
+                    let constraint_names: Vec<String> = tp
+                        .constraints
+                        .iter()
+                        .filter_map(|(mod_id, sym_id)| {
+                            self.table
+                                .get_symbol(*mod_id, *sym_id)
+                                .map(|s| s.name.clone())
+                        })
+                        .collect();
+                    format!("{}: {}", tp.name, constraint_names.join(" + "))
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    fn emit_implement_block(&mut self, symbol: &Symbol) {
+        if let SymbolKind::ImplementBlock(ref info) = symbol.kind {
+            self.emit_implement_block_inner(info);
+        }
+    }
+
+    fn emit_implement_block_inner(&mut self, info: &ImplementBlockInfo) {
+        // Get interface and target type names
+        let iface_name = self
+            .table
+            .get_symbol(info.interface.0, info.interface.1)
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| "UnknownInterface".to_string());
+
+        let target_name = self
+            .table
+            .get_symbol(info.target_type.0, info.target_type.1)
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| "UnknownType".to_string());
+
+        self.emit_line("");
+        self.emit_line(&format!("implement {} for {} {{", iface_name, target_name));
+        self.indent += 1;
+
+        for method in &info.methods {
+            self.emit_method(method);
+        }
+
+        self.indent -= 1;
+        self.emit_line("}");
     }
 
     fn literal_for_type(&mut self, type_info: &TypeInfo) -> String {
