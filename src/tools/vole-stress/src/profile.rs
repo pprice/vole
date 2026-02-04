@@ -130,15 +130,81 @@ fn minimal_profile() -> Profile {
     Profile { plan, emit }
 }
 
-/// Full profile - comprehensive codebase with all language features.
+/// Full profile - comprehensive syntax coverage at moderate size.
 ///
-/// This is the default profile for stress testing the compiler with
-/// a realistic, complex codebase.
+/// Target characteristics:
+/// - 3 layers, 3-5 modules per layer (~9-15 modules total)
+/// - All declaration types: class, interface, implement, error, globals, functions
+/// - All expression types exercised with moderate probabilities
+/// - All statement types exercised with moderate probabilities
+/// - Generics with constraints on classes, interfaces, and functions
+/// - Lambdas with captures
+/// - Match and when expressions
+/// - Target: ~2000-5000 lines, exercises all compiler paths
+///
+/// Note: Struct and type alias declarations are not yet in the vole-stress
+/// symbol system. When added, this profile should include them.
 fn full_profile() -> Profile {
-    Profile {
-        plan: PlanConfig::default(),
-        emit: EmitConfig::default(),
-    }
+    let plan = PlanConfig {
+        // 3 layers with 3-5 modules per layer (using 4 as midpoint)
+        layers: 3,
+        modules_per_layer: 4,
+
+        // All declaration types with moderate counts
+        classes_per_module: (2, 4),
+        interfaces_per_module: (1, 3),
+        errors_per_module: (1, 2),
+        functions_per_module: (3, 6),
+        globals_per_module: (1, 3),
+
+        // Class/interface structure for comprehensive testing
+        fields_per_class: (2, 5),
+        methods_per_class: (2, 4),
+        methods_per_interface: (2, 3),
+        fields_per_error: (1, 3),
+
+        // Function parameters
+        params_per_function: (1, 4),
+
+        // Generics with constraints (moderate, not extreme)
+        type_params_per_class: (0, 2),
+        type_params_per_interface: (0, 2),
+        type_params_per_function: (0, 2),
+        constraints_per_type_param: (0, 2),
+
+        // Interface relationships
+        interface_extends_probability: 0.4,
+        implement_blocks_per_module: (1, 2),
+
+        // Module imports
+        cross_layer_import_probability: 0.3,
+        enable_diamond_dependencies: true,
+    };
+
+    let emit = EmitConfig {
+        stmt_config: StmtConfig {
+            expr_config: ExprConfig {
+                // Moderate depth to generate non-trivial expressions
+                max_depth: 4,
+                // Higher probabilities to exercise all expression types
+                binary_probability: 0.5,
+                when_probability: 0.2,
+                match_probability: 0.15,
+                if_expr_probability: 0.2,
+                lambda_probability: 0.15, // Elevated for lambda coverage
+            },
+            // Moderate statement depth for nested control flow
+            max_depth: 3,
+            // Reasonable statements per block
+            statements_per_block: (2, 4),
+            // Higher probabilities for control flow coverage
+            if_probability: 0.3,
+            while_probability: 0.15,
+            for_probability: 0.2,
+        },
+    };
+
+    Profile { plan, emit }
 }
 
 /// Deep-nesting profile - stress parser stack and AST depth.
@@ -458,8 +524,83 @@ mod tests {
     #[test]
     fn full_profile_exists() {
         let profile = get_profile("full").expect("full profile should exist");
-        // Full should have multiple layers
-        assert!(profile.plan.layers >= 2);
+
+        // Verify ticket requirements: 3 layers, 3-5 modules per layer
+        assert_eq!(profile.plan.layers, 3, "full profile should have 3 layers");
+        assert!(
+            profile.plan.modules_per_layer >= 3 && profile.plan.modules_per_layer <= 5,
+            "full profile should have 3-5 modules per layer"
+        );
+
+        // All declaration types should be enabled (non-zero ranges)
+        assert!(
+            profile.plan.classes_per_module.1 > 0,
+            "full profile should generate classes"
+        );
+        assert!(
+            profile.plan.interfaces_per_module.1 > 0,
+            "full profile should generate interfaces"
+        );
+        assert!(
+            profile.plan.errors_per_module.1 > 0,
+            "full profile should generate errors"
+        );
+        assert!(
+            profile.plan.functions_per_module.1 > 0,
+            "full profile should generate functions"
+        );
+        assert!(
+            profile.plan.implement_blocks_per_module.1 > 0,
+            "full profile should generate implement blocks"
+        );
+
+        // Generics with constraints
+        assert!(
+            profile.plan.type_params_per_class.1 > 0,
+            "full profile should support generic classes"
+        );
+        assert!(
+            profile.plan.type_params_per_function.1 > 0,
+            "full profile should support generic functions"
+        );
+        assert!(
+            profile.plan.constraints_per_type_param.1 > 0,
+            "full profile should support type param constraints"
+        );
+
+        // All expression types exercised (non-zero probabilities)
+        let expr_cfg = &profile.emit.stmt_config.expr_config;
+        assert!(
+            expr_cfg.binary_probability > 0.0,
+            "full profile should generate binary expressions"
+        );
+        assert!(
+            expr_cfg.when_probability > 0.0,
+            "full profile should generate when expressions"
+        );
+        assert!(
+            expr_cfg.match_probability > 0.0,
+            "full profile should generate match expressions"
+        );
+        assert!(
+            expr_cfg.lambda_probability > 0.0,
+            "full profile should generate lambda expressions"
+        );
+
+        // All statement types exercised
+        let stmt_cfg = &profile.emit.stmt_config;
+        assert!(
+            stmt_cfg.if_probability > 0.0,
+            "full profile should generate if statements"
+        );
+        assert!(
+            stmt_cfg.while_probability > 0.0,
+            "full profile should generate while statements"
+        );
+        assert!(
+            stmt_cfg.for_probability > 0.0,
+            "full profile should generate for statements"
+        );
     }
 
     #[test]
