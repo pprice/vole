@@ -222,13 +222,17 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                         format!("(-{}{})", val, suffix)
                     }
                     5..=6 => {
-                        // when expression (no if expressions - they're statements in Vole)
+                        // Multi-arm when expression
                         self.generate_when_expr(&TypeInfo::Primitive(prim), ctx, depth)
                     }
                     7 => {
                         // Match expression
                         let ty = TypeInfo::Primitive(prim);
                         self.generate_match_expr(&ty, &ty, ctx, depth)
+                    }
+                    8 => {
+                        // Two-arm conditional (if-expression equivalent)
+                        self.generate_if_expr(&TypeInfo::Primitive(prim), ctx, depth)
                     }
                     _ => self.generate_simple(&TypeInfo::Primitive(prim), ctx),
                 }
@@ -254,19 +258,27 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                         let ty = TypeInfo::Primitive(prim);
                         self.generate_match_expr(&ty, &ty, ctx, depth)
                     }
+                    7 => {
+                        // Two-arm conditional (if-expression equivalent)
+                        self.generate_if_expr(&TypeInfo::Primitive(prim), ctx, depth)
+                    }
                     _ => self.generate_simple(&TypeInfo::Primitive(prim), ctx),
                 }
             }
             PrimitiveType::String => {
                 match choice {
                     0..=1 => {
-                        // when expression returning string (no if - it's a statement in Vole)
+                        // Multi-arm when expression returning string
                         self.generate_when_expr(&TypeInfo::Primitive(prim), ctx, depth)
                     }
                     2..=3 => {
                         // Match expression
                         let ty = TypeInfo::Primitive(prim);
                         self.generate_match_expr(&ty, &ty, ctx, depth)
+                    }
+                    4..=5 => {
+                        // Two-arm conditional (if-expression equivalent)
+                        self.generate_if_expr(&TypeInfo::Primitive(prim), ctx, depth)
                     }
                     _ => self.generate_simple(&TypeInfo::Primitive(prim), ctx),
                 }
@@ -331,14 +343,16 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         format!("({} {} {})", left, op, right)
     }
 
-    /// Generate an if expression.
-    #[allow(dead_code)]
+    /// Generate a conditional expression using when (Vole's if-expression equivalent).
+    ///
+    /// Produces a 2-arm when expression: `when { cond => then, _ => else }`.
+    /// This is distinct from generate_when_expr which produces 2-4 arms.
     fn generate_if_expr(&mut self, ty: &TypeInfo, ctx: &ExprContext, depth: usize) -> String {
         let cond = self.generate(&TypeInfo::Primitive(PrimitiveType::Bool), ctx, depth + 1);
         let then_expr = self.generate(ty, ctx, depth + 1);
         let else_expr = self.generate(ty, ctx, depth + 1);
 
-        format!("if {} {{ {} }} else {{ {} }}", cond, then_expr, else_expr)
+        format!("when {{ {} => {}, _ => {} }}", cond, then_expr, else_expr)
     }
 
     /// Generate a when expression.
