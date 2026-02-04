@@ -81,6 +81,8 @@ pub struct Implementation {
     pub target_type_args: Vec<TypeId>,
     /// Method bindings for this implementation
     pub method_bindings: Vec<MethodBinding>,
+    /// Span of the implement block that created this implementation (for error reporting)
+    pub span: Option<miette::SourceSpan>,
 }
 
 /// A type definition (interface, class, struct, etc.)

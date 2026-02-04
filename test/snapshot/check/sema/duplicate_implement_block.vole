@@ -1,0 +1,17 @@
+interface IFace {
+    func foo() -> i64
+}
+
+class Foo {}
+
+implement IFace for Foo {
+    func foo() -> i64 {
+        return 42
+    }
+}
+
+implement IFace for Foo {
+    func foo() -> i64 {
+        return 99
+    }
+}

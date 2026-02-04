@@ -1,0 +1,20 @@
+[stdout]
+
+[stderr]
+  × [E2104]: duplicate implementation of 'IFace' for 'Foo'
+    ╭─[<path>/duplicate_implement_block.vole:7:1]
+  6 │     
+  7 │ ╭─▶ implement IFace for Foo {
+  8 │ │       func foo() -> i64 {
+  9 │ │           return 42
+ 10 │ │       }
+ 11 │ ├─▶ }
+    · ╰──── 'IFace' already implemented here
+ 12 │     
+ 13 │ ╭─▶ implement IFace for Foo {
+ 14 │ │       func foo() -> i64 {
+ 15 │ │           return 99
+ 16 │ │       }
+ 17 │ ├─▶ }
+    · ╰──── duplicate implementation here
+    ╰────

@@ -183,19 +183,28 @@ impl EntityRegistry {
         type_id: TypeDefId,
         interface_id: TypeDefId,
         type_args: Vec<crate::type_arena::TypeId>,
+        span: Option<miette::SourceSpan>,
     ) {
-        self.add_implementation_with_target_args(type_id, interface_id, type_args, Vec::new());
+        self.add_implementation_with_target_args(
+            type_id,
+            interface_id,
+            type_args,
+            Vec::new(),
+            span,
+        );
     }
 
     /// Add an interface implementation to a type with target type specialization args.
     /// `target_type_args` records the concrete type args of the implementing type
     /// (e.g., [i64] for `implement Describable for Box<i64>`).
+    /// `span` is the source location of the implement block for error reporting.
     pub fn add_implementation_with_target_args(
         &mut self,
         type_id: TypeDefId,
         interface_id: TypeDefId,
         type_args: Vec<crate::type_arena::TypeId>,
         target_type_args: Vec<crate::type_arena::TypeId>,
+        span: Option<miette::SourceSpan>,
     ) {
         use crate::entity_defs::Implementation;
         self.type_defs[type_id.index() as usize]
@@ -205,7 +214,43 @@ impl EntityRegistry {
                 type_args,
                 target_type_args,
                 method_bindings: Vec::new(),
+                span,
             });
+    }
+
+    /// Check if an interface is already implemented for a type, returning the span of the existing impl.
+    /// Returns Some(Some(span)) if implemented by an implement block (has span)
+    /// Returns Some(None) if implemented by class declaration (no span)
+    /// Returns None if not implemented
+    pub fn find_existing_implementation(
+        &self,
+        type_id: TypeDefId,
+        interface_id: TypeDefId,
+    ) -> Option<Option<miette::SourceSpan>> {
+        let type_def = &self.type_defs[type_id.index() as usize];
+        for impl_ in &type_def.implements {
+            if impl_.interface == interface_id {
+                return Some(impl_.span);
+            }
+        }
+        None
+    }
+
+    /// Update the span for an existing implementation (e.g., when an implement block
+    /// provides methods for an interface declared on the class).
+    pub fn set_implementation_span(
+        &mut self,
+        type_id: TypeDefId,
+        interface_id: TypeDefId,
+        span: miette::SourceSpan,
+    ) {
+        let type_def = &mut self.type_defs[type_id.index() as usize];
+        for impl_ in &mut type_def.implements {
+            if impl_.interface == interface_id {
+                impl_.span = Some(span);
+                return;
+            }
+        }
     }
 
     /// Add a method binding to an existing implementation
@@ -230,6 +275,7 @@ impl EntityRegistry {
             type_args: Vec::new(),
             target_type_args: Vec::new(),
             method_bindings: vec![binding],
+            span: None,
         });
     }
 

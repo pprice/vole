@@ -690,6 +690,17 @@ pub enum SemanticError {
         #[label("intersection type not allowed here")]
         span: SourceSpan,
     },
+
+    #[error("duplicate implementation of '{interface}' for '{target}'")]
+    #[diagnostic(code(E2104))]
+    DuplicateImplementation {
+        interface: String,
+        target: String,
+        #[label("duplicate implementation here")]
+        span: SourceSpan,
+        #[label("'{interface}' already implemented here")]
+        first_impl: SourceSpan,
+    },
 }
 
 /// Semantic warnings (W3xxx) - these don't prevent compilation but indicate potential issues

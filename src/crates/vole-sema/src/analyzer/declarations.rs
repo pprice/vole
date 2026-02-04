@@ -1547,10 +1547,40 @@ impl Analyzer {
                 );
                 continue;
             }
+            // Check for duplicate implementation (e.g., `class Foo: IFace, IFace`)
+            // find_existing_implementation returns Some(_) if this interface is already registered
+            if self
+                .entity_registry()
+                .find_existing_implementation(entity_type_id, interface_type_id)
+                .is_some()
+            {
+                let interface_name = self
+                    .name_table()
+                    .last_segment_str(self.entity_registry().get_type(interface_type_id).name_id)
+                    .unwrap_or_else(|| "?".to_string());
+                let target_name = self
+                    .name_table()
+                    .last_segment_str(self.entity_registry().get_type(entity_type_id).name_id)
+                    .unwrap_or_else(|| "?".to_string());
+                self.add_error(
+                    SemanticError::DuplicateImplementation {
+                        interface: interface_name,
+                        target: target_name,
+                        span: span.into(),
+                        first_impl: span.into(), // Same span since both are in the class declaration
+                    },
+                    span,
+                );
+                continue;
+            }
+            // Note: We don't set a span here because class declarations that declare
+            // `: Interface` are complementary to `implement Interface for Class` blocks.
+            // Duplicate detection is only for multiple implement blocks.
             self.entity_registry_mut().add_implementation(
                 entity_type_id,
                 interface_type_id,
                 type_arg_ids.clone(),
+                None, // No span - class declaration, not implement block
             );
 
             // Register interface default methods on the implementing type
@@ -2140,19 +2170,85 @@ impl Analyzer {
                     .unwrap_or_default()
             };
 
-            // Pre-register the implementation with type args so they're available
-            // for validate_interface_satisfaction's substitution map
-            if let Some(entity_type_id) = entity_type_id
+            // Check for duplicate implementation before registering
+            // find_existing_implementation returns:
+            // - None: no existing implementation
+            // - Some(None): implementation from class declaration (no span) - OK to add implement block
+            // - Some(Some(span)): implementation from another implement block - duplicate error
+            enum ImplAction {
+                AddNew,
+                SetSpan,
+                Duplicate {
+                    interface_name: String,
+                    first_span: miette::SourceSpan,
+                },
+            }
+            let action = if let Some(entity_type_id) = entity_type_id
                 && let Some(iface_id) = interface_type_id
-                && (!interface_type_args.is_empty() || !target_type_args.is_empty())
             {
-                self.entity_registry_mut()
-                    .add_implementation_with_target_args(
-                        entity_type_id,
-                        iface_id,
-                        interface_type_args,
-                        target_type_args,
+                match self
+                    .entity_registry()
+                    .find_existing_implementation(entity_type_id, iface_id)
+                {
+                    Some(Some(first_span)) => {
+                        let interface_name = self
+                            .name_table()
+                            .last_segment_str(self.entity_registry().get_type(iface_id).name_id)
+                            .unwrap_or_else(|| "?".to_string());
+                        ImplAction::Duplicate {
+                            interface_name,
+                            first_span,
+                        }
+                    }
+                    Some(None) => ImplAction::SetSpan,
+                    None => ImplAction::AddNew,
+                }
+            } else {
+                ImplAction::AddNew
+            };
+
+            match action {
+                ImplAction::Duplicate {
+                    interface_name,
+                    first_span,
+                } => {
+                    let target_name = format_type_expr(&impl_block.target_type, interner);
+                    self.add_error(
+                        SemanticError::DuplicateImplementation {
+                            interface: interface_name,
+                            target: target_name,
+                            span: impl_block.span.into(),
+                            first_impl: first_span,
+                        },
+                        impl_block.span,
                     );
+                    return; // Skip processing the duplicate implement block
+                }
+                ImplAction::SetSpan => {
+                    if let Some(entity_type_id) = entity_type_id
+                        && let Some(iface_id) = interface_type_id
+                    {
+                        self.entity_registry_mut().set_implementation_span(
+                            entity_type_id,
+                            iface_id,
+                            impl_block.span.into(),
+                        );
+                    }
+                }
+                ImplAction::AddNew => {
+                    if let Some(entity_type_id) = entity_type_id
+                        && let Some(iface_id) = interface_type_id
+                    {
+                        self.entity_registry_mut()
+                            .add_implementation_with_target_args(
+                                entity_type_id,
+                                iface_id,
+                                interface_type_args,
+                                target_type_args,
+                                Some(impl_block.span.into()),
+                            );
+                    }
+                }
             }
 
             for method in &impl_block.methods {

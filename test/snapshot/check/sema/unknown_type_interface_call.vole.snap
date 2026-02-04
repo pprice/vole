@@ -11,6 +11,19 @@
  14 │     }
     ╰────
   help: type not found
+  × [E2052]: type 'Counter' does not satisfy interface 'Getter': missing method 'get'
+    ╭─[<path>/unknown_type_interface_call.vole:8:1]
+  7 │     
+  8 │ ╭─▶ class Counter {
+  9 │ │       value: i64
+ 10 │ │   
+ 11 │ │       func get() -> BadType {
+ 12 │ │           return self.value
+ 13 │ │       }
+ 14 │ ├─▶ }
+    · ╰──── declared to implement Getter
+ 15 │     
+    ╰────
   × [E2001]: expected main::Getter, found main::Counter
     ╭─[<path>/unknown_type_interface_call.vole:24:24]
  23 │     let c = Counter { value: 42 }
