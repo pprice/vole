@@ -71,8 +71,7 @@ impl Manifest {
     /// Write the manifest to a directory as `vole-stress.json`.
     pub fn write_to_dir(&self, dir: &Path) -> io::Result<()> {
         let path = dir.join("vole-stress.json");
-        let json = serde_json::to_string_pretty(self)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let json = serde_json::to_string_pretty(self).map_err(io::Error::other)?;
         fs::write(path, json)
     }
 }

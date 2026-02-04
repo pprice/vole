@@ -20,6 +20,7 @@ pub struct ModuleId(pub usize);
 
 /// Type information for generating type-correct expressions.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum TypeInfo {
     /// Primitive types: i32, i64, f64, bool, string, nil
     Primitive(PrimitiveType),
@@ -43,6 +44,7 @@ pub enum TypeInfo {
 
 /// Primitive types in Vole.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum PrimitiveType {
     I32,
     I64,
@@ -88,6 +90,7 @@ impl PrimitiveType {
     }
 }
 
+#[allow(dead_code)]
 impl TypeInfo {
     /// Check if this type is a primitive type.
     pub fn is_primitive(&self) -> bool {
@@ -291,6 +294,7 @@ impl ModuleSymbols {
     }
 
     /// Iterate over all symbols in this module.
+    #[allow(dead_code)]
     pub fn symbols(&self) -> impl Iterator<Item = &Symbol> {
         self.symbols.iter()
     }
@@ -379,6 +383,7 @@ impl SymbolTable {
     }
 
     /// Get a module by name.
+    #[allow(dead_code)]
     pub fn get_module_by_name(&self, name: &str) -> Option<&ModuleSymbols> {
         self.module_by_name
             .get(name)
@@ -401,6 +406,7 @@ impl SymbolTable {
     }
 
     /// Get all classes across all modules.
+    #[allow(dead_code)]
     pub fn all_classes(&self) -> Vec<(ModuleId, &Symbol)> {
         self.modules
             .iter()
@@ -417,6 +423,7 @@ impl SymbolTable {
     }
 
     /// Get all functions across all modules.
+    #[allow(dead_code)]
     pub fn all_functions(&self) -> Vec<(ModuleId, &Symbol)> {
         self.modules
             .iter()

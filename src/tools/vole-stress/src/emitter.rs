@@ -9,27 +9,18 @@ use std::fmt::Write as _;
 use std::io;
 use std::path::Path;
 
+use crate::expr::{ExprConfig, ExprGenerator};
+use crate::stmt::{StmtConfig, StmtContext, StmtGenerator};
 use crate::symbols::{
     ClassInfo, FieldInfo, FunctionInfo, ImplementBlockInfo, InterfaceInfo, MethodInfo,
-    ModuleSymbols, ParamInfo, PrimitiveType, Symbol, SymbolKind, SymbolTable, TypeInfo, TypeParam,
+    ModuleSymbols, ParamInfo, Symbol, SymbolKind, SymbolTable, TypeInfo, TypeParam,
 };
 
 /// Configuration for the emitter phase.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct EmitConfig {
-    /// Maximum expression depth for generated expressions.
-    pub max_expr_depth: usize,
-    /// Number of statements per function body.
-    pub statements_per_function: (usize, usize),
-}
-
-impl Default for EmitConfig {
-    fn default() -> Self {
-        Self {
-            max_expr_depth: 3,
-            statements_per_function: (2, 5),
-        }
-    }
+    /// Configuration for statement generation.
+    pub stmt_config: StmtConfig,
 }
 
 /// Emit all modules to the given output directory.
@@ -331,26 +322,14 @@ impl<'a, R: Rng> EmitContext<'a, R> {
     }
 
     fn emit_function_body(&mut self, return_type: &TypeInfo, params: &[ParamInfo]) {
-        let stmt_count = self.rng.gen_range(
-            self.config.statements_per_function.0..=self.config.statements_per_function.1,
-        );
+        let mut stmt_ctx = StmtContext::new(params, self.table);
+        let mut stmt_gen = StmtGenerator::new(self.rng, &self.config.stmt_config);
+        stmt_gen.set_indent(self.indent);
 
-        // Generate some local variables and statements
-        for i in 0..stmt_count {
-            let var_name = format!("local{}", i);
-            let expr = self.random_expression(params, 0);
-            self.emit_line(&format!("let {} = {}", var_name, expr));
-        }
+        let lines = stmt_gen.generate_body(return_type, &mut stmt_ctx, 0);
 
-        // Generate return statement
-        match return_type {
-            TypeInfo::Void => {
-                // No return needed
-            }
-            _ => {
-                let return_expr = self.expression_for_type(return_type, params, 0);
-                self.emit_line(&format!("return {}", return_expr));
-            }
+        for line in lines {
+            self.emit_line(&line);
         }
     }
 
@@ -425,126 +404,14 @@ impl<'a, R: Rng> EmitContext<'a, R> {
     }
 
     fn literal_for_type(&mut self, type_info: &TypeInfo) -> String {
+        let config = ExprConfig::default();
+        let mut expr_gen = ExprGenerator::new(self.rng, &config);
+
         match type_info {
-            TypeInfo::Primitive(p) => self.literal_for_primitive(*p),
+            TypeInfo::Primitive(p) => expr_gen.literal_for_primitive(*p),
             TypeInfo::Optional(_) => "nil".to_string(),
             TypeInfo::Void => "nil".to_string(),
             _ => "nil".to_string(),
-        }
-    }
-
-    fn literal_for_primitive(&mut self, prim: PrimitiveType) -> String {
-        match prim {
-            PrimitiveType::I32 => self.rng.gen_range(0..100).to_string(),
-            PrimitiveType::I64 => self.rng.gen_range(0..1000).to_string(),
-            PrimitiveType::F64 => {
-                let val = self.rng.gen_range(0..100) as f64;
-                format!("{:.2}", val + 0.5)
-            }
-            PrimitiveType::Bool => {
-                let b = self.rng.gen_bool(0.5);
-                if b { "true" } else { "false" }.to_string()
-            }
-            PrimitiveType::String => format!("\"str{}\"", self.rng.gen_range(0..100)),
-            PrimitiveType::Nil => "nil".to_string(),
-        }
-    }
-
-    fn random_expression(&mut self, params: &[ParamInfo], depth: usize) -> String {
-        if depth >= self.config.max_expr_depth || params.is_empty() {
-            // Return a simple literal
-            let prim = PrimitiveType::random_expr_type(self.rng);
-            return self.literal_for_primitive(prim);
-        }
-
-        // Choose expression type
-        match self.rng.gen_range(0..5) {
-            0 => {
-                // Use a parameter
-                let param = &params[self.rng.gen_range(0..params.len())];
-                param.name.clone()
-            }
-            1 => {
-                // Binary operation on integers
-                let left = self.random_expression(params, depth + 1);
-                let right = self.random_expression(params, depth + 1);
-                let op = match self.rng.gen_range(0..4) {
-                    0 => "+",
-                    1 => "-",
-                    2 => "*",
-                    _ => "/",
-                };
-                format!("({} {} {})", left, op, right)
-            }
-            2 => {
-                // Comparison
-                let left = self.random_expression(params, depth + 1);
-                let right = self.random_expression(params, depth + 1);
-                let op = match self.rng.gen_range(0..4) {
-                    0 => "==",
-                    1 => "!=",
-                    2 => "<",
-                    _ => ">",
-                };
-                format!("({} {} {})", left, op, right)
-            }
-            3 => {
-                // Literal
-                let prim = PrimitiveType::random_expr_type(self.rng);
-                self.literal_for_primitive(prim)
-            }
-            _ => {
-                // Boolean operation
-                let left = self.random_expression(params, depth + 1);
-                let right = self.random_expression(params, depth + 1);
-                let use_and = self.rng.gen_bool(0.5);
-                let op = if use_and { "and" } else { "or" };
-                format!("({} {} {})", left, op, right)
-            }
-        }
-    }
-
-    fn expression_for_type(
-        &mut self,
-        type_info: &TypeInfo,
-        params: &[ParamInfo],
-        depth: usize,
-    ) -> String {
-        match type_info {
-            TypeInfo::Primitive(p) => {
-                // Try to find a parameter of the same type
-                let matching_param = params
-                    .iter()
-                    .find(|p2| matches!(&p2.param_type, TypeInfo::Primitive(pt) if pt == p));
-                if let Some(param) = matching_param {
-                    param.name.clone()
-                } else {
-                    self.literal_for_primitive(*p)
-                }
-            }
-            TypeInfo::Optional(inner) => {
-                // 50% chance of nil, 50% chance of value
-                let use_nil = self.rng.gen_bool(0.5);
-                if use_nil {
-                    "nil".to_string()
-                } else {
-                    self.expression_for_type(inner, params, depth)
-                }
-            }
-            TypeInfo::Void => "nil".to_string(),
-            TypeInfo::Union(types) => {
-                // Pick one of the union types
-                if types.is_empty() {
-                    "nil".to_string()
-                } else {
-                    let idx = self.rng.gen_range(0..types.len());
-                    self.expression_for_type(&types[idx], params, depth)
-                }
-            }
-            _ => {
-                let prim = PrimitiveType::random_expr_type(self.rng);
-                self.literal_for_primitive(prim)
-            }
         }
     }
 

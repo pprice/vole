@@ -184,15 +184,13 @@ fn plan_imports<R: Rng>(
 
             // Cross-layer imports: sometimes import from layers beyond the next one
             if config.cross_layer_import_probability > 0.0 && layer_idx + 2 < layers.len() {
-                for far_layer_idx in (layer_idx + 2)..layers.len() {
-                    if rng.gen_bool(config.cross_layer_import_probability) {
-                        let far_layer = &layers[far_layer_idx];
-                        if !far_layer.is_empty() {
-                            let target_idx = rng.gen_range(0..far_layer.len());
-                            let target = far_layer[target_idx];
-                            if !imported.contains(&target) {
-                                imported.push(target);
-                            }
+                for far_layer in layers.iter().skip(layer_idx + 2) {
+                    if rng.gen_bool(config.cross_layer_import_probability) && !far_layer.is_empty()
+                    {
+                        let target_idx = rng.gen_range(0..far_layer.len());
+                        let target = far_layer[target_idx];
+                        if !imported.contains(&target) {
+                            imported.push(target);
                         }
                     }
                 }
@@ -564,69 +562,78 @@ fn plan_return_type_with_type_params<R: Rng>(rng: &mut R, type_params: &[TypePar
 }
 
 /// Add interface implementations to classes after all declarations exist.
+/// Only implements interfaces from the same module to avoid cross-module reference issues.
 fn plan_interface_implementations<R: Rng>(
     rng: &mut R,
     table: &mut SymbolTable,
     _config: &PlanConfig,
 ) {
-    // Collect all non-generic interfaces with their methods
-    // (only non-generic for inline class implements)
-    let interfaces: Vec<(ModuleId, SymbolId, Vec<MethodInfo>)> = table
-        .all_interfaces()
-        .iter()
-        .filter_map(|(mid, s)| {
-            if let SymbolKind::Interface(ref info) = s.kind {
-                // Only use interfaces without type params for simple implements
-                if info.type_params.is_empty() {
-                    Some((*mid, s.id, info.methods.clone()))
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        })
-        .collect();
+    // Process each module independently to avoid cross-module references
+    for module_idx in 0..table.module_count() {
+        let module_id = ModuleId(module_idx);
 
-    if interfaces.is_empty() {
-        return;
-    }
-
-    // Collect all non-generic class locations
-    let class_locations: Vec<(ModuleId, SymbolId)> = table
-        .all_classes()
-        .iter()
-        .filter_map(|(mid, s)| {
-            if let SymbolKind::Class(ref info) = s.kind {
-                if info.type_params.is_empty() {
-                    Some((*mid, s.id))
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    // For each class, possibly implement an interface
-    for (module_id, class_id) in class_locations {
-        // 30% chance a class implements an interface
-        if rng.gen_bool(0.3) {
-            let iface_idx = rng.gen_range(0..interfaces.len());
-            let (iface_mod, iface_id, ref iface_methods) = interfaces[iface_idx];
-
-            if let Some(module) = table.get_module_mut(module_id) {
-                if let Some(symbol) = module.get_symbol_mut(class_id) {
-                    if let SymbolKind::Class(ref mut info) = symbol.kind {
-                        // Copy interface methods to class (if not already present)
-                        for method in iface_methods {
-                            if !info.methods.iter().any(|m| m.name == method.name) {
-                                info.methods.push(method.clone());
+        // Collect non-generic interfaces in this module
+        let interfaces: Vec<(SymbolId, Vec<MethodInfo>)> = table
+            .get_module(module_id)
+            .map(|m| {
+                m.interfaces()
+                    .filter_map(|s| {
+                        if let SymbolKind::Interface(ref info) = s.kind {
+                            if info.type_params.is_empty() {
+                                Some((s.id, info.methods.clone()))
+                            } else {
+                                None
                             }
+                        } else {
+                            None
                         }
-                        info.implements.push((iface_mod, iface_id));
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        if interfaces.is_empty() {
+            continue;
+        }
+
+        // Collect non-generic classes in this module
+        let classes: Vec<SymbolId> = table
+            .get_module(module_id)
+            .map(|m| {
+                m.classes()
+                    .filter_map(|s| {
+                        if let SymbolKind::Class(ref info) = s.kind {
+                            if info.type_params.is_empty() {
+                                Some(s.id)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // For each class, possibly implement an interface from the same module
+        for class_id in classes {
+            // 30% chance a class implements an interface
+            if rng.gen_bool(0.3) {
+                let iface_idx = rng.gen_range(0..interfaces.len());
+                let (iface_id, ref iface_methods) = interfaces[iface_idx];
+
+                if let Some(module) = table.get_module_mut(module_id)
+                    && let Some(symbol) = module.get_symbol_mut(class_id)
+                    && let SymbolKind::Class(ref mut info) = symbol.kind
+                {
+                    // Copy interface methods to class (if not already present)
+                    for method in iface_methods {
+                        if !info.methods.iter().any(|m| m.name == method.name) {
+                            info.methods.push(method.clone());
+                        }
                     }
+                    info.implements.push((module_id, iface_id));
                 }
             }
         }
@@ -677,15 +684,13 @@ fn plan_interface_extends<R: Rng>(rng: &mut R, table: &mut SymbolTable, config: 
                 })
                 .unwrap_or_default();
 
-            if let Some(module) = table.get_module_mut(child_mod) {
-                if let Some(symbol) = module.get_symbol_mut(child_id) {
-                    if let SymbolKind::Interface(ref mut info) = symbol.kind {
-                        if !info.extends.contains(&(parent_mod, parent_id)) {
-                            info.extends.push((parent_mod, parent_id));
-                            // Don't copy methods - Vole interface extends just requires impl
-                        }
-                    }
-                }
+            if let Some(module) = table.get_module_mut(child_mod)
+                && let Some(symbol) = module.get_symbol_mut(child_id)
+                && let SymbolKind::Interface(ref mut info) = symbol.kind
+                && !info.extends.contains(&(parent_mod, parent_id))
+            {
+                info.extends.push((parent_mod, parent_id));
+                // Don't copy methods - Vole interface extends just requires impl
             }
 
             // Silence unused warning
@@ -695,67 +700,76 @@ fn plan_interface_extends<R: Rng>(rng: &mut R, table: &mut SymbolTable, config: 
 }
 
 /// Add standalone implement blocks.
+/// Only creates implement blocks for interfaces and classes within the same module
+/// to avoid cross-module reference issues.
 fn plan_implement_blocks<R: Rng>(
     rng: &mut R,
     table: &mut SymbolTable,
     names: &mut NameGen,
     config: &PlanConfig,
 ) {
-    // Collect non-generic interfaces and classes for implement blocks
-    let interfaces: Vec<(ModuleId, SymbolId, Vec<MethodInfo>)> = table
-        .all_interfaces()
-        .iter()
-        .filter_map(|(mid, s)| {
-            if let SymbolKind::Interface(ref info) = s.kind {
-                if info.type_params.is_empty() {
-                    Some((*mid, s.id, info.methods.clone()))
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    if interfaces.is_empty() {
-        return;
-    }
-
-    // Collect classes that don't already implement interfaces
-    let available_classes: Vec<(ModuleId, SymbolId)> = table
-        .all_classes()
-        .iter()
-        .filter_map(|(mid, s)| {
-            if let SymbolKind::Class(ref info) = s.kind {
-                if info.type_params.is_empty() && info.implements.is_empty() {
-                    Some((*mid, s.id))
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    if available_classes.is_empty() {
-        return;
-    }
-
-    // Create implement blocks for each module
+    // Create implement blocks for each module, using only local interfaces and classes
     for module_id in 0..table.module_count() {
         let module_id = ModuleId(module_id);
+
+        // Get interfaces in this module
+        let interfaces: Vec<(SymbolId, Vec<MethodInfo>)> = table
+            .get_module(module_id)
+            .map(|m| {
+                m.interfaces()
+                    .filter_map(|s| {
+                        if let SymbolKind::Interface(ref info) = s.kind {
+                            if info.type_params.is_empty() {
+                                Some((s.id, info.methods.clone()))
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        if interfaces.is_empty() {
+            continue;
+        }
+
+        // Get non-generic classes in this module that don't already implement interfaces
+        let classes: Vec<SymbolId> = table
+            .get_module(module_id)
+            .map(|m| {
+                m.classes()
+                    .filter_map(|s| {
+                        if let SymbolKind::Class(ref info) = s.kind {
+                            if info.type_params.is_empty() && info.implements.is_empty() {
+                                Some(s.id)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        if classes.is_empty() {
+            continue;
+        }
+
         let block_count = rng
             .gen_range(config.implement_blocks_per_module.0..=config.implement_blocks_per_module.1);
 
         for _ in 0..block_count {
-            // Pick a random interface and class
+            // Pick a random interface and class from this module
             let iface_idx = rng.gen_range(0..interfaces.len());
-            let class_idx = rng.gen_range(0..available_classes.len());
+            let class_idx = rng.gen_range(0..classes.len());
 
-            let (iface_mod, iface_id, ref iface_methods) = interfaces[iface_idx];
-            let (class_mod, class_id) = available_classes[class_idx];
+            let (iface_id, ref iface_methods) = interfaces[iface_idx];
+            let class_id = classes[class_idx];
 
             // Generate method implementations
             let methods: Vec<MethodInfo> = iface_methods
@@ -771,8 +785,8 @@ fn plan_implement_blocks<R: Rng>(
             let impl_name = names.next("impl");
 
             let kind = SymbolKind::ImplementBlock(ImplementBlockInfo {
-                interface: (iface_mod, iface_id),
-                target_type: (class_mod, class_id),
+                interface: (module_id, iface_id),
+                target_type: (module_id, class_id),
                 methods,
             });
 

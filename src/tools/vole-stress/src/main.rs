@@ -1,7 +1,9 @@
 mod emitter;
+mod expr;
 mod manifest;
 mod names;
 mod planner;
+mod stmt;
 mod symbols;
 
 use std::fs;
