@@ -1,4 +1,15 @@
+mod manifest;
+mod names;
+
+use std::fs;
+use std::path::PathBuf;
+use std::process::ExitCode;
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use clap::Parser;
+use rand::SeedableRng;
+
+use manifest::{GenerationOptions, Manifest};
 
 #[derive(Parser)]
 #[command(name = "vole-stress")]
@@ -26,14 +37,75 @@ struct Cli {
 
     /// Output base directory
     #[arg(long, default_value = "/tmp/vole-stress")]
-    output: String,
+    output: PathBuf,
 }
 
-fn main() {
+fn main() -> ExitCode {
     let cli = Cli::parse();
-    println!(
-        "vole-stress: profile={}, layers={}",
-        cli.profile, cli.layers
-    );
-    todo!("implement generation")
+
+    // Determine seed - use provided or generate from current time
+    let seed = cli.seed.unwrap_or_else(|| {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0)
+    });
+
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+
+    // Determine output directory name
+    let dir_name = cli.name.unwrap_or_else(|| names::generate(&mut rng));
+
+    // Create output directory path
+    let output_dir = cli.output.join(&dir_name);
+
+    // Create the base output directory if needed
+    if let Err(e) = fs::create_dir_all(&cli.output) {
+        eprintln!(
+            "error: failed to create base directory '{}': {}",
+            cli.output.display(),
+            e
+        );
+        return ExitCode::FAILURE;
+    }
+
+    // Create the specific output directory
+    if output_dir.exists() {
+        eprintln!(
+            "error: output directory already exists: {}",
+            output_dir.display()
+        );
+        return ExitCode::FAILURE;
+    }
+
+    if let Err(e) = fs::create_dir(&output_dir) {
+        eprintln!(
+            "error: failed to create output directory '{}': {}",
+            output_dir.display(),
+            e
+        );
+        return ExitCode::FAILURE;
+    }
+
+    // Create and write manifest
+    let options = GenerationOptions {
+        layers: cli.layers,
+        modules_per_layer: cli.modules_per_layer,
+    };
+    let manifest = Manifest::new(seed, cli.profile.clone(), options);
+
+    if let Err(e) = manifest.write_to_dir(&output_dir) {
+        eprintln!("error: failed to write manifest: {}", e);
+        return ExitCode::FAILURE;
+    }
+
+    // Print summary
+    println!("vole-stress: Generated synthetic codebase");
+    println!("  seed:    {seed}");
+    println!("  profile: {}", cli.profile);
+    println!("  layers:  {}", cli.layers);
+    println!("  modules: {} per layer", cli.modules_per_layer);
+    println!("  output:  {}", output_dir.display());
+
+    ExitCode::SUCCESS
 }

@@ -1729,7 +1729,10 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "rand",
- "vole-frontend",
+ "serde",
+ "serde_json",
+ "vergen",
+ "vergen-gitcl",
 ]
 
 [[package]]
