@@ -1,0 +1,6 @@
+// Test that unknown types in let statements produce clear errors
+func main() {
+    let x: boolean = true
+    let y: str = "hello"
+    let z: String = "world"
+}

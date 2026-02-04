@@ -386,6 +386,8 @@ impl Analyzer {
         params
             .iter()
             .map(|p| {
+                // Validate type annotation first to emit errors for unknown types
+                self.validate_type_annotation(&p.ty, p.span, interner, None);
                 let type_id = self.resolve_type_id(&p.ty, interner);
                 self.check_never_not_allowed(type_id, p.span);
                 self.check_union_simplification(&p.ty, p.span);
@@ -397,6 +399,10 @@ impl Analyzer {
 
     /// Resolve and validate the return type for a non-generic function.
     fn resolve_non_generic_return(&mut self, func: &FuncDecl, interner: &Interner) -> ArenaTypeId {
+        // Validate return type annotation first to emit errors for unknown types
+        if let Some(rt) = &func.return_type {
+            self.validate_type_annotation(rt, func.span, interner, None);
+        }
         let return_type_id = func
             .return_type
             .as_ref()
@@ -450,13 +456,23 @@ impl Analyzer {
     }
 
     /// Validate parameter and return types after resolution (for generic functions).
-    fn validate_generic_function_types(&mut self, func: &FuncDecl, param_type_ids: &[ArenaTypeId]) {
+    fn validate_generic_function_types(
+        &mut self,
+        func: &FuncDecl,
+        param_type_ids: &[ArenaTypeId],
+        interner: &Interner,
+        type_param_scope: Option<&TypeParamScope>,
+    ) {
         for (param, &type_id) in func.params.iter().zip(param_type_ids) {
+            // Validate type annotation to emit errors for unknown types
+            self.validate_type_annotation(&param.ty, param.span, interner, type_param_scope);
             self.check_never_not_allowed(type_id, param.span);
             self.check_union_simplification(&param.ty, param.span);
             self.check_combination_not_allowed(&param.ty, param.span);
         }
         if let Some(rt) = &func.return_type {
+            // Validate return type annotation to emit errors for unknown types
+            self.validate_type_annotation(rt, func.span, interner, type_param_scope);
             self.check_combination_not_allowed(rt, func.span);
         }
     }
@@ -499,7 +515,12 @@ impl Analyzer {
             self.resolve_generic_signature(func, interner, &type_param_scope, &synthetic_param_map);
 
         // Validate types after resolution
-        self.validate_generic_function_types(func, &param_type_ids);
+        self.validate_generic_function_types(
+            func,
+            &param_type_ids,
+            interner,
+            Some(&type_param_scope),
+        );
 
         // Create signature and register
         let signature = FunctionType::from_ids(&param_type_ids, return_type_id, false);
@@ -698,9 +719,9 @@ impl Analyzer {
     }
 
     /// Validate a type expression and emit an error if it resolves to an unknown type.
-    /// This is called during method registration to provide proper error messages
-    /// for unknown types in method signatures.
-    fn validate_type_annotation(
+    /// This is called during type resolution to provide proper error messages
+    /// for unknown types in type annotations.
+    pub(super) fn validate_type_annotation(
         &mut self,
         type_expr: &TypeExpr,
         span: Span,
@@ -729,10 +750,10 @@ impl Analyzer {
                 {
                     return;
                 }
-                // Try to resolve the type
+                // Try to resolve the type (with interface/class fallback for prelude types)
                 let resolved = self
                     .resolver(interner)
-                    .resolve_type(*sym, &self.entity_registry());
+                    .resolve_type_or_interface(*sym, &self.entity_registry());
                 if resolved.is_none() {
                     self.add_error(
                         SemanticError::UnknownType {

@@ -1,0 +1,4 @@
+// Test that unknown types in function return types produce clear errors
+func foo() -> boolean { return true }
+func bar() -> str { return "hello" }
+func baz() -> int { return 42 }

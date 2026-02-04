@@ -142,6 +142,11 @@ impl Analyzer {
                             }
                         }
 
+                        // Validate type annotation first to emit errors for unknown types
+                        if let Some(ty) = &let_stmt.ty {
+                            self.validate_type_annotation(ty, let_stmt.span, interner, None);
+                        }
+
                         let declared_type_id = let_stmt
                             .ty
                             .as_ref()

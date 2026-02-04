@@ -1,0 +1,4 @@
+// Test that unknown types in function parameters produce clear errors
+func foo(x: boolean) { }
+func bar(s: str) { }
+func baz(a: int, b: String) { }
