@@ -1018,6 +1018,61 @@ mod tests {
     }
 
     #[test]
+    fn non_generic_classes_have_no_type_param_methods() {
+        use crate::profile::get_profile;
+
+        // Use the problematic seed that exposed the bug
+        let profile = get_profile("full").unwrap();
+        let mut rng = rand::rngs::StdRng::seed_from_u64(1770226963014480876);
+
+        let table = plan(&mut rng, &profile.plan);
+
+        // Check all classes for type param usage in methods
+        for module in table.modules() {
+            for symbol in module.classes() {
+                if let SymbolKind::Class(ref info) = symbol.kind {
+                    let is_generic = !info.type_params.is_empty();
+                    let class_type_param_names: std::collections::HashSet<_> =
+                        info.type_params.iter().map(|tp| tp.name.as_str()).collect();
+
+                    for method in &info.methods {
+                        for param in &method.params {
+                            if let TypeInfo::TypeParam(ref name) = param.param_type {
+                                if !is_generic {
+                                    panic!(
+                                        "Non-generic class {} has method {} with type param {}",
+                                        symbol.name, method.name, name
+                                    );
+                                }
+                                if !class_type_param_names.contains(name.as_str()) {
+                                    panic!(
+                                        "Class {} method {} uses type param {} which is not in class type params {:?}",
+                                        symbol.name, method.name, name, class_type_param_names
+                                    );
+                                }
+                            }
+                        }
+                        if let TypeInfo::TypeParam(ref name) = method.return_type {
+                            if !is_generic {
+                                panic!(
+                                    "Non-generic class {} has method {} with return type param {}",
+                                    symbol.name, method.name, name
+                                );
+                            }
+                            if !class_type_param_names.contains(name.as_str()) {
+                                panic!(
+                                    "Class {} method {} returns type param {} which is not in class type params {:?}",
+                                    symbol.name, method.name, name, class_type_param_names
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn plan_cross_layer_imports() {
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
         let config = PlanConfig {

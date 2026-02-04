@@ -787,4 +787,99 @@ mod tests {
         assert!(code.contains("construction\""));
         assert!(code.contains("let instance ="));
     }
+
+    #[test]
+    fn generated_code_has_no_undefined_type_params() {
+        use crate::profile::get_profile;
+        use crate::symbols::{SymbolKind, TypeInfo};
+
+        // Use the problematic seed that exposed the bug
+        let profile = get_profile("full").unwrap();
+        let seed = 1770226963014480876_u64;
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+
+        let table = plan(&mut rng, &profile.plan);
+
+        // Check at the symbol table level - this is the real source of truth
+        for module in table.modules() {
+            // Check classes
+            for symbol in module.classes() {
+                if let SymbolKind::Class(ref info) = symbol.kind {
+                    let class_type_params: std::collections::HashSet<_> =
+                        info.type_params.iter().map(|tp| &tp.name).collect();
+
+                    // Check fields
+                    for field in &info.fields {
+                        if let TypeInfo::TypeParam(ref name) = field.field_type {
+                            assert!(
+                                class_type_params.contains(name),
+                                "Class {} field {} uses undefined type param {}. Class type params: {:?}",
+                                symbol.name,
+                                field.name,
+                                name,
+                                class_type_params
+                            );
+                        }
+                    }
+
+                    // Check methods
+                    for method in &info.methods {
+                        for param in &method.params {
+                            if let TypeInfo::TypeParam(ref name) = param.param_type {
+                                assert!(
+                                    class_type_params.contains(name),
+                                    "Class {} method {} param {} uses undefined type param {}. Class type params: {:?}",
+                                    symbol.name,
+                                    method.name,
+                                    param.name,
+                                    name,
+                                    class_type_params
+                                );
+                            }
+                        }
+                        if let TypeInfo::TypeParam(ref name) = method.return_type {
+                            assert!(
+                                class_type_params.contains(name),
+                                "Class {} method {} return uses undefined type param {}. Class type params: {:?}",
+                                symbol.name,
+                                method.name,
+                                name,
+                                class_type_params
+                            );
+                        }
+                    }
+                }
+            }
+
+            // Check functions
+            for symbol in module.functions() {
+                if let SymbolKind::Function(ref info) = symbol.kind {
+                    let func_type_params: std::collections::HashSet<_> =
+                        info.type_params.iter().map(|tp| &tp.name).collect();
+
+                    for param in &info.params {
+                        if let TypeInfo::TypeParam(ref name) = param.param_type {
+                            assert!(
+                                func_type_params.contains(name),
+                                "Function {} param {} uses undefined type param {}. Function type params: {:?}",
+                                symbol.name,
+                                param.name,
+                                name,
+                                func_type_params
+                            );
+                        }
+                    }
+                    if let TypeInfo::TypeParam(ref name) = info.return_type {
+                        assert!(
+                            func_type_params.contains(name),
+                            "Function {} return uses undefined type param {}. Function type params: {:?}",
+                            symbol.name,
+                            name,
+                            func_type_params
+                        );
+                    }
+                }
+            }
+        }
+    }
 }

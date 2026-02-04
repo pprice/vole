@@ -12,6 +12,7 @@ const INDENT: isize = 4;
 /// Groups arguments for printing a class-like body (class, struct).
 struct ClassLikeBody<'a, 'b> {
     name: &'b str,
+    type_params: DocBuilder<'a, Arena<'a>>,
     implements: DocBuilder<'a, Arena<'a>>,
     fields: &'b [FieldDef],
     external: Option<&'b ExternalBlock>,
@@ -112,6 +113,113 @@ fn print_let_tuple_stmt<'a>(
         .append(print_expr(arena, &stmt.init, interner))
 }
 
+/// Print type parameters (e.g., `<T, U: Constraint>`).
+fn print_type_params<'a>(
+    arena: &'a Arena<'a>,
+    type_params: &[TypeParam],
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    if type_params.is_empty() {
+        return arena.nil();
+    }
+
+    let params: Vec<_> = type_params
+        .iter()
+        .map(|tp| {
+            let name = arena.text(interner.resolve(tp.name).to_string());
+            if let Some(constraint) = &tp.constraint {
+                name.append(arena.text(": "))
+                    .append(print_type_constraint(arena, constraint, interner))
+            } else {
+                name
+            }
+        })
+        .collect();
+
+    arena
+        .text("<")
+        .append(arena.intersperse(params, arena.text(", ")))
+        .append(arena.text(">"))
+}
+
+/// Print a type constraint (e.g., `Hashable + Eq` or `i32 | string`).
+fn print_type_constraint<'a>(
+    arena: &'a Arena<'a>,
+    constraint: &TypeConstraint,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    match constraint {
+        TypeConstraint::Interface(interfaces) => {
+            let parts: Vec<_> = interfaces
+                .iter()
+                .map(|ci| {
+                    let iface_name = arena.text(interner.resolve(ci.name).to_string());
+                    if ci.type_args.is_empty() {
+                        iface_name
+                    } else {
+                        let args: Vec<_> = ci
+                            .type_args
+                            .iter()
+                            .map(|arg| print_type_expr(arena, arg, interner))
+                            .collect();
+                        iface_name
+                            .append(arena.text("<"))
+                            .append(arena.intersperse(args, arena.text(", ")))
+                            .append(arena.text(">"))
+                    }
+                })
+                .collect();
+            arena.intersperse(parts, arena.text(" + "))
+        }
+        TypeConstraint::Union(types) => {
+            let parts: Vec<_> = types
+                .iter()
+                .map(|ty| print_type_expr(arena, ty, interner))
+                .collect();
+            arena.intersperse(parts, arena.text(" | "))
+        }
+        TypeConstraint::Structural { fields, methods } => {
+            let mut parts: Vec<DocBuilder<'a, Arena<'a>>> = Vec::new();
+            for field in fields {
+                parts.push(
+                    arena
+                        .text(interner.resolve(field.name).to_string())
+                        .append(arena.text(": "))
+                        .append(print_type_expr(arena, &field.ty, interner)),
+                );
+            }
+            for method in methods {
+                // Structural method params are just types, not named params
+                let param_types: Vec<_> = method
+                    .params
+                    .iter()
+                    .map(|ty| print_type_expr(arena, ty, interner))
+                    .collect();
+                let params = arena
+                    .text("(")
+                    .append(arena.intersperse(param_types, arena.text(", ")))
+                    .append(arena.text(")"));
+                let return_type = arena.text(" -> ").append(print_type_expr(
+                    arena,
+                    &method.return_type,
+                    interner,
+                ));
+                parts.push(
+                    arena
+                        .text("func ")
+                        .append(arena.text(interner.resolve(method.name).to_string()))
+                        .append(params)
+                        .append(return_type),
+                );
+            }
+            arena
+                .text("{ ")
+                .append(arena.intersperse(parts, arena.text(", ")))
+                .append(arena.text(" }"))
+        }
+    }
+}
+
 /// Print a function declaration.
 fn print_func_decl<'a>(
     arena: &'a Arena<'a>,
@@ -119,6 +227,9 @@ fn print_func_decl<'a>(
     interner: &Interner,
 ) -> DocBuilder<'a, Arena<'a>> {
     let name = interner.resolve(func.name).to_string();
+
+    // Type parameters
+    let type_params = print_type_params(arena, &func.type_params, interner);
 
     // Build parameter list
     let params = print_params(arena, &func.params, interner);
@@ -135,6 +246,7 @@ fn print_func_decl<'a>(
     arena
         .text("func ")
         .append(arena.text(name))
+        .append(type_params)
         .append(params)
         .append(return_type)
         .append(print_func_body(arena, &func.body, interner))
@@ -1329,6 +1441,8 @@ fn print_class_decl<'a>(
 ) -> DocBuilder<'a, Arena<'a>> {
     let name = interner.resolve(class.name).to_string();
 
+    let type_params = print_type_params(arena, &class.type_params, interner);
+
     let implements = if class.implements.is_empty() {
         arena.nil()
     } else {
@@ -1346,6 +1460,7 @@ fn print_class_decl<'a>(
         arena,
         ClassLikeBody {
             name: &name,
+            type_params,
             implements,
             fields: &class.fields,
             external: class.external.as_ref(),
@@ -1363,10 +1478,13 @@ fn print_struct_decl<'a>(
 ) -> DocBuilder<'a, Arena<'a>> {
     let name = interner.resolve(struct_decl.name).to_string();
 
+    let type_params = print_type_params(arena, &struct_decl.type_params, interner);
+
     print_class_like_body(
         arena,
         ClassLikeBody {
             name: &name,
+            type_params,
             implements: arena.nil(),
             fields: &struct_decl.fields,
             external: None,
@@ -1429,6 +1547,7 @@ fn print_class_like_body<'a, 'b>(
 ) -> DocBuilder<'a, Arena<'a>> {
     let ClassLikeBody {
         name,
+        type_params,
         implements,
         fields,
         external,
@@ -1441,6 +1560,7 @@ fn print_class_like_body<'a, 'b>(
             .text(keyword.to_string())
             .append(arena.text(" "))
             .append(arena.text(name.to_string()))
+            .append(type_params)
             .append(implements)
             .append(arena.text(" {}"));
     }
@@ -1478,6 +1598,7 @@ fn print_class_like_body<'a, 'b>(
         .text(keyword.to_string())
         .append(arena.text(" "))
         .append(arena.text(name.to_string()))
+        .append(type_params)
         .append(implements)
         .append(arena.text(" {"))
         .append(arena.hardline().append(body).nest(INDENT))
@@ -1506,6 +1627,8 @@ fn print_interface_decl<'a>(
 ) -> DocBuilder<'a, Arena<'a>> {
     let name = interner.resolve(iface.name).to_string();
 
+    let type_params = print_type_params(arena, &iface.type_params, interner);
+
     let extends = if iface.extends.is_empty() {
         arena.nil()
     } else {
@@ -1523,6 +1646,7 @@ fn print_interface_decl<'a>(
         return arena
             .text("interface ")
             .append(arena.text(name))
+            .append(type_params)
             .append(extends)
             .append(arena.text(" {}"));
     }
@@ -1561,6 +1685,7 @@ fn print_interface_decl<'a>(
     arena
         .text("interface ")
         .append(arena.text(name))
+        .append(type_params)
         .append(extends)
         .append(arena.text(" {"))
         .append(arena.hardline().append(body).nest(INDENT))
