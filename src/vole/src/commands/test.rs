@@ -363,8 +363,6 @@ fn run_source_tests_with_modules(
     cache: Rc<RefCell<ModuleCache>>,
     compiled_modules: &mut Option<CompiledModules>,
 ) -> Result<TestResults, String> {
-    let sema_start = Instant::now();
-
     // Parse and type check with shared cache
     let analyzed = compile_source(
         PipelineOptions {
@@ -378,10 +376,6 @@ fn run_source_tests_with_modules(
         &mut io::stderr(),
     )
     .map_err(|_| String::new())?;
-    let sema_time = sema_start.elapsed();
-
-    // Compile - either with pre-compiled modules or compiling them fresh
-    let codegen_start = Instant::now();
 
     // Check if cached modules contain all modules needed by this file
     let can_use_cache = compiled_modules.as_ref().is_some_and(|modules| {
@@ -397,7 +391,7 @@ fn run_source_tests_with_modules(
         JitOptions::debug()
     };
 
-    let (jit, compile_result, tests, modules_time, program_time) = if can_use_cache {
+    let (jit, compile_result, tests) = if can_use_cache {
         let modules = compiled_modules.as_ref().unwrap();
         // Subsequent files: use pre-compiled modules
         let mut jit = JitContext::with_modules_and_options(modules, options);
@@ -405,17 +399,13 @@ fn run_source_tests_with_modules(
         compiler.set_source_file(file_path);
 
         // Import module functions (fast - just declarations, no codegen)
-        let modules_start = Instant::now();
         let _ = compiler.import_modules();
-        let modules_time = modules_start.elapsed();
 
         // Compile just the main program
-        let program_start = Instant::now();
         let result = compiler.compile_program_only(&analyzed.program);
-        let program_time = program_start.elapsed();
 
         let tests = compiler.take_tests();
-        (jit, result, tests, modules_time, program_time)
+        (jit, result, tests)
     } else {
         // First file: compile normally and cache modules for future files
         let mut jit = JitContext::with_options(options);
@@ -423,18 +413,14 @@ fn run_source_tests_with_modules(
         compiler.set_source_file(file_path);
 
         // Compile modules (this is the expensive part)
-        let modules_start = Instant::now();
         let modules_result = compiler.compile_modules_only();
-        let modules_time = modules_start.elapsed();
 
         // Compile main program
-        let program_start = Instant::now();
         let result = if modules_result.is_ok() {
             compiler.compile_program_only(&analyzed.program)
         } else {
             modules_result
         };
-        let program_time = program_start.elapsed();
 
         let tests = compiler.take_tests();
 
@@ -463,23 +449,8 @@ fn run_source_tests_with_modules(
             }
         }
 
-        (jit, result, tests, modules_time, program_time)
+        (jit, result, tests)
     };
-
-    let codegen_time = codegen_start.elapsed();
-
-    // Print compile time in verbose mode
-    if config.verbose {
-        println!(
-            "  {}sema: {}, codegen: {} (modules: {}, program: {}){}",
-            config.colors.dim(),
-            format_duration(sema_time),
-            format_duration(codegen_time),
-            format_duration(modules_time),
-            format_duration(program_time),
-            config.colors.reset()
-        );
-    }
 
     // Check compilation result
     if let Err(e) = compile_result {
@@ -515,8 +486,6 @@ fn run_source_tests_with_progress(
     config: &TestRunConfig,
     cache: Rc<RefCell<ModuleCache>>,
 ) -> Result<TestResults, String> {
-    let sema_start = Instant::now();
-
     // Parse and type check with shared cache
     let analyzed = compile_source(
         PipelineOptions {
@@ -530,51 +499,31 @@ fn run_source_tests_with_progress(
         &mut io::stderr(),
     )
     .map_err(|_| String::new())?;
-    let sema_time = sema_start.elapsed();
 
     // Compile
-    let codegen_start = Instant::now();
     let options = if config.release {
         JitOptions::release()
     } else {
         JitOptions::debug()
     };
     let mut jit = JitContext::with_options(options);
-    let (compile_result, tests, modules_time, program_time) = {
+    let (compile_result, tests) = {
         let mut compiler = Compiler::new(&mut jit, &analyzed);
         compiler.set_source_file(file_path);
 
         // Compile modules first (prelude functions)
-        let modules_start = Instant::now();
         let modules_result = compiler.compile_modules_only();
-        let modules_time = modules_start.elapsed();
 
         // Then compile just the main program
-        let program_start = Instant::now();
         let result = if modules_result.is_ok() {
             compiler.compile_program_only(&analyzed.program)
         } else {
             modules_result
         };
-        let program_time = program_start.elapsed();
 
         let tests = compiler.take_tests();
-        (result, tests, modules_time, program_time)
+        (result, tests)
     };
-    let codegen_time = codegen_start.elapsed();
-
-    // Print compile time in verbose mode
-    if config.verbose {
-        println!(
-            "  {}sema: {}, codegen: {} (modules: {}, program: {}){}",
-            config.colors.dim(),
-            format_duration(sema_time),
-            format_duration(codegen_time),
-            format_duration(modules_time),
-            format_duration(program_time),
-            config.colors.reset()
-        );
-    }
 
     // Check compilation result
     if let Err(e) = compile_result {
@@ -622,7 +571,7 @@ fn execute_tests_with_progress(
                 // Print failure immediately in verbose mode
                 if config.verbose {
                     println!(
-                        "  {}\u{2717}{} {} - could not find test function",
+                        "  {}\u{2718}{} {} - could not find test function",
                         config.colors.red(),
                         config.colors.reset(),
                         test.name,
@@ -703,7 +652,7 @@ fn execute_tests_with_progress(
             match &status {
                 TestStatus::Passed => {
                     println!(
-                        "  {}\u{2713}{} {} {}({}){}",
+                        "  {}\u{2022}{} {} {}({}){}",
                         config.colors.green(),
                         config.colors.reset(),
                         test.name,
@@ -715,7 +664,7 @@ fn execute_tests_with_progress(
                 }
                 TestStatus::Failed(failure) => {
                     print!(
-                        "  {}\u{2717}{} {} {}({}){}",
+                        "  {}\u{2718}{} {} {}({}){}",
                         config.colors.red(),
                         config.colors.reset(),
                         test.name,
@@ -789,7 +738,7 @@ fn print_test_result(result: &TestResult, colors: &TermColors) {
     match &result.status {
         TestStatus::Passed => {
             println!(
-                "  {}\u{2713}{} {} {}({}){}",
+                "  {}\u{2022}{} {} {}({}){}",
                 colors.green(),
                 colors.reset(),
                 result.info.name,
@@ -800,7 +749,7 @@ fn print_test_result(result: &TestResult, colors: &TermColors) {
         }
         TestStatus::Failed(failure) => {
             print!(
-                "  {}\u{2717}{} {} {}({}){}",
+                "  {}\u{2718}{} {} {}({}){}",
                 colors.red(),
                 colors.reset(),
                 result.info.name,
