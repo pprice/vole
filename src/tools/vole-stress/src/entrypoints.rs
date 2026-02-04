@@ -73,6 +73,8 @@ impl<'a, R: Rng> EntrypointContext<'a, R> {
             }
         }
 
+        self.emit_line("print(\"done\")");
+
         self.indent -= 1;
         self.emit_line("}");
 
