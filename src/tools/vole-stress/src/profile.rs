@@ -36,7 +36,13 @@ impl std::error::Error for UnknownProfileError {}
 
 /// Returns a list of available profile names.
 pub fn available_profiles() -> Vec<&'static str> {
-    vec!["minimal", "full", "deep-nesting", "wide-types"]
+    vec![
+        "minimal",
+        "full",
+        "deep-nesting",
+        "wide-types",
+        "many-modules",
+    ]
 }
 
 /// Get a profile by name.
@@ -48,6 +54,7 @@ pub fn get_profile(name: &str) -> Result<Profile, UnknownProfileError> {
         "full" => Ok(full_profile()),
         "deep-nesting" => Ok(deep_nesting_profile()),
         "wide-types" => Ok(wide_types_profile()),
+        "many-modules" => Ok(many_modules_profile()),
         _ => Err(UnknownProfileError(name.to_string())),
     }
 }
@@ -281,6 +288,76 @@ fn wide_types_profile() -> Profile {
     Profile { plan, emit }
 }
 
+/// Many-modules profile - stress import resolution and module caching.
+///
+/// This profile generates a large module graph to test:
+/// - 5+ layers with 10+ modules per layer (50+ total modules)
+/// - Heavy cross-layer imports for import resolution stress
+/// - Diamond dependencies where A imports B,C; B,C both import D
+/// - Repeated imports of the same module from different files
+/// - Re-exports and transitive dependencies
+///
+/// Target: stress module loader, test caching effectiveness,
+/// import resolution performance, and module graph handling.
+fn many_modules_profile() -> Profile {
+    let plan = PlanConfig {
+        // Deep module hierarchy: 5 layers with 10 modules each = 50 modules
+        layers: 5,
+        modules_per_layer: 10,
+        // Light declarations per module - focus is on module graph, not content
+        classes_per_module: (1, 2),
+        interfaces_per_module: (0, 1),
+        errors_per_module: (0, 1),
+        functions_per_module: (2, 4),
+        globals_per_module: (1, 2),
+        // Simple class/interface structure
+        fields_per_class: (1, 3),
+        methods_per_class: (1, 2),
+        methods_per_interface: (1, 2),
+        fields_per_error: (0, 1),
+        // Simple function signatures
+        params_per_function: (0, 2),
+        // No generics - keep focus on module loading, not type complexity
+        type_params_per_class: (0, 0),
+        type_params_per_interface: (0, 0),
+        type_params_per_function: (0, 0),
+        constraints_per_type_param: (0, 0),
+        // Some interface relationships for realistic module usage
+        interface_extends_probability: 0.2,
+        implement_blocks_per_module: (0, 1),
+        // High cross-layer import probability for heavy import graph
+        cross_layer_import_probability: 0.7,
+        // Enable diamond dependencies (A imports B,C; B,C both import D)
+        enable_diamond_dependencies: true,
+    };
+
+    let emit = EmitConfig {
+        stmt_config: StmtConfig {
+            expr_config: ExprConfig {
+                // Shallow expression depth - focus on modules, not code complexity
+                max_depth: 2,
+                // Moderate expression complexity
+                binary_probability: 0.2,
+                // Minimal complex expressions
+                when_probability: 0.0,
+                match_probability: 0.0,
+                if_expr_probability: 0.0,
+                lambda_probability: 0.0,
+            },
+            // Shallow statement depth
+            max_depth: 1,
+            // Few statements per block
+            statements_per_block: (1, 2),
+            // Minimal control flow
+            if_probability: 0.1,
+            while_probability: 0.0,
+            for_probability: 0.0,
+        },
+    };
+
+    Profile { plan, emit }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -428,6 +505,76 @@ mod tests {
         assert!(
             err.to_string().contains("wide-types"),
             "error message should mention wide-types profile"
+        );
+    }
+
+    #[test]
+    fn many_modules_profile_exists() {
+        let profile = get_profile("many-modules").expect("many-modules profile should exist");
+        // Verify many-modules characteristics: focus on module graph breadth
+
+        // 5+ layers
+        assert!(
+            profile.plan.layers >= 5,
+            "layers should be >= 5 for many-modules"
+        );
+
+        // 10+ modules per layer
+        assert!(
+            profile.plan.modules_per_layer >= 10,
+            "modules_per_layer should be >= 10 for many-modules"
+        );
+
+        // High cross-layer import probability for heavy import graph
+        assert!(
+            profile.plan.cross_layer_import_probability >= 0.5,
+            "cross_layer_import_probability should be >= 0.5 for many-modules"
+        );
+
+        // Diamond dependencies enabled
+        assert!(
+            profile.plan.enable_diamond_dependencies,
+            "enable_diamond_dependencies should be true for many-modules"
+        );
+
+        // Light declarations - focus on modules, not content complexity
+        assert!(
+            profile.plan.classes_per_module.1 <= 3,
+            "classes_per_module max should be <= 3 for many-modules"
+        );
+        assert!(
+            profile.plan.functions_per_module.1 <= 5,
+            "functions_per_module max should be <= 5 for many-modules"
+        );
+
+        // Shallow nesting - focus on module graph, not code depth
+        assert!(
+            profile.emit.stmt_config.max_depth <= 2,
+            "statement max_depth should be <= 2 for many-modules"
+        );
+        assert!(
+            profile.emit.stmt_config.expr_config.max_depth <= 2,
+            "expression max_depth should be <= 2 for many-modules"
+        );
+    }
+
+    #[test]
+    fn available_profiles_includes_many_modules() {
+        let profiles = available_profiles();
+        assert!(
+            profiles.contains(&"many-modules"),
+            "available_profiles should include many-modules"
+        );
+    }
+
+    #[test]
+    fn unknown_profile_error_includes_many_modules() {
+        let result = get_profile("nonexistent");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("many-modules"),
+            "error message should mention many-modules profile"
         );
     }
 }
