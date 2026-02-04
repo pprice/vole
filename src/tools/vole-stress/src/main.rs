@@ -1,5 +1,8 @@
+mod emitter;
 mod manifest;
 mod names;
+mod planner;
+mod symbols;
 
 use std::fs;
 use std::path::PathBuf;
@@ -9,7 +12,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use clap::Parser;
 use rand::SeedableRng;
 
+use emitter::{EmitConfig, emit_all};
 use manifest::{GenerationOptions, Manifest};
+use planner::{PlanConfig, plan};
 
 #[derive(Parser)]
 #[command(name = "vole-stress")]
@@ -99,12 +104,31 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
 
+    // Plan phase: generate declaration skeleton
+    let plan_config = PlanConfig {
+        layers: cli.layers,
+        modules_per_layer: cli.modules_per_layer,
+        ..Default::default()
+    };
+    let symbol_table = plan(&mut rng, &plan_config);
+
+    // Fill phase: emit Vole source code
+    let emit_config = EmitConfig::default();
+    if let Err(e) = emit_all(&mut rng, &symbol_table, &emit_config, &output_dir) {
+        eprintln!("error: failed to write modules: {}", e);
+        return ExitCode::FAILURE;
+    }
+
     // Print summary
+    let total_modules = symbol_table.module_count();
     println!("vole-stress: Generated synthetic codebase");
     println!("  seed:    {seed}");
     println!("  profile: {}", cli.profile);
     println!("  layers:  {}", cli.layers);
-    println!("  modules: {} per layer", cli.modules_per_layer);
+    println!(
+        "  modules: {} total ({} per layer)",
+        total_modules, cli.modules_per_layer
+    );
     println!("  output:  {}", output_dir.display());
 
     ExitCode::SUCCESS
