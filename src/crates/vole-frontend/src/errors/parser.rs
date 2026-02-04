@@ -166,4 +166,16 @@ pub enum ParserError {
         #[label("missing `func` keyword")]
         span: SourceSpan,
     },
+
+    #[error("to define a function, use `func` instead of `{keyword}`")]
+    #[diagnostic(
+        code(E1033),
+        help("Vole uses `func` to define functions: `func {name}() {{ ... }}`")
+    )]
+    WrongFuncKeyword {
+        keyword: String,
+        name: String,
+        #[label("use `func` here")]
+        span: SourceSpan,
+    },
 }

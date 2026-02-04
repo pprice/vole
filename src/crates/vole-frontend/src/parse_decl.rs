@@ -16,6 +16,37 @@ struct ClassBodyParseResult {
 }
 
 impl<'src> Parser<'src> {
+    /// Check if the current identifier is a foreign function keyword (fn, def, function, void)
+    /// followed by identifier and '('. Returns (keyword, name) if the pattern matches.
+    fn looks_like_foreign_func_keyword(&self) -> Option<(String, String)> {
+        if !self.check(TokenType::Identifier) {
+            return None;
+        }
+
+        let keyword = &self.current.lexeme;
+        if !matches!(keyword.as_str(), "fn" | "def" | "function" | "void") {
+            return None;
+        }
+
+        let keyword = keyword.to_string();
+        let mut lexer_copy = self.lexer.clone();
+
+        // After keyword, expect identifier (function name)
+        let name_tok = lexer_copy.next_token();
+        if name_tok.ty != TokenType::Identifier {
+            return None;
+        }
+        let name = name_tok.lexeme;
+
+        // After identifier, expect '('
+        let next = lexer_copy.next_token();
+        if next.ty != TokenType::LParen {
+            return None;
+        }
+
+        Some((keyword, name))
+    }
+
     /// Check if the current position looks like a function definition missing the `func` keyword.
     /// Pattern: identifier ( ... ) { or identifier ( ... ) -> Type {
     /// Returns the function name if the pattern matches, None otherwise.
@@ -89,9 +120,18 @@ impl<'src> Parser<'src> {
                 let block = self.parse_external_block()?;
                 Ok(Decl::External(block))
             }
-            // Check for missing func keyword first
+            // Check for foreign func keywords (fn, def, function, void), then missing func keyword
             TokenType::Identifier => {
-                if let Some(name) = self.looks_like_func_def() {
+                if let Some((keyword, name)) = self.looks_like_foreign_func_keyword() {
+                    Err(ParseError::new(
+                        ParserError::WrongFuncKeyword {
+                            keyword,
+                            name,
+                            span: self.current.span.into(),
+                        },
+                        self.current.span,
+                    ))
+                } else if let Some(name) = self.looks_like_func_def() {
                     Err(ParseError::new(
                         ParserError::MissingFuncKeyword {
                             name,
