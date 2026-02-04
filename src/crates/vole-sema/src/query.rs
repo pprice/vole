@@ -153,6 +153,17 @@ impl<'a> ProgramQuery<'a> {
         self.name_table.name_id(module, segments, self.interner)
     }
 
+    /// Convert Symbols to a NameId using a custom interner (for module-specific symbols)
+    #[must_use]
+    pub fn try_name_id_with_interner(
+        &self,
+        module: ModuleId,
+        segments: &[Symbol],
+        interner: &Interner,
+    ) -> Option<NameId> {
+        self.name_table.name_id(module, segments, interner)
+    }
+
     /// Convert a single Symbol to a NameId in the main module (panics if not found)
     pub fn name_id_in_main(&self, sym: Symbol) -> NameId {
         self.name_id(self.main_module(), &[sym])

@@ -154,8 +154,11 @@ impl ProgressLine {
     /// Finalize the progress line (print final counter if any dots printed).
     fn finish(&mut self) {
         if self.dots_on_line > 0 {
+            // Pad with spaces to align counter with previous lines
+            let padding = self.term_width.saturating_sub(self.dots_on_line);
             println!(
-                " {}[{}/{}]{}",
+                "{} {}[{}/{}]{}",
+                " ".repeat(padding),
                 self.colors.dim(),
                 self.completed,
                 self.total_discovered,

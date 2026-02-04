@@ -367,24 +367,11 @@ impl Compiler<'_> {
                 }
             }
 
-            // Register implement block methods (both instance and static declarations)
-            {
-                let module_id = self.query().module_id_or_main(module_path);
-                for decl in &program.declarations {
-                    if let Decl::Implement(impl_block) = decl {
-                        self.register_implement_block_with_interner(
-                            impl_block,
-                            module_interner,
-                            module_id,
-                        );
-                    }
-                }
-            }
-
             // Get module ID for type resolution
             let module_id = self.query().module_id_or_main(module_path);
 
             // Finalize module classes (register type metadata, declare methods)
+            // MUST happen before implement block registration, which needs type_metadata
             for decl in &program.declarations {
                 if let Decl::Class(class) = decl {
                     self.finalize_module_class(class, module_interner, module_id);
@@ -402,6 +389,18 @@ impl Compiler<'_> {
             for decl in &program.declarations {
                 if let Decl::Sentinel(sentinel_decl) = decl {
                     self.finalize_module_sentinel(sentinel_decl, module_interner, module_id);
+                }
+            }
+
+            // Register implement block methods (both instance and static declarations)
+            // MUST happen after class finalization so type_metadata is populated
+            for decl in &program.declarations {
+                if let Decl::Implement(impl_block) = decl {
+                    self.register_implement_block_with_interner(
+                        impl_block,
+                        module_interner,
+                        module_id,
+                    );
                 }
             }
         }
@@ -544,19 +543,8 @@ impl Compiler<'_> {
                 }
             }
 
-            // Import implement block methods (both instance and static, using Linkage::Import)
-            let module_id_for_impl = self.query().module_id_or_main(module_path);
-            for decl in &program.declarations {
-                if let Decl::Implement(impl_block) = decl {
-                    self.import_module_implement_block(
-                        impl_block,
-                        module_interner,
-                        module_id_for_impl,
-                    );
-                }
-            }
-
             // Finalize module classes (register type metadata, import methods)
+            // MUST happen before implement block import, which needs type_metadata
             let module_id = self.query().module_id_or_main(module_path);
             for decl in &program.declarations {
                 if let Decl::Class(class) = decl {
@@ -568,6 +556,18 @@ impl Compiler<'_> {
             for decl in &program.declarations {
                 if let Decl::Struct(struct_decl) = decl {
                     self.import_module_struct(struct_decl, module_interner, module_id);
+                }
+            }
+
+            // Import implement block methods (both instance and static, using Linkage::Import)
+            // MUST happen after class finalization so type_metadata is populated
+            for decl in &program.declarations {
+                if let Decl::Implement(impl_block) = decl {
+                    self.import_module_implement_block(
+                        impl_block,
+                        module_interner,
+                        module_id,
+                    );
                 }
             }
         }

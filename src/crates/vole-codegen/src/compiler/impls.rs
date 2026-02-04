@@ -293,9 +293,10 @@ impl Compiler<'_> {
                     (type_id, impl_id)
                 }
                 TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => {
+                    // Use module-specific interner for symbol resolution
                     let type_def_id = self
                         .query()
-                        .try_name_id(module_id, &[*sym])
+                        .try_name_id_with_interner(module_id, &[*sym], interner)
                         .and_then(|name_id| self.query().try_type_def_id(name_id))
                         .unwrap_or_else(|| {
                             panic!(
@@ -478,15 +479,17 @@ impl Compiler<'_> {
                 }
                 TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => {
                     // Look up TypeDefId from Symbol (for Generic, uses the base class name)
+                    // Use the module-specific interner to resolve symbols from that module's AST
                     // Try given module first, then fall back to program module
                     // (implement blocks in tests blocks may target parent-scope types)
                     let type_def_id = self
                     .query()
-                    .try_name_id(module_id, &[*sym])
+                    .try_name_id_with_interner(module_id, &[*sym], interner)
                     .and_then(|name_id| self.query().try_type_def_id(name_id))
                     .or_else(|| {
                         let prog_mod = self.program_module();
                         if prog_mod != module_id {
+                            // Fall back to program module using its interner
                             self.query()
                                 .try_name_id(prog_mod, &[*sym])
                                 .and_then(|name_id| self.query().try_type_def_id(name_id))
@@ -795,9 +798,10 @@ impl Compiler<'_> {
             }
             TypeExpr::Handle => TypeId::HANDLE,
             TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => {
+                // Use module-specific interner for symbol resolution
                 let type_def_id = self
                     .query()
-                    .try_name_id(module_id, &[*sym])
+                    .try_name_id_with_interner(module_id, &[*sym], interner)
                     .and_then(|name_id| self.query().try_type_def_id(name_id))
                     .unwrap_or_else(|| {
                         panic!(

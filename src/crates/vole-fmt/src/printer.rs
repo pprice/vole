@@ -267,23 +267,13 @@ fn print_params<'a>(
         .map(|p| print_param(arena, p, interner))
         .collect();
 
-    // Multi-line format: each param on its own line with trailing comma
-    let multi_line = arena
-        .hardline()
-        .append(arena.intersperse(
-            param_docs.iter().cloned(),
-            arena.text(",").append(arena.hardline()),
-        ))
-        .append(arena.text(","))
-        .nest(INDENT)
-        .append(arena.hardline());
-
-    // Single line format: params separated by ", "
+    // Always use single-line format: params separated by ", "
+    // Vole's parser doesn't support newlines after opening paren in function declarations
     let single_line = arena.intersperse(param_docs, arena.text(", "));
 
     arena
         .text("(")
-        .append(multi_line.flat_alt(single_line).group())
+        .append(single_line)
         .append(arena.text(")"))
 }
 

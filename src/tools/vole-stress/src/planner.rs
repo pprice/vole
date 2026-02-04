@@ -641,60 +641,54 @@ fn plan_interface_implementations<R: Rng>(
 }
 
 /// Add interface extends relationships.
+/// Only creates extends relationships within the same module to avoid cross-module
+/// reference issues (vole-stress doesn't generate imports for cross-module interface extends).
 fn plan_interface_extends<R: Rng>(rng: &mut R, table: &mut SymbolTable, config: &PlanConfig) {
-    // Collect all non-generic interfaces
-    let interfaces: Vec<(ModuleId, SymbolId)> = table
-        .all_interfaces()
-        .iter()
-        .filter_map(|(mid, s)| {
-            if let SymbolKind::Interface(ref info) = s.kind {
-                if info.type_params.is_empty() {
-                    Some((*mid, s.id))
-                } else {
-                    None
+    // Process each module separately to keep extends within same module
+    for module_id in 0..table.module_count() {
+        let module_id = ModuleId(module_id);
+
+        // Collect all non-generic interfaces in this module
+        let interfaces: Vec<SymbolId> = table
+            .get_module(module_id)
+            .map(|m| {
+                m.symbols()
+                    .filter_map(|s| {
+                        if let SymbolKind::Interface(ref info) = s.kind {
+                            if info.type_params.is_empty() {
+                                Some(s.id)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        if interfaces.len() < 2 {
+            continue;
+        }
+
+        // For each interface, possibly extend another from the same module
+        for i in 1..interfaces.len() {
+            if rng.gen_bool(config.interface_extends_probability) {
+                let child_id = interfaces[i];
+                // Pick a parent from earlier interfaces to avoid cycles
+                let parent_idx = rng.gen_range(0..i);
+                let parent_id = interfaces[parent_idx];
+
+                if let Some(module) = table.get_module_mut(module_id)
+                    && let Some(symbol) = module.get_symbol_mut(child_id)
+                    && let SymbolKind::Interface(ref mut info) = symbol.kind
+                    && !info.extends.contains(&(module_id, parent_id))
+                {
+                    info.extends.push((module_id, parent_id));
+                    // Don't copy methods - Vole interface extends just requires impl
                 }
-            } else {
-                None
             }
-        })
-        .collect();
-
-    if interfaces.len() < 2 {
-        return;
-    }
-
-    // For each interface, possibly extend another
-    for i in 1..interfaces.len() {
-        if rng.gen_bool(config.interface_extends_probability) {
-            let (child_mod, child_id) = interfaces[i];
-            // Pick a parent from earlier interfaces to avoid cycles
-            let parent_idx = rng.gen_range(0..i);
-            let (parent_mod, parent_id) = interfaces[parent_idx];
-
-            // Get parent methods to copy
-            let parent_methods: Vec<MethodInfo> = table
-                .get_module(parent_mod)
-                .and_then(|m| m.get_symbol(parent_id))
-                .and_then(|s| {
-                    if let SymbolKind::Interface(ref info) = s.kind {
-                        Some(info.methods.clone())
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or_default();
-
-            if let Some(module) = table.get_module_mut(child_mod)
-                && let Some(symbol) = module.get_symbol_mut(child_id)
-                && let SymbolKind::Interface(ref mut info) = symbol.kind
-                && !info.extends.contains(&(parent_mod, parent_id))
-            {
-                info.extends.push((parent_mod, parent_id));
-                // Don't copy methods - Vole interface extends just requires impl
-            }
-
-            // Silence unused warning
-            let _ = parent_methods;
         }
     }
 }
