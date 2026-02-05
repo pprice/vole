@@ -521,13 +521,9 @@ impl Cg<'_, '_, '_> {
                 if compiled.is_owned() {
                     rc_temps.push(compiled);
                 }
-                // Check if param is interface type using arena
-                let is_interface = self.arena().unwrap_interface(param_type_id).is_some();
-                let compiled = if is_interface {
-                    self.box_interface_value(compiled, param_type_id)?
-                } else {
-                    compiled
-                };
+                // Coerce argument to parameter type if needed
+                // (e.g., concrete type -> interface box, concrete type -> union)
+                let compiled = self.coerce_to_type(compiled, param_type_id)?;
 
                 // Generic class methods expect i64 for TypeParam, convert if needed
                 let arg_value = if is_generic_class && compiled.ty != types::I64 {

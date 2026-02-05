@@ -1,0 +1,75 @@
+// Test: Class method with union type parameters
+// Bug: vol-4oax - SEGFAULT when calling a class method that takes a union
+// type parameter (e.g., i64 | u32 | i32). The method call path didn't coerce
+// concrete arguments to their union representation, causing the callee to
+// dereference the raw value as a union pointer (tag + payload).
+
+interface HasUnionMethod {
+    func process(value: i64 | u32 | i32, scale: f64)
+}
+
+class Processor implements HasUnionMethod {
+    factor: i32,
+
+    func process(value: i64 | u32 | i32, scale: f64) {
+        let is_i64 = value is i64
+        let is_u32 = value is u32
+        let is_i32 = value is i32
+        assert(is_i64 || is_u32 || is_i32)
+    }
+
+    func check_type(value: i64 | u32 | i32) -> string {
+        if value is i64 { return "i64" }
+        if value is u32 { return "u32" }
+        if value is i32 { return "i32" }
+        return "unknown"
+    }
+}
+
+interface HasOptionalParam {
+    func maybe(value: i64?)
+}
+
+class OptHandler implements HasOptionalParam {
+    flag: bool,
+
+    func maybe(value: i64?) {
+        if value is i64 {
+            assert(true)
+        } else {
+            assert(value is nil)
+        }
+    }
+}
+
+tests {
+    test "class method with union param - i64" {
+        let p = Processor { factor: 10 }
+        p.process(6_i64, 40.21)
+    }
+
+    test "class method with union param - i32" {
+        let p = Processor { factor: 10 }
+        p.process(42_i32, 1.5)
+    }
+
+    test "class method with union param - type check i64" {
+        let p = Processor { factor: 10 }
+        assert(p.check_type(100_i64) == "i64")
+    }
+
+    test "class method with union param - type check i32" {
+        let p = Processor { factor: 10 }
+        assert(p.check_type(50_i32) == "i32")
+    }
+
+    test "class method with optional param - some" {
+        let h = OptHandler { flag: true }
+        h.maybe(42_i64)
+    }
+
+    test "class method with optional param - nil" {
+        let h = OptHandler { flag: false }
+        h.maybe(nil)
+    }
+}
