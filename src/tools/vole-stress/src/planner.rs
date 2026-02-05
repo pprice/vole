@@ -13,8 +13,8 @@ use rand::Rng;
 
 use crate::symbols::{
     ClassInfo, ErrorInfo, FieldInfo, FunctionInfo, GlobalInfo, ImplementBlockInfo, InterfaceInfo,
-    MethodInfo, ModuleId, ParamInfo, PrimitiveType, SymbolId, SymbolKind, SymbolTable, TypeInfo,
-    TypeParam,
+    MethodInfo, ModuleId, ParamInfo, PrimitiveType, StructInfo, SymbolId, SymbolKind, SymbolTable,
+    TypeInfo, TypeParam,
 };
 
 /// Configuration for the planning phase.
@@ -24,6 +24,8 @@ pub struct PlanConfig {
     pub layers: usize,
     /// Number of modules per layer.
     pub modules_per_layer: usize,
+    /// Number of structs per module (range).
+    pub structs_per_module: (usize, usize),
     /// Number of classes per module (range).
     pub classes_per_module: (usize, usize),
     /// Number of interfaces per module (range).
@@ -34,6 +36,8 @@ pub struct PlanConfig {
     pub functions_per_module: (usize, usize),
     /// Number of globals per module (range).
     pub globals_per_module: (usize, usize),
+    /// Number of fields per struct (range).
+    pub fields_per_struct: (usize, usize),
     /// Number of fields per class (range).
     pub fields_per_class: (usize, usize),
     /// Number of methods per class (range).
@@ -60,6 +64,8 @@ pub struct PlanConfig {
     pub cross_layer_import_probability: f64,
     /// Enable diamond dependency patterns in imports.
     pub enable_diamond_dependencies: bool,
+    /// Probability (0.0-1.0) that a function has a fallible return type.
+    pub fallible_probability: f64,
 }
 
 impl Default for PlanConfig {
@@ -67,11 +73,13 @@ impl Default for PlanConfig {
         Self {
             layers: 3,
             modules_per_layer: 5,
+            structs_per_module: (0, 2),
             classes_per_module: (1, 3),
             interfaces_per_module: (0, 2),
             errors_per_module: (0, 2),
             functions_per_module: (2, 5),
             globals_per_module: (1, 3),
+            fields_per_struct: (2, 4),
             fields_per_class: (1, 4),
             methods_per_class: (1, 3),
             methods_per_interface: (1, 2),
@@ -85,6 +93,7 @@ impl Default for PlanConfig {
             implement_blocks_per_module: (0, 2),
             cross_layer_import_probability: 0.2,
             enable_diamond_dependencies: true,
+            fallible_probability: 0.15,
         }
     }
 }
@@ -148,6 +157,11 @@ pub fn plan<R: Rng>(rng: &mut R, config: &PlanConfig) -> SymbolTable {
 
     // Phase 5: Add interface extends relationships
     plan_interface_extends(rng, &mut table, config);
+
+    // Phase 5.5: Reconcile class implements after interface extends
+    // Classes from Phase 4 may implement interfaces that gained extends in Phase 5.
+    // Ensure all parent interface methods are present in those classes.
+    reconcile_class_implements(&mut table);
 
     // Phase 6: Add standalone implement blocks
     plan_implement_blocks(rng, &mut table, &mut names, config);
@@ -242,6 +256,12 @@ fn plan_module_declarations<R: Rng>(
         plan_interface(rng, table, names, module_id, config);
     }
 
+    // Generate structs (value types with fields only)
+    let struct_count = rng.gen_range(config.structs_per_module.0..=config.structs_per_module.1);
+    for _ in 0..struct_count {
+        plan_struct(rng, table, names, module_id, config);
+    }
+
     // Generate classes
     let class_count = rng.gen_range(config.classes_per_module.0..=config.classes_per_module.1);
     for _ in 0..class_count {
@@ -295,6 +315,30 @@ fn plan_interface<R: Rng>(
         extends: vec![],
         methods,
     });
+    table
+        .get_module_mut(module_id)
+        .map(|m| m.add_symbol(name, kind))
+        .unwrap_or(SymbolId(0))
+}
+
+/// Plan a struct declaration (value type with primitive-typed fields only).
+fn plan_struct<R: Rng>(
+    rng: &mut R,
+    table: &mut SymbolTable,
+    names: &mut NameGen,
+    module_id: ModuleId,
+    config: &PlanConfig,
+) -> SymbolId {
+    let name = names.next("Struct");
+    let field_count = rng.gen_range(config.fields_per_struct.0..=config.fields_per_struct.1);
+    let mut fields = Vec::new();
+
+    for _ in 0..field_count {
+        // Struct fields are always primitive types
+        fields.push(plan_field(rng, names));
+    }
+
+    let kind = SymbolKind::Struct(StructInfo { fields });
     table
         .get_module_mut(module_id)
         .map(|m| m.add_symbol(name, kind))
@@ -393,7 +437,18 @@ fn plan_function<R: Rng>(
         params.push(plan_param_with_type_params(rng, names, &type_params));
     }
 
-    let return_type = plan_return_type_with_type_params(rng, &type_params);
+    // Possibly make this a fallible function if error types are available in the module
+    // and the function has no type parameters (fallible generics are too complex)
+    let return_type = if type_params.is_empty()
+        && config.fallible_probability > 0.0
+        && rng.gen_bool(config.fallible_probability)
+    {
+        plan_fallible_return_type(rng, table, module_id, &type_params)
+            .unwrap_or_else(|| plan_return_type_with_type_params(rng, &type_params))
+    } else {
+        plan_return_type_with_type_params(rng, &type_params)
+    };
+
     let kind = SymbolKind::Function(FunctionInfo {
         type_params,
         params,
@@ -460,10 +515,48 @@ fn plan_method_signature<R: Rng>(
 
 /// Plan a function/method parameter.
 fn plan_param<R: Rng>(rng: &mut R, names: &mut NameGen) -> ParamInfo {
+    let param_type = if rng.gen_bool(0.15) {
+        // 15% chance to generate a union type parameter
+        plan_union_type(rng)
+    } else {
+        TypeInfo::Primitive(PrimitiveType::random_expr_type(rng))
+    };
     ParamInfo {
         name: names.next("param"),
-        param_type: TypeInfo::Primitive(PrimitiveType::random_expr_type(rng)),
+        param_type,
     }
+}
+
+/// Plan a union type with 2-3 primitive variants.
+fn plan_union_type<R: Rng>(rng: &mut R) -> TypeInfo {
+    let variant_count = rng.gen_range(2..=3);
+    let mut variants = Vec::with_capacity(variant_count);
+    let all_types = [
+        PrimitiveType::I8,
+        PrimitiveType::I16,
+        PrimitiveType::I32,
+        PrimitiveType::I64,
+        PrimitiveType::I128,
+        PrimitiveType::U8,
+        PrimitiveType::U16,
+        PrimitiveType::U32,
+        PrimitiveType::U64,
+        PrimitiveType::F32,
+        PrimitiveType::F64,
+        PrimitiveType::Bool,
+        PrimitiveType::String,
+    ];
+
+    // Pick distinct primitive types for the union
+    let mut used = std::collections::HashSet::new();
+    while variants.len() < variant_count {
+        let idx = rng.gen_range(0..all_types.len());
+        if used.insert(idx) {
+            variants.push(TypeInfo::Primitive(all_types[idx]));
+        }
+    }
+
+    TypeInfo::Union(variants)
 }
 
 /// Plan a return type for a function/method.
@@ -548,6 +641,50 @@ fn plan_param_with_type_params<R: Rng>(
         name: names.next("param"),
         param_type,
     }
+}
+
+/// Plan a fallible return type using an error type from the same module.
+///
+/// Returns `None` if no error types are available in the module.
+fn plan_fallible_return_type<R: Rng>(
+    rng: &mut R,
+    table: &SymbolTable,
+    module_id: ModuleId,
+    type_params: &[TypeParam],
+) -> Option<TypeInfo> {
+    // Collect error types from this module
+    let errors: Vec<SymbolId> = table
+        .get_module(module_id)?
+        .errors()
+        .map(|s| s.id)
+        .collect();
+
+    if errors.is_empty() {
+        return None;
+    }
+
+    // Pick a random error type
+    let error_idx = rng.gen_range(0..errors.len());
+    let error_id = errors[error_idx];
+
+    // Generate the success type (a primitive or type param)
+    let success_type = plan_return_type_with_type_params(rng, type_params);
+    // Fallible functions can't have void success type - use i64 as fallback
+    let success_type = if matches!(success_type, TypeInfo::Void) {
+        TypeInfo::Primitive(PrimitiveType::random_expr_type(rng))
+    } else {
+        success_type
+    };
+    // Unwrap optional since fallible already handles the error case
+    let success_type = match success_type {
+        TypeInfo::Optional(inner) => *inner,
+        other => other,
+    };
+
+    Some(TypeInfo::Fallible {
+        success: Box::new(success_type),
+        error: Box::new(TypeInfo::Error(module_id, error_id)),
+    })
 }
 
 /// Plan a return type that may use a type parameter.
@@ -693,6 +830,98 @@ fn plan_interface_extends<R: Rng>(rng: &mut R, table: &mut SymbolTable, config: 
     }
 }
 
+/// Collect all methods required by an interface, including inherited methods from parent
+/// interfaces (via extends). Returns methods with duplicates removed (by name).
+fn collect_all_interface_methods(
+    table: &SymbolTable,
+    module_id: ModuleId,
+    iface_id: SymbolId,
+) -> Vec<MethodInfo> {
+    let mut all_methods = Vec::new();
+    let mut seen_names = std::collections::HashSet::new();
+    let mut stack = vec![(module_id, iface_id)];
+    let mut visited = std::collections::HashSet::new();
+
+    while let Some((mid, sid)) = stack.pop() {
+        if !visited.insert((mid, sid)) {
+            continue; // Avoid infinite loops from cycles
+        }
+
+        if let Some(symbol) = table.get_symbol(mid, sid) {
+            if let SymbolKind::Interface(ref info) = symbol.kind {
+                // Add this interface's own methods
+                for method in &info.methods {
+                    if seen_names.insert(method.name.clone()) {
+                        all_methods.push(method.clone());
+                    }
+                }
+                // Push parent interfaces onto the stack
+                for &(parent_mid, parent_sid) in &info.extends {
+                    stack.push((parent_mid, parent_sid));
+                }
+            }
+        }
+    }
+
+    all_methods
+}
+
+/// After interface extends are set up, ensure classes that implement interfaces
+/// also have methods from all parent interfaces.
+fn reconcile_class_implements(table: &mut SymbolTable) {
+    for module_idx in 0..table.module_count() {
+        let module_id = ModuleId(module_idx);
+
+        // Collect classes that implement interfaces, along with their interface list
+        let class_impls: Vec<(SymbolId, Vec<(ModuleId, SymbolId)>)> = table
+            .get_module(module_id)
+            .map(|m| {
+                m.classes()
+                    .filter_map(|s| {
+                        if let SymbolKind::Class(ref info) = s.kind {
+                            if !info.implements.is_empty() {
+                                Some((s.id, info.implements.clone()))
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // For each class, collect all required methods from all implemented interfaces
+        // (including ancestor methods) and add any missing ones to the class
+        for (class_id, iface_refs) in class_impls {
+            let mut required_methods = Vec::new();
+            let mut seen_names = std::collections::HashSet::new();
+
+            for (iface_mid, iface_sid) in &iface_refs {
+                let methods = collect_all_interface_methods(table, *iface_mid, *iface_sid);
+                for method in methods {
+                    if seen_names.insert(method.name.clone()) {
+                        required_methods.push(method);
+                    }
+                }
+            }
+
+            // Add missing methods to the class
+            if let Some(module) = table.get_module_mut(module_id)
+                && let Some(symbol) = module.get_symbol_mut(class_id)
+                && let SymbolKind::Class(ref mut info) = symbol.kind
+            {
+                for method in &required_methods {
+                    if !info.methods.iter().any(|m| m.name == method.name) {
+                        info.methods.push(method.clone());
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Add standalone implement blocks.
 /// Only creates implement blocks for interfaces and classes within the same module
 /// to avoid cross-module reference issues.
@@ -706,15 +935,16 @@ fn plan_implement_blocks<R: Rng>(
     for module_id in 0..table.module_count() {
         let module_id = ModuleId(module_id);
 
-        // Get interfaces in this module
-        let interfaces: Vec<(SymbolId, Vec<MethodInfo>)> = table
+        // Get non-generic interfaces in this module, collecting ALL required methods
+        // (including inherited methods from parent interfaces via extends)
+        let iface_ids: Vec<SymbolId> = table
             .get_module(module_id)
             .map(|m| {
                 m.interfaces()
                     .filter_map(|s| {
                         if let SymbolKind::Interface(ref info) = s.kind {
                             if info.type_params.is_empty() {
-                                Some((s.id, info.methods.clone()))
+                                Some(s.id)
                             } else {
                                 None
                             }
@@ -725,6 +955,15 @@ fn plan_implement_blocks<R: Rng>(
                     .collect()
             })
             .unwrap_or_default();
+
+        // Collect all methods (including ancestors) for each interface
+        let interfaces: Vec<(SymbolId, Vec<MethodInfo>)> = iface_ids
+            .iter()
+            .map(|&iface_id| {
+                let methods = collect_all_interface_methods(table, module_id, iface_id);
+                (iface_id, methods)
+            })
+            .collect();
 
         if interfaces.is_empty() {
             continue;
@@ -1007,11 +1246,12 @@ mod tests {
 
     #[test]
     fn plan_creates_implement_blocks() {
-        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let mut rng = rand::rngs::StdRng::seed_from_u64(55);
         let config = PlanConfig {
             layers: 1,
             modules_per_layer: 1,
             interfaces_per_module: (2, 2),
+            structs_per_module: (0, 0),
             classes_per_module: (2, 2),
             implement_blocks_per_module: (2, 2),
             type_params_per_interface: (0, 0),
@@ -1111,6 +1351,47 @@ mod tests {
             "Expected at least 2 imports with cross-layer enabled, got {}",
             imports_count
         );
+    }
+
+    #[test]
+    fn plan_creates_structs() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let config = PlanConfig {
+            layers: 1,
+            modules_per_layer: 1,
+            structs_per_module: (2, 2),
+            classes_per_module: (0, 0),
+            functions_per_module: (0, 0),
+            interfaces_per_module: (0, 0),
+            errors_per_module: (0, 0),
+            globals_per_module: (0, 0),
+            ..Default::default()
+        };
+
+        let table = plan(&mut rng, &config);
+        let module = table.get_module(ModuleId(0)).unwrap();
+
+        assert_eq!(module.structs().count(), 2);
+
+        // Verify struct fields are primitive types only
+        for symbol in module.structs() {
+            if let SymbolKind::Struct(ref info) = symbol.kind {
+                assert!(
+                    !info.fields.is_empty(),
+                    "Struct {} should have at least 2 fields",
+                    symbol.name
+                );
+                for field in &info.fields {
+                    assert!(
+                        field.field_type.is_primitive(),
+                        "Struct {} field {} should be a primitive type, got {:?}",
+                        symbol.name,
+                        field.name,
+                        field.field_type
+                    );
+                }
+            }
+        }
     }
 
     #[test]
