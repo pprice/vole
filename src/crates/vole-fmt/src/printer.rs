@@ -271,10 +271,7 @@ fn print_params<'a>(
     // Vole's parser doesn't support newlines after opening paren in function declarations
     let single_line = arena.intersperse(param_docs, arena.text(", "));
 
-    arena
-        .text("(")
-        .append(single_line)
-        .append(arena.text(")"))
+    arena.text("(").append(single_line).append(arena.text(")"))
 }
 
 /// Print a single parameter.

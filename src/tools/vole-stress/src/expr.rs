@@ -5,7 +5,9 @@
 
 use rand::Rng;
 
-use crate::symbols::{ParamInfo, PrimitiveType, SymbolKind, SymbolTable, TypeInfo};
+use crate::symbols::{
+    ModuleId, ParamInfo, PrimitiveType, SymbolId, SymbolKind, SymbolTable, TypeInfo,
+};
 
 /// Configuration for expression generation.
 #[derive(Debug, Clone)]
@@ -113,6 +115,85 @@ impl<'a> ExprContext<'a> {
         vars
     }
 
+    /// Get all array-typed variables in scope, along with their element type.
+    ///
+    /// Returns `(name, element_type)` pairs for variables of type `[T]`.
+    pub fn array_vars(&self) -> Vec<(String, TypeInfo)> {
+        let mut vars = Vec::new();
+        for (name, ty) in self.locals {
+            if let TypeInfo::Array(elem) = ty {
+                vars.push((name.clone(), *elem.clone()));
+            }
+        }
+        for param in self.params {
+            if let TypeInfo::Array(elem) = &param.param_type {
+                vars.push((param.name.clone(), *elem.clone()));
+            }
+        }
+        vars
+    }
+
+    /// Get all optional-typed variables in scope whose inner type matches.
+    ///
+    /// Returns `(name, inner_type)` pairs for variables of type `T?` where T
+    /// matches the given target.
+    pub fn optional_vars_matching(&self, target: &TypeInfo) -> Vec<(String, TypeInfo)> {
+        let mut vars = Vec::new();
+        for (name, ty) in self.locals {
+            if let TypeInfo::Optional(inner) = ty {
+                if types_compatible(inner, target) {
+                    vars.push((name.clone(), *inner.clone()));
+                }
+            }
+        }
+        for param in self.params {
+            if let TypeInfo::Optional(inner) = &param.param_type {
+                if types_compatible(inner, target) {
+                    vars.push((param.name.clone(), *inner.clone()));
+                }
+            }
+        }
+        vars
+    }
+
+    /// Get all optional-typed variables in scope whose inner type is a class.
+    ///
+    /// Returns `(name, mod_id, sym_id)` triples for variables of type `ClassName?`.
+    pub fn optional_class_vars(&self) -> Vec<(String, ModuleId, SymbolId)> {
+        let mut vars = Vec::new();
+        for (name, ty) in self.locals {
+            if let TypeInfo::Optional(inner) = ty {
+                if let TypeInfo::Class(mod_id, sym_id) = inner.as_ref() {
+                    vars.push((name.clone(), *mod_id, *sym_id));
+                }
+            }
+        }
+        for param in self.params {
+            if let TypeInfo::Optional(inner) = &param.param_type {
+                if let TypeInfo::Class(mod_id, sym_id) = inner.as_ref() {
+                    vars.push((param.name.clone(), *mod_id, *sym_id));
+                }
+            }
+        }
+        vars
+    }
+
+    /// Get all union-typed variables in scope, along with their variant types.
+    pub fn union_typed_vars(&self) -> Vec<(&str, &[TypeInfo])> {
+        let mut vars = Vec::new();
+        for (name, ty) in self.locals {
+            if let TypeInfo::Union(variants) = ty {
+                vars.push((name.as_str(), variants.as_slice()));
+            }
+        }
+        for param in self.params {
+            if let TypeInfo::Union(variants) = &param.param_type {
+                vars.push((param.name.as_str(), variants.as_slice()));
+            }
+        }
+        vars
+    }
+
     /// Get all variables in scope (any type), for use in string interpolation.
     pub fn all_vars(&self) -> Vec<(&str, &TypeInfo)> {
         let mut vars = Vec::new();
@@ -142,8 +223,16 @@ fn types_compatible(actual: &TypeInfo, expected: &TypeInfo) -> bool {
 fn is_numeric_type(ty: &TypeInfo) -> bool {
     matches!(
         ty,
-        TypeInfo::Primitive(PrimitiveType::I32)
+        TypeInfo::Primitive(PrimitiveType::I8)
+            | TypeInfo::Primitive(PrimitiveType::I16)
+            | TypeInfo::Primitive(PrimitiveType::I32)
             | TypeInfo::Primitive(PrimitiveType::I64)
+            | TypeInfo::Primitive(PrimitiveType::I128)
+            | TypeInfo::Primitive(PrimitiveType::U8)
+            | TypeInfo::Primitive(PrimitiveType::U16)
+            | TypeInfo::Primitive(PrimitiveType::U32)
+            | TypeInfo::Primitive(PrimitiveType::U64)
+            | TypeInfo::Primitive(PrimitiveType::F32)
             | TypeInfo::Primitive(PrimitiveType::F64)
     )
 }
@@ -184,8 +273,54 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                 // No matching parameter found - use panic (this shouldn't happen with good planning)
                 "panic(\"unreachable: type parameter has no source\")".to_string()
             }
+            TypeInfo::Union(variants) => {
+                // For union types, generate a value for a random variant
+                if variants.is_empty() {
+                    "nil".to_string()
+                } else {
+                    let idx = self.rng.gen_range(0..variants.len());
+                    self.generate(&variants[idx].clone(), ctx, depth)
+                }
+            }
             _ => self.generate_simple(ty, ctx),
         }
+    }
+
+    /// Try to generate an array index expression on an array-typed local.
+    ///
+    /// Looks for array-typed variables in scope whose element type matches
+    /// the target primitive type. Returns `Some("arrayVar[index]")` on success,
+    /// using a small constant index (0..=2) to stay within bounds of typical
+    /// small arrays.
+    fn try_generate_array_index(
+        &mut self,
+        prim: PrimitiveType,
+        ctx: &ExprContext,
+    ) -> Option<String> {
+        let target = TypeInfo::Primitive(prim);
+        let array_vars = ctx.array_vars();
+
+        // Filter to arrays whose element type matches the target
+        let candidates: Vec<_> = array_vars
+            .iter()
+            .filter(|(_, elem_ty)| types_compatible(elem_ty, &target))
+            .collect();
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..candidates.len());
+        let (var_name, _) = &candidates[idx];
+
+        // Use a small constant index to stay within bounds of small arrays
+        let index = self.rng.gen_range(0..=2);
+        let suffix = match prim {
+            PrimitiveType::I32 => "_i32",
+            PrimitiveType::I64 => "_i64",
+            _ => "_i64", // default index type
+        };
+        Some(format!("{}[{}{}]", var_name, index, suffix))
     }
 
     /// Try to generate a field access expression on a class-typed local.
@@ -231,8 +366,78 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         Some(format!("{}.{}", local_name, field_name))
     }
 
+    /// Try to generate a null coalescing expression (`optVar ?? defaultExpr`).
+    ///
+    /// Looks for optional-typed variables in scope whose inner type matches
+    /// the target type. Returns `Some("optVar ?? defaultExpr")` on success.
+    /// The result type is the inner type T (not T?).
+    fn try_generate_null_coalesce(
+        &mut self,
+        target: &TypeInfo,
+        ctx: &ExprContext,
+        depth: usize,
+    ) -> Option<String> {
+        let candidates = ctx.optional_vars_matching(target);
+        if candidates.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..candidates.len());
+        let (var_name, _inner_ty) = &candidates[idx];
+
+        // Generate a default value of the inner type
+        let default_expr = self.generate(target, ctx, depth + 1);
+
+        Some(format!("({} ?? {})", var_name, default_expr))
+    }
+
+    /// Try to generate an optional chaining expression (`optVar?.fieldName`).
+    ///
+    /// Looks for optional-typed variables in scope whose inner type is a class
+    /// with accessible fields. Returns `Some(("optVar?.fieldName", field_type?))`
+    /// where the result type is `Optional(field_type)`.
+    /// Only considers non-generic classes.
+    fn try_generate_optional_chaining(&mut self, ctx: &ExprContext) -> Option<(String, TypeInfo)> {
+        let opt_class_vars = ctx.optional_class_vars();
+        if opt_class_vars.is_empty() {
+            return None;
+        }
+
+        // Collect (var_name, field_name, field_type) candidates
+        let mut candidates: Vec<(String, String, TypeInfo)> = Vec::new();
+
+        for (var_name, mod_id, sym_id) in &opt_class_vars {
+            if let Some(sym) = ctx.table.get_symbol(*mod_id, *sym_id) {
+                if let SymbolKind::Class(ref info) = sym.kind {
+                    // Skip generic classes
+                    if !info.type_params.is_empty() {
+                        continue;
+                    }
+                    for field in &info.fields {
+                        candidates.push((
+                            var_name.clone(),
+                            field.name.clone(),
+                            field.field_type.clone(),
+                        ));
+                    }
+                }
+            }
+        }
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..candidates.len());
+        let (var_name, field_name, field_type) = &candidates[idx];
+
+        // The result of ?. is always optional
+        let result_type = TypeInfo::Optional(Box::new(field_type.clone()));
+        Some((format!("{}?.{}", var_name, field_name), result_type))
+    }
+
     /// Generate a simple expression (literal or variable reference).
-    fn generate_simple(&mut self, ty: &TypeInfo, ctx: &ExprContext) -> String {
+    pub fn generate_simple(&mut self, ty: &TypeInfo, ctx: &ExprContext) -> String {
         // Try to find a matching variable first
         if let Some(var) = ctx.find_matching_var(ty)
             && self.rng.gen_bool(0.6)
@@ -245,6 +450,14 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             TypeInfo::Primitive(p) => self.literal_for_primitive(*p),
             TypeInfo::Optional(_) => "nil".to_string(),
             TypeInfo::Void => "nil".to_string(),
+            TypeInfo::Union(variants) => {
+                // Generate a literal for a random variant
+                if let Some(first) = variants.first() {
+                    self.generate_simple(first, ctx)
+                } else {
+                    "nil".to_string()
+                }
+            }
             _ => self.literal_for_primitive(PrimitiveType::I64),
         }
     }
@@ -261,6 +474,24 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         if self.rng.gen_bool(0.18) {
             if let Some(access) = self.try_generate_field_access(prim, ctx) {
                 return access;
+            }
+        }
+
+        // ~15% chance to generate array indexing: `arrVar[index]`
+        // when an array-typed variable with matching element type is in scope
+        if self.rng.gen_bool(0.15) {
+            if let Some(expr) = self.try_generate_array_index(prim, ctx) {
+                return expr;
+            }
+        }
+
+        // ~15% chance to generate null coalescing: `optVar ?? defaultExpr`
+        // when an optional-typed variable with matching inner type is in scope
+        if self.rng.gen_bool(0.15) {
+            if let Some(expr) =
+                self.try_generate_null_coalesce(&TypeInfo::Primitive(prim), ctx, depth)
+            {
+                return expr;
             }
         }
 
@@ -325,6 +556,12 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                         // Two-arm conditional (if-expression equivalent)
                         self.generate_if_expr(&TypeInfo::Primitive(prim), ctx, depth)
                     }
+                    8 => {
+                        // Type test (is) expression on union-typed variable
+                        self.generate_is_expr(ctx).unwrap_or_else(|| {
+                            self.generate_simple(&TypeInfo::Primitive(prim), ctx)
+                        })
+                    }
                     _ => self.generate_simple(&TypeInfo::Primitive(prim), ctx),
                 }
             }
@@ -346,6 +583,37 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                     6..=8 => {
                         // Interpolated string (~30%)
                         self.generate_interpolated_string(ctx)
+                    }
+                    _ => self.generate_simple(&TypeInfo::Primitive(prim), ctx),
+                }
+            }
+            // Wider integer and float types: generate simpler expressions
+            // (no binary arith/bitwise since those only support i32/i64/f64)
+            PrimitiveType::I8
+            | PrimitiveType::I16
+            | PrimitiveType::I128
+            | PrimitiveType::U8
+            | PrimitiveType::U16
+            | PrimitiveType::U32
+            | PrimitiveType::U64
+            | PrimitiveType::F32 => {
+                match choice {
+                    0..=4 => {
+                        // Literal
+                        self.generate_simple(&TypeInfo::Primitive(prim), ctx)
+                    }
+                    5..=6 => {
+                        // Multi-arm when expression
+                        self.generate_when_expr(&TypeInfo::Primitive(prim), ctx, depth)
+                    }
+                    7 => {
+                        // Match expression
+                        let ty = TypeInfo::Primitive(prim);
+                        self.generate_match_expr(&ty, &ty, ctx, depth)
+                    }
+                    8 => {
+                        // Two-arm conditional (if-expression equivalent)
+                        self.generate_if_expr(&TypeInfo::Primitive(prim), ctx, depth)
                     }
                     _ => self.generate_simple(&TypeInfo::Primitive(prim), ctx),
                 }
@@ -457,6 +725,33 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         format!("({} {} {})", left, op, right)
     }
 
+    /// Generate a type test (`is`) expression on a union-typed variable.
+    ///
+    /// Returns `Some("varName is TypeName")` if a union-typed variable is in scope,
+    /// or `None` if no union-typed variables are available.
+    pub fn generate_is_expr(&mut self, ctx: &ExprContext) -> Option<String> {
+        let union_vars = ctx.union_typed_vars();
+        if union_vars.is_empty() {
+            return None;
+        }
+
+        let var_idx = self.rng.gen_range(0..union_vars.len());
+        let (var_name, variants) = union_vars[var_idx];
+
+        if variants.is_empty() {
+            return None;
+        }
+
+        let variant_idx = self.rng.gen_range(0..variants.len());
+        let variant = &variants[variant_idx];
+
+        // Only generate `is` for primitive variants (type name is straightforward)
+        match variant {
+            TypeInfo::Primitive(prim) => Some(format!("({} is {})", var_name, prim.as_str())),
+            _ => None,
+        }
+    }
+
     /// Generate a conditional expression using when (Vole's if-expression equivalent).
     ///
     /// Produces a 2-arm when expression: `when { cond => then, _ => else }`.
@@ -489,6 +784,28 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
 
     /// Generate an optional expression.
     fn generate_optional(&mut self, inner: &TypeInfo, ctx: &ExprContext, depth: usize) -> String {
+        // ~20% chance to generate optional chaining (optVar?.field) when
+        // an optional class-typed variable with a field matching inner is in scope.
+        // The result of ?. is Optional(field_type).
+        if self.rng.gen_bool(0.20) {
+            if let Some((expr, result_ty)) = self.try_generate_optional_chaining(ctx) {
+                // result_ty is Optional(field_type); check if field_type matches inner
+                if let TypeInfo::Optional(ref chained_inner) = result_ty {
+                    if types_compatible(chained_inner, inner) {
+                        return expr;
+                    }
+                }
+            }
+        }
+
+        // ~20% chance to reference an existing optional variable in scope
+        if self.rng.gen_bool(0.20) {
+            let opt_ty = TypeInfo::Optional(Box::new(inner.clone()));
+            if let Some(var) = ctx.find_matching_var(&opt_ty) {
+                return var;
+            }
+        }
+
         // 50% chance of nil, 50% chance of value
         if self.rng.gen_bool(0.5) {
             "nil".to_string()
@@ -584,6 +901,14 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
     /// Generate a literal for a primitive type.
     pub fn literal_for_primitive(&mut self, prim: PrimitiveType) -> String {
         match prim {
+            PrimitiveType::I8 => {
+                let val: i8 = self.rng.gen_range(-128..=127);
+                format!("{}_i8", val)
+            }
+            PrimitiveType::I16 => {
+                let val: i16 = self.rng.gen_range(-1000..=1000);
+                format!("{}_i16", val)
+            }
             PrimitiveType::I32 => {
                 let val: i32 = self.rng.gen_range(0..100);
                 format!("{}_i32", val)
@@ -591,6 +916,30 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             PrimitiveType::I64 => {
                 let val: i64 = self.rng.gen_range(0..1000);
                 format!("{}_i64", val)
+            }
+            PrimitiveType::I128 => {
+                let val: i64 = self.rng.gen_range(0..10000);
+                format!("{}_i128", val)
+            }
+            PrimitiveType::U8 => {
+                let val: u8 = self.rng.gen_range(0..=255);
+                format!("{}_u8", val)
+            }
+            PrimitiveType::U16 => {
+                let val: u16 = self.rng.gen_range(0..=1000);
+                format!("{}_u16", val)
+            }
+            PrimitiveType::U32 => {
+                let val: u32 = self.rng.gen_range(0..1000);
+                format!("{}_u32", val)
+            }
+            PrimitiveType::U64 => {
+                let val: u64 = self.rng.gen_range(0..10000);
+                format!("{}_u64", val)
+            }
+            PrimitiveType::F32 => {
+                let val: f32 = self.rng.gen_range(0.0_f32..100.0_f32);
+                format!("{:.2}_f32", val)
             }
             PrimitiveType::F64 => {
                 let val: f64 = self.rng.gen_range(0.0..100.0);
@@ -700,6 +1049,7 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::symbols::{ClassInfo, FieldInfo};
     use rand::SeedableRng;
 
     #[test]
@@ -873,5 +1223,499 @@ mod tests {
         let expr2 = gen2.generate(&TypeInfo::Primitive(PrimitiveType::I64), &ctx, 0);
 
         assert_eq!(expr1, expr2);
+    }
+
+    #[test]
+    fn test_is_expr_with_union_param() {
+        let config = ExprConfig::default();
+        let table = SymbolTable::new();
+        let params = vec![ParamInfo {
+            name: "val".to_string(),
+            param_type: TypeInfo::Union(vec![
+                TypeInfo::Primitive(PrimitiveType::I32),
+                TypeInfo::Primitive(PrimitiveType::String),
+            ]),
+        }];
+
+        let mut found_is = false;
+        for seed in 0..100 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let ctx = ExprContext::new(&params, &[], &table);
+            if let Some(expr) = generator.generate_is_expr(&ctx) {
+                assert!(
+                    expr.contains("val is "),
+                    "Expected 'val is ...', got: {}",
+                    expr
+                );
+                assert!(
+                    expr == "(val is i32)" || expr == "(val is string)",
+                    "Unexpected is expr: {}",
+                    expr,
+                );
+                found_is = true;
+            }
+        }
+        assert!(found_is, "Expected to generate at least one is expression");
+    }
+
+    #[test]
+    fn test_is_expr_no_union_vars() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let config = ExprConfig::default();
+        let mut generator = ExprGenerator::new(&mut rng, &config);
+
+        let table = SymbolTable::new();
+        let ctx = ExprContext::new(&[], &[], &table);
+
+        // With no union-typed vars, should return None
+        assert!(generator.generate_is_expr(&ctx).is_none());
+    }
+
+    #[test]
+    fn test_is_expr_in_bool_generation() {
+        let config = ExprConfig::default();
+        let table = SymbolTable::new();
+        let params = vec![ParamInfo {
+            name: "x".to_string(),
+            param_type: TypeInfo::Union(vec![
+                TypeInfo::Primitive(PrimitiveType::I64),
+                TypeInfo::Primitive(PrimitiveType::Bool),
+            ]),
+        }];
+
+        let mut found_is = false;
+        for seed in 0..500 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let ctx = ExprContext::new(&params, &[], &table);
+            let expr = generator.generate(&TypeInfo::Primitive(PrimitiveType::Bool), &ctx, 0);
+            if expr.contains(" is ") {
+                found_is = true;
+                break;
+            }
+        }
+        assert!(
+            found_is,
+            "Expected at least one 'is' expression in bool generation across 500 seeds",
+        );
+    }
+
+    #[test]
+    fn test_union_type_expr_generation() {
+        let config = ExprConfig::default();
+        let table = SymbolTable::new();
+
+        let union_ty = TypeInfo::Union(vec![
+            TypeInfo::Primitive(PrimitiveType::I32),
+            TypeInfo::Primitive(PrimitiveType::String),
+        ]);
+
+        // Should generate valid expressions for union types
+        for seed in 0..50 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let ctx = ExprContext::new(&[], &[], &table);
+            let expr = generator.generate(&union_ty, &ctx, 0);
+            assert!(
+                !expr.is_empty(),
+                "Union type expression should not be empty"
+            );
+        }
+    }
+
+    #[test]
+    fn test_null_coalesce_with_optional_var() {
+        let config = ExprConfig::default();
+        let table = SymbolTable::new();
+        let locals = vec![(
+            "opt_val".to_string(),
+            TypeInfo::Optional(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+        )];
+
+        let mut found_coalesce = false;
+        for seed in 0..500 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let ctx = ExprContext::new(&[], &locals, &table);
+            let expr = generator.generate(&TypeInfo::Primitive(PrimitiveType::I64), &ctx, 0);
+            if expr.contains("??") {
+                assert!(
+                    expr.contains("opt_val"),
+                    "Null coalesce should reference the optional variable, got: {}",
+                    expr,
+                );
+                found_coalesce = true;
+                break;
+            }
+        }
+        assert!(
+            found_coalesce,
+            "Expected at least one null coalescing expression across 500 seeds",
+        );
+    }
+
+    #[test]
+    fn test_null_coalesce_no_optional_vars() {
+        let config = ExprConfig::default();
+        let table = SymbolTable::new();
+        let locals = vec![(
+            "plain_val".to_string(),
+            TypeInfo::Primitive(PrimitiveType::I64),
+        )];
+
+        // With no optional-typed vars, ?? should never appear
+        for seed in 0..200 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let ctx = ExprContext::new(&[], &locals, &table);
+            let expr = generator.generate(&TypeInfo::Primitive(PrimitiveType::I64), &ctx, 0);
+            assert!(
+                !expr.contains("??"),
+                "Should not generate ?? without optional vars, got: {}",
+                expr,
+            );
+        }
+    }
+
+    #[test]
+    fn test_null_coalesce_type_mismatch_not_generated() {
+        let config = ExprConfig::default();
+        let table = SymbolTable::new();
+        // Optional<String> should NOT produce ?? when generating i64
+        let locals = vec![(
+            "opt_str".to_string(),
+            TypeInfo::Optional(Box::new(TypeInfo::Primitive(PrimitiveType::String))),
+        )];
+
+        for seed in 0..200 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let ctx = ExprContext::new(&[], &locals, &table);
+            let expr = generator.generate(&TypeInfo::Primitive(PrimitiveType::I64), &ctx, 0);
+            assert!(
+                !expr.contains("??"),
+                "Should not generate ?? with mismatched inner type, got: {}",
+                expr,
+            );
+        }
+    }
+
+    #[test]
+    fn test_optional_chaining_with_class_optional() {
+        let config = ExprConfig::default();
+        let mut table = SymbolTable::new();
+        let mod_id = table.add_module("test_mod".to_string(), "test_mod.vole".to_string());
+
+        // Create a class with an i64 field
+        let sym_id = table.get_module_mut(mod_id).unwrap().add_symbol(
+            "Point".to_string(),
+            SymbolKind::Class(ClassInfo {
+                type_params: vec![],
+                fields: vec![FieldInfo {
+                    name: "x".to_string(),
+                    field_type: TypeInfo::Primitive(PrimitiveType::I64),
+                }],
+                methods: vec![],
+                implements: vec![],
+            }),
+        );
+
+        // Local variable of type Point?
+        let locals = vec![(
+            "opt_point".to_string(),
+            TypeInfo::Optional(Box::new(TypeInfo::Class(mod_id, sym_id))),
+        )];
+
+        let mut found_chaining = false;
+        for seed in 0..500 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let ctx = ExprContext::new(&[], &locals, &table);
+            // Generate Optional<i64> - the result of ?.x on Point?
+            let expr = generator.generate(
+                &TypeInfo::Optional(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+                &ctx,
+                0,
+            );
+            if expr.contains("?.") {
+                assert!(
+                    expr.contains("opt_point?.x"),
+                    "Optional chaining should reference opt_point?.x, got: {}",
+                    expr,
+                );
+                found_chaining = true;
+                break;
+            }
+        }
+        assert!(
+            found_chaining,
+            "Expected at least one optional chaining expression across 500 seeds",
+        );
+    }
+
+    #[test]
+    fn test_optional_chaining_no_class_optionals() {
+        let config = ExprConfig::default();
+        let table = SymbolTable::new();
+        // Only a plain optional, no class-typed optional
+        let locals = vec![(
+            "opt_num".to_string(),
+            TypeInfo::Optional(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+        )];
+
+        for seed in 0..200 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let ctx = ExprContext::new(&[], &locals, &table);
+            let expr = generator.generate(
+                &TypeInfo::Optional(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+                &ctx,
+                0,
+            );
+            assert!(
+                !expr.contains("?."),
+                "Should not generate ?. without class-typed optional, got: {}",
+                expr,
+            );
+        }
+    }
+
+    #[test]
+    fn test_null_coalesce_direct() {
+        let config = ExprConfig::default();
+        let table = SymbolTable::new();
+        let locals = vec![(
+            "maybe".to_string(),
+            TypeInfo::Optional(Box::new(TypeInfo::Primitive(PrimitiveType::Bool))),
+        )];
+
+        let mut found = false;
+        for seed in 0..500 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let ctx = ExprContext::new(&[], &locals, &table);
+            if let Some(expr) = generator.try_generate_null_coalesce(
+                &TypeInfo::Primitive(PrimitiveType::Bool),
+                &ctx,
+                0,
+            ) {
+                assert!(
+                    expr.contains("maybe"),
+                    "Should reference 'maybe', got: {}",
+                    expr
+                );
+                assert!(expr.contains("??"), "Should contain '??', got: {}", expr);
+                found = true;
+                break;
+            }
+        }
+        assert!(
+            found,
+            "Expected try_generate_null_coalesce to succeed at least once"
+        );
+    }
+
+    #[test]
+    fn test_optional_chaining_direct() {
+        let config = ExprConfig::default();
+        let mut table = SymbolTable::new();
+        let mod_id = table.add_module("m".to_string(), "m.vole".to_string());
+        let sym_id = table.get_module_mut(mod_id).unwrap().add_symbol(
+            "Rec".to_string(),
+            SymbolKind::Class(ClassInfo {
+                type_params: vec![],
+                fields: vec![
+                    FieldInfo {
+                        name: "val".to_string(),
+                        field_type: TypeInfo::Primitive(PrimitiveType::I32),
+                    },
+                    FieldInfo {
+                        name: "name".to_string(),
+                        field_type: TypeInfo::Primitive(PrimitiveType::String),
+                    },
+                ],
+                methods: vec![],
+                implements: vec![],
+            }),
+        );
+
+        let locals = vec![(
+            "opt_rec".to_string(),
+            TypeInfo::Optional(Box::new(TypeInfo::Class(mod_id, sym_id))),
+        )];
+
+        let mut found = false;
+        for seed in 0..100 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let ctx = ExprContext::new(&[], &locals, &table);
+            if let Some((expr, result_ty)) = generator.try_generate_optional_chaining(&ctx) {
+                assert!(
+                    expr.starts_with("opt_rec?."),
+                    "Should start with 'opt_rec?.', got: {}",
+                    expr,
+                );
+                assert!(
+                    expr == "opt_rec?.val" || expr == "opt_rec?.name",
+                    "Should reference a field, got: {}",
+                    expr,
+                );
+                // Result type should be Optional
+                assert!(
+                    matches!(result_ty, TypeInfo::Optional(_)),
+                    "Result type should be Optional, got: {:?}",
+                    result_ty,
+                );
+                found = true;
+                break;
+            }
+        }
+        assert!(
+            found,
+            "Expected try_generate_optional_chaining to succeed at least once"
+        );
+    }
+
+    #[test]
+    fn test_array_index_with_matching_array_var() {
+        let config = ExprConfig::default();
+        let table = SymbolTable::new();
+        let locals = vec![(
+            "nums".to_string(),
+            TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+        )];
+
+        let mut found_index = false;
+        for seed in 0..500 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let ctx = ExprContext::new(&[], &locals, &table);
+            let expr = generator.generate(&TypeInfo::Primitive(PrimitiveType::I64), &ctx, 0);
+            if expr.contains("nums[") {
+                // Index should be 0, 1, or 2 with _i64 suffix
+                assert!(
+                    expr.contains("nums[0_i64]")
+                        || expr.contains("nums[1_i64]")
+                        || expr.contains("nums[2_i64]"),
+                    "Array index should use small constant index, got: {}",
+                    expr,
+                );
+                found_index = true;
+                break;
+            }
+        }
+        assert!(
+            found_index,
+            "Expected at least one array index expression across 500 seeds",
+        );
+    }
+
+    #[test]
+    fn test_array_index_no_matching_array_vars() {
+        let config = ExprConfig::default();
+        let table = SymbolTable::new();
+        // Array of strings should NOT produce array index when generating i64
+        let locals = vec![(
+            "strs".to_string(),
+            TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::String))),
+        )];
+
+        for seed in 0..200 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let ctx = ExprContext::new(&[], &locals, &table);
+            let expr = generator.generate(&TypeInfo::Primitive(PrimitiveType::I64), &ctx, 0);
+            assert!(
+                !expr.contains("strs["),
+                "Should not generate array index with mismatched element type, got: {}",
+                expr,
+            );
+        }
+    }
+
+    #[test]
+    fn test_array_index_direct() {
+        let config = ExprConfig::default();
+        let table = SymbolTable::new();
+        let locals = vec![(
+            "arr".to_string(),
+            TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I32))),
+        )];
+
+        let mut found = false;
+        for seed in 0..100 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let ctx = ExprContext::new(&[], &locals, &table);
+            if let Some(expr) = generator.try_generate_array_index(PrimitiveType::I32, &ctx) {
+                assert!(
+                    expr.starts_with("arr["),
+                    "Should start with 'arr[', got: {}",
+                    expr,
+                );
+                // Verify index is a small constant with proper suffix
+                assert!(
+                    expr.contains("_i32]"),
+                    "Index should have _i32 suffix, got: {}",
+                    expr,
+                );
+                found = true;
+                break;
+            }
+        }
+        assert!(
+            found,
+            "Expected try_generate_array_index to succeed at least once"
+        );
+    }
+
+    #[test]
+    fn test_array_index_no_arrays_in_scope() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let config = ExprConfig::default();
+        let mut generator = ExprGenerator::new(&mut rng, &config);
+
+        let table = SymbolTable::new();
+        let ctx = ExprContext::new(&[], &[], &table);
+
+        // With no array-typed vars, should return None
+        assert!(
+            generator
+                .try_generate_array_index(PrimitiveType::I64, &ctx)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn test_array_vars_helper() {
+        let table = SymbolTable::new();
+        let locals = vec![
+            (
+                "nums".to_string(),
+                TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+            ),
+            ("plain".to_string(), TypeInfo::Primitive(PrimitiveType::I64)),
+            (
+                "strs".to_string(),
+                TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::String))),
+            ),
+        ];
+
+        let params = vec![ParamInfo {
+            name: "param_arr".to_string(),
+            param_type: TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::Bool))),
+        }];
+
+        let ctx = ExprContext::new(&params, &locals, &table);
+        let arr_vars = ctx.array_vars();
+
+        assert_eq!(arr_vars.len(), 3);
+        assert_eq!(arr_vars[0].0, "nums");
+        assert_eq!(arr_vars[0].1, TypeInfo::Primitive(PrimitiveType::I64));
+        assert_eq!(arr_vars[1].0, "strs");
+        assert_eq!(arr_vars[1].1, TypeInfo::Primitive(PrimitiveType::String));
+        assert_eq!(arr_vars[2].0, "param_arr");
+        assert_eq!(arr_vars[2].1, TypeInfo::Primitive(PrimitiveType::Bool));
     }
 }

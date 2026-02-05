@@ -75,7 +75,8 @@ fn minimal_profile() -> Profile {
         // Single layer with 1 module (plus implicit main)
         layers: 1,
         modules_per_layer: 1,
-        // No classes, interfaces, or errors
+        // No classes, interfaces, structs, or errors
+        structs_per_module: (0, 0),
         classes_per_module: (0, 0),
         interfaces_per_module: (0, 0),
         errors_per_module: (0, 0),
@@ -96,7 +97,10 @@ fn minimal_profile() -> Profile {
         // No cross-layer imports (only one layer anyway)
         cross_layer_import_probability: 0.0,
         enable_diamond_dependencies: false,
-        // These won't be used since we have no classes
+        // No fallible functions (no error types in minimal)
+        fallible_probability: 0.0,
+        // These won't be used since we have no classes or structs
+        fields_per_struct: (0, 0),
         fields_per_class: (0, 0),
         methods_per_class: (0, 0),
         methods_per_interface: (0, 0),
@@ -125,6 +129,10 @@ fn minimal_profile() -> Profile {
             while_probability: 0.0,
             for_probability: 0.0,
             break_continue_probability: 0.0,
+            compound_assign_probability: 0.0,
+            // No fallible (no error types in minimal)
+            raise_probability: 0.0,
+            try_probability: 0.0,
         },
     };
 
@@ -152,13 +160,15 @@ fn full_profile() -> Profile {
         modules_per_layer: 4,
 
         // All declaration types with moderate counts
+        structs_per_module: (1, 3),
         classes_per_module: (2, 4),
         interfaces_per_module: (1, 3),
         errors_per_module: (1, 2),
         functions_per_module: (3, 6),
         globals_per_module: (1, 3),
 
-        // Class/interface structure for comprehensive testing
+        // Class/interface/struct structure for comprehensive testing
+        fields_per_struct: (2, 4),
         fields_per_class: (2, 5),
         methods_per_class: (2, 4),
         methods_per_interface: (2, 3),
@@ -180,6 +190,9 @@ fn full_profile() -> Profile {
         // Module imports
         cross_layer_import_probability: 0.3,
         enable_diamond_dependencies: true,
+
+        // Fallible functions: ~18% of non-generic functions get fallible return types
+        fallible_probability: 0.18,
     };
 
     let emit = EmitConfig {
@@ -203,6 +216,10 @@ fn full_profile() -> Profile {
             while_probability: 0.15,
             for_probability: 0.2,
             break_continue_probability: 0.12,
+            compound_assign_probability: 0.15,
+            // Fallible: raise in fallible bodies, try when calling fallible funcs
+            raise_probability: 0.12,
+            try_probability: 0.15,
         },
     };
 
@@ -211,18 +228,20 @@ fn full_profile() -> Profile {
 
 /// Deep-nesting profile - stress parser stack and AST depth.
 ///
-/// This profile generates code with extreme nesting to test:
+/// This profile generates code with significant nesting to test:
 /// - Parser recursion limits and stack usage
 /// - AST traversal efficiency in all compiler phases
 /// - Memory usage with deeply nested structures
 ///
-/// Target: expressions and statements nested 100-500 levels deep.
+/// Target: expressions nested 15-20 levels, statements nested 10-15 levels.
+/// Higher depths cause exponential AST growth and generation timeouts.
 fn deep_nesting_profile() -> Profile {
     let plan = PlanConfig {
         // Small module structure - focus is on depth, not breadth
         layers: 1,
         modules_per_layer: 1,
         // Few declarations, but each will have deeply nested bodies
+        structs_per_module: (0, 0),
         classes_per_module: (0, 1),
         interfaces_per_module: (0, 0),
         errors_per_module: (0, 0),
@@ -241,7 +260,10 @@ fn deep_nesting_profile() -> Profile {
         // Single module, no imports
         cross_layer_import_probability: 0.0,
         enable_diamond_dependencies: false,
-        // Minimal class structure
+        // No fallible functions - focus is on nesting
+        fallible_probability: 0.0,
+        // Minimal class/struct structure
+        fields_per_struct: (0, 0),
         fields_per_class: (1, 2),
         methods_per_class: (1, 2),
         methods_per_interface: (0, 0),
@@ -251,31 +273,33 @@ fn deep_nesting_profile() -> Profile {
     let emit = EmitConfig {
         stmt_config: StmtConfig {
             expr_config: ExprConfig {
-                // Very deep expression nesting (100-500 levels target)
-                // Each level can spawn sub-expressions, so effective depth compounds
-                max_depth: 150,
+                // Deep expression nesting - high enough to stress the compiler,
+                // low enough to avoid exponential blowup in generation
+                max_depth: 8,
                 // High probability of binary expressions for deep a + (b + (c + ...))
-                binary_probability: 0.8,
-                // when expressions add depth with multiple arms
-                when_probability: 0.3,
-                // match expressions for deep pattern matching
-                match_probability: 0.2,
-                // if expressions for deep conditional chains
-                if_expr_probability: 0.3,
-                // lambda expressions for deep captures
-                lambda_probability: 0.15,
+                binary_probability: 0.6,
+                // Multi-branch expressions at moderate probability
+                when_probability: 0.15,
+                match_probability: 0.1,
+                if_expr_probability: 0.15,
+                // Some lambdas for capture depth
+                lambda_probability: 0.05,
+                // Block expressions add depth
             },
-            // Deep statement nesting for { { { ... } } }
-            max_depth: 100,
-            // More statements per block to compound nesting
-            statements_per_block: (2, 4),
-            // High probability of control flow for deep if-else chains
-            if_probability: 0.6,
-            // while loops add block depth
-            while_probability: 0.2,
-            // for loops add block depth
-            for_probability: 0.2,
+            // Deep statement nesting for nested control flow
+            max_depth: 6,
+            // Keep blocks small to bound total output size
+            statements_per_block: (1, 2),
+            // High probability of if for deep if-else chains
+            if_probability: 0.5,
+            // while/for loops add block depth
+            while_probability: 0.15,
+            for_probability: 0.15,
             break_continue_probability: 0.12,
+            compound_assign_probability: 0.15,
+            // No fallible - focus is on nesting depth
+            raise_probability: 0.0,
+            try_probability: 0.0,
         },
     };
 
@@ -297,6 +321,8 @@ fn wide_types_profile() -> Profile {
         // Moderate module structure - focus is on wide types, not modules
         layers: 2,
         modules_per_layer: 3,
+        // Several structs with wide field counts
+        structs_per_module: (1, 2),
         // Several classes with wide field counts
         classes_per_module: (2, 4),
         // Several interfaces with many methods
@@ -307,6 +333,8 @@ fn wide_types_profile() -> Profile {
         functions_per_module: (3, 5),
         // A few globals
         globals_per_module: (1, 2),
+        // Wide struct fields: 10-25
+        fields_per_struct: (10, 25),
         // Wide fields: 20-50 fields per class
         fields_per_class: (20, 50),
         // Many methods per class: 10-20
@@ -330,6 +358,8 @@ fn wide_types_profile() -> Profile {
         // Standard import behavior
         cross_layer_import_probability: 0.2,
         enable_diamond_dependencies: true,
+        // Some fallible functions
+        fallible_probability: 0.10,
     };
 
     let emit = EmitConfig {
@@ -354,6 +384,10 @@ fn wide_types_profile() -> Profile {
             while_probability: 0.1,
             for_probability: 0.1,
             break_continue_probability: 0.12,
+            compound_assign_probability: 0.15,
+            // Some fallible support
+            raise_probability: 0.08,
+            try_probability: 0.10,
         },
     };
 
@@ -377,12 +411,14 @@ fn many_modules_profile() -> Profile {
         layers: 5,
         modules_per_layer: 10,
         // Light declarations per module - focus is on module graph, not content
+        structs_per_module: (0, 1),
         classes_per_module: (1, 2),
         interfaces_per_module: (0, 1),
         errors_per_module: (0, 1),
         functions_per_module: (2, 4),
         globals_per_module: (1, 2),
-        // Simple class/interface structure
+        // Simple class/interface/struct structure
+        fields_per_struct: (1, 3),
         fields_per_class: (1, 3),
         methods_per_class: (1, 2),
         methods_per_interface: (1, 2),
@@ -401,6 +437,8 @@ fn many_modules_profile() -> Profile {
         cross_layer_import_probability: 0.7,
         // Enable diamond dependencies (A imports B,C; B,C both import D)
         enable_diamond_dependencies: true,
+        // No fallible functions - focus on module loading
+        fallible_probability: 0.0,
     };
 
     let emit = EmitConfig {
@@ -425,6 +463,10 @@ fn many_modules_profile() -> Profile {
             while_probability: 0.0,
             for_probability: 0.0,
             break_continue_probability: 0.0,
+            compound_assign_probability: 0.0,
+            // No fallible - focus on module loading
+            raise_probability: 0.0,
+            try_probability: 0.0,
         },
     };
 
@@ -447,6 +489,8 @@ fn generics_heavy_profile() -> Profile {
         // Moderate module structure - focus is on generics, not module graph
         layers: 2,
         modules_per_layer: 3,
+        // A few structs (structs don't have generics, but add some for variety)
+        structs_per_module: (0, 1),
         // Many classes - each will be generic
         classes_per_module: (3, 5),
         // Many interfaces for constraints
@@ -457,6 +501,8 @@ fn generics_heavy_profile() -> Profile {
         functions_per_module: (4, 6),
         // Some globals
         globals_per_module: (1, 2),
+        // Struct fields
+        fields_per_struct: (2, 3),
         // Moderate field counts - fields can use type params
         fields_per_class: (2, 4),
         // Many methods - methods will also be generic on generic classes
@@ -480,6 +526,8 @@ fn generics_heavy_profile() -> Profile {
         // Standard import behavior
         cross_layer_import_probability: 0.3,
         enable_diamond_dependencies: true,
+        // Some fallible functions for generics-heavy profile
+        fallible_probability: 0.10,
     };
 
     let emit = EmitConfig {
@@ -507,6 +555,10 @@ fn generics_heavy_profile() -> Profile {
             while_probability: 0.1,
             for_probability: 0.15,
             break_continue_probability: 0.12,
+            compound_assign_probability: 0.15,
+            // Some fallible support
+            raise_probability: 0.08,
+            try_probability: 0.10,
         },
     };
 
@@ -633,15 +685,15 @@ mod tests {
         // Verify deep nesting characteristics
         assert_eq!(profile.plan.layers, 1);
         assert_eq!(profile.plan.modules_per_layer, 1);
-        // Deep expression nesting
+        // Expression nesting depth (8+ is enough with compounding from binary ops)
         assert!(
-            profile.emit.stmt_config.expr_config.max_depth >= 100,
-            "expression max_depth should be >= 100 for deep nesting"
+            profile.emit.stmt_config.expr_config.max_depth >= 6,
+            "expression max_depth should be >= 6 for deep nesting"
         );
-        // Deep statement nesting
+        // Statement nesting depth
         assert!(
-            profile.emit.stmt_config.max_depth >= 50,
-            "statement max_depth should be >= 50 for deep nesting"
+            profile.emit.stmt_config.max_depth >= 6,
+            "statement max_depth should be >= 6 for deep nesting"
         );
         // High binary probability for deep a + (b + (c + ...))
         assert!(
@@ -650,8 +702,8 @@ mod tests {
         );
         // High if probability for deep if-else chains
         assert!(
-            profile.emit.stmt_config.if_probability >= 0.5,
-            "if_probability should be high for deep nesting"
+            profile.emit.stmt_config.if_probability >= 0.4,
+            "if_probability should be moderately high for deep nesting"
         );
     }
 

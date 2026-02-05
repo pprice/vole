@@ -2174,15 +2174,17 @@ impl Analyzer {
             // find_existing_implementation returns:
             // - None: no existing implementation
             // - Some(None): implementation from class declaration (no span) - OK to add implement block
-            // - Some(Some(span)): implementation from another implement block - duplicate error
+            // - Some(Some(span)): implementation from another implement block - may be duplicate
             enum ImplAction {
                 AddNew,
                 SetSpan,
+                Skip, // Same implement block already processed (e.g., module imported multiple times)
                 Duplicate {
                     interface_name: String,
                     first_span: miette::SourceSpan,
                 },
             }
+            let current_span: miette::SourceSpan = impl_block.span.into();
             let action = if let Some(entity_type_id) = entity_type_id
                 && let Some(iface_id) = interface_type_id
             {
@@ -2191,13 +2193,20 @@ impl Analyzer {
                     .find_existing_implementation(entity_type_id, iface_id)
                 {
                     Some(Some(first_span)) => {
-                        let interface_name = self
-                            .name_table()
-                            .last_segment_str(self.entity_registry().get_type(iface_id).name_id)
-                            .unwrap_or_else(|| "?".to_string());
-                        ImplAction::Duplicate {
-                            interface_name,
-                            first_span,
+                        // If the spans match, this is the same implement block being
+                        // processed again (e.g., when a module is imported by multiple
+                        // test files). Skip silently rather than reporting duplicate.
+                        if first_span == current_span {
+                            ImplAction::Skip
+                        } else {
+                            let interface_name = self
+                                .name_table()
+                                .last_segment_str(self.entity_registry().get_type(iface_id).name_id)
+                                .unwrap_or_else(|| "?".to_string());
+                            ImplAction::Duplicate {
+                                interface_name,
+                                first_span,
+                            }
                         }
                     }
                     Some(None) => ImplAction::SetSpan,
@@ -2223,6 +2232,10 @@ impl Analyzer {
                         impl_block.span,
                     );
                     return; // Skip processing the duplicate implement block
+                }
+                ImplAction::Skip => {
+                    // Same implement block already processed - skip silently
+                    return;
                 }
                 ImplAction::SetSpan => {
                     if let Some(entity_type_id) = entity_type_id

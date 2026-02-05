@@ -1419,13 +1419,16 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             }
         }
         // Coerce int to float (unlikely but handle for safety)
-        if value_ty.is_int() && expected_ty.is_float()
-            && value_ty == types::I64 && expected_ty == types::F64 {
-                return self
-                    .builder
-                    .ins()
-                    .bitcast(types::F64, MemFlags::new(), value);
-            }
+        if value_ty.is_int()
+            && expected_ty.is_float()
+            && value_ty == types::I64
+            && expected_ty == types::F64
+        {
+            return self
+                .builder
+                .ins()
+                .bitcast(types::F64, MemFlags::new(), value);
+        }
         value
     }
 

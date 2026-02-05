@@ -563,11 +563,7 @@ impl Compiler<'_> {
             // MUST happen after class finalization so type_metadata is populated
             for decl in &program.declarations {
                 if let Decl::Implement(impl_block) = decl {
-                    self.import_module_implement_block(
-                        impl_block,
-                        module_interner,
-                        module_id,
-                    );
+                    self.import_module_implement_block(impl_block, module_interner, module_id);
                 }
             }
         }

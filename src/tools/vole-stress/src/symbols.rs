@@ -26,6 +26,8 @@ pub enum TypeInfo {
     Primitive(PrimitiveType),
     /// A user-defined class type
     Class(ModuleId, SymbolId),
+    /// A user-defined struct type (value type)
+    Struct(ModuleId, SymbolId),
     /// A user-defined interface type
     Interface(ModuleId, SymbolId),
     /// A user-defined error type
@@ -36,6 +38,11 @@ pub enum TypeInfo {
     Union(Vec<TypeInfo>),
     /// Array type [T]
     Array(Box<TypeInfo>),
+    /// Fallible type fallible(SuccessType, ErrorType)
+    Fallible {
+        success: Box<TypeInfo>,
+        error: Box<TypeInfo>,
+    },
     /// Void type (no return value)
     Void,
     /// A type parameter (e.g., T in Box<T>)
@@ -46,8 +53,16 @@ pub enum TypeInfo {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)]
 pub enum PrimitiveType {
+    I8,
+    I16,
     I32,
     I64,
+    I128,
+    U8,
+    U16,
+    U32,
+    U64,
+    F32,
     F64,
     Bool,
     String,
@@ -58,8 +73,16 @@ impl PrimitiveType {
     /// Return the Vole syntax for this primitive type.
     pub fn as_str(&self) -> &'static str {
         match self {
+            PrimitiveType::I8 => "i8",
+            PrimitiveType::I16 => "i16",
             PrimitiveType::I32 => "i32",
             PrimitiveType::I64 => "i64",
+            PrimitiveType::I128 => "i128",
+            PrimitiveType::U8 => "u8",
+            PrimitiveType::U16 => "u16",
+            PrimitiveType::U32 => "u32",
+            PrimitiveType::U64 => "u64",
+            PrimitiveType::F32 => "f32",
             PrimitiveType::F64 => "f64",
             PrimitiveType::Bool => "bool",
             PrimitiveType::String => "string",
@@ -68,25 +91,40 @@ impl PrimitiveType {
     }
 
     /// Select a random primitive type suitable for expressions.
+    ///
+    /// The core types (i32, i64, f64, bool, string) appear ~90% of the time.
+    /// Wider primitive types (i8, i16, i128, u8, u16, u32, u64, f32) share
+    /// the remaining ~10% so they appear occasionally.
     pub fn random_expr_type<R: Rng>(rng: &mut R) -> Self {
-        match rng.gen_range(0..5) {
-            0 => PrimitiveType::I32,
-            1 => PrimitiveType::I64,
-            2 => PrimitiveType::F64,
-            3 => PrimitiveType::Bool,
-            _ => PrimitiveType::String,
+        match rng.gen_range(0..50) {
+            0..=8 => PrimitiveType::I32,
+            9..=17 => PrimitiveType::I64,
+            18..=26 => PrimitiveType::F64,
+            27..=35 => PrimitiveType::Bool,
+            36..=44 => PrimitiveType::String,
+            // ~10% combined for wider types (1 slot each out of 50)
+            45 => PrimitiveType::I8,
+            46 => PrimitiveType::I16,
+            47 => PrimitiveType::I128,
+            48 => PrimitiveType::U8,
+            _ => {
+                // Spread remaining wider types across the last slot
+                match rng.gen_range(0..4) {
+                    0 => PrimitiveType::U16,
+                    1 => PrimitiveType::U32,
+                    2 => PrimitiveType::U64,
+                    _ => PrimitiveType::F32,
+                }
+            }
         }
     }
 
     /// Select a random primitive type suitable for fields.
+    ///
+    /// Same distribution as `random_expr_type`: core types ~90%, wider types ~10%.
     pub fn random_field_type<R: Rng>(rng: &mut R) -> Self {
-        match rng.gen_range(0..5) {
-            0 => PrimitiveType::I32,
-            1 => PrimitiveType::I64,
-            2 => PrimitiveType::F64,
-            3 => PrimitiveType::Bool,
-            _ => PrimitiveType::String,
-        }
+        // Reuse the same distribution as expr types
+        Self::random_expr_type(rng)
     }
 }
 
@@ -102,6 +140,27 @@ impl TypeInfo {
         !matches!(self, TypeInfo::Void)
     }
 
+    /// Check if this type is a fallible type.
+    pub fn is_fallible(&self) -> bool {
+        matches!(self, TypeInfo::Fallible { .. })
+    }
+
+    /// Get the success type of a fallible type, or the type itself if not fallible.
+    pub fn success_type(&self) -> &TypeInfo {
+        match self {
+            TypeInfo::Fallible { success, .. } => success,
+            _ => self,
+        }
+    }
+
+    /// Get the error type of a fallible type.
+    pub fn error_type(&self) -> Option<&TypeInfo> {
+        match self {
+            TypeInfo::Fallible { error, .. } => Some(error),
+            _ => None,
+        }
+    }
+
     /// Generate Vole syntax for this type.
     pub fn to_vole_syntax(&self, table: &SymbolTable) -> String {
         match self {
@@ -109,6 +168,9 @@ impl TypeInfo {
             TypeInfo::Class(mod_id, sym_id) => table
                 .get_symbol(*mod_id, *sym_id)
                 .map_or_else(|| "UnknownClass".to_string(), |s| s.name.clone()),
+            TypeInfo::Struct(mod_id, sym_id) => table
+                .get_symbol(*mod_id, *sym_id)
+                .map_or_else(|| "UnknownStruct".to_string(), |s| s.name.clone()),
             TypeInfo::Interface(mod_id, sym_id) => table
                 .get_symbol(*mod_id, *sym_id)
                 .map_or_else(|| "UnknownInterface".to_string(), |s| s.name.clone()),
@@ -122,6 +184,11 @@ impl TypeInfo {
                 .collect::<Vec<_>>()
                 .join(" | "),
             TypeInfo::Array(elem) => format!("[{}]", elem.to_vole_syntax(table)),
+            TypeInfo::Fallible { success, error } => format!(
+                "fallible({}, {})",
+                success.to_vole_syntax(table),
+                error.to_vole_syntax(table)
+            ),
             TypeInfo::Void => "void".to_string(),
             TypeInfo::TypeParam(name) => name.clone(),
         }
@@ -143,6 +210,8 @@ pub struct TypeParam {
 pub enum SymbolKind {
     /// A class declaration with fields and methods.
     Class(ClassInfo),
+    /// A struct declaration with fields (value type, no methods).
+    Struct(StructInfo),
     /// An interface declaration with method signatures.
     Interface(InterfaceInfo),
     /// An error type declaration with fields.
@@ -168,7 +237,14 @@ pub struct ClassInfo {
     pub implements: Vec<(ModuleId, SymbolId)>,
 }
 
-/// Information about a class/error field.
+/// Information about a struct declaration (value type, fields only).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructInfo {
+    /// Fields of the struct. Only primitive types.
+    pub fields: Vec<FieldInfo>,
+}
+
+/// Information about a class/error/struct field.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FieldInfo {
     pub name: String,
@@ -314,6 +390,13 @@ impl ModuleSymbols {
             .filter(|s| matches!(s.kind, SymbolKind::Class(_)))
     }
 
+    /// Get all structs in this module.
+    pub fn structs(&self) -> impl Iterator<Item = &Symbol> {
+        self.symbols
+            .iter()
+            .filter(|s| matches!(s.kind, SymbolKind::Struct(_)))
+    }
+
     /// Get all interfaces in this module.
     pub fn interfaces(&self) -> impl Iterator<Item = &Symbol> {
         self.symbols
@@ -449,8 +532,16 @@ mod tests {
 
     #[test]
     fn primitive_type_as_str() {
+        assert_eq!(PrimitiveType::I8.as_str(), "i8");
+        assert_eq!(PrimitiveType::I16.as_str(), "i16");
         assert_eq!(PrimitiveType::I32.as_str(), "i32");
         assert_eq!(PrimitiveType::I64.as_str(), "i64");
+        assert_eq!(PrimitiveType::I128.as_str(), "i128");
+        assert_eq!(PrimitiveType::U8.as_str(), "u8");
+        assert_eq!(PrimitiveType::U16.as_str(), "u16");
+        assert_eq!(PrimitiveType::U32.as_str(), "u32");
+        assert_eq!(PrimitiveType::U64.as_str(), "u64");
+        assert_eq!(PrimitiveType::F32.as_str(), "f32");
         assert_eq!(PrimitiveType::F64.as_str(), "f64");
         assert_eq!(PrimitiveType::Bool.as_str(), "bool");
         assert_eq!(PrimitiveType::String.as_str(), "string");
@@ -506,6 +597,12 @@ mod tests {
 
         let array = TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I64)));
         assert_eq!(array.to_vole_syntax(&table), "[i64]");
+
+        let fallible = TypeInfo::Fallible {
+            success: Box::new(TypeInfo::Primitive(PrimitiveType::I64)),
+            error: Box::new(TypeInfo::Primitive(PrimitiveType::String)),
+        };
+        assert_eq!(fallible.to_vole_syntax(&table), "fallible(i64, string)");
     }
 
     #[test]
