@@ -1353,8 +1353,7 @@ impl Cg<'_, '_, '_> {
         // Try Switch optimization for dense integer literal arms (O(1) dispatch)
         if let Some(analysis) = match_switch::analyze_switch(match_expr, scrutinee_type_id) {
             tracing::trace!(arms = analysis.arm_values.len(), "using switch dispatch");
-            return match_switch::emit_switch_match(
-                self,
+            return self.emit_switch_match(
                 match_expr,
                 analysis,
                 scrutinee,
@@ -1676,9 +1675,14 @@ impl Cg<'_, '_, '_> {
                     self.emit_rc_inc_for_type(body_val.value, result_type_id)?;
                 }
 
+                let converted = self.convert_for_select(
+                    body_val.value,
+                    body_val.ty,
+                    result_cranelift_type,
+                );
                 self.builder
                     .ins()
-                    .jump(merge_block, &[body_val.value.into()]);
+                    .jump(merge_block, &[converted.into()]);
             } else {
                 self.builder.ins().jump(merge_block, &[]);
             }
@@ -1702,6 +1706,98 @@ impl Cg<'_, '_, '_> {
             let result = self.builder.block_params(merge_block)[0];
             let mut cv = CompiledValue::new(result, result_cranelift_type, result_type_id);
             if self.rc_state(result_type_id).needs_cleanup() {
+                cv.rc_lifecycle = RcLifecycle::Owned;
+            }
+            Ok(cv)
+        } else {
+            Ok(self.void_value())
+        }
+    }
+
+    /// Emit a match expression using Cranelift's Switch for O(1) dispatch.
+    ///
+    /// Creates a body block for each arm plus a default block, wires up the Switch,
+    /// then compiles each arm body and merges results.
+    fn emit_switch_match(
+        &mut self,
+        match_expr: &MatchExpr,
+        analysis: match_switch::SwitchAnalysis,
+        scrutinee: CompiledValue,
+        result_type_id: TypeId,
+        result_cranelift_type: Type,
+        is_void: bool,
+    ) -> CodegenResult<CompiledValue> {
+        use cranelift::frontend::Switch;
+
+        let merge_block = self.builder.create_block();
+        if !is_void {
+            self.builder
+                .append_block_param(merge_block, result_cranelift_type);
+        }
+
+        // Create body blocks for each arm
+        let body_blocks: Vec<Block> = match_expr
+            .arms
+            .iter()
+            .map(|_| self.builder.create_block())
+            .collect();
+
+        // Default block: wildcard arm or trap
+        let default_block = if let Some(wc_idx) = analysis.wildcard_idx {
+            body_blocks[wc_idx]
+        } else {
+            self.builder.create_block()
+        };
+
+        // Build and emit the Switch
+        let mut switch = Switch::new();
+        for &(arm_idx, value) in &analysis.arm_values {
+            // Use two's complement representation so negative i64 values
+            // map to the upper half of u64 range (fits within i64 type bounds)
+            let entry = value as u64 as u128;
+            switch.set_entry(entry, body_blocks[arm_idx]);
+        }
+        switch.emit(self.builder, scrutinee.value, default_block);
+
+        // If there's no wildcard, the default block is a trap
+        if analysis.wildcard_idx.is_none() {
+            self.switch_and_seal(default_block);
+            self.builder.ins().trap(TrapCode::unwrap_user(1));
+        }
+
+        // Whether the result type needs RC cleanup
+        let result_needs_rc = !is_void && self.rc_state(result_type_id).needs_cleanup();
+
+        // Compile each arm body
+        for (i, arm) in match_expr.arms.iter().enumerate() {
+            self.builder.switch_to_block(body_blocks[i]);
+            self.builder.seal_block(body_blocks[i]);
+
+            let body_val = self.expr(&arm.body)?;
+
+            if !is_void {
+                if result_needs_rc && body_val.is_borrowed() {
+                    self.emit_rc_inc_for_type(body_val.value, result_type_id)?;
+                }
+                let converted = self.convert_for_select(
+                    body_val.value,
+                    body_val.ty,
+                    result_cranelift_type,
+                );
+                self.builder
+                    .ins()
+                    .jump(merge_block, &[converted.into()]);
+            } else {
+                self.builder.ins().jump(merge_block, &[]);
+            }
+        }
+
+        self.switch_and_seal(merge_block);
+
+        if !is_void {
+            let result = self.builder.block_params(merge_block)[0];
+            let mut cv = CompiledValue::new(result, result_cranelift_type, result_type_id);
+            if result_needs_rc {
                 cv.rc_lifecycle = RcLifecycle::Owned;
             }
             Ok(cv)
@@ -2119,9 +2215,14 @@ impl Cg<'_, '_, '_> {
             if result_needs_rc && then_result.is_borrowed() {
                 self.emit_rc_inc_for_type(then_result.value, result_type_id)?;
             }
+            let converted = self.convert_for_select(
+                then_result.value,
+                then_result.ty,
+                result_cranelift_type,
+            );
             self.builder
                 .ins()
-                .jump(merge_block, &[then_result.value.into()]);
+                .jump(merge_block, &[converted.into()]);
         } else {
             self.builder.ins().jump(merge_block, &[]);
         }
@@ -2138,9 +2239,14 @@ impl Cg<'_, '_, '_> {
             if result_needs_rc && else_result.is_borrowed() {
                 self.emit_rc_inc_for_type(else_result.value, result_type_id)?;
             }
+            let converted = self.convert_for_select(
+                else_result.value,
+                else_result.ty,
+                result_cranelift_type,
+            );
             self.builder
                 .ins()
-                .jump(merge_block, &[else_result.value.into()]);
+                .jump(merge_block, &[converted.into()]);
         } else {
             self.builder.ins().jump(merge_block, &[]);
         }
@@ -2359,9 +2465,14 @@ impl Cg<'_, '_, '_> {
                 if result_needs_rc && body_result.is_borrowed() {
                     self.emit_rc_inc_for_type(body_result.value, result_type_id)?;
                 }
+                let converted = self.convert_for_select(
+                    body_result.value,
+                    body_result.ty,
+                    result_cranelift_type,
+                );
                 self.builder
                     .ins()
-                    .jump(merge_block, &[body_result.value.into()]);
+                    .jump(merge_block, &[converted.into()]);
             } else {
                 self.builder.ins().jump(merge_block, &[]);
             }
