@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use rustc_hash::FxHashMap;
 
-use super::helpers::convert_to_i64_for_storage;
+use super::helpers::{convert_to_i64_for_storage, store_field_value};
 use crate::RuntimeFn;
 use crate::context::Cg;
 use crate::errors::{CodegenError, CodegenResult};
@@ -141,7 +141,7 @@ impl Cg<'_, '_, '_> {
         }
 
         let base_type_id = metadata.type_id;
-        let field_count = metadata.field_slots.len() as u32;
+        let field_count = metadata.physical_slot_count as u32;
         // Prefer the type from semantic analysis (handles generic instantiation, module-aware)
         let result_type_id = self.get_expr_type(&expr.id).unwrap_or(metadata.vole_type);
         let field_slots = metadata.field_slots.clone();
@@ -279,12 +279,7 @@ impl Cg<'_, '_, '_> {
                 value
             };
 
-            let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
-            let store_value = convert_to_i64_for_storage(self.builder, &final_value);
-
-            self.builder
-                .ins()
-                .call(set_func_ref, &[instance_ptr, slot_val, store_value]);
+            store_field_value(self.builder, set_func_ref, instance_ptr, slot, &final_value);
         }
 
         // Handle omitted fields with default values
@@ -333,12 +328,7 @@ impl Cg<'_, '_, '_> {
                 value
             };
 
-            let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
-            let store_value = convert_to_i64_for_storage(self.builder, &final_value);
-
-            self.builder
-                .ins()
-                .call(set_func_ref, &[instance_ptr, slot_val, store_value]);
+            store_field_value(self.builder, set_func_ref, instance_ptr, slot, &final_value);
         }
 
         Ok(CompiledValue::new(

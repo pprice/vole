@@ -103,4 +103,3 @@ pub(crate) fn analyze_switch(
         wildcard_idx,
     })
 }
-

@@ -82,6 +82,7 @@ impl Compiler<'_> {
             TypeMetadata {
                 type_id,
                 field_slots: FxHashMap::default(),
+                physical_slot_count: 0,
                 vole_type: vole_type_id,
                 type_def_id,
                 method_infos: FxHashMap::default(),
@@ -131,7 +132,8 @@ impl Compiler<'_> {
         };
 
         // Build field slots map and optionally collect field type tags (classes only)
-        let (field_slots, field_type_tags) = self.build_field_slots_and_tags(type_def_id, is_class);
+        let (field_slots, physical_slot_count, field_type_tags) =
+            self.build_field_slots_and_tags(type_def_id, is_class);
 
         // Register field types in runtime type registry for cleanup (classes only)
         if is_class {
@@ -175,6 +177,7 @@ impl Compiler<'_> {
             TypeMetadata {
                 type_id,
                 field_slots,
+                physical_slot_count,
                 vole_type: vole_type_id,
                 type_def_id,
                 method_infos,
@@ -183,11 +186,14 @@ impl Compiler<'_> {
     }
 
     /// Build field slots map and optionally field type tags for runtime cleanup.
+    /// Build field slot mapping and optional type tags.
+    /// Returns (field_slots, physical_slot_count, field_type_tags).
+    /// i128 fields use 2 consecutive u64 slots, so physical_slot_count may exceed field count.
     fn build_field_slots_and_tags(
         &self,
         type_def_id: TypeDefId,
         collect_tags: bool,
-    ) -> (FxHashMap<String, usize>, Vec<FieldTypeTag>) {
+    ) -> (FxHashMap<String, usize>, usize, Vec<FieldTypeTag>) {
         let mut field_slots = FxHashMap::default();
         let mut field_type_tags = Vec::new();
 
@@ -197,19 +203,41 @@ impl Compiler<'_> {
             .fields_on_type(type_def_id)
             .collect();
 
-        for field_id in field_ids {
+        // Remap sema slots to physical slots: i128 fields need 2 u64 slots.
+        // Sort by sema slot to ensure deterministic physical slot assignment.
+        let mut fields_by_slot: Vec<_> = field_ids
+            .iter()
+            .map(|&fid| {
+                let fd = self.registry().get_field(fid);
+                (fd.slot, fid)
+            })
+            .collect();
+        fields_by_slot.sort_by_key(|(slot, _)| *slot);
+
+        let arena = self.arena();
+        let mut physical_slot = 0usize;
+        for (_, field_id) in fields_by_slot {
             let field_def = self.registry().get_field(field_id);
             let field_name = self
                 .query()
                 .last_segment(field_def.name_id)
                 .expect("INTERNAL: field lookup: field has no name");
-            field_slots.insert(field_name, field_def.slot);
+            field_slots.insert(field_name, physical_slot);
             if collect_tags {
-                field_type_tags.push(type_id_to_field_tag(field_def.ty, self.arena()));
+                field_type_tags.push(type_id_to_field_tag(field_def.ty, arena));
+                // i128 uses 2 physical slots; add a Value tag for the high half
+                if crate::types::is_wide_type(field_def.ty, arena) {
+                    field_type_tags.push(FieldTypeTag::Value);
+                }
             }
+            physical_slot += if crate::types::is_wide_type(field_def.ty, arena) {
+                2
+            } else {
+                1
+            };
         }
 
-        (field_slots, field_type_tags)
+        (field_slots, physical_slot, field_type_tags)
     }
 
     /// Register instance methods for a type and return the method_infos map.
@@ -353,6 +381,7 @@ impl Compiler<'_> {
             TypeMetadata {
                 type_id: 0,
                 field_slots: FxHashMap::default(),
+                physical_slot_count: 0,
                 vole_type: vole_type_id,
                 type_def_id,
                 method_infos: FxHashMap::default(),
@@ -384,6 +413,7 @@ impl Compiler<'_> {
             TypeMetadata {
                 type_id: 0,
                 field_slots: FxHashMap::default(),
+                physical_slot_count: 0,
                 vole_type: vole_type_id,
                 type_def_id,
                 method_infos: FxHashMap::default(),
@@ -428,6 +458,7 @@ impl Compiler<'_> {
             TypeMetadata {
                 type_id: 0,
                 field_slots: FxHashMap::default(),
+                physical_slot_count: 0,
                 vole_type: vole_type_id,
                 type_def_id,
                 method_infos: FxHashMap::default(),
@@ -541,7 +572,8 @@ impl Compiler<'_> {
         };
 
         // Build field slots and optionally collect field_type_tags (classes only)
-        let (field_slots, field_type_tags) = self.build_field_slots_and_tags(type_def_id, is_class);
+        let (field_slots, physical_slot_count, field_type_tags) =
+            self.build_field_slots_and_tags(type_def_id, is_class);
 
         // Register field types in runtime type registry (classes only)
         if is_class {
@@ -572,6 +604,7 @@ impl Compiler<'_> {
             TypeMetadata {
                 type_id,
                 field_slots,
+                physical_slot_count,
                 vole_type: vole_type_id,
                 type_def_id,
                 method_infos,

@@ -106,8 +106,17 @@ impl Cg<'_, '_, '_> {
             return self.struct_field_load(obj.value, slot, field_type_id, obj.type_id);
         }
 
-        let result_raw = self.get_field_cached(obj.value, slot as u32)?;
-        let mut cv = self.convert_field_value(result_raw, field_type_id);
+        // i128 fields use 2 consecutive slots - load both and reconstruct
+        let is_wide = crate::types::is_wide_type(field_type_id, self.arena());
+        let mut cv = if is_wide {
+            let get_func_ref = self.runtime_func_ref(RuntimeFn::InstanceGetField)?;
+            let value =
+                super::helpers::load_wide_field(self.builder, get_func_ref, obj.value, slot);
+            CompiledValue::new(value, types::I128, field_type_id)
+        } else {
+            let result_raw = self.get_field_cached(obj.value, slot as u32)?;
+            self.convert_field_value(result_raw, field_type_id)
+        };
 
         // If the object is an owned RC temporary (e.g., method call result used
         // inline: `obj.method().field`), we must clean it up after extracting
@@ -337,13 +346,9 @@ impl Cg<'_, '_, '_> {
             value
         };
 
-        let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
-        let store_value = convert_to_i64_for_storage(self.builder, &value);
-
-        self.call_runtime_void(
-            RuntimeFn::InstanceSetField,
-            &[obj.value, slot_val, store_value],
-        )?;
+        // Store field value, handling i128 which needs 2 slots
+        let set_func_ref = self.runtime_func_ref(RuntimeFn::InstanceSetField)?;
+        super::helpers::store_field_value(self.builder, set_func_ref, obj.value, slot, &value);
         self.field_cache.clear(); // Invalidate cached field reads
 
         // The assignment consumed the temp — ownership transfers

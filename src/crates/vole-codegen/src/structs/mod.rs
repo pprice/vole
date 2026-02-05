@@ -3,7 +3,7 @@
 // Struct/class operations for code generation.
 
 mod access;
-mod helpers;
+pub(crate) mod helpers;
 mod literals;
 mod methods;
 

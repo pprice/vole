@@ -1179,9 +1179,7 @@ impl Cg<'_, '_, '_> {
         } else if type_id.is_integer() || type_id.is_bool() {
             self.builder.ins().icmp(IntCC::Equal, left, right)
         } else {
-            panic!(
-                "compile_equality_check: unexpected type {type_id:?} for equality comparison"
-            )
+            panic!("compile_equality_check: unexpected type {type_id:?} for equality comparison")
         })
     }
 
@@ -1675,14 +1673,9 @@ impl Cg<'_, '_, '_> {
                     self.emit_rc_inc_for_type(body_val.value, result_type_id)?;
                 }
 
-                let converted = self.convert_for_select(
-                    body_val.value,
-                    body_val.ty,
-                    result_cranelift_type,
-                );
-                self.builder
-                    .ins()
-                    .jump(merge_block, &[converted.into()]);
+                let converted =
+                    self.convert_for_select(body_val.value, body_val.ty, result_cranelift_type);
+                self.builder.ins().jump(merge_block, &[converted.into()]);
             } else {
                 self.builder.ins().jump(merge_block, &[]);
             }
@@ -1779,14 +1772,9 @@ impl Cg<'_, '_, '_> {
                 if result_needs_rc && body_val.is_borrowed() {
                     self.emit_rc_inc_for_type(body_val.value, result_type_id)?;
                 }
-                let converted = self.convert_for_select(
-                    body_val.value,
-                    body_val.ty,
-                    result_cranelift_type,
-                );
-                self.builder
-                    .ins()
-                    .jump(merge_block, &[converted.into()]);
+                let converted =
+                    self.convert_for_select(body_val.value, body_val.ty, result_cranelift_type);
+                self.builder.ins().jump(merge_block, &[converted.into()]);
             } else {
                 self.builder.ins().jump(merge_block, &[]);
             }
@@ -2215,14 +2203,9 @@ impl Cg<'_, '_, '_> {
             if result_needs_rc && then_result.is_borrowed() {
                 self.emit_rc_inc_for_type(then_result.value, result_type_id)?;
             }
-            let converted = self.convert_for_select(
-                then_result.value,
-                then_result.ty,
-                result_cranelift_type,
-            );
-            self.builder
-                .ins()
-                .jump(merge_block, &[converted.into()]);
+            let converted =
+                self.convert_for_select(then_result.value, then_result.ty, result_cranelift_type);
+            self.builder.ins().jump(merge_block, &[converted.into()]);
         } else {
             self.builder.ins().jump(merge_block, &[]);
         }
@@ -2239,14 +2222,9 @@ impl Cg<'_, '_, '_> {
             if result_needs_rc && else_result.is_borrowed() {
                 self.emit_rc_inc_for_type(else_result.value, result_type_id)?;
             }
-            let converted = self.convert_for_select(
-                else_result.value,
-                else_result.ty,
-                result_cranelift_type,
-            );
-            self.builder
-                .ins()
-                .jump(merge_block, &[converted.into()]);
+            let converted =
+                self.convert_for_select(else_result.value, else_result.ty, result_cranelift_type);
+            self.builder.ins().jump(merge_block, &[converted.into()]);
         } else {
             self.builder.ins().jump(merge_block, &[]);
         }
@@ -2470,9 +2448,7 @@ impl Cg<'_, '_, '_> {
                     body_result.ty,
                     result_cranelift_type,
                 );
-                self.builder
-                    .ins()
-                    .jump(merge_block, &[converted.into()]);
+                self.builder.ins().jump(merge_block, &[converted.into()]);
             } else {
                 self.builder.ins().jump(merge_block, &[]);
             }
@@ -2648,6 +2624,16 @@ impl Cg<'_, '_, '_> {
                 // Struct was auto-boxed: field_source is a raw heap pointer
                 // with fields at flat offsets, same layout as stack structs
                 self.struct_field_load(field_source, slot, field_type_id, field_source_type_id)?
+            } else if crate::types::is_wide_type(field_type_id, self.arena()) {
+                // i128 fields use 2 consecutive slots
+                let get_func_ref = self.runtime_func_ref(RuntimeFn::InstanceGetField)?;
+                let value = crate::structs::helpers::load_wide_field(
+                    self.builder,
+                    get_func_ref,
+                    field_source,
+                    slot,
+                );
+                CompiledValue::new(value, types::I128, field_type_id)
             } else {
                 // Class/instance: use runtime InstanceGetField
                 let slot_val = self.builder.ins().iconst(types::I32, slot as i64);

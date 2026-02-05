@@ -118,8 +118,10 @@ impl CompiledValue {
 pub(crate) struct TypeMetadata {
     /// Unique type ID for runtime
     pub type_id: u32,
-    /// Map from field name to slot index
+    /// Map from field name to physical slot index (i128 fields use 2 consecutive slots)
     pub field_slots: FxHashMap<String, usize>,
+    /// Total number of physical u64 slots (may be > field_slots.len() when i128 fields exist)
+    pub physical_slot_count: usize,
     /// The Vole type (Class) - interned TypeId handle
     pub vole_type: TypeId,
     /// TypeDefId for sema lookups (method return types, etc.)
@@ -296,6 +298,13 @@ pub(crate) fn try_type_id_to_cranelift(
         ));
     }
     Ok(type_id_to_cranelift(ty, arena, pointer_type))
+}
+
+/// Check if a type requires 2 u64 slots in class instance storage.
+/// Currently only i128 (128-bit integer) is wider than a single u64.
+pub(crate) fn is_wide_type(ty: TypeId, arena: &TypeArena) -> bool {
+    use vole_sema::type_arena::SemaType;
+    matches!(arena.get(ty), SemaType::Primitive(PrimitiveType::I128))
 }
 
 /// Get the size in bytes for a TypeId.

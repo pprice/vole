@@ -1,0 +1,73 @@
+// Test i128 fields in class instances (2-slot wide storage)
+
+class Container {
+    value: i128
+}
+
+implement Container {
+    func add_to(other: i128) -> i128 {
+        return self.value + other
+    }
+
+    func get_value() -> i128 {
+        return self.value
+    }
+}
+
+class Pair {
+    a: i128
+    b: i128
+}
+
+class Mixed {
+    name: string
+    big: i128
+    count: i64
+}
+
+tests "i128 class field storage" {
+    test "store and load i128 field" {
+        let c = Container { value: 100_i128 }
+        assert(c.value == 100_i128)
+    }
+
+    test "i128 field method access" {
+        let c = Container { value: 100_i128 }
+        assert(c.add_to(50_i128) == 150_i128)
+    }
+
+    test "i128 field getter" {
+        let c = Container { value: 200_i128 }
+        assert(c.get_value() == 200_i128)
+    }
+
+    test "i128 field mutation" {
+        let c = Container { value: 10_i128 }
+        c.value = 999_i128
+        assert(c.value == 999_i128)
+    }
+
+    test "i128 field with negative value" {
+        let c = Container { value: -42_i128 }
+        assert(c.value == -42_i128)
+    }
+
+    test "i128 field with large value" {
+        let big: i128 = 9223372036854775807
+        let c = Container { value: big + 1 }
+        assert(c.value > big)
+    }
+
+    test "multiple i128 fields" {
+        let p = Pair { a: 111_i128, b: 222_i128 }
+        assert(p.a == 111_i128)
+        assert(p.b == 222_i128)
+    }
+
+    test "mixed i128 and other fields" {
+        let m = Mixed { name: "test", big: 12345_i128, count: 42 }
+        assert(m.name == "test")
+        assert(m.big == 12345_i128)
+        assert(m.count == 42)
+    }
+}
