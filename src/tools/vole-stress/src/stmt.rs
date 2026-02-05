@@ -455,13 +455,16 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     }
 
     /// Generate a for statement.
+    ///
+    /// Randomly chooses between exclusive (`start..end`) and inclusive
+    /// (`start..=end`) range syntax with ~50/50 probability.
+    /// Optionally uses a local i64 variable as the upper bound.
     fn generate_for_statement(&mut self, ctx: &mut StmtContext, depth: usize) -> String {
         let iter_name = ctx.new_local_name();
 
-        // Generate range
-        let start = self.rng.gen_range(0..3);
-        let end = start + self.rng.gen_range(1..5);
-        let range = format!("{}..{}", start, end);
+        // Generate range with randomly chosen syntax
+        let use_inclusive = self.rng.gen_bool(0.5);
+        let range = self.generate_range(ctx, use_inclusive);
 
         let was_in_loop = ctx.in_loop;
         let was_in_while_loop = ctx.in_while_loop;
@@ -487,6 +490,48 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         let body_block = self.format_block(&body_stmts);
         format!("for {} in {} {}", iter_name, range, body_block)
+    }
+
+    /// Generate a range expression for a for loop.
+    ///
+    /// Produces either exclusive (`start..end`) or inclusive (`start..=end`)
+    /// syntax. The upper bound may reference an existing local i64 variable
+    /// (~30% chance when one is available).
+    fn generate_range(&mut self, ctx: &StmtContext, inclusive: bool) -> String {
+        let start = self.rng.gen_range(0..3);
+
+        // Collect i64 locals that could serve as variable bounds
+        let i64_locals: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::I64)))
+            .map(|(name, _, _)| name.clone())
+            .collect();
+
+        // Try to use a local i64 variable as the upper bound (~30% chance)
+        let var_bound = if !i64_locals.is_empty() && self.rng.gen_bool(0.3) {
+            let idx = self.rng.gen_range(0..i64_locals.len());
+            Some(i64_locals[idx].clone())
+        } else {
+            None
+        };
+
+        if let Some(var_name) = var_bound {
+            // Variable bound: use the variable name directly
+            if inclusive {
+                format!("{}..={}", start, var_name)
+            } else {
+                format!("{}..{}", start, var_name)
+            }
+        } else if inclusive {
+            // Inclusive literal bound: `start..=end` iterates start through end.
+            let end = start + self.rng.gen_range(0..5);
+            format!("{}..={}", start, end.max(start))
+        } else {
+            // Exclusive literal bound: `start..end` iterates start through end-1.
+            let end = start + self.rng.gen_range(1..5);
+            format!("{}..{}", start, end)
+        }
     }
 
     /// Generate a break or continue statement wrapped in a conditional.
@@ -1028,6 +1073,73 @@ mod tests {
         let stmt = generator.generate_for_statement(&mut ctx, 0);
         assert!(stmt.contains("for "));
         assert!(stmt.contains("in "));
+    }
+
+    #[test]
+    fn test_for_statement_both_range_syntaxes() {
+        let table = SymbolTable::new();
+        let config = StmtConfig::default();
+
+        let mut found_exclusive = false;
+        let mut found_inclusive = false;
+        for seed in 0..500 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = StmtGenerator::new(&mut rng, &config);
+            let mut ctx = StmtContext::new(&[], &table);
+
+            let stmt = generator.generate_for_statement(&mut ctx, 0);
+            assert!(stmt.contains("for "), "Should contain 'for': {}", stmt);
+            assert!(stmt.contains("in "), "Should contain 'in': {}", stmt);
+
+            if stmt.contains("..=") {
+                found_inclusive = true;
+            } else if stmt.contains("..") {
+                found_exclusive = true;
+            }
+
+            if found_exclusive && found_inclusive {
+                break;
+            }
+        }
+        assert!(
+            found_exclusive,
+            "Expected exclusive range syntax (a..b) across 500 seeds",
+        );
+        assert!(
+            found_inclusive,
+            "Expected inclusive range syntax (a..=b) across 500 seeds",
+        );
+    }
+
+    #[test]
+    fn test_for_statement_variable_bound() {
+        let table = SymbolTable::new();
+        let config = StmtConfig::default();
+
+        let mut found_var_bound = false;
+        for seed in 0..500 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = StmtGenerator::new(&mut rng, &config);
+            let mut ctx = StmtContext::new(&[], &table);
+
+            // Add an i64 local so variable bounds can be used
+            ctx.add_local(
+                "n".to_string(),
+                TypeInfo::Primitive(PrimitiveType::I64),
+                false,
+            );
+
+            let stmt = generator.generate_for_statement(&mut ctx, 0);
+            // Check if the range uses the variable name "n" as a bound
+            if stmt.contains("..n") || stmt.contains("..=n") {
+                found_var_bound = true;
+                break;
+            }
+        }
+        assert!(
+            found_var_bound,
+            "Expected variable bound in for-loop range across 500 seeds",
+        );
     }
 
     #[test]
