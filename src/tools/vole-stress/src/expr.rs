@@ -290,8 +290,8 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
     ///
     /// Looks for array-typed variables in scope whose element type matches
     /// the target primitive type. Returns `Some("arrayVar[index]")` on success,
-    /// using a small constant index (0..=2) to stay within bounds of typical
-    /// small arrays.
+    /// using a small constant index (0..=1) to stay within bounds of typical
+    /// small arrays (which have 2-4 elements).
     fn try_generate_array_index(
         &mut self,
         prim: PrimitiveType,
@@ -313,8 +313,9 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         let idx = self.rng.gen_range(0..candidates.len());
         let (var_name, _) = &candidates[idx];
 
-        // Use a small constant index to stay within bounds of small arrays
-        let index = self.rng.gen_range(0..=2);
+        // Use a small constant index to stay within bounds of small arrays.
+        // Arrays generated in stmt.rs have 2-4 elements, so use 0..=1 to be safe.
+        let index = self.rng.gen_range(0..=1);
         let suffix = match prim {
             PrimitiveType::I32 => "_i32",
             PrimitiveType::I64 => "_i64",
@@ -1658,12 +1659,10 @@ mod tests {
             let ctx = ExprContext::new(&[], &locals, &table);
             let expr = generator.generate(&TypeInfo::Primitive(PrimitiveType::I64), &ctx, 0);
             if expr.contains("nums[") {
-                // Index should be 0, 1, or 2 with _i64 suffix
+                // Index should be 0 or 1 with _i64 suffix
                 assert!(
-                    expr.contains("nums[0_i64]")
-                        || expr.contains("nums[1_i64]")
-                        || expr.contains("nums[2_i64]"),
-                    "Array index should use small constant index, got: {}",
+                    expr.contains("nums[0_i64]") || expr.contains("nums[1_i64]"),
+                    "Array index should use small constant index (0 or 1), got: {}",
                     expr,
                 );
                 found_index = true;
