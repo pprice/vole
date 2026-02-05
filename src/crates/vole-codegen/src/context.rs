@@ -1365,6 +1365,70 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue::new(zero, types::I64, TypeId::VOID)
     }
 
+    /// Create a zero/default value of the given Cranelift type.
+    ///
+    /// Used for empty match arms and other cases where a typed default is needed.
+    pub fn typed_zero(&mut self, ty: Type) -> Value {
+        if ty == types::F64 {
+            self.builder.ins().f64const(0.0)
+        } else if ty == types::F32 {
+            self.builder.ins().f32const(0.0)
+        } else {
+            self.builder.ins().iconst(ty, 0)
+        }
+    }
+
+    /// Coerce a return value to match the function's declared return type.
+    ///
+    /// In generic function contexts, sema may infer a specific type for an
+    /// expression (e.g., i32 or f64) while the function signature uses i64
+    /// for the generic type parameter. This method ensures the value type
+    /// matches the function signature's return type.
+    pub fn coerce_return_value(&mut self, value: Value) -> Value {
+        let value_ty = self.builder.func.dfg.value_type(value);
+        let ret_types = &self.builder.func.signature.returns;
+        if ret_types.len() != 1 {
+            return value;
+        }
+        let expected_ty = ret_types[0].value_type;
+        if value_ty == expected_ty {
+            return value;
+        }
+        // Coerce between integer types via sextend/ireduce
+        if value_ty.is_int() && expected_ty.is_int() {
+            if expected_ty.bytes() > value_ty.bytes() {
+                return self.builder.ins().sextend(expected_ty, value);
+            } else {
+                return self.builder.ins().ireduce(expected_ty, value);
+            }
+        }
+        // Coerce float to int via bitcast (for generic contexts using i64 for type params)
+        if value_ty.is_float() && expected_ty.is_int() {
+            if value_ty == types::F64 && expected_ty == types::I64 {
+                return self
+                    .builder
+                    .ins()
+                    .bitcast(types::I64, MemFlags::new(), value);
+            }
+            if value_ty == types::F32 && expected_ty == types::I64 {
+                let f64_val = self.builder.ins().fpromote(types::F64, value);
+                return self
+                    .builder
+                    .ins()
+                    .bitcast(types::I64, MemFlags::new(), f64_val);
+            }
+        }
+        // Coerce int to float (unlikely but handle for safety)
+        if value_ty.is_int() && expected_ty.is_float()
+            && value_ty == types::I64 && expected_ty == types::F64 {
+                return self
+                    .builder
+                    .ins()
+                    .bitcast(types::F64, MemFlags::new(), value);
+            }
+        value
+    }
+
     /// Get the result of a call instruction as a CompiledValue.
     ///
     /// If the call has no results, returns void_value().
@@ -1466,6 +1530,16 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Create an integer constant with a specific Vole type
     pub fn int_const(&mut self, n: i64, type_id: TypeId) -> CompiledValue {
         let ty = self.cranelift_type(type_id);
+        // If bidirectional inference produced a float type for an integer literal
+        // (can happen in generic contexts where the type parameter resolves to f64
+        // during sema but codegen uses i64 for the type param), fall back to i64.
+        // Float conversion for `let x: f64 = 5` is handled by sema recording the
+        // literal as a FloatLiteral, not through int_const.
+        let (ty, type_id) = if ty == types::F64 || ty == types::F32 {
+            (types::I64, TypeId::I64)
+        } else {
+            (ty, type_id)
+        };
         // Cranelift's iconst doesn't support I128 directly - we need to create
         // an i64 constant and sign-extend it to i128
         let value = if ty == types::I128 {

@@ -329,7 +329,12 @@ pub fn compile_function_body_with_cg(
             }
             cg.builder.ins().return_(&[sret_ptr]);
         } else {
-            cg.builder.ins().return_(&[value.value]);
+            // Coerce the value to match the function return type if needed.
+            // This handles generic functions where sema may infer a specific
+            // type (e.g. i32, f64) for an expression, but the function signature
+            // uses i64 for the generic type parameter.
+            let ret_val = cg.coerce_return_value(value.value);
+            cg.builder.ins().return_(&[ret_val]);
         }
     } else if !terminated {
         match default_return {

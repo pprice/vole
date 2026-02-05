@@ -5,14 +5,12 @@
 
 use cranelift::frontend::Switch;
 use cranelift::prelude::*;
-use cranelift_codegen::ir::BlockArg;
-
 use vole_frontend::{ExprKind, MatchExpr, PatternKind, UnaryOp};
 use vole_sema::type_arena::TypeId;
 
 use crate::context::Cg;
 use crate::errors::CodegenResult;
-use crate::types::CompiledValue;
+use crate::types::{CompiledValue, RcLifecycle};
 
 /// Minimum number of non-default arms required to use the Switch optimization.
 const MIN_SWITCH_ARMS: usize = 4;
@@ -121,9 +119,15 @@ pub(crate) fn emit_switch_match(
     match_expr: &MatchExpr,
     analysis: SwitchAnalysis,
     scrutinee: CompiledValue,
+    result_type_id: TypeId,
+    result_cranelift_type: Type,
+    is_void: bool,
 ) -> CodegenResult<CompiledValue> {
     let merge_block = cg.builder.create_block();
-    cg.builder.append_block_param(merge_block, types::I64);
+    if !is_void {
+        cg.builder
+            .append_block_param(merge_block, result_cranelift_type);
+    }
 
     // Create body blocks for each arm
     let body_blocks: Vec<Block> = match_expr
@@ -155,9 +159,10 @@ pub(crate) fn emit_switch_match(
         cg.builder.ins().trap(TrapCode::unwrap_user(1));
     }
 
-    // Compile each arm body
-    let mut result_type_id = TypeId::VOID;
+    // Whether the result type needs RC cleanup
+    let result_needs_rc = !is_void && cg.rc_state(result_type_id).needs_cleanup();
 
+    // Compile each arm body
     for (i, arm) in match_expr.arms.iter().enumerate() {
         cg.builder.switch_to_block(body_blocks[i]);
         cg.builder.seal_block(body_blocks[i]);
@@ -166,36 +171,26 @@ pub(crate) fn emit_switch_match(
         // For wildcard arm, no bindings either
         let body_val = cg.expr(&arm.body)?;
 
-        if i == 0 || (result_type_id == TypeId::VOID && body_val.type_id != TypeId::VOID) {
-            result_type_id = body_val.type_id;
-        }
-
-        let result_val = if body_val.ty != types::I64 {
-            match body_val.ty {
-                types::I8 => cg.builder.ins().sextend(types::I64, body_val.value),
-                types::I32 => cg.builder.ins().sextend(types::I64, body_val.value),
-                _ => body_val.value,
+        if !is_void {
+            if result_needs_rc && body_val.is_borrowed() {
+                cg.emit_rc_inc_for_type(body_val.value, result_type_id)?;
             }
+            cg.builder.ins().jump(merge_block, &[body_val.value.into()]);
         } else {
-            body_val.value
-        };
-
-        let result_arg = BlockArg::from(result_val);
-        cg.builder.ins().jump(merge_block, &[result_arg]);
+            cg.builder.ins().jump(merge_block, &[]);
+        }
     }
 
     cg.switch_and_seal(merge_block);
 
-    let merged_value = cg.builder.block_params(merge_block)[0];
-    let target_cty = cg.cranelift_type(result_type_id);
-    let (result, result_ty) = if target_cty != types::I64 && target_cty.is_int() {
-        (
-            cg.builder.ins().ireduce(target_cty, merged_value),
-            target_cty,
-        )
+    if !is_void {
+        let result = cg.builder.block_params(merge_block)[0];
+        let mut cv = CompiledValue::new(result, result_cranelift_type, result_type_id);
+        if result_needs_rc {
+            cv.rc_lifecycle = RcLifecycle::Owned;
+        }
+        Ok(cv)
     } else {
-        (merged_value, types::I64)
-    };
-
-    Ok(CompiledValue::new(result, result_ty, result_type_id))
+        Ok(cg.void_value())
+    }
 }

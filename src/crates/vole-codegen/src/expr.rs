@@ -78,7 +78,7 @@ impl Cg<'_, '_, '_> {
                 Ok(self.mark_rc_owned(result))
             }
             ExprKind::Index(idx) => self.index(&idx.object, &idx.index),
-            ExprKind::Match(match_expr) => self.match_expr(match_expr),
+            ExprKind::Match(match_expr) => self.match_expr(match_expr, expr.id),
             ExprKind::Is(is_expr) => self.is_expr(is_expr, expr.id),
             ExprKind::NullCoalesce(nc) => self.null_coalesce(nc),
             ExprKind::Lambda(lambda) => {
@@ -1331,20 +1331,40 @@ impl Cg<'_, '_, '_> {
 
     /// Compile a match expression
     #[tracing::instrument(skip(self, match_expr), fields(arms = match_expr.arms.len()))]
-    pub fn match_expr(&mut self, match_expr: &MatchExpr) -> CodegenResult<CompiledValue> {
+    pub fn match_expr(
+        &mut self,
+        match_expr: &MatchExpr,
+        expr_id: NodeId,
+    ) -> CodegenResult<CompiledValue> {
         let scrutinee = self.expr(&match_expr.scrutinee)?;
         let scrutinee_type_id = scrutinee.type_id;
         let scrutinee_type_str = self.arena().display_basic(scrutinee_type_id);
         tracing::trace!(scrutinee_type = %scrutinee_type_str, "match scrutinee");
 
+        // Get the result type from semantic analysis (same as when_expr / if_expr)
+        let result_type_id = self.get_expr_type(&expr_id).unwrap_or(TypeId::VOID);
+        let result_cranelift_type = self.cranelift_type(result_type_id);
+        let is_void = self.arena().is_void(result_type_id);
+
         // Try Switch optimization for dense integer literal arms (O(1) dispatch)
         if let Some(analysis) = match_switch::analyze_switch(match_expr, scrutinee_type_id) {
             tracing::trace!(arms = analysis.arm_values.len(), "using switch dispatch");
-            return match_switch::emit_switch_match(self, match_expr, analysis, scrutinee);
+            return match_switch::emit_switch_match(
+                self,
+                match_expr,
+                analysis,
+                scrutinee,
+                result_type_id,
+                result_cranelift_type,
+                is_void,
+            );
         }
 
         let merge_block = self.builder.create_block();
-        self.builder.append_block_param(merge_block, types::I64);
+        if !is_void {
+            self.builder
+                .append_block_param(merge_block, result_cranelift_type);
+        }
 
         // Create a trap block for non-exhaustive match (should be unreachable)
         let trap_block = self.builder.create_block();
@@ -1357,13 +1377,13 @@ impl Cg<'_, '_, '_> {
 
         if !arm_blocks.is_empty() {
             self.builder.ins().jump(arm_blocks[0], &[]);
-        } else {
-            let default_val = self.builder.ins().iconst(types::I64, 0);
+        } else if !is_void {
+            let default_val = self.typed_zero(result_cranelift_type);
             let default_arg = BlockArg::from(default_val);
             self.builder.ins().jump(merge_block, &[default_arg]);
+        } else {
+            self.builder.ins().jump(merge_block, &[]);
         }
-
-        let mut result_type_id = TypeId::VOID;
 
         for (i, arm) in match_expr.arms.iter().enumerate() {
             let arm_block = arm_blocks[i];
@@ -1642,31 +1662,22 @@ impl Cg<'_, '_, '_> {
             let body_val = self.expr(&arm.body)?;
             let _ = std::mem::replace(&mut self.vars, saved_vars);
 
-            if i == 0 {
-                result_type_id = body_val.type_id;
-            }
-
-            // If the arm body produces a borrowed RC value, emit rc_inc so
-            // the match result owns its reference (mirroring if_expr_blocks).
-            // Without this, borrowed payloads extracted from unions would be
-            // freed by both the union cleanup and the result variable cleanup.
-            let result_needs_rc = self.rc_state(result_type_id).needs_cleanup();
-            if result_needs_rc && body_val.is_borrowed() {
-                self.emit_rc_inc_for_type(body_val.value, result_type_id)?;
-            }
-
-            let result_val = if body_val.ty != types::I64 {
-                match body_val.ty {
-                    types::I8 => self.builder.ins().sextend(types::I64, body_val.value),
-                    types::I32 => self.builder.ins().sextend(types::I64, body_val.value),
-                    _ => body_val.value,
+            if !is_void {
+                // If the arm body produces a borrowed RC value, emit rc_inc so
+                // the match result owns its reference (mirroring if_expr_blocks).
+                // Without this, borrowed payloads extracted from unions would be
+                // freed by both the union cleanup and the result variable cleanup.
+                let result_needs_rc = self.rc_state(result_type_id).needs_cleanup();
+                if result_needs_rc && body_val.is_borrowed() {
+                    self.emit_rc_inc_for_type(body_val.value, result_type_id)?;
                 }
-            } else {
-                body_val.value
-            };
 
-            let result_arg = BlockArg::from(result_val);
-            self.builder.ins().jump(merge_block, &[result_arg]);
+                self.builder
+                    .ins()
+                    .jump(merge_block, &[body_val.value.into()]);
+            } else {
+                self.builder.ins().jump(merge_block, &[]);
+            }
             self.builder.seal_block(body_block);
         }
 
@@ -1683,24 +1694,16 @@ impl Cg<'_, '_, '_> {
         // rc_dec balances the original reference from the callee.
         self.cleanup_fallible_scrutinee(&scrutinee, scrutinee_type_id)?;
 
-        let merged_value = self.builder.block_params(merge_block)[0];
-
-        // Reduce back to the correct type based on result_type_id
-        let target_cty = self.cranelift_type(result_type_id);
-        let (result, result_ty) = if target_cty != types::I64 && target_cty.is_int() {
-            (
-                self.builder.ins().ireduce(target_cty, merged_value),
-                target_cty,
-            )
+        if !is_void {
+            let result = self.builder.block_params(merge_block)[0];
+            let mut cv = CompiledValue::new(result, result_cranelift_type, result_type_id);
+            if self.rc_state(result_type_id).needs_cleanup() {
+                cv.rc_lifecycle = RcLifecycle::Owned;
+            }
+            Ok(cv)
         } else {
-            (merged_value, types::I64)
-        };
-
-        let mut cv = CompiledValue::new(result, result_ty, result_type_id);
-        if self.rc_state(result_type_id).needs_cleanup() {
-            cv.rc_lifecycle = RcLifecycle::Owned;
+            Ok(self.void_value())
         }
-        Ok(cv)
     }
 
     /// Emit rc_dec for the payload inside a fallible scrutinee after a match.
