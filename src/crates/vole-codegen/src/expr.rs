@@ -1160,7 +1160,7 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Compile an equality check for two values based on their Vole type.
-    /// Handles string comparison via runtime function, f64 via fcmp, and integers via icmp.
+    /// Handles string comparison via runtime function, floats via fcmp, and integers via icmp.
     fn compile_equality_check(
         &mut self,
         type_id: TypeId,
@@ -1174,10 +1174,14 @@ impl Cg<'_, '_, '_> {
             } else {
                 self.builder.ins().icmp(IntCC::Equal, left, right)
             }
-        } else if type_id == arena.f64() {
+        } else if arena.is_float(type_id) {
             self.builder.ins().fcmp(FloatCC::Equal, left, right)
-        } else {
+        } else if type_id.is_integer() || type_id.is_bool() {
             self.builder.ins().icmp(IntCC::Equal, left, right)
+        } else {
+            panic!(
+                "compile_equality_check: unexpected type {type_id:?} for equality comparison"
+            )
         })
     }
 

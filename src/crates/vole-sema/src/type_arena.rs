@@ -126,6 +126,12 @@ impl TypeId {
         self.is_signed_int() || self.is_unsigned_int()
     }
 
+    /// Check if this is the bool type (no arena needed)
+    #[inline]
+    pub fn is_bool(self) -> bool {
+        self == Self::BOOL
+    }
+
     /// Check if this is a floating point type (no arena needed)
     #[inline]
     pub fn is_float(self) -> bool {

@@ -109,4 +109,98 @@ tests "float comparisons" {
         assert(a < b)
         assert(b > a)
     }
+
+    test "f32 equality" {
+        let a: f32 = 3.0_f32
+        let b: f32 = 3.0_f32
+        assert(a == b)
+        assert(!(a != b))
+    }
+
+    test "f32 inequality" {
+        let a: f32 = 3.0_f32
+        let b: f32 = 4.0_f32
+        assert(a != b)
+        assert(!(a == b))
+    }
+
+    test "f32 all comparisons" {
+        let a: f32 = 1.0_f32
+        let b: f32 = 2.0_f32
+        assert(a < b)
+        assert(a <= b)
+        assert(b > a)
+        assert(b >= a)
+        assert(a == a)
+        assert(a != b)
+    }
+}
+
+tests "f32 match patterns" {
+    test "match f32 literal" {
+        let x: f32 = 2.0_f32
+        let result = match x {
+            1.0_f32 => "one"
+            2.0_f32 => "two"
+            3.0_f32 => "three"
+            _ => "other"
+        }
+        assert(result == "two")
+    }
+
+    test "match f32 wildcard" {
+        let x: f32 = 99.0_f32
+        let result = match x {
+            1.0_f32 => "one"
+            _ => "other"
+        }
+        assert(result == "other")
+    }
+
+    test "match f64 literal" {
+        let x: f64 = 3.14
+        let result = match x {
+            1.0 => "one"
+            3.14 => "pi"
+            _ => "other"
+        }
+        assert(result == "pi")
+    }
+}
+
+tests "f32 optional comparisons" {
+    test "optional f32 equals value" {
+        let x: f32? = 3.0_f32
+        assert(x == 3.0_f32)
+    }
+
+    test "optional f32 not equals value" {
+        let x: f32? = 3.0_f32
+        assert(x != 5.0_f32)
+    }
+
+    test "nil f32 not equals value" {
+        let x: f32? = nil
+        assert(x != 3.0_f32)
+    }
+
+    test "nil f32 not equals zero" {
+        let x: f32? = nil
+        assert(!(x == 0.0_f32))
+    }
+
+    test "optional f64 equals value" {
+        let x: f64? = 3.14
+        assert(x == 3.14)
+    }
+
+    test "optional f64 not equals value" {
+        let x: f64? = 3.14
+        assert(x != 2.0)
+    }
+
+    test "nil f64 not equals value" {
+        let x: f64? = nil
+        assert(x != 3.14)
+    }
 }

@@ -799,11 +799,11 @@ impl Cg<'_, '_, '_> {
         };
 
         // Compare payload with value (extend if necessary to match types)
-        let values_equal = if value.ty == types::F64 {
+        let values_equal = if value.ty.is_float() {
             self.builder
                 .ins()
                 .fcmp(FloatCC::Equal, payload, value.value)
-        } else {
+        } else if value.ty.is_int() {
             // Ensure both values have the same type for comparison
             let (cmp_payload, cmp_value) = if payload_cranelift_type.bytes() < value.ty.bytes() {
                 // Extend payload to match value's type
@@ -822,6 +822,11 @@ impl Cg<'_, '_, '_> {
             self.builder
                 .ins()
                 .icmp(IntCC::Equal, cmp_payload, cmp_value)
+        } else {
+            panic!(
+                "optional_eq: unexpected Cranelift type {:?} for equality comparison",
+                value.ty
+            )
         };
 
         // Result is: is_not_nil AND values_equal
