@@ -42,6 +42,13 @@ pub struct StmtConfig {
     pub discard_probability: f64,
     /// Probability of generating an early return statement in function bodies.
     pub early_return_probability: f64,
+    /// Probability of generating else-if chains in if statements.
+    /// When an if statement is generated, this probability controls whether
+    /// it becomes an if-else-if chain instead of a simple if/else.
+    pub else_if_probability: f64,
+    /// Probability of using a static method call instead of direct construction
+    /// when instantiating a class with static methods. Set to 0.0 to disable.
+    pub static_call_probability: f64,
 }
 
 impl Default for StmtConfig {
@@ -61,6 +68,8 @@ impl Default for StmtConfig {
             fixed_array_probability: 0.10,
             discard_probability: 0.05,
             early_return_probability: 0.15,
+            else_if_probability: 0.3,
+            static_call_probability: 0.3,
         }
     }
 }
@@ -407,6 +416,14 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             return self.generate_fixed_array_let(ctx);
         }
 
+        // ~10% chance to generate a widening let statement
+        // (assign narrower type expression to wider type variable)
+        if self.rng.gen_bool(0.10) {
+            if let Some(stmt) = self.try_generate_widening_let(ctx) {
+                return stmt;
+            }
+        }
+
         let name = ctx.new_local_name();
         let is_mutable = self.rng.gen_bool(0.3);
         let ty = self.random_primitive_type();
@@ -419,6 +436,96 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         let mutability = if is_mutable { "let mut" } else { "let" };
         format!("{} {} = {}", mutability, name, value)
+    }
+
+    /// Try to generate a widening let statement.
+    ///
+    /// Looks for existing narrow-typed variables in scope and generates a let
+    /// that assigns them to a wider-typed variable, exercising Vole's implicit
+    /// numeric widening.
+    ///
+    /// Example: If `narrow_var: i32` is in scope, generates `let wide: i64 = narrow_var`.
+    ///
+    /// Returns `None` if no suitable widening source is in scope.
+    fn try_generate_widening_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Find all widenable (source_name, source_type, target_type) candidates
+        let mut candidates: Vec<(String, PrimitiveType, PrimitiveType)> = Vec::new();
+
+        for (name, ty, _mutable) in &ctx.locals {
+            if let TypeInfo::Primitive(narrow_type) = ty {
+                // Find all types this can widen to
+                let widen_targets = Self::widening_targets(*narrow_type);
+                for wide_type in widen_targets {
+                    candidates.push((name.clone(), *narrow_type, wide_type));
+                }
+            }
+        }
+
+        for param in ctx.params {
+            if let TypeInfo::Primitive(narrow_type) = &param.param_type {
+                let widen_targets = Self::widening_targets(*narrow_type);
+                for wide_type in widen_targets {
+                    candidates.push((param.name.clone(), *narrow_type, wide_type));
+                }
+            }
+        }
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        // Pick a random candidate
+        let idx = self.rng.gen_range(0..candidates.len());
+        let (source_name, _narrow_type, wide_type) = &candidates[idx];
+
+        let name = ctx.new_local_name();
+        let wide_ty = TypeInfo::Primitive(*wide_type);
+
+        // Add the variable with the wide type to scope
+        ctx.add_local(name.clone(), wide_ty, false);
+
+        // Format: let name: wide_type = narrow_var
+        Some(format!(
+            "let {}: {} = {}",
+            name,
+            wide_type.as_str(),
+            source_name
+        ))
+    }
+
+    /// Returns types that the given narrow type can widen to.
+    fn widening_targets(narrow: PrimitiveType) -> Vec<PrimitiveType> {
+        match narrow {
+            PrimitiveType::I8 => vec![
+                PrimitiveType::I16,
+                PrimitiveType::I32,
+                PrimitiveType::I64,
+                PrimitiveType::I128,
+            ],
+            PrimitiveType::I16 => vec![PrimitiveType::I32, PrimitiveType::I64, PrimitiveType::I128],
+            PrimitiveType::I32 => vec![PrimitiveType::I64, PrimitiveType::I128],
+            PrimitiveType::I64 => vec![PrimitiveType::I128],
+            PrimitiveType::U8 => vec![
+                PrimitiveType::U16,
+                PrimitiveType::U32,
+                PrimitiveType::U64,
+                PrimitiveType::I16,
+                PrimitiveType::I32,
+                PrimitiveType::I64,
+                PrimitiveType::I128,
+            ],
+            PrimitiveType::U16 => vec![
+                PrimitiveType::U32,
+                PrimitiveType::U64,
+                PrimitiveType::I32,
+                PrimitiveType::I64,
+                PrimitiveType::I128,
+            ],
+            PrimitiveType::U32 => vec![PrimitiveType::U64, PrimitiveType::I64, PrimitiveType::I128],
+            PrimitiveType::U64 => vec![PrimitiveType::I128],
+            PrimitiveType::F32 => vec![PrimitiveType::F64],
+            _ => vec![],
+        }
     }
 
     /// Generate a let statement binding a lambda expression.
@@ -450,30 +557,48 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     }
 
     /// Generate an if statement.
+    ///
+    /// May generate else-if chains based on `config.else_if_probability`.
+    /// When an else-if chain is generated, it produces:
+    /// ```vole
+    /// if cond1 { ... } else if cond2 { ... } else if cond3 { ... } else { ... }
+    /// ```
     fn generate_if_statement(&mut self, ctx: &mut StmtContext, depth: usize) -> String {
-        let expr_ctx = ctx.to_expr_context();
-
-        // 30% chance to use an `is` expression as the condition if union-typed vars exist
-        let try_is = self.rng.gen_bool(0.3);
-        let cond = {
-            let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
-            if try_is {
-                expr_gen.generate_is_expr(&expr_ctx).unwrap_or_else(|| {
-                    expr_gen.generate(&TypeInfo::Primitive(PrimitiveType::Bool), &expr_ctx, 0)
-                })
-            } else {
-                expr_gen.generate(&TypeInfo::Primitive(PrimitiveType::Bool), &expr_ctx, 0)
-            }
-        };
-
-        // Generate then branch (save and restore locals for scoping)
         let locals_before = ctx.locals.len();
+
+        // Generate the initial condition
+        let cond = self.generate_bool_condition(ctx);
+
+        // Generate then branch
         let then_stmts = self.generate_block(ctx, depth + 1);
         ctx.locals.truncate(locals_before);
         let then_block = self.format_block(&then_stmts);
 
-        // 50% chance of else branch
-        let else_part = if self.rng.gen_bool(0.5) {
+        // Decide whether to generate else-if chains
+        let use_else_if = self.rng.gen_bool(self.config.else_if_probability);
+
+        let else_part = if use_else_if {
+            // Generate 1-3 else-if arms
+            let arm_count = self.rng.gen_range(1..=3);
+            let mut else_if_parts = Vec::new();
+
+            for _ in 0..arm_count {
+                let else_if_cond = self.generate_bool_condition(ctx);
+                let else_if_stmts = self.generate_block(ctx, depth + 1);
+                ctx.locals.truncate(locals_before);
+                let else_if_block = self.format_block(&else_if_stmts);
+                let else_if_part = format!(" else if {} {}", else_if_cond, else_if_block);
+                else_if_parts.push(else_if_part);
+            }
+
+            // Always end with a plain else block for safety
+            let else_stmts = self.generate_block(ctx, depth + 1);
+            ctx.locals.truncate(locals_before);
+            let else_block = self.format_block(&else_stmts);
+
+            format!("{} else {}", else_if_parts.join(""), else_block)
+        } else if self.rng.gen_bool(0.5) {
+            // 50% chance of simple else branch (no else-if)
             let else_stmts = self.generate_block(ctx, depth + 1);
             ctx.locals.truncate(locals_before);
             let else_block = self.format_block(&else_stmts);
@@ -483,6 +608,22 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         };
 
         format!("if {} {}{}", cond, then_block, else_part)
+    }
+
+    /// Generate a boolean condition for if/else-if statements.
+    ///
+    /// Has a 30% chance to use an `is` expression if union-typed variables exist.
+    fn generate_bool_condition(&mut self, ctx: &mut StmtContext) -> String {
+        let expr_ctx = ctx.to_expr_context();
+        let try_is = self.rng.gen_bool(0.3);
+        let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+        if try_is {
+            expr_gen.generate_is_expr(&expr_ctx).unwrap_or_else(|| {
+                expr_gen.generate(&TypeInfo::Primitive(PrimitiveType::Bool), &expr_ctx, 0)
+            })
+        } else {
+            expr_gen.generate(&TypeInfo::Primitive(PrimitiveType::Bool), &expr_ctx, 0)
+        }
     }
 
     /// Generate a while statement.
@@ -1021,15 +1162,32 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     }
 
     /// Format a block of statements.
+    ///
+    /// This produces a block with relative indentation:
+    /// - Inner statements are indented by 4 spaces from the opening brace
+    /// - The closing brace is at the same level as the opening
+    ///
+    /// When a statement is multi-line (e.g., nested if/else-if chains), each
+    /// line of the statement is indented by 4 spaces.
     fn format_block(&self, stmts: &[String]) -> String {
         if stmts.is_empty() {
             return "{ }".to_string();
         }
 
-        let indent = "    ".repeat(self.indent + 1);
-        let inner: Vec<String> = stmts.iter().map(|s| format!("{}{}", indent, s)).collect();
+        // Use a single level of indentation for the block contents.
+        // The outer indentation is handled by emit_line.
+        let one_indent = "    ";
+        let inner: Vec<String> = stmts
+            .iter()
+            .flat_map(|s| {
+                // Split each statement into lines and indent each line
+                s.lines()
+                    .map(|line| format!("{}{}", one_indent, line))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
 
-        format!("{{\n{}\n{}}}", inner.join("\n"), "    ".repeat(self.indent))
+        format!("{{\n{}\n}}", inner.join("\n"))
     }
 
     /// Get the current indentation string.
@@ -1154,6 +1312,9 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     /// current module. Only constructs classes with primitive-typed fields
     /// so the resulting local can be used for field access expressions.
     ///
+    /// If the class has static methods, there's a chance to use a static method
+    /// call instead of direct construction: `let local = ClassName.staticMethod(args)`
+    ///
     /// If the class has Self-returning methods (from standalone implement blocks),
     /// there's a chance to chain method calls on the constructed instance:
     /// `let local = ClassName { fields }.selfMethod(args).selfMethod2(args)`
@@ -1182,12 +1343,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let (sym_id, class_name, class_info) = &candidates[idx];
 
         let name = ctx.new_local_name();
-
-        // Generate field values for construction
-        let fields = self.generate_field_values(&class_info.fields, ctx);
         let ty = TypeInfo::Class(module_id, *sym_id);
 
         ctx.add_local(name.clone(), ty, false);
+
+        // Try using a static method call if available
+        if !class_info.static_methods.is_empty()
+            && self.rng.gen_bool(self.config.static_call_probability)
+        {
+            let expr = self.generate_static_method_call(class_name, class_info, ctx);
+            return Some(format!("let {} = {}", name, expr));
+        }
+
+        // Generate field values for construction
+        let fields = self.generate_field_values(&class_info.fields, ctx);
 
         // Build the base expression (class construction)
         let mut expr = format!("{} {{ {} }}", class_name, fields);
@@ -1199,6 +1368,33 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
 
         Some(format!("let {} = {}", name, expr))
+    }
+
+    /// Generate a static method call on a class.
+    ///
+    /// Returns something like `ClassName.staticMethod(arg1, arg2)`.
+    fn generate_static_method_call(
+        &mut self,
+        class_name: &str,
+        class_info: &ClassInfo,
+        ctx: &mut StmtContext,
+    ) -> String {
+        // Pick a random static method
+        let idx = self.rng.gen_range(0..class_info.static_methods.len());
+        let static_method = &class_info.static_methods[idx];
+
+        // Generate arguments for the static method
+        let expr_ctx = ctx.to_expr_context();
+        let args: Vec<String> = static_method
+            .params
+            .iter()
+            .map(|p| {
+                let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+                expr_gen.generate_simple(&p.param_type, &expr_ctx)
+            })
+            .collect();
+
+        format!("{}.{}({})", class_name, static_method.name, args.join(", "))
     }
 
     /// Try to generate a method chain for a class instance.
@@ -1872,6 +2068,113 @@ mod tests {
                 "With early_return_probability=0.0, should have exactly 1 return: {:?}",
                 lines
             );
+        }
+    }
+
+    #[test]
+    fn test_else_if_chain_generation() {
+        let table = SymbolTable::new();
+
+        // Use a config with high else_if_probability to ensure it triggers
+        let config = StmtConfig {
+            if_probability: 0.99,
+            else_if_probability: 0.99,
+            while_probability: 0.0,
+            for_probability: 0.0,
+            break_continue_probability: 0.0,
+            compound_assign_probability: 0.0,
+            ..StmtConfig::default()
+        };
+
+        let mut found_else_if = false;
+        for seed in 0..200 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = StmtGenerator::new(&mut rng, &config);
+            let mut ctx = StmtContext::new(&[], &table);
+
+            let stmt = generator.generate_statement(&mut ctx, 0);
+
+            // Check for else-if pattern: "} else if"
+            if stmt.contains("} else if ") {
+                found_else_if = true;
+                // Verify the syntax is correct: should have multiple else-if arms
+                // and end with a plain else
+                assert!(
+                    stmt.contains("} else {"),
+                    "Else-if chain should end with plain else: {}",
+                    stmt
+                );
+                break;
+            }
+        }
+        assert!(
+            found_else_if,
+            "Expected at least one else-if chain across 200 seeds"
+        );
+    }
+
+    #[test]
+    fn test_else_if_chain_not_generated_when_probability_zero() {
+        let table = SymbolTable::new();
+
+        let config = StmtConfig {
+            if_probability: 0.99,
+            else_if_probability: 0.0,
+            while_probability: 0.0,
+            for_probability: 0.0,
+            break_continue_probability: 0.0,
+            compound_assign_probability: 0.0,
+            ..StmtConfig::default()
+        };
+
+        for seed in 0..100 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = StmtGenerator::new(&mut rng, &config);
+            let mut ctx = StmtContext::new(&[], &table);
+
+            let stmt = generator.generate_statement(&mut ctx, 0);
+
+            // With else_if_probability=0.0, should never see "else if"
+            assert!(
+                !stmt.contains("else if"),
+                "With else_if_probability=0.0, should not have else-if: {}",
+                stmt
+            );
+        }
+    }
+
+    #[test]
+    fn test_else_if_chain_syntax_correct() {
+        let table = SymbolTable::new();
+
+        let config = StmtConfig {
+            if_probability: 0.99,
+            else_if_probability: 0.99,
+            while_probability: 0.0,
+            for_probability: 0.0,
+            break_continue_probability: 0.0,
+            compound_assign_probability: 0.0,
+            ..StmtConfig::default()
+        };
+
+        // Test multiple seeds to validate syntax
+        for seed in 0..100 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = StmtGenerator::new(&mut rng, &config);
+            let mut ctx = StmtContext::new(&[], &table);
+
+            let stmt = generator.generate_statement(&mut ctx, 0);
+
+            if stmt.contains("else if") {
+                // The "else if" must be on the same line as closing brace
+                // Valid: "} else if"
+                // Invalid: "}\nelse if"
+                assert!(
+                    stmt.contains("} else if "),
+                    "else-if must follow closing brace on same line: {}",
+                    stmt
+                );
+            }
         }
     }
 }

@@ -13,8 +13,8 @@ use rand::Rng;
 
 use crate::symbols::{
     ClassInfo, ErrorInfo, FieldInfo, FunctionInfo, GlobalInfo, ImplementBlockInfo, InterfaceInfo,
-    MethodInfo, ModuleId, ParamInfo, PrimitiveType, StructInfo, SymbolId, SymbolKind, SymbolTable,
-    TypeInfo, TypeParam,
+    MethodInfo, ModuleId, ParamInfo, PrimitiveType, StaticMethodInfo, StructInfo, SymbolId,
+    SymbolKind, SymbolTable, TypeInfo, TypeParam,
 };
 
 /// Configuration for the planning phase.
@@ -42,6 +42,10 @@ pub struct PlanConfig {
     pub fields_per_class: (usize, usize),
     /// Number of methods per class (range).
     pub methods_per_class: (usize, usize),
+    /// Number of static methods per class (range).
+    /// Only applies to non-generic classes with fields. Static methods
+    /// are constructor-like methods that return the class type.
+    pub static_methods_per_class: (usize, usize),
     /// Number of methods per interface (range).
     pub methods_per_interface: (usize, usize),
     /// Number of fields per error (range).
@@ -68,6 +72,11 @@ pub struct PlanConfig {
     pub fallible_probability: f64,
     /// Probability (0.0-1.0) that a planned function is a generator (returns Iterator<T>).
     pub generator_probability: f64,
+    /// Probability (0.0-1.0) that a function has a never return type (diverging function).
+    pub never_probability: f64,
+    /// Probability (0.0-1.0) that a class field references another class type.
+    /// Only applies to non-generic classes to avoid cyclic type references.
+    pub nested_class_field_probability: f64,
 }
 
 impl Default for PlanConfig {
@@ -84,6 +93,7 @@ impl Default for PlanConfig {
             fields_per_struct: (2, 4),
             fields_per_class: (1, 4),
             methods_per_class: (1, 3),
+            static_methods_per_class: (0, 2),
             methods_per_interface: (1, 2),
             fields_per_error: (0, 2),
             params_per_function: (0, 3),
@@ -97,6 +107,8 @@ impl Default for PlanConfig {
             enable_diamond_dependencies: true,
             fallible_probability: 0.15,
             generator_probability: 0.10,
+            never_probability: 0.02,
+            nested_class_field_probability: 0.20,
         }
     }
 }
@@ -174,6 +186,14 @@ pub fn plan<R: Rng>(rng: &mut R, config: &PlanConfig) -> SymbolTable {
     // Now that all declarations exist, we can pick constraint interfaces from
     // the same module for each generic class/interface/function.
     plan_all_type_param_constraints(rng, &mut table, config);
+
+    // Phase 3.6: Assign class-typed fields to some non-generic classes
+    // This enables nested field access patterns (obj.inner.field).
+    plan_nested_class_fields(rng, &mut table, config);
+
+    // Phase 3.7: Add static methods to non-generic classes with fields
+    // Static methods are constructor-like methods called on the class name.
+    plan_static_methods(rng, &mut table, &mut names, config);
 
     // Phase 4: Add interface implementations to classes and interface extends
     plan_interface_implementations(rng, &mut table, config);
@@ -301,7 +321,7 @@ fn plan_module_declarations<R: Rng>(
         plan_error(rng, table, names, module_id, config);
     }
 
-    // Generate functions (some may become generators based on generator_probability).
+    // Generate functions (some may become generators or never-returning functions).
     // Generators are only allowed in non-imported modules (layer 0) due to vol-67b9.
     let func_count = rng.gen_range(config.functions_per_module.0..=config.functions_per_module.1);
     for _ in 0..func_count {
@@ -310,6 +330,8 @@ fn plan_module_declarations<R: Rng>(
             && rng.gen_bool(config.generator_probability)
         {
             plan_generator(rng, table, names, module_id);
+        } else if config.never_probability > 0.0 && rng.gen_bool(config.never_probability) {
+            plan_never_function(rng, table, names, module_id, config);
         } else {
             plan_function(rng, table, names, module_id, config);
         }
@@ -419,6 +441,7 @@ fn plan_class<R: Rng>(
         fields,
         methods,
         implements: vec![],
+        static_methods: vec![],
     });
 
     table
@@ -565,6 +588,38 @@ fn plan_generator<R: Rng>(
         type_params: vec![],
         params,
         return_type,
+    });
+
+    table
+        .get_module_mut(module_id)
+        .map(|m| m.add_symbol(name, kind))
+        .unwrap_or(SymbolId(0))
+}
+
+/// Plan a never-returning function declaration (diverging function).
+///
+/// Never-returning functions are always non-generic, have 0-2 parameters,
+/// and return the `never` type. The body will call `panic()` or `unreachable`.
+fn plan_never_function<R: Rng>(
+    rng: &mut R,
+    table: &mut SymbolTable,
+    names: &mut NameGen,
+    module_id: ModuleId,
+    config: &PlanConfig,
+) -> SymbolId {
+    let name = names.next("diverge");
+
+    // Never-returning functions get 0-2 simple parameters
+    let param_count = rng.gen_range(config.params_per_function.0..=config.params_per_function.1);
+    let mut params = Vec::new();
+    for _ in 0..param_count.min(2) {
+        params.push(plan_param(rng, names));
+    }
+
+    let kind = SymbolKind::Function(FunctionInfo {
+        type_params: vec![],
+        params,
+        return_type: TypeInfo::Never,
     });
 
     table
@@ -1378,6 +1433,175 @@ fn plan_all_type_param_constraints<R: Rng>(
     }
 }
 
+/// Assign class-typed fields to some non-generic classes.
+///
+/// This is done in a separate phase after all classes are created to ensure
+/// non-cyclic references. A class can only reference classes declared before it
+/// (lower SymbolId), ensuring acyclic dependencies.
+///
+/// Only non-generic classes can have class-typed fields, and only non-generic
+/// classes can be referenced as field types. This avoids complex generic type
+/// resolution during construction.
+fn plan_nested_class_fields<R: Rng>(rng: &mut R, table: &mut SymbolTable, config: &PlanConfig) {
+    if config.nested_class_field_probability <= 0.0 {
+        return;
+    }
+
+    // Process each module independently
+    for module_idx in 0..table.module_count() {
+        let module_id = ModuleId(module_idx);
+
+        // Collect non-generic classes with at least one primitive field
+        let non_generic_classes: Vec<(SymbolId, String)> = table
+            .get_module(module_id)
+            .map(|m| {
+                m.classes()
+                    .filter_map(|s| {
+                        if let SymbolKind::Class(ref info) = s.kind {
+                            if info.type_params.is_empty() && !info.fields.is_empty() {
+                                Some((s.id, s.name.clone()))
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // Need at least 2 classes to create nested references
+        if non_generic_classes.len() < 2 {
+            continue;
+        }
+
+        // For each class (except the first), possibly add a field referencing an earlier class
+        for i in 1..non_generic_classes.len() {
+            if !rng.gen_bool(config.nested_class_field_probability) {
+                continue;
+            }
+
+            let (class_id, _) = non_generic_classes[i];
+
+            // Pick a random earlier class to reference (ensures non-cyclic)
+            let target_idx = rng.gen_range(0..i);
+            let (target_class_id, target_class_name) = &non_generic_classes[target_idx];
+
+            // Create the field with a name based on the target class
+            let field_name = format!("nested_{}", target_class_name.to_lowercase());
+            let field_type = TypeInfo::Class(module_id, *target_class_id);
+            let new_field = FieldInfo {
+                name: field_name,
+                field_type,
+            };
+
+            // Add the field to the class
+            if let Some(module) = table.get_module_mut(module_id)
+                && let Some(symbol) = module.get_symbol_mut(class_id)
+                && let SymbolKind::Class(ref mut info) = symbol.kind
+            {
+                info.fields.push(new_field);
+            }
+        }
+    }
+}
+
+/// Add static methods to non-generic classes with fields.
+///
+/// Static methods are constructor-like methods that return the class type.
+/// They are called on the class name: `ClassName.methodName(args)`.
+///
+/// Only non-generic classes with fields can have static methods, since the
+/// static method body constructs an instance of the class.
+fn plan_static_methods<R: Rng>(
+    rng: &mut R,
+    table: &mut SymbolTable,
+    names: &mut NameGen,
+    config: &PlanConfig,
+) {
+    // Skip if static methods are disabled
+    if config.static_methods_per_class.1 == 0 {
+        return;
+    }
+
+    // Process each module
+    for module_idx in 0..table.module_count() {
+        let module_id = ModuleId(module_idx);
+
+        // Collect non-generic classes with fields
+        let classes: Vec<SymbolId> = table
+            .get_module(module_id)
+            .map(|m| {
+                m.classes()
+                    .filter_map(|s| {
+                        if let SymbolKind::Class(ref info) = s.kind {
+                            // Only non-generic classes with at least one field
+                            if info.type_params.is_empty() && !info.fields.is_empty() {
+                                Some(s.id)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // Add static methods to each eligible class
+        for class_id in classes {
+            let static_count = rng
+                .gen_range(config.static_methods_per_class.0..=config.static_methods_per_class.1);
+
+            if static_count == 0 {
+                continue;
+            }
+
+            let mut static_methods = Vec::with_capacity(static_count);
+            for _ in 0..static_count {
+                static_methods.push(plan_static_method(rng, names, config));
+            }
+
+            // Add the static methods to the class
+            if let Some(module) = table.get_module_mut(module_id)
+                && let Some(symbol) = module.get_symbol_mut(class_id)
+                && let SymbolKind::Class(ref mut info) = symbol.kind
+            {
+                info.static_methods = static_methods;
+            }
+        }
+    }
+}
+
+/// Plan a single static method.
+///
+/// Static methods in vole-stress are constructor-like: they take primitive
+/// parameters and return Self (the class type).
+fn plan_static_method<R: Rng>(
+    rng: &mut R,
+    names: &mut NameGen,
+    config: &PlanConfig,
+) -> StaticMethodInfo {
+    let name = names.next("static");
+
+    // Generate 0-2 primitive parameters
+    let param_count = rng.gen_range(config.params_per_function.0..=config.params_per_function.1);
+    let param_count = param_count.min(2); // Limit to 0-2 params for statics
+    let mut params = Vec::with_capacity(param_count);
+
+    for _ in 0..param_count {
+        params.push(plan_param(rng, names));
+    }
+
+    StaticMethodInfo {
+        name,
+        params,
+        returns_self: true,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1690,16 +1914,73 @@ mod tests {
 
             for symbol in module.implement_blocks() {
                 if let SymbolKind::ImplementBlock(ref info) = symbol.kind {
-                    let pair = (info.interface, info.target_type);
-                    assert!(
-                        seen_pairs.insert(pair),
-                        "Duplicate implement block found: {:?} for {:?} in module {}",
-                        info.interface,
-                        info.target_type,
-                        module.name
-                    );
+                    // Only check interface implements (standalone blocks have interface=None)
+                    if let Some(iface) = info.interface {
+                        let pair = (iface, info.target_type);
+                        assert!(
+                            seen_pairs.insert(pair),
+                            "Duplicate implement block found: {:?} for {:?} in module {}",
+                            info.interface,
+                            info.target_type,
+                            module.name
+                        );
+                    }
                 }
             }
         }
+    }
+
+    #[test]
+    fn plan_creates_static_methods() {
+        // Use a config that ensures static methods are generated
+        let config = PlanConfig {
+            layers: 1,
+            modules_per_layer: 1,
+            classes_per_module: (2, 2),
+            functions_per_module: (0, 0),
+            interfaces_per_module: (0, 0),
+            errors_per_module: (0, 0),
+            globals_per_module: (0, 0),
+            structs_per_module: (0, 0),
+            type_params_per_class: (0, 0), // Non-generic classes
+            fields_per_class: (2, 2),      // Must have fields
+            methods_per_class: (0, 0),
+            static_methods_per_class: (2, 2), // Force exactly 2 static methods
+            ..Default::default()
+        };
+
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let table = plan(&mut rng, &config);
+        let module = table.get_module(ModuleId(0)).unwrap();
+
+        let mut found_static = false;
+        for symbol in module.classes() {
+            if let SymbolKind::Class(ref info) = symbol.kind {
+                if !info.static_methods.is_empty() {
+                    found_static = true;
+                    assert_eq!(
+                        info.static_methods.len(),
+                        2,
+                        "Class {} should have exactly 2 static methods",
+                        symbol.name
+                    );
+                    for static_method in &info.static_methods {
+                        assert!(
+                            static_method.name.starts_with("static"),
+                            "Static method name should start with 'static', got: {}",
+                            static_method.name
+                        );
+                        assert!(
+                            static_method.returns_self,
+                            "Static method should return Self"
+                        );
+                    }
+                }
+            }
+        }
+        assert!(
+            found_static,
+            "Expected at least one class with static methods"
+        );
     }
 }

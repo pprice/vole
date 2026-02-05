@@ -56,6 +56,8 @@ pub enum TypeInfo {
     Iterator(Box<TypeInfo>),
     /// Void type (no return value)
     Void,
+    /// Never type (bottom type, never returns)
+    Never,
     /// A type parameter (e.g., T in Box<T>)
     TypeParam(String),
 }
@@ -99,6 +101,77 @@ impl PrimitiveType {
             PrimitiveType::String => "string",
             PrimitiveType::Nil => "nil",
         }
+    }
+
+    /// Check if this primitive type can be implicitly widened to the target type.
+    ///
+    /// Widening rules mirror vole-sema's `PrimitiveType::can_widen_to`:
+    /// - Signed integers can widen to larger signed integers (i8 -> i16 -> i32 -> i64 -> i128)
+    /// - Unsigned integers can widen to larger unsigned integers (u8 -> u16 -> u32 -> u64)
+    /// - Unsigned integers can widen to signed integers with more bits (u8 -> i16, u16 -> i32, etc.)
+    /// - f32 can widen to f64
+    #[allow(dead_code)] // Used in tests and may be used for future features
+    pub fn can_widen_to(self, target: PrimitiveType) -> bool {
+        if self == target {
+            return true;
+        }
+        match (self, target) {
+            // Signed to larger signed
+            (
+                PrimitiveType::I8,
+                PrimitiveType::I16 | PrimitiveType::I32 | PrimitiveType::I64 | PrimitiveType::I128,
+            ) => true,
+            (PrimitiveType::I16, PrimitiveType::I32 | PrimitiveType::I64 | PrimitiveType::I128) => {
+                true
+            }
+            (PrimitiveType::I32, PrimitiveType::I64 | PrimitiveType::I128) => true,
+            (PrimitiveType::I64, PrimitiveType::I128) => true,
+            // Unsigned to larger unsigned
+            (PrimitiveType::U8, PrimitiveType::U16 | PrimitiveType::U32 | PrimitiveType::U64) => {
+                true
+            }
+            (PrimitiveType::U16, PrimitiveType::U32 | PrimitiveType::U64) => true,
+            (PrimitiveType::U32, PrimitiveType::U64) => true,
+            // Unsigned to larger signed (requires at least one extra bit for sign)
+            (
+                PrimitiveType::U8,
+                PrimitiveType::I16 | PrimitiveType::I32 | PrimitiveType::I64 | PrimitiveType::I128,
+            ) => true,
+            (PrimitiveType::U16, PrimitiveType::I32 | PrimitiveType::I64 | PrimitiveType::I128) => {
+                true
+            }
+            (PrimitiveType::U32, PrimitiveType::I64 | PrimitiveType::I128) => true,
+            (PrimitiveType::U64, PrimitiveType::I128) => true,
+            // Float widening
+            (PrimitiveType::F32, PrimitiveType::F64) => true,
+            _ => false,
+        }
+    }
+
+    /// Return all primitive types that can be implicitly widened to this type.
+    ///
+    /// This is the inverse of `can_widen_to`: returns types T where T.can_widen_to(self).
+    /// The returned list excludes `self` (identity widening).
+    #[allow(dead_code)] // Used in tests
+    pub fn types_that_widen_to(self) -> Vec<PrimitiveType> {
+        let mut result = Vec::new();
+        let candidates = [
+            PrimitiveType::I8,
+            PrimitiveType::I16,
+            PrimitiveType::I32,
+            PrimitiveType::I64,
+            PrimitiveType::U8,
+            PrimitiveType::U16,
+            PrimitiveType::U32,
+            PrimitiveType::U64,
+            PrimitiveType::F32,
+        ];
+        for candidate in candidates {
+            if candidate != self && candidate.can_widen_to(self) {
+                result.push(candidate);
+            }
+        }
+        result
     }
 
     /// Select a random primitive type suitable for expressions.
@@ -311,6 +384,7 @@ impl TypeInfo {
                 format!("Iterator<{}>", elem.to_vole_syntax(table))
             }
             TypeInfo::Void => "void".to_string(),
+            TypeInfo::Never => "never".to_string(),
             TypeInfo::TypeParam(name) => name.clone(),
         }
     }
@@ -345,6 +419,18 @@ pub enum SymbolKind {
     ImplementBlock(ImplementBlockInfo),
 }
 
+/// Information about a static method in a class.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StaticMethodInfo {
+    /// The method name.
+    pub name: String,
+    /// Method parameters.
+    pub params: Vec<ParamInfo>,
+    /// Whether this is a constructor-like static that returns Self.
+    /// Always true for vole-stress generated statics.
+    pub returns_self: bool,
+}
+
 /// Information about a class declaration.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClassInfo {
@@ -356,6 +442,8 @@ pub struct ClassInfo {
     pub methods: Vec<MethodInfo>,
     /// Interfaces this class implements.
     pub implements: Vec<(ModuleId, SymbolId)>,
+    /// Static methods (inside `statics { }` block).
+    pub static_methods: Vec<StaticMethodInfo>,
 }
 
 /// Information about a struct declaration (value type, fields only).
@@ -684,6 +772,75 @@ mod tests {
     }
 
     #[test]
+    fn primitive_type_can_widen_to() {
+        // Same type always widens to itself
+        assert!(PrimitiveType::I32.can_widen_to(PrimitiveType::I32));
+        assert!(PrimitiveType::F64.can_widen_to(PrimitiveType::F64));
+
+        // Signed to larger signed
+        assert!(PrimitiveType::I8.can_widen_to(PrimitiveType::I16));
+        assert!(PrimitiveType::I8.can_widen_to(PrimitiveType::I32));
+        assert!(PrimitiveType::I8.can_widen_to(PrimitiveType::I64));
+        assert!(PrimitiveType::I8.can_widen_to(PrimitiveType::I128));
+        assert!(PrimitiveType::I16.can_widen_to(PrimitiveType::I32));
+        assert!(PrimitiveType::I32.can_widen_to(PrimitiveType::I64));
+        assert!(PrimitiveType::I64.can_widen_to(PrimitiveType::I128));
+
+        // Cannot widen to smaller
+        assert!(!PrimitiveType::I64.can_widen_to(PrimitiveType::I32));
+        assert!(!PrimitiveType::I32.can_widen_to(PrimitiveType::I16));
+
+        // Unsigned to larger unsigned
+        assert!(PrimitiveType::U8.can_widen_to(PrimitiveType::U16));
+        assert!(PrimitiveType::U16.can_widen_to(PrimitiveType::U32));
+        assert!(PrimitiveType::U32.can_widen_to(PrimitiveType::U64));
+
+        // Unsigned to larger signed (needs extra bit for sign)
+        assert!(PrimitiveType::U8.can_widen_to(PrimitiveType::I16));
+        assert!(PrimitiveType::U16.can_widen_to(PrimitiveType::I32));
+        assert!(PrimitiveType::U32.can_widen_to(PrimitiveType::I64));
+        assert!(PrimitiveType::U64.can_widen_to(PrimitiveType::I128));
+
+        // Cannot widen unsigned to same-size signed
+        assert!(!PrimitiveType::U8.can_widen_to(PrimitiveType::I8));
+        assert!(!PrimitiveType::U32.can_widen_to(PrimitiveType::I32));
+
+        // Float widening
+        assert!(PrimitiveType::F32.can_widen_to(PrimitiveType::F64));
+        assert!(!PrimitiveType::F64.can_widen_to(PrimitiveType::F32));
+
+        // No widening between incompatible types
+        assert!(!PrimitiveType::I32.can_widen_to(PrimitiveType::F64));
+        assert!(!PrimitiveType::Bool.can_widen_to(PrimitiveType::I32));
+    }
+
+    #[test]
+    fn primitive_type_types_that_widen_to() {
+        // Types that widen to i64
+        let to_i64 = PrimitiveType::I64.types_that_widen_to();
+        assert!(to_i64.contains(&PrimitiveType::I8));
+        assert!(to_i64.contains(&PrimitiveType::I16));
+        assert!(to_i64.contains(&PrimitiveType::I32));
+        assert!(to_i64.contains(&PrimitiveType::U8));
+        assert!(to_i64.contains(&PrimitiveType::U16));
+        assert!(to_i64.contains(&PrimitiveType::U32));
+        assert!(!to_i64.contains(&PrimitiveType::I64)); // Excludes self
+
+        // Types that widen to f64
+        let to_f64 = PrimitiveType::F64.types_that_widen_to();
+        assert!(to_f64.contains(&PrimitiveType::F32));
+        assert!(!to_f64.contains(&PrimitiveType::F64)); // Excludes self
+
+        // Types that widen to i8 (none)
+        let to_i8 = PrimitiveType::I8.types_that_widen_to();
+        assert!(to_i8.is_empty());
+
+        // Types that widen to bool (none)
+        let to_bool = PrimitiveType::Bool.types_that_widen_to();
+        assert!(to_bool.is_empty());
+    }
+
+    #[test]
     fn symbol_table_add_module() {
         let mut table = SymbolTable::new();
         let id = table.add_module("test_module".to_string(), "test_module.vole".to_string());
@@ -776,6 +933,7 @@ mod tests {
                 fields: vec![],
                 methods: vec![],
                 implements: vec![],
+                static_methods: vec![],
             }),
         );
 

@@ -14,7 +14,8 @@ use crate::expr::{ExprConfig, ExprContext, ExprGenerator};
 use crate::stmt::{StmtConfig, StmtContext, StmtGenerator};
 use crate::symbols::{
     ClassInfo, FieldInfo, FunctionInfo, ImplementBlockInfo, InterfaceInfo, MethodInfo,
-    ModuleSymbols, ParamInfo, PrimitiveType, Symbol, SymbolKind, SymbolTable, TypeInfo, TypeParam,
+    ModuleSymbols, ParamInfo, PrimitiveType, StaticMethodInfo, Symbol, SymbolKind, SymbolTable,
+    TypeInfo, TypeParam,
 };
 
 /// Configuration for the emitter phase.
@@ -148,6 +149,11 @@ impl<'a, R: Rng> EmitContext<'a, R> {
         // Emit implement blocks
         for symbol in self.module.implement_blocks() {
             self.emit_implement_block(symbol);
+        }
+
+        // Emit statics blocks for classes with static methods
+        for symbol in self.module.classes() {
+            self.emit_statics_block(symbol);
         }
 
         // Emit module tests
@@ -1074,6 +1080,106 @@ impl<'a, R: Rng> EmitContext<'a, R> {
         self.emit_line("}");
     }
 
+    /// Emit a statics block for a class with static methods.
+    ///
+    /// Produces:
+    /// ```vole
+    /// implement ClassName {
+    ///     statics {
+    ///         func staticName() -> ClassName { ... }
+    ///     }
+    /// }
+    /// ```
+    fn emit_statics_block(&mut self, symbol: &Symbol) {
+        let SymbolKind::Class(ref info) = symbol.kind else {
+            return;
+        };
+
+        // Skip if no static methods
+        if info.static_methods.is_empty() {
+            return;
+        }
+
+        self.emit_line("");
+        self.emit_line(&format!("implement {} {{", symbol.name));
+        self.indent += 1;
+
+        self.emit_line("statics {");
+        self.indent += 1;
+
+        for static_method in &info.static_methods {
+            self.emit_static_method(static_method, &symbol.name, &info.fields);
+        }
+
+        self.indent -= 1;
+        self.emit_line("}");
+
+        self.indent -= 1;
+        self.emit_line("}");
+    }
+
+    /// Emit a static method inside a statics block.
+    fn emit_static_method(
+        &mut self,
+        static_method: &StaticMethodInfo,
+        class_name: &str,
+        class_fields: &[FieldInfo],
+    ) {
+        self.emit_line("");
+        let params = self.format_params(&static_method.params);
+
+        // Static methods return the class type (using ClassName, not Self)
+        self.emit_line(&format!(
+            "func {}({}) -> {} {{",
+            static_method.name, params, class_name
+        ));
+        self.indent += 1;
+
+        // Generate a simple body that returns the constructed class
+        self.emit_static_method_body(&static_method.params, class_name, class_fields);
+
+        self.indent -= 1;
+        self.emit_line("}");
+    }
+
+    /// Emit the body of a static method that constructs and returns the class.
+    fn emit_static_method_body(
+        &mut self,
+        params: &[ParamInfo],
+        class_name: &str,
+        class_fields: &[FieldInfo],
+    ) {
+        // Generate field values for construction
+        let field_values = self.generate_static_field_values(class_fields, params);
+
+        // Just return the constructed instance
+        self.emit_line(&format!("return {} {{ {} }}", class_name, field_values));
+    }
+
+    /// Generate field values for static method construction.
+    ///
+    /// Uses parameters when their type matches a field type, otherwise
+    /// generates a literal value.
+    fn generate_static_field_values(
+        &mut self,
+        fields: &[FieldInfo],
+        params: &[ParamInfo],
+    ) -> String {
+        fields
+            .iter()
+            .map(|f| {
+                // Try to use a parameter with matching type
+                let value = params
+                    .iter()
+                    .find(|p| p.param_type == f.field_type)
+                    .map(|p| p.name.clone())
+                    .unwrap_or_else(|| self.generate_test_value(&f.field_type));
+                format!("{}: {}", f.name, value)
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
     /// Emit a method that uses Self as return type in a standalone implement block.
     fn emit_self_method(
         &mut self,
@@ -1753,6 +1859,58 @@ mod tests {
         assert!(
             code.contains("func method"),
             "Expected method declaration, got:\n{}",
+            code
+        );
+    }
+
+    #[test]
+    fn emit_statics_block() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let plan_config = PlanConfig {
+            layers: 1,
+            modules_per_layer: 1,
+            classes_per_module: (1, 1),
+            functions_per_module: (0, 0),
+            interfaces_per_module: (0, 0),
+            errors_per_module: (0, 0),
+            globals_per_module: (0, 0),
+            structs_per_module: (0, 0),
+            type_params_per_class: (0, 0),
+            fields_per_class: (2, 2),
+            methods_per_class: (0, 0),
+            static_methods_per_class: (2, 2), // Force 2 static methods
+            ..Default::default()
+        };
+
+        let table = plan(&mut rng, &plan_config);
+
+        // Verify the class has static methods in the symbol table
+        let module = table.get_module(ModuleId(0)).unwrap();
+        let has_statics = module.classes().any(|s| {
+            if let SymbolKind::Class(ref info) = s.kind {
+                !info.static_methods.is_empty()
+            } else {
+                false
+            }
+        });
+        assert!(
+            has_statics,
+            "Expected class to have static methods in symbol table"
+        );
+
+        // Now emit the module and check the output
+        let emit_config = EmitConfig::default();
+        let code = emit_module(&mut rng, &table, module, &emit_config);
+
+        // Should contain statics block
+        assert!(
+            code.contains("statics {"),
+            "Expected statics block in output:\n{}",
+            code
+        );
+        assert!(
+            code.contains("func static"),
+            "Expected static method in output:\n{}",
             code
         );
     }

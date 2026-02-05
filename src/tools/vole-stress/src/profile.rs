@@ -109,6 +109,7 @@ fn minimal_profile() -> Profile {
         fields_per_struct: (0, 0),
         fields_per_class: (0, 0),
         methods_per_class: (0, 0),
+        static_methods_per_class: (0, 0),
         methods_per_interface: (0, 0),
         fields_per_error: (0, 0),
     };
@@ -154,6 +155,8 @@ fn minimal_profile() -> Profile {
             early_return_probability: 0.0,
             // No else-if chains in minimal
             else_if_probability: 0.0,
+            // No static method calls in minimal
+            static_call_probability: 0.0,
         },
         // No destructured imports in minimal (no multi-layer modules)
         destructured_import_probability: 0.0,
@@ -196,6 +199,7 @@ fn full_profile() -> Profile {
         fields_per_struct: (2, 4),
         fields_per_class: (2, 5),
         methods_per_class: (2, 4),
+        static_methods_per_class: (1, 2),
         methods_per_interface: (2, 3),
         fields_per_error: (1, 3),
 
@@ -266,6 +270,8 @@ fn full_profile() -> Profile {
             early_return_probability: 0.15,
             // Else-if chains in if statements (~30%)
             else_if_probability: 0.30,
+            // Use static method calls ~30% of the time when constructing classes
+            static_call_probability: 0.30,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -325,6 +331,7 @@ fn deep_nesting_profile() -> Profile {
         fields_per_struct: (0, 0),
         fields_per_class: (1, 2),
         methods_per_class: (1, 2),
+        static_methods_per_class: (0, 0),
         methods_per_interface: (0, 0),
         fields_per_error: (0, 0),
     };
@@ -379,6 +386,8 @@ fn deep_nesting_profile() -> Profile {
             early_return_probability: 0.10,
             // Higher else-if probability for deep nested if-else-if chains
             else_if_probability: 0.40,
+            // No static method calls in deep-nesting (focus is on control flow depth)
+            static_call_probability: 0.0,
         },
         // No destructured imports in deep-nesting (single module focus)
         destructured_import_probability: 0.0,
@@ -422,6 +431,8 @@ fn wide_types_profile() -> Profile {
         fields_per_class: (20, 50),
         // Many methods per class: 10-20
         methods_per_class: (10, 20),
+        // A few static methods for variety
+        static_methods_per_class: (0, 1),
         // Many methods per interface: 10-20
         methods_per_interface: (10, 20),
         // Wide error fields: 5-15
@@ -492,6 +503,8 @@ fn wide_types_profile() -> Profile {
             early_return_probability: 0.10,
             // Some else-if chains
             else_if_probability: 0.25,
+            // Use static method calls ~20% of the time
+            static_call_probability: 0.20,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -531,6 +544,7 @@ fn many_modules_profile() -> Profile {
         fields_per_struct: (1, 3),
         fields_per_class: (1, 3),
         methods_per_class: (1, 2),
+        static_methods_per_class: (0, 0),
         methods_per_interface: (1, 2),
         fields_per_error: (0, 1),
         // Simple function signatures
@@ -598,6 +612,8 @@ fn many_modules_profile() -> Profile {
             early_return_probability: 0.0,
             // No else-if chains - focus on module loading
             else_if_probability: 0.0,
+            // No static method calls - focus on module loading
+            static_call_probability: 0.0,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -644,6 +660,8 @@ fn generics_heavy_profile() -> Profile {
         fields_per_class: (2, 4),
         // Many methods - methods will also be generic on generic classes
         methods_per_class: (3, 5),
+        // No static methods - focus on generics (statics are non-generic only)
+        static_methods_per_class: (0, 0),
         // Many interface methods for constraint satisfaction
         methods_per_interface: (2, 4),
         // Simple error fields
@@ -718,6 +736,8 @@ fn generics_heavy_profile() -> Profile {
             early_return_probability: 0.12,
             // Some else-if chains
             else_if_probability: 0.25,
+            // No static method calls - focus on generics (statics are non-generic only)
+            static_call_probability: 0.0,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.

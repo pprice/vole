@@ -30,6 +30,9 @@ pub struct ExprConfig {
     pub method_chain_probability: f64,
     /// Maximum depth of method chains (e.g., 2 means a.b().c() is allowed).
     pub max_chain_depth: usize,
+    /// Probability of using `unreachable` in match/when wildcard arms.
+    /// Only used when the arm is provably unreachable (e.g., all cases covered).
+    pub unreachable_probability: f64,
 }
 
 impl Default for ExprConfig {
@@ -43,6 +46,7 @@ impl Default for ExprConfig {
             lambda_probability: 0.05,
             method_chain_probability: 0.20,
             max_chain_depth: 2,
+            unreachable_probability: 0.05,
         }
     }
 }
@@ -731,6 +735,8 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
     ///
     /// Looks for local variables with class type whose fields match the
     /// target primitive type. Returns `Some("local.field")` on success.
+    /// Also supports nested field access through class-typed fields, e.g.,
+    /// `local.inner.field` where `inner` is a class-typed field.
     /// Only considers non-generic classes (generic field types are too
     /// complex to resolve).
     fn try_generate_field_access(
@@ -740,24 +746,20 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
     ) -> Option<String> {
         let target = TypeInfo::Primitive(prim);
 
-        // Collect (local_name, field_name) pairs for matching fields
-        let mut candidates: Vec<(String, String)> = Vec::new();
+        // Collect full access paths (e.g., "obj.field" or "obj.inner.field")
+        let mut candidates: Vec<String> = Vec::new();
 
         for (name, ty) in ctx.locals {
             if let TypeInfo::Class(mod_id, sym_id) = ty {
-                if let Some(sym) = ctx.table.get_symbol(*mod_id, *sym_id) {
-                    if let SymbolKind::Class(ref info) = sym.kind {
-                        // Skip generic classes
-                        if !info.type_params.is_empty() {
-                            continue;
-                        }
-                        for field in &info.fields {
-                            if field.field_type == target {
-                                candidates.push((name.clone(), field.name.clone()));
-                            }
-                        }
-                    }
-                }
+                self.collect_field_paths(
+                    ctx.table,
+                    *mod_id,
+                    *sym_id,
+                    name.clone(),
+                    &target,
+                    &mut candidates,
+                    0, // depth
+                );
             }
         }
 
@@ -766,8 +768,63 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         }
 
         let idx = self.rng.gen_range(0..candidates.len());
-        let (local_name, field_name) = &candidates[idx];
-        Some(format!("{}.{}", local_name, field_name))
+        Some(candidates[idx].clone())
+    }
+
+    /// Recursively collect field access paths that lead to the target type.
+    ///
+    /// This enables nested field access like `obj.inner.field` where `inner`
+    /// is a class-typed field. Depth is limited to prevent infinite recursion
+    /// in case of any cyclic references (though planning should prevent these).
+    fn collect_field_paths(
+        &self,
+        table: &SymbolTable,
+        mod_id: ModuleId,
+        sym_id: SymbolId,
+        prefix: String,
+        target: &TypeInfo,
+        candidates: &mut Vec<String>,
+        depth: usize,
+    ) {
+        // Limit depth to prevent excessive nesting (and handle any cycles)
+        const MAX_DEPTH: usize = 3;
+        if depth >= MAX_DEPTH {
+            return;
+        }
+
+        let Some(sym) = table.get_symbol(mod_id, sym_id) else {
+            return;
+        };
+        let SymbolKind::Class(ref info) = sym.kind else {
+            return;
+        };
+
+        // Skip generic classes
+        if !info.type_params.is_empty() {
+            return;
+        }
+
+        for field in &info.fields {
+            let field_path = format!("{}.{}", prefix, field.name);
+
+            // Check if this field matches the target type
+            if &field.field_type == target {
+                candidates.push(field_path.clone());
+            }
+
+            // If this field is a class type, recurse into it
+            if let TypeInfo::Class(nested_mod_id, nested_sym_id) = &field.field_type {
+                self.collect_field_paths(
+                    table,
+                    *nested_mod_id,
+                    *nested_sym_id,
+                    field_path,
+                    target,
+                    candidates,
+                    depth + 1,
+                );
+            }
+        }
     }
 
     /// Try to generate a null coalescing expression (`optVar ?? defaultExpr`).
@@ -976,8 +1033,50 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                 let return_type = return_type.as_ref().clone();
                 self.generate_lambda(&param_types, &return_type, ctx, self.config.max_depth)
             }
+            TypeInfo::Class(mod_id, sym_id) => {
+                // Generate a class construction expression
+                self.generate_class_construction(*mod_id, *sym_id, ctx)
+            }
             _ => self.literal_for_primitive(PrimitiveType::I64),
         }
+    }
+
+    /// Generate a class construction expression.
+    ///
+    /// Constructs an instance of the class with all fields initialized.
+    /// For fields that are themselves class-typed, recursively constructs
+    /// nested instances.
+    fn generate_class_construction(
+        &mut self,
+        mod_id: ModuleId,
+        sym_id: SymbolId,
+        ctx: &ExprContext,
+    ) -> String {
+        let Some(symbol) = ctx.table.get_symbol(mod_id, sym_id) else {
+            return "nil".to_string();
+        };
+        let SymbolKind::Class(ref class_info) = symbol.kind else {
+            return "nil".to_string();
+        };
+
+        // Skip generic classes - they require type arguments we don't track
+        if !class_info.type_params.is_empty() {
+            return "nil".to_string();
+        }
+
+        let class_name = symbol.name.clone();
+        let fields = class_info.fields.clone();
+
+        // Generate field values
+        let field_values: Vec<String> = fields
+            .iter()
+            .map(|f| {
+                let value = self.generate_simple(&f.field_type, ctx);
+                format!("{}: {}", f.name, value)
+            })
+            .collect();
+
+        format!("{} {{ {} }}", class_name, field_values.join(", "))
     }
 
     /// Generate a primitive expression.
@@ -1325,19 +1424,42 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
     }
 
     /// Generate a when expression.
+    ///
+    /// Optionally uses `unreachable` in the wildcard arm when one of the
+    /// preceding conditions is guaranteed to be true (e.g., `true => ...`).
     fn generate_when_expr(&mut self, ty: &TypeInfo, ctx: &ExprContext, depth: usize) -> String {
+        // Decide if we want to use unreachable in the default arm
+        let use_unreachable = self.rng.gen_bool(self.config.unreachable_probability);
+
         let arm_count = self.rng.gen_range(2..=4);
         let mut arms = Vec::new();
 
-        for _ in 0..arm_count - 1 {
-            let cond = self.generate(&TypeInfo::Primitive(PrimitiveType::Bool), ctx, depth + 1);
+        if use_unreachable {
+            // Generate a "true" condition to guarantee the default arm is unreachable
             let value = self.generate(ty, ctx, depth + 1);
-            arms.push(format!("{} => {}", cond, value));
-        }
+            arms.push(format!("true => {}", value));
 
-        // Default arm with wildcard
-        let default_value = self.generate(ty, ctx, depth + 1);
-        arms.push(format!("_ => {}", default_value));
+            // Generate additional arms (will never execute, but syntactically valid)
+            for _ in 1..arm_count - 1 {
+                let cond = self.generate(&TypeInfo::Primitive(PrimitiveType::Bool), ctx, depth + 1);
+                let arm_value = self.generate(ty, ctx, depth + 1);
+                arms.push(format!("{} => {}", cond, arm_value));
+            }
+
+            // Default arm with unreachable
+            arms.push("_ => unreachable".to_string());
+        } else {
+            // Normal when expression
+            for _ in 0..arm_count - 1 {
+                let cond = self.generate(&TypeInfo::Primitive(PrimitiveType::Bool), ctx, depth + 1);
+                let value = self.generate(ty, ctx, depth + 1);
+                arms.push(format!("{} => {}", cond, value));
+            }
+
+            // Default arm with a value
+            let default_value = self.generate(ty, ctx, depth + 1);
+            arms.push(format!("_ => {}", default_value));
+        }
 
         format!("when {{ {} }}", arms.join(", "))
     }
@@ -1625,6 +1747,9 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
     }
 
     /// Generate a match expression.
+    ///
+    /// Optionally uses `unreachable` in the wildcard arm when the subject is
+    /// a known literal value and one of the preceding patterns matches it.
     pub fn generate_match_expr(
         &mut self,
         subject_type: &TypeInfo,
@@ -1632,6 +1757,16 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         ctx: &ExprContext,
         depth: usize,
     ) -> String {
+        // Decide if we want to use unreachable in the default arm
+        let use_unreachable = self.rng.gen_bool(self.config.unreachable_probability);
+
+        if use_unreachable {
+            // Generate a match where the default arm is provably unreachable
+            // by matching on a known literal and including a pattern for it
+            return self.generate_match_with_unreachable(subject_type, result_type, ctx, depth);
+        }
+
+        // Normal match expression
         let subject = self.generate(subject_type, ctx, depth + 1);
         let arm_count = self.rng.gen_range(2..=4);
         let mut arms = Vec::new();
@@ -1644,6 +1779,78 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         }
 
         // Always end with wildcard for exhaustiveness
+        let default_value = self.generate(result_type, ctx, depth + 1);
+        arms.push(format!("_ => {}", default_value));
+
+        format!("match {} {{ {} }}", subject, arms.join(", "))
+    }
+
+    /// Generate a match expression where the default arm uses `unreachable`.
+    ///
+    /// Creates a pattern like:
+    /// ```vole
+    /// match 5 {
+    ///     5 => "five",
+    ///     _ => unreachable
+    /// }
+    /// ```
+    fn generate_match_with_unreachable(
+        &mut self,
+        subject_type: &TypeInfo,
+        result_type: &TypeInfo,
+        ctx: &ExprContext,
+        depth: usize,
+    ) -> String {
+        // Generate a known literal subject for primitive types
+        let (subject_literal, pattern) = match subject_type {
+            TypeInfo::Primitive(prim) => {
+                let lit = self.literal_for_primitive(*prim);
+                (lit.clone(), lit)
+            }
+            _ => {
+                // For non-primitive types, fall back to a normal match
+                return self.generate_match_expr_normal(subject_type, result_type, ctx, depth);
+            }
+        };
+
+        let arm_count = self.rng.gen_range(2..=4);
+        let mut arms = Vec::new();
+
+        // First arm matches the known subject value
+        let first_value = self.generate(result_type, ctx, depth + 1);
+        arms.push(format!("{} => {}", pattern, first_value));
+
+        // Generate additional non-matching arms (won't execute but valid syntax)
+        for _ in 1..arm_count - 1 {
+            let other_pattern = self.generate_pattern(subject_type);
+            let value = self.generate(result_type, ctx, depth + 1);
+            arms.push(format!("{} => {}", other_pattern, value));
+        }
+
+        // Default arm with unreachable
+        arms.push("_ => unreachable".to_string());
+
+        format!("match {} {{ {} }}", subject_literal, arms.join(", "))
+    }
+
+    /// Generate a normal match expression (internal helper for fallback).
+    fn generate_match_expr_normal(
+        &mut self,
+        subject_type: &TypeInfo,
+        result_type: &TypeInfo,
+        ctx: &ExprContext,
+        depth: usize,
+    ) -> String {
+        let subject = self.generate(subject_type, ctx, depth + 1);
+        let arm_count = self.rng.gen_range(2..=4);
+        let mut arms = Vec::new();
+
+        for _ in 0..arm_count - 1 {
+            let pattern = self.generate_pattern(subject_type);
+            let value = self.generate(result_type, ctx, depth + 1);
+            arms.push(format!("{} => {}", pattern, value));
+        }
+
         let default_value = self.generate(result_type, ctx, depth + 1);
         arms.push(format!("_ => {}", default_value));
 
@@ -2121,6 +2328,7 @@ mod tests {
                 }],
                 methods: vec![],
                 implements: vec![],
+                static_methods: vec![],
             }),
         );
 
@@ -2240,6 +2448,7 @@ mod tests {
                 ],
                 methods: vec![],
                 implements: vec![],
+                static_methods: vec![],
             }),
         );
 
