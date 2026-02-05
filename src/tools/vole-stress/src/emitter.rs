@@ -318,6 +318,11 @@ impl<'a, R: Rng> EmitContext<'a, R> {
                 let elem_val = self.generate_test_value(elem);
                 format!("[{}]", elem_val)
             }
+            TypeInfo::Tuple(elems) => {
+                let values: Vec<String> =
+                    elems.iter().map(|t| self.generate_test_value(t)).collect();
+                format!("[{}]", values.join(", "))
+            }
             TypeInfo::Void => "nil".to_string(),
             TypeInfo::Union(variants) => {
                 // For union types, generate a value for the first variant
@@ -893,6 +898,11 @@ impl<'a, R: Rng> EmitContext<'a, R> {
                 drop(expr_gen);
                 let elem_val = self.literal_for_type(elem);
                 format!("[{}]", elem_val)
+            }
+            TypeInfo::Tuple(elems) => {
+                drop(expr_gen);
+                let values: Vec<String> = elems.iter().map(|t| self.literal_for_type(t)).collect();
+                format!("[{}]", values.join(", "))
             }
             _ => "nil".to_string(),
         }

@@ -33,6 +33,8 @@ pub struct StmtConfig {
     pub raise_probability: f64,
     /// Probability of generating a try expression when calling fallible functions.
     pub try_probability: f64,
+    /// Probability of generating a tuple let-binding with destructuring.
+    pub tuple_probability: f64,
 }
 
 impl Default for StmtConfig {
@@ -48,6 +50,7 @@ impl Default for StmtConfig {
             compound_assign_probability: 0.15,
             raise_probability: 0.10,
             try_probability: 0.12,
+            tuple_probability: 0.10,
         }
     }
 }
@@ -166,6 +169,9 @@ fn types_match(a: &TypeInfo, b: &TypeInfo) -> bool {
         (TypeInfo::Void, TypeInfo::Void) => true,
         (TypeInfo::Optional(ia), TypeInfo::Optional(ib)) => types_match(ia, ib),
         (TypeInfo::Array(ea), TypeInfo::Array(eb)) => types_match(ea, eb),
+        (TypeInfo::Tuple(ea), TypeInfo::Tuple(eb)) => {
+            ea.len() == eb.len() && ea.iter().zip(eb.iter()).all(|(a, b)| types_match(a, b))
+        }
         _ => false,
     }
 }
@@ -302,6 +308,11 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // ~12% chance to generate an array-typed local for array indexing
         if self.rng.gen_bool(0.12) {
             return self.generate_array_let(ctx);
+        }
+
+        // Tuple let-binding with destructuring
+        if self.rng.gen_bool(self.config.tuple_probability) {
+            return self.generate_tuple_let(ctx);
         }
 
         let name = ctx.new_local_name();
@@ -886,6 +897,50 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         ctx.add_local(name.clone(), array_ty, false);
 
         format!("let {} = [{}]", name, elements.join(", "))
+    }
+
+    /// Generate a tuple let-binding with destructuring.
+    ///
+    /// Produces a two-statement sequence:
+    /// ```vole
+    /// let tN: [i64, string] = [42_i64, "hello"]
+    /// let [a, b] = tN
+    /// ```
+    /// Adds each destructured element as a local variable with its
+    /// corresponding element type.
+    fn generate_tuple_let(&mut self, ctx: &mut StmtContext) -> String {
+        let tuple_ty = TypeInfo::random_tuple_type(self.rng);
+        let elem_types = match &tuple_ty {
+            TypeInfo::Tuple(elems) => elems.clone(),
+            _ => unreachable!(),
+        };
+
+        // Generate the tuple literal expression
+        let expr_ctx = ctx.to_expr_context();
+        let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+        let value = expr_gen.generate(&tuple_ty, &expr_ctx, 0);
+
+        let tuple_name = ctx.new_local_name();
+        let type_annotation = tuple_ty.to_vole_syntax(ctx.table);
+
+        // Generate destructuring names for each element
+        let destruct_names: Vec<String> = elem_types.iter().map(|_| ctx.new_local_name()).collect();
+
+        // Add destructured locals to scope
+        for (name, ty) in destruct_names.iter().zip(elem_types.iter()) {
+            ctx.add_local(name.clone(), ty.clone(), false);
+        }
+
+        let pattern = format!("[{}]", destruct_names.join(", "));
+        format!(
+            "let {}: {} = {}\n{}let {} = {}",
+            tuple_name,
+            type_annotation,
+            value,
+            self.indent_str(),
+            pattern,
+            tuple_name,
+        )
     }
 
     /// Try to generate a let statement that constructs a class instance.

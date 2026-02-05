@@ -178,6 +178,22 @@ impl<'a> ExprContext<'a> {
         vars
     }
 
+    /// Get all tuple-typed variables in scope, along with their element types.
+    pub fn tuple_vars(&self) -> Vec<(String, Vec<TypeInfo>)> {
+        let mut vars = Vec::new();
+        for (name, ty) in self.locals {
+            if let TypeInfo::Tuple(elems) = ty {
+                vars.push((name.clone(), elems.clone()));
+            }
+        }
+        for param in self.params {
+            if let TypeInfo::Tuple(elems) = &param.param_type {
+                vars.push((param.name.clone(), elems.clone()));
+            }
+        }
+        vars
+    }
+
     /// Get all union-typed variables in scope, along with their variant types.
     pub fn union_typed_vars(&self) -> Vec<(&str, &[TypeInfo])> {
         let mut vars = Vec::new();
@@ -214,6 +230,12 @@ fn types_compatible(actual: &TypeInfo, expected: &TypeInfo) -> bool {
         (TypeInfo::Void, TypeInfo::Void) => true,
         (TypeInfo::Optional(a), TypeInfo::Optional(e)) => types_compatible(a, e),
         (TypeInfo::Array(a), TypeInfo::Array(e)) => types_compatible(a, e),
+        (TypeInfo::Tuple(a), TypeInfo::Tuple(e)) => {
+            a.len() == e.len()
+                && a.iter()
+                    .zip(e.iter())
+                    .all(|(ai, ei)| types_compatible(ai, ei))
+        }
         _ => false,
     }
 }
@@ -273,6 +295,7 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                 // No matching parameter found - use panic (this shouldn't happen with good planning)
                 "panic(\"unreachable: type parameter has no source\")".to_string()
             }
+            TypeInfo::Tuple(elem_types) => self.generate_tuple(elem_types, ctx, depth),
             TypeInfo::Union(variants) => {
                 // For union types, generate a value for a random variant
                 if variants.is_empty() {
@@ -460,6 +483,14 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             TypeInfo::Primitive(p) => self.literal_for_primitive(*p),
             TypeInfo::Optional(_) => "nil".to_string(),
             TypeInfo::Void => "nil".to_string(),
+            TypeInfo::Tuple(elem_types) => {
+                // Generate a simple tuple with literal elements
+                let elements: Vec<String> = elem_types
+                    .iter()
+                    .map(|t| self.generate_simple(t, ctx))
+                    .collect();
+                format!("[{}]", elements.join(", "))
+            }
             TypeInfo::Union(variants) => {
                 // Generate a literal for a random variant
                 if let Some(first) = variants.first() {
@@ -858,6 +889,28 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
 
         let elements: Vec<String> = (0..len)
             .map(|_| self.generate(elem, ctx, depth + 1))
+            .collect();
+
+        format!("[{}]", elements.join(", "))
+    }
+
+    /// Generate a tuple literal expression.
+    ///
+    /// Produces `[expr1, expr2, ...]` where each element matches its
+    /// corresponding type in `elem_types`. Uses simple expressions only
+    /// (literals and variable references) to keep the tuple on a single
+    /// line and avoid parse issues with multi-line expressions inside
+    /// square brackets.
+    fn generate_tuple(
+        &mut self,
+        elem_types: &[TypeInfo],
+        ctx: &ExprContext,
+        _depth: usize,
+    ) -> String {
+        let elem_types = elem_types.to_vec();
+        let elements: Vec<String> = elem_types
+            .iter()
+            .map(|ty| self.generate_simple(ty, ctx))
             .collect();
 
         format!("[{}]", elements.join(", "))

@@ -38,6 +38,8 @@ pub enum TypeInfo {
     Union(Vec<TypeInfo>),
     /// Array type [T]
     Array(Box<TypeInfo>),
+    /// Tuple type [T1, T2, ...] (heterogeneous, fixed-length)
+    Tuple(Vec<TypeInfo>),
     /// Fallible type fallible(SuccessType, ErrorType)
     Fallible {
         success: Box<TypeInfo>,
@@ -166,6 +168,18 @@ impl PrimitiveType {
 
 #[allow(dead_code)]
 impl TypeInfo {
+    /// Generate a random tuple type with 2-3 primitive element types.
+    ///
+    /// Uses core types (i32, i64, f64, bool, string) for element types to
+    /// keep generated tuples simple and widely compatible.
+    pub fn random_tuple_type<R: Rng>(rng: &mut R) -> Self {
+        let elem_count = rng.gen_range(2..=3);
+        let elems: Vec<TypeInfo> = (0..elem_count)
+            .map(|_| TypeInfo::Primitive(PrimitiveType::random_expr_type(rng)))
+            .collect();
+        TypeInfo::Tuple(elems)
+    }
+
     /// Check if this type is a primitive type.
     pub fn is_primitive(&self) -> bool {
         matches!(self, TypeInfo::Primitive(_))
@@ -184,6 +198,19 @@ impl TypeInfo {
     /// Check if this type is an iterator type (returned by generators).
     pub fn is_iterator(&self) -> bool {
         matches!(self, TypeInfo::Iterator(_))
+    }
+
+    /// Check if this type is a tuple type.
+    pub fn is_tuple(&self) -> bool {
+        matches!(self, TypeInfo::Tuple(_))
+    }
+
+    /// Get the element types of a tuple type.
+    pub fn tuple_element_types(&self) -> Option<&[TypeInfo]> {
+        match self {
+            TypeInfo::Tuple(elems) => Some(elems),
+            _ => None,
+        }
     }
 
     /// Get the element type of an iterator type.
@@ -233,6 +260,10 @@ impl TypeInfo {
                 .collect::<Vec<_>>()
                 .join(" | "),
             TypeInfo::Array(elem) => format!("[{}]", elem.to_vole_syntax(table)),
+            TypeInfo::Tuple(elems) => {
+                let parts: Vec<String> = elems.iter().map(|t| t.to_vole_syntax(table)).collect();
+                format!("[{}]", parts.join(", "))
+            }
             TypeInfo::Fallible { success, error } => format!(
                 "fallible({}, {})",
                 success.to_vole_syntax(table),
@@ -673,6 +704,12 @@ mod tests {
 
         let array = TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I64)));
         assert_eq!(array.to_vole_syntax(&table), "[i64]");
+
+        let tuple = TypeInfo::Tuple(vec![
+            TypeInfo::Primitive(PrimitiveType::I64),
+            TypeInfo::Primitive(PrimitiveType::String),
+        ]);
+        assert_eq!(tuple.to_vole_syntax(&table), "[i64, string]");
 
         let fallible = TypeInfo::Fallible {
             success: Box::new(TypeInfo::Primitive(PrimitiveType::I64)),

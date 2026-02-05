@@ -135,6 +135,8 @@ fn minimal_profile() -> Profile {
             // No fallible (no error types in minimal)
             raise_probability: 0.0,
             try_probability: 0.0,
+            // No tuples in minimal
+            tuple_probability: 0.0,
         },
     };
 
@@ -224,6 +226,8 @@ fn full_profile() -> Profile {
             // Fallible: raise in fallible bodies, try when calling fallible funcs
             raise_probability: 0.12,
             try_probability: 0.15,
+            // Tuples with destructuring
+            tuple_probability: 0.12,
         },
     };
 
@@ -313,6 +317,8 @@ fn deep_nesting_profile() -> Profile {
             // No fallible - focus is on nesting depth
             raise_probability: 0.0,
             try_probability: 0.0,
+            // Some tuples for variety
+            tuple_probability: 0.08,
         },
     };
 
@@ -403,6 +409,8 @@ fn wide_types_profile() -> Profile {
             // Some fallible support
             raise_probability: 0.08,
             try_probability: 0.10,
+            // Some tuples
+            tuple_probability: 0.10,
         },
     };
 
@@ -484,6 +492,8 @@ fn many_modules_profile() -> Profile {
             // No fallible - focus on module loading
             raise_probability: 0.0,
             try_probability: 0.0,
+            // No tuples - focus on module loading
+            tuple_probability: 0.0,
         },
     };
 
@@ -578,6 +588,8 @@ fn generics_heavy_profile() -> Profile {
             // Some fallible support
             raise_probability: 0.08,
             try_probability: 0.10,
+            // Some tuples
+            tuple_probability: 0.10,
         },
     };
 
