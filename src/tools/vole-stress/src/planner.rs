@@ -415,6 +415,37 @@ fn plan_error<R: Rng>(
         .unwrap_or(SymbolId(0))
 }
 
+/// Plan a function-typed parameter with simple primitive param/return types.
+///
+/// Generates a parameter like `f: (i64, i64) -> i64` with 1-2 primitive param
+/// types and a primitive return type. Avoids wide/complex types to keep lambda
+/// generation straightforward.
+fn plan_function_typed_param<R: Rng>(rng: &mut R, names: &mut NameGen) -> ParamInfo {
+    let param_count = rng.gen_range(1..=2);
+    let param_types: Vec<TypeInfo> = (0..param_count)
+        .map(|_| {
+            let prim = match rng.gen_range(0..3) {
+                0 => PrimitiveType::I64,
+                1 => PrimitiveType::Bool,
+                _ => PrimitiveType::String,
+            };
+            TypeInfo::Primitive(prim)
+        })
+        .collect();
+    let return_type = match rng.gen_range(0..3) {
+        0 => PrimitiveType::I64,
+        1 => PrimitiveType::Bool,
+        _ => PrimitiveType::String,
+    };
+    ParamInfo {
+        name: names.next("param"),
+        param_type: TypeInfo::Function {
+            param_types,
+            return_type: Box::new(TypeInfo::Primitive(return_type)),
+        },
+    }
+}
+
 /// Plan a function declaration.
 fn plan_function<R: Rng>(
     rng: &mut R,
@@ -435,6 +466,11 @@ fn plan_function<R: Rng>(
 
     for _ in 0..param_count {
         params.push(plan_param_with_type_params(rng, names, &type_params));
+    }
+
+    // ~10% chance to add a function-typed parameter (only for non-generic functions)
+    if type_params.is_empty() && rng.gen_bool(0.10) {
+        params.push(plan_function_typed_param(rng, names));
     }
 
     // Possibly make this a fallible function if error types are available in the module

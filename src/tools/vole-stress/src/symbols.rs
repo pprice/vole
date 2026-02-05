@@ -43,6 +43,11 @@ pub enum TypeInfo {
         success: Box<TypeInfo>,
         error: Box<TypeInfo>,
     },
+    /// Function type (param_types) -> return_type
+    Function {
+        param_types: Vec<TypeInfo>,
+        return_type: Box<TypeInfo>,
+    },
     /// Void type (no return value)
     Void,
     /// A type parameter (e.g., T in Box<T>)
@@ -218,6 +223,17 @@ impl TypeInfo {
                 success.to_vole_syntax(table),
                 error.to_vole_syntax(table)
             ),
+            TypeInfo::Function {
+                param_types,
+                return_type,
+            } => {
+                let params = param_types
+                    .iter()
+                    .map(|t| t.to_vole_syntax(table))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("({}) -> {}", params, return_type.to_vole_syntax(table))
+            }
             TypeInfo::Void => "void".to_string(),
             TypeInfo::TypeParam(name) => name.clone(),
         }
@@ -632,6 +648,24 @@ mod tests {
             error: Box::new(TypeInfo::Primitive(PrimitiveType::String)),
         };
         assert_eq!(fallible.to_vole_syntax(&table), "fallible(i64, string)");
+
+        let func_type = TypeInfo::Function {
+            param_types: vec![TypeInfo::Primitive(PrimitiveType::I64)],
+            return_type: Box::new(TypeInfo::Primitive(PrimitiveType::I64)),
+        };
+        assert_eq!(func_type.to_vole_syntax(&table), "(i64) -> i64");
+
+        let multi_param_func = TypeInfo::Function {
+            param_types: vec![
+                TypeInfo::Primitive(PrimitiveType::I64),
+                TypeInfo::Primitive(PrimitiveType::String),
+            ],
+            return_type: Box::new(TypeInfo::Primitive(PrimitiveType::Bool)),
+        };
+        assert_eq!(
+            multi_param_func.to_vole_syntax(&table),
+            "(i64, string) -> bool"
+        );
     }
 
     #[test]

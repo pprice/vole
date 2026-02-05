@@ -437,8 +437,31 @@ impl<'a, R: Rng> EntrypointContext<'a, R> {
                 }
                 "nil".to_string()
             }
+            TypeInfo::Function {
+                param_types,
+                return_type,
+            } => self.generate_lambda_for_function_type(param_types, return_type),
             _ => "nil".to_string(),
         }
+    }
+
+    /// Generate a lambda expression matching a function type signature.
+    fn generate_lambda_for_function_type(
+        &mut self,
+        param_types: &[TypeInfo],
+        return_type: &TypeInfo,
+    ) -> String {
+        let params: Vec<String> = param_types
+            .iter()
+            .enumerate()
+            .map(|(i, ty)| format!("p{}: {}", i, ty.to_vole_syntax(self.table)))
+            .collect();
+        let body = self.generate_value_for_type(return_type);
+        let return_annotation = match return_type {
+            TypeInfo::Void => String::new(),
+            _ => format!(" -> {}", return_type.to_vole_syntax(self.table)),
+        };
+        format!("({}){} => {}", params.join(", "), return_annotation, body)
     }
 
     fn generate_primitive_value(&mut self, prim: PrimitiveType) -> String {

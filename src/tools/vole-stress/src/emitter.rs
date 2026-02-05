@@ -10,7 +10,7 @@ use std::io;
 use std::path::Path;
 
 use crate::entrypoints::{emit_integration_tests, emit_main};
-use crate::expr::{ExprConfig, ExprGenerator};
+use crate::expr::{ExprConfig, ExprContext, ExprGenerator};
 use crate::stmt::{StmtConfig, StmtContext, StmtGenerator};
 use crate::symbols::{
     ClassInfo, FieldInfo, FunctionInfo, ImplementBlockInfo, InterfaceInfo, MethodInfo,
@@ -342,6 +342,17 @@ impl<'a, R: Rng> EmitContext<'a, R> {
                     }
                 }
                 "nil".to_string()
+            }
+            TypeInfo::Function {
+                param_types,
+                return_type,
+            } => {
+                // Generate a lambda matching the function type
+                let config = ExprConfig::default();
+                let mut expr_gen = ExprGenerator::new(self.rng, &config);
+                let table = self.table;
+                let ctx = ExprContext::new(&[], &[], table);
+                expr_gen.generate_lambda(param_types, return_type, &ctx, config.max_depth)
             }
             _ => "nil".to_string(),
         }

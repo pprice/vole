@@ -282,6 +282,15 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                     self.generate(&variants[idx].clone(), ctx, depth)
                 }
             }
+            TypeInfo::Function {
+                param_types,
+                return_type,
+            } => {
+                // Generate a lambda expression matching the function type
+                let param_types = param_types.clone();
+                let return_type = return_type.as_ref().clone();
+                self.generate_lambda(&param_types, &return_type, ctx, depth)
+            }
             _ => self.generate_simple(ty, ctx),
         }
     }
@@ -458,6 +467,15 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                 } else {
                     "nil".to_string()
                 }
+            }
+            TypeInfo::Function {
+                param_types,
+                return_type,
+            } => {
+                // Generate a simple lambda expression
+                let param_types = param_types.clone();
+                let return_type = return_type.as_ref().clone();
+                self.generate_lambda(&param_types, &return_type, ctx, self.config.max_depth)
             }
             _ => self.literal_for_primitive(PrimitiveType::I64),
         }

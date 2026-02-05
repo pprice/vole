@@ -257,6 +257,13 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             return self.generate_compound_assignment(ctx);
         }
 
+        // ~20% chance to call a function-typed parameter if one is in scope
+        if self.rng.gen_bool(0.20) {
+            if let Some(stmt) = self.try_generate_fn_param_call(ctx) {
+                return stmt;
+            }
+        }
+
         let choice: f64 = self.rng.gen_range(0.0..1.0);
 
         if choice < self.config.if_probability {
@@ -726,6 +733,61 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             "let {} = when {{ {} => {}, _ => {} }}",
             name, guard_cond, call_expr, default_val
         ))
+    }
+
+    /// Try to generate a let statement that calls a function-typed parameter.
+    ///
+    /// Looks for parameters with `TypeInfo::Function` type in the current scope,
+    /// generates arguments matching the function's param types, and binds the
+    /// result. Returns `None` if no function-typed parameters are in scope.
+    fn try_generate_fn_param_call(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Find function-typed parameters
+        let fn_params: Vec<(String, Vec<TypeInfo>, TypeInfo)> = ctx
+            .params
+            .iter()
+            .filter_map(|p| {
+                if let TypeInfo::Function {
+                    param_types,
+                    return_type,
+                } = &p.param_type
+                {
+                    Some((
+                        p.name.clone(),
+                        param_types.clone(),
+                        return_type.as_ref().clone(),
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if fn_params.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..fn_params.len());
+        let (fn_name, param_types, return_type) = fn_params[idx].clone();
+
+        // Generate arguments for the function call
+        let expr_ctx = ctx.to_expr_context();
+        let args: Vec<String> = param_types
+            .iter()
+            .map(|ty| {
+                let mut eg = ExprGenerator::new(self.rng, &self.config.expr_config);
+                eg.generate_simple(ty, &expr_ctx)
+            })
+            .collect();
+
+        let call = format!("{}({})", fn_name, args.join(", "));
+
+        let name = ctx.new_local_name();
+        if matches!(return_type, TypeInfo::Void) {
+            Some(call)
+        } else {
+            ctx.add_local(name.clone(), return_type, false);
+            Some(format!("let {} = {}", name, call))
+        }
     }
 
     /// Generate a block of statements.
