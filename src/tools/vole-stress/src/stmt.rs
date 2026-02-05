@@ -75,6 +75,9 @@ pub struct StmtContext<'a> {
     pub local_counter: usize,
     /// Name of the function currently being generated (to prevent self-recursion).
     pub current_function_name: Option<String>,
+    /// Variables that should not be modified by compound assignments.
+    /// Used to protect while-loop counter and guard variables from modification.
+    pub protected_vars: Vec<String>,
 }
 
 impl<'a> StmtContext<'a> {
@@ -92,6 +95,7 @@ impl<'a> StmtContext<'a> {
             fallible_error_type: None,
             local_counter: 0,
             current_function_name: None,
+            protected_vars: Vec::new(),
         }
     }
 
@@ -112,6 +116,7 @@ impl<'a> StmtContext<'a> {
             fallible_error_type: None,
             local_counter: 0,
             current_function_name: None,
+            protected_vars: Vec::new(),
         }
     }
 
@@ -397,6 +402,12 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             true,
         );
 
+        // Protect both counter and guard from compound assignments.
+        // These variables control loop termination and must not be modified
+        // by generated statements inside the loop body.
+        ctx.protected_vars.push(counter_name.clone());
+        ctx.protected_vars.push(guard_name.clone());
+
         let was_in_loop = ctx.in_loop;
         let was_in_while_loop = ctx.in_while_loop;
         ctx.in_loop = true;
@@ -406,6 +417,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let locals_before = ctx.locals.len();
         let user_stmts = self.generate_block(ctx, depth + 1);
         ctx.locals.truncate(locals_before);
+        // Note: We intentionally do NOT remove counter and guard from protected_vars here.
+        // They remain protected for any subsequent statements in the outer scope, since
+        // they're still in scope (in ctx.locals) and must not be modified by compound
+        // assignments in sibling statements or nested loops.
 
         // Build the full loop body: guard increment + break check, then
         // user statements, then counter increment at the end.
@@ -496,10 +511,11 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         )
     }
 
-    /// Check if there are any mutable numeric locals in scope.
+    /// Check if there are any mutable numeric locals in scope that are not protected.
     fn has_mutable_numeric_locals(&self, ctx: &StmtContext) -> bool {
-        ctx.locals.iter().any(|(_, ty, is_mut)| {
+        ctx.locals.iter().any(|(name, ty, is_mut)| {
             *is_mut
+                && !ctx.protected_vars.contains(name)
                 && matches!(
                     ty,
                     TypeInfo::Primitive(PrimitiveType::I8)
@@ -522,13 +538,14 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     /// Picks a random mutable numeric local, a random compound operator,
     /// and generates a simple numeric literal RHS of the same type.
     /// Avoids /= and %= to prevent division by zero.
+    /// Excludes protected variables (e.g., while-loop counters and guards).
     fn generate_compound_assignment(&mut self, ctx: &mut StmtContext) -> String {
-        // Collect mutable numeric locals
+        // Collect mutable numeric locals, excluding protected variables
         let candidates: Vec<(String, PrimitiveType)> = ctx
             .locals
             .iter()
             .filter_map(|(name, ty, is_mut)| {
-                if !is_mut {
+                if !is_mut || ctx.protected_vars.contains(name) {
                     return None;
                 }
                 match ty {
