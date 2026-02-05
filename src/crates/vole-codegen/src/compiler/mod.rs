@@ -50,9 +50,10 @@ pub(crate) enum DeclareMode {
     Import,
 }
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use cranelift::prelude::types as clif_types;
+use cranelift_module::FuncId;
 
 use crate::context::ModuleExportBinding;
 use crate::errors::CodegenResult;
@@ -90,6 +91,11 @@ pub struct Compiler<'a> {
     /// When true, skip compilation of `Decl::Tests` blocks.
     /// Set by `vole run` to avoid codegen cost for tests in production.
     skip_tests: bool,
+    /// Track which JIT functions have already been defined.
+    /// Prevents DuplicateDefinition errors when the same method is provided
+    /// by multiple implement blocks (e.g., `implement IFace26 for Class30`
+    /// and `implement IFace25 for Class30` both providing `method137`).
+    defined_functions: FxHashSet<FuncId>,
 }
 
 impl<'a> Compiler<'a> {
@@ -121,6 +127,7 @@ impl<'a> Compiler<'a> {
             func_registry,
             global_module_bindings: FxHashMap::default(),
             skip_tests: false,
+            defined_functions: FxHashSet::default(),
         }
     }
 
@@ -245,7 +252,15 @@ impl<'a> Compiler<'a> {
 
     /// Define a function and clear the JIT context.
     /// This is the common teardown after function compilation.
-    fn finalize_function(&mut self, func_id: cranelift_module::FuncId) -> CodegenResult<()> {
+    /// Silently skips if the function was already defined (e.g., from overlapping
+    /// implement blocks), preventing DuplicateDefinition errors from Cranelift.
+    fn finalize_function(&mut self, func_id: FuncId) -> CodegenResult<()> {
+        if !self.defined_functions.insert(func_id) {
+            // Already defined (e.g., same method from overlapping implement blocks).
+            // Clear the context without defining to avoid DuplicateDefinition error.
+            self.jit.clear();
+            return Ok(());
+        }
         self.jit.define_function(func_id)?;
         self.jit.clear();
         Ok(())

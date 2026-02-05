@@ -2,15 +2,13 @@ use std::rc::Rc;
 
 use rustc_hash::FxHashMap;
 
-use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
-use cranelift_module::Module;
-
 use super::common::{FunctionCompileConfig, compile_function_inner_with_params};
 use super::{Compiler, SelfParam};
-use crate::errors::{CodegenError, CodegenResult};
+use crate::errors::CodegenResult;
 use crate::types::{
     CodegenCtx, MethodInfo, TypeMetadata, method_name_id_with_interner, type_id_to_cranelift,
 };
+use cranelift::prelude::{FunctionBuilder, FunctionBuilderContext, types};
 use vole_frontend::ast::PrimitiveType as AstPrimitive;
 use vole_frontend::{
     ClassDecl, Expr, FuncDecl, ImplementBlock, InterfaceMethod, Interner, StaticsBlock, StructDecl,
@@ -379,9 +377,12 @@ impl Compiler<'_> {
                 .entity_registry()
                 .get_method(semantic_method_id);
             let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
-            let display_name = self.func_registry.display(func_key);
-            let jit_func_id = self.jit.import_function(&display_name, &sig);
-            self.func_registry.set_func_id(func_key, jit_func_id);
+            // Skip if already imported (overlapping implement blocks)
+            if self.func_registry.func_id(func_key).is_none() {
+                let display_name = self.func_registry.display(func_key);
+                let jit_func_id = self.jit.import_function(&display_name, &sig);
+                self.func_registry.set_func_id(func_key, jit_func_id);
+            }
 
             if let Some(tdef_id) = type_def_id
                 && let Some(name_id) = method_name_id
@@ -448,9 +449,12 @@ impl Compiler<'_> {
                 .entity_registry()
                 .get_method(semantic_method_id);
             let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
-            let display_name = self.func_registry.display(func_key);
-            let jit_func_id = self.jit.import_function(&display_name, &sig);
-            self.func_registry.set_func_id(func_key, jit_func_id);
+            // Skip if already imported (overlapping implement blocks)
+            if self.func_registry.func_id(func_key).is_none() {
+                let display_name = self.func_registry.display(func_key);
+                let jit_func_id = self.jit.import_function(&display_name, &sig);
+                self.func_registry.set_func_id(func_key, jit_func_id);
+            }
 
             let type_name_id =
                 self.query()
@@ -594,9 +598,13 @@ impl Compiler<'_> {
                 .entity_registry()
                 .get_method(semantic_method_id);
             let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
-            let display_name = self.func_registry.display(func_key);
-            let jit_func_id = self.jit.declare_function(&display_name, &sig);
-            self.func_registry.set_func_id(func_key, jit_func_id);
+            // Skip if this method was already declared (e.g., from an overlapping
+            // implement block where a child interface re-declares a parent method)
+            if self.func_registry.func_id(func_key).is_none() {
+                let display_name = self.func_registry.display(func_key);
+                let jit_func_id = self.jit.declare_function(&display_name, &sig);
+                self.func_registry.set_func_id(func_key, jit_func_id);
+            }
             // Populate method_func_keys for method lookup using type's NameId for stable lookup
             if let Some(tdef_id) = type_def_id
                 && let Some(name_id) = method_name_id
@@ -679,9 +687,12 @@ impl Compiler<'_> {
                     .entity_registry()
                     .get_method(semantic_method_id);
                 let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
-                let display_name = self.func_registry.display(func_key);
-                let func_id = self.jit.declare_function(&display_name, &sig);
-                self.func_registry.set_func_id(func_key, func_id);
+                // Skip if already declared (overlapping implement blocks)
+                if self.func_registry.func_id(func_key).is_none() {
+                    let display_name = self.func_registry.display(func_key);
+                    let func_id = self.jit.declare_function(&display_name, &sig);
+                    self.func_registry.set_func_id(func_key, func_id);
+                }
 
                 // Register in method_func_keys for codegen lookup using type's NameId for stable lookup
                 let type_name_id = self
@@ -1204,12 +1215,8 @@ impl Compiler<'_> {
             )?;
         }
 
-        // Define the function
-        self.jit
-            .module
-            .define_function(func_id, &mut self.jit.ctx)
-            .map_err(|e| CodegenError::internal_with_context("cranelift error", e.to_string()))?;
-        self.jit.module.clear_context(&mut self.jit.ctx);
+        // Define the function (skip if already defined by an overlapping implement block)
+        self.finalize_function(func_id)?;
 
         Ok(())
     }
@@ -1312,8 +1319,7 @@ impl Compiler<'_> {
         }
 
         // Define the function
-        self.jit.define_function(func_id)?;
-        self.jit.clear();
+        self.finalize_function(func_id)?;
 
         Ok(())
     }
@@ -1410,8 +1416,7 @@ impl Compiler<'_> {
         }
 
         // Define the function
-        self.jit.define_function(func_id)?;
-        self.jit.clear();
+        self.finalize_function(func_id)?;
 
         Ok(())
     }
@@ -1815,8 +1820,7 @@ impl Compiler<'_> {
             }
 
             // Define the function
-            self.jit.define_function(func_id)?;
-            self.jit.clear();
+            self.finalize_function(func_id)?;
         }
 
         Ok(())

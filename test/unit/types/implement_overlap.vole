@@ -1,0 +1,54 @@
+// Test: Overlapping implement blocks for inherited interface methods.
+// When IFace2 extends IFace1, and a class implements both IFace2 and IFace1,
+// methods from IFace1 that are provided in both implement blocks should not
+// cause DuplicateDefinition errors.
+
+interface Renderable {
+    func render() -> string
+    func id() -> i64
+}
+
+interface Displayable extends Renderable {
+    func label() -> string
+}
+
+class Widget {
+    name: string,
+    code: i64,
+}
+
+implement Displayable for Widget {
+    func label() -> string {
+        return "widget:{self.name}"
+    }
+
+    // render() is from Renderable (inherited via Displayable)
+    func render() -> string {
+        return "[{self.name}]"
+    }
+
+    func id() -> i64 {
+        return self.code
+    }
+}
+
+// This implement block provides render() and id() again for the base interface.
+// Previously caused DuplicateDefinition for Widget::render and Widget::id.
+implement Renderable for Widget {
+    func render() -> string {
+        return "[{self.name}]"
+    }
+
+    func id() -> i64 {
+        return self.code
+    }
+}
+
+tests {
+    test "overlapping implement blocks" {
+        let w = Widget { name: "btn", code: 42 }
+        assert(w.render() == "[btn]")
+        assert(w.label() == "widget:btn")
+        assert(w.id() == 42)
+    }
+}
