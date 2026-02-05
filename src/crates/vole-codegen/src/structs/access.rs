@@ -390,6 +390,29 @@ impl Cg<'_, '_, '_> {
             return Ok(CompiledValue::new(field_ptr, ptr_type, field_type_id));
         }
 
+        // i128 fields occupy 2 x 8-byte slots: load low and high halves, reconstruct
+        let is_wide = {
+            let arena = self.arena();
+            crate::types::is_wide_type(field_type_id, arena)
+        };
+        if is_wide {
+            let low = self
+                .builder
+                .ins()
+                .load(types::I64, MemFlags::new(), struct_ptr, offset);
+            let high = self
+                .builder
+                .ins()
+                .load(types::I64, MemFlags::new(), struct_ptr, offset + 8);
+            let low_ext = self.builder.ins().uextend(types::I128, low);
+            let high_ext = self.builder.ins().uextend(types::I128, high);
+            let sixty_four_i64 = self.builder.ins().iconst(types::I64, 64);
+            let sixty_four = self.builder.ins().uextend(types::I128, sixty_four_i64);
+            let high_shifted = self.builder.ins().ishl(high_ext, sixty_four);
+            let value = self.builder.ins().bor(high_shifted, low_ext);
+            return Ok(CompiledValue::new(value, types::I128, field_type_id));
+        }
+
         // Non-struct field: load as i64, then convert to proper type
         let raw_value = self
             .builder

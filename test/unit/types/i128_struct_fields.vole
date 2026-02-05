@@ -1,0 +1,65 @@
+// Test i128 fields in struct value types (stack-allocated, 2-slot wide storage)
+
+struct BigValue {
+    value: i128,
+}
+
+struct Mixed128 {
+    name: string,
+    big: i128,
+    count: i64,
+}
+
+struct TwoBigs {
+    a: i128,
+    b: i128,
+}
+
+struct SmallAndBig {
+    small: u8,
+    big: i128,
+    flag: bool,
+}
+
+tests "i128 struct field storage" {
+    test "store and load i128 struct field" {
+        let s = BigValue { value: 100_i128 }
+        assert(s.value == 100_i128)
+    }
+
+    test "i128 struct field negative value" {
+        let s = BigValue { value: -42_i128 }
+        assert(s.value == -42_i128)
+    }
+
+    test "i128 struct field large value" {
+        let big: i128 = 9223372036854775807
+        let s = BigValue { value: big + 1 }
+        assert(s.value > big)
+    }
+
+    test "i128 struct field zero" {
+        let s = BigValue { value: 0_i128 }
+        assert(s.value == 0_i128)
+    }
+
+    test "mixed struct with i128 field" {
+        let m = Mixed128 { name: "test", big: 12345_i128, count: 42 }
+        assert(m.name == "test")
+        assert(m.big == 12345_i128)
+        assert(m.count == 42)
+    }
+
+    test "two i128 struct fields" {
+        let t = TwoBigs { a: 111_i128, b: 222_i128 }
+        assert(t.a == 111_i128)
+        assert(t.b == 222_i128)
+    }
+
+    test "i128 struct field with small types" {
+        let s = SmallAndBig { small: 7_u8, big: 9999_i128, flag: true }
+        assert(s.small == 7_u8)
+        assert(s.big == 9999_i128)
+        assert(s.flag)
+    }
+}

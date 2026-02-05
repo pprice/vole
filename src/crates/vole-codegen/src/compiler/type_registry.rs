@@ -188,11 +188,14 @@ impl Compiler<'_> {
     /// Build field slots map and optionally field type tags for runtime cleanup.
     /// Build field slot mapping and optional type tags.
     /// Returns (field_slots, physical_slot_count, field_type_tags).
-    /// i128 fields use 2 consecutive u64 slots, so physical_slot_count may exceed field count.
+    /// For classes: i128 fields use 2 consecutive u64 slots in runtime storage,
+    /// so field_slots maps to physical slot indices and physical_slot_count may exceed field count.
+    /// For structs: field_slots maps to ordinal (sema) indices since struct_field_byte_offset
+    /// computes byte offsets by iterating field_types up to the given index.
     fn build_field_slots_and_tags(
         &self,
         type_def_id: TypeDefId,
-        collect_tags: bool,
+        is_class: bool,
     ) -> (FxHashMap<String, usize>, usize, Vec<FieldTypeTag>) {
         let mut field_slots = FxHashMap::default();
         let mut field_type_tags = Vec::new();
@@ -216,14 +219,17 @@ impl Compiler<'_> {
 
         let arena = self.arena();
         let mut physical_slot = 0usize;
-        for (_, field_id) in fields_by_slot {
-            let field_def = self.registry().get_field(field_id);
+        for (ordinal, (_, field_id)) in fields_by_slot.iter().enumerate() {
+            let field_def = self.registry().get_field(*field_id);
             let field_name = self
                 .query()
                 .last_segment(field_def.name_id)
                 .expect("INTERNAL: field lookup: field has no name");
-            field_slots.insert(field_name, physical_slot);
-            if collect_tags {
+            // Classes use physical slot indices (runtime instance storage).
+            // Structs use ordinal indices (struct_field_byte_offset iterates field_types).
+            let slot_key = if is_class { physical_slot } else { ordinal };
+            field_slots.insert(field_name, slot_key);
+            if is_class {
                 field_type_tags.push(type_id_to_field_tag(field_def.ty, arena));
                 // i128 uses 2 physical slots; add a Value tag for the high half
                 if crate::types::is_wide_type(field_def.ty, arena) {

@@ -558,7 +558,7 @@ impl Cg<'_, '_, '_> {
         Ok(CompiledValue::new(ptr, ptr_type, result_type_id))
     }
 
-    /// Store a value into a struct field's stack slot, handling nested structs.
+    /// Store a value into a struct field's stack slot, handling nested structs and i128.
     fn store_struct_field(
         &mut self,
         value: CompiledValue,
@@ -580,6 +580,15 @@ impl Cg<'_, '_, '_> {
                         .load(types::I64, MemFlags::new(), value.value, src_off);
                 self.builder.ins().stack_store(val, slot, dst_off);
             }
+        } else if value.ty == types::I128 {
+            // i128 needs 2 x 8-byte slots: low 64 bits at offset, high 64 bits at offset+8
+            let low = self.builder.ins().ireduce(types::I64, value.value);
+            self.builder.ins().stack_store(low, slot, offset);
+            let sixty_four_i64 = self.builder.ins().iconst(types::I64, 64);
+            let sixty_four = self.builder.ins().uextend(types::I128, sixty_four_i64);
+            let shifted = self.builder.ins().ushr(value.value, sixty_four);
+            let high = self.builder.ins().ireduce(types::I64, shifted);
+            self.builder.ins().stack_store(high, slot, offset + 8);
         } else {
             let store_value = convert_to_i64_for_storage(self.builder, &value);
             self.builder.ins().stack_store(store_value, slot, offset);

@@ -274,13 +274,22 @@ pub(crate) fn struct_flat_slot_count(
 }
 
 /// Compute the number of flat 8-byte slots a single field occupies.
-/// Nested struct fields are recursively expanded; all other types use 1 slot.
+/// Nested struct fields are recursively expanded; i128 uses 2 slots (16 bytes);
+/// all other non-struct types use 1 slot.
 pub(crate) fn field_flat_slots(
     type_id: TypeId,
     arena: &TypeArena,
     entities: &EntityRegistry,
 ) -> usize {
-    struct_flat_slot_count(type_id, arena, entities).unwrap_or(1)
+    if let Some(count) = struct_flat_slot_count(type_id, arena, entities) {
+        return count;
+    }
+    // i128 needs 2 x 8-byte slots
+    if crate::types::is_wide_type(type_id, arena) {
+        2
+    } else {
+        1
+    }
 }
 
 /// Compute the byte offset of field `slot` within a struct, accounting
