@@ -401,8 +401,9 @@ pub struct InterfaceInfo {
 /// Information about a standalone implement block.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImplementBlockInfo {
-    /// The interface being implemented.
-    pub interface: (ModuleId, SymbolId),
+    /// The interface being implemented. None for standalone implement blocks
+    /// (e.g., `implement ClassName { ... }` without an interface).
+    pub interface: Option<(ModuleId, SymbolId)>,
     /// The type the interface is being implemented for.
     pub target_type: (ModuleId, SymbolId),
     /// Method implementations.

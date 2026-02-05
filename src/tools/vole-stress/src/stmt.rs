@@ -5,7 +5,7 @@
 
 use rand::Rng;
 
-use crate::expr::{ExprConfig, ExprContext, ExprGenerator};
+use crate::expr::{ExprConfig, ExprContext, ExprGenerator, get_chainable_methods};
 use crate::symbols::{
     ClassInfo, FunctionInfo, ModuleId, ParamInfo, PrimitiveType, SymbolKind, SymbolTable, TypeInfo,
 };
@@ -1082,6 +1082,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     /// Returns `None` if no suitable non-generic class is available in the
     /// current module. Only constructs classes with primitive-typed fields
     /// so the resulting local can be used for field access expressions.
+    ///
+    /// If the class has Self-returning methods (from standalone implement blocks),
+    /// there's a chance to chain method calls on the constructed instance:
+    /// `let local = ClassName { fields }.selfMethod(args).selfMethod2(args)`
     fn try_generate_class_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
         let module_id = ctx.module_id?;
         let module = ctx.table.get_module(module_id)?;
@@ -1114,7 +1118,79 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         ctx.add_local(name.clone(), ty, false);
 
-        Some(format!("let {} = {} {{ {} }}", name, class_name, fields))
+        // Build the base expression (class construction)
+        let mut expr = format!("{} {{ {} }}", class_name, fields);
+
+        // Try to chain Self-returning methods
+        let chain = self.try_generate_method_chain(ctx.table, module_id, *sym_id, ctx);
+        if !chain.is_empty() {
+            expr = format!("{}{}", expr, chain);
+        }
+
+        Some(format!("let {} = {}", name, expr))
+    }
+
+    /// Try to generate a method chain for a class instance.
+    ///
+    /// Returns a string like `.selfMethod(args).selfMethod2(args)` or empty string
+    /// if no chaining is done.
+    fn try_generate_method_chain(
+        &mut self,
+        table: &SymbolTable,
+        mod_id: ModuleId,
+        class_id: crate::symbols::SymbolId,
+        ctx: &mut StmtContext,
+    ) -> String {
+        // Get chainable methods for this class
+        let methods = get_chainable_methods(table, mod_id, class_id);
+
+        // Filter to Self-returning methods only
+        let self_returning: Vec<_> = methods.iter().filter(|m| m.returns_self).collect();
+        if self_returning.is_empty() {
+            return String::new();
+        }
+
+        // Probabilistically decide whether to chain
+        if !self
+            .rng
+            .gen_bool(self.config.expr_config.method_chain_probability)
+        {
+            return String::new();
+        }
+
+        let expr_ctx = ctx.to_expr_context();
+        let mut chain = String::new();
+        let max_depth = self.config.expr_config.max_chain_depth;
+        let mut depth = 0;
+
+        while depth < max_depth {
+            // Pick a random Self-returning method
+            let method_idx = self.rng.gen_range(0..self_returning.len());
+            let method = self_returning[method_idx];
+
+            // Generate arguments for the method call
+            let args: Vec<String> = method
+                .params
+                .iter()
+                .map(|p| {
+                    let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+                    expr_gen.generate_simple(&p.param_type, &expr_ctx)
+                })
+                .collect();
+
+            chain.push_str(&format!(".{}({})", method.name, args.join(", ")));
+            depth += 1;
+
+            // Probabilistically stop chaining
+            if !self
+                .rng
+                .gen_bool(self.config.expr_config.method_chain_probability)
+            {
+                break;
+            }
+        }
+
+        chain
     }
 
     /// Generate field value expressions for class construction.
@@ -1159,6 +1235,11 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     /// Set the indentation level.
     pub fn set_indent(&mut self, indent: usize) {
         self.indent = indent;
+    }
+
+    /// Generate a random usize in the given range.
+    pub fn gen_range_usize(&mut self, range: std::ops::Range<usize>) -> usize {
+        self.rng.gen_range(range)
     }
 
     /// Generate a generator function body with a while loop and yield statements.

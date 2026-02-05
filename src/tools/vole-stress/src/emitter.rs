@@ -857,29 +857,117 @@ impl<'a, R: Rng> EmitContext<'a, R> {
     }
 
     fn emit_implement_block_inner(&mut self, info: &ImplementBlockInfo) {
-        // Get interface and target type names
-        let iface_name = self
-            .table
-            .get_symbol(info.interface.0, info.interface.1)
-            .map(|s| s.name.clone())
-            .unwrap_or_else(|| "UnknownInterface".to_string());
-
         let target_name = self
             .table
             .get_symbol(info.target_type.0, info.target_type.1)
             .map(|s| s.name.clone())
             .unwrap_or_else(|| "UnknownType".to_string());
 
-        self.emit_line("");
-        self.emit_line(&format!("implement {} for {} {{", iface_name, target_name));
-        self.indent += 1;
+        // Get target class fields for Self construction (used in standalone implement blocks)
+        let target_fields = self
+            .table
+            .get_symbol(info.target_type.0, info.target_type.1)
+            .and_then(|s| {
+                if let SymbolKind::Class(ref class_info) = s.kind {
+                    Some(class_info.fields.clone())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_default();
 
-        for method in &info.methods {
-            self.emit_method(method);
+        self.emit_line("");
+
+        if let Some((iface_mod_id, iface_sym_id)) = info.interface {
+            // Interface implementation: implement Interface for Class
+            let iface_name = self
+                .table
+                .get_symbol(iface_mod_id, iface_sym_id)
+                .map(|s| s.name.clone())
+                .unwrap_or_else(|| "UnknownInterface".to_string());
+
+            self.emit_line(&format!("implement {} for {} {{", iface_name, target_name));
+            self.indent += 1;
+
+            for method in &info.methods {
+                self.emit_method(method);
+            }
+        } else {
+            // Standalone implement block: implement Class { ... }
+            // Methods can use Self as return type
+            self.emit_line(&format!("implement {} {{", target_name));
+            self.indent += 1;
+
+            for method in &info.methods {
+                self.emit_self_method(method, &target_name, &target_fields);
+            }
         }
 
         self.indent -= 1;
         self.emit_line("}");
+    }
+
+    /// Emit a method that uses Self as return type in a standalone implement block.
+    fn emit_self_method(
+        &mut self,
+        method: &MethodInfo,
+        class_name: &str,
+        target_fields: &[FieldInfo],
+    ) {
+        self.emit_line("");
+        let params = self.format_params(&method.params);
+
+        // Use Self as return type
+        self.emit_line(&format!("func {}({}) -> Self {{", method.name, params));
+        self.indent += 1;
+
+        // Generate the body that returns Self
+        self.emit_self_returning_body(&method.params, class_name, target_fields);
+
+        self.indent -= 1;
+        self.emit_line("}");
+    }
+
+    /// Emit a function body that returns the implementing class type (for Self return).
+    fn emit_self_returning_body(
+        &mut self,
+        params: &[ParamInfo],
+        class_name: &str,
+        target_fields: &[FieldInfo],
+    ) {
+        // First, generate the field values for construction (uses self.rng)
+        let field_values = self.generate_self_field_values(target_fields);
+
+        // Now generate the statements using StmtGenerator
+        let mut stmt_ctx = StmtContext::with_module(params, self.table, self.module.id);
+        let mut stmt_gen = StmtGenerator::new(self.rng, &self.config.stmt_config);
+        stmt_gen.set_indent(self.indent);
+
+        // Generate a few statements (but not as many as full body since we handle return)
+        // Collect all lines first, then emit to avoid borrow issues
+        let stmt_count = 1 + (stmt_gen.gen_range_usize(0..2)); // 1-2 statements
+        let mut lines = Vec::with_capacity(stmt_count + 1);
+        for _ in 0..stmt_count {
+            let stmt = stmt_gen.generate_statement(&mut stmt_ctx, 0);
+            lines.push(stmt);
+        }
+
+        // Add the return statement using the class name (not Self)
+        lines.push(format!("return {} {{ {} }}", class_name, field_values));
+
+        // Now emit all the lines
+        for line in lines {
+            self.emit_line(&line);
+        }
+    }
+
+    /// Generate field values for class construction.
+    fn generate_self_field_values(&mut self, fields: &[FieldInfo]) -> String {
+        fields
+            .iter()
+            .map(|f| format!("{}: {}", f.name, self.generate_test_value(&f.field_type)))
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 
     fn literal_for_type(&mut self, type_info: &TypeInfo) -> String {

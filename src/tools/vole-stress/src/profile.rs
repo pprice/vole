@@ -121,6 +121,9 @@ fn minimal_profile() -> Profile {
                 match_probability: 0.0,
                 if_expr_probability: 0.0,
                 lambda_probability: 0.0,
+                // No method chaining in minimal profile
+                method_chain_probability: 0.0,
+                max_chain_depth: 0,
             },
             // Shallow statement depth
             max_depth: 1,
@@ -216,6 +219,9 @@ fn full_profile() -> Profile {
                 match_probability: 0.15,
                 if_expr_probability: 0.2,
                 lambda_probability: 0.15, // Elevated for lambda coverage
+                // Method chaining on class instances
+                method_chain_probability: 0.20,
+                max_chain_depth: 2,
             },
             // Moderate statement depth for nested control flow
             max_depth: 3,
@@ -309,7 +315,9 @@ fn deep_nesting_profile() -> Profile {
                 if_expr_probability: 0.15,
                 // Some lambdas for capture depth
                 lambda_probability: 0.05,
-                // Block expressions add depth
+                // Light method chaining (not the focus of this profile)
+                method_chain_probability: 0.10,
+                max_chain_depth: 2,
             },
             // Deep statement nesting for nested control flow
             max_depth: 6,
@@ -407,6 +415,9 @@ fn wide_types_profile() -> Profile {
                 match_probability: 0.1,
                 if_expr_probability: 0.1,
                 lambda_probability: 0.05,
+                // Standard method chaining
+                method_chain_probability: 0.15,
+                max_chain_depth: 2,
             },
             // Moderate statement depth
             max_depth: 2,
@@ -494,6 +505,9 @@ fn many_modules_profile() -> Profile {
                 match_probability: 0.0,
                 if_expr_probability: 0.0,
                 lambda_probability: 0.0,
+                // No method chaining - focus on module loading
+                method_chain_probability: 0.0,
+                max_chain_depth: 0,
             },
             // Shallow statement depth
             max_depth: 1,
@@ -594,6 +608,9 @@ fn generics_heavy_profile() -> Profile {
                 if_expr_probability: 0.1,
                 // Higher lambda probability for generic lambdas
                 lambda_probability: 0.15,
+                // Standard method chaining
+                method_chain_probability: 0.15,
+                max_chain_depth: 2,
             },
             // Moderate statement depth
             max_depth: 2,

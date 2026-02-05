@@ -189,6 +189,9 @@ pub fn plan<R: Rng>(rng: &mut R, config: &PlanConfig) -> SymbolTable {
     // Phase 6: Add standalone implement blocks
     plan_implement_blocks(rng, &mut table, &mut names, config);
 
+    // Phase 7: Add standalone implement blocks with Self-returning methods
+    plan_standalone_implement_blocks(rng, &mut table, &mut names, config);
+
     table
 }
 
@@ -1144,7 +1147,7 @@ fn plan_implement_blocks<R: Rng>(
             let impl_name = names.next("impl");
 
             let kind = SymbolKind::ImplementBlock(ImplementBlockInfo {
-                interface: (module_id, iface_id),
+                interface: Some((module_id, iface_id)),
                 target_type: (module_id, class_id),
                 methods,
             });
@@ -1154,6 +1157,101 @@ fn plan_implement_blocks<R: Rng>(
                 created += 1;
             }
         }
+    }
+}
+
+/// Add standalone implement blocks with Self-returning methods.
+///
+/// Creates `implement ClassName { ... }` blocks (without interfaces) that add
+/// methods returning Self to existing non-generic classes. These methods use
+/// Self as the return type and construct instances of the implementing class.
+fn plan_standalone_implement_blocks<R: Rng>(
+    rng: &mut R,
+    table: &mut SymbolTable,
+    names: &mut NameGen,
+    config: &PlanConfig,
+) {
+    // Process each module
+    for module_idx in 0..table.module_count() {
+        let module_id = ModuleId(module_idx);
+
+        // Get non-generic classes in this module that don't already have
+        // a standalone implement block
+        let classes: Vec<(SymbolId, String)> = table
+            .get_module(module_id)
+            .map(|m| {
+                m.classes()
+                    .filter_map(|s| {
+                        if let SymbolKind::Class(ref info) = s.kind {
+                            // Only non-generic classes with fields
+                            if info.type_params.is_empty() && !info.fields.is_empty() {
+                                Some((s.id, s.name.clone()))
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        if classes.is_empty() {
+            continue;
+        }
+
+        // ~30% chance per class to get a standalone implement block
+        for (class_id, _class_name) in &classes {
+            if !rng.gen_bool(0.30) {
+                continue;
+            }
+
+            // Generate 1-2 Self-returning methods
+            let method_count = rng.gen_range(1..=2);
+            let mut methods = Vec::with_capacity(method_count);
+
+            for _ in 0..method_count {
+                methods.push(plan_self_returning_method(rng, names, config));
+            }
+
+            let impl_name = names.next("selfimpl");
+
+            let kind = SymbolKind::ImplementBlock(ImplementBlockInfo {
+                interface: None, // Standalone - no interface
+                target_type: (module_id, *class_id),
+                methods,
+            });
+
+            if let Some(module) = table.get_module_mut(module_id) {
+                module.add_symbol(impl_name, kind);
+            }
+        }
+    }
+}
+
+/// Plan a method that returns Self.
+///
+/// Generates a method with primitive parameters and a void return type
+/// (the return type will be replaced with Self by the emitter).
+fn plan_self_returning_method<R: Rng>(
+    rng: &mut R,
+    names: &mut NameGen,
+    config: &PlanConfig,
+) -> MethodInfo {
+    let name = names.next("selfMethod");
+    let param_count = rng.gen_range(config.params_per_function.0..=config.params_per_function.1);
+    let mut params = Vec::new();
+
+    for _ in 0..param_count {
+        params.push(plan_param(rng, names));
+    }
+
+    // Use Void as a placeholder - the emitter will use Self as return type
+    MethodInfo {
+        name,
+        params,
+        return_type: TypeInfo::Void,
     }
 }
 

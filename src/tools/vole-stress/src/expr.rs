@@ -25,6 +25,10 @@ pub struct ExprConfig {
     pub if_expr_probability: f64,
     /// Probability of generating a lambda expression.
     pub lambda_probability: f64,
+    /// Probability of chaining another method call when the return type supports it.
+    pub method_chain_probability: f64,
+    /// Maximum depth of method chains (e.g., 2 means a.b().c() is allowed).
+    pub max_chain_depth: usize,
 }
 
 impl Default for ExprConfig {
@@ -36,6 +40,8 @@ impl Default for ExprConfig {
             match_probability: 0.1,
             if_expr_probability: 0.15,
             lambda_probability: 0.05,
+            method_chain_probability: 0.20,
+            max_chain_depth: 2,
         }
     }
 }
@@ -255,6 +261,111 @@ impl<'a> ExprContext<'a> {
         }
         vars
     }
+
+    /// Get all class-typed variables in scope.
+    ///
+    /// Returns `(name, mod_id, sym_id)` triples for variables of class type.
+    /// Only includes non-generic classes.
+    pub fn class_vars(&self) -> Vec<(String, ModuleId, SymbolId)> {
+        let mut vars = Vec::new();
+        for (name, ty) in self.locals {
+            if let TypeInfo::Class(mod_id, sym_id) = ty {
+                // Check if the class is non-generic
+                if let Some(sym) = self.table.get_symbol(*mod_id, *sym_id) {
+                    if let SymbolKind::Class(ref info) = sym.kind {
+                        if info.type_params.is_empty() {
+                            vars.push((name.clone(), *mod_id, *sym_id));
+                        }
+                    }
+                }
+            }
+        }
+        for param in self.params {
+            if let TypeInfo::Class(mod_id, sym_id) = &param.param_type {
+                if let Some(sym) = self.table.get_symbol(*mod_id, *sym_id) {
+                    if let SymbolKind::Class(ref info) = sym.kind {
+                        if info.type_params.is_empty() {
+                            vars.push((param.name.clone(), *mod_id, *sym_id));
+                        }
+                    }
+                }
+            }
+        }
+        vars
+    }
+}
+
+/// Information about a chainable method on a class.
+#[derive(Debug, Clone)]
+pub struct ChainableMethod {
+    /// The method name.
+    pub name: String,
+    /// The method parameters (excluding self).
+    pub params: Vec<ParamInfo>,
+    /// Whether this method returns Self (can be chained further).
+    pub returns_self: bool,
+}
+
+/// Get all chainable methods for a class.
+///
+/// Returns methods from:
+/// 1. The class's own methods (ClassInfo.methods)
+/// 2. Standalone implement blocks targeting this class
+///
+/// Methods that return Self (from standalone implement blocks) are marked as chainable.
+pub fn get_chainable_methods(
+    table: &SymbolTable,
+    mod_id: ModuleId,
+    class_id: SymbolId,
+) -> Vec<ChainableMethod> {
+    let mut methods = Vec::new();
+
+    // Get the class info
+    let Some(class_sym) = table.get_symbol(mod_id, class_id) else {
+        return methods;
+    };
+    let SymbolKind::Class(ref class_info) = class_sym.kind else {
+        return methods;
+    };
+
+    // Add methods from the class itself (these don't return Self)
+    for method in &class_info.methods {
+        methods.push(ChainableMethod {
+            name: method.name.clone(),
+            params: method.params.clone(),
+            returns_self: false,
+        });
+    }
+
+    // Find standalone implement blocks targeting this class
+    let Some(module) = table.get_module(mod_id) else {
+        return methods;
+    };
+
+    for impl_sym in module.implement_blocks() {
+        let SymbolKind::ImplementBlock(ref impl_info) = impl_sym.kind else {
+            continue;
+        };
+
+        // Check if this is a standalone implement block (no interface) for our class
+        if impl_info.interface.is_some() {
+            continue;
+        }
+        if impl_info.target_type != (mod_id, class_id) {
+            continue;
+        }
+
+        // Add methods from this standalone implement block (these return Self)
+        for method in &impl_info.methods {
+            methods.push(ChainableMethod {
+                name: method.name.clone(),
+                params: method.params.clone(),
+                returns_self: true, // Methods in standalone impl blocks return Self
+            });
+        }
+    }
+
+    methods
 }
 
 /// Check if two types are compatible for expression generation.
@@ -352,8 +463,74 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                 let return_type = return_type.as_ref().clone();
                 self.generate_lambda(&param_types, &return_type, ctx, depth)
             }
+            TypeInfo::Class(mod_id, sym_id) => {
+                // For class types, try method chaining if there's a matching variable
+                self.generate_class_expr(*mod_id, *sym_id, ctx)
+            }
             _ => self.generate_simple(ty, ctx),
         }
+    }
+
+    /// Generate an expression of a class type.
+    ///
+    /// Tries to find an existing variable of this class type and optionally
+    /// chain method calls on it (if methods return Self).
+    fn generate_class_expr(
+        &mut self,
+        mod_id: ModuleId,
+        sym_id: SymbolId,
+        ctx: &ExprContext,
+    ) -> String {
+        // Find variables of this class type
+        let class_vars: Vec<_> = ctx
+            .class_vars()
+            .into_iter()
+            .filter(|(_, m, s)| *m == mod_id && *s == sym_id)
+            .collect();
+
+        if class_vars.is_empty() {
+            // No variable of this type, fall back to literal-style generation
+            return self.generate_simple(&TypeInfo::Class(mod_id, sym_id), ctx);
+        }
+
+        // Pick a random variable
+        let var_idx = self.rng.gen_range(0..class_vars.len());
+        let (var_name, _, _) = &class_vars[var_idx];
+
+        // Decide whether to chain methods
+        if self.rng.gen_bool(self.config.method_chain_probability) {
+            // Get chainable methods for this class
+            let methods = get_chainable_methods(ctx.table, mod_id, sym_id);
+
+            // Only chain if there are Self-returning methods
+            let self_returning: Vec<_> = methods.iter().filter(|m| m.returns_self).collect();
+            if !self_returning.is_empty() {
+                // Build a method chain
+                let mut expr = var_name.clone();
+                let mut chain_depth = 0;
+
+                while chain_depth < self.config.max_chain_depth {
+                    // Pick a Self-returning method
+                    let method_idx = self.rng.gen_range(0..self_returning.len());
+                    let method = self_returning[method_idx];
+
+                    // Generate arguments
+                    let args = self.generate_method_args(&method.params, ctx);
+                    expr = format!("{}.{}({})", expr, method.name, args);
+                    chain_depth += 1;
+
+                    // Probabilistically stop chaining
+                    if !self.rng.gen_bool(self.config.method_chain_probability) {
+                        break;
+                    }
+                }
+
+                return expr;
+            }
+        }
+
+        // No chaining, just return the variable
+        var_name.clone()
     }
 
     /// Try to generate an array index expression on an array-typed local.
@@ -575,6 +752,15 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         // The result of ?. is always optional
         let result_type = TypeInfo::Optional(Box::new(field_type.clone()));
         Some((format!("{}?.{}", var_name, field_name), result_type))
+    }
+
+    /// Generate arguments for a method call.
+    fn generate_method_args(&mut self, params: &[ParamInfo], ctx: &ExprContext) -> String {
+        params
+            .iter()
+            .map(|p| self.generate_simple(&p.param_type, ctx))
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 
     /// Generate a simple expression (literal or variable reference).
