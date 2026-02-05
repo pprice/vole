@@ -73,6 +73,8 @@ pub struct StmtContext<'a> {
     pub fallible_error_type: Option<TypeInfo>,
     /// Counter for generating unique local variable names.
     pub local_counter: usize,
+    /// Name of the function currently being generated (to prevent self-recursion).
+    pub current_function_name: Option<String>,
 }
 
 impl<'a> StmtContext<'a> {
@@ -89,6 +91,7 @@ impl<'a> StmtContext<'a> {
             is_fallible: false,
             fallible_error_type: None,
             local_counter: 0,
+            current_function_name: None,
         }
     }
 
@@ -108,6 +111,7 @@ impl<'a> StmtContext<'a> {
             is_fallible: false,
             fallible_error_type: None,
             local_counter: 0,
+            current_function_name: None,
         }
     }
 
@@ -626,17 +630,26 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     /// If the current function is NOT fallible, use a `match` expression to
     /// handle the result: `match func() { success x => x, error => default, _ => default }`.
     ///
+    /// Excludes the current function from candidates to prevent direct self-recursion.
+    /// Wraps the call in a conditional (`when`) to guard against mutual recursion
+    /// between functions that call each other without base cases.
+    ///
     /// Returns `None` if no fallible functions are available in the module.
     fn try_generate_try_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
         let module_id = ctx.module_id?;
         let module = ctx.table.get_module(module_id)?;
 
-        // Find fallible functions in this module (non-generic)
+        // Find fallible functions in this module (non-generic),
+        // excluding the current function to prevent direct self-recursion.
+        let current_name = ctx.current_function_name.as_deref();
         let fallible_funcs: Vec<(String, FunctionInfo)> = module
             .functions()
             .filter_map(|sym| {
                 if let SymbolKind::Function(ref info) = sym.kind {
-                    if info.type_params.is_empty() && info.return_type.is_fallible() {
+                    if info.type_params.is_empty()
+                        && info.return_type.is_fallible()
+                        && current_name != Some(sym.name.as_str())
+                    {
                         return Some((sym.name.clone(), info.clone()));
                     }
                 }
@@ -665,40 +678,37 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         let success_type = func_info.return_type.success_type().clone();
 
-        // Check if we can propagate errors (same error type in caller and callee)
-        let can_propagate = if ctx.is_fallible {
-            if let (Some(caller_err), Some(callee_err)) = (
-                ctx.fallible_error_type.as_ref(),
-                func_info.return_type.error_type(),
-            ) {
-                caller_err == callee_err
-            } else {
-                false
-            }
-        } else {
-            false
+        // Generate a default value for the non-call branch
+        let default_val = {
+            let expr_ctx2 = ctx.to_expr_context();
+            let mut eg = ExprGenerator::new(self.rng, &self.config.expr_config);
+            eg.generate_simple(&success_type, &expr_ctx2)
+        };
+
+        // Generate a simple boolean guard condition to prevent mutual recursion.
+        // The call only executes when the condition is true, providing a
+        // non-recursive fallback path through the else/default branch.
+        let guard_cond = {
+            let expr_ctx3 = ctx.to_expr_context();
+            let mut eg = ExprGenerator::new(self.rng, &self.config.expr_config);
+            eg.generate_simple(&TypeInfo::Primitive(PrimitiveType::Bool), &expr_ctx3)
         };
 
         let name = ctx.new_local_name();
+        ctx.add_local(name.clone(), success_type, false);
 
-        if can_propagate {
-            // Use try to propagate errors
-            ctx.add_local(name.clone(), success_type, false);
-            Some(format!("let {} = try {}({})", name, func_name, args_str))
-        } else {
-            // Use match to handle the fallible result
-            // Generate simple default value to avoid multi-line expressions
-            let default_val = {
-                let expr_ctx2 = ctx.to_expr_context();
-                let mut eg = ExprGenerator::new(self.rng, &self.config.expr_config);
-                eg.generate_simple(&success_type, &expr_ctx2)
-            };
-            ctx.add_local(name.clone(), success_type, false);
-            Some(format!(
-                "let {} = match {}({}) {{ success x => x, error => {}, _ => {} }}",
-                name, func_name, args_str, default_val, default_val
-            ))
-        }
+        // Use `match` (not `try`) so the call can sit inside a `when` guard.
+        // The `when` condition makes the call conditional, providing a
+        // non-recursive default path that prevents infinite mutual recursion.
+        let call_expr = format!(
+            "match {}({}) {{ success x => x, error => {}, _ => {} }}",
+            func_name, args_str, default_val, default_val
+        );
+
+        Some(format!(
+            "let {} = when {{ {} => {}, _ => {} }}",
+            name, guard_cond, call_expr, default_val
+        ))
     }
 
     /// Generate a block of statements.

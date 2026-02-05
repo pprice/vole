@@ -606,7 +606,7 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             method.name, params, return_type
         ));
         self.indent += 1;
-        self.emit_function_body(&method.return_type, &method.params);
+        self.emit_function_body(&method.return_type, &method.params, None);
         self.indent -= 1;
         self.emit_line("}");
     }
@@ -617,7 +617,7 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             let header = self.format_function_header(&symbol.name, info);
             self.emit_line(&format!("{} {{", header));
             self.indent += 1;
-            self.emit_function_body(&info.return_type, &info.params);
+            self.emit_function_body(&info.return_type, &info.params, Some(&symbol.name));
             self.indent -= 1;
             self.emit_line("}");
         }
@@ -642,8 +642,16 @@ impl<'a, R: Rng> EmitContext<'a, R> {
         header
     }
 
-    fn emit_function_body(&mut self, return_type: &TypeInfo, params: &[ParamInfo]) {
+    fn emit_function_body(
+        &mut self,
+        return_type: &TypeInfo,
+        params: &[ParamInfo],
+        function_name: Option<&str>,
+    ) {
         let mut stmt_ctx = StmtContext::with_module(params, self.table, self.module.id);
+
+        // Track the current function name to prevent self-recursion
+        stmt_ctx.current_function_name = function_name.map(String::from);
 
         // If this function has a fallible return type, mark the context as fallible
         if let TypeInfo::Fallible { error, .. } = return_type {
