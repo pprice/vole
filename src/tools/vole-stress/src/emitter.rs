@@ -438,7 +438,14 @@ impl<'a, R: Rng> EmitContext<'a, R> {
     fn emit_global(&mut self, symbol: &Symbol) {
         if let SymbolKind::Global(ref info) = symbol.kind {
             let mutability = if info.is_mutable { "let mut" } else { "let" };
-            let value = self.literal_for_type(&info.value_type);
+            // Non-mutable globals are exported and must use constant expressions
+            // (single literal tokens, no unary negation) so the module analyzer
+            // can evaluate them at compile time.
+            let value = if info.is_mutable {
+                self.literal_for_type(&info.value_type)
+            } else {
+                self.constant_literal_for_type(&info.value_type)
+            };
             self.emit_line(&format!(
                 "{} {}: {} = {}",
                 mutability,
@@ -760,6 +767,34 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             TypeInfo::Array(elem) => {
                 drop(expr_gen);
                 let elem_val = self.literal_for_type(elem);
+                format!("[{}]", elem_val)
+            }
+            _ => "nil".to_string(),
+        }
+    }
+
+    /// Generate a constant-safe literal for a type. Only produces values that
+    /// the module analyzer recognizes as compile-time constants (no unary
+    /// negation, no complex expressions).
+    fn constant_literal_for_type(&mut self, type_info: &TypeInfo) -> String {
+        let config = ExprConfig::default();
+        let mut expr_gen = ExprGenerator::new(self.rng, &config);
+
+        match type_info {
+            TypeInfo::Primitive(p) => expr_gen.constant_literal_for_primitive(*p),
+            TypeInfo::Optional(_) => "nil".to_string(),
+            TypeInfo::Void => "nil".to_string(),
+            TypeInfo::Union(variants) => {
+                if let Some(first) = variants.first() {
+                    drop(expr_gen);
+                    self.constant_literal_for_type(first)
+                } else {
+                    "nil".to_string()
+                }
+            }
+            TypeInfo::Array(elem) => {
+                drop(expr_gen);
+                let elem_val = self.constant_literal_for_type(elem);
                 format!("[{}]", elem_val)
             }
             _ => "nil".to_string(),

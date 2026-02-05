@@ -960,6 +960,71 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         }
     }
 
+    /// Generate a literal value for a primitive type that is safe for use as a
+    /// module-level constant (i.e. will be parsed as a single literal token, not
+    /// a unary negation expression). Only produces non-negative values.
+    pub fn constant_literal_for_primitive(&mut self, prim: PrimitiveType) -> String {
+        match prim {
+            PrimitiveType::I8 => {
+                let val: i8 = self.rng.gen_range(0..=127);
+                format!("{}_i8", val)
+            }
+            PrimitiveType::I16 => {
+                let val: i16 = self.rng.gen_range(0..=1000);
+                format!("{}_i16", val)
+            }
+            PrimitiveType::I32 => {
+                let val: i32 = self.rng.gen_range(0..100);
+                format!("{}_i32", val)
+            }
+            PrimitiveType::I64 => {
+                let val: i64 = self.rng.gen_range(0..1000);
+                format!("{}_i64", val)
+            }
+            PrimitiveType::I128 => {
+                let val: i64 = self.rng.gen_range(0..10000);
+                format!("{}_i128", val)
+            }
+            // Unsigned types are already non-negative
+            PrimitiveType::U8 => {
+                let val: u8 = self.rng.gen_range(0..=255);
+                format!("{}_u8", val)
+            }
+            PrimitiveType::U16 => {
+                let val: u16 = self.rng.gen_range(0..=1000);
+                format!("{}_u16", val)
+            }
+            PrimitiveType::U32 => {
+                let val: u32 = self.rng.gen_range(0..1000);
+                format!("{}_u32", val)
+            }
+            PrimitiveType::U64 => {
+                let val: u64 = self.rng.gen_range(0..10000);
+                format!("{}_u64", val)
+            }
+            PrimitiveType::F32 => {
+                let val: f32 = self.rng.gen_range(0.0_f32..100.0_f32);
+                format!("{:.2}_f32", val)
+            }
+            PrimitiveType::F64 => {
+                let val: f64 = self.rng.gen_range(0.0..100.0);
+                format!("{:.2}_f64", val)
+            }
+            PrimitiveType::Bool => {
+                if self.rng.gen_bool(0.5) {
+                    "true".to_string()
+                } else {
+                    "false".to_string()
+                }
+            }
+            PrimitiveType::String => {
+                let id = self.rng.gen_range(0..100);
+                format!("\"str{}\"", id)
+            }
+            PrimitiveType::Nil => "nil".to_string(),
+        }
+    }
+
     /// Generate a match expression.
     pub fn generate_match_expr(
         &mut self,
