@@ -1,0 +1,11 @@
+// Base module with functions and values
+
+let BASE_VALUE: i64 = 42
+
+func add(a: i64, b: i64) -> i64 {
+    return a + b
+}
+
+func multiply(a: i64, b: i64) -> i64 {
+    return a * b
+}

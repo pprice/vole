@@ -120,6 +120,67 @@ impl Compiler<'_> {
         }
     }
 
+    /// Extract destructured import bindings from a module's declarations.
+    ///
+    /// When a module uses `let { add } = import "./other"`, this creates bindings
+    /// that map the local name (`add`) to the source module's function. These bindings
+    /// must be available during compilation of the module's function bodies so that
+    /// calls to `add()` can be resolved.
+    ///
+    /// Returns a list of `(local_symbol, binding)` pairs that should be inserted into
+    /// `global_module_bindings` before compiling the module's function bodies.
+    fn extract_module_destructured_bindings(
+        analyzed: &crate::AnalyzedProgram,
+        program: &Program,
+        module_interner: &Interner,
+        module_path: &str,
+    ) -> Vec<(Symbol, super::ModuleExportBinding)> {
+        let mut bindings = Vec::new();
+        // Get the module-specific type map (module NodeIds are separate from main program)
+        let module_types = analyzed.expression_data.module_types(module_path);
+        for decl in &program.declarations {
+            if let Decl::LetTuple(let_tuple) = decl
+                && let ExprKind::Import(_) = &let_tuple.init.kind
+            {
+                // Look up the import expression's type in the module-specific type map
+                let module_type_id =
+                    module_types.and_then(|types| types.get(&let_tuple.init.id).copied());
+                let Some(module_type_id) = module_type_id else {
+                    continue;
+                };
+                let Some(module_info) =
+                    analyzed.type_arena().unwrap_module(module_type_id).cloned()
+                else {
+                    continue;
+                };
+
+                if let PatternKind::Record { fields, .. } = &let_tuple.pattern.kind {
+                    for field_pattern in fields {
+                        let export_name = field_pattern.field_name;
+                        let export_name_str = module_interner.resolve(export_name);
+
+                        let export_type_id = module_info
+                            .exports
+                            .iter()
+                            .find(|(name_id, _)| {
+                                analyzed.name_table().last_segment_str(*name_id).as_deref()
+                                    == Some(export_name_str)
+                            })
+                            .map(|(_, ty)| *ty);
+
+                        if let Some(export_type_id) = export_type_id {
+                            bindings.push((
+                                field_pattern.binding,
+                                (module_info.module_id, export_name, export_type_id),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        bindings
+    }
+
     /// Compile a complete program
     pub fn compile_program(&mut self, program: &Program) -> CodegenResult<()> {
         // Compile module functions first (before main program)
@@ -428,6 +489,21 @@ impl Compiler<'_> {
                 })
                 .collect();
 
+            // Register destructured import bindings for this module.
+            // When a module uses `let { add } = import "./other"`, the binding must
+            // be available during compilation of the module's function bodies.
+            let module_bindings = Self::extract_module_destructured_bindings(
+                self.analyzed,
+                program,
+                module_interner,
+                module_path,
+            );
+            let module_binding_keys: Vec<Symbol> =
+                module_bindings.iter().map(|(k, _)| *k).collect();
+            for (key, binding) in module_bindings {
+                self.global_module_bindings.insert(key, binding);
+            }
+
             // Compile pure Vole function bodies
             for decl in &program.declarations {
                 if let Decl::Function(func) = decl {
@@ -510,6 +586,12 @@ impl Compiler<'_> {
                         &module_global_inits,
                     )?;
                 }
+            }
+
+            // Remove module-specific destructured import bindings to avoid
+            // symbol collisions with other modules (different interners).
+            for key in &module_binding_keys {
+                self.global_module_bindings.remove(key);
             }
         }
 

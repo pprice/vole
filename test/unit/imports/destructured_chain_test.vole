@@ -1,0 +1,29 @@
+// Tests for transitive destructured imports (vol-vzjx)
+// When a module uses destructured imports and is then imported by another module,
+// the destructured bindings must be available during codegen.
+
+let mid = import "./destructured_chain/middle"
+let base = import "./destructured_chain/base"
+
+tests {
+    test "transitive destructured import: function call" {
+        // middle.double_add uses destructured 'add' from base
+        assert(mid.double_add(5) == 10)
+    }
+
+    test "transitive destructured import: multiple functions" {
+        // middle.triple uses destructured 'multiply' from base
+        assert(mid.triple(7) == 21)
+    }
+
+    test "transitive destructured import: value binding" {
+        // middle.base_plus uses destructured 'BASE_VALUE' and 'add' from base
+        assert(mid.base_plus(8) == 50)
+    }
+
+    test "transitive destructured import: consistency with direct" {
+        // Results should match calling base directly
+        assert(mid.double_add(5) == base.add(5, 5))
+        assert(mid.triple(7) == base.multiply(7, 3))
+    }
+}

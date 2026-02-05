@@ -1,0 +1,14 @@
+// Middle module that uses destructured import from base
+let { add, multiply, BASE_VALUE } = import "./base"
+
+func double_add(x: i64) -> i64 {
+    return add(x, x)
+}
+
+func triple(x: i64) -> i64 {
+    return multiply(x, 3)
+}
+
+func base_plus(x: i64) -> i64 {
+    return add(BASE_VALUE, x)
+}
