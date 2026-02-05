@@ -20,6 +20,7 @@ use vole::commands::common::{PipelineOptions, compile_source};
 use vole::runtime::{
     JmpBuf, alloc_track, call_setjmp, clear_current_test, clear_test_jmp_buf, set_current_file,
     set_current_test, set_stdout_capture, set_test_jmp_buf, take_assert_failure,
+    take_stack_overflow,
 };
 use vole::sema::ModuleCache;
 
@@ -291,6 +292,7 @@ fn execute_tests_with_tracking(
             if call_setjmp(&mut jmp_buf) == 0 {
                 test_fn();
             } else {
+                let _ = take_stack_overflow();
                 let _ = take_assert_failure();
             }
         }));

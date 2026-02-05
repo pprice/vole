@@ -20,6 +20,7 @@ use crate::codegen::{CompiledModules, Compiler, JitContext, JitOptions, TestInfo
 use crate::runtime::{
     AssertFailure, JmpBuf, call_setjmp, clear_current_test, clear_test_jmp_buf, set_current_file,
     set_current_test, set_stdout_capture, set_test_jmp_buf, take_assert_failure,
+    take_stack_overflow,
 };
 use crate::sema::ModuleCache;
 use crate::util::format_duration;
@@ -821,12 +822,17 @@ fn execute_tests_with_progress(
 
         // Wrap test execution in catch_unwind to catch panics
         let panic_result = catch_unwind(AssertUnwindSafe(|| unsafe {
-            if call_setjmp(&mut jmp_buf) == 0 {
+            let setjmp_val = call_setjmp(&mut jmp_buf);
+            if setjmp_val == 0 {
                 // Normal execution path
                 test_fn();
                 TestStatus::Passed
+            } else if take_stack_overflow() {
+                // Returned via longjmp from stack overflow signal handler
+                let _ = take_assert_failure(); // consume the placeholder
+                TestStatus::Panicked("stack overflow (infinite recursion)".to_string())
             } else {
-                // Returned via longjmp from assertion failure
+                // Returned via longjmp from assertion failure or panic
                 TestStatus::Failed(take_assert_failure())
             }
         }));
