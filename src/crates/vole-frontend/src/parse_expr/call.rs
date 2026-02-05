@@ -72,13 +72,16 @@ impl<'src> Parser<'src> {
                 if self.check(TokenType::LParen) {
                     // Method call: expr.method(args) or expr.method<T>(args)
                     self.advance(); // consume '('
+                    self.skip_newlines();
                     let mut args = Vec::new();
                     if !self.check(TokenType::RParen) {
                         loop {
                             args.push(self.expression(0)?);
+                            self.skip_newlines();
                             if !self.match_token(TokenType::Comma) {
                                 break;
                             }
+                            self.skip_newlines();
                             // Allow trailing comma
                             if self.check(TokenType::RParen) {
                                 break;
@@ -183,13 +186,16 @@ impl<'src> Parser<'src> {
     /// Finish parsing a function call (after the opening paren)
     pub(crate) fn finish_call(&mut self, callee: Expr) -> Result<Expr, ParseError> {
         let mut args = Vec::new();
+        self.skip_newlines();
 
         if !self.check(TokenType::RParen) {
             loop {
                 args.push(self.expression(0)?);
+                self.skip_newlines();
                 if !self.match_token(TokenType::Comma) {
                     break;
                 }
+                self.skip_newlines();
                 // Allow trailing comma
                 if self.check(TokenType::RParen) {
                     break;

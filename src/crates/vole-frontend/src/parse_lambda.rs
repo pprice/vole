@@ -361,11 +361,18 @@ impl<'src> Parser<'src> {
                 if self.check(TokenType::LParen) {
                     // Method call: expr.method(args)
                     self.advance(); // consume '('
+                    self.skip_newlines();
                     let mut args = Vec::new();
                     if !self.check(TokenType::RParen) {
                         loop {
                             args.push(self.expression(0)?);
+                            self.skip_newlines();
                             if !self.match_token(TokenType::Comma) {
+                                break;
+                            }
+                            self.skip_newlines();
+                            // Allow trailing comma
+                            if self.check(TokenType::RParen) {
                                 break;
                             }
                         }

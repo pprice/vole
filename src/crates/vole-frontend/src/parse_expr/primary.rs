@@ -375,6 +375,7 @@ impl<'src> Parser<'src> {
             TokenType::LBracket => {
                 let start_span = self.current.span;
                 self.advance(); // consume '['
+                self.skip_newlines();
 
                 // Empty array: []
                 if self.check(TokenType::RBracket) {
@@ -389,6 +390,7 @@ impl<'src> Parser<'src> {
 
                 // Parse first element
                 let first = self.expression(0)?;
+                self.skip_newlines();
 
                 // Check what follows the first element
                 if self.check(TokenType::Semicolon) {
@@ -412,10 +414,12 @@ impl<'src> Parser<'src> {
                 let mut elements = vec![first];
 
                 while self.match_token(TokenType::Comma) {
+                    self.skip_newlines();
                     if self.check(TokenType::RBracket) {
                         break; // trailing comma allowed
                     }
                     elements.push(self.expression(0)?);
+                    self.skip_newlines();
                 }
 
                 let end_span = self.current.span;

@@ -1,0 +1,130 @@
+// Test multi-line function call arguments and array literals
+
+func add(a: i64, b: i64) -> i64 {
+    return a + b
+}
+
+func triple(a: i64, b: i64, c: i64) -> i64 {
+    return a + b + c
+}
+
+class Point {
+    x: i32,
+    y: i32,
+
+    func sum() -> i32 {
+        return self.x + self.y
+    }
+
+    func offset(dx: i32, dy: i32) -> Point {
+        return Point { x: self.x + dx, y: self.y + dy }
+    }
+}
+
+tests "multi-line function call arguments" {
+    test "basic multi-line call" {
+        let x = add(
+            1,
+            2,
+        )
+        assert(x == 3)
+    }
+
+    test "multi-line call no trailing comma" {
+        let x = add(
+            10,
+            20
+        )
+        assert(x == 30)
+    }
+
+    test "multi-line call with three args" {
+        let x = triple(
+            1,
+            2,
+            3,
+        )
+        assert(x == 6)
+    }
+
+    test "nested multi-line calls" {
+        let x = add(
+            add(
+                1,
+                2,
+            ),
+            add(
+                3,
+                4,
+            ),
+        )
+        assert(x == 10)
+    }
+
+    test "multi-line call in expression" {
+        let x = 10 + add(
+            5,
+            15,
+        )
+        assert(x == 30)
+    }
+}
+
+tests "multi-line array literals" {
+    test "basic multi-line array" {
+        let arr = [
+            10,
+            20,
+            30,
+        ]
+        assert(arr[0] == 10)
+        assert(arr[1] == 20)
+        assert(arr[2] == 30)
+    }
+
+    test "multi-line array no trailing comma" {
+        let arr = [
+            1,
+            2
+        ]
+        assert(arr[0] == 1)
+        assert(arr[1] == 2)
+    }
+
+    test "single element multi-line array" {
+        let arr = [
+            42,
+        ]
+        assert(arr[0] == 42)
+    }
+}
+
+tests "multi-line method call arguments" {
+    test "method call with multi-line args" {
+        let p = Point { x: 1, y: 2 }
+        let p2 = p.offset(
+            10,
+            20,
+        )
+        assert(p2.x == 11)
+        assert(p2.y == 22)
+    }
+}
+
+tests "multi-line calls in when expressions" {
+    test "multi-line call in when arm body" {
+        let x = 5
+        let result = when {
+            x > 10 => add(
+                1,
+                2,
+            ),
+            x > 0 => add(
+                10,
+                20,
+            ),
+            _ => 0,
+        }
+        assert(result == 30)
+    }
+}
