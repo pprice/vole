@@ -133,6 +133,24 @@ impl<'a> ExprContext<'a> {
         vars
     }
 
+    /// Get all fixed-size array-typed variables in scope.
+    ///
+    /// Returns `(name, element_type, size)` tuples for variables of type `[T; N]`.
+    pub fn fixed_array_vars(&self) -> Vec<(String, TypeInfo, usize)> {
+        let mut vars = Vec::new();
+        for (name, ty) in self.locals {
+            if let TypeInfo::FixedArray(elem, size) = ty {
+                vars.push((name.clone(), *elem.clone(), *size));
+            }
+        }
+        for param in self.params {
+            if let TypeInfo::FixedArray(elem, size) = &param.param_type {
+                vars.push((param.name.clone(), *elem.clone(), *size));
+            }
+        }
+        vars
+    }
+
     /// Get all optional-typed variables in scope whose inner type matches.
     ///
     /// Returns `(name, inner_type)` pairs for variables of type `T?` where T
@@ -246,6 +264,9 @@ fn types_compatible(actual: &TypeInfo, expected: &TypeInfo) -> bool {
         (TypeInfo::Void, TypeInfo::Void) => true,
         (TypeInfo::Optional(a), TypeInfo::Optional(e)) => types_compatible(a, e),
         (TypeInfo::Array(a), TypeInfo::Array(e)) => types_compatible(a, e),
+        (TypeInfo::FixedArray(a, sa), TypeInfo::FixedArray(e, se)) => {
+            sa == se && types_compatible(a, e)
+        }
         (TypeInfo::Tuple(a), TypeInfo::Tuple(e)) => {
             a.len() == e.len()
                 && a.iter()
@@ -299,6 +320,7 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             TypeInfo::Optional(inner) => self.generate_optional(inner, ctx, depth),
             TypeInfo::Void => "nil".to_string(),
             TypeInfo::Array(elem) => self.generate_array(elem, ctx, depth),
+            TypeInfo::FixedArray(elem, size) => self.generate_fixed_array(elem, *size, ctx, depth),
             TypeInfo::TypeParam(name) => {
                 // For type params, try to find a matching parameter, else use panic
                 for param in ctx.params {
@@ -364,6 +386,44 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         // Use a small constant index to stay within bounds of small arrays.
         // Arrays generated in stmt.rs have 2-4 elements, so use 0..=1 to be safe.
         let index = self.rng.gen_range(0..=1);
+        let suffix = match prim {
+            PrimitiveType::I32 => "_i32",
+            PrimitiveType::I64 => "_i64",
+            _ => "_i64", // default index type
+        };
+        Some(format!("{}[{}{}]", var_name, index, suffix))
+    }
+
+    /// Try to generate a fixed array index expression on a fixed-array-typed local.
+    ///
+    /// Looks for fixed-array-typed variables in scope whose element type matches
+    /// the target primitive type. Returns `Some("fixedArrayVar[index]")` on success,
+    /// using a constant index within bounds of the array size.
+    fn try_generate_fixed_array_index(
+        &mut self,
+        prim: PrimitiveType,
+        ctx: &ExprContext,
+    ) -> Option<String> {
+        let target = TypeInfo::Primitive(prim);
+        let fixed_array_vars = ctx.fixed_array_vars();
+
+        // Filter to fixed arrays whose element type matches the target
+        let candidates: Vec<_> = fixed_array_vars
+            .iter()
+            .filter(|(_, elem_ty, _)| types_compatible(elem_ty, &target))
+            .collect();
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..candidates.len());
+        let (var_name, _, size) = &candidates[idx];
+
+        // Use a constant index within bounds of the fixed array.
+        // Clamp to 0..=(size-1) to stay within bounds.
+        let max_index = size.saturating_sub(1).max(0);
+        let index = self.rng.gen_range(0..=max_index);
         let suffix = match prim {
             PrimitiveType::I32 => "_i32",
             PrimitiveType::I64 => "_i64",
@@ -548,6 +608,11 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                     .collect();
                 format!("[{}]", elements.join(", "))
             }
+            TypeInfo::FixedArray(elem, size) => {
+                // Generate a simple repeat literal
+                let value = self.generate_simple(elem, ctx);
+                format!("[{}; {}]", value, size)
+            }
             TypeInfo::Union(variants) => {
                 // Generate a literal for a random variant
                 if let Some(first) = variants.first() {
@@ -588,6 +653,14 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         // when an array-typed variable with matching element type is in scope
         if self.rng.gen_bool(0.15) {
             if let Some(expr) = self.try_generate_array_index(prim, ctx) {
+                return expr;
+            }
+        }
+
+        // ~12% chance to generate fixed array indexing: `fixedArrVar[index]`
+        // when a fixed-array-typed variable with matching element type is in scope
+        if self.rng.gen_bool(0.12) {
+            if let Some(expr) = self.try_generate_fixed_array_index(prim, ctx) {
                 return expr;
             }
         }
@@ -957,6 +1030,23 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             .collect();
 
         format!("[{}]", elements.join(", "))
+    }
+
+    /// Generate a fixed-size array expression using repeat literal syntax.
+    ///
+    /// Produces `[value; count]` where `value` is a simple expression of the
+    /// element type. Uses simple expressions only (literals and variable refs)
+    /// to keep the repeat literal on a single line.
+    fn generate_fixed_array(
+        &mut self,
+        elem: &TypeInfo,
+        size: usize,
+        ctx: &ExprContext,
+        _depth: usize,
+    ) -> String {
+        // Generate a simple value expression for the repeat literal
+        let value = self.generate_simple(elem, ctx);
+        format!("[{}; {}]", value, size)
     }
 
     /// Generate a tuple literal expression.

@@ -38,6 +38,8 @@ pub enum TypeInfo {
     Union(Vec<TypeInfo>),
     /// Array type [T]
     Array(Box<TypeInfo>),
+    /// Fixed-size array type [T; N] (homogeneous, stack-allocated)
+    FixedArray(Box<TypeInfo>, usize),
     /// Tuple type [T1, T2, ...] (heterogeneous, fixed-length)
     Tuple(Vec<TypeInfo>),
     /// Fallible type fallible(SuccessType, ErrorType)
@@ -205,6 +207,28 @@ impl TypeInfo {
         matches!(self, TypeInfo::Tuple(_))
     }
 
+    /// Check if this type is a fixed-size array type.
+    pub fn is_fixed_array(&self) -> bool {
+        matches!(self, TypeInfo::FixedArray(_, _))
+    }
+
+    /// Get the element type and size of a fixed-size array type.
+    pub fn fixed_array_info(&self) -> Option<(&TypeInfo, usize)> {
+        match self {
+            TypeInfo::FixedArray(elem, size) => Some((elem, *size)),
+            _ => None,
+        }
+    }
+
+    /// Generate a random fixed-size array type with 2-4 elements.
+    ///
+    /// Uses primitive types suitable for arrays (excluding i128) for element types.
+    pub fn random_fixed_array_type<R: Rng>(rng: &mut R) -> Self {
+        let elem_type = PrimitiveType::random_array_element_type(rng);
+        let size = rng.gen_range(2..=4);
+        TypeInfo::FixedArray(Box::new(TypeInfo::Primitive(elem_type)), size)
+    }
+
     /// Get the element types of a tuple type.
     pub fn tuple_element_types(&self) -> Option<&[TypeInfo]> {
         match self {
@@ -260,6 +284,9 @@ impl TypeInfo {
                 .collect::<Vec<_>>()
                 .join(" | "),
             TypeInfo::Array(elem) => format!("[{}]", elem.to_vole_syntax(table)),
+            TypeInfo::FixedArray(elem, size) => {
+                format!("[{}; {}]", elem.to_vole_syntax(table), size)
+            }
             TypeInfo::Tuple(elems) => {
                 let parts: Vec<String> = elems.iter().map(|t| t.to_vole_syntax(table)).collect();
                 format!("[{}]", parts.join(", "))

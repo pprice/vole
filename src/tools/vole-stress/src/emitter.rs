@@ -323,6 +323,11 @@ impl<'a, R: Rng> EmitContext<'a, R> {
                     elems.iter().map(|t| self.generate_test_value(t)).collect();
                 format!("[{}]", values.join(", "))
             }
+            TypeInfo::FixedArray(elem, size) => {
+                // Generate repeat literal for fixed array
+                let elem_val = self.generate_test_value(elem);
+                format!("[{}; {}]", elem_val, size)
+            }
             TypeInfo::Void => "nil".to_string(),
             TypeInfo::Union(variants) => {
                 // For union types, generate a value for the first variant
@@ -904,6 +909,11 @@ impl<'a, R: Rng> EmitContext<'a, R> {
                 let values: Vec<String> = elems.iter().map(|t| self.literal_for_type(t)).collect();
                 format!("[{}]", values.join(", "))
             }
+            TypeInfo::FixedArray(elem, size) => {
+                drop(expr_gen);
+                let elem_val = self.literal_for_type(elem);
+                format!("[{}; {}]", elem_val, size)
+            }
             _ => "nil".to_string(),
         }
     }
@@ -931,6 +941,11 @@ impl<'a, R: Rng> EmitContext<'a, R> {
                 drop(expr_gen);
                 let elem_val = self.constant_literal_for_type(elem);
                 format!("[{}]", elem_val)
+            }
+            TypeInfo::FixedArray(elem, size) => {
+                drop(expr_gen);
+                let elem_val = self.constant_literal_for_type(elem);
+                format!("[{}; {}]", elem_val, size)
             }
             _ => "nil".to_string(),
         }

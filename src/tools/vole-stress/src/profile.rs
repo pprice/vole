@@ -137,6 +137,8 @@ fn minimal_profile() -> Profile {
             try_probability: 0.0,
             // No tuples in minimal
             tuple_probability: 0.0,
+            // No fixed arrays in minimal
+            fixed_array_probability: 0.0,
         },
     };
 
@@ -228,6 +230,8 @@ fn full_profile() -> Profile {
             try_probability: 0.15,
             // Tuples with destructuring
             tuple_probability: 0.12,
+            // Fixed-size arrays with destructuring
+            fixed_array_probability: 0.12,
         },
     };
 
@@ -319,6 +323,8 @@ fn deep_nesting_profile() -> Profile {
             try_probability: 0.0,
             // Some tuples for variety
             tuple_probability: 0.08,
+            // Some fixed arrays for variety
+            fixed_array_probability: 0.08,
         },
     };
 
@@ -411,6 +417,8 @@ fn wide_types_profile() -> Profile {
             try_probability: 0.10,
             // Some tuples
             tuple_probability: 0.10,
+            // Some fixed arrays
+            fixed_array_probability: 0.10,
         },
     };
 
@@ -494,6 +502,8 @@ fn many_modules_profile() -> Profile {
             try_probability: 0.0,
             // No tuples - focus on module loading
             tuple_probability: 0.0,
+            // No fixed arrays - focus on module loading
+            fixed_array_probability: 0.0,
         },
     };
 
@@ -590,6 +600,8 @@ fn generics_heavy_profile() -> Profile {
             try_probability: 0.10,
             // Some tuples
             tuple_probability: 0.10,
+            // Some fixed arrays
+            fixed_array_probability: 0.10,
         },
     };
 

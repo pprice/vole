@@ -35,6 +35,8 @@ pub struct StmtConfig {
     pub try_probability: f64,
     /// Probability of generating a tuple let-binding with destructuring.
     pub tuple_probability: f64,
+    /// Probability of generating a fixed-size array let-binding with destructuring.
+    pub fixed_array_probability: f64,
 }
 
 impl Default for StmtConfig {
@@ -51,6 +53,7 @@ impl Default for StmtConfig {
             raise_probability: 0.10,
             try_probability: 0.12,
             tuple_probability: 0.10,
+            fixed_array_probability: 0.10,
         }
     }
 }
@@ -169,6 +172,9 @@ fn types_match(a: &TypeInfo, b: &TypeInfo) -> bool {
         (TypeInfo::Void, TypeInfo::Void) => true,
         (TypeInfo::Optional(ia), TypeInfo::Optional(ib)) => types_match(ia, ib),
         (TypeInfo::Array(ea), TypeInfo::Array(eb)) => types_match(ea, eb),
+        (TypeInfo::FixedArray(ea, sa), TypeInfo::FixedArray(eb, sb)) => {
+            sa == sb && types_match(ea, eb)
+        }
         (TypeInfo::Tuple(ea), TypeInfo::Tuple(eb)) => {
             ea.len() == eb.len() && ea.iter().zip(eb.iter()).all(|(a, b)| types_match(a, b))
         }
@@ -313,6 +319,11 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // Tuple let-binding with destructuring
         if self.rng.gen_bool(self.config.tuple_probability) {
             return self.generate_tuple_let(ctx);
+        }
+
+        // Fixed-size array let-binding with destructuring
+        if self.rng.gen_bool(self.config.fixed_array_probability) {
+            return self.generate_fixed_array_let(ctx);
         }
 
         let name = ctx.new_local_name();
@@ -940,6 +951,49 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             self.indent_str(),
             pattern,
             tuple_name,
+        )
+    }
+
+    /// Generate a fixed-size array let-binding with destructuring.
+    ///
+    /// Produces a two-statement sequence:
+    /// ```vole
+    /// let arrN: [i64; 3] = [42_i64; 3]
+    /// let [a, b, c] = arrN
+    /// ```
+    /// Adds each destructured element as a local variable with the element type.
+    fn generate_fixed_array_let(&mut self, ctx: &mut StmtContext) -> String {
+        let fixed_array_ty = TypeInfo::random_fixed_array_type(self.rng);
+        let (elem_ty, size) = match &fixed_array_ty {
+            TypeInfo::FixedArray(elem, size) => (*elem.clone(), *size),
+            _ => unreachable!(),
+        };
+
+        // Generate the repeat literal expression
+        let expr_ctx = ctx.to_expr_context();
+        let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+        let value = expr_gen.generate(&fixed_array_ty, &expr_ctx, 0);
+
+        let arr_name = ctx.new_local_name();
+        let type_annotation = fixed_array_ty.to_vole_syntax(ctx.table);
+
+        // Generate destructuring names for each element
+        let destruct_names: Vec<String> = (0..size).map(|_| ctx.new_local_name()).collect();
+
+        // Add destructured locals to scope with the element type
+        for name in &destruct_names {
+            ctx.add_local(name.clone(), elem_ty.clone(), false);
+        }
+
+        let pattern = format!("[{}]", destruct_names.join(", "));
+        format!(
+            "let {}: {} = {}\n{}let {} = {}",
+            arr_name,
+            type_annotation,
+            value,
+            self.indent_str(),
+            pattern,
+            arr_name,
         )
     }
 
