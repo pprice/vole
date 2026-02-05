@@ -112,9 +112,18 @@ impl Cg<'_, '_, '_> {
             owned_flags.push(is_owned);
         }
 
-        // Single part — return directly, no builder needed
+        // Single part — return directly, no builder needed.
+        // Preserve the original lifecycle: if the value is borrowed (e.g. a
+        // variable read like `"{local0}"`), return it as borrowed so the
+        // caller emits rc_inc when binding.  Returning a borrowed value as
+        // Owned would skip the inc while still registering a dec on scope
+        // exit, causing a double-free.
         if string_values.len() == 1 {
-            return Ok(self.string_temp(string_values[0]));
+            let mut cv = self.string_temp(string_values[0]);
+            if !owned_flags[0] {
+                cv.mark_borrowed();
+            }
+            return Ok(cv);
         }
 
         // Multi-part: use StringBuilder — one allocation instead of N concats

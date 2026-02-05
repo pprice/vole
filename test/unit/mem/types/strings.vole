@@ -420,3 +420,86 @@ tests "multiple string temps in one expression" {
         assert(result == "FOO-BAR-BAZ")
     }
 }
+
+// Regression test for heap corruption (double-free) caused by
+// single-expression string interpolation returning a borrowed value
+// as Owned.  When `"{expr}"` has exactly one expression part, the
+// interpolation optimisation returns the same Value without creating a
+// StringBuilder copy.  If the lifecycle was incorrectly marked Owned,
+// the let-binding would skip rc_inc while still registering rc_dec on
+// scope exit — resulting in a double-free of the underlying string.
+
+class RcTestClass {
+    f1: i64,
+    f2: string,
+    f3: bool,
+}
+
+func single_part_interp_with_class(p: string, n: i32) -> i32? {
+    let s = when {
+        true => "hello"
+        _ => "{p}!"
+    }
+    if true {
+        let _x = "some string"
+    }
+    let alias = "{s}"
+    let c1 = RcTestClass {
+        f1: 42_i64,
+        f2: "{s}, {alias} done",
+        f3: true,
+    }
+    let _c2 = RcTestClass {
+        f1: 99_i64,
+        f2: when {
+            true => c1.f2
+            _ => "{s} | {n}"
+        },
+        f3: true,
+    }
+    return nil
+}
+
+func single_part_interp_dynamic(p: string) -> string {
+    // The when expression produces a dynamically allocated string
+    // (interpolation in the taken branch), so the double-free was fatal.
+    let s = when {
+        true => "{p} world"
+        _ => "fallback"
+    }
+    let alias = "{s}"
+    return alias
+}
+
+tests "single-part interpolation RC lifecycle" {
+    test "single-part interp with class fields does not double-free" {
+        let _r = single_part_interp_with_class("test", 42_i32)
+        assert(true)
+    }
+
+    test "single-part interp preserves dynamic string value" {
+        let result = single_part_interp_dynamic("hello")
+        assert(result == "hello world")
+    }
+
+    test "single-part interp alias matches original" {
+        let s = "original"
+        let alias = "{s}"
+        assert(alias == "original")
+    }
+
+    test "single-part interp with method result" {
+        let s = "  hello  ".trim()
+        let alias = "{s}"
+        assert(alias == "hello")
+    }
+
+    test "repeated single-part interp does not corrupt heap" {
+        let mut i: i32 = 0_i32
+        while i < 10_i32 {
+            let _r = single_part_interp_with_class("iter", i)
+            i = i + 1_i32
+        }
+        assert(true)
+    }
+}
