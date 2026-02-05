@@ -219,7 +219,7 @@ fn plan_imports<R: Rng>(
                     // Use a deterministic "shared" module based on layer index
                     let shared_idx = layer_idx % flat_later.len();
                     let shared = flat_later[shared_idx];
-                    if !imported.contains(&shared) {
+                    if shared != module_id && !imported.contains(&shared) {
                         imported.push(shared);
                     }
                 }
