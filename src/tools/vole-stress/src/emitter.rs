@@ -640,7 +640,9 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             method.name, params, return_type
         ));
         self.indent += 1;
-        self.emit_function_body(&method.return_type, &method.params, None);
+        // Methods don't have their own type params (they use class type params),
+        // but for now we pass empty to avoid complications with class type params.
+        self.emit_function_body(&method.return_type, &method.params, None, &[]);
         self.indent -= 1;
         self.emit_line("}");
     }
@@ -651,7 +653,12 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             let header = self.format_function_header(&symbol.name, info);
             self.emit_line(&format!("{} {{", header));
             self.indent += 1;
-            self.emit_function_body(&info.return_type, &info.params, Some(&symbol.name));
+            self.emit_function_body(
+                &info.return_type,
+                &info.params,
+                Some(&symbol.name),
+                &info.type_params,
+            );
             self.indent -= 1;
             self.emit_line("}");
         }
@@ -681,6 +688,7 @@ impl<'a, R: Rng> EmitContext<'a, R> {
         return_type: &TypeInfo,
         params: &[ParamInfo],
         function_name: Option<&str>,
+        type_params: &[TypeParam],
     ) {
         // Generator functions (returning Iterator<T>) get a special body with yield
         if let TypeInfo::Iterator(elem_type) = return_type {
@@ -692,6 +700,9 @@ impl<'a, R: Rng> EmitContext<'a, R> {
 
         // Track the current function name to prevent self-recursion
         stmt_ctx.current_function_name = function_name.map(String::from);
+
+        // Pass type parameters for generic functions (enables interface method calls)
+        stmt_ctx.type_params = type_params.to_vec();
 
         // If this function has a fallible return type, mark the context as fallible
         if let TypeInfo::Fallible { error, .. } = return_type {

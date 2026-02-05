@@ -8,6 +8,7 @@ use rand::Rng;
 use crate::expr::{ExprConfig, ExprContext, ExprGenerator, get_chainable_methods};
 use crate::symbols::{
     ClassInfo, FunctionInfo, ModuleId, ParamInfo, PrimitiveType, SymbolKind, SymbolTable, TypeInfo,
+    TypeParam,
 };
 
 /// Configuration for statement generation.
@@ -93,6 +94,9 @@ pub struct StmtContext<'a> {
     /// The effective return type (success type for fallible functions).
     /// Set when generating function bodies to enable early returns.
     pub return_type: Option<TypeInfo>,
+    /// Type parameters of the current function (for generic functions).
+    /// Used to pass constraints to expression generation for interface method calls.
+    pub type_params: Vec<TypeParam>,
 }
 
 impl<'a> StmtContext<'a> {
@@ -112,6 +116,7 @@ impl<'a> StmtContext<'a> {
             current_function_name: None,
             protected_vars: Vec::new(),
             return_type: None,
+            type_params: Vec::new(),
         }
     }
 
@@ -134,6 +139,7 @@ impl<'a> StmtContext<'a> {
             current_function_name: None,
             protected_vars: Vec::new(),
             return_type: None,
+            type_params: Vec::new(),
         }
     }
 
@@ -149,6 +155,7 @@ impl<'a> StmtContext<'a> {
             params: self.params,
             locals: Box::leak(locals_for_expr.into_boxed_slice()),
             table: self.table,
+            type_params: Box::leak(self.type_params.clone().into_boxed_slice()),
         }
     }
 

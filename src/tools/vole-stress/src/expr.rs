@@ -6,7 +6,8 @@
 use rand::Rng;
 
 use crate::symbols::{
-    ModuleId, ParamInfo, PrimitiveType, SymbolId, SymbolKind, SymbolTable, TypeInfo,
+    InterfaceInfo, MethodInfo, ModuleId, ParamInfo, PrimitiveType, SymbolId, SymbolKind,
+    SymbolTable, TypeInfo, TypeParam,
 };
 
 /// Configuration for expression generation.
@@ -55,6 +56,9 @@ pub struct ExprContext<'a> {
     pub locals: &'a [(String, TypeInfo)],
     /// Symbol table for type lookups.
     pub table: &'a SymbolTable,
+    /// Type parameters in scope (for generic functions/classes).
+    /// Each TypeParam may have interface constraints that allow method calls.
+    pub type_params: &'a [TypeParam],
 }
 
 #[allow(dead_code)]
@@ -69,6 +73,22 @@ impl<'a> ExprContext<'a> {
             params,
             locals,
             table,
+            type_params: &[],
+        }
+    }
+
+    /// Create a new expression context with type parameters.
+    pub fn with_type_params(
+        params: &'a [ParamInfo],
+        locals: &'a [(String, TypeInfo)],
+        table: &'a SymbolTable,
+        type_params: &'a [TypeParam],
+    ) -> Self {
+        Self {
+            params,
+            locals,
+            table,
+            type_params,
         }
     }
 
@@ -293,6 +313,40 @@ impl<'a> ExprContext<'a> {
         }
         vars
     }
+
+    /// Get all type-param-typed variables in scope that have interface constraints.
+    ///
+    /// Returns `(var_name, type_param_name, constraints)` tuples for variables
+    /// whose type is a type parameter with at least one interface constraint.
+    /// Only returns variables where the corresponding type param has constraints.
+    pub fn constrained_type_param_vars(&self) -> Vec<(String, String, Vec<(ModuleId, SymbolId)>)> {
+        let mut vars = Vec::new();
+
+        // Check parameters for type-param-typed variables
+        for param in self.params {
+            if let TypeInfo::TypeParam(ref tp_name) = param.param_type {
+                // Look up the type param in our type_params to get its constraints
+                if let Some(tp) = self.type_params.iter().find(|tp| &tp.name == tp_name) {
+                    if !tp.constraints.is_empty() {
+                        vars.push((param.name.clone(), tp_name.clone(), tp.constraints.clone()));
+                    }
+                }
+            }
+        }
+
+        // Check locals for type-param-typed variables
+        for (name, ty) in self.locals {
+            if let TypeInfo::TypeParam(tp_name) = ty {
+                if let Some(tp) = self.type_params.iter().find(|tp| &tp.name == tp_name) {
+                    if !tp.constraints.is_empty() {
+                        vars.push((name.clone(), tp_name.clone(), tp.constraints.clone()));
+                    }
+                }
+            }
+        }
+
+        vars
+    }
 }
 
 /// Information about a chainable method on a class.
@@ -362,6 +416,70 @@ pub fn get_chainable_methods(
                 params: method.params.clone(),
                 returns_self: true, // Methods in standalone impl blocks return Self
             });
+        }
+    }
+
+    methods
+}
+
+/// Get all methods from an interface, including inherited methods from parent interfaces.
+///
+/// Returns all MethodInfo for the interface and any interfaces it extends.
+pub fn get_interface_methods(
+    table: &SymbolTable,
+    mod_id: ModuleId,
+    iface_id: SymbolId,
+) -> Vec<MethodInfo> {
+    let mut all_methods = Vec::new();
+    let mut seen_names = std::collections::HashSet::new();
+    let mut stack = vec![(mod_id, iface_id)];
+    let mut visited = std::collections::HashSet::new();
+
+    while let Some((mid, sid)) = stack.pop() {
+        if !visited.insert((mid, sid)) {
+            continue; // Avoid infinite loops from cycles
+        }
+
+        if let Some(symbol) = table.get_symbol(mid, sid) {
+            if let SymbolKind::Interface(ref info) = symbol.kind {
+                // Add this interface's own methods
+                for method in &info.methods {
+                    if seen_names.insert(method.name.clone()) {
+                        all_methods.push(method.clone());
+                    }
+                }
+
+                // Queue parent interfaces
+                for &(parent_mid, parent_sid) in &info.extends {
+                    stack.push((parent_mid, parent_sid));
+                }
+            }
+        }
+    }
+
+    all_methods
+}
+
+/// Get methods callable on a type parameter based on its interface constraints.
+///
+/// Returns all methods from all constraining interfaces.
+pub fn get_type_param_constraint_methods(
+    table: &SymbolTable,
+    constraints: &[(ModuleId, SymbolId)],
+) -> Vec<(InterfaceInfo, MethodInfo)> {
+    let mut methods = Vec::new();
+    let mut seen_names = std::collections::HashSet::new();
+
+    for &(mod_id, iface_id) in constraints {
+        if let Some(symbol) = table.get_symbol(mod_id, iface_id) {
+            if let SymbolKind::Interface(ref iface_info) = symbol.kind {
+                let iface_methods = get_interface_methods(table, mod_id, iface_id);
+                for method in iface_methods {
+                    if seen_names.insert(method.name.clone()) {
+                        methods.push((iface_info.clone(), method));
+                    }
+                }
+            }
         }
     }
 
@@ -709,6 +827,48 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         Some(format!("{}.contains(\"{}\")", var, substrings[sub_idx]))
     }
 
+    /// Try to generate an interface method call on a type-param-typed variable.
+    ///
+    /// Looks for variables in scope whose type is a type parameter with interface
+    /// constraints. If found, picks a method from one of the constraining interfaces
+    /// whose return type matches the target type and generates a method call.
+    ///
+    /// Returns `Some("varName.methodName(args)")` on success.
+    fn try_generate_type_param_method_call(
+        &mut self,
+        target: &TypeInfo,
+        ctx: &ExprContext,
+    ) -> Option<String> {
+        let constrained_vars = ctx.constrained_type_param_vars();
+        if constrained_vars.is_empty() {
+            return None;
+        }
+
+        // Collect all (var_name, method_name, params) candidates where method returns target type
+        let mut candidates: Vec<(String, String, Vec<ParamInfo>)> = Vec::new();
+
+        for (var_name, _tp_name, constraints) in &constrained_vars {
+            let methods = get_type_param_constraint_methods(ctx.table, constraints);
+            for (_iface_info, method) in methods {
+                // Check if return type matches target (only check non-generic interfaces)
+                if types_compatible(&method.return_type, target) {
+                    candidates.push((var_name.clone(), method.name.clone(), method.params.clone()));
+                }
+            }
+        }
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..candidates.len());
+        let (var_name, method_name, params) = &candidates[idx];
+
+        // Generate arguments for the method call
+        let args = self.generate_method_args(params, ctx);
+        Some(format!("{}.{}({})", var_name, method_name, args))
+    }
+
     /// Try to generate an optional chaining expression (`optVar?.fieldName`).
     ///
     /// Looks for optional-typed variables in scope whose inner type is a class
@@ -865,6 +1025,16 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         // (No arguments, so vole-fmt never wraps the call across lines.)
         if prim == PrimitiveType::I64 && self.rng.gen_bool(0.12) {
             if let Some(expr) = self.try_generate_string_length(ctx) {
+                return expr;
+            }
+        }
+
+        // ~15% chance to call an interface method on a type-param-typed variable
+        // when the method's return type matches our target primitive type.
+        if self.rng.gen_bool(0.15) {
+            if let Some(expr) =
+                self.try_generate_type_param_method_call(&TypeInfo::Primitive(prim), ctx)
+            {
                 return expr;
             }
         }
