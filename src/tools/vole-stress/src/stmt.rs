@@ -367,15 +367,28 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     }
 
     /// Generate a while statement.
+    ///
+    /// Emits a guard variable before the loop that increments unconditionally
+    /// at the top of the loop body (before any generated statements). This
+    /// guarantees termination even when `continue` skips the manual counter
+    /// increment at the end of the body.
     fn generate_while_statement(&mut self, ctx: &mut StmtContext, depth: usize) -> String {
         // Generate a simple bounded condition to prevent infinite loops
         // We'll use a pattern like: counter < limit
         let counter_name = ctx.new_local_name();
+        let guard_name = ctx.new_local_name();
         let limit = self.rng.gen_range(1..=5);
+        let guard_limit = limit * 10;
 
         // Pre-statement to initialize counter (this stays in outer scope)
         ctx.add_local(
             counter_name.clone(),
+            TypeInfo::Primitive(PrimitiveType::I64),
+            true,
+        );
+        // Guard variable also lives in outer scope
+        ctx.add_local(
+            guard_name.clone(),
             TypeInfo::Primitive(PrimitiveType::I64),
             true,
         );
@@ -387,10 +400,16 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         // Generate body (save and restore locals for scoping)
         let locals_before = ctx.locals.len();
-        let mut body_stmts = self.generate_block(ctx, depth + 1);
+        let user_stmts = self.generate_block(ctx, depth + 1);
         ctx.locals.truncate(locals_before);
-        // Add increment at end
-        body_stmts.push(format!("{} = {} + 1", counter_name, counter_name));
+
+        // Build the full loop body: guard increment + break check, then
+        // user statements, then counter increment at the end.
+        let mut body_stmts = Vec::with_capacity(user_stmts.len() + 3);
+        body_stmts.push(format!("{guard_name} = {guard_name} + 1"));
+        body_stmts.push(format!("if {guard_name} > {guard_limit} {{ break }}"));
+        body_stmts.extend(user_stmts);
+        body_stmts.push(format!("{counter_name} = {counter_name} + 1"));
 
         ctx.in_loop = was_in_loop;
         ctx.in_while_loop = was_in_while_loop;
@@ -398,8 +417,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let body_block = self.format_block(&body_stmts);
 
         format!(
-            "let mut {} = 0\n{}while {} < {} {}",
+            "let mut {} = 0\n{}let mut {} = 0\n{}while {} < {} {}",
             counter_name,
+            self.indent_str(),
+            guard_name,
             self.indent_str(),
             counter_name,
             limit,
@@ -447,11 +468,11 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     /// Wraps in `if <condition> { break }` to avoid always exiting on
     /// the first iteration. Only called when `ctx.in_loop` is true.
     ///
-    /// In while loops, only `break` is generated (never `continue`) because
-    /// `continue` would skip the manual loop-counter increment at the end of
-    /// the body, potentially creating an infinite loop.
+    /// Both `break` and `continue` are allowed in while loops because a
+    /// guard variable at the top of the loop body guarantees termination
+    /// even when `continue` skips the manual counter increment.
     fn generate_break_continue(&mut self, ctx: &mut StmtContext) -> String {
-        let keyword = if ctx.in_while_loop || self.rng.gen_bool(0.5) {
+        let keyword = if self.rng.gen_bool(0.5) {
             "break"
         } else {
             "continue"
