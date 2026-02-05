@@ -928,6 +928,14 @@ impl Cg<'_, '_, '_> {
         let result = self.binary_op(current, rhs, binary_op, line)?;
 
         // Store back
+        // i128 cannot fit in a TaggedValue (u64 payload)
+        if result.ty == types::I128 {
+            return Err(CodegenError::type_mismatch(
+                "array compound assignment",
+                "a type that fits in 64 bits",
+                "i128 (128-bit values cannot be stored in arrays)",
+            ));
+        }
         let array_set_ref = self.runtime_func_ref(RuntimeFn::ArraySet)?;
         let store_value = convert_to_i64_for_storage(self.builder, &result);
         // Compute tag before using builder to avoid borrow conflict

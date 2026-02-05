@@ -19,7 +19,9 @@ use vole_runtime::native_registry::{NativeFunction, NativeType};
 use vole_sema::type_arena::TypeId;
 
 use super::context::Cg;
-use super::types::{CompiledValue, native_type_to_cranelift, type_id_to_cranelift};
+use super::types::{
+    CompiledValue, is_wide_fallible, native_type_to_cranelift, type_id_to_cranelift,
+};
 use super::{FunctionKey, FunctionRegistry, RuntimeFn};
 
 /// Compile a string literal as a static RcString baked into the JIT data section.
@@ -1040,7 +1042,12 @@ impl Cg<'_, '_, '_> {
         let arena = self.arena();
         if ret != arena.void() {
             // For fallible returns, use multi-value return (tag: i64, payload: i64)
-            if arena.unwrap_fallible(ret).is_some() {
+            // For wide fallible (i128 success), use (tag: i64, low: i64, high: i64)
+            if is_wide_fallible(ret, arena) {
+                sig.returns.push(AbiParam::new(types::I64)); // tag
+                sig.returns.push(AbiParam::new(types::I64)); // low
+                sig.returns.push(AbiParam::new(types::I64)); // high
+            } else if arena.unwrap_fallible(ret).is_some() {
                 sig.returns.push(AbiParam::new(types::I64)); // tag
                 sig.returns.push(AbiParam::new(types::I64)); // payload
             } else {

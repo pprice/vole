@@ -307,6 +307,16 @@ pub(crate) fn is_wide_type(ty: TypeId, arena: &TypeArena) -> bool {
     matches!(arena.get(ty), SemaType::Primitive(PrimitiveType::I128))
 }
 
+/// Check if a fallible type has a wide (i128) success type.
+/// Returns true if the type is `fallible(i128, ...)`.
+/// When true, the fallible return convention uses 3 i64 registers instead of 2
+/// to carry (tag, payload_low, payload_high).
+pub(crate) fn is_wide_fallible(ty: TypeId, arena: &TypeArena) -> bool {
+    arena
+        .unwrap_fallible(ty)
+        .is_some_and(|(success_type_id, _)| is_wide_type(success_type_id, arena))
+}
+
 /// Get the size in bytes for a TypeId.
 ///
 /// # Panics

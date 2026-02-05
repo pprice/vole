@@ -1,0 +1,114 @@
+// Test i128 values in fallible functions (raise, try, match)
+// Exercises: i128 success return, i128 error fields, error destructuring
+
+error BigError { value: i128 }
+error MixedError { count: i64, big: i128 }
+error SmallError { code: i64 }
+
+func returnI128(x: i128) -> fallible(i128, SmallError) {
+    if x < 0_i128 {
+        raise SmallError { code: -1 }
+    }
+    return x
+}
+
+func raiseWithI128Field(x: i128) -> fallible(i64, BigError) {
+    if x > 100_i128 {
+        raise BigError { value: x }
+    }
+    return 0
+}
+
+func raiseWithMixedFields(x: i128) -> fallible(i64, MixedError) {
+    if x > 100_i128 {
+        raise MixedError { count: 1, big: x }
+    }
+    return 0
+}
+
+tests "i128 fallible success return" {
+    test "i128 success value small" {
+        let result = match returnI128(42_i128) {
+            success x => x
+            error => -1_i128
+            _ => -2_i128
+        }
+        assert(result == 42_i128)
+    }
+
+    test "i128 success value zero" {
+        let result = match returnI128(0_i128) {
+            success x => x
+            error => -1_i128
+            _ => -2_i128
+        }
+        assert(result == 0_i128)
+    }
+
+    test "i128 success value large" {
+        let big: i128 = 9223372036854775807
+        let result = match returnI128(big) {
+            success x => x
+            error => -1_i128
+            _ => -2_i128
+        }
+        assert(result == big)
+    }
+
+    test "i128 fallible error path" {
+        let result = match returnI128(-5_i128) {
+            success x => 0
+            error SmallError => -1
+            _ => -999
+        }
+        assert(result == -1)
+    }
+}
+
+tests "i128 error fields in raise" {
+    test "single i128 field error" {
+        let result = match raiseWithI128Field(200_i128) {
+            success x => 0_i128
+            error BigError { value } => value
+            _ => -1_i128
+        }
+        assert(result == 200_i128)
+    }
+
+    test "single i128 field large value" {
+        let big: i128 = 9223372036854775807
+        let result = match raiseWithI128Field(big + 1) {
+            success x => 0_i128
+            error BigError { value } => value
+            _ => -1_i128
+        }
+        assert(result > big)
+    }
+
+    test "mixed fields with i128" {
+        let result = match raiseWithMixedFields(200_i128) {
+            success x => 0_i128
+            error MixedError { count, big } => big
+            _ => -1_i128
+        }
+        assert(result == 200_i128)
+    }
+
+    test "mixed fields count" {
+        let result = match raiseWithMixedFields(200_i128) {
+            success x => -1
+            error MixedError { count, big } => count
+            _ => -999
+        }
+        assert(result == 1)
+    }
+
+    test "success path not raising" {
+        let result = match raiseWithI128Field(50_i128) {
+            success x => x
+            error BigError { value } => -1
+            _ => -999
+        }
+        assert(result == 0)
+    }
+}

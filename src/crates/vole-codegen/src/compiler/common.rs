@@ -270,17 +270,42 @@ pub fn compile_function_body_with_cg(
                 .builder
                 .ins()
                 .load(types::I64, MemFlags::new(), value.value, 0);
-            // Only load payload if union has payload data.
-            // Sentinel-only unions have union_size == 8 (tag only), no payload to read.
-            let union_size = cg.type_size(value.type_id);
-            let payload = if union_size > 8 {
-                cg.builder
-                    .ins()
-                    .load(types::I64, MemFlags::new(), value.value, 8)
+
+            let is_wide = cg
+                .return_type
+                .is_some_and(|ret| crate::types::is_wide_fallible(ret, cg.arena()));
+
+            if is_wide {
+                // Wide fallible (i128 success): load low/high from offset 8/16
+                let union_size = cg.type_size(value.type_id);
+                let (low, high) = if union_size > 8 {
+                    let low = cg
+                        .builder
+                        .ins()
+                        .load(types::I64, MemFlags::new(), value.value, 8);
+                    let high = cg
+                        .builder
+                        .ins()
+                        .load(types::I64, MemFlags::new(), value.value, 16);
+                    (low, high)
+                } else {
+                    let zero = cg.builder.ins().iconst(types::I64, 0);
+                    (zero, zero)
+                };
+                cg.builder.ins().return_(&[tag, low, high]);
             } else {
-                cg.builder.ins().iconst(types::I64, 0)
-            };
-            cg.builder.ins().return_(&[tag, payload]);
+                // Only load payload if union has payload data.
+                // Sentinel-only unions have union_size == 8 (tag only), no payload to read.
+                let union_size = cg.type_size(value.type_id);
+                let payload = if union_size > 8 {
+                    cg.builder
+                        .ins()
+                        .load(types::I64, MemFlags::new(), value.value, 8)
+                } else {
+                    cg.builder.ins().iconst(types::I64, 0)
+                };
+                cg.builder.ins().return_(&[tag, payload]);
+            }
         } else if let Some(ret_type_id) = cg.return_type
             && cg.is_small_struct_return(ret_type_id)
         {

@@ -1462,6 +1462,29 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             return self.void_value();
         }
 
+        // Check for wide fallible multi-value return (3 results: tag, low, high)
+        // i128 success values are split across two i64 registers
+        if results.len() == 3 && crate::types::is_wide_fallible(return_type_id, self.arena()) {
+            let tag = results[0];
+            let low = results[1];
+            let high = results[2];
+
+            // Allocate stack slot: 8 (tag) + 16 (i128 payload) = 24 bytes
+            let slot_size = 24u32;
+            let slot = self.alloc_stack(slot_size);
+
+            // Store tag at offset 0
+            self.builder.ins().stack_store(tag, slot, 0);
+            // Reconstruct i128 from low/high and store at offset 8
+            let i128_val = super::structs::reconstruct_i128(self.builder, low, high);
+            super::structs::helpers::store_i128_to_stack(self.builder, i128_val, slot, 8);
+
+            let ptr_type = self.ptr_type();
+            let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+
+            return CompiledValue::new(ptr, ptr_type, return_type_id);
+        }
+
         // Check for fallible multi-value return (2 results: tag, payload)
         if results.len() == 2 && self.arena().unwrap_fallible(return_type_id).is_some() {
             let tag = results[0];

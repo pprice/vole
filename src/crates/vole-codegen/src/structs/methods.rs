@@ -898,6 +898,14 @@ impl Cg<'_, '_, '_> {
         };
         let tag_val = self.builder.ins().iconst(types::I64, tag);
 
+        // i128 cannot fit in a TaggedValue (u64 payload)
+        if value.ty == types::I128 {
+            return Err(CodegenError::type_mismatch(
+                "array push",
+                "a type that fits in 64 bits",
+                "i128 (128-bit values cannot be stored in arrays)",
+            ));
+        }
         // Convert value to i64 for storage
         let value_bits = convert_to_i64_for_storage(self.builder, &value);
 

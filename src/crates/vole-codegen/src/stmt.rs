@@ -11,10 +11,13 @@ use vole_sema::IsCheckResult;
 use vole_sema::type_arena::TypeId;
 
 use super::context::Cg;
-use super::structs::{convert_to_i64_for_storage, get_field_slot_and_type_id_cg};
+use super::structs::{
+    convert_to_i64_for_storage, get_field_slot_and_type_id_cg, split_i128_for_storage,
+    store_value_to_stack,
+};
 use super::types::{
     CompiledValue, FALLIBLE_SUCCESS_TAG, convert_to_type, fallible_error_tag_by_id,
-    tuple_layout_id, type_id_to_cranelift,
+    is_wide_fallible, tuple_layout_id, type_id_to_cranelift,
 };
 
 /// Check if a block contains a `continue` statement (recursively).
@@ -421,10 +424,15 @@ impl Cg<'_, '_, '_> {
                         // Both tag and payload are i64 for uniform representation
                         let tag_val = self.builder.ins().iconst(types::I64, FALLIBLE_SUCCESS_TAG);
 
-                        // Convert payload to i64 for uniform representation
-                        let payload_val = convert_to_i64_for_storage(self.builder, &compiled);
-
-                        self.builder.ins().return_(&[tag_val, payload_val]);
+                        if is_wide_fallible(ret_type_id, self.arena()) {
+                            // i128 success: return (tag, low, high) in 3 registers
+                            let (low, high) = split_i128_for_storage(self.builder, compiled.value);
+                            self.builder.ins().return_(&[tag_val, low, high]);
+                        } else {
+                            // Convert payload to i64 for uniform representation
+                            let payload_val = convert_to_i64_for_storage(self.builder, &compiled);
+                            self.builder.ins().return_(&[tag_val, payload_val]);
+                        }
                     } else if let Some(ret_type_id) = return_type_id
                         && self.is_small_struct_return(ret_type_id)
                     {
@@ -1308,13 +1316,16 @@ impl Cg<'_, '_, '_> {
         // Determine payload based on number of fields
         // This matches the layout used by external functions in runtime:
         // - 0 fields: payload is 0
-        // - 1 field: payload is the field value directly (inline)
-        // - 2+ fields: payload is a pointer to field data
+        // - 1 field (non-wide): payload is the field value directly (inline)
+        // - 1 field (i128): payload is a pointer to stack-allocated i128 data
+        // - 2+ fields: payload is a pointer to field data (i128 fields use 16 bytes)
         let payload_val = if error_fields.is_empty() {
             // No fields - payload is 0
             self.builder.ins().iconst(types::I64, 0)
-        } else if error_fields.len() == 1 {
-            // Single field - store inline as payload value
+        } else if error_fields.len() == 1
+            && !crate::types::is_wide_type(error_fields[0].ty, self.arena())
+        {
+            // Single non-wide field - store inline as payload value
             let field_def = &error_fields[0];
             let field_name = self
                 .name_table()
@@ -1337,12 +1348,23 @@ impl Cg<'_, '_, '_> {
             field_value.debug_assert_rc_handled("Stmt::Raise (single field)");
             convert_to_i64_for_storage(self.builder, &field_value)
         } else {
-            // Multiple fields - allocate on stack and store field values
-            let error_payload_size = (error_fields.len() * 8) as u32;
+            // Multiple fields (or single i128 field) - allocate on stack and store field values.
+            // i128 fields use 16 bytes (2 slots), all others use 8 bytes (1 slot).
+            let error_payload_size: u32 = error_fields
+                .iter()
+                .map(|f| {
+                    if crate::types::is_wide_type(f.ty, self.arena()) {
+                        16u32
+                    } else {
+                        8u32
+                    }
+                })
+                .sum();
             let slot = self.alloc_stack(error_payload_size);
 
             // Store each field value at the appropriate offset
-            for (field_idx, field_def) in error_fields.iter().enumerate() {
+            let mut field_offset: i32 = 0;
+            for field_def in &error_fields {
                 let field_name = self
                     .name_table()
                     .last_segment_str(field_def.name_id)
@@ -1361,11 +1383,9 @@ impl Cg<'_, '_, '_> {
                 // The field value is consumed into the error payload.
                 field_value.mark_consumed();
                 field_value.debug_assert_rc_handled("Stmt::Raise (multi field)");
-                let store_value = convert_to_i64_for_storage(self.builder, &field_value);
-                let field_offset = (field_idx as i32) * 8;
-                self.builder
-                    .ins()
-                    .stack_store(store_value, slot, field_offset);
+                let bytes_stored =
+                    store_value_to_stack(self.builder, &field_value, slot, field_offset);
+                field_offset += bytes_stored;
             }
 
             let ptr_type = self.ptr_type();
@@ -1375,8 +1395,15 @@ impl Cg<'_, '_, '_> {
         // RC cleanup: like return, clean up all RC locals before exiting.
         self.emit_rc_cleanup_all_scopes(None)?;
 
-        // Return from the function with (tag, payload)
-        self.builder.ins().return_(&[tag_val, payload_val]);
+        // Return from the function with (tag, payload) or (tag, payload, 0) for wide fallible
+        if is_wide_fallible(return_type_id, self.arena()) {
+            // Wide fallible: return 3 values (tag, payload, 0) for consistency
+            // with the 3-register convention for i128 success values
+            let zero = self.builder.ins().iconst(types::I64, 0);
+            self.builder.ins().return_(&[tag_val, payload_val, zero]);
+        } else {
+            self.builder.ins().return_(&[tag_val, payload_val]);
+        }
 
         // Raise always terminates the current block
         Ok(true)

@@ -621,6 +621,15 @@ impl Cg<'_, '_, '_> {
             // RC: inc borrowed RC elements so the array gets its own reference.
             self.rc_inc_borrowed_for_container(&compiled)?;
 
+            // i128 cannot fit in a TaggedValue (u64 payload) - reject at compile time
+            if compiled.ty == types::I128 {
+                return Err(CodegenError::type_mismatch(
+                    "array element",
+                    "a type that fits in 64 bits",
+                    "i128 (128-bit values cannot be stored in arrays)",
+                ));
+            }
+
             // Compute tag before using builder to avoid borrow conflict
             let tag = {
                 let arena = self.arena();
@@ -957,6 +966,15 @@ impl Cg<'_, '_, '_> {
         } else if is_dynamic_array {
             // Dynamic array assignment
             let idx = self.expr(index)?;
+
+            // i128 cannot fit in a TaggedValue (u64 payload)
+            if val.ty == types::I128 {
+                return Err(CodegenError::type_mismatch(
+                    "array element assignment",
+                    "a type that fits in 64 bits",
+                    "i128 (128-bit values cannot be stored in arrays)",
+                ));
+            }
 
             let set_value_ref = self.runtime_func_ref(RuntimeFn::ArraySet)?;
             // Compute tag before using builder to avoid borrow conflict
@@ -2724,8 +2742,8 @@ impl Cg<'_, '_, '_> {
         // - Offset 0: tag (i64)
         // - Offset 8: payload (i64)
         //   - For 0 fields: 0
-        //   - For 1 field: the field value directly (inline)
-        //   - For 2+ fields: pointer to field data
+        //   - For 1 non-wide field: the field value directly (inline)
+        //   - For 1 wide (i128) field or 2+ fields: pointer to field data
         //
         // Load the payload from the fallible
         let payload = self.builder.ins().load(
@@ -2735,9 +2753,30 @@ impl Cg<'_, '_, '_> {
             FALLIBLE_PAYLOAD_OFFSET,
         );
 
-        // For single-field errors, the payload IS the field value
-        // For multi-field errors, the payload is a pointer to field data
-        let single_field = error_fields.len() == 1;
+        // For single non-wide field errors, the payload IS the field value
+        // For single wide (i128) field or multi-field errors, payload is a pointer to field data
+        let has_any_wide = error_fields
+            .iter()
+            .any(|f| crate::types::is_wide_type(f.ty, self.arena()));
+        let inline_single_field = error_fields.len() == 1 && !has_any_wide;
+
+        // Precompute field byte offsets (i128 fields use 16 bytes, others 8)
+        let field_byte_offsets: Vec<i32> = {
+            let arena = self.arena();
+            let mut offset = 0i32;
+            error_fields
+                .iter()
+                .map(|f| {
+                    let current = offset;
+                    offset += if crate::types::is_wide_type(f.ty, arena) {
+                        16
+                    } else {
+                        8
+                    };
+                    current
+                })
+                .collect()
+        };
 
         for field_pattern in fields {
             let field_name = self.interner().resolve(field_pattern.field_name);
@@ -2749,24 +2788,43 @@ impl Cg<'_, '_, '_> {
                 continue;
             };
 
-            // Load the field value
-            let raw_value = if single_field {
-                // For single-field errors, the payload is the value directly
-                payload
-            } else {
-                // For multi-field errors, payload is a pointer to field data
-                let field_offset = (field_idx as i32) * 8;
-                self.builder
-                    .ins()
-                    .load(types::I64, MemFlags::new(), payload, field_offset)
-            };
-
-            // Convert from i64 to the actual field type
             let field_ty_id = field_def.ty;
-            let converted = self.convert_field_value(raw_value, field_ty_id);
-            let var = self.builder.declare_var(converted.ty);
-            self.builder.def_var(var, converted.value);
-            arm_variables.insert(field_pattern.binding, (var, field_ty_id));
+            let is_wide = crate::types::is_wide_type(field_ty_id, self.arena());
+
+            // Load the field value
+            if inline_single_field {
+                // For single non-wide field errors, the payload is the value directly
+                let converted = self.convert_field_value(payload, field_ty_id);
+                let var = self.builder.declare_var(converted.ty);
+                self.builder.def_var(var, converted.value);
+                arm_variables.insert(field_pattern.binding, (var, field_ty_id));
+            } else if is_wide {
+                // Wide (i128) field in multi-field or single-wide-field error
+                let field_offset = field_byte_offsets[field_idx];
+                let low =
+                    self.builder
+                        .ins()
+                        .load(types::I64, MemFlags::new(), payload, field_offset);
+                let high =
+                    self.builder
+                        .ins()
+                        .load(types::I64, MemFlags::new(), payload, field_offset + 8);
+                let i128_val = super::structs::reconstruct_i128(self.builder, low, high);
+                let var = self.builder.declare_var(types::I128);
+                self.builder.def_var(var, i128_val);
+                arm_variables.insert(field_pattern.binding, (var, field_ty_id));
+            } else {
+                // Non-wide field in multi-field error, payload is a pointer to field data
+                let field_offset = field_byte_offsets[field_idx];
+                let raw_value =
+                    self.builder
+                        .ins()
+                        .load(types::I64, MemFlags::new(), payload, field_offset);
+                let converted = self.convert_field_value(raw_value, field_ty_id);
+                let var = self.builder.declare_var(converted.ty);
+                self.builder.def_var(var, converted.value);
+                arm_variables.insert(field_pattern.binding, (var, field_ty_id));
+            }
         }
 
         Ok(Some(is_this_error))

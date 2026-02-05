@@ -174,9 +174,67 @@ pub(crate) fn convert_to_i64_for_storage(
         types::I16 => builder.ins().uextend(types::I64, value.value),
         types::I32 => builder.ins().uextend(types::I64, value.value),
         types::I64 => value.value,
-        // i128 should not reach here - callers must use store_field_value instead
+        // i128 should not reach here - callers must use store_field_value,
+        // split_i128_for_storage, or store_i128_to_stack instead
         types::I128 => panic!("i128 must use store_field_value for 2-slot storage"),
         _ => value.value,
+    }
+}
+
+/// Split an i128 value into (low, high) i64 halves.
+/// Used for fallible returns and stack storage of wide types.
+pub(crate) fn split_i128_for_storage(
+    builder: &mut FunctionBuilder,
+    value: Value,
+) -> (Value, Value) {
+    let low = builder.ins().ireduce(types::I64, value);
+    let sixty_four_i64 = builder.ins().iconst(types::I64, 64);
+    let sixty_four = builder.ins().uextend(types::I128, sixty_four_i64);
+    let shifted = builder.ins().ushr(value, sixty_four);
+    let high = builder.ins().ireduce(types::I64, shifted);
+    (low, high)
+}
+
+/// Reconstruct an i128 from (low, high) i64 halves.
+/// Reverse of `split_i128_for_storage`.
+pub(crate) fn reconstruct_i128(builder: &mut FunctionBuilder, low: Value, high: Value) -> Value {
+    let low_ext = builder.ins().uextend(types::I128, low);
+    let high_ext = builder.ins().uextend(types::I128, high);
+    let sixty_four_i64 = builder.ins().iconst(types::I64, 64);
+    let sixty_four = builder.ins().uextend(types::I128, sixty_four_i64);
+    let high_shifted = builder.ins().ishl(high_ext, sixty_four);
+    builder.ins().bor(high_shifted, low_ext)
+}
+
+/// Store an i128 value to a stack slot at the given offset (uses 16 bytes: 2 x 8-byte slots).
+pub(crate) fn store_i128_to_stack(
+    builder: &mut FunctionBuilder,
+    value: Value,
+    slot: codegen::ir::StackSlot,
+    offset: i32,
+) {
+    let (low, high) = split_i128_for_storage(builder, value);
+    builder.ins().stack_store(low, slot, offset);
+    builder.ins().stack_store(high, slot, offset + 8);
+}
+
+/// Store a field value to a stack slot, handling i128 which needs 2 x 8-byte slots.
+/// For i128: stores low 64 bits at `offset`, high 64 bits at `offset + 8`.
+/// For all other types: stores via convert_to_i64_for_storage at `offset`.
+/// Returns the number of bytes consumed (8 for normal types, 16 for i128).
+pub(crate) fn store_value_to_stack(
+    builder: &mut FunctionBuilder,
+    value: &CompiledValue,
+    slot: codegen::ir::StackSlot,
+    offset: i32,
+) -> i32 {
+    if value.ty == types::I128 {
+        store_i128_to_stack(builder, value.value, slot, offset);
+        16
+    } else {
+        let store_val = convert_to_i64_for_storage(builder, value);
+        builder.ins().stack_store(store_val, slot, offset);
+        8
     }
 }
 

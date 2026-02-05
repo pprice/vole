@@ -324,10 +324,22 @@ impl Cg<'_, '_, '_> {
                 if rc_old.is_some() && value.is_borrowed() {
                     self.emit_rc_inc_for_type(value.value, field_type_id)?;
                 }
-                let store_value = convert_to_i64_for_storage(self.builder, &value);
-                self.builder
-                    .ins()
-                    .store(MemFlags::new(), store_value, obj.value, offset);
+                if value.ty == types::I128 {
+                    // i128 needs 2 x 8-byte stores (low then high)
+                    let (low, high) =
+                        super::helpers::split_i128_for_storage(self.builder, value.value);
+                    self.builder
+                        .ins()
+                        .store(MemFlags::new(), low, obj.value, offset);
+                    self.builder
+                        .ins()
+                        .store(MemFlags::new(), high, obj.value, offset + 8);
+                } else {
+                    let store_value = convert_to_i64_for_storage(self.builder, &value);
+                    self.builder
+                        .ins()
+                        .store(MemFlags::new(), store_value, obj.value, offset);
+                }
                 if let Some(old_val) = rc_old {
                     self.emit_rc_dec_for_type(old_val, field_type_id)?;
                 }

@@ -2,7 +2,7 @@ use cranelift::prelude::{Signature, Type as CraneliftType, types};
 use smallvec::{SmallVec, smallvec};
 
 use super::Compiler;
-use crate::types::type_id_to_cranelift;
+use crate::types::{is_wide_fallible, type_id_to_cranelift};
 use vole_identity::{FunctionId, MethodId};
 use vole_sema::type_arena::TypeId;
 
@@ -79,6 +79,13 @@ impl Compiler<'_> {
         if let Some(ret_type_id) = return_type_id
             && arena_ref.unwrap_fallible(ret_type_id).is_some()
         {
+            if is_wide_fallible(ret_type_id, arena_ref) {
+                // Wide fallible (i128 success): (tag: i64, low: i64, high: i64)
+                return self.jit.create_signature_multi_return(
+                    &cranelift_params,
+                    &[types::I64, types::I64, types::I64],
+                );
+            }
             // Fallible returns: (tag: i64, payload: i64)
             // We use i64 for both to have a uniform representation that works
             // for both success values and error pointers.

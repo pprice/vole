@@ -13,7 +13,7 @@ use vole_sema::type_arena::{TypeArena, TypeId};
 use super::RuntimeFn;
 use super::compiler::common::{FunctionCompileConfig, compile_function_inner_with_params};
 use super::context::Cg;
-use super::types::CompiledValue;
+use super::types::{CompiledValue, is_wide_fallible};
 use crate::errors::{CodegenError, CodegenResult};
 
 /// Information about a captured variable for lambda compilation
@@ -98,7 +98,12 @@ impl Cg<'_, '_, '_> {
             sig.params.push(AbiParam::new(param_ty));
         }
         // For fallible returns, use multi-value return (tag: i64, payload: i64)
-        if self.arena().unwrap_fallible(return_type_id).is_some() {
+        // For wide fallible (i128 success), use (tag: i64, low: i64, high: i64)
+        if is_wide_fallible(return_type_id, self.arena()) {
+            sig.returns.push(AbiParam::new(types::I64)); // tag
+            sig.returns.push(AbiParam::new(types::I64)); // low
+            sig.returns.push(AbiParam::new(types::I64)); // high
+        } else if self.arena().unwrap_fallible(return_type_id).is_some() {
             sig.returns.push(AbiParam::new(types::I64)); // tag
             sig.returns.push(AbiParam::new(types::I64)); // payload
         } else {
@@ -198,7 +203,12 @@ impl Cg<'_, '_, '_> {
             sig.params.push(AbiParam::new(param_ty));
         }
         // For fallible returns, use multi-value return (tag: i64, payload: i64)
-        if self.arena().unwrap_fallible(return_type_id).is_some() {
+        // For wide fallible (i128 success), use (tag: i64, low: i64, high: i64)
+        if is_wide_fallible(return_type_id, self.arena()) {
+            sig.returns.push(AbiParam::new(types::I64)); // tag
+            sig.returns.push(AbiParam::new(types::I64)); // low
+            sig.returns.push(AbiParam::new(types::I64)); // high
+        } else if self.arena().unwrap_fallible(return_type_id).is_some() {
             sig.returns.push(AbiParam::new(types::I64)); // tag
             sig.returns.push(AbiParam::new(types::I64)); // payload
         } else {
