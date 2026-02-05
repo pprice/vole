@@ -1352,6 +1352,21 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Ok(result)
     }
 
+    /// Invalidate value caches when entering a control flow branch.
+    ///
+    /// The `field_cache` and `call_cache` store Cranelift SSA `Value`s that are
+    /// defined in a particular basic block.  When the builder switches to a
+    /// sibling block (e.g., the next arm of a `when`/`match`/`if` expression),
+    /// values cached from a previous arm do **not** dominate the new block,
+    /// so reusing them would produce a Cranelift verifier error
+    /// ("uses value from non-dominating inst").
+    ///
+    /// Call this at the start of each arm body in any branching construct.
+    pub fn invalidate_value_caches(&mut self) {
+        self.field_cache.clear();
+        self.call_cache.clear();
+    }
+
     /// Call a runtime function that returns void
     pub fn call_runtime_void(&mut self, runtime: RuntimeFn, args: &[Value]) -> CodegenResult<()> {
         let func_ref = self.runtime_func_ref(runtime)?;

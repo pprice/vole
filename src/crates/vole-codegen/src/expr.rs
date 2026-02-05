@@ -1392,6 +1392,7 @@ impl Cg<'_, '_, '_> {
             let next_block = arm_blocks.get(i + 1).copied().unwrap_or(trap_block);
 
             self.builder.switch_to_block(arm_block);
+            self.invalidate_value_caches();
 
             let mut arm_variables = self.vars.clone();
             // Track the effective arm block (may change for conditional extraction)
@@ -1687,6 +1688,7 @@ impl Cg<'_, '_, '_> {
         self.builder.ins().trap(TrapCode::unwrap_user(1));
 
         self.switch_and_seal(merge_block);
+        self.invalidate_value_caches();
 
         // Clean up fallible scrutinee payload.
         // Fallible structs are stack-allocated (tag + payload) and never RC-tracked,
@@ -1765,6 +1767,7 @@ impl Cg<'_, '_, '_> {
         for (i, arm) in match_expr.arms.iter().enumerate() {
             self.builder.switch_to_block(body_blocks[i]);
             self.builder.seal_block(body_blocks[i]);
+            self.invalidate_value_caches();
 
             let body_val = self.expr(&arm.body)?;
 
@@ -1781,6 +1784,7 @@ impl Cg<'_, '_, '_> {
         }
 
         self.switch_and_seal(merge_block);
+        self.invalidate_value_caches();
 
         if !is_void {
             let result = self.builder.block_params(merge_block)[0];
@@ -2198,6 +2202,7 @@ impl Cg<'_, '_, '_> {
 
         // Compile then branch
         self.switch_and_seal(then_block);
+        self.invalidate_value_caches();
         let then_result = self.expr(&if_expr.then_branch)?;
         if !is_void {
             if result_needs_rc && then_result.is_borrowed() {
@@ -2212,6 +2217,7 @@ impl Cg<'_, '_, '_> {
 
         // Compile else branch
         self.switch_and_seal(else_block);
+        self.invalidate_value_caches();
         let else_result = if let Some(ref else_branch) = if_expr.else_branch {
             self.expr(else_branch)?
         } else {
@@ -2231,6 +2237,7 @@ impl Cg<'_, '_, '_> {
 
         // Continue in merge block
         self.switch_and_seal(merge_block);
+        self.invalidate_value_caches();
 
         if !is_void {
             let result = self.builder.block_params(merge_block)[0];
@@ -2435,6 +2442,7 @@ impl Cg<'_, '_, '_> {
         // Compile body blocks
         for (i, arm) in when_expr.arms.iter().enumerate() {
             self.switch_and_seal(body_blocks[i]);
+            self.invalidate_value_caches();
 
             let body_result = self.expr(&arm.body)?;
 
@@ -2456,6 +2464,7 @@ impl Cg<'_, '_, '_> {
 
         // Continue in merge block
         self.switch_and_seal(merge_block);
+        self.invalidate_value_caches();
 
         if !is_void {
             let result = self.builder.block_params(merge_block)[0];

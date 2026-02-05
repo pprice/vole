@@ -1,0 +1,107 @@
+// Test: Field cache values don't leak across branch arms.
+//
+// When a generic class field (stored as i64, narrowed via ireduce) is accessed
+// in one arm of a when/match, the cached Cranelift SSA Value must not be reused
+// in sibling arms (which are in non-dominating basic blocks).
+//
+// The bug triggers when:
+// 1. A class has a generic type T instantiated smaller than i64 (e.g. i32)
+// 2. A method accesses self.field (goes through InstanceGetField -> ireduce)
+// 3. The same field is accessed in multiple arms of a branching expression
+// 4. The branch uses block-based compilation (not the 2-arm select optimization)
+
+class Container<T> {
+    value: T,
+    extra: i32,
+
+    // 3-arm when: bypasses the 2-arm select optimization, forces block-based compilation.
+    // Each arm accesses self.value which goes through get_field_cached -> ireduce.
+    func pick_when(a: bool, b: bool) -> T {
+        return when {
+            a => self.value
+            b => self.value
+            _ => self.value
+        }
+    }
+
+    // Method call in body makes the arm non-selectable, forcing block-based when.
+    func get_value() -> T {
+        return self.value
+    }
+
+    func pick_via_method(flag: bool) -> T {
+        return when {
+            flag => self.get_value()
+            _ => self.get_value()
+        }
+    }
+
+    // Match on bool with field access in arms.
+    func pick_match(flag: bool) -> T {
+        return match flag {
+            true => self.value
+            _ => self.value
+        }
+    }
+
+    // If statement with field access in both branches.
+    // The field_cache must be cleared when entering then/else blocks.
+    func pick_if(flag: bool) -> T {
+        if flag {
+            return self.value
+        } else {
+            return self.value
+        }
+    }
+
+    // Nested: match containing when.
+    func pick_nested(flag: bool, other: bool) -> T {
+        return match flag {
+            true => when {
+                other => self.value
+                _ => self.value
+            }
+            _ => self.value
+        }
+    }
+}
+
+tests {
+    test "when 3-arm field cache" {
+        let c = Container<i32> { value: 42_i32, extra: 0_i32 }
+        assert(c.pick_when(true, false) == 42_i32)
+        assert(c.pick_when(false, true) == 42_i32)
+        assert(c.pick_when(false, false) == 42_i32)
+    }
+
+    test "when via method call" {
+        let c = Container<i32> { value: 99_i32, extra: 0_i32 }
+        assert(c.pick_via_method(true) == 99_i32)
+        assert(c.pick_via_method(false) == 99_i32)
+    }
+
+    test "match field cache" {
+        let c = Container<i32> { value: 7_i32, extra: 0_i32 }
+        assert(c.pick_match(true) == 7_i32)
+        assert(c.pick_match(false) == 7_i32)
+    }
+
+    test "if expression field cache" {
+        let c = Container<i32> { value: 15_i32, extra: 0_i32 }
+        assert(c.pick_if(true) == 15_i32)
+        assert(c.pick_if(false) == 15_i32)
+    }
+
+    test "nested match/when field cache" {
+        let c = Container<i32> { value: 33_i32, extra: 0_i32 }
+        assert(c.pick_nested(true, true) == 33_i32)
+        assert(c.pick_nested(true, false) == 33_i32)
+        assert(c.pick_nested(false, true) == 33_i32)
+    }
+
+    test "bool type parameter" {
+        let c = Container<bool> { value: true, extra: 0_i32 }
+        assert(c.pick_when(true, false) == true)
+        assert(c.pick_when(false, true) == true)
+    }
+}
