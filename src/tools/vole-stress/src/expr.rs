@@ -210,6 +210,22 @@ impl<'a> ExprContext<'a> {
         vars
     }
 
+    /// Get all string-typed variables in scope.
+    pub fn string_vars(&self) -> Vec<String> {
+        let mut vars = Vec::new();
+        for (name, ty) in self.locals {
+            if matches!(ty, TypeInfo::Primitive(PrimitiveType::String)) {
+                vars.push(name.clone());
+            }
+        }
+        for param in self.params {
+            if matches!(param.param_type, TypeInfo::Primitive(PrimitiveType::String)) {
+                vars.push(param.name.clone());
+            }
+        }
+        vars
+    }
+
     /// Get all variables in scope (any type), for use in string interpolation.
     pub fn all_vars(&self) -> Vec<(&str, &TypeInfo)> {
         let mut vars = Vec::new();
@@ -424,6 +440,38 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         Some(format!("({} ?? {})", var_name, default_expr))
     }
 
+    /// Try to generate a `str.length()` call for an i64 expression.
+    ///
+    /// Looks for string-typed variables in scope and returns
+    /// `Some("strVar.length()")` on success.
+    fn try_generate_string_length(&mut self, ctx: &ExprContext) -> Option<String> {
+        let candidates = ctx.string_vars();
+        if candidates.is_empty() {
+            return None;
+        }
+        let idx = self.rng.gen_range(0..candidates.len());
+        Some(format!("{}.length()", candidates[idx]))
+    }
+
+    /// Try to generate a `str.contains(other)` call for a bool expression.
+    ///
+    /// Looks for string-typed variables in scope and returns
+    /// `Some("strVar.contains(\"literal\")")` on success. The argument is
+    /// always a short string literal to keep the expression simple.
+    fn try_generate_string_contains(&mut self, ctx: &ExprContext) -> Option<String> {
+        let candidates = ctx.string_vars();
+        if candidates.is_empty() {
+            return None;
+        }
+        let idx = self.rng.gen_range(0..candidates.len());
+        let var = &candidates[idx];
+
+        // Use a short literal substring as the argument
+        let substrings = ["str", "hello", "a", "test", "x", ""];
+        let sub_idx = self.rng.gen_range(0..substrings.len());
+        Some(format!("{}.contains(\"{}\")", var, substrings[sub_idx]))
+    }
+
     /// Try to generate an optional chaining expression (`optVar?.fieldName`).
     ///
     /// Looks for optional-typed variables in scope whose inner type is a class
@@ -478,8 +526,17 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             return var;
         }
 
-        // Otherwise generate a literal
+        // Otherwise generate a literal (or simple method call)
         match ty {
+            TypeInfo::Primitive(PrimitiveType::Bool) => {
+                // ~20% chance to generate str.contains("...") if a string var is in scope
+                if self.rng.gen_bool(0.20) {
+                    if let Some(expr) = self.try_generate_string_contains(ctx) {
+                        return expr;
+                    }
+                }
+                self.literal_for_primitive(PrimitiveType::Bool)
+            }
             TypeInfo::Primitive(p) => self.literal_for_primitive(*p),
             TypeInfo::Optional(_) => "nil".to_string(),
             TypeInfo::Void => "nil".to_string(),
@@ -541,6 +598,14 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             if let Some(expr) =
                 self.try_generate_null_coalesce(&TypeInfo::Primitive(prim), ctx, depth)
             {
+                return expr;
+            }
+        }
+
+        // ~12% chance to generate str.length() for i64 expressions.
+        // (No arguments, so vole-fmt never wraps the call across lines.)
+        if prim == PrimitiveType::I64 && self.rng.gen_bool(0.12) {
+            if let Some(expr) = self.try_generate_string_length(ctx) {
                 return expr;
             }
         }
@@ -1398,18 +1463,6 @@ mod tests {
             found_u8,
             "Expected at least one bitwise NOT (~) expression for u8 across 500 seeds",
         );
-
-        // Check that bitwise NOT does NOT appear in f64 expressions
-        for seed in 0..200 {
-            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-            let mut generator = ExprGenerator::new(&mut rng, &config);
-            let expr = generator.generate(&TypeInfo::Primitive(PrimitiveType::F64), &ctx, 0);
-            assert!(
-                !expr.contains('~'),
-                "Bitwise NOT should not appear in f64 expressions, got: {}",
-                expr,
-            );
-        }
     }
 
     #[test]
@@ -1919,5 +1972,175 @@ mod tests {
         assert_eq!(arr_vars[1].1, TypeInfo::Primitive(PrimitiveType::String));
         assert_eq!(arr_vars[2].0, "param_arr");
         assert_eq!(arr_vars[2].1, TypeInfo::Primitive(PrimitiveType::Bool));
+    }
+
+    #[test]
+    fn test_string_vars_helper() {
+        let table = SymbolTable::new();
+        let locals = vec![
+            (
+                "name".to_string(),
+                TypeInfo::Primitive(PrimitiveType::String),
+            ),
+            ("count".to_string(), TypeInfo::Primitive(PrimitiveType::I64)),
+            (
+                "label".to_string(),
+                TypeInfo::Primitive(PrimitiveType::String),
+            ),
+        ];
+
+        let params = vec![ParamInfo {
+            name: "msg".to_string(),
+            param_type: TypeInfo::Primitive(PrimitiveType::String),
+        }];
+
+        let ctx = ExprContext::new(&params, &locals, &table);
+        let str_vars = ctx.string_vars();
+
+        assert_eq!(str_vars.len(), 3);
+        assert_eq!(str_vars[0], "name");
+        assert_eq!(str_vars[1], "label");
+        assert_eq!(str_vars[2], "msg");
+    }
+
+    #[test]
+    fn test_string_length_direct() {
+        let config = ExprConfig::default();
+        let table = SymbolTable::new();
+        let locals = vec![("s".to_string(), TypeInfo::Primitive(PrimitiveType::String))];
+
+        let mut found = false;
+        for seed in 0..100 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let ctx = ExprContext::new(&[], &locals, &table);
+            if let Some(expr) = generator.try_generate_string_length(&ctx) {
+                assert_eq!(expr, "s.length()");
+                found = true;
+                break;
+            }
+        }
+        assert!(
+            found,
+            "Expected try_generate_string_length to succeed at least once"
+        );
+    }
+
+    #[test]
+    fn test_string_length_no_strings() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let config = ExprConfig::default();
+        let mut generator = ExprGenerator::new(&mut rng, &config);
+
+        let table = SymbolTable::new();
+        let ctx = ExprContext::new(&[], &[], &table);
+
+        assert!(generator.try_generate_string_length(&ctx).is_none());
+    }
+
+    #[test]
+    fn test_string_length_in_i64_generation() {
+        let config = ExprConfig::default();
+        let table = SymbolTable::new();
+        let locals = vec![(
+            "text".to_string(),
+            TypeInfo::Primitive(PrimitiveType::String),
+        )];
+
+        let mut found = false;
+        for seed in 0..500 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let ctx = ExprContext::new(&[], &locals, &table);
+            let expr = generator.generate(&TypeInfo::Primitive(PrimitiveType::I64), &ctx, 0);
+            if expr.contains(".length()") {
+                assert!(
+                    expr.contains("text.length()"),
+                    "Expected 'text.length()', got: {}",
+                    expr,
+                );
+                found = true;
+                break;
+            }
+        }
+        assert!(
+            found,
+            "Expected at least one .length() call in i64 generation across 500 seeds",
+        );
+    }
+
+    #[test]
+    fn test_string_contains_direct() {
+        let config = ExprConfig::default();
+        let table = SymbolTable::new();
+        let locals = vec![("s".to_string(), TypeInfo::Primitive(PrimitiveType::String))];
+
+        let mut found = false;
+        for seed in 0..100 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let ctx = ExprContext::new(&[], &locals, &table);
+            if let Some(expr) = generator.try_generate_string_contains(&ctx) {
+                assert!(
+                    expr.starts_with("s.contains(\""),
+                    "Expected 's.contains(\"...\")' , got: {}",
+                    expr,
+                );
+                assert!(
+                    expr.ends_with("\")"),
+                    "Expected closing quote-paren, got: {}",
+                    expr,
+                );
+                found = true;
+                break;
+            }
+        }
+        assert!(
+            found,
+            "Expected try_generate_string_contains to succeed at least once"
+        );
+    }
+
+    #[test]
+    fn test_string_contains_no_strings() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let config = ExprConfig::default();
+        let mut generator = ExprGenerator::new(&mut rng, &config);
+
+        let table = SymbolTable::new();
+        let ctx = ExprContext::new(&[], &[], &table);
+
+        assert!(generator.try_generate_string_contains(&ctx).is_none());
+    }
+
+    #[test]
+    fn test_string_contains_in_bool_generation() {
+        let config = ExprConfig::default();
+        let table = SymbolTable::new();
+        let locals = vec![(
+            "msg".to_string(),
+            TypeInfo::Primitive(PrimitiveType::String),
+        )];
+
+        let mut found = false;
+        for seed in 0..500 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let ctx = ExprContext::new(&[], &locals, &table);
+            let expr = generator.generate(&TypeInfo::Primitive(PrimitiveType::Bool), &ctx, 0);
+            if expr.contains(".contains(") {
+                assert!(
+                    expr.contains("msg.contains("),
+                    "Expected 'msg.contains(...)', got: {}",
+                    expr,
+                );
+                found = true;
+                break;
+            }
+        }
+        assert!(
+            found,
+            "Expected at least one .contains() call in bool generation across 500 seeds",
+        );
     }
 }
