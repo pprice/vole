@@ -38,6 +38,10 @@ pub struct StmtConfig {
     pub tuple_probability: f64,
     /// Probability of generating a fixed-size array let-binding with destructuring.
     pub fixed_array_probability: f64,
+    /// Probability of generating a struct let-binding with destructuring.
+    /// When a struct-typed variable is in scope, this probability controls
+    /// whether we destructure it into its field bindings.
+    pub struct_destructure_probability: f64,
     /// Probability of generating a discard expression (_ = expr) statement.
     pub discard_probability: f64,
     /// Probability of generating an early return statement in function bodies.
@@ -66,6 +70,7 @@ impl Default for StmtConfig {
             try_probability: 0.12,
             tuple_probability: 0.10,
             fixed_array_probability: 0.10,
+            struct_destructure_probability: 0.12,
             discard_probability: 0.05,
             early_return_probability: 0.15,
             else_if_probability: 0.3,
@@ -401,6 +406,13 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~10% chance to generate a struct-typed local for struct usage patterns
+        if self.rng.gen_bool(0.10) {
+            if let Some(stmt) = self.try_generate_struct_let(ctx) {
+                return stmt;
+            }
+        }
+
         // ~12% chance to generate an array-typed local for array indexing
         if self.rng.gen_bool(0.12) {
             return self.generate_array_let(ctx);
@@ -414,6 +426,17 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // Fixed-size array let-binding with destructuring
         if self.rng.gen_bool(self.config.fixed_array_probability) {
             return self.generate_fixed_array_let(ctx);
+        }
+
+        // Struct destructuring: if we have a struct-typed variable in scope,
+        // destructure it into its fields
+        if self
+            .rng
+            .gen_bool(self.config.struct_destructure_probability)
+        {
+            if let Some(stmt) = self.try_generate_struct_destructure(ctx) {
+                return stmt;
+            }
         }
 
         // ~10% chance to generate a widening let statement
@@ -1368,6 +1391,138 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
 
         Some(format!("let {} = {}", name, expr))
+    }
+
+    /// Try to generate a let statement that constructs a struct instance.
+    ///
+    /// Returns `None` if no suitable struct is available in the current module.
+    /// Structs are value types with primitive fields, making them simpler than classes.
+    fn try_generate_struct_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let module_id = ctx.module_id?;
+        let module = ctx.table.get_module(module_id)?;
+
+        // Collect structs from this module
+        let candidates: Vec<_> = module
+            .structs()
+            .filter_map(|sym| {
+                if let SymbolKind::Struct(ref info) = sym.kind {
+                    Some((sym.id, sym.name.clone(), info.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..candidates.len());
+        let (sym_id, struct_name, struct_info) = &candidates[idx];
+
+        let name = ctx.new_local_name();
+        let ty = TypeInfo::Struct(module_id, *sym_id);
+
+        ctx.add_local(name.clone(), ty, false);
+
+        // Generate field values for construction
+        let fields = self.generate_field_values(&struct_info.fields, ctx);
+
+        Some(format!("let {} = {} {{ {} }}", name, struct_name, fields))
+    }
+
+    /// Try to generate a struct destructuring statement.
+    ///
+    /// Looks for struct-typed variables in scope and generates destructuring:
+    /// ```vole
+    /// let { field1, field2 } = structVar
+    /// ```
+    /// Adds each destructured field as a new local variable with its field type.
+    ///
+    /// Returns `None` if no struct-typed variable is in scope.
+    fn try_generate_struct_destructure(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Ensure we're in a module context
+        let _ = ctx.module_id?;
+
+        // Find struct-typed variables in locals
+        let struct_locals: Vec<_> = ctx
+            .locals
+            .iter()
+            .filter_map(|(name, ty, _)| {
+                if let TypeInfo::Struct(mod_id, sym_id) = ty {
+                    Some((name.clone(), *mod_id, *sym_id))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Also check params for struct types
+        let struct_params: Vec<_> = ctx
+            .params
+            .iter()
+            .filter_map(|p| {
+                if let TypeInfo::Struct(mod_id, sym_id) = &p.param_type {
+                    Some((p.name.clone(), *mod_id, *sym_id))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let all_structs: Vec<_> = struct_locals.into_iter().chain(struct_params).collect();
+
+        if all_structs.is_empty() {
+            return None;
+        }
+
+        // Pick a random struct-typed variable
+        let idx = self.rng.gen_range(0..all_structs.len());
+        let (var_name, struct_mod_id, struct_sym_id) = &all_structs[idx];
+
+        // Get the struct info to find field names and types
+        let symbol = ctx.table.get_symbol(*struct_mod_id, *struct_sym_id)?;
+        let struct_info = match &symbol.kind {
+            SymbolKind::Struct(info) => info,
+            _ => return None,
+        };
+
+        if struct_info.fields.is_empty() {
+            return None;
+        }
+
+        // Decide whether to do full or partial destructuring
+        let do_partial = self.rng.gen_bool(0.3);
+        let fields_to_destruct = if do_partial && struct_info.fields.len() > 1 {
+            // Partial: pick a random subset (at least 1 field)
+            let count = self.rng.gen_range(1..struct_info.fields.len());
+            let mut indices: Vec<usize> = (0..struct_info.fields.len()).collect();
+            // Shuffle and take first `count`
+            for i in (1..indices.len()).rev() {
+                let j = self.rng.gen_range(0..=i);
+                indices.swap(i, j);
+            }
+            indices.truncate(count);
+            indices.sort(); // Keep original order for readability
+            indices
+        } else {
+            // Full destructuring
+            (0..struct_info.fields.len()).collect()
+        };
+
+        // Build the pattern and collect new locals.
+        // We always use the renamed syntax (field: binding) to avoid name collisions
+        // with other variables in scope.
+        let mut pattern_parts = Vec::new();
+        for &field_idx in &fields_to_destruct {
+            let field = &struct_info.fields[field_idx];
+            let new_name = ctx.new_local_name();
+            pattern_parts.push(format!("{}: {}", field.name, new_name));
+            ctx.add_local(new_name, field.field_type.clone(), false);
+        }
+
+        let pattern = format!("{{ {} }}", pattern_parts.join(", "));
+        Some(format!("let {} = {}", pattern, var_name))
     }
 
     /// Generate a static method call on a class.

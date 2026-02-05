@@ -493,23 +493,27 @@ impl<'a, R: Rng> EntrypointContext<'a, R> {
                 }
             }
             TypeInfo::Class(mod_id, sym_id) => {
-                // For class types, construct an instance
-                if let Some(symbol) = self.table.get_symbol(*mod_id, *sym_id) {
-                    if let SymbolKind::Class(ref class_info) = symbol.kind {
-                        if class_info.type_params.is_empty() {
-                            let fields = self.generate_field_values(&class_info.fields);
-                            return format!("{} {{ {} }}", symbol.name, fields);
+                // For class types, construct an instance with module-qualified name
+                if let Some(module) = self.table.get_module(*mod_id) {
+                    if let Some(symbol) = module.get_symbol(*sym_id) {
+                        if let SymbolKind::Class(ref class_info) = symbol.kind {
+                            if class_info.type_params.is_empty() {
+                                let fields = self.generate_field_values(&class_info.fields);
+                                return format!("{}.{} {{ {} }}", module.name, symbol.name, fields);
+                            }
                         }
                     }
                 }
                 "nil".to_string()
             }
             TypeInfo::Struct(mod_id, sym_id) => {
-                // For struct types, construct an instance
-                if let Some(symbol) = self.table.get_symbol(*mod_id, *sym_id) {
-                    if let SymbolKind::Struct(ref struct_info) = symbol.kind {
-                        let fields = self.generate_field_values(&struct_info.fields);
-                        return format!("{} {{ {} }}", symbol.name, fields);
+                // For struct types, construct an instance with module-qualified name
+                if let Some(module) = self.table.get_module(*mod_id) {
+                    if let Some(symbol) = module.get_symbol(*sym_id) {
+                        if let SymbolKind::Struct(ref struct_info) = symbol.kind {
+                            let fields = self.generate_field_values(&struct_info.fields);
+                            return format!("{}.{} {{ {} }}", module.name, symbol.name, fields);
+                        }
                     }
                 }
                 "nil".to_string()

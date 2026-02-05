@@ -318,6 +318,25 @@ impl<'a> ExprContext<'a> {
         vars
     }
 
+    /// Get all struct-typed variables in scope.
+    ///
+    /// Returns `(name, mod_id, sym_id)` triples for variables of struct type.
+    /// Structs are value types and never generic.
+    pub fn struct_vars(&self) -> Vec<(String, ModuleId, SymbolId)> {
+        let mut vars = Vec::new();
+        for (name, ty) in self.locals {
+            if let TypeInfo::Struct(mod_id, sym_id) = ty {
+                vars.push((name.clone(), *mod_id, *sym_id));
+            }
+        }
+        for param in self.params {
+            if let TypeInfo::Struct(mod_id, sym_id) = &param.param_type {
+                vars.push((param.name.clone(), *mod_id, *sym_id));
+            }
+        }
+        vars
+    }
+
     /// Get all type-param-typed variables in scope that have interface constraints.
     ///
     /// Returns `(var_name, type_param_name, constraints)` tuples for variables
@@ -506,6 +525,8 @@ fn types_compatible(actual: &TypeInfo, expected: &TypeInfo) -> bool {
                     .zip(e.iter())
                     .all(|(ai, ei)| types_compatible(ai, ei))
         }
+        (TypeInfo::Struct(ma, sa), TypeInfo::Struct(me, se)) => ma == me && sa == se,
+        (TypeInfo::Class(ma, sa), TypeInfo::Class(me, se)) => ma == me && sa == se,
         _ => false,
     }
 }
@@ -589,6 +610,10 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                 // For class types, try method chaining if there's a matching variable
                 self.generate_class_expr(*mod_id, *sym_id, ctx)
             }
+            TypeInfo::Struct(mod_id, sym_id) => {
+                // For struct types, try to find an existing variable or construct
+                self.generate_struct_expr(*mod_id, *sym_id, ctx)
+            }
             _ => self.generate_simple(ty, ctx),
         }
     }
@@ -653,6 +678,66 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
 
         // No chaining, just return the variable
         var_name.clone()
+    }
+
+    /// Generate an expression of a struct type.
+    ///
+    /// Tries to find an existing variable of this struct type, or falls back
+    /// to constructing a new struct instance. Structs are value types and
+    /// can be freely copied, so returning an existing variable is safe.
+    fn generate_struct_expr(
+        &mut self,
+        mod_id: ModuleId,
+        sym_id: SymbolId,
+        ctx: &ExprContext,
+    ) -> String {
+        // Find variables of this struct type
+        let struct_vars: Vec<_> = ctx
+            .struct_vars()
+            .into_iter()
+            .filter(|(_, m, s)| *m == mod_id && *s == sym_id)
+            .collect();
+
+        // 60% chance to use an existing variable if one exists
+        if !struct_vars.is_empty() && self.rng.gen_bool(0.6) {
+            let var_idx = self.rng.gen_range(0..struct_vars.len());
+            let (var_name, _, _) = &struct_vars[var_idx];
+            return var_name.clone();
+        }
+
+        // Fall back to constructing a new struct
+        self.generate_struct_construction(mod_id, sym_id, ctx)
+    }
+
+    /// Generate a struct construction expression.
+    ///
+    /// Constructs an instance of the struct with all fields initialized.
+    fn generate_struct_construction(
+        &mut self,
+        mod_id: ModuleId,
+        sym_id: SymbolId,
+        ctx: &ExprContext,
+    ) -> String {
+        let Some(symbol) = ctx.table.get_symbol(mod_id, sym_id) else {
+            return "nil".to_string();
+        };
+        let SymbolKind::Struct(ref struct_info) = symbol.kind else {
+            return "nil".to_string();
+        };
+
+        let struct_name = symbol.name.clone();
+        let fields = struct_info.fields.clone();
+
+        // Generate field values
+        let field_values: Vec<String> = fields
+            .iter()
+            .map(|f| {
+                let value = self.generate_simple(&f.field_type, ctx);
+                format!("{}: {}", f.name, value)
+            })
+            .collect();
+
+        format!("{} {{ {} }}", struct_name, field_values.join(", "))
     }
 
     /// Try to generate an array index expression on an array-typed local.
@@ -1036,6 +1121,10 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             TypeInfo::Class(mod_id, sym_id) => {
                 // Generate a class construction expression
                 self.generate_class_construction(*mod_id, *sym_id, ctx)
+            }
+            TypeInfo::Struct(mod_id, sym_id) => {
+                // Generate a struct construction expression
+                self.generate_struct_construction(*mod_id, *sym_id, ctx)
             }
             _ => self.literal_for_primitive(PrimitiveType::I64),
         }

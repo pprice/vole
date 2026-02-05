@@ -77,6 +77,12 @@ pub struct PlanConfig {
     /// Probability (0.0-1.0) that a class field references another class type.
     /// Only applies to non-generic classes to avoid cyclic type references.
     pub nested_class_field_probability: f64,
+    /// Probability (0.0-1.0) that a function parameter uses a struct type.
+    /// Only applies to non-generic functions when structs are available in the module.
+    pub struct_param_probability: f64,
+    /// Probability (0.0-1.0) that a function returns a struct type.
+    /// Only applies to non-generic functions when structs are available in the module.
+    pub struct_return_probability: f64,
 }
 
 impl Default for PlanConfig {
@@ -109,6 +115,8 @@ impl Default for PlanConfig {
             generator_probability: 0.10,
             never_probability: 0.02,
             nested_class_field_probability: 0.20,
+            struct_param_probability: 0.10,
+            struct_return_probability: 0.10,
         }
     }
 }
@@ -519,11 +527,33 @@ fn plan_function<R: Rng>(
         rng.gen_range(config.type_params_per_function.0..=config.type_params_per_function.1);
     let type_params = plan_type_params(names, type_param_count);
 
+    // Collect available structs for potential struct params/returns
+    // Only used for non-generic functions
+    let module_structs = if type_params.is_empty() {
+        collect_module_structs(table, module_id)
+    } else {
+        vec![]
+    };
+
     let param_count = rng.gen_range(config.params_per_function.0..=config.params_per_function.1);
     let mut params = Vec::new();
 
     for _ in 0..param_count {
-        params.push(plan_param_with_type_params(rng, names, &type_params));
+        // For non-generic functions with structs available, maybe use a struct param
+        if type_params.is_empty()
+            && !module_structs.is_empty()
+            && config.struct_param_probability > 0.0
+            && rng.gen_bool(config.struct_param_probability)
+        {
+            let struct_idx = rng.gen_range(0..module_structs.len());
+            let (sym_id, _) = &module_structs[struct_idx];
+            params.push(ParamInfo {
+                name: names.next("param"),
+                param_type: TypeInfo::Struct(module_id, *sym_id),
+            });
+        } else {
+            params.push(plan_param_with_type_params(rng, names, &type_params));
+        }
     }
 
     // ~10% chance to add a function-typed parameter (only for non-generic functions)
@@ -539,6 +569,15 @@ fn plan_function<R: Rng>(
     {
         plan_fallible_return_type(rng, table, module_id, &type_params)
             .unwrap_or_else(|| plan_return_type_with_type_params(rng, &type_params))
+    } else if type_params.is_empty()
+        && !module_structs.is_empty()
+        && config.struct_return_probability > 0.0
+        && rng.gen_bool(config.struct_return_probability)
+    {
+        // Return a struct type
+        let struct_idx = rng.gen_range(0..module_structs.len());
+        let (sym_id, _) = &module_structs[struct_idx];
+        TypeInfo::Struct(module_id, *sym_id)
     } else {
         plan_return_type_with_type_params(rng, &type_params)
     };
@@ -656,6 +695,21 @@ fn plan_field<R: Rng>(rng: &mut R, names: &mut NameGen) -> FieldInfo {
         name: names.next("field"),
         field_type: TypeInfo::Primitive(PrimitiveType::random_field_type(rng)),
     }
+}
+
+/// Collect available structs from a module.
+///
+/// Returns a list of (SymbolId, struct_name) pairs for all structs in the module.
+/// Structs are value types and cannot be generic, so all structs are eligible.
+fn collect_module_structs(table: &SymbolTable, module_id: ModuleId) -> Vec<(SymbolId, String)> {
+    table
+        .get_module(module_id)
+        .map(|m| {
+            m.structs()
+                .map(|s| (s.id, s.name.clone()))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
 }
 
 /// Plan a method signature.

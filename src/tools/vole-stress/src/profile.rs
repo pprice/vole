@@ -105,6 +105,8 @@ fn minimal_profile() -> Profile {
         never_probability: 0.0,
         // No nested class fields in minimal (no classes)
         nested_class_field_probability: 0.0,
+        struct_param_probability: 0.0,
+        struct_return_probability: 0.0,
         // These won't be used since we have no classes or structs
         fields_per_struct: (0, 0),
         fields_per_class: (0, 0),
@@ -149,6 +151,8 @@ fn minimal_profile() -> Profile {
             tuple_probability: 0.0,
             // No fixed arrays in minimal
             fixed_array_probability: 0.0,
+            // No struct destructuring in minimal
+            struct_destructure_probability: 0.0,
             // No discards in minimal
             discard_probability: 0.0,
             // No early returns in minimal
@@ -228,6 +232,8 @@ fn full_profile() -> Profile {
         never_probability: 0.02,
         // ~25% of non-generic classes get a field referencing another class
         nested_class_field_probability: 0.25,
+        struct_param_probability: 0.10,
+        struct_return_probability: 0.10,
     };
 
     let emit = EmitConfig {
@@ -264,6 +270,8 @@ fn full_profile() -> Profile {
             tuple_probability: 0.12,
             // Fixed-size arrays with destructuring
             fixed_array_probability: 0.12,
+            // Struct destructuring when struct-typed variables are in scope
+            struct_destructure_probability: 0.15,
             // Discard expressions (_ = func()) to exercise syntax
             discard_probability: 0.05,
             // Early returns in function bodies (~15%)
@@ -327,6 +335,8 @@ fn deep_nesting_profile() -> Profile {
         never_probability: 0.0,
         // Some nested class fields for variety in deep nesting
         nested_class_field_probability: 0.15,
+        struct_param_probability: 0.10,
+        struct_return_probability: 0.10,
         // Minimal class/struct structure
         fields_per_struct: (0, 0),
         fields_per_class: (1, 2),
@@ -380,6 +390,8 @@ fn deep_nesting_profile() -> Profile {
             tuple_probability: 0.08,
             // Some fixed arrays for variety
             fixed_array_probability: 0.08,
+            // Some struct destructuring for variety
+            struct_destructure_probability: 0.08,
             // Some discards for variety
             discard_probability: 0.05,
             // Some early returns for variety
@@ -460,6 +472,8 @@ fn wide_types_profile() -> Profile {
         never_probability: 0.02,
         // Moderate nested class fields
         nested_class_field_probability: 0.20,
+        struct_param_probability: 0.10,
+        struct_return_probability: 0.10,
     };
 
     let emit = EmitConfig {
@@ -497,6 +511,8 @@ fn wide_types_profile() -> Profile {
             tuple_probability: 0.10,
             // Some fixed arrays
             fixed_array_probability: 0.10,
+            // Some struct destructuring
+            struct_destructure_probability: 0.10,
             // Some discards
             discard_probability: 0.05,
             // Some early returns
@@ -569,6 +585,8 @@ fn many_modules_profile() -> Profile {
         never_probability: 0.0,
         // Light nested class fields - focus on module loading
         nested_class_field_probability: 0.10,
+        struct_param_probability: 0.10,
+        struct_return_probability: 0.10,
     };
 
     let emit = EmitConfig {
@@ -606,6 +624,8 @@ fn many_modules_profile() -> Profile {
             tuple_probability: 0.0,
             // No fixed arrays - focus on module loading
             fixed_array_probability: 0.0,
+            // No struct destructuring - focus on module loading
+            struct_destructure_probability: 0.0,
             // No discards - focus on module loading
             discard_probability: 0.0,
             // No early returns - focus on module loading
@@ -690,6 +710,8 @@ fn generics_heavy_profile() -> Profile {
         // No nested class fields - focus on generics, not nested types
         // (nested class fields are only for non-generic classes)
         nested_class_field_probability: 0.0,
+        struct_param_probability: 0.0,
+        struct_return_probability: 0.0,
     };
 
     let emit = EmitConfig {
@@ -730,6 +752,8 @@ fn generics_heavy_profile() -> Profile {
             tuple_probability: 0.10,
             // Some fixed arrays
             fixed_array_probability: 0.10,
+            // Some struct destructuring
+            struct_destructure_probability: 0.10,
             // Some discards
             discard_probability: 0.05,
             // Some early returns
