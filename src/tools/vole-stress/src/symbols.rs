@@ -573,6 +573,7 @@ impl SymbolTable {
     }
 
     /// Get all interfaces across all modules.
+    #[allow(dead_code)]
     pub fn all_interfaces(&self) -> Vec<(ModuleId, &Symbol)> {
         self.modules
             .iter()

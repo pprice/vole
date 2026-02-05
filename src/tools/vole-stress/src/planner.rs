@@ -170,6 +170,11 @@ pub fn plan<R: Rng>(rng: &mut R, config: &PlanConfig) -> SymbolTable {
         );
     }
 
+    // Phase 3.5: Assign interface constraints to type parameters
+    // Now that all declarations exist, we can pick constraint interfaces from
+    // the same module for each generic class/interface/function.
+    plan_all_type_param_constraints(rng, &mut table, config);
+
     // Phase 4: Add interface implementations to classes and interface extends
     plan_interface_implementations(rng, &mut table, config);
 
@@ -1152,38 +1157,19 @@ fn plan_implement_blocks<R: Rng>(
     }
 }
 
-/// Add constraints to type parameters based on available interfaces.
-#[allow(dead_code)]
-fn plan_type_param_constraints<R: Rng>(
+/// Pick random non-generic interface constraints from the same module.
+///
+/// Returns up to `constraints_per_type_param` distinct interface references
+/// from the given module, suitable for constraining a single type parameter.
+fn pick_constraints_from_module<R: Rng>(
     rng: &mut R,
-    table: &SymbolTable,
     config: &PlanConfig,
+    local_interfaces: &[(ModuleId, SymbolId)],
 ) -> Vec<(ModuleId, SymbolId)> {
     let constraint_count =
         rng.gen_range(config.constraints_per_type_param.0..=config.constraints_per_type_param.1);
 
-    if constraint_count == 0 {
-        return vec![];
-    }
-
-    // Collect non-generic interfaces to use as constraints
-    let interfaces: Vec<(ModuleId, SymbolId)> = table
-        .all_interfaces()
-        .iter()
-        .filter_map(|(mid, s)| {
-            if let SymbolKind::Interface(ref info) = s.kind {
-                if info.type_params.is_empty() {
-                    Some((*mid, s.id))
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    if interfaces.is_empty() {
+    if constraint_count == 0 || local_interfaces.is_empty() {
         return vec![];
     }
 
@@ -1191,18 +1177,107 @@ fn plan_type_param_constraints<R: Rng>(
     let mut used_indices = std::collections::HashSet::new();
 
     for _ in 0..constraint_count {
-        if used_indices.len() >= interfaces.len() {
+        if used_indices.len() >= local_interfaces.len() {
             break;
         }
-        let mut idx = rng.gen_range(0..interfaces.len());
+        let mut idx = rng.gen_range(0..local_interfaces.len());
         while used_indices.contains(&idx) {
-            idx = (idx + 1) % interfaces.len();
+            idx = (idx + 1) % local_interfaces.len();
         }
         used_indices.insert(idx);
-        constraints.push(interfaces[idx]);
+        constraints.push(local_interfaces[idx]);
     }
 
     constraints
+}
+
+/// Assign interface constraints to type parameters on all generic declarations.
+///
+/// Runs after all module declarations exist so that every non-generic interface
+/// in a module is available as a potential constraint. Only uses interfaces from
+/// the same module to avoid cross-module reference issues.
+fn plan_all_type_param_constraints<R: Rng>(
+    rng: &mut R,
+    table: &mut SymbolTable,
+    config: &PlanConfig,
+) {
+    for module_idx in 0..table.module_count() {
+        let module_id = ModuleId(module_idx);
+
+        // Collect non-generic interfaces in this module
+        let local_interfaces: Vec<(ModuleId, SymbolId)> = table
+            .get_module(module_id)
+            .map(|m| {
+                m.interfaces()
+                    .filter_map(|s| {
+                        if let SymbolKind::Interface(ref info) = s.kind {
+                            if info.type_params.is_empty() {
+                                Some((module_id, s.id))
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        if local_interfaces.is_empty() {
+            continue;
+        }
+
+        // Collect symbol ids of generic declarations that need constraints
+        let generic_symbol_ids: Vec<SymbolId> = table
+            .get_module(module_id)
+            .map(|m| {
+                m.symbols()
+                    .filter(|s| match &s.kind {
+                        SymbolKind::Class(info) => !info.type_params.is_empty(),
+                        SymbolKind::Interface(info) => !info.type_params.is_empty(),
+                        SymbolKind::Function(info) => !info.type_params.is_empty(),
+                        _ => false,
+                    })
+                    .map(|s| s.id)
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // Assign constraints to each type parameter of each generic symbol
+        for sym_id in generic_symbol_ids {
+            // Read type param count (immutable borrow), generate constraints,
+            // then apply them (mutable borrow) -- two-phase borrow pattern.
+            let type_param_count = table
+                .get_symbol(module_id, sym_id)
+                .map(|s| match &s.kind {
+                    SymbolKind::Class(info) => info.type_params.len(),
+                    SymbolKind::Interface(info) => info.type_params.len(),
+                    SymbolKind::Function(info) => info.type_params.len(),
+                    _ => 0,
+                })
+                .unwrap_or(0);
+
+            let new_constraints: Vec<Vec<(ModuleId, SymbolId)>> = (0..type_param_count)
+                .map(|_| pick_constraints_from_module(rng, config, &local_interfaces))
+                .collect();
+
+            if let Some(module) = table.get_module_mut(module_id)
+                && let Some(symbol) = module.get_symbol_mut(sym_id)
+            {
+                let type_params = match &mut symbol.kind {
+                    SymbolKind::Class(info) => &mut info.type_params,
+                    SymbolKind::Interface(info) => &mut info.type_params,
+                    SymbolKind::Function(info) => &mut info.type_params,
+                    _ => continue,
+                };
+
+                for (tp, constraints) in type_params.iter_mut().zip(new_constraints) {
+                    tp.constraints = constraints;
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
