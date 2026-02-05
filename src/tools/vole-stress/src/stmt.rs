@@ -37,6 +37,8 @@ pub struct StmtConfig {
     pub tuple_probability: f64,
     /// Probability of generating a fixed-size array let-binding with destructuring.
     pub fixed_array_probability: f64,
+    /// Probability of generating a discard expression (_ = expr) statement.
+    pub discard_probability: f64,
 }
 
 impl Default for StmtConfig {
@@ -54,6 +56,7 @@ impl Default for StmtConfig {
             try_probability: 0.12,
             tuple_probability: 0.10,
             fixed_array_probability: 0.10,
+            discard_probability: 0.05,
         }
     }
 }
@@ -272,6 +275,13 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // ~20% chance to call a function-typed parameter if one is in scope
         if self.rng.gen_bool(0.20) {
             if let Some(stmt) = self.try_generate_fn_param_call(ctx) {
+                return stmt;
+            }
+        }
+
+        // Occasionally generate a discard statement (_ = func()) to exercise the syntax
+        if self.rng.gen_bool(self.config.discard_probability) {
+            if let Some(stmt) = self.try_generate_discard_statement(ctx) {
                 return stmt;
             }
         }
@@ -855,6 +865,76 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             ctx.add_local(name.clone(), return_type, false);
             Some(format!("let {} = {}", name, call))
         }
+    }
+
+    /// Try to generate a discard statement (_ = expr) that discards a function's return value.
+    ///
+    /// Looks for non-generic functions in the current module that return a non-void,
+    /// non-fallible type. Excludes the current function to prevent direct self-recursion.
+    /// Wraps the call in a conditional to guard against mutual recursion.
+    ///
+    /// Returns `None` if no suitable functions are available.
+    fn try_generate_discard_statement(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let module_id = ctx.module_id?;
+        let module = ctx.table.get_module(module_id)?;
+
+        // Find non-generic functions with non-void, non-fallible return types,
+        // excluding the current function to prevent direct self-recursion.
+        let current_name = ctx.current_function_name.as_deref();
+        let candidates: Vec<(String, FunctionInfo)> = module
+            .functions()
+            .filter_map(|sym| {
+                if let SymbolKind::Function(ref info) = sym.kind {
+                    // Skip generic functions, void return, fallible return, and self
+                    if info.type_params.is_empty()
+                        && !matches!(info.return_type, TypeInfo::Void)
+                        && !info.return_type.is_fallible()
+                        && !info.return_type.is_iterator()
+                        && current_name != Some(sym.name.as_str())
+                    {
+                        return Some((sym.name.clone(), info.clone()));
+                    }
+                }
+                None
+            })
+            .collect();
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..candidates.len());
+        let (func_name, func_info) = candidates[idx].clone();
+
+        // Generate simple arguments for the call
+        let expr_ctx = ctx.to_expr_context();
+        let args: Vec<String> = func_info
+            .params
+            .iter()
+            .map(|p| {
+                let mut eg = ExprGenerator::new(self.rng, &self.config.expr_config);
+                eg.generate_simple(&p.param_type, &expr_ctx)
+            })
+            .collect();
+        let args_str = args.join(", ");
+
+        // Generate a simple boolean guard condition to prevent mutual recursion
+        let guard_cond = {
+            let expr_ctx2 = ctx.to_expr_context();
+            let mut eg = ExprGenerator::new(self.rng, &self.config.expr_config);
+            eg.generate_simple(&TypeInfo::Primitive(PrimitiveType::Bool), &expr_ctx2)
+        };
+
+        // Emit a conditional discard: if guard { _ = func(args) }
+        let indent = "    ".repeat(self.indent + 1);
+        Some(format!(
+            "if {} {{\n{}_ = {}({})\n{}}}",
+            guard_cond,
+            indent,
+            func_name,
+            args_str,
+            "    ".repeat(self.indent)
+        ))
     }
 
     /// Generate a block of statements.
@@ -1444,5 +1524,105 @@ mod tests {
         let lines2 = gen2.generate_body(&TypeInfo::Primitive(PrimitiveType::I64), &mut ctx2, 0);
 
         assert_eq!(lines1, lines2);
+    }
+
+    #[test]
+    fn test_discard_statement_generation() {
+        // Set up a symbol table with a module containing a non-generic,
+        // non-void-returning function that can be used for discard statements.
+        let mut table = SymbolTable::new();
+        let module_id = table.add_module("test_mod".to_string(), "test_mod.vole".to_string());
+
+        // Add a function that returns i64 (suitable for discarding)
+        {
+            let module = table.get_module_mut(module_id).unwrap();
+            module.add_symbol(
+                "discardable_func".to_string(),
+                SymbolKind::Function(FunctionInfo {
+                    type_params: vec![],
+                    params: vec![ParamInfo {
+                        name: "x".to_string(),
+                        param_type: TypeInfo::Primitive(PrimitiveType::I64),
+                    }],
+                    return_type: TypeInfo::Primitive(PrimitiveType::I64),
+                }),
+            );
+        }
+
+        // Use a config with high discard probability to trigger the feature
+        let config = StmtConfig {
+            discard_probability: 0.99, // Very high to ensure it triggers
+            if_probability: 0.0,
+            while_probability: 0.0,
+            for_probability: 0.0,
+            break_continue_probability: 0.0,
+            compound_assign_probability: 0.0,
+            raise_probability: 0.0,
+            try_probability: 0.0,
+            tuple_probability: 0.0,
+            fixed_array_probability: 0.0,
+            ..StmtConfig::default()
+        };
+
+        let mut found_discard = false;
+        for seed in 0..100 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = StmtGenerator::new(&mut rng, &config);
+            let mut ctx = StmtContext::with_module(&[], &table, module_id);
+
+            let stmt = generator.generate_statement(&mut ctx, 0);
+
+            // Check if this statement contains a discard pattern
+            // Discards are wrapped in: if <cond> { _ = func(...) }
+            if stmt.contains("_ = discardable_func") {
+                found_discard = true;
+                // Verify the format: should be wrapped in an if block
+                assert!(
+                    stmt.starts_with("if "),
+                    "Discard should be wrapped in if: {}",
+                    stmt
+                );
+                assert!(
+                    stmt.contains("_ = discardable_func("),
+                    "Should contain discard call: {}",
+                    stmt
+                );
+                break;
+            }
+        }
+        assert!(
+            found_discard,
+            "Expected at least one discard statement across 100 seeds"
+        );
+    }
+
+    #[test]
+    fn test_discard_statement_not_generated_without_functions() {
+        // Without any functions in the module, discard statements should not be generated
+        let mut table = SymbolTable::new();
+        let module_id = table.add_module("empty_mod".to_string(), "empty_mod.vole".to_string());
+
+        let config = StmtConfig {
+            discard_probability: 0.99,
+            if_probability: 0.0,
+            while_probability: 0.0,
+            for_probability: 0.0,
+            ..StmtConfig::default()
+        };
+
+        for seed in 0..50 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = StmtGenerator::new(&mut rng, &config);
+            let mut ctx = StmtContext::with_module(&[], &table, module_id);
+
+            let stmt = generator.generate_statement(&mut ctx, 0);
+
+            // Should not contain discard pattern since there are no functions
+            assert!(
+                !stmt.contains("_ =") || stmt.contains("_ =>"),
+                "Discard should not appear without callable functions: {}",
+                stmt
+            );
+        }
     }
 }
