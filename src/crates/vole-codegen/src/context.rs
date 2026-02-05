@@ -963,9 +963,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 .query()
                 .expr_data()
                 .module_types(module_path)
-                && let Some(ty) = module_types.get(node_id)
             {
-                return Some(*ty);
+                // Module has its own type map — use it exclusively.
+                // NodeIds are per-program, so falling through to the main program's
+                // types would return wrong types for coincidentally matching NodeIds.
+                return module_types.get(node_id).copied();
             }
         }
         // Fall back to main program expr_types

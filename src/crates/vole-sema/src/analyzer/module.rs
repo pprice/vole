@@ -290,7 +290,7 @@ impl Analyzer {
 
         // Parse the module
         let mut parser = Parser::new(&module_info.source);
-        let program = match parser.parse_program() {
+        let mut program = match parser.parse_program() {
             Ok(p) => p,
             Err(e) => {
                 bail_module!(self, &canonical_path);
@@ -305,6 +305,26 @@ impl Analyzer {
                 return Err(());
             }
         };
+
+        // Transform generators in the imported module (yield -> state machine)
+        // This must happen before semantic analysis so codegen sees the desugared AST.
+        let mut module_interner_mut = parser.into_interner();
+        let (_, transform_errors) =
+            crate::transforms::transform_generators(&mut program, &mut module_interner_mut);
+        if !transform_errors.is_empty() {
+            bail_module!(self, &canonical_path);
+            // Report the first transform error as a module error
+            self.add_error(
+                SemanticError::ModuleParseError {
+                    path: import_path.to_string(),
+                    message: format!("generator transform error: {}", transform_errors[0].error),
+                    span: span.into(),
+                },
+                span,
+            );
+            return Err(());
+        }
+        let module_interner = module_interner_mut;
 
         // Collect exports, constants, and track external functions
         let mut exports = FxHashMap::default();
@@ -321,7 +341,6 @@ impl Analyzer {
         let mut deferred_functions: Vec<(NameId, &FuncDecl)> = Vec::new();
         let mut deferred_externals: Vec<(NameId, &ExternalFunc)> = Vec::new();
         let mut deferred_generic_externals: Vec<(NameId, &ExternalFunc)> = Vec::new();
-        let module_interner = parser.into_interner();
 
         // For stdlib modules, use symbolic paths like "std:math" for native registry lookups.
         // For user modules, use canonical file path for consistent deduplication.

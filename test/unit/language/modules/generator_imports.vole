@@ -1,0 +1,73 @@
+// Tests for importing modules that export generator functions
+let gen_mod = import "./generator_module"
+
+tests {
+    test "imported generator creates iterator" {
+        let iter = gen_mod.count_to_three()
+        assert(true)
+    }
+
+    test "imported generator next returns value" {
+        let iter = gen_mod.count_to_three()
+        let r = iter.next()
+        // Result should be i64 | Done; getting here means no crash
+        assert(true)
+    }
+
+    test "imported generator collect" {
+        let result = gen_mod.count_to_three().collect()
+        assert(result.length() == 3)
+        assert(result[0] == 1)
+        assert(result[1] == 2)
+        assert(result[2] == 3)
+    }
+
+    test "imported generator map and collect" {
+        let result = gen_mod.count_to_three().map((x) => x * 10).collect()
+        assert(result[0] == 10)
+        assert(result[1] == 20)
+        assert(result[2] == 30)
+    }
+
+    test "imported generator filter and collect" {
+        let result = gen_mod.count_to_three().filter((x) => x > 1).collect()
+        assert(result.length() == 2)
+        assert(result[0] == 2)
+        assert(result[1] == 3)
+    }
+
+    test "imported generator take" {
+        let result = gen_mod.count_to_three().take(2).collect()
+        assert(result.length() == 2)
+        assert(result[0] == 1)
+        assert(result[1] == 2)
+    }
+
+    test "imported generator count" {
+        assert(gen_mod.count_to_three().count() == 3)
+    }
+
+    test "imported generator sum" {
+        assert(gen_mod.count_to_three().sum() == 6)
+    }
+
+    test "imported single yield generator" {
+        let result = gen_mod.single_yield().collect()
+        assert(result.length() == 1)
+        assert(result[0] == 42)
+    }
+
+    test "multiple independent imported iterators" {
+        let iter1 = gen_mod.count_to_three()
+        let iter2 = gen_mod.count_to_three()
+
+        let r1 = iter1.next()
+        let r2 = iter2.next()
+
+        // Both should work independently
+        let result1 = gen_mod.count_to_three().collect()
+        let result2 = gen_mod.count_to_three().collect()
+        assert(result1.length() == 3)
+        assert(result2.length() == 3)
+    }
+}

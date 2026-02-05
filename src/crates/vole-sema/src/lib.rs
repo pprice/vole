@@ -18,6 +18,7 @@ pub mod query;
 pub mod resolution;
 pub mod resolve;
 pub mod scope;
+pub mod transforms;
 pub mod type_arena;
 pub mod type_display;
 pub mod types;

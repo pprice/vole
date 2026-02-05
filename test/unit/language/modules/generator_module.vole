@@ -1,0 +1,10 @@
+// Module exporting generator functions for testing module generator imports
+func count_to_three() -> Iterator<i64> {
+    yield 1
+    yield 2
+    yield 3
+}
+
+func single_yield() -> Iterator<i64> {
+    yield 42
+}
