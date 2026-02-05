@@ -65,6 +65,8 @@ pub struct StmtContext<'a> {
     pub module_id: Option<ModuleId>,
     /// Whether we're in a loop (break/continue valid).
     pub in_loop: bool,
+    /// Whether the innermost loop is a while loop (continue would skip increment).
+    pub in_while_loop: bool,
     /// Whether this function is fallible.
     pub is_fallible: bool,
     /// The error type of this fallible function (if any).
@@ -83,6 +85,7 @@ impl<'a> StmtContext<'a> {
             table,
             module_id: None,
             in_loop: false,
+            in_while_loop: false,
             is_fallible: false,
             fallible_error_type: None,
             local_counter: 0,
@@ -101,6 +104,7 @@ impl<'a> StmtContext<'a> {
             table,
             module_id: Some(module_id),
             in_loop: false,
+            in_while_loop: false,
             is_fallible: false,
             fallible_error_type: None,
             local_counter: 0,
@@ -377,7 +381,9 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         );
 
         let was_in_loop = ctx.in_loop;
+        let was_in_while_loop = ctx.in_while_loop;
         ctx.in_loop = true;
+        ctx.in_while_loop = true;
 
         // Generate body (save and restore locals for scoping)
         let locals_before = ctx.locals.len();
@@ -387,6 +393,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         body_stmts.push(format!("{} = {} + 1", counter_name, counter_name));
 
         ctx.in_loop = was_in_loop;
+        ctx.in_while_loop = was_in_while_loop;
 
         let body_block = self.format_block(&body_stmts);
 
@@ -410,7 +417,9 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let range = format!("{}..{}", start, end);
 
         let was_in_loop = ctx.in_loop;
+        let was_in_while_loop = ctx.in_while_loop;
         ctx.in_loop = true;
+        ctx.in_while_loop = false;
 
         // Save locals before block (loop variable is scoped to body)
         let locals_before = ctx.locals.len();
@@ -427,6 +436,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // Restore locals (removes loop variable and body locals)
         ctx.locals.truncate(locals_before);
         ctx.in_loop = was_in_loop;
+        ctx.in_while_loop = was_in_while_loop;
 
         let body_block = self.format_block(&body_stmts);
         format!("for {} in {} {}", iter_name, range, body_block)
@@ -436,8 +446,12 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     ///
     /// Wraps in `if <condition> { break }` to avoid always exiting on
     /// the first iteration. Only called when `ctx.in_loop` is true.
+    ///
+    /// In while loops, only `break` is generated (never `continue`) because
+    /// `continue` would skip the manual loop-counter increment at the end of
+    /// the body, potentially creating an infinite loop.
     fn generate_break_continue(&mut self, ctx: &mut StmtContext) -> String {
-        let keyword = if self.rng.gen_bool(0.5) {
+        let keyword = if ctx.in_while_loop || self.rng.gen_bool(0.5) {
             "break"
         } else {
             "continue"

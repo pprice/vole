@@ -1,0 +1,2301 @@
+let GLOBAL13: i32 = 18_i32
+
+let GLOBAL14: bool = false
+
+let GLOBAL15: bool = true
+
+interface IFace18<T91, T92> {
+    func method110(param380: i32) -> u8
+    func method111(param381: i64)
+}
+
+error Err15 {
+    field166: i32,
+}
+
+error Err16 {
+    field167: f32,
+}
+
+struct Struct17 {
+    field153: i32,
+    field154: f64,
+}
+
+struct Struct18 {
+    field155: i64,
+    field156: i64,
+    field157: i16,
+    field158: string,
+}
+
+struct Struct19 {
+    field159: string,
+    field160: bool,
+    field161: f64,
+}
+
+class Class23<T93, T94> {
+    field162: string,
+    field163: i64,
+
+    func method112(param382: i128) {
+        if (match when {
+        when {
+            true => false
+            _ => false
+            } => (6_i32 - 39_i32)
+        _ => (85_i32 - 2_i32)
+        } {
+            _ => 86_i32
+            _ => match (-77_i32) {
+                40_i32 => (96_i32 + 42_i32)
+                _ => (-84_i32)
+            }
+            _ => (-95_i32)
+        } == when {
+        ((true && false) || (!true)) => 98_i32
+        _ => when {
+            (83.14_f64 > 38.82_f64) => (15_i32 + 93_i32)
+            _ => (-8_i32)
+            }
+        }) {
+            let local0 = (when {
+            (false || (45.54_f64 != 28.48_f64)) => ((-91_i32) >= (41_i32 & 39_i32))
+            _ => ((88_i32 & 10_i32) < (25_i32 - 55_i32))
+            } || when {
+            (true || when {
+                false => true
+                _ => false
+                }) => (match 70.05_f64 {
+                    _ if true => 16.09_f64
+                    79.13_f64 => 1.31_f64
+                    22.87_f64 => 91.43_f64
+                    _ => 26.54_f64
+                } <= match 82.73_f64 {
+                    6.11_f64 => 69.82_f64
+                    _ => 84.42_f64
+                    33.81_f64 => 16.16_f64
+                    _ => 92.18_f64
+                })
+            _ => false
+            })
+        } else {
+            let mut local1 = 0
+            while local1 < 5 {
+                local1 *= 61_i64
+                for local2 in 0..2 {
+                    let local3 = (35_i64 + (when {
+                    match true {
+                            _ if false => true
+                            _ if false => true
+                            _ => true
+                            _ => false
+                        } => local1
+                    false => when {
+                        false => local1
+                        _ => local1
+                        }
+                    (local1 < 824_i64) => when {
+                        false => 530_i64
+                        false => 209_i64
+                        true => local1
+                        _ => local1
+                        }
+                    _ => when {
+                        false => local1
+                        _ => local1
+                        }
+                    } + 993_i64))
+                }
+                local1 = local1 + 1
+            }
+            for local4 in 0..1 {
+                if match false {
+                    _ => (false || true)
+                    false => false
+                    _ => (((93.42_f64 * 84.69_f64) * (-87.0_f64)) == when {
+                    (true && true) => (-20.0_f64)
+                    true => (91.76_f64 + 64.32_f64)
+                    (!false) => when {
+                        false => 97.68_f64
+                        _ => 2.91_f64
+                        }
+                    _ => match 57.92_f64 {
+                            _ if false => 7.4_f64
+                            _ => 73.79_f64
+                            _ => 21.06_f64
+                        }
+                    })
+                    _ => ((when {
+                    false => 94_i32
+                    _ => 17_i32
+                    } != (14_i32 << 1_i32)) || ((95.46_f64 + 49.02_f64) >= (89.16_f64 + 53.36_f64)))
+                } {
+                    let local5 = ((((791_i64 >> 17_i64) + when {
+                    true => local1
+                    true => 555_i64
+                    true => 106_i64
+                    _ => 870_i64
+                    }) + (when {
+                    false => 391_i64
+                    false => local1
+                    false => 554_i64
+                    _ => 192_i64
+                    } | when {
+                    false => local1
+                    true => local1
+                    true => local1
+                    _ => 647_i64
+                    })) <= (-31_i64))
+                }
+                let local6 = [ 88_i32, 17_i32 ]
+            }
+        }
+        for local7 in 1..3 {
+            if (when {
+            (when {
+                true => 65_i32
+                _ => 3_i32
+                } == (-27_i32)) => 256_i64
+            match (87_i32 == 57_i32) {
+                    true => true
+                    false => (!false)
+                    _ => true
+                } => when {
+                (919_i64 < 834_i64) => when {
+                    true => local7
+                    _ => 540_i64
+                    }
+                when {
+                    false => true
+                    _ => false
+                    } => when {
+                    true => 916_i64
+                    true => 554_i64
+                    false => local7
+                    _ => 605_i64
+                    }
+                _ => when {
+                    false => 107_i64
+                    _ => local7
+                    }
+                }
+            when {
+                when {
+                    true => false
+                    _ => false
+                    } => false
+                _ => (25.62_f64 == 71.31_f64)
+                } => when {
+                (true && false) => 963_i64
+                _ => (489_i64 + 23_i64)
+                }
+            _ => when {
+                (77_i32 >= 21_i32) => (local7 << 3_i64)
+                _ => (local7 * 666_i64)
+                }
+            } >= (when {
+            (local7 > 966_i64) => (local7 + local7)
+            _ => (-30_i64)
+            } + ((local7 + local7) ^ (local7 & local7)))) {
+                break
+            }
+            for local8 in 2..6 {
+                let mut local9 = match (local7 | when {
+                (3.34_f64 == 62.73_f64) => when {
+                    true => local7
+                    true => 556_i64
+                    true => 808_i64
+                    _ => 81_i64
+                    }
+                (45_i32 < 78_i32) => 903_i64
+                _ => local7
+                }) {
+                    _ => when {
+                    match match false {
+                            false => false
+                            _ => true
+                        } {
+                            _ if false => when {
+                            true => true
+                            _ => true
+                            }
+                            _ if true => (true || true)
+                            _ => (local7 == 361_i64)
+                        } => ((local7 + local7) * when {
+                        true => local7
+                        _ => local7
+                        })
+                    _ => (match local7 {
+                            417_i64 => local7
+                            362_i64 => local7
+                            _ => local7
+                        } << 20_i64)
+                    }
+                    _ if true => (local7 * ((725_i64 + 98_i64) + when {
+                    false => local7
+                    false => local7
+                    false => local7
+                    _ => local7
+                    }))
+                    _ => 734_i64
+                }
+            }
+        }
+        if ((((46.85_f64 + 17.31_f64) > when {
+        false => 57.57_f64
+        false => 18.11_f64
+        _ => 96.17_f64
+        }) || (when {
+        false => true
+        _ => true
+        } || true)) && true) {
+            if (when {
+            true => (-90_i64)
+            _ => when {
+                false => 737_i64
+                _ => 654_i64
+                }
+            } == when {
+            false => when {
+                when {
+                    false => true
+                    _ => false
+                    } => when {
+                    false => 779_i64
+                    _ => 614_i64
+                    }
+                _ => when {
+                    false => 794_i64
+                    false => 133_i64
+                    false => 478_i64
+                    _ => 673_i64
+                    }
+                }
+            false => when {
+                match true {
+                        _ => false
+                        false => true
+                        _ if false => true
+                        _ => true
+                    } => (965_i64 * 29_i64)
+                (840_i64 == 926_i64) => (743_i64 + 405_i64)
+                _ => when {
+                    true => 371_i64
+                    _ => 596_i64
+                    }
+                }
+            _ => match (67_i64 + 73_i64) {
+                    _ if false => (178_i64 + 497_i64)
+                    _ => 755_i64
+                }
+            }) {
+                let local10 = Class24 {
+                    field164: (((-68_i64) <= (-64_i64)) || (19_i32 != match when {
+                    false => 45_i32
+                    _ => 78_i32
+                    } {
+                        _ => when {
+                        false => 70_i32
+                        _ => 45_i32
+                        }
+                        _ => (52_i32 * 94_i32)
+                        _ => (-4_i32)
+                    })),
+                    field165: match when {
+                    false => when {
+                        (22_i32 == 44_i32) => match "str41" {
+                                "str4" => "str76"
+                                _ => "str3"
+                            }
+                        (76.39_f64 == 2.58_f64) => when {
+                            false => "str78"
+                            _ => "str11"
+                            }
+                        _ => match "str72" {
+                                _ if false => "str95"
+                                "str96" => "str75"
+                                _ => "str77"
+                                _ => "str23"
+                            }
+                        }
+                    _ => match match "str65" {
+                            "str61" => "str88"
+                            "str53" => "str0"
+                            _ => "str53"
+                            _ => "str31"
+                        } {
+                            _ => when {
+                            false => "str51"
+                            _ => "str55"
+                            }
+                            _ => "{param382}"
+                        }
+                    } {
+                        "str40" => when {
+                        false => "str45"
+                        _ => "{param382} done"
+                        }
+                        _ => "{param382}"
+                    },
+                }
+            } else {
+                let mut local11 = 0
+                while local11 < 4 {
+                    let local12 = when {
+                    when {
+                        match true {
+                                true => when {
+                                true => true
+                                _ => true
+                                }
+                                _ if true => (23_i32 == 52_i32)
+                                _ => (true || true)
+                            } => (false && (4_i32 < 73_i32))
+                        _ => false
+                        } => (when {
+                        (!false) => when {
+                            true => 78_i32
+                            _ => 20_i32
+                            }
+                        _ => (23_i32 + 88_i32)
+                        } + when {
+                        when {
+                            false => false
+                            _ => true
+                            } => 27_i32
+                        _ => match 45_i32 {
+                                9_i32 => 2_i32
+                                _ => 39_i32
+                            }
+                        })
+                    (((18.22_f64 - 54.08_f64) * when {
+                        true => 71.13_f64
+                        _ => 64.37_f64
+                        }) <= (match 89.27_f64 {
+                            93.15_f64 => 32.72_f64
+                            _ => 69.59_f64
+                            _ => 81.16_f64
+                        } + when {
+                        false => 96.76_f64
+                        true => 5.0_f64
+                        _ => 97.14_f64
+                        })) => 27_i32
+                    _ => ((when {
+                        false => 84_i32
+                        false => 44_i32
+                        true => 59_i32
+                        _ => 58_i32
+                        } ^ (76_i32 + 92_i32)) & (when {
+                        true => 11_i32
+                        _ => 71_i32
+                        } - (77_i32 & 63_i32)))
+                    }
+                    local11 = local11 + 1
+                }
+                local11 -= 147_i64
+            }
+            for local13 in 1..5 {
+                if (local13 < local13) {
+                    let local14 = ((when {
+                    (false && true) => (496_i64 + 598_i64)
+                    (false || true) => when {
+                        false => local13
+                        _ => local13
+                        }
+                    (true && false) => when {
+                        false => local13
+                        true => local13
+                        false => local13
+                        _ => local13
+                        }
+                    _ => (local13 + 313_i64)
+                    } - (-59_i64)) ^ ((match local13 {
+                        _ if true => local13
+                        _ if false => local13
+                        _ => local13
+                    } + (local13 + local13)) * (local13 - (local13 << 26_i64))))
+                    let local15 = (p0: string, p1: u16) -> i64 => 150_i64
+                } else {
+                    let local16 = (76.6_f64 + when {
+                    false => 61.63_f64
+                    (82_i32 > (48_i32 - 44_i32)) => match match 39.4_f64 {
+                            39.68_f64 => 26.26_f64
+                            _ => 36.86_f64
+                            _ => 1.45_f64
+                            _ => 80.56_f64
+                        } {
+                            _ if false => (18.53_f64 + 1.39_f64)
+                            _ => match 50.91_f64 {
+                                _ => 17.29_f64
+                                48.31_f64 => 34.65_f64
+                                _ => 5.29_f64
+                                _ => 66.09_f64
+                            }
+                        }
+                    when {
+                        (true && true) => (53.82_f64 >= 79.01_f64)
+                        _ => (false || true)
+                        } => when {
+                        false => (52.55_f64 - 48.81_f64)
+                        _ => (21.08_f64 * 32.72_f64)
+                        }
+                    _ => when {
+                        (!true) => when {
+                            true => 50.13_f64
+                            _ => 76.98_f64
+                            }
+                        _ => match 80.52_f64 {
+                                _ => 58.31_f64
+                                _ => 64.29_f64
+                            }
+                        }
+                    })
+                }
+                let local17 = match ((match 59.07_f64 {
+                    23.68_f64 => 82.9_f64
+                    _ => 61.17_f64
+                } < (12.07_f64 + 2.82_f64)) || (when {
+                true => 60.77_f64
+                true => 75.03_f64
+                _ => 95.05_f64
+                } == (75.78_f64 * 32.52_f64))) {
+                    _ => (match 12_i32 {
+                        _ => (23_i32 & 12_i32)
+                        10_i32 => when {
+                        false => 55_i32
+                        _ => 89_i32
+                        }
+                        _ => match 60_i32 {
+                            78_i32 => 16_i32
+                            17_i32 => 5_i32
+                            _ => 70_i32
+                        }
+                        _ => match 21_i32 {
+                            45_i32 => 60_i32
+                            _ => 91_i32
+                        }
+                    } != (when {
+                    false => 15_i32
+                    true => 95_i32
+                    _ => 67_i32
+                    } + 37_i32))
+                    _ => (when {
+                    true => (54.22_f64 - 57.51_f64)
+                    _ => (59.44_f64 + 33.59_f64)
+                    } <= ((86.22_f64 * 46.7_f64) + (67.77_f64 * 47.95_f64)))
+                    _ if false => ((when {
+                    true => false
+                    _ => false
+                    } || when {
+                    false => true
+                    _ => true
+                    }) && ((local13 + 753_i64) >= (-24_i64)))
+                    _ => (true || false)
+                }
+            }
+        } else {
+            let local18 = (46.86_f64 >= (match match 89.39_f64 {
+                18.94_f64 => 87.21_f64
+                _ => 32.49_f64
+                _ => 65.74_f64
+            } {
+                _ if false => (69.96_f64 + 15.0_f64)
+                _ => when {
+                false => 21.85_f64
+                _ => 54.51_f64
+                }
+            } + 78.25_f64))
+            let mut local19 = when {
+            false => (-29_i64)
+            _ => when {
+                (when {
+                    local18 => 35.29_f64
+                    false => 58.15_f64
+                    local18 => 48.06_f64
+                    _ => 33.84_f64
+                    } > (31.04_f64 * 36.92_f64)) => when {
+                    (44_i64 != 912_i64) => (668_i64 + 507_i64)
+                    _ => (479_i64 << 7_i64)
+                    }
+                (when {
+                    local18 => 85.7_f64
+                    _ => 38.55_f64
+                    } >= 58.53_f64) => (-53_i64)
+                _ => when {
+                    (284_i64 != 671_i64) => (523_i64 + 166_i64)
+                    (local18 && true) => (575_i64 & 187_i64)
+                    (true && true) => (451_i64 * 305_i64)
+                    _ => when {
+                        local18 => 102_i64
+                        local18 => 693_i64
+                        _ => 542_i64
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    func method113(param383: i32) -> i32 {
+        let mut local0 = match match "val: {param383 + 7_i32} ok" {
+            "str21" => match "{param383}" {
+                _ => "str80"
+                _ => "{param383}!"
+                "str61" => "got {param383}"
+                _ => when {
+                true => "str75"
+                _ => "str77"
+                }
+            }
+            _ if false => match when {
+            false => "str4"
+            _ => "str24"
+            } {
+                "str70" => "result: {param383 + 1_i32}"
+                _ if false => when {
+                true => "str4"
+                _ => "str24"
+                }
+                _ => "str26"
+            }
+            _ => when {
+            (!false) => when {
+                true => "str65"
+                true => "str12"
+                _ => "str60"
+                }
+            true => when {
+                false => "str21"
+                false => "str5"
+                _ => "str49"
+                }
+            when {
+                false => false
+                _ => false
+                } => match "str19" {
+                    _ => "str38"
+                    _ => "str47"
+                }
+            _ => match "str15" {
+                    _ => "str93"
+                    _ => "str25"
+                    "str78" => "str69"
+                    _ => "str75"
+                }
+            }
+        } {
+            _ if true => "result: {param383}"
+            _ => when {
+            ((486_i64 <= 137_i64) && (65.58_f64 > 10.53_f64)) => when {
+                true => "val: {param383 + 8_i32}!"
+                _ => "{param383}"
+                }
+            _ => "{param383}"
+            }
+        }
+        if match match (!true) {
+            _ => match (true || true) {
+                _ => true
+                _ if true => (58.85_f64 >= 35.15_f64)
+                _ if true => (true && true)
+                _ => false
+            }
+            _ => when {
+            (21.88_f64 == 29.22_f64) => (param383 == param383)
+            _ => (!false)
+            }
+            _ => (!true)
+            _ => match (true && true) {
+                false => (827_i64 < 775_i64)
+                _ => (23.74_f64 <= 79.98_f64)
+            }
+        } {
+            false => ((when {
+            true => 86_i32
+            _ => param383
+            } - when {
+            false => param383
+            _ => param383
+            }) <= 98_i32)
+            false => (((param383 != 20_i32) && (!false)) && ((true || false) && (!false)))
+            _ => (when {
+            match true {
+                    _ => false
+                    _ => false
+                } => match 93.71_f64 {
+                    3.88_f64 => 20.51_f64
+                    58.88_f64 => 94.36_f64
+                    44.43_f64 => 78.54_f64
+                    _ => 39.09_f64
+                }
+            _ => (31.49_f64 * 85.39_f64)
+            } <= (when {
+            false => 54.46_f64
+            _ => 45.28_f64
+            } + (46.61_f64 * 0.67_f64)))
+        } {
+            if ((-89_i64) == ((539_i64 + (333_i64 | 83_i64)) * match when {
+            false => 305_i64
+            _ => 141_i64
+            } {
+                848_i64 => 576_i64
+                576_i64 => (144_i64 | 313_i64)
+                _ => when {
+                true => 265_i64
+                _ => 776_i64
+                }
+                _ => (726_i64 * 540_i64)
+            })) {
+                let mut local1 = 0
+                while local1 < 2 {
+                    let local2 = (-71_i64)
+                    local1 = local1 + 1
+                }
+            }
+            for local3 in 1..2 {
+                let local4 = ((-22_i64) - local3)
+            }
+        }
+        return when {
+        when {
+            ((!false) || match false {
+                    _ => true
+                    false => true
+                    true => true
+                    _ => true
+                }) => (!false)
+            _ => ((76.45_f64 == 56.41_f64) && (true && true))
+            } => when {
+            (!false) => match when {
+                true => param383
+                true => param383
+                _ => param383
+                } {
+                    71_i32 => (param383 + param383)
+                    _ => when {
+                    false => param383
+                    _ => param383
+                    }
+                }
+            (when {
+                true => true
+                _ => true
+                } || (false || false)) => match (-80_i32) {
+                    _ => when {
+                    true => param383
+                    true => 41_i32
+                    _ => param383
+                    }
+                    _ if true => 51_i32
+                    78_i32 => (34_i32 + param383)
+                    _ => (-3_i32)
+                }
+            match (true && true) {
+                    false => (359_i64 > 351_i64)
+                    true => (!true)
+                    _ => false
+                } => when {
+                (86_i32 == 53_i32) => (param383 - param383)
+                (false || false) => (-49_i32)
+                (false && false) => param383
+                _ => (param383 ^ param383)
+                }
+            _ => (when {
+                true => param383
+                _ => 88_i32
+                } ^ (22_i32 - param383))
+            }
+        ((!false) && when {
+            true => match false {
+                    _ => false
+                    false => false
+                    _ => true
+                }
+            _ => (54_i32 < 45_i32)
+            }) => match (-57_i32) {
+                _ if false => when {
+                true => when {
+                    false => param383
+                    _ => 90_i32
+                    }
+                _ => when {
+                    true => param383
+                    _ => param383
+                    }
+                }
+                90_i32 => match (param383 & param383) {
+                    _ if false => 13_i32
+                    _ => param383
+                    _ if true => (param383 + param383)
+                    _ => (param383 - param383)
+                }
+                _ => when {
+                match true {
+                        _ => true
+                        _ if true => true
+                        _ if true => false
+                        _ => true
+                    } => when {
+                    true => param383
+                    true => 43_i32
+                    false => 67_i32
+                    _ => 16_i32
+                    }
+                true => when {
+                    false => param383
+                    _ => param383
+                    }
+                _ => when {
+                    true => param383
+                    false => param383
+                    _ => param383
+                    }
+                }
+                _ => ((32_i32 & 31_i32) + (24_i32 * 76_i32))
+            }
+        _ => ((38_i32 * (89_i32 + 59_i32)) | (-57_i32))
+        }
+    }
+}
+
+class Class24 {
+    field164: bool,
+    field165: string,
+
+    func method114(param384: i32) -> bool {
+        let local0 = Class24 {
+            field164: ((!false) || false),
+            field165: when {
+            match ((61.72_f64 + 22.81_f64) > (93.06_f64 - 28.58_f64)) {
+                    _ if true => ((16.93_f64 + 20.66_f64) != (-18.0_f64))
+                    _ => ((914_i64 + 259_i64) == (89_i64 - 550_i64))
+                } => when {
+                ((7_i32 + 6_i32) <= when {
+                    false => 27_i32
+                    _ => 5_i32
+                    }) => "result: {param384 + 8_i32} ok"
+                _ => when {
+                    match true {
+                            _ if false => false
+                            _ => true
+                        } => match "str78" {
+                            _ if true => "str49"
+                            "str33" => "str26"
+                            "str3" => "str74"
+                            _ => "str77"
+                        }
+                    _ => when {
+                        true => "str64"
+                        false => "str57"
+                        true => "str71"
+                        _ => "str55"
+                        }
+                    }
+                }
+            (false && (true && when {
+                false => true
+                _ => false
+                })) => when {
+                (match true {
+                        _ => true
+                        _ => true
+                    } && (false || true)) => "str60"
+                _ => match when {
+                    false => "str36"
+                    _ => "str29"
+                    } {
+                        _ => match "str7" {
+                            _ => "str80"
+                            "str95" => "str68"
+                            _ => "str88"
+                        }
+                        _ => "x={param384}"
+                        _ => "str58"
+                    }
+                }
+            false => match when {
+                (false && false) => when {
+                    false => "str15"
+                    _ => "str55"
+                    }
+                when {
+                    false => true
+                    _ => false
+                    } => when {
+                    false => "str3"
+                    false => "str61"
+                    _ => "str40"
+                    }
+                false => when {
+                    true => "str88"
+                    false => "str72"
+                    _ => "str26"
+                    }
+                _ => "{param384}"
+                } {
+                    _ if false => "{param384 + 1_i32}"
+                    _ => when {
+                    true => match "str30" {
+                            "str65" => "str37"
+                            _ => "str21"
+                            "str88" => "str59"
+                            _ => "str91"
+                        }
+                    _ => when {
+                        true => "str0"
+                        _ => "str84"
+                        }
+                    }
+                }
+            _ => "str88"
+            },
+        }
+        let mut local1 = 0
+        while local1 < 2 {
+            if when {
+            when {
+                when {
+                    match false {
+                            _ if false => false
+                            _ => false
+                            _ => false
+                        } => (750_i64 < local1)
+                    _ => (!true)
+                    } => local0.field164
+                _ => ((!false) || true)
+                } => local0.field164
+            _ => false
+            } {
+                break
+            }
+            for local2 in 0..3 {
+                let mut local3 = 0
+                while local3 < 1 {
+                    let local4 = (p0: i64) -> string => "str2"
+                    let local5 = (!true)
+                    local3 = local3 + 1
+                }
+            }
+            local1 = local1 + 1
+        }
+        let mut local6 = 0
+        while local6 < 1 {
+            for local7 in 1..3 {
+                let mut local8 = 0
+                while local8 < 3 {
+                    let local9 = when {
+                    local0.field164 => 70_i32
+                    _ => (when {
+                        false => match param384 {
+                                5_i32 => param384
+                                _ => param384
+                            }
+                        _ => when {
+                            false => 97_i32
+                            _ => 99_i32
+                            }
+                        } + when {
+                        (35.96_f64 != 64.4_f64) => when {
+                            false => 80_i32
+                            _ => param384
+                            }
+                        true => (param384 >> 13_i32)
+                        _ => param384
+                        })
+                    }
+                    local8 = local8 + 1
+                }
+            }
+            let mut local10 = 0
+            while local10 < 5 {
+                for local11 in 2..6 {
+                    let local12 = match when {
+                    match local0.field164 {
+                            true => local0.field164
+                            _ => local0.field164
+                        } => "{local0}"
+                    match (13_i32 == param384) {
+                            _ => (!true)
+                            _ => (40.89_f64 != 86.46_f64)
+                        } => when {
+                        (52.78_f64 <= 49.02_f64) => when {
+                            false => "str17"
+                            _ => "str69"
+                            }
+                        _ => when {
+                            true => "str75"
+                            _ => "str93"
+                            }
+                        }
+                    _ => "{local10} | {local6 + 1_i64}!"
+                    } {
+                        "str78" => local0.field165
+                        _ => when {
+                        ((97_i32 == param384) || match true {
+                                _ => true
+                                _ if false => false
+                                true => true
+                                _ => true
+                            }) => match "val: {local6 + 3_i64}" {
+                                "str64" => "str93"
+                                _ if false => "{local10}, {param384 + 1_i32}"
+                                "str9" => when {
+                                false => "str4"
+                                _ => "str70"
+                                }
+                                _ => match "str58" {
+                                    _ => "str83"
+                                    _ => "str96"
+                                }
+                            }
+                        _ => local0.field165
+                        }
+                        "str88" => when {
+                        (match 94_i32 {
+                                _ if false => param384
+                                _ => param384
+                                _ => param384
+                            } <= (param384 * param384)) => local0.field165
+                        false => "result: {local6} ok"
+                        _ => local0.field165
+                        }
+                        _ => local0.field165
+                    }
+                }
+                for local13 in 0..3 {
+                    let local14 = [ "str3", "str90", "str97", "str38" ]
+                    let local15 = (p0: i8) -> i64 => 56_i64
+                }
+                local10 = local10 + 1
+            }
+            local6 = local6 + 1
+        }
+        return when {
+        local0.field164 => when {
+            local0.field164 => ((local1 - local1) >= when {
+                false => 962_i64
+                false => local1
+                true => 381_i64
+                _ => local1
+                })
+            _ => true
+            }
+        _ => false
+        }
+    }
+
+    func method115(param385: i32) -> i32 {
+        let local0 = ((when {
+        false => (788_i64 * 402_i64)
+        (59.27_f64 < 77.93_f64) => when {
+            true => 654_i64
+            _ => 450_i64
+            }
+        (17.7_f64 < 32.12_f64) => when {
+            false => 27_i64
+            _ => 776_i64
+            }
+        _ => when {
+            true => 87_i64
+            _ => 194_i64
+            }
+        } * match when {
+        true => 513_i64
+        false => 432_i64
+        false => 133_i64
+        _ => 315_i64
+        } {
+            _ if true => (-54_i64)
+            _ => when {
+            true => 429_i64
+            true => 110_i64
+            false => 936_i64
+            _ => 140_i64
+            }
+        }) - when {
+        (when {
+            true => true
+            _ => false
+            } || false) => match match 871_i64 {
+                _ if true => 806_i64
+                _ if true => 570_i64
+                _ => 33_i64
+            } {
+                _ if false => when {
+                true => 233_i64
+                _ => 652_i64
+                }
+                _ => when {
+                true => 287_i64
+                _ => 176_i64
+                }
+            }
+        false => ((-41_i64) + (408_i64 + 801_i64))
+        _ => when {
+            (3.55_f64 < 74.97_f64) => when {
+                true => 203_i64
+                false => 259_i64
+                _ => 178_i64
+                }
+            (15.32_f64 <= 41.15_f64) => when {
+                true => 188_i64
+                false => 561_i64
+                _ => 893_i64
+                }
+            _ => (-7_i64)
+            }
+        })
+        let local1 = (-40.0_f64)
+        if (56.15_f64 > when {
+        true => ((-42.0_f64) - when {
+            false => local1
+            _ => 54.36_f64
+            })
+        match (24.59_f64 < local1) {
+                _ if true => (param385 >= 24_i32)
+                false => (true || false)
+                _ => (local1 == local1)
+                _ => false
+            } => (-92.0_f64)
+        _ => ((-13.0_f64) - (local1 + local1))
+        }) {
+            let local2 = when {
+            (((local0 + local0) + (local0 + 886_i64)) != when {
+                (456_i64 <= 937_i64) => when {
+                    false => 941_i64
+                    false => 366_i64
+                    _ => local0
+                    }
+                true => when {
+                    false => local0
+                    false => 143_i64
+                    _ => local0
+                    }
+                _ => 430_i64
+                }) => local1
+            false => when {
+                (when {
+                    false => 941_i64
+                    _ => local0
+                    } < (local0 * local0)) => match (local1 - 93.67_f64) {
+                        _ if true => (local1 + local1)
+                        _ if true => (54.37_f64 - local1)
+                        _ if false => when {
+                        false => 89.36_f64
+                        _ => local1
+                        }
+                        _ => (-34.0_f64)
+                    }
+                _ => match 17.55_f64 {
+                        2.05_f64 => (10.27_f64 + 84.46_f64)
+                        _ => (-33.0_f64)
+                        _ => local1
+                        _ => when {
+                        true => local1
+                        _ => local1
+                        }
+                    }
+                }
+            _ => 14.52_f64
+            }
+        }
+        for local3 in 1..3 {
+            for local4 in 0..4 {
+                if ((((local0 + local0) - when {
+                true => local0
+                true => 275_i64
+                true => 251_i64
+                _ => 919_i64
+                }) != when {
+                (local1 != local1) => local0
+                (false || true) => (local0 + 361_i64)
+                false => (local0 + 230_i64)
+                _ => local0
+                }) || false) {
+                    break
+                }
+            }
+            if (((match param385 {
+                _ => param385
+                _ => 10_i32
+            } * when {
+            false => 7_i32
+            _ => 16_i32
+            }) & when {
+            (local1 < 69.74_f64) => (param385 << 15_i32)
+            _ => when {
+                false => param385
+                _ => param385
+                }
+            }) < 34_i32) {
+                continue
+            }
+        }
+        return (-2_i32)
+    }
+
+    func method116(param386: f64, param387: string, param388: i32, param389: string) -> i32 {
+        let mut local0 = 0
+        while local0 < 1 {
+            let local1 = Class24 { field164: (local0 == (-85_i64)), field165: "str4" }
+            for local2 in 2..4 {
+                local0 += 174_i64
+                if false {
+                    let local3 = local1.field164
+                    let local4 = Class24 {
+                        field164: (match (when {
+                        false => param386
+                        _ => 29.74_f64
+                        } + (param386 - param386)) {
+                            4.01_f64 => when {
+                            false => (-43.0_f64)
+                            (63.8_f64 <= 30.48_f64) => (param386 - 83.59_f64)
+                            (local3 || local3) => match 87.16_f64 {
+                                    91.97_f64 => param386
+                                    _ if false => 52.97_f64
+                                    _ => 71.91_f64
+                                }
+                            _ => (param386 * 81.52_f64)
+                            }
+                            93.04_f64 => match (param386 + param386) {
+                                _ if false => (param386 - 38.85_f64)
+                                _ if false => when {
+                                true => param386
+                                true => param386
+                                _ => param386
+                                }
+                                _ => (-41.0_f64)
+                            }
+                            _ => ((-28.0_f64) - (43.64_f64 + param386))
+                        } >= when {
+                        local1.field164 => match param386 {
+                                55.35_f64 => when {
+                                true => 18.77_f64
+                                local3 => 48.77_f64
+                                false => param386
+                                _ => param386
+                                }
+                                _ => (47.28_f64 - param386)
+                            }
+                        _ => match (-39.0_f64) {
+                                _ => (param386 + param386)
+                                _ => when {
+                                local3 => 17.03_f64
+                                _ => 97.13_f64
+                                }
+                                _ => (param386 * param386)
+                            }
+                        }),
+                        field165: local1.field165,
+                    }
+                } else {
+                    let local5 = () -> string => "str82"
+                }
+            }
+            local0 = local0 + 1
+        }
+        local0 += 605_i64
+        return match param388 {
+            56_i32 => ((when {
+            true => param388
+            _ => param388
+            } + (param388 * param388)) + when {
+            match true {
+                    _ if false => false
+                    false => true
+                    _ => false
+                } => (-84_i32)
+            _ => match param388 {
+                    _ => param388
+                    _ => param388
+                }
+            })
+            41_i32 => (((86_i32 - 19_i32) | (param388 + param388)) + when {
+            (72.9_f64 > param386) => when {
+                false => param388
+                true => 48_i32
+                _ => param388
+                }
+            _ => (param388 + 86_i32)
+            })
+            _ if true => (((param388 + param388) * match 5_i32 {
+                28_i32 => param388
+                _ if true => param388
+                _ => param388
+                _ => param388
+            }) * param388)
+            _ => param388
+        }
+    }
+}
+
+func func43<T95, T96>(param390: i64, param391: i8) -> string {
+    if false {
+        let local0 = (p0: string) -> i64 => 82_i64
+    }
+    let local1 = (p0: u64, p1: i64) -> string => "str3"
+    let mut local2 = 0
+    while local2 < 3 {
+        for local3 in 1..2 {
+            if (true && (match when {
+            false => 6_i32
+            false => 96_i32
+            _ => 29_i32
+            } {
+                _ if true => (60_i32 * 38_i32)
+                _ => (53_i32 + 19_i32)
+            } == when {
+            (452_i64 != local2) => when {
+                true => 58_i32
+                _ => 45_i32
+                }
+            (true || true) => (34_i32 + 59_i32)
+            (51_i32 >= 44_i32) => when {
+                true => 94_i32
+                true => 32_i32
+                true => 71_i32
+                _ => 40_i32
+                }
+            _ => when {
+                true => 77_i32
+                _ => 55_i32
+                }
+            })) {
+                continue
+            }
+        }
+        local2 = local2 + 1
+    }
+    for local4 in 2..4 {
+        for local5 in 0..2 {
+            let mut local6 = 0
+            while local6 < 3 {
+                let local7 = match when {
+                when {
+                    (12_i32 <= 76_i32) => (87.26_f64 >= 62.98_f64)
+                    _ => false
+                    } => "{param391}"
+                _ => match when {
+                    true => "str10"
+                    false => "str96"
+                    _ => "str66"
+                    } {
+                        _ if true => match "str1" {
+                            "str59" => "str44"
+                            _ if false => "str27"
+                            _ if false => "str31"
+                            _ => "str32"
+                        }
+                        _ => when {
+                        false => "str65"
+                        _ => "str31"
+                        }
+                    }
+                } {
+                    _ => match "str2" {
+                        _ => when {
+                        false => match "str97" {
+                                "str11" => "str93"
+                                _ if true => "str74"
+                                _ => "str84"
+                            }
+                        (43.11_f64 > 51.87_f64) => "str7"
+                        (local2 == local2) => "{local6} - {local2}"
+                        _ => match "str91" {
+                                _ => "str38"
+                                _ if true => "str9"
+                                "str27" => "str59"
+                                _ => "str80"
+                            }
+                        }
+                        _ => match "{param391} and {local4}!" {
+                            _ => when {
+                            true => "str49"
+                            _ => "str16"
+                            }
+                            _ => when {
+                            false => "str48"
+                            _ => "str13"
+                            }
+                            _ => when {
+                            true => "str34"
+                            _ => "str8"
+                            }
+                        }
+                    }
+                    _ => match "{local4} | {param391} done" {
+                        _ if false => "val: {local4} | {local2} done"
+                        "str94" => "str67"
+                        "str70" => match "{local2} ok" {
+                            "str62" => "str48"
+                            _ => "str12"
+                        }
+                        _ => "str22"
+                    }
+                }
+                let local8 = Class24 { field164: (!false), field165: "{local7} - {local4}" }
+                local6 = local6 + 1
+            }
+            for local9 in 2..5 {
+                let local10 = "{param390}, {local4}!"
+            }
+        }
+    }
+    return "{local2}"
+}
+
+func func44<T97>(param392: bool) -> bool? {
+    if ((match when {
+    true => 77.18_f64
+    param392 => 91.57_f64
+    _ => 79.86_f64
+    } {
+        _ if true => (22.19_f64 + 0.88_f64)
+        _ => when {
+        true => 10.73_f64
+        param392 => 78.87_f64
+        param392 => 77.23_f64
+        _ => 44.0_f64
+        }
+    } != 77.2_f64) || param392) {
+        let mut local0 = match -18_i8 {
+            _ if true => when {
+            param392 => match -96_i8 {
+                    _ if true => -11_i8
+                    -18_i8 => -107_i8
+                    _ if false => -81_i8
+                    _ => 77_i8
+                }
+            _ => -58_i8
+            }
+            _ => 104_i8
+        }
+        for local1 in 0..3 {
+            let local2 = [ 87_i8, 3_i8, 122_i8, -119_i8 ]
+            if true {
+                let local3 = (when {
+                when {
+                    when {
+                        true => param392
+                        _ => param392
+                        } => match true {
+                            _ if true => param392
+                            false => param392
+                            _ => param392
+                        }
+                    _ => (!param392)
+                    } => (-67_i64)
+                param392 => (match 42_i64 {
+                        320_i64 => local1
+                        _ => local1
+                        _ => local1
+                        _ => local1
+                    } + (687_i64 + 161_i64))
+                match (99.78_f64 != 69.76_f64) {
+                        false => match true {
+                            _ => true
+                            true => param392
+                            _ => true
+                        }
+                        _ => (706_i64 < local1)
+                        _ => (9.91_f64 != 88.2_f64)
+                    } => ((local1 + local1) - when {
+                    false => 90_i64
+                    _ => 379_i64
+                    })
+                _ => when {
+                    (param392 || param392) => when {
+                        param392 => local1
+                        param392 => local1
+                        false => 198_i64
+                        _ => local1
+                        }
+                    _ => when {
+                        param392 => local1
+                        param392 => 40_i64
+                        _ => local1
+                        }
+                    }
+                } + match ((174_i64 >> 16_i64) + match local1 {
+                    _ if true => 987_i64
+                    _ => local1
+                    _ => local1
+                }) {
+                    _ => (-96_i64)
+                    _ => (when {
+                    true => 384_i64
+                    _ => local1
+                    } + match 951_i64 {
+                        _ => 180_i64
+                        _ if true => local1
+                        _ => 753_i64
+                        _ => local1
+                    })
+                })
+                let mut local4 = (-40.0_f64)
+            } else {
+                let local5 = (-84.0_f64)
+                let local6 = match match (when {
+                false => 14.35_f64
+                _ => local5
+                } + match local5 {
+                    _ if true => 74.75_f64
+                    _ => local5
+                    _ => 37.74_f64
+                }) {
+                    _ if false => (40.25_f64 + match 7.67_f64 {
+                        13.99_f64 => 11.84_f64
+                        _ if false => 72.54_f64
+                        _ => local5
+                    })
+                    _ => (-60.0_f64)
+                } {
+                    _ => (when {
+                    (2_i32 != 96_i32) => match local5 {
+                            38.34_f64 => local5
+                            79.08_f64 => 99.45_f64
+                            58.97_f64 => local5
+                            _ => local5
+                        }
+                    _ => (local5 + 39.05_f64)
+                    } * local5)
+                    _ => ((when {
+                    true => local5
+                    _ => 95.64_f64
+                    } - (local5 * 87.22_f64)) * (-68.0_f64))
+                }
+            }
+        }
+    }
+    let mut local7 = 0
+    while local7 < 3 {
+        if ((-24.0_f64) >= (when {
+        param392 => when {
+            true => 14.96_f64
+            _ => 17.77_f64
+            }
+        when {
+            param392 => true
+            _ => param392
+            } => (-77.0_f64)
+        match param392 {
+                false => param392
+                _ if false => param392
+                _ => true
+            } => when {
+            true => 86.56_f64
+            _ => 63.41_f64
+            }
+        _ => (-84.0_f64)
+        } * when {
+        (true && true) => (36.0_f64 + 51.31_f64)
+        _ => (92.55_f64 + 38.06_f64)
+        })) {
+            let mut local8 = 0
+            while local8 < 5 {
+                let mut local9 = 42.04_f64
+                local8 = local8 + 1
+            }
+            if true {
+                let local10 = match "val: {local8 + 8_i64}" {
+                    _ if true => "{local8}"
+                    _ if false => when {
+                    (!param392) => when {
+                        match param392 {
+                                _ => false
+                                _ if true => param392
+                                true => param392
+                                _ => param392
+                            } => when {
+                            param392 => "str47"
+                            _ => "str54"
+                            }
+                        _ => "{local7 + 7_i64}"
+                        }
+                    _ => "got {local7}, {param392}"
+                    }
+                    _ => when {
+                    (86_i32 != (86_i32 * 36_i32)) => match "str51" {
+                            "str82" => match "str33" {
+                                _ if false => "str68"
+                                _ => "str63"
+                            }
+                            _ if true => "result: {local7 + 2_i64}!"
+                            _ => "val: {param392} | {param392}"
+                            _ => "result: {param392} - {param392} ok"
+                        }
+                    (!param392) => "got {local8}"
+                    _ => when {
+                        (param392 || param392) => when {
+                            param392 => "str39"
+                            _ => "str63"
+                            }
+                        _ => "x={local8} - {local8}"
+                        }
+                    }
+                    _ => when {
+                    when {
+                        (36_i32 != 76_i32) => (local7 > local7)
+                        _ => (param392 || param392)
+                        } => "result: {param392}, {local7} done"
+                    _ => when {
+                        (false && param392) => "{param392}"
+                        _ => "str37"
+                        }
+                    }
+                }
+            } else {
+                let local11 = Class24 {
+                    field164: ((-57_i64) > (when {
+                    (30.58_f64 != 45.84_f64) => when {
+                        param392 => 835_i64
+                        _ => local7
+                        }
+                    _ => match 391_i64 {
+                            _ => local7
+                            _ if false => 639_i64
+                            _ if true => local7
+                            _ => local7
+                        }
+                    } + when {
+                    when {
+                        true => true
+                        _ => false
+                        } => (404_i64 - 805_i64)
+                    _ => (local7 >> 20_i64)
+                    })),
+                    field165: when {
+                    param392 => "result: {param392} and {local8}"
+                    ((-3_i64) != when {
+                        (!false) => (local7 + 532_i64)
+                        _ => (-36_i64)
+                        }) => when {
+                        when {
+                            (62_i32 < 17_i32) => param392
+                            _ => (92.38_f64 != 65.56_f64)
+                            } => "{local8}"
+                        when {
+                            match param392 {
+                                    _ if false => param392
+                                    _ => true
+                                } => match param392 {
+                                    _ if true => param392
+                                    false => true
+                                    false => param392
+                                    _ => param392
+                                }
+                            _ => match param392 {
+                                    _ => param392
+                                    _ => param392
+                                }
+                            } => match "{local7} done" {
+                                _ => "result: {local7}"
+                                _ if true => when {
+                                param392 => "str64"
+                                param392 => "str83"
+                                _ => "str16"
+                                }
+                                _ if true => match "str37" {
+                                    "str80" => "str33"
+                                    "str51" => "str16"
+                                    _ => "str54"
+                                }
+                                _ => "str84"
+                            }
+                        ((69.37_f64 + 38.25_f64) >= (21.38_f64 - 21.36_f64)) => when {
+                            true => when {
+                                true => "str0"
+                                true => "str7"
+                                _ => "str64"
+                                }
+                            _ => when {
+                                param392 => "str58"
+                                _ => "str76"
+                                }
+                            }
+                        _ => when {
+                            match true {
+                                    false => true
+                                    false => true
+                                    _ if true => param392
+                                    _ => param392
+                                } => when {
+                                param392 => "str65"
+                                param392 => "str64"
+                                _ => "str91"
+                                }
+                            _ => "result: {param392} - {local7 + 5_i64}"
+                            }
+                        }
+                    _ => "got {param392} | {local8 + 6_i64}!"
+                    },
+                }
+            }
+        }
+        let local12 = [ 49.08_f64, 14.5_f64 ]
+        local7 = local7 + 1
+    }
+    local7 -= 273_i64
+    for local13 in 2..5 {
+        local7 *= 890_i64
+    }
+    return ((when {
+    (param392 || param392) => (73_i32 >> 15_i32)
+    (9.09_f64 >= 94.25_f64) => (72_i32 - 29_i32)
+    (!true) => (51_i32 + 7_i32)
+    _ => when {
+        false => 5_i32
+        param392 => 29_i32
+        _ => 5_i32
+        }
+    } + (when {
+    param392 => 54_i32
+    param392 => 40_i32
+    param392 => 34_i32
+    _ => 14_i32
+    } * 21_i32)) != (match (43_i32 & 52_i32) {
+        84_i32 => (28_i32 << 15_i32)
+        _ => when {
+        param392 => 31_i32
+        _ => 56_i32
+        }
+    } + (when {
+    param392 => 12_i32
+    _ => 90_i32
+    } - when {
+    false => 34_i32
+    param392 => 41_i32
+    param392 => 59_i32
+    _ => 12_i32
+    })))
+}
+
+func func45<T98, T99>(param393: i64, param394: string) -> i8 {
+    for local0 in 1..3 {
+        for local1 in 0..3 {
+            if ((((local0 & local0) + local0) + when {
+            match false {
+                    true => true
+                    _ => false
+                } => match 997_i64 {
+                    153_i64 => local0
+                    869_i64 => local0
+                    _ => local0
+                }
+            (!false) => (local0 + 154_i64)
+            _ => when {
+                true => 780_i64
+                _ => local0
+                }
+            }) >= (local0 - local0)) {
+                let local2 = param394
+            }
+        }
+    }
+    for local3 in 1..3 {
+        let local4 = match match (when {
+        true => 1.76_f64
+        _ => 75.96_f64
+        } * when {
+        true => 67.02_f64
+        true => 79.12_f64
+        _ => 77.13_f64
+        }) {
+            _ => 78.9_f64
+            52.76_f64 => (39.76_f64 - when {
+            false => 25.24_f64
+            false => 29.18_f64
+            _ => 51.14_f64
+            })
+            _ => (-36.0_f64)
+        } {
+            _ => when {
+            ((false || false) && (false || true)) => (when {
+                true => 72.09_f64
+                _ => 43.08_f64
+                } + match 49.29_f64 {
+                    _ if false => 92.23_f64
+                    9.45_f64 => 72.15_f64
+                    _ => 93.31_f64
+                })
+            match (!false) {
+                    _ => (54_i32 > 31_i32)
+                    _ if false => true
+                    _ => (32_i32 > 36_i32)
+                } => when {
+                when {
+                    false => false
+                    _ => false
+                    } => when {
+                    false => 76.57_f64
+                    true => 25.65_f64
+                    _ => 91.16_f64
+                    }
+                (true || false) => (60.79_f64 - 97.53_f64)
+                (86_i32 == 46_i32) => (4.4_f64 - 16.65_f64)
+                _ => match 34.8_f64 {
+                        _ if true => 1.12_f64
+                        _ => 0.77_f64
+                    }
+                }
+            when {
+                (11_i32 == 50_i32) => (false && false)
+                _ => (false && true)
+                } => when {
+                when {
+                    false => false
+                    _ => false
+                    } => (23.25_f64 + 29.46_f64)
+                _ => 17.68_f64
+                }
+            _ => ((60.53_f64 * 59.03_f64) - when {
+                false => 54.86_f64
+                false => 80.89_f64
+                true => 48.81_f64
+                _ => 84.84_f64
+                })
+            }
+            _ => when {
+            ((49.79_f64 * 67.85_f64) < (37.48_f64 + 87.37_f64)) => when {
+                (58.1_f64 > 80.96_f64) => (-36.0_f64)
+                _ => match 86.28_f64 {
+                        _ => 2.57_f64
+                        22.18_f64 => 5.9_f64
+                        74.35_f64 => 94.52_f64
+                        _ => 31.95_f64
+                    }
+                }
+            false => (42.05_f64 - when {
+                false => 71.46_f64
+                true => 18.45_f64
+                true => 84.99_f64
+                _ => 31.54_f64
+                })
+            _ => when {
+                false => when {
+                    true => 35.4_f64
+                    _ => 75.79_f64
+                    }
+                _ => (59.5_f64 + 51.29_f64)
+                }
+            }
+            _ => ((-13.0_f64) + 7.24_f64)
+            _ => (when {
+            (false && true) => when {
+                false => 32.33_f64
+                _ => 60.41_f64
+                }
+            _ => match 24.41_f64 {
+                    _ => 42.94_f64
+                    _ => 8.15_f64
+                    _ => 99.16_f64
+                }
+            } + match match 29.52_f64 {
+                _ => 52.06_f64
+                _ => 7.31_f64
+            } {
+                _ if true => (-84.0_f64)
+                _ if false => 87.08_f64
+                _ if false => when {
+                true => 42.6_f64
+                _ => 42.48_f64
+                }
+                _ => (27.04_f64 + 13.86_f64)
+            })
+        }
+    }
+    return when {
+    ((when {
+        true => false
+        _ => true
+        } && (param393 != param393)) || ((17_i32 != 84_i32) && (false && true))) => 45_i8
+    _ => when {
+        true => -91_i8
+        _ => -51_i8
+        }
+    }
+}
+
+func func46<T100>(param395: T100, param396: i64, param397: i32) -> T100 {
+    let local0 = when {
+    match false {
+            _ if false => when {
+            match false {
+                    _ => false
+                    _ if false => true
+                    _ if false => true
+                    _ => false
+                } => match false {
+                    _ if true => true
+                    false => true
+                    true => false
+                    _ => false
+                }
+            _ => (!false)
+            }
+            _ => ((76_i32 ^ param397) == when {
+            false => param397
+            _ => param397
+            })
+        } => when {
+        ((699_i64 > param396) || (param396 > param396)) => ((12_i32 * param397) + 28_i32)
+        _ => (match 88_i32 {
+                _ => param397
+                _ => param397
+            } - match 55_i32 {
+                _ if true => param397
+                _ => param397
+            })
+        }
+    _ => param397
+    }
+    let mut local1 = 0
+    while local1 < 1 {
+        let mut local2 = 0
+        while local2 < 3 {
+            if (!true) {
+                continue
+            }
+            local2 = local2 + 1
+        }
+        if false {
+            for local3 in 0..1 {
+                let mut local4 = when {
+                (match (local0 + local0) {
+                        _ => (63_i32 ^ local0)
+                        _ if false => match local0 {
+                            _ => local0
+                            _ => local0
+                        }
+                        _ => when {
+                        true => local0
+                        true => 42_i32
+                        true => local0
+                        _ => local0
+                        }
+                    } != when {
+                    false => when {
+                        true => 78_i32
+                        _ => local0
+                        }
+                    _ => (45_i32 + local0)
+                    }) => match local0 {
+                        _ if true => ((local0 + 98_i32) & (local0 + 92_i32))
+                        _ => when {
+                        false => when {
+                            true => local0
+                            false => 21_i32
+                            _ => 98_i32
+                            }
+                        when {
+                            true => true
+                            _ => true
+                            } => when {
+                            false => 14_i32
+                            false => local0
+                            _ => local0
+                            }
+                        true => (7_i32 + local0)
+                        _ => (-48_i32)
+                        }
+                        _ => (-10_i32)
+                    }
+                _ => ((when {
+                    false => 25_i32
+                    _ => local0
+                    } + when {
+                    true => 66_i32
+                    true => local0
+                    true => local0
+                    _ => 23_i32
+                    }) + ((95_i32 + 43_i32) >> 6_i32))
+                }
+                let local5 = when {
+                match true {
+                        _ => ((61_i32 == local0) && false)
+                        _ => ((38.17_f64 >= 78.77_f64) || (172_i64 <= local1))
+                        _ => ((95.31_f64 > 8.57_f64) || true)
+                        _ => false
+                    } => (-60_i32)
+                ((when {
+                    false => local1
+                    _ => local1
+                    } == (local1 - 464_i64)) || ((local1 | 620_i64) != (869_i64 + 127_i64))) => ((when {
+                    true => 57_i32
+                    _ => local0
+                    } - (23_i32 - 82_i32)) + when {
+                    (12.24_f64 > 24.76_f64) => local0
+                    (!true) => (-73_i32)
+                    (true || false) => when {
+                        true => local0
+                        true => 24_i32
+                        true => 8_i32
+                        _ => 93_i32
+                        }
+                    _ => match 46_i32 {
+                            _ if true => 52_i32
+                            _ => 95_i32
+                        }
+                    })
+                (when {
+                    (true && false) => (local1 << 13_i64)
+                    _ => (-21_i64)
+                    } == ((local1 | 121_i64) * when {
+                    false => local1
+                    false => local1
+                    false => 126_i64
+                    _ => local1
+                    })) => ((7_i32 + local0) + ((15_i32 * 41_i32) - when {
+                    false => local0
+                    false => local0
+                    _ => 96_i32
+                    }))
+                _ => match when {
+                    (true && true) => when {
+                        true => 15_i32
+                        _ => local0
+                        }
+                    _ => (local0 + 45_i32)
+                    } {
+                        _ if true => (when {
+                        false => 85_i32
+                        true => 17_i32
+                        _ => 1_i32
+                        } + match 57_i32 {
+                            _ => local0
+                            22_i32 => 92_i32
+                            60_i32 => local0
+                            _ => local0
+                        })
+                        _ => (-72_i32)
+                        _ => when {
+                        (false && true) => 94_i32
+                        false => (-34_i32)
+                        false => (local0 ^ 47_i32)
+                        _ => (local0 * 41_i32)
+                        }
+                        _ => when {
+                        false => when {
+                            true => local0
+                            false => 29_i32
+                            false => local0
+                            _ => local0
+                            }
+                        match false {
+                                _ => true
+                                false => true
+                                _ => true
+                            } => when {
+                            false => 43_i32
+                            _ => local0
+                            }
+                        match true {
+                                true => false
+                                false => true
+                                _ => false
+                            } => (local0 + 61_i32)
+                        _ => (76_i32 - local0)
+                        }
+                    }
+                }
+            }
+            if when {
+            ((-63.0_f64) <= when {
+                (13.92_f64 > 48.03_f64) => when {
+                    false => 60.0_f64
+                    true => 0.07_f64
+                    false => 38.92_f64
+                    _ => 42.62_f64
+                    }
+                _ => (67.79_f64 - 85.93_f64)
+                }) => (when {
+                when {
+                    false => false
+                    _ => true
+                    } => when {
+                    false => local0
+                    _ => 83_i32
+                    }
+                (true && true) => when {
+                    true => local0
+                    false => 76_i32
+                    false => local0
+                    _ => local0
+                    }
+                _ => when {
+                    false => 35_i32
+                    _ => local0
+                    }
+                } == (match local0 {
+                    _ if false => local0
+                    _ if false => 28_i32
+                    _ => local0
+                } + when {
+                false => local0
+                _ => local0
+                }))
+            _ => (!true)
+            } {
+                let local6 = when {
+                (match (-64_i32) {
+                        _ if true => (local0 - 16_i32)
+                        35_i32 => local0
+                        _ => (local0 - local0)
+                    } <= ((local0 + local0) >> 14_i32)) => (-94_i32)
+                _ => ((when {
+                    true => local0
+                    true => local0
+                    _ => 24_i32
+                    } + (local0 * 49_i32)) * local0)
+                }
+            }
+        } else {
+            for local7 in 1..3 {
+                let local8 = Class24 {
+                    field164: match (((94.76_f64 * 22.31_f64) + when {
+                    true => 49.53_f64
+                    true => 64.13_f64
+                    _ => 4.51_f64
+                    }) >= (-90.0_f64)) {
+                        _ => match when {
+                        match true {
+                                _ => true
+                                _ if true => true
+                                _ => true
+                                _ => true
+                            } => (false || true)
+                        _ => (true && true)
+                        } {
+                            true => false
+                            false => (57.2_f64 != match 67.95_f64 {
+                                19.4_f64 => 18.84_f64
+                                33.26_f64 => 20.22_f64
+                                _ => 35.41_f64
+                            })
+                            _ => ((22.58_f64 >= 85.19_f64) && (local1 == local1))
+                        }
+                        _ => (!true)
+                    },
+                    field165: match when {
+                    (local1 <= (local1 >> 23_i64)) => "{param397 + 6_i32} | {local0}"
+                    _ => "str19"
+                    } {
+                        _ if true => "x={local7}, {param397}"
+                        _ if false => match when {
+                        false => when {
+                            true => "str19"
+                            _ => "str86"
+                            }
+                        (25_i32 > 3_i32) => "got {param396}"
+                        _ => match "str1" {
+                                _ if true => "str95"
+                                _ => "str0"
+                                _ => "str60"
+                            }
+                        } {
+                            _ if false => "got {local7 + 8_i64} - {param397}"
+                            _ => "val: {param395} ok"
+                        }
+                        _ => "{local1} | {local2}"
+                        _ => when {
+                        ((local0 * 2_i32) <= (local0 | local0)) => "{local2} - {local7}!"
+                        (true && (false && true)) => when {
+                            true => match "str90" {
+                                    _ if false => "str91"
+                                    _ if true => "str42"
+                                    _ if false => "str9"
+                                    _ => "str90"
+                                }
+                            (false && true) => when {
+                                false => "str3"
+                                _ => "str26"
+                                }
+                            _ => match "str55" {
+                                    "str78" => "str70"
+                                    _ => "str42"
+                                }
+                            }
+                        when {
+                            (66_i32 >= 64_i32) => when {
+                                true => false
+                                _ => true
+                                }
+                            _ => (true && true)
+                            } => when {
+                            (local0 > local0) => "str47"
+                            _ => "str12"
+                            }
+                        _ => when {
+                            false => "str58"
+                            _ => match "str55" {
+                                    "str73" => "str44"
+                                    _ if true => "str3"
+                                    _ => "str50"
+                                }
+                            }
+                        }
+                    },
+                }
+            }
+            let mut local9 = 0
+            while local9 < 5 {
+                let local10 = when {
+                when {
+                    ((59_i32 ^ local0) == (local0 & local0)) => (when {
+                        false => true
+                        _ => false
+                        } || (!true))
+                    _ => false
+                    } => (local1 | when {
+                    (true && false) => (local1 * local1)
+                    false => (140_i64 - local1)
+                    (!false) => (-61_i64)
+                    _ => match 466_i64 {
+                            _ => local1
+                            _ => local1
+                        }
+                    })
+                ((!true) || (!false)) => match ((611_i64 + 63_i64) & (230_i64 | local1)) {
+                        _ if false => when {
+                        true => when {
+                            false => local1
+                            false => local1
+                            false => local1
+                            _ => 600_i64
+                            }
+                        (40_i32 == 93_i32) => (953_i64 & local1)
+                        (911_i64 >= local1) => when {
+                            true => local1
+                            _ => local1
+                            }
+                        _ => (-25_i64)
+                        }
+                        _ => (-55_i64)
+                    }
+                false => (when {
+                    (false || true) => when {
+                        true => 642_i64
+                        true => local1
+                        _ => local1
+                        }
+                    _ => when {
+                        true => local1
+                        true => 229_i64
+                        _ => local1
+                        }
+                    } + when {
+                    (!false) => when {
+                        false => 349_i64
+                        _ => local1
+                        }
+                    _ => (local1 + local1)
+                    })
+                _ => when {
+                    ((44.95_f64 != 26.27_f64) || (local0 >= 31_i32)) => ((local1 + 919_i64) + (local1 >> 12_i64))
+                    _ => ((local1 ^ 711_i64) * local1)
+                    }
+                }
+                let local11 = Class24 {
+                    field164: (((26.76_f64 * when {
+                    true => 67.51_f64
+                    _ => 75.6_f64
+                    }) * when {
+                    (true || true) => when {
+                        false => 69.19_f64
+                        false => 36.28_f64
+                        true => 7.23_f64
+                        _ => 86.74_f64
+                        }
+                    _ => 32.62_f64
+                    }) == ((-52.0_f64) + 65.42_f64)),
+                    field165: "{param396}",
+                }
+                local9 = local9 + 1
+            }
+        }
+        local1 = local1 + 1
+    }
+    for local12 in 1..2 {
+        let mut local13 = 0
+        while local13 < 5 {
+            let mut local14 = 0
+            while local14 < 4 {
+                let local15 = () -> i64 => 513_i64
+                let local16 = [ 59_i8, -70_i8, 109_i8, 66_i8 ]
+                local14 = local14 + 1
+            }
+            local13 = local13 + 1
+        }
+    }
+    let local17 = [ 554_i64, 494_i64, 311_i64, 183_i64 ]
+    return param395
+}
+
+func func47<T101>(param398: T101, param399: i64, param400: i64, param401: u8) -> T101 {
+    for local0 in 0..1 {
+        if true {
+            break
+        }
+    }
+    let mut local1 = 0
+    while local1 < 5 {
+        if (when {
+        ((13_i32 * 29_i32) == when {
+            true => 19_i32
+            false => 34_i32
+            _ => 25_i32
+            }) => (-60_i32)
+        _ => (match 5_i32 {
+                50_i32 => 13_i32
+                _ if true => 26_i32
+                _ => 37_i32
+                _ => 15_i32
+            } << 14_i32)
+        } > (-43_i32)) {
+            local1 -= 852_i64
+        }
+        local1 = local1 + 1
+    }
+    return param398
+}
+
+tests "mod_l2_9" {
+    test "Class24 construction" {
+        let instance = Class24 { field164: true, field165: "test40" }
+        assert(true)
+        let _method114_result = instance.method114(40_i32)
+        let _method115_result = instance.method115(6_i32)
+        let _method116_result = instance.method116(43.48_f64, "test48", 9_i32, "test22")
+    }
+
+    test "Struct17 construction" {
+        let instance = Struct17 { field153: 43_i32, field154: 37.14_f64 }
+        assert(true)
+        let _field153_val = instance.field153
+        let _field154_val = instance.field154
+    }
+
+    test "Struct18 construction" {
+        let instance = Struct18 {
+            field155: 14_i64,
+            field156: 37_i64,
+            field157: 13_i16,
+            field158: "test61",
+        }
+        assert(true)
+        let _field155_val = instance.field155
+        let _field156_val = instance.field156
+        let _field157_val = instance.field157
+        let _field158_val = instance.field158
+    }
+
+    test "Struct19 construction" {
+        let instance = Struct19 { field159: "test51", field160: true, field161: 3.94_f64 }
+        assert(true)
+        let _field159_val = instance.field159
+        let _field160_val = instance.field160
+        let _field161_val = instance.field161
+    }
+}
