@@ -66,6 +66,8 @@ pub struct PlanConfig {
     pub enable_diamond_dependencies: bool,
     /// Probability (0.0-1.0) that a function has a fallible return type.
     pub fallible_probability: f64,
+    /// Probability (0.0-1.0) that a planned function is a generator (returns Iterator<T>).
+    pub generator_probability: f64,
 }
 
 impl Default for PlanConfig {
@@ -94,6 +96,7 @@ impl Default for PlanConfig {
             cross_layer_import_probability: 0.2,
             enable_diamond_dependencies: true,
             fallible_probability: 0.15,
+            generator_probability: 0.10,
         }
     }
 }
@@ -147,9 +150,24 @@ pub fn plan<R: Rng>(rng: &mut R, config: &PlanConfig) -> SymbolTable {
     plan_imports(rng, &mut table, &layers, config);
 
     // Phase 3: Create declarations in each module
+    // Only layer 0 modules can have generators (workaround for vol-67b9:
+    // importing a module with generator functions fails with "yield outside
+    // generator context"). Layer 0 modules are not imported by any other module.
+    let layer0_modules: std::collections::HashSet<ModuleId> = layers
+        .first()
+        .map(|l| l.iter().copied().collect())
+        .unwrap_or_default();
     for module_id in 0..table.module_count() {
         let module_id = ModuleId(module_id);
-        plan_module_declarations(rng, &mut table, &mut names, module_id, config);
+        let allow_generators = layer0_modules.contains(&module_id);
+        plan_module_declarations(
+            rng,
+            &mut table,
+            &mut names,
+            module_id,
+            config,
+            allow_generators,
+        );
     }
 
     // Phase 4: Add interface implementations to classes and interface extends
@@ -248,6 +266,7 @@ fn plan_module_declarations<R: Rng>(
     names: &mut NameGen,
     module_id: ModuleId,
     config: &PlanConfig,
+    allow_generators: bool,
 ) {
     // Generate interfaces first (so classes can implement them)
     let interface_count =
@@ -274,10 +293,18 @@ fn plan_module_declarations<R: Rng>(
         plan_error(rng, table, names, module_id, config);
     }
 
-    // Generate functions
+    // Generate functions (some may become generators based on generator_probability).
+    // Generators are only allowed in non-imported modules (layer 0) due to vol-67b9.
     let func_count = rng.gen_range(config.functions_per_module.0..=config.functions_per_module.1);
     for _ in 0..func_count {
-        plan_function(rng, table, names, module_id, config);
+        if allow_generators
+            && config.generator_probability > 0.0
+            && rng.gen_bool(config.generator_probability)
+        {
+            plan_generator(rng, table, names, module_id);
+        } else {
+            plan_function(rng, table, names, module_id, config);
+        }
     }
 
     // Generate globals
@@ -487,6 +514,47 @@ fn plan_function<R: Rng>(
 
     let kind = SymbolKind::Function(FunctionInfo {
         type_params,
+        params,
+        return_type,
+    });
+
+    table
+        .get_module_mut(module_id)
+        .map(|m| m.add_symbol(name, kind))
+        .unwrap_or(SymbolId(0))
+}
+
+/// Plan a generator function declaration (returns Iterator<T>).
+///
+/// Generators are always non-generic, have 0-2 parameters (used to control
+/// the iteration), and return `Iterator<PrimitiveType>`. The yield type
+/// is restricted to primitive types to keep the generated code simple.
+fn plan_generator<R: Rng>(
+    rng: &mut R,
+    table: &mut SymbolTable,
+    names: &mut NameGen,
+    module_id: ModuleId,
+) -> SymbolId {
+    let name = names.next("gen");
+
+    // Generators get 0-2 simple parameters (for controlling iteration bounds)
+    let param_count = rng.gen_range(0..=2);
+    let mut params = Vec::new();
+    for _ in 0..param_count {
+        params.push(plan_param(rng, names));
+    }
+
+    // Pick a primitive yield type (the Iterator element type)
+    // Use core types only (i64, string, bool) for simplicity
+    let yield_prim = match rng.gen_range(0..3) {
+        0 => PrimitiveType::I64,
+        1 => PrimitiveType::String,
+        _ => PrimitiveType::Bool,
+    };
+    let return_type = TypeInfo::Iterator(Box::new(TypeInfo::Primitive(yield_prim)));
+
+    let kind = SymbolKind::Function(FunctionInfo {
+        type_params: vec![],
         params,
         return_type,
     });

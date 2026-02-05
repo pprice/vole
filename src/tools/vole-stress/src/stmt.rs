@@ -926,6 +926,48 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     pub fn set_indent(&mut self, indent: usize) {
         self.indent = indent;
     }
+
+    /// Generate a generator function body with a while loop and yield statements.
+    ///
+    /// Produces a bounded loop pattern:
+    /// ```vole
+    /// let mut i = 0
+    /// while i < N {
+    ///     yield <expr>
+    ///     i = i + 1
+    /// }
+    /// ```
+    /// where N is a small random limit (2-5) and `<expr>` is a simple expression
+    /// of the element type.
+    pub fn generate_generator_body(
+        &mut self,
+        elem_type: &TypeInfo,
+        ctx: &StmtContext,
+    ) -> Vec<String> {
+        let mut lines = Vec::new();
+        let limit = self.rng.gen_range(2..=5);
+
+        // Initialize counter
+        lines.push("let mut _gi = 0".to_string());
+
+        // Generate the yield expression.
+        // IMPORTANT: Use an empty context (no params, no locals) because the vole
+        // compiler does not support referencing function parameters inside generator
+        // yield expressions (compiler bug: params are lost during state machine
+        // transformation). Only literals are safe here.
+        let empty_expr_ctx = ExprContext::new(&[], &[], ctx.table);
+        let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+        let yield_expr = expr_gen.generate_simple(elem_type, &empty_expr_ctx);
+
+        // Build the while loop with yield
+        let indent = "    ".repeat(self.indent + 1);
+        lines.push(format!("while _gi < {} {{", limit));
+        lines.push(format!("{}yield {}", indent, yield_expr));
+        lines.push(format!("{}_gi = _gi + 1", indent));
+        lines.push("}".to_string());
+
+        lines
+    }
 }
 
 #[cfg(test)]

@@ -189,6 +189,12 @@ impl<'a, R: Rng> EmitContext<'a, R> {
 
             // Generate the test body based on return type
             match &info.return_type {
+                TypeInfo::Iterator(elem_type) => {
+                    // Generator function - exercise with iterator methods
+                    let chain = self.generate_iterator_chain(elem_type);
+                    self.emit_line(&format!("let _result = {}{}", call, chain));
+                    self.emit_line("assert(true)");
+                }
                 TypeInfo::Fallible { success, .. } => {
                     // Fallible function - wrap in match to handle success/error
                     let default_val = self.generate_test_value(success);
@@ -666,6 +672,12 @@ impl<'a, R: Rng> EmitContext<'a, R> {
         params: &[ParamInfo],
         function_name: Option<&str>,
     ) {
+        // Generator functions (returning Iterator<T>) get a special body with yield
+        if let TypeInfo::Iterator(elem_type) = return_type {
+            self.emit_generator_body(elem_type, params);
+            return;
+        }
+
         let mut stmt_ctx = StmtContext::with_module(params, self.table, self.module.id);
 
         // Track the current function name to prevent self-recursion
@@ -685,6 +697,108 @@ impl<'a, R: Rng> EmitContext<'a, R> {
 
         for line in lines {
             self.emit_line(&line);
+        }
+    }
+
+    /// Emit a generator function body with a while loop and yield statements.
+    ///
+    /// Generates a simple bounded loop pattern:
+    /// ```vole
+    /// let mut i = 0
+    /// while i < N {
+    ///     yield <expr of elem_type>
+    ///     i = i + 1
+    /// }
+    /// ```
+    fn emit_generator_body(&mut self, elem_type: &TypeInfo, params: &[ParamInfo]) {
+        let mut stmt_gen = StmtGenerator::new(self.rng, &self.config.stmt_config);
+        stmt_gen.set_indent(self.indent);
+
+        let stmt_ctx = StmtContext::with_module(params, self.table, self.module.id);
+        let lines = stmt_gen.generate_generator_body(elem_type, &stmt_ctx);
+
+        for line in lines {
+            self.emit_line(&line);
+        }
+    }
+
+    /// Generate a random iterator method chain for a generator call.
+    ///
+    /// The element type determines which terminal methods are valid:
+    /// - `.sum()` is only valid for numeric element types
+    /// - `.count()` is always valid and returns i64
+    /// - All other chains end with `.collect()`
+    fn generate_iterator_chain(&mut self, elem_type: &TypeInfo) -> String {
+        let is_numeric = matches!(
+            elem_type,
+            TypeInfo::Primitive(PrimitiveType::I64)
+                | TypeInfo::Primitive(PrimitiveType::I32)
+                | TypeInfo::Primitive(PrimitiveType::F64)
+        );
+
+        // Choose a chain pattern
+        let pattern = self.rng.gen_range(0..10);
+        match pattern {
+            0..=3 => {
+                // Plain .collect()
+                ".collect()".to_string()
+            }
+            4 => {
+                // .take(n).collect()
+                let n = self.rng.gen_range(1..=3);
+                format!(".take({}).collect()", n)
+            }
+            5 => {
+                // .skip(n).collect()
+                let n = self.rng.gen_range(1..=2);
+                format!(".skip({}).collect()", n)
+            }
+            6 => {
+                // .count()
+                ".count()".to_string()
+            }
+            7 if is_numeric => {
+                // .sum() - only for numeric types
+                ".sum()".to_string()
+            }
+            8 => {
+                // .filter(predicate).collect()
+                let pred = self.generate_filter_predicate(elem_type);
+                format!(".filter({}).collect()", pred)
+            }
+            9 => {
+                // .map(transform).collect()
+                let mapper = self.generate_map_lambda(elem_type);
+                format!(".map({}).collect()", mapper)
+            }
+            _ => {
+                // Fallback to .collect()
+                ".collect()".to_string()
+            }
+        }
+    }
+
+    /// Generate a filter predicate lambda for a given element type.
+    fn generate_filter_predicate(&mut self, elem_type: &TypeInfo) -> String {
+        match elem_type {
+            TypeInfo::Primitive(PrimitiveType::I64) => "(x) => x > 0_i64".to_string(),
+            TypeInfo::Primitive(PrimitiveType::I32) => "(x) => x > 0_i32".to_string(),
+            TypeInfo::Primitive(PrimitiveType::F64) => "(x) => x > 0.0_f64".to_string(),
+            TypeInfo::Primitive(PrimitiveType::Bool) => "(x) => x".to_string(),
+            TypeInfo::Primitive(PrimitiveType::String) => "(x) => true".to_string(),
+            _ => "(x) => true".to_string(),
+        }
+    }
+
+    /// Generate a map transformation lambda for a given element type.
+    fn generate_map_lambda(&mut self, elem_type: &TypeInfo) -> String {
+        match elem_type {
+            TypeInfo::Primitive(PrimitiveType::I64) => "(x) => x + 1_i64".to_string(),
+            TypeInfo::Primitive(PrimitiveType::I32) => "(x) => x + 1_i32".to_string(),
+            TypeInfo::Primitive(PrimitiveType::F64) => "(x) => x + 1.0_f64".to_string(),
+            TypeInfo::Primitive(PrimitiveType::Bool) => "(x) => !x".to_string(),
+            TypeInfo::Primitive(PrimitiveType::String) => "(x) => x".to_string(),
+            _ => "(x) => x".to_string(),
         }
     }
 

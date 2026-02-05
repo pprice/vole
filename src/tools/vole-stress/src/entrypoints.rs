@@ -196,6 +196,12 @@ impl<'a, R: Rng> EntrypointContext<'a, R> {
         let call = format!("{}.{}({})", module.name, name, args);
 
         match &info.return_type {
+            TypeInfo::Iterator(elem_type) => {
+                // Generator function - exercise with iterator methods
+                let chain = self.generate_iterator_chain(elem_type);
+                self.emit_line(&format!("let _result = {}{}", call, chain));
+                self.emit_line("assert(true)");
+            }
             TypeInfo::Fallible { success, .. } => {
                 // Fallible function - wrap in match to handle success/error
                 let default_val = self.generate_value_for_type(success);
@@ -321,6 +327,14 @@ impl<'a, R: Rng> EntrypointContext<'a, R> {
                 if info.type_params.is_empty() {
                     let args = self.generate_call_args(&info.params);
                     match &info.return_type {
+                        TypeInfo::Iterator(elem_type) => {
+                            // Generator function - exercise with iterator methods
+                            let chain = self.generate_iterator_chain(elem_type);
+                            self.emit_line(&format!(
+                                "let _{}_result = {}.{}({}){}",
+                                symbol.name, module.name, symbol.name, args, chain
+                            ));
+                        }
                         TypeInfo::Fallible { success, .. } => {
                             // Fallible function - wrap in match to handle result
                             let default_val = self.generate_value_for_type(success);
@@ -374,6 +388,69 @@ impl<'a, R: Rng> EntrypointContext<'a, R> {
         }
 
         self.emit_line("");
+    }
+
+    /// Generate a random iterator method chain for a generator call.
+    ///
+    /// The element type determines which terminal methods are valid:
+    /// - `.sum()` is only valid for numeric element types
+    /// - `.count()` is always valid and returns i64
+    /// - All other chains end with `.collect()`
+    fn generate_iterator_chain(&mut self, elem_type: &TypeInfo) -> String {
+        let is_numeric = matches!(
+            elem_type,
+            TypeInfo::Primitive(PrimitiveType::I64)
+                | TypeInfo::Primitive(PrimitiveType::I32)
+                | TypeInfo::Primitive(PrimitiveType::F64)
+        );
+
+        let pattern = self.rng.gen_range(0..10);
+        match pattern {
+            0..=3 => ".collect()".to_string(),
+            4 => {
+                let n = self.rng.gen_range(1..=3);
+                format!(".take({}).collect()", n)
+            }
+            5 => {
+                let n = self.rng.gen_range(1..=2);
+                format!(".skip({}).collect()", n)
+            }
+            6 => ".count()".to_string(),
+            7 if is_numeric => ".sum()".to_string(),
+            8 => {
+                let pred = self.generate_filter_predicate(elem_type);
+                format!(".filter({}).collect()", pred)
+            }
+            9 => {
+                let mapper = self.generate_map_lambda(elem_type);
+                format!(".map({}).collect()", mapper)
+            }
+            _ => ".collect()".to_string(),
+        }
+    }
+
+    /// Generate a filter predicate lambda for a given element type.
+    fn generate_filter_predicate(&self, elem_type: &TypeInfo) -> &'static str {
+        match elem_type {
+            TypeInfo::Primitive(PrimitiveType::I64) => "(x) => x > 0_i64",
+            TypeInfo::Primitive(PrimitiveType::I32) => "(x) => x > 0_i32",
+            TypeInfo::Primitive(PrimitiveType::F64) => "(x) => x > 0.0_f64",
+            TypeInfo::Primitive(PrimitiveType::Bool) => "(x) => x",
+            TypeInfo::Primitive(PrimitiveType::String) => "(x) => true",
+            _ => "(x) => true",
+        }
+    }
+
+    /// Generate a map transformation lambda for a given element type.
+    fn generate_map_lambda(&self, elem_type: &TypeInfo) -> &'static str {
+        match elem_type {
+            TypeInfo::Primitive(PrimitiveType::I64) => "(x) => x + 1_i64",
+            TypeInfo::Primitive(PrimitiveType::I32) => "(x) => x + 1_i32",
+            TypeInfo::Primitive(PrimitiveType::F64) => "(x) => x + 1.0_f64",
+            TypeInfo::Primitive(PrimitiveType::Bool) => "(x) => !x",
+            TypeInfo::Primitive(PrimitiveType::String) => "(x) => x",
+            _ => "(x) => x",
+        }
     }
 
     fn generate_call_args(&mut self, params: &[ParamInfo]) -> String {

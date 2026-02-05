@@ -99,6 +99,8 @@ fn minimal_profile() -> Profile {
         enable_diamond_dependencies: false,
         // No fallible functions (no error types in minimal)
         fallible_probability: 0.0,
+        // No generators in minimal
+        generator_probability: 0.0,
         // These won't be used since we have no classes or structs
         fields_per_struct: (0, 0),
         fields_per_class: (0, 0),
@@ -193,6 +195,8 @@ fn full_profile() -> Profile {
 
         // Fallible functions: ~18% of non-generic functions get fallible return types
         fallible_probability: 0.18,
+        // ~15% of non-generic functions become generators
+        generator_probability: 0.15,
     };
 
     let emit = EmitConfig {
@@ -263,6 +267,8 @@ fn deep_nesting_profile() -> Profile {
         enable_diamond_dependencies: false,
         // No fallible functions - focus is on nesting
         fallible_probability: 0.0,
+        // No generators - focus is on nesting depth
+        generator_probability: 0.0,
         // Minimal class/struct structure
         fields_per_struct: (0, 0),
         fields_per_class: (1, 2),
@@ -367,6 +373,8 @@ fn wide_types_profile() -> Profile {
         enable_diamond_dependencies: true,
         // Some fallible functions
         fallible_probability: 0.10,
+        // Some generators
+        generator_probability: 0.08,
     };
 
     let emit = EmitConfig {
@@ -446,6 +454,8 @@ fn many_modules_profile() -> Profile {
         enable_diamond_dependencies: true,
         // No fallible functions - focus on module loading
         fallible_probability: 0.0,
+        // No generators - focus on module loading
+        generator_probability: 0.0,
     };
 
     let emit = EmitConfig {
@@ -535,6 +545,8 @@ fn generics_heavy_profile() -> Profile {
         enable_diamond_dependencies: true,
         // Some fallible functions for generics-heavy profile
         fallible_probability: 0.10,
+        // Some generators for generics-heavy profile
+        generator_probability: 0.10,
     };
 
     let emit = EmitConfig {

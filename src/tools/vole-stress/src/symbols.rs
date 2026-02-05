@@ -48,6 +48,8 @@ pub enum TypeInfo {
         param_types: Vec<TypeInfo>,
         return_type: Box<TypeInfo>,
     },
+    /// Iterator type (returned by generator functions)
+    Iterator(Box<TypeInfo>),
     /// Void type (no return value)
     Void,
     /// A type parameter (e.g., T in Box<T>)
@@ -179,6 +181,19 @@ impl TypeInfo {
         matches!(self, TypeInfo::Fallible { .. })
     }
 
+    /// Check if this type is an iterator type (returned by generators).
+    pub fn is_iterator(&self) -> bool {
+        matches!(self, TypeInfo::Iterator(_))
+    }
+
+    /// Get the element type of an iterator type.
+    pub fn iterator_element_type(&self) -> Option<&TypeInfo> {
+        match self {
+            TypeInfo::Iterator(elem) => Some(elem),
+            _ => None,
+        }
+    }
+
     /// Get the success type of a fallible type, or the type itself if not fallible.
     pub fn success_type(&self) -> &TypeInfo {
         match self {
@@ -233,6 +248,9 @@ impl TypeInfo {
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!("({}) -> {}", params, return_type.to_vole_syntax(table))
+            }
+            TypeInfo::Iterator(elem) => {
+                format!("Iterator<{}>", elem.to_vole_syntax(table))
             }
             TypeInfo::Void => "void".to_string(),
             TypeInfo::TypeParam(name) => name.clone(),
@@ -475,6 +493,18 @@ impl ModuleSymbols {
         self.symbols
             .iter()
             .filter(|s| matches!(s.kind, SymbolKind::ImplementBlock(_)))
+    }
+
+    /// Get all generator functions in this module (functions returning Iterator<T>).
+    #[allow(dead_code)]
+    pub fn generators(&self) -> impl Iterator<Item = &Symbol> {
+        self.symbols.iter().filter(|s| {
+            if let SymbolKind::Function(ref info) = s.kind {
+                info.return_type.is_iterator()
+            } else {
+                false
+            }
+        })
     }
 }
 
