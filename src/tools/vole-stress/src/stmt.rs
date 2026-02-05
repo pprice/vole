@@ -39,6 +39,8 @@ pub struct StmtConfig {
     pub fixed_array_probability: f64,
     /// Probability of generating a discard expression (_ = expr) statement.
     pub discard_probability: f64,
+    /// Probability of generating an early return statement in function bodies.
+    pub early_return_probability: f64,
 }
 
 impl Default for StmtConfig {
@@ -57,6 +59,7 @@ impl Default for StmtConfig {
             tuple_probability: 0.10,
             fixed_array_probability: 0.10,
             discard_probability: 0.05,
+            early_return_probability: 0.15,
         }
     }
 }
@@ -87,6 +90,9 @@ pub struct StmtContext<'a> {
     /// Variables that should not be modified by compound assignments.
     /// Used to protect while-loop counter and guard variables from modification.
     pub protected_vars: Vec<String>,
+    /// The effective return type (success type for fallible functions).
+    /// Set when generating function bodies to enable early returns.
+    pub return_type: Option<TypeInfo>,
 }
 
 impl<'a> StmtContext<'a> {
@@ -105,6 +111,7 @@ impl<'a> StmtContext<'a> {
             local_counter: 0,
             current_function_name: None,
             protected_vars: Vec::new(),
+            return_type: None,
         }
     }
 
@@ -126,6 +133,7 @@ impl<'a> StmtContext<'a> {
             local_counter: 0,
             current_function_name: None,
             protected_vars: Vec::new(),
+            return_type: None,
         }
     }
 
@@ -208,6 +216,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     }
 
     /// Generate a function body with statements and a return.
+    ///
+    /// Optionally generates an early return inside an if block for functions
+    /// with non-void return types. The early return probability is controlled
+    /// by `config.early_return_probability`.
     pub fn generate_body(
         &mut self,
         return_type: &TypeInfo,
@@ -219,24 +231,76 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             .rng
             .gen_range(self.config.statements_per_block.0..=self.config.statements_per_block.1);
 
+        // For fallible functions, use the success type for the return expression
+        let effective_return_type = return_type.success_type().clone();
+
+        // Set the return type in context for early return generation
+        ctx.return_type = Some(effective_return_type.clone());
+
         // Generate statements
         for _ in 0..stmt_count {
             let stmt = self.generate_statement(ctx, depth);
             lines.push(stmt);
         }
 
-        // For fallible functions, use the success type for the return expression
-        let effective_return_type = return_type.success_type();
+        // Optionally generate an early return inside an if block for non-void functions
+        if !matches!(effective_return_type, TypeInfo::Void)
+            && self.rng.gen_bool(self.config.early_return_probability)
+        {
+            if let Some(early_return_stmt) = self.generate_early_return(ctx) {
+                lines.push(early_return_stmt);
+            }
+        }
 
-        // Generate return statement
+        // Generate final return statement (always needed for non-void functions)
         if !matches!(effective_return_type, TypeInfo::Void) {
             let expr_ctx = ctx.to_expr_context();
             let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
-            let return_expr = expr_gen.generate(effective_return_type, &expr_ctx, 0);
+            let return_expr = expr_gen.generate(&effective_return_type, &expr_ctx, 0);
             lines.push(format!("return {}", return_expr));
         }
 
         lines
+    }
+
+    /// Generate an early return statement wrapped in an if block.
+    ///
+    /// Produces a pattern like:
+    /// ```vole
+    /// if <condition> {
+    ///     return <expr>
+    /// }
+    /// ```
+    ///
+    /// Returns `None` if the function has a void return type.
+    fn generate_early_return(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let return_type = ctx.return_type.as_ref()?;
+        if matches!(return_type, TypeInfo::Void) {
+            return None;
+        }
+
+        let expr_ctx = ctx.to_expr_context();
+
+        // Generate a simple boolean condition (avoid multi-line expressions in if)
+        let cond = {
+            let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+            expr_gen.generate_simple(&TypeInfo::Primitive(PrimitiveType::Bool), &expr_ctx)
+        };
+
+        // Generate the return expression
+        let return_expr = {
+            let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+            expr_gen.generate(return_type, &expr_ctx, 0)
+        };
+
+        let indent = "    ".repeat(self.indent + 1);
+        Some(format!(
+            "if {} {{\n{}return {}\n{}}}",
+            cond,
+            indent,
+            return_expr,
+            "    ".repeat(self.indent)
+        ))
     }
 
     /// Generate a single statement.
@@ -1703,6 +1767,103 @@ mod tests {
                 !stmt.contains("_ =") || stmt.contains("_ =>"),
                 "Discard should not appear without callable functions: {}",
                 stmt
+            );
+        }
+    }
+
+    #[test]
+    fn test_early_return_generation() {
+        let table = SymbolTable::new();
+
+        // Use a config with high early_return_probability to ensure it triggers
+        let config = StmtConfig {
+            early_return_probability: 0.99,
+            if_probability: 0.0,
+            while_probability: 0.0,
+            for_probability: 0.0,
+            ..StmtConfig::default()
+        };
+
+        let mut found_early_return = false;
+        for seed in 0..100 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = StmtGenerator::new(&mut rng, &config);
+            let mut ctx = StmtContext::new(&[], &table);
+
+            let lines =
+                generator.generate_body(&TypeInfo::Primitive(PrimitiveType::I64), &mut ctx, 0);
+
+            // Check if there's an early return (if block containing return before the final return)
+            let return_count = lines.iter().filter(|l| l.contains("return ")).count();
+            if return_count >= 2 {
+                // Should have an "if" block with a return inside it
+                let has_if_with_return = lines.iter().any(|l| l.starts_with("if "));
+                if has_if_with_return {
+                    found_early_return = true;
+                    break;
+                }
+            }
+        }
+        assert!(
+            found_early_return,
+            "Expected at least one early return in if block across 100 seeds"
+        );
+    }
+
+    #[test]
+    fn test_early_return_not_generated_for_void() {
+        let table = SymbolTable::new();
+
+        let config = StmtConfig {
+            early_return_probability: 0.99,
+            if_probability: 0.0,
+            while_probability: 0.0,
+            for_probability: 0.0,
+            ..StmtConfig::default()
+        };
+
+        for seed in 0..50 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = StmtGenerator::new(&mut rng, &config);
+            let mut ctx = StmtContext::new(&[], &table);
+
+            let lines = generator.generate_body(&TypeInfo::Void, &mut ctx, 0);
+
+            // Void functions should not have any return statements
+            assert!(
+                !lines.iter().any(|l| l.contains("return ")),
+                "Void functions should not have return statements: {:?}",
+                lines
+            );
+        }
+    }
+
+    #[test]
+    fn test_early_return_disabled_when_probability_zero() {
+        let table = SymbolTable::new();
+
+        let config = StmtConfig {
+            early_return_probability: 0.0,
+            if_probability: 0.0,
+            while_probability: 0.0,
+            for_probability: 0.0,
+            ..StmtConfig::default()
+        };
+
+        for seed in 0..100 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = StmtGenerator::new(&mut rng, &config);
+            let mut ctx = StmtContext::new(&[], &table);
+
+            let lines =
+                generator.generate_body(&TypeInfo::Primitive(PrimitiveType::I64), &mut ctx, 0);
+
+            // Should have exactly one return statement (the final one)
+            let return_count = lines.iter().filter(|l| l.contains("return ")).count();
+            assert_eq!(
+                return_count, 1,
+                "With early_return_probability=0.0, should have exactly 1 return: {:?}",
+                lines
             );
         }
     }

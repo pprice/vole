@@ -144,6 +144,8 @@ fn minimal_profile() -> Profile {
             fixed_array_probability: 0.0,
             // No discards in minimal
             discard_probability: 0.0,
+            // No early returns in minimal
+            early_return_probability: 0.0,
         },
     };
 
@@ -242,6 +244,8 @@ fn full_profile() -> Profile {
             fixed_array_probability: 0.12,
             // Discard expressions (_ = func()) to exercise syntax
             discard_probability: 0.05,
+            // Early returns in function bodies (~15%)
+            early_return_probability: 0.15,
         },
     };
 
@@ -339,6 +343,8 @@ fn deep_nesting_profile() -> Profile {
             fixed_array_probability: 0.08,
             // Some discards for variety
             discard_probability: 0.05,
+            // Some early returns for variety
+            early_return_probability: 0.10,
         },
     };
 
@@ -438,6 +444,8 @@ fn wide_types_profile() -> Profile {
             fixed_array_probability: 0.10,
             // Some discards
             discard_probability: 0.05,
+            // Some early returns
+            early_return_probability: 0.10,
         },
     };
 
@@ -528,6 +536,8 @@ fn many_modules_profile() -> Profile {
             fixed_array_probability: 0.0,
             // No discards - focus on module loading
             discard_probability: 0.0,
+            // No early returns - focus on module loading
+            early_return_probability: 0.0,
         },
     };
 
@@ -631,6 +641,8 @@ fn generics_heavy_profile() -> Profile {
             fixed_array_probability: 0.10,
             // Some discards
             discard_probability: 0.05,
+            // Some early returns
+            early_return_probability: 0.12,
         },
     };
 
