@@ -506,15 +506,22 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                         self.generate_binary_arith(prim, ctx, depth)
                     }
                     4 => {
-                        // Unary negation - generate a negated literal
-                        let suffix = match prim {
-                            PrimitiveType::I32 => "_i32",
-                            PrimitiveType::I64 => "_i64",
-                            PrimitiveType::F64 => "_f64",
-                            _ => "",
-                        };
-                        let val = self.rng.gen_range(1..100);
-                        format!("(-{}{})", val, suffix)
+                        // Unary: negation or bitwise NOT (integer only)
+                        if prim != PrimitiveType::F64 && self.rng.gen_bool(0.5) {
+                            // Bitwise NOT on integer operand
+                            let inner = self.generate_simple(&TypeInfo::Primitive(prim), ctx);
+                            format!("(~{})", inner)
+                        } else {
+                            // Unary negation
+                            let suffix = match prim {
+                                PrimitiveType::I32 => "_i32",
+                                PrimitiveType::I64 => "_i64",
+                                PrimitiveType::F64 => "_f64",
+                                _ => "",
+                            };
+                            let val = self.rng.gen_range(1..100);
+                            format!("(-{}{})", val, suffix)
+                        }
                     }
                     5..=6 => {
                         // Multi-arm when expression
@@ -599,9 +606,18 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             | PrimitiveType::U64
             | PrimitiveType::F32 => {
                 match choice {
-                    0..=4 => {
+                    0..=3 => {
                         // Literal
                         self.generate_simple(&TypeInfo::Primitive(prim), ctx)
+                    }
+                    4 => {
+                        // Bitwise NOT (integer types only, not F32)
+                        if prim != PrimitiveType::F32 {
+                            let inner = self.generate_simple(&TypeInfo::Primitive(prim), ctx);
+                            format!("(~{})", inner)
+                        } else {
+                            self.generate_simple(&TypeInfo::Primitive(prim), ctx)
+                        }
                     }
                     5..=6 => {
                         // Multi-arm when expression
@@ -1271,6 +1287,57 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn test_bitwise_not_generation() {
+        let config = ExprConfig::default();
+        let table = SymbolTable::new();
+        let ctx = ExprContext::new(&[], &[], &table);
+
+        // Check that bitwise NOT appears in i64 expressions
+        let mut found_i64 = false;
+        for seed in 0..500 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let expr = generator.generate(&TypeInfo::Primitive(PrimitiveType::I64), &ctx, 0);
+            if expr.contains('~') {
+                found_i64 = true;
+                break;
+            }
+        }
+        assert!(
+            found_i64,
+            "Expected at least one bitwise NOT (~) expression for i64 across 500 seeds",
+        );
+
+        // Check that bitwise NOT appears in wider integer types (e.g. u8)
+        let mut found_u8 = false;
+        for seed in 0..500 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let expr = generator.generate(&TypeInfo::Primitive(PrimitiveType::U8), &ctx, 0);
+            if expr.contains('~') {
+                found_u8 = true;
+                break;
+            }
+        }
+        assert!(
+            found_u8,
+            "Expected at least one bitwise NOT (~) expression for u8 across 500 seeds",
+        );
+
+        // Check that bitwise NOT does NOT appear in f64 expressions
+        for seed in 0..200 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let expr = generator.generate(&TypeInfo::Primitive(PrimitiveType::F64), &ctx, 0);
+            assert!(
+                !expr.contains('~'),
+                "Bitwise NOT should not appear in f64 expressions, got: {}",
+                expr,
+            );
         }
     }
 
