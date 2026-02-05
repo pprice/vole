@@ -747,7 +747,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     /// so it can be used for array indexing expressions later.
     fn generate_array_let(&mut self, ctx: &mut StmtContext) -> String {
         let name = ctx.new_local_name();
-        let elem_prim = PrimitiveType::random_expr_type(self.rng);
+        let elem_prim = PrimitiveType::random_array_element_type(self.rng);
         let elem_ty = TypeInfo::Primitive(elem_prim);
 
         // Generate 2-4 elements so indexing with 0..=2 is safe

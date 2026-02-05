@@ -126,6 +126,35 @@ impl PrimitiveType {
         // Reuse the same distribution as expr types
         Self::random_expr_type(rng)
     }
+
+    /// Select a random primitive type suitable for array elements.
+    ///
+    /// Arrays in Vole require element types that fit in 64 bits, so i128 is
+    /// excluded. Otherwise uses the same distribution as `random_expr_type`:
+    /// core types ~90%, wider types ~10%.
+    pub fn random_array_element_type<R: Rng>(rng: &mut R) -> Self {
+        match rng.gen_range(0..50) {
+            0..=8 => PrimitiveType::I32,
+            9..=17 => PrimitiveType::I64,
+            18..=26 => PrimitiveType::F64,
+            27..=35 => PrimitiveType::Bool,
+            36..=44 => PrimitiveType::String,
+            // ~10% combined for wider types (1 slot each out of 50)
+            // Note: i128 is excluded (not valid for array elements)
+            45 => PrimitiveType::I8,
+            46 => PrimitiveType::I16,
+            47 => PrimitiveType::U8,
+            48 => PrimitiveType::U16,
+            _ => {
+                // Spread remaining wider types across the last slot
+                match rng.gen_range(0..3) {
+                    0 => PrimitiveType::U32,
+                    1 => PrimitiveType::U64,
+                    _ => PrimitiveType::F32,
+                }
+            }
+        }
+    }
 }
 
 #[allow(dead_code)]
