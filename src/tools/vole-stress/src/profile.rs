@@ -233,8 +233,9 @@ fn full_profile() -> Profile {
 /// - AST traversal efficiency in all compiler phases
 /// - Memory usage with deeply nested structures
 ///
-/// Target: expressions nested 15-20 levels, statements nested 10-15 levels.
-/// Higher depths cause exponential AST growth and generation timeouts.
+/// Target: expressions nested 5 levels, statements nested 6 levels.
+/// Higher expression depths cause exponential AST growth from multi-arm
+/// when/match expressions, producing functions too large for Cranelift.
 fn deep_nesting_profile() -> Profile {
     let plan = PlanConfig {
         // Small module structure - focus is on depth, not breadth
@@ -273,9 +274,15 @@ fn deep_nesting_profile() -> Profile {
     let emit = EmitConfig {
         stmt_config: StmtConfig {
             expr_config: ExprConfig {
-                // Deep expression nesting - high enough to stress the compiler,
-                // low enough to avoid exponential blowup in generation
-                max_depth: 8,
+                // Expression nesting depth. Must stay moderate because
+                // multi-arm expressions (when/match) have a branching
+                // factor of 3-7 per level.  At depth 8 some seeds hit
+                // worst-case ~7^8 ≈ 5 million leaf expressions, producing
+                // functions with 100K+ CLIF instructions that hang in
+                // Cranelift register allocation.  Depth 5 still gives
+                // meaningful nesting while keeping worst-case size bounded
+                // (~7^5 ≈ 17K leaves, well within Cranelift's budget).
+                max_depth: 5,
                 // High probability of binary expressions for deep a + (b + (c + ...))
                 binary_probability: 0.6,
                 // Multi-branch expressions at moderate probability
@@ -685,10 +692,11 @@ mod tests {
         // Verify deep nesting characteristics
         assert_eq!(profile.plan.layers, 1);
         assert_eq!(profile.plan.modules_per_layer, 1);
-        // Expression nesting depth (8+ is enough with compounding from binary ops)
+        // Expression nesting depth (5+ avoids exponential blowup from
+        // multi-arm when/match while still achieving meaningful depth)
         assert!(
-            profile.emit.stmt_config.expr_config.max_depth >= 6,
-            "expression max_depth should be >= 6 for deep nesting"
+            profile.emit.stmt_config.expr_config.max_depth >= 5,
+            "expression max_depth should be >= 5 for deep nesting"
         );
         // Statement nesting depth
         assert!(
