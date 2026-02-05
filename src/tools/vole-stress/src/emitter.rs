@@ -113,6 +113,11 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             self.emit_error(symbol);
         }
 
+        // Emit structs
+        for symbol in self.module.structs() {
+            self.emit_struct(symbol);
+        }
+
         // Emit classes
         for symbol in self.module.classes() {
             self.emit_class(symbol);
@@ -132,14 +137,15 @@ impl<'a, R: Rng> EmitContext<'a, R> {
         self.emit_module_tests();
     }
 
-    /// Emit a tests block that exercises the module's functions and classes.
+    /// Emit a tests block that exercises the module's functions, classes, and structs.
     fn emit_module_tests(&mut self) {
-        // Collect functions and classes to test
+        // Collect functions, classes, and structs to test
         let functions: Vec<_> = self.module.functions().collect();
         let classes: Vec<_> = self.module.classes().collect();
+        let structs: Vec<_> = self.module.structs().collect();
 
         // Skip if nothing to test
-        if functions.is_empty() && classes.is_empty() {
+        if functions.is_empty() && classes.is_empty() && structs.is_empty() {
             return;
         }
 
@@ -155,6 +161,11 @@ impl<'a, R: Rng> EmitContext<'a, R> {
         // Generate tests for each class
         for symbol in &classes {
             self.emit_class_test(symbol);
+        }
+
+        // Generate tests for each struct
+        for symbol in &structs {
+            self.emit_struct_test(symbol);
         }
 
         self.indent -= 1;
@@ -178,6 +189,15 @@ impl<'a, R: Rng> EmitContext<'a, R> {
 
             // Generate the test body based on return type
             match &info.return_type {
+                TypeInfo::Fallible { success, .. } => {
+                    // Fallible function - wrap in match to handle success/error
+                    let default_val = self.generate_test_value(success);
+                    self.emit_line(&format!(
+                        "let _result = match {} {{ success x => x, error => {}, _ => {} }}",
+                        call, default_val, default_val
+                    ));
+                    self.emit_line("assert(true)");
+                }
                 TypeInfo::Void => {
                     // Void function - just call it and assert true
                     self.emit_line(&call);
@@ -245,6 +265,35 @@ impl<'a, R: Rng> EmitContext<'a, R> {
         }
     }
 
+    /// Emit a test for a struct (construction and field access).
+    fn emit_struct_test(&mut self, symbol: &Symbol) {
+        if let SymbolKind::Struct(ref info) = symbol.kind {
+            self.emit_line(&format!("test \"{} construction\" {{", symbol.name));
+            self.indent += 1;
+
+            // Generate field values for construction
+            let field_values = self.generate_struct_field_values(&info.fields);
+            self.emit_line(&format!(
+                "let instance = {} {{ {} }}",
+                symbol.name, field_values
+            ));
+            // Construction succeeded if we get here
+            self.emit_line("assert(true)");
+
+            // Test field access for each field
+            for field in &info.fields {
+                self.emit_line(&format!(
+                    "let _{}_val = instance.{}",
+                    field.name, field.name
+                ));
+            }
+
+            self.indent -= 1;
+            self.emit_line("}");
+            self.emit_line("");
+        }
+    }
+
     /// Generate test arguments for function/method parameters.
     fn generate_test_args(&mut self, params: &[ParamInfo]) -> String {
         params
@@ -264,6 +313,14 @@ impl<'a, R: Rng> EmitContext<'a, R> {
                 format!("[{}]", elem_val)
             }
             TypeInfo::Void => "nil".to_string(),
+            TypeInfo::Union(variants) => {
+                // For union types, generate a value for the first variant
+                if let Some(first) = variants.first() {
+                    self.generate_test_value(first)
+                } else {
+                    "nil".to_string()
+                }
+            }
             TypeInfo::Class(mod_id, sym_id) => {
                 // For class types, construct an instance
                 if let Some(symbol) = self.table.get_symbol(*mod_id, *sym_id) {
@@ -276,6 +333,16 @@ impl<'a, R: Rng> EmitContext<'a, R> {
                 }
                 "nil".to_string()
             }
+            TypeInfo::Struct(mod_id, sym_id) => {
+                // For struct types, construct an instance
+                if let Some(symbol) = self.table.get_symbol(*mod_id, *sym_id) {
+                    if let SymbolKind::Struct(ref struct_info) = symbol.kind {
+                        let fields = self.generate_struct_field_values(&struct_info.fields);
+                        return format!("{} {{ {} }}", symbol.name, fields);
+                    }
+                }
+                "nil".to_string()
+            }
             _ => "nil".to_string(),
         }
     }
@@ -283,6 +350,14 @@ impl<'a, R: Rng> EmitContext<'a, R> {
     /// Generate a primitive test value.
     fn generate_primitive_test_value(&mut self, prim: PrimitiveType) -> String {
         match prim {
+            PrimitiveType::I8 => {
+                let val: i8 = self.rng.gen_range(1..50);
+                format!("{}_i8", val)
+            }
+            PrimitiveType::I16 => {
+                let val: i16 = self.rng.gen_range(1..100);
+                format!("{}_i16", val)
+            }
             PrimitiveType::I32 => {
                 let val: i32 = self.rng.gen_range(1..50);
                 format!("{}_i32", val)
@@ -290,6 +365,30 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             PrimitiveType::I64 => {
                 let val: i64 = self.rng.gen_range(1..100);
                 format!("{}_i64", val)
+            }
+            PrimitiveType::I128 => {
+                let val: i64 = self.rng.gen_range(1..1000);
+                format!("{}_i128", val)
+            }
+            PrimitiveType::U8 => {
+                let val: u8 = self.rng.gen_range(1..50);
+                format!("{}_u8", val)
+            }
+            PrimitiveType::U16 => {
+                let val: u16 = self.rng.gen_range(1..100);
+                format!("{}_u16", val)
+            }
+            PrimitiveType::U32 => {
+                let val: u32 = self.rng.gen_range(1..100);
+                format!("{}_u32", val)
+            }
+            PrimitiveType::U64 => {
+                let val: u64 = self.rng.gen_range(1..1000);
+                format!("{}_u64", val)
+            }
+            PrimitiveType::F32 => {
+                let val: f32 = self.rng.gen_range(1.0_f32..50.0_f32);
+                format!("{:.2}_f32", val)
             }
             PrimitiveType::F64 => {
                 let val: f64 = self.rng.gen_range(1.0..50.0);
@@ -306,6 +405,15 @@ impl<'a, R: Rng> EmitContext<'a, R> {
 
     /// Generate field values for class construction.
     fn generate_class_field_values(&mut self, fields: &[FieldInfo]) -> String {
+        fields
+            .iter()
+            .map(|f| format!("{}: {}", f.name, self.generate_test_value(&f.field_type)))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    /// Generate field values for struct construction.
+    fn generate_struct_field_values(&mut self, fields: &[FieldInfo]) -> String {
         fields
             .iter()
             .map(|f| format!("{}: {}", f.name, self.generate_test_value(&f.field_type)))
@@ -402,6 +510,23 @@ impl<'a, R: Rng> EmitContext<'a, R> {
                     symbol.name,
                     fields.join(", ")
                 ));
+            }
+        }
+    }
+
+    fn emit_struct(&mut self, symbol: &Symbol) {
+        if let SymbolKind::Struct(ref info) = symbol.kind {
+            self.emit_line("");
+            if info.fields.is_empty() {
+                self.emit_line(&format!("struct {} {{}}", symbol.name));
+            } else {
+                self.emit_line(&format!("struct {} {{", symbol.name));
+                self.indent += 1;
+                for field in &info.fields {
+                    self.emit_field(field);
+                }
+                self.indent -= 1;
+                self.emit_line("}");
             }
         }
     }
@@ -519,6 +644,14 @@ impl<'a, R: Rng> EmitContext<'a, R> {
 
     fn emit_function_body(&mut self, return_type: &TypeInfo, params: &[ParamInfo]) {
         let mut stmt_ctx = StmtContext::with_module(params, self.table, self.module.id);
+
+        // If this function has a fallible return type, mark the context as fallible
+        if let TypeInfo::Fallible { error, .. } = return_type {
+            stmt_ctx.is_fallible = true;
+            // Collect fallible functions in this module for try expressions
+            stmt_ctx.fallible_error_type = Some(error.as_ref().clone());
+        }
+
         let mut stmt_gen = StmtGenerator::new(self.rng, &self.config.stmt_config);
         stmt_gen.set_indent(self.indent);
 
@@ -607,6 +740,20 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             TypeInfo::Primitive(p) => expr_gen.literal_for_primitive(*p),
             TypeInfo::Optional(_) => "nil".to_string(),
             TypeInfo::Void => "nil".to_string(),
+            TypeInfo::Union(variants) => {
+                // For union types, generate a literal for the first variant
+                if let Some(first) = variants.first() {
+                    drop(expr_gen);
+                    self.literal_for_type(first)
+                } else {
+                    "nil".to_string()
+                }
+            }
+            TypeInfo::Array(elem) => {
+                drop(expr_gen);
+                let elem_val = self.literal_for_type(elem);
+                format!("[{}]", elem_val)
+            }
             _ => "nil".to_string(),
         }
     }
@@ -789,6 +936,68 @@ mod tests {
         // Should contain class construction test
         assert!(code.contains("construction\""));
         assert!(code.contains("let instance ="));
+    }
+
+    #[test]
+    fn emit_module_contains_struct() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let plan_config = PlanConfig {
+            layers: 1,
+            modules_per_layer: 1,
+            structs_per_module: (1, 1),
+            classes_per_module: (0, 0),
+            functions_per_module: (0, 0),
+            interfaces_per_module: (0, 0),
+            errors_per_module: (0, 0),
+            globals_per_module: (0, 0),
+            ..Default::default()
+        };
+
+        let table = plan(&mut rng, &plan_config);
+        let module = table.get_module(ModuleId(0)).unwrap();
+        let emit_config = EmitConfig::default();
+
+        let code = emit_module(&mut rng, &table, module, &emit_config);
+
+        assert!(
+            code.contains("struct Struct"),
+            "Expected struct declaration in output, got:\n{}",
+            code
+        );
+    }
+
+    #[test]
+    fn emit_module_tests_for_structs() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let plan_config = PlanConfig {
+            layers: 1,
+            modules_per_layer: 1,
+            structs_per_module: (1, 1),
+            classes_per_module: (0, 0),
+            functions_per_module: (0, 0),
+            interfaces_per_module: (0, 0),
+            errors_per_module: (0, 0),
+            globals_per_module: (0, 0),
+            ..Default::default()
+        };
+
+        let table = plan(&mut rng, &plan_config);
+        let module = table.get_module(ModuleId(0)).unwrap();
+        let emit_config = EmitConfig::default();
+
+        let code = emit_module(&mut rng, &table, module, &emit_config);
+
+        // Should contain struct construction test
+        assert!(
+            code.contains("construction\""),
+            "Expected struct construction test, got:\n{}",
+            code
+        );
+        assert!(
+            code.contains("let instance ="),
+            "Expected struct instance creation, got:\n{}",
+            code
+        );
     }
 
     #[test]

@@ -7,7 +7,8 @@ use rand::Rng;
 use std::fmt::Write as _;
 
 use crate::symbols::{
-    FieldInfo, ModuleSymbols, ParamInfo, PrimitiveType, SymbolKind, SymbolTable, TypeInfo,
+    FieldInfo, ModuleSymbols, ParamInfo, PrimitiveType, StructInfo, SymbolKind, SymbolTable,
+    TypeInfo,
 };
 
 /// Emit main.vole entrypoint that imports leaf modules and exercises the generated code.
@@ -155,6 +156,13 @@ impl<'a, R: Rng> EntrypointContext<'a, R> {
                 }
             }
         }
+
+        // Test structs
+        for symbol in module.structs() {
+            if let SymbolKind::Struct(ref info) = symbol.kind {
+                self.emit_struct_test(module, &symbol.name, info);
+            }
+        }
     }
 
     fn emit_global_test(&mut self, module: &ModuleSymbols, name: &str) {
@@ -163,8 +171,10 @@ impl<'a, R: Rng> EntrypointContext<'a, R> {
             module.name, name
         ));
         self.indent += 1;
-        self.emit_line(&format!("let value = {}.{}", module.name, name));
-        self.emit_line("assert(value != nil)");
+        // Use _ = value pattern to verify access succeeds without nil comparison
+        // (non-optional types can't be compared to nil in Vole)
+        self.emit_line(&format!("let _ = {}.{}", module.name, name));
+        self.emit_line("assert(true)");
         self.indent -= 1;
         self.emit_line("}");
         self.emit_line("");
@@ -186,17 +196,29 @@ impl<'a, R: Rng> EntrypointContext<'a, R> {
         let call = format!("{}.{}({})", module.name, name, args);
 
         match &info.return_type {
+            TypeInfo::Fallible { success, .. } => {
+                // Fallible function - wrap in match to handle success/error
+                let default_val = self.generate_value_for_type(success);
+                self.emit_line(&format!(
+                    "let _result = match {} {{ success x => x, error => {}, _ => {} }}",
+                    call, default_val, default_val
+                ));
+                self.emit_line("assert(true)");
+            }
             TypeInfo::Void => {
                 self.emit_line(&call);
                 self.emit_line("assert(true)");
             }
             TypeInfo::Optional(_) => {
+                // Optional types can be compared to nil
                 self.emit_line(&format!("let result = {}", call));
                 self.emit_line("assert(result != nil || result == nil)");
             }
             _ => {
-                self.emit_line(&format!("let result = {}", call));
-                self.emit_line("assert(result != nil)");
+                // Non-optional types can't be compared to nil in Vole
+                // Just verify the call succeeds by discarding the result
+                self.emit_line(&format!("let _ = {}", call));
+                self.emit_line("assert(true)");
             }
         }
 
@@ -218,11 +240,14 @@ impl<'a, R: Rng> EntrypointContext<'a, R> {
         self.indent += 1;
 
         let fields = self.generate_field_values(&info.fields);
+        // Use _ = instance pattern to verify construction succeeds without nil comparison
+        // (non-optional class instances can't be compared to nil in Vole)
         self.emit_line(&format!(
             "let instance = {}.{} {{ {} }}",
             module.name, name, fields
         ));
-        self.emit_line("assert(instance != nil)");
+        // Construction succeeded if we get here, assert true
+        self.emit_line("assert(true)");
 
         // Test each method that doesn't have type parameters
         for method in &info.methods {
@@ -238,6 +263,34 @@ impl<'a, R: Rng> EntrypointContext<'a, R> {
                     ));
                 }
             }
+        }
+
+        self.indent -= 1;
+        self.emit_line("}");
+        self.emit_line("");
+    }
+
+    fn emit_struct_test(&mut self, module: &ModuleSymbols, name: &str, info: &StructInfo) {
+        self.emit_line(&format!(
+            "test \"{}.{} struct construction\" {{",
+            module.name, name
+        ));
+        self.indent += 1;
+
+        let fields = self.generate_field_values(&info.fields);
+        self.emit_line(&format!(
+            "let instance = {}.{} {{ {} }}",
+            module.name, name, fields
+        ));
+        // Construction succeeded if we get here
+        self.emit_line("assert(true)");
+
+        // Test field access for each field
+        for field in &info.fields {
+            self.emit_line(&format!(
+                "let _{}_val = instance.{}",
+                field.name, field.name
+            ));
         }
 
         self.indent -= 1;
@@ -268,6 +321,14 @@ impl<'a, R: Rng> EntrypointContext<'a, R> {
                 if info.type_params.is_empty() {
                     let args = self.generate_call_args(&info.params);
                     match &info.return_type {
+                        TypeInfo::Fallible { success, .. } => {
+                            // Fallible function - wrap in match to handle result
+                            let default_val = self.generate_value_for_type(success);
+                            self.emit_line(&format!(
+                                "let _{}_result = match {}.{}({}) {{ success x => x, error => {}, _ => {} }}",
+                                symbol.name, module.name, symbol.name, args, default_val, default_val
+                            ));
+                        }
                         TypeInfo::Void => {
                             self.emit_line(&format!("{}.{}({})", module.name, symbol.name, args));
                         }
@@ -295,6 +356,20 @@ impl<'a, R: Rng> EntrypointContext<'a, R> {
                         fields
                     ));
                 }
+            }
+        }
+
+        // Exercise structs (construct all - structs have no generics)
+        for symbol in module.structs() {
+            if let SymbolKind::Struct(ref info) = symbol.kind {
+                let fields = self.generate_field_values(&info.fields);
+                self.emit_line(&format!(
+                    "let _{}_instance = {}.{} {{ {} }}",
+                    symbol.name.to_lowercase(),
+                    module.name,
+                    symbol.name,
+                    fields
+                ));
             }
         }
 
@@ -332,12 +407,50 @@ impl<'a, R: Rng> EntrypointContext<'a, R> {
                 format!("[{}]", elem_val)
             }
             TypeInfo::Void => "nil".to_string(),
+            TypeInfo::Union(variants) => {
+                // For union types, generate a value for the first variant
+                if let Some(first) = variants.first() {
+                    self.generate_value_for_type(first)
+                } else {
+                    "nil".to_string()
+                }
+            }
+            TypeInfo::Class(mod_id, sym_id) => {
+                // For class types, construct an instance
+                if let Some(symbol) = self.table.get_symbol(*mod_id, *sym_id) {
+                    if let SymbolKind::Class(ref class_info) = symbol.kind {
+                        if class_info.type_params.is_empty() {
+                            let fields = self.generate_field_values(&class_info.fields);
+                            return format!("{} {{ {} }}", symbol.name, fields);
+                        }
+                    }
+                }
+                "nil".to_string()
+            }
+            TypeInfo::Struct(mod_id, sym_id) => {
+                // For struct types, construct an instance
+                if let Some(symbol) = self.table.get_symbol(*mod_id, *sym_id) {
+                    if let SymbolKind::Struct(ref struct_info) = symbol.kind {
+                        let fields = self.generate_field_values(&struct_info.fields);
+                        return format!("{} {{ {} }}", symbol.name, fields);
+                    }
+                }
+                "nil".to_string()
+            }
             _ => "nil".to_string(),
         }
     }
 
     fn generate_primitive_value(&mut self, prim: PrimitiveType) -> String {
         match prim {
+            PrimitiveType::I8 => {
+                let val: i8 = self.rng.gen_range(1..50);
+                format!("{}_i8", val)
+            }
+            PrimitiveType::I16 => {
+                let val: i16 = self.rng.gen_range(1..100);
+                format!("{}_i16", val)
+            }
             PrimitiveType::I32 => {
                 let val: i32 = self.rng.gen_range(1..50);
                 format!("{}_i32", val)
@@ -345,6 +458,30 @@ impl<'a, R: Rng> EntrypointContext<'a, R> {
             PrimitiveType::I64 => {
                 let val: i64 = self.rng.gen_range(1..100);
                 format!("{}_i64", val)
+            }
+            PrimitiveType::I128 => {
+                let val: i64 = self.rng.gen_range(1..1000);
+                format!("{}_i128", val)
+            }
+            PrimitiveType::U8 => {
+                let val: u8 = self.rng.gen_range(1..50);
+                format!("{}_u8", val)
+            }
+            PrimitiveType::U16 => {
+                let val: u16 = self.rng.gen_range(1..100);
+                format!("{}_u16", val)
+            }
+            PrimitiveType::U32 => {
+                let val: u32 = self.rng.gen_range(1..100);
+                format!("{}_u32", val)
+            }
+            PrimitiveType::U64 => {
+                let val: u64 = self.rng.gen_range(1..1000);
+                format!("{}_u64", val)
+            }
+            PrimitiveType::F32 => {
+                let val: f32 = self.rng.gen_range(1.0_f32..50.0_f32);
+                format!("{:.2}_f32", val)
             }
             PrimitiveType::F64 => {
                 let val: f64 = self.rng.gen_range(1.0..50.0);
@@ -506,6 +643,67 @@ mod tests {
         // Should test class construction
         assert!(code.contains("class construction\""));
         assert!(code.contains("let instance ="));
+    }
+
+    #[test]
+    fn emit_integration_tests_tests_structs() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let plan_config = PlanConfig {
+            layers: 1,
+            modules_per_layer: 1,
+            structs_per_module: (1, 1),
+            classes_per_module: (0, 0),
+            functions_per_module: (0, 0),
+            interfaces_per_module: (0, 0),
+            errors_per_module: (0, 0),
+            globals_per_module: (0, 0),
+            type_params_per_class: (0, 0),
+            type_params_per_function: (0, 0),
+            ..Default::default()
+        };
+
+        let table = plan(&mut rng, &plan_config);
+        let code = emit_integration_tests(&mut rng, &table);
+
+        // Should test struct construction
+        assert!(
+            code.contains("struct construction\""),
+            "Expected struct construction test, got:\n{}",
+            code
+        );
+        assert!(
+            code.contains("let instance ="),
+            "Expected struct instance creation, got:\n{}",
+            code
+        );
+    }
+
+    #[test]
+    fn emit_main_exercises_structs() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let plan_config = PlanConfig {
+            layers: 2,
+            modules_per_layer: 2,
+            structs_per_module: (1, 1),
+            classes_per_module: (0, 0),
+            functions_per_module: (0, 0),
+            interfaces_per_module: (0, 0),
+            errors_per_module: (0, 0),
+            globals_per_module: (0, 0),
+            type_params_per_class: (0, 0),
+            type_params_per_function: (0, 0),
+            ..Default::default()
+        };
+
+        let table = plan(&mut rng, &plan_config);
+        let code = emit_main(&mut rng, &table);
+
+        // Should exercise struct construction in main
+        assert!(
+            code.contains("_struct"),
+            "Expected struct exercise in main, got:\n{}",
+            code
+        );
     }
 
     #[test]
