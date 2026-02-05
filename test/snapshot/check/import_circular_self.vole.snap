@@ -1,0 +1,11 @@
+[stdout]
+
+[stderr]
+  × [E2106]: circular import detected: ./import_circular_self.vole
+   ╭─[<path>/import_circular_self.vole:2:16]
+ 1 │ // Test that self-importing module is detected as circular import
+ 2 │ let self_mod = import "./import_circular_self.vole"
+   ·                ──────────────────┬─────────────────
+   ·                                  ╰── import creates a cycle
+   ╰────
+  help: modules cannot import themselves or form import cycles

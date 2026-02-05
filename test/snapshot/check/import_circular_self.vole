@@ -1,0 +1,2 @@
+// Test that self-importing module is detected as circular import
+let self_mod = import "./import_circular_self.vole"

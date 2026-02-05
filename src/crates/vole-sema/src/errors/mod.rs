@@ -715,6 +715,17 @@ pub enum SemanticError {
         #[label("'{ty}' is not optional")]
         span: SourceSpan,
     },
+
+    #[error("circular import detected: {path}")]
+    #[diagnostic(
+        code(E2106),
+        help("modules cannot import themselves or form import cycles")
+    )]
+    CircularImport {
+        path: String,
+        #[label("import creates a cycle")]
+        span: SourceSpan,
+    },
 }
 
 /// Semantic warnings (W3xxx) - these don't prevent compilation but indicate potential issues

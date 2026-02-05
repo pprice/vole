@@ -198,6 +198,41 @@ impl Analyzer {
         }
         tracing::debug!(import_path, %canonical_path, "analyze_module: cache MISS");
 
+        // Check for circular import: if this module is already being analyzed
+        // somewhere in the call stack, we have a cycle.
+        if self
+            .ctx
+            .modules_in_progress
+            .borrow()
+            .contains(&canonical_path)
+        {
+            self.add_error(
+                SemanticError::CircularImport {
+                    path: import_path.to_string(),
+                    span: span.into(),
+                },
+                span,
+            );
+            return Err(());
+        }
+
+        // Mark this module as in-progress before loading/analyzing
+        self.ctx
+            .modules_in_progress
+            .borrow_mut()
+            .insert(canonical_path.clone());
+
+        // Helper macro to clean up modules_in_progress on early return
+        macro_rules! bail_module {
+            ($self:expr, $canonical_path:expr) => {
+                $self
+                    .ctx
+                    .modules_in_progress
+                    .borrow_mut()
+                    .remove($canonical_path);
+            };
+        }
+
         // Cache miss - now load the file content
         let is_relative = import_path.starts_with("./") || import_path.starts_with("../");
         let module_info = if is_relative {
@@ -206,6 +241,7 @@ impl Analyzer {
                     match self.module_loader.load_relative(import_path, current_path) {
                         Ok(info) => info,
                         Err(e) => {
+                            bail_module!(self, &canonical_path);
                             self.add_error(
                                 SemanticError::ModuleNotFound {
                                     path: import_path.to_string(),
@@ -219,6 +255,7 @@ impl Analyzer {
                     }
                 }
                 None => {
+                    bail_module!(self, &canonical_path);
                     self.add_error(
                         SemanticError::ModuleNotFound {
                             path: import_path.to_string(),
@@ -234,6 +271,7 @@ impl Analyzer {
             match self.module_loader.load(import_path) {
                 Ok(info) => info,
                 Err(e) => {
+                    bail_module!(self, &canonical_path);
                     self.add_error(
                         SemanticError::ModuleNotFound {
                             path: import_path.to_string(),
@@ -255,6 +293,7 @@ impl Analyzer {
         let program = match parser.parse_program() {
             Ok(p) => p,
             Err(e) => {
+                bail_module!(self, &canonical_path);
                 self.add_error(
                     SemanticError::ModuleParseError {
                         path: import_path.to_string(),
@@ -397,6 +436,13 @@ impl Analyzer {
         let analyze_result = sub_analyzer.analyze(&program, &module_interner);
         if let Err(ref errors) = analyze_result {
             tracing::warn!(import_path, ?errors, "module analysis errors");
+            // Propagate circular import errors to the parent so they're reported to the user.
+            // Without this, a self-importing file checked individually would silently succeed.
+            for err in errors {
+                if matches!(err.error, SemanticError::CircularImport { .. }) {
+                    self.errors.push(err.clone());
+                }
+            }
         }
         // Store module-specific expr_types (NodeIds are per-program)
         // Nested module entries are already in the shared ctx from the sub-analyzer.
@@ -625,6 +671,12 @@ impl Analyzer {
             %module_path_check,
             "analyze_module: created module type"
         );
+
+        // Module analysis complete - remove from in-progress set
+        self.ctx
+            .modules_in_progress
+            .borrow_mut()
+            .remove(&canonical_path);
 
         // Cache the TypeId with canonical path for consistent lookups
         self.ctx

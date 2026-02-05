@@ -321,6 +321,10 @@ pub struct AnalyzerContext {
     /// Optional shared cache for module analysis results.
     /// When set, modules are cached after analysis and reused across Analyzer instances.
     pub module_cache: Option<Rc<RefCell<ModuleCache>>>,
+    /// Set of modules currently being analyzed (for circular import detection).
+    /// Shared across all sub-analyzers via Rc<AnalyzerContext> so that cycles
+    /// are detected even across nested module imports.
+    pub modules_in_progress: RefCell<FxHashSet<String>>,
 }
 
 impl AnalyzerContext {
@@ -334,6 +338,7 @@ impl AnalyzerContext {
             module_method_resolutions: RefCell::new(FxHashMap::default()),
             module_is_check_results: RefCell::new(FxHashMap::default()),
             module_cache: cache,
+            modules_in_progress: RefCell::new(FxHashSet::default()),
         }
     }
 
