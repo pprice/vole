@@ -101,6 +101,10 @@ fn minimal_profile() -> Profile {
         fallible_probability: 0.0,
         // No generators in minimal
         generator_probability: 0.0,
+        // No never-returning functions in minimal
+        never_probability: 0.0,
+        // No nested class fields in minimal (no classes)
+        nested_class_field_probability: 0.0,
         // These won't be used since we have no classes or structs
         fields_per_struct: (0, 0),
         fields_per_class: (0, 0),
@@ -124,6 +128,8 @@ fn minimal_profile() -> Profile {
                 // No method chaining in minimal profile
                 method_chain_probability: 0.0,
                 max_chain_depth: 0,
+                // No unreachable in minimal
+                unreachable_probability: 0.0,
             },
             // Shallow statement depth
             max_depth: 1,
@@ -151,6 +157,8 @@ fn minimal_profile() -> Profile {
         },
         // No destructured imports in minimal (no multi-layer modules)
         destructured_import_probability: 0.0,
+        // No expression-bodied functions in minimal (keep output simple)
+        expr_body_probability: 0.0,
     };
 
     Profile { plan, emit }
@@ -212,6 +220,10 @@ fn full_profile() -> Profile {
         fallible_probability: 0.18,
         // ~15% of non-generic functions become generators
         generator_probability: 0.15,
+        // ~2% of functions are never-returning (diverging)
+        never_probability: 0.02,
+        // ~25% of non-generic classes get a field referencing another class
+        nested_class_field_probability: 0.25,
     };
 
     let emit = EmitConfig {
@@ -228,6 +240,8 @@ fn full_profile() -> Profile {
                 // Method chaining on class instances
                 method_chain_probability: 0.20,
                 max_chain_depth: 2,
+                // ~5% unreachable in match/when arms
+                unreachable_probability: 0.05,
             },
             // Moderate statement depth for nested control flow
             max_depth: 3,
@@ -257,6 +271,8 @@ fn full_profile() -> Profile {
         // Module-level destructured imports fail when the module is transitively imported.
         // Re-enable at ~0.30 once the bug is fixed.
         destructured_import_probability: 0.0,
+        // ~20% of eligible functions use expression-body syntax (=> expr)
+        expr_body_probability: 0.20,
     };
 
     Profile { plan, emit }
@@ -301,6 +317,10 @@ fn deep_nesting_profile() -> Profile {
         fallible_probability: 0.0,
         // No generators - focus is on nesting depth
         generator_probability: 0.0,
+        // No never-returning functions - focus is on nesting
+        never_probability: 0.0,
+        // Some nested class fields for variety in deep nesting
+        nested_class_field_probability: 0.15,
         // Minimal class/struct structure
         fields_per_struct: (0, 0),
         fields_per_class: (1, 2),
@@ -332,6 +352,8 @@ fn deep_nesting_profile() -> Profile {
                 // Light method chaining (not the focus of this profile)
                 method_chain_probability: 0.10,
                 max_chain_depth: 2,
+                // Some unreachable for variety
+                unreachable_probability: 0.05,
             },
             // Deep statement nesting for nested control flow
             max_depth: 6,
@@ -360,6 +382,8 @@ fn deep_nesting_profile() -> Profile {
         },
         // No destructured imports in deep-nesting (single module focus)
         destructured_import_probability: 0.0,
+        // Some expression-bodied functions for syntax variety
+        expr_body_probability: 0.15,
     };
 
     Profile { plan, emit }
@@ -421,6 +445,10 @@ fn wide_types_profile() -> Profile {
         fallible_probability: 0.10,
         // Some generators
         generator_probability: 0.08,
+        // Some never-returning functions
+        never_probability: 0.02,
+        // Moderate nested class fields
+        nested_class_field_probability: 0.20,
     };
 
     let emit = EmitConfig {
@@ -438,6 +466,8 @@ fn wide_types_profile() -> Profile {
                 // Standard method chaining
                 method_chain_probability: 0.15,
                 max_chain_depth: 2,
+                // Some unreachable
+                unreachable_probability: 0.05,
             },
             // Moderate statement depth
             max_depth: 2,
@@ -467,6 +497,8 @@ fn wide_types_profile() -> Profile {
         // Module-level destructured imports fail when the module is transitively imported.
         // Re-enable at ~0.20 once the bug is fixed.
         destructured_import_probability: 0.0,
+        // ~15% expression-bodied functions
+        expr_body_probability: 0.15,
     };
 
     Profile { plan, emit }
@@ -519,6 +551,10 @@ fn many_modules_profile() -> Profile {
         fallible_probability: 0.0,
         // No generators - focus on module loading
         generator_probability: 0.0,
+        // No never-returning functions - focus on module loading
+        never_probability: 0.0,
+        // Light nested class fields - focus on module loading
+        nested_class_field_probability: 0.10,
     };
 
     let emit = EmitConfig {
@@ -536,6 +572,8 @@ fn many_modules_profile() -> Profile {
                 // No method chaining - focus on module loading
                 method_chain_probability: 0.0,
                 max_chain_depth: 0,
+                // No unreachable - focus on module loading
+                unreachable_probability: 0.0,
             },
             // Shallow statement depth
             max_depth: 1,
@@ -565,6 +603,8 @@ fn many_modules_profile() -> Profile {
         // Module-level destructured imports fail when the module is transitively imported.
         // Re-enable at ~0.30 once the bug is fixed.
         destructured_import_probability: 0.0,
+        // No expression-bodied functions - focus on module loading
+        expr_body_probability: 0.0,
     };
 
     Profile { plan, emit }
@@ -627,6 +667,11 @@ fn generics_heavy_profile() -> Profile {
         fallible_probability: 0.10,
         // Some generators for generics-heavy profile
         generator_probability: 0.10,
+        // Some never-returning functions
+        never_probability: 0.02,
+        // No nested class fields - focus on generics, not nested types
+        // (nested class fields are only for non-generic classes)
+        nested_class_field_probability: 0.0,
     };
 
     let emit = EmitConfig {
@@ -647,6 +692,8 @@ fn generics_heavy_profile() -> Profile {
                 // Standard method chaining
                 method_chain_probability: 0.15,
                 max_chain_depth: 2,
+                // Some unreachable
+                unreachable_probability: 0.05,
             },
             // Moderate statement depth
             max_depth: 2,
@@ -676,6 +723,8 @@ fn generics_heavy_profile() -> Profile {
         // Module-level destructured imports fail when the module is transitively imported.
         // Re-enable at ~0.20 once the bug is fixed.
         destructured_import_probability: 0.0,
+        // ~15% expression-bodied functions
+        expr_body_probability: 0.15,
     };
 
     Profile { plan, emit }

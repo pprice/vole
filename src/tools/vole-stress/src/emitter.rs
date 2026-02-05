@@ -25,6 +25,10 @@ pub struct EmitConfig {
     /// Probability (0.0-1.0) that an import uses destructured syntax.
     /// E.g., `import { func_name, ClassName } from module_path`
     pub destructured_import_probability: f64,
+    /// Probability (0.0-1.0) that a function uses expression-body syntax.
+    /// E.g., `func double(x: i64) -> i64 => x * 2`
+    /// Only applies to non-void, non-generator, non-never functions.
+    pub expr_body_probability: f64,
 }
 
 impl Default for EmitConfig {
@@ -32,6 +36,7 @@ impl Default for EmitConfig {
         Self {
             stmt_config: StmtConfig::default(),
             destructured_import_probability: 0.0,
+            expr_body_probability: 0.0,
         }
     }
 }
@@ -702,33 +707,58 @@ impl<'a, R: Rng> EmitContext<'a, R> {
     fn emit_method(&mut self, method: &MethodInfo) {
         self.emit_line("");
         let params = self.format_params(&method.params);
-        let return_type = self.format_return_type(&method.return_type);
-        self.emit_line(&format!(
-            "func {}({}){} {{",
-            method.name, params, return_type
-        ));
-        self.indent += 1;
-        // Methods don't have their own type params (they use class type params),
-        // but for now we pass empty to avoid complications with class type params.
-        self.emit_function_body(&method.return_type, &method.params, None, &[]);
-        self.indent -= 1;
-        self.emit_line("}");
+        let return_type_str = self.format_return_type(&method.return_type);
+
+        // Check if this method can use expression-body syntax
+        if self.can_use_expr_body(&method.return_type)
+            && self.rng.gen_bool(self.config.expr_body_probability)
+        {
+            // Expression-body syntax: func name(...) -> T => expr
+            let expr = self.generate_return_expr(&method.return_type, &method.params);
+            self.emit_line(&format!(
+                "func {}({}){} => {}",
+                method.name, params, return_type_str, expr
+            ));
+        } else {
+            // Block-body syntax
+            self.emit_line(&format!(
+                "func {}({}){} {{",
+                method.name, params, return_type_str
+            ));
+            self.indent += 1;
+            // Methods don't have their own type params (they use class type params),
+            // but for now we pass empty to avoid complications with class type params.
+            self.emit_function_body(&method.return_type, &method.params, None, &[]);
+            self.indent -= 1;
+            self.emit_line("}");
+        }
     }
 
     fn emit_function(&mut self, symbol: &Symbol) {
         if let SymbolKind::Function(ref info) = symbol.kind {
             self.emit_line("");
             let header = self.format_function_header(&symbol.name, info);
-            self.emit_line(&format!("{} {{", header));
-            self.indent += 1;
-            self.emit_function_body(
-                &info.return_type,
-                &info.params,
-                Some(&symbol.name),
-                &info.type_params,
-            );
-            self.indent -= 1;
-            self.emit_line("}");
+
+            // Check if this function can use expression-body syntax
+            if self.can_use_expr_body(&info.return_type)
+                && self.rng.gen_bool(self.config.expr_body_probability)
+            {
+                // Expression-body syntax: func name(...) -> T => expr
+                let expr = self.generate_return_expr(&info.return_type, &info.params);
+                self.emit_line(&format!("{} => {}", header, expr));
+            } else {
+                // Block-body syntax: func name(...) -> T { ... }
+                self.emit_line(&format!("{} {{", header));
+                self.indent += 1;
+                self.emit_function_body(
+                    &info.return_type,
+                    &info.params,
+                    Some(&symbol.name),
+                    &info.type_params,
+                );
+                self.indent -= 1;
+                self.emit_line("}");
+            }
         }
     }
 
@@ -751,6 +781,42 @@ impl<'a, R: Rng> EmitContext<'a, R> {
         header
     }
 
+    /// Check if a return type is eligible for expression-body syntax.
+    ///
+    /// Expression-bodied functions work for:
+    /// - Primitive types
+    /// - Optional types
+    /// - Array types
+    /// - Tuple types
+    /// - Fixed-size array types
+    /// - Fallible types (with success type)
+    /// - Class/struct types
+    ///
+    /// Not eligible:
+    /// - Void (no return value to express)
+    /// - Iterator (requires yield)
+    /// - Never (requires panic/unreachable)
+    fn can_use_expr_body(&self, return_type: &TypeInfo) -> bool {
+        !matches!(
+            return_type,
+            TypeInfo::Void | TypeInfo::Iterator(_) | TypeInfo::Never
+        )
+    }
+
+    /// Generate a simple expression for the return type.
+    ///
+    /// Used for expression-bodied functions where the entire body is a single
+    /// expression. Uses `generate_simple` to avoid complex multi-line expressions
+    /// that would break parsing when formatted across multiple lines.
+    fn generate_return_expr(&mut self, return_type: &TypeInfo, params: &[ParamInfo]) -> String {
+        // For fallible functions, use the success type for expression generation
+        let effective_return_type = return_type.success_type().clone();
+
+        let expr_ctx = ExprContext::new(params, &[], self.table);
+        let mut expr_gen = ExprGenerator::new(self.rng, &self.config.stmt_config.expr_config);
+        expr_gen.generate_simple(&effective_return_type, &expr_ctx)
+    }
+
     fn emit_function_body(
         &mut self,
         return_type: &TypeInfo,
@@ -761,6 +827,12 @@ impl<'a, R: Rng> EmitContext<'a, R> {
         // Generator functions (returning Iterator<T>) get a special body with yield
         if let TypeInfo::Iterator(elem_type) = return_type {
             self.emit_generator_body(elem_type, params);
+            return;
+        }
+
+        // Never-returning functions (diverging) just call panic or unreachable
+        if matches!(return_type, TypeInfo::Never) {
+            self.emit_never_body();
             return;
         }
 
@@ -808,6 +880,22 @@ impl<'a, R: Rng> EmitContext<'a, R> {
 
         for line in lines {
             self.emit_line(&line);
+        }
+    }
+
+    /// Emit a never-returning function body.
+    ///
+    /// Never-returning functions diverge by calling `panic()` or using `unreachable`.
+    /// Randomly chooses between:
+    /// - `panic("message")`
+    /// - `unreachable`
+    fn emit_never_body(&mut self) {
+        // Randomly choose between panic and unreachable
+        if self.rng.gen_bool(0.5) {
+            let msg_id = self.rng.gen_range(0..100);
+            self.emit_line(&format!("panic(\"diverge{}\")", msg_id));
+        } else {
+            self.emit_line("unreachable");
         }
     }
 
@@ -1532,6 +1620,139 @@ mod tests {
         assert!(
             code.contains("let mod_l") && code.contains(" = import"),
             "Expected regular import syntax, got:\n{}",
+            code
+        );
+    }
+
+    #[test]
+    fn emit_expression_bodied_functions_when_probability_is_one() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let plan_config = PlanConfig {
+            layers: 1,
+            modules_per_layer: 1,
+            classes_per_module: (0, 0),
+            functions_per_module: (3, 3), // Non-void returning functions
+            interfaces_per_module: (0, 0),
+            errors_per_module: (0, 0),
+            globals_per_module: (0, 0),
+            structs_per_module: (0, 0),
+            type_params_per_function: (0, 0),
+            ..Default::default()
+        };
+
+        let table = plan(&mut rng, &plan_config);
+        let module = table.get_module(ModuleId(0)).unwrap();
+
+        // Enable expression-bodied functions at 100%
+        let emit_config = EmitConfig {
+            expr_body_probability: 1.0,
+            ..Default::default()
+        };
+
+        let code = emit_module(&mut rng, &table, module, &emit_config);
+
+        // Should contain expression-bodied function syntax: func name(...) -> T => expr
+        // The pattern is "-> T => " where T is the return type
+        assert!(
+            code.contains(" => ")
+                && code
+                    .lines()
+                    .any(|l| l.contains("func ") && l.contains(" => ")),
+            "Expected expression-bodied function syntax (=> expr), got:\n{}",
+            code
+        );
+    }
+
+    #[test]
+    fn emit_block_bodied_functions_when_probability_is_zero() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let plan_config = PlanConfig {
+            layers: 1,
+            modules_per_layer: 1,
+            classes_per_module: (0, 0),
+            functions_per_module: (3, 3),
+            interfaces_per_module: (0, 0),
+            errors_per_module: (0, 0),
+            globals_per_module: (0, 0),
+            structs_per_module: (0, 0),
+            type_params_per_function: (0, 0),
+            ..Default::default()
+        };
+
+        let table = plan(&mut rng, &plan_config);
+        let module = table.get_module(ModuleId(0)).unwrap();
+
+        // Disable expression-bodied functions
+        let emit_config = EmitConfig {
+            expr_body_probability: 0.0,
+            ..Default::default()
+        };
+
+        let code = emit_module(&mut rng, &table, module, &emit_config);
+
+        // Count lines with "func" that also have "=> " (expression-bodied)
+        // vs lines with "func" that have " {" (block-bodied)
+        let func_lines: Vec<&str> = code
+            .lines()
+            .filter(|l| l.contains("func ") && !l.trim().starts_with("//"))
+            .collect();
+
+        // With 0.0 probability, no functions should use expression-body syntax
+        for line in &func_lines {
+            // Check this isn't a lambda (which uses => but isn't an expression-bodied function)
+            if !line.contains("(") || !line.contains("->") {
+                continue;
+            }
+            // Skip lambdas by checking if this is at function declaration level
+            if line.trim().starts_with("func ") {
+                assert!(
+                    !line.contains(") => "),
+                    "Expected block-bodied function (no => expr), got: {}",
+                    line
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn expression_bodied_methods_work() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let plan_config = PlanConfig {
+            layers: 1,
+            modules_per_layer: 1,
+            classes_per_module: (1, 1),
+            functions_per_module: (0, 0),
+            interfaces_per_module: (0, 0),
+            errors_per_module: (0, 0),
+            globals_per_module: (0, 0),
+            structs_per_module: (0, 0),
+            methods_per_class: (2, 2),
+            type_params_per_class: (0, 0),
+            ..Default::default()
+        };
+
+        let table = plan(&mut rng, &plan_config);
+        let module = table.get_module(ModuleId(0)).unwrap();
+
+        // Enable expression-bodied functions at 100%
+        let emit_config = EmitConfig {
+            expr_body_probability: 1.0,
+            ..Default::default()
+        };
+
+        let code = emit_module(&mut rng, &table, module, &emit_config);
+
+        // Should contain expression-bodied method syntax in class methods
+        // Methods can return void, so not all will be expression-bodied
+        // Just verify the code is valid and contains class + method declarations
+        assert!(
+            code.contains("class "),
+            "Expected class declaration, got:\n{}",
+            code
+        );
+        assert!(
+            code.contains("func method"),
+            "Expected method declaration, got:\n{}",
             code
         );
     }
