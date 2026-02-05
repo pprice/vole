@@ -1,0 +1,6 @@
+// Middle module that uses destructured import
+let { add } = import "./repro_destruct_import_base.vole"
+
+func double_add(x: i64) -> i64 {
+    return add(x, x)
+}

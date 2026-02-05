@@ -1,0 +1,10 @@
+// Main module that imports middle module
+// Bug: "function not found: add" during codegen when middle module
+// uses destructured imports at module level
+
+let mid = import "./repro_destruct_import_mid.vole"
+
+func main() {
+    let x = mid.double_add(5)
+    print("double_add(5) = {x}")
+}

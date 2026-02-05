@@ -1,0 +1,6 @@
+// Base module for destructured import bug repro
+let VALUE: i64 = 42
+
+func add(a: i64, b: i64) -> i64 {
+    return a + b
+}

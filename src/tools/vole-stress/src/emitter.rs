@@ -18,10 +18,22 @@ use crate::symbols::{
 };
 
 /// Configuration for the emitter phase.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct EmitConfig {
     /// Configuration for statement generation.
     pub stmt_config: StmtConfig,
+    /// Probability (0.0-1.0) that an import uses destructured syntax.
+    /// E.g., `import { func_name, ClassName } from module_path`
+    pub destructured_import_probability: f64,
+}
+
+impl Default for EmitConfig {
+    fn default() -> Self {
+        Self {
+            stmt_config: StmtConfig::default(),
+            destructured_import_probability: 0.0,
+        }
+    }
 }
 
 /// Emit all modules to the given output directory.
@@ -451,6 +463,31 @@ impl<'a, R: Rng> EmitContext<'a, R> {
     fn emit_imports(&mut self) {
         for import in &self.module.imports {
             if let Some(target) = self.table.get_module(import.target_module) {
+                // Check if we should use destructured imports (based on config probability)
+                let use_destructured = self.config.destructured_import_probability > 0.0
+                    && self
+                        .rng
+                        .gen_bool(self.config.destructured_import_probability);
+
+                if use_destructured {
+                    // Collect importable symbols: non-generic functions, classes, and structs
+                    let importable_names = self.collect_importable_names(target);
+
+                    if !importable_names.is_empty() {
+                        // Pick 1-3 names to import (or all if fewer available)
+                        let count = self.rng.gen_range(1..=importable_names.len().min(3));
+                        let selected: Vec<_> = importable_names.into_iter().take(count).collect();
+                        let names_str = selected.join(", ");
+                        // Vole uses: let { name1, name2 } = import "path"
+                        self.emit_line(&format!(
+                            "let {{ {} }} = import \"./{}.vole\"",
+                            names_str, target.name
+                        ));
+                        continue;
+                    }
+                }
+
+                // Fall back to regular import: let alias = import "path"
                 self.emit_line(&format!(
                     "let {} = import \"./{}.vole\"",
                     import.alias, target.name
@@ -460,6 +497,37 @@ impl<'a, R: Rng> EmitContext<'a, R> {
         if !self.module.imports.is_empty() {
             self.emit_line("");
         }
+    }
+
+    /// Collect names of symbols that can be imported via destructuring.
+    /// Returns non-generic functions, non-generic classes, and structs.
+    fn collect_importable_names(&self, module: &ModuleSymbols) -> Vec<String> {
+        let mut names = Vec::new();
+
+        // Non-generic functions
+        for symbol in module.functions() {
+            if let SymbolKind::Function(ref info) = symbol.kind {
+                if info.type_params.is_empty() {
+                    names.push(symbol.name.clone());
+                }
+            }
+        }
+
+        // Non-generic classes
+        for symbol in module.classes() {
+            if let SymbolKind::Class(ref info) = symbol.kind {
+                if info.type_params.is_empty() {
+                    names.push(symbol.name.clone());
+                }
+            }
+        }
+
+        // Structs (structs don't have generics)
+        for symbol in module.structs() {
+            names.push(symbol.name.clone());
+        }
+
+        names
     }
 
     fn emit_global(&mut self, symbol: &Symbol) {
@@ -1052,7 +1120,11 @@ impl<'a, R: Rng> EmitContext<'a, R> {
 
     fn emit_line(&mut self, line: &str) {
         let indent_str = "    ".repeat(self.indent);
-        writeln!(self.output, "{}{}", indent_str, line).unwrap();
+        // Handle multi-line statements (e.g., if-else-if chains)
+        // by indenting each line
+        for part in line.lines() {
+            writeln!(self.output, "{}{}", indent_str, part).unwrap();
+        }
     }
 }
 
@@ -1385,5 +1457,82 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn emit_destructured_imports_when_probability_is_one() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let plan_config = PlanConfig {
+            layers: 2,
+            modules_per_layer: 1,
+            classes_per_module: (0, 0),
+            functions_per_module: (2, 2), // At least some functions to import
+            interfaces_per_module: (0, 0),
+            errors_per_module: (0, 0),
+            globals_per_module: (0, 0),
+            structs_per_module: (1, 1), // At least one struct to import
+            type_params_per_function: (0, 0), // Non-generic so they can be imported
+            ..Default::default()
+        };
+
+        let table = plan(&mut rng, &plan_config);
+        let module = table.get_module(ModuleId(0)).unwrap();
+
+        // Enable destructured imports at 100%
+        let emit_config = EmitConfig {
+            destructured_import_probability: 1.0,
+            ..Default::default()
+        };
+
+        let code = emit_module(&mut rng, &table, module, &emit_config);
+
+        // Should use destructured import syntax: let { name } = import "path"
+        assert!(
+            code.contains("let {") && code.contains("} = import"),
+            "Expected destructured import syntax, got:\n{}",
+            code
+        );
+    }
+
+    #[test]
+    fn emit_regular_imports_when_probability_is_zero() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let plan_config = PlanConfig {
+            layers: 2,
+            modules_per_layer: 1,
+            classes_per_module: (0, 0),
+            functions_per_module: (2, 2),
+            interfaces_per_module: (0, 0),
+            errors_per_module: (0, 0),
+            globals_per_module: (0, 0),
+            structs_per_module: (1, 1),
+            type_params_per_function: (0, 0),
+            ..Default::default()
+        };
+
+        let table = plan(&mut rng, &plan_config);
+        let module = table.get_module(ModuleId(0)).unwrap();
+
+        // Disable destructured imports
+        let emit_config = EmitConfig {
+            destructured_import_probability: 0.0,
+            ..Default::default()
+        };
+
+        let code = emit_module(&mut rng, &table, module, &emit_config);
+
+        // Should NOT use destructured import syntax
+        assert!(
+            !code.contains("let {"),
+            "Expected regular import syntax (no destructuring), got:\n{}",
+            code
+        );
+
+        // Should have regular import: let name = import "path"
+        assert!(
+            code.contains("let mod_l") && code.contains(" = import"),
+            "Expected regular import syntax, got:\n{}",
+            code
+        );
     }
 }

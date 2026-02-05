@@ -146,7 +146,11 @@ fn minimal_profile() -> Profile {
             discard_probability: 0.0,
             // No early returns in minimal
             early_return_probability: 0.0,
+            // No else-if chains in minimal
+            else_if_probability: 0.0,
         },
+        // No destructured imports in minimal (no multi-layer modules)
+        destructured_import_probability: 0.0,
     };
 
     Profile { plan, emit }
@@ -246,7 +250,13 @@ fn full_profile() -> Profile {
             discard_probability: 0.05,
             // Early returns in function bodies (~15%)
             early_return_probability: 0.15,
+            // Else-if chains in if statements (~30%)
+            else_if_probability: 0.30,
         },
+        // Destructured imports are disabled due to a compiler bug (vol-vzjx):
+        // Module-level destructured imports fail when the module is transitively imported.
+        // Re-enable at ~0.30 once the bug is fixed.
+        destructured_import_probability: 0.0,
     };
 
     Profile { plan, emit }
@@ -345,7 +355,11 @@ fn deep_nesting_profile() -> Profile {
             discard_probability: 0.05,
             // Some early returns for variety
             early_return_probability: 0.10,
+            // Higher else-if probability for deep nested if-else-if chains
+            else_if_probability: 0.40,
         },
+        // No destructured imports in deep-nesting (single module focus)
+        destructured_import_probability: 0.0,
     };
 
     Profile { plan, emit }
@@ -446,7 +460,13 @@ fn wide_types_profile() -> Profile {
             discard_probability: 0.05,
             // Some early returns
             early_return_probability: 0.10,
+            // Some else-if chains
+            else_if_probability: 0.25,
         },
+        // Destructured imports are disabled due to a compiler bug (vol-vzjx):
+        // Module-level destructured imports fail when the module is transitively imported.
+        // Re-enable at ~0.20 once the bug is fixed.
+        destructured_import_probability: 0.0,
     };
 
     Profile { plan, emit }
@@ -538,7 +558,13 @@ fn many_modules_profile() -> Profile {
             discard_probability: 0.0,
             // No early returns - focus on module loading
             early_return_probability: 0.0,
+            // No else-if chains - focus on module loading
+            else_if_probability: 0.0,
         },
+        // Destructured imports are disabled due to a compiler bug (vol-vzjx):
+        // Module-level destructured imports fail when the module is transitively imported.
+        // Re-enable at ~0.30 once the bug is fixed.
+        destructured_import_probability: 0.0,
     };
 
     Profile { plan, emit }
@@ -643,7 +669,13 @@ fn generics_heavy_profile() -> Profile {
             discard_probability: 0.05,
             // Some early returns
             early_return_probability: 0.12,
+            // Some else-if chains
+            else_if_probability: 0.25,
         },
+        // Destructured imports are disabled due to a compiler bug (vol-vzjx):
+        // Module-level destructured imports fail when the module is transitively imported.
+        // Re-enable at ~0.20 once the bug is fixed.
+        destructured_import_probability: 0.0,
     };
 
     Profile { plan, emit }
