@@ -289,6 +289,19 @@ pub extern "C" fn vole_panic(
 
 // Array FFI functions
 
+/// Trigger a clean Vole panic for array index out of bounds.
+/// Uses the longjmp-based error path so extern "C" functions don't unwind.
+#[cold]
+#[inline(never)]
+fn array_index_oob(index: usize, len: usize) -> ! {
+    let msg = RcString::new(&format!(
+        "array index out of bounds: index {} but length is {}",
+        index, len
+    ));
+    let file = b"<runtime>";
+    vole_panic(msg, file.as_ptr(), file.len(), 0);
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_array_new() -> *mut RcArray {
     RcArray::new()
@@ -311,6 +324,10 @@ pub extern "C" fn vole_array_get_tag(arr: *const RcArray, index: usize) -> u64 {
     if arr.is_null() {
         return 0;
     }
+    let len = unsafe { (*arr).len };
+    if index >= len {
+        array_index_oob(index, len);
+    }
     unsafe { RcArray::get(arr, index).tag }
 }
 
@@ -319,11 +336,22 @@ pub extern "C" fn vole_array_get_value(arr: *const RcArray, index: usize) -> u64
     if arr.is_null() {
         return 0;
     }
+    let len = unsafe { (*arr).len };
+    if index >= len {
+        array_index_oob(index, len);
+    }
     unsafe { RcArray::get(arr, index).value }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_array_set(arr: *mut RcArray, index: usize, tag: u64, value: u64) {
+    if arr.is_null() {
+        return;
+    }
+    let len = unsafe { (*arr).len };
+    if index >= len {
+        array_index_oob(index, len);
+    }
     unsafe {
         RcArray::set(arr, index, TaggedValue { tag, value });
     }

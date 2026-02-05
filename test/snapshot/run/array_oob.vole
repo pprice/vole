@@ -1,0 +1,6 @@
+// Test array out-of-bounds produces a clean panic (not abort)
+func main() {
+    let arr = [10, 20, 30]
+    let x = arr[5]
+    println(x)
+}

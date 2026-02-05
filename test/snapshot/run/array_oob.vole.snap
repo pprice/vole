@@ -1,0 +1,5 @@
+[stdout]
+
+[stderr]
+panic: array index out of bounds: index 5 but length is 3
+  at <runtime>:0

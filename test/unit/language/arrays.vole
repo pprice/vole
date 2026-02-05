@@ -31,4 +31,17 @@ tests "arrays" {
         assert(arr[0][0] == 1)
         assert(arr[1][1] == 4)
     }
+
+    test "boundary access" {
+        let arr = [10, 20, 30]
+        assert(arr[0] == 10)
+        assert(arr[2] == 30)
+        assert(arr.length() == 3)
+    }
+
+    test "single element array" {
+        let arr = [42]
+        assert(arr[0] == 42)
+        assert(arr.length() == 1)
+    }
 }
