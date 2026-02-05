@@ -198,7 +198,8 @@ impl Cg<'_, '_, '_> {
                 .codegen_ctx
                 .jit_module()
                 .declare_func_in_func(func_id, self.builder.func);
-            let call_inst = self.builder.ins().call(func_ref, &args);
+            let coerced = self.coerce_call_args(func_ref, &args);
+            let call_inst = self.builder.ins().call(func_ref, &coerced);
             self.field_cache.clear(); // Callee may mutate instance fields
             let result = self.call_result(call_inst, return_type_id);
             self.consume_rc_args(&mut rc_temps)?;
@@ -605,7 +606,8 @@ impl Cg<'_, '_, '_> {
             args.insert(0, sret_ptr);
         }
 
-        let call = self.builder.ins().call(method_func_ref, &args);
+        let coerced = self.coerce_call_args(method_func_ref, &args);
+        let call = self.builder.ins().call(method_func_ref, &coerced);
         self.field_cache.clear(); // Methods may mutate fields via self
 
         // If the return type is a union, copy the data from the callee's stack to our own
@@ -910,9 +912,8 @@ impl Cg<'_, '_, '_> {
         let value_bits = convert_to_i64_for_storage(self.builder, &value);
 
         // Call vole_array_push(arr_ptr, tag, value)
-        self.builder
-            .ins()
-            .call(push_ref, &[arr_obj.value, tag_val, value_bits]);
+        let push_args = self.coerce_call_args(push_ref, &[arr_obj.value, tag_val, value_bits]);
+        self.builder.ins().call(push_ref, &push_args);
 
         // Return void
         let void_type_id = self.arena().void();
@@ -1354,7 +1355,8 @@ impl Cg<'_, '_, '_> {
                 // Get monomorphized function reference and call
                 let func_key = self.funcs().intern_name_id(instance.mangled_name);
                 let func_ref = self.func_ref(func_key)?;
-                let call = self.builder.ins().call(func_ref, &args);
+                let coerced = self.coerce_call_args(func_ref, &args);
+                let call = self.builder.ins().call(func_ref, &coerced);
                 self.field_cache.clear();
                 // call_result must run before consume_rc_args to copy union data
                 // from callee's stack before rc_dec calls can clobber it
@@ -1424,7 +1426,8 @@ impl Cg<'_, '_, '_> {
 
         // Get function reference and call
         let func_ref = self.func_ref(func_key)?;
-        let call = self.builder.ins().call(func_ref, &args);
+        let coerced = self.coerce_call_args(func_ref, &args);
+        let call = self.builder.ins().call(func_ref, &coerced);
         self.field_cache.clear();
         // call_result must run before consume_rc_args to copy union data
         // from callee's stack before rc_dec calls can clobber it

@@ -638,9 +638,8 @@ impl Cg<'_, '_, '_> {
             let tag_val = self.builder.ins().iconst(types::I64, tag);
             let value_bits = convert_to_i64_for_storage(self.builder, &compiled);
 
-            self.builder
-                .ins()
-                .call(array_push_ref, &[arr_ptr, tag_val, value_bits]);
+            let push_args = self.coerce_call_args(array_push_ref, &[arr_ptr, tag_val, value_bits]);
+            self.builder.ins().call(array_push_ref, &push_args);
 
             // The element value is consumed into the array container.
             compiled.mark_consumed();
@@ -985,9 +984,9 @@ impl Cg<'_, '_, '_> {
             let tag_val = self.builder.ins().iconst(types::I64, tag);
             let value_bits = convert_to_i64_for_storage(self.builder, &val);
 
-            self.builder
-                .ins()
-                .call(set_value_ref, &[arr.value, idx.value, tag_val, value_bits]);
+            let set_args =
+                self.coerce_call_args(set_value_ref, &[arr.value, idx.value, tag_val, value_bits]);
+            self.builder.ins().call(set_value_ref, &set_args);
 
             // The assignment consumed the temp — ownership transfers
             // to the dynamic array element.

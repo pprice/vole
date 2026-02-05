@@ -1,0 +1,117 @@
+// Test that narrow integer types (i8, i16, i32) are correctly
+// coerced to match function signature parameter types at call boundaries.
+// Regression test for verifier error: "arg N has type iXX, expected i64"
+
+// Generic class with methods that accept/return the type parameter.
+// When instantiated with narrow types (i8, i16, i32), the codegen
+// must coerce values to match the function signatures.
+class Box<T> {
+    value: T,
+
+    func get() -> T {
+        return self.value
+    }
+
+    func set(v: T) {
+        self.value = v
+    }
+}
+
+class Pair<A, B> {
+    first: A,
+    second: B,
+
+    func getFirst() -> A {
+        return self.first
+    }
+
+    func getSecond() -> B {
+        return self.second
+    }
+}
+
+// Class with multiple narrow-typed method parameters
+class NarrowMethods {
+    base: i32,
+
+    func add_i32(a: i32, b: i32) -> i32 {
+        return self.base + a + b
+    }
+
+    func combine(a: i32, b: i64, c: bool) -> i64 {
+        if c {
+            return a + b
+        }
+        return b
+    }
+}
+
+tests "narrow type coercion at call boundaries" {
+    test "generic box with i32" {
+        let b = Box { value: 42_i32 }
+        assert(b.get() == 42)
+        b.set(100_i32)
+        assert(b.get() == 100)
+    }
+
+    test "generic box with i16" {
+        let b = Box { value: 300_i16 }
+        assert(b.get() == 300)
+        b.set(500_i16)
+        assert(b.get() == 500)
+    }
+
+    test "generic box with i8" {
+        let b = Box { value: 42_i8 }
+        assert(b.get() == 42)
+        b.set(100_i8)
+        assert(b.get() == 100)
+    }
+
+    test "generic box with f64" {
+        let b = Box { value: 3.14 }
+        assert(b.get() == 3.14)
+        b.set(2.71)
+        assert(b.get() == 2.71)
+    }
+
+    test "generic pair with narrow types" {
+        let p = Pair { first: 10_i32, second: 20_i16 }
+        assert(p.getFirst() == 10)
+        assert(p.getSecond() == 20)
+    }
+
+    test "generic pair with mixed narrow and wide" {
+        let p = Pair { first: 5_i8, second: 1000_i64 }
+        assert(p.getFirst() == 5)
+        assert(p.getSecond() == 1000)
+    }
+
+    test "class method with i32 params" {
+        let n = NarrowMethods { base: 100_i32 }
+        assert(n.add_i32(10_i32, 20_i32) == 130)
+    }
+
+    test "class method with mixed param types" {
+        let n = NarrowMethods { base: 0_i32 }
+        assert(n.combine(5_i32, 10_i64, true) == 15)
+        assert(n.combine(5_i32, 10_i64, false) == 10)
+    }
+
+    test "i32 values in dynamic array" {
+        let arr: [i32] = [1_i32, 2_i32, 3_i32]
+        assert(arr[0] == 1)
+        assert(arr[1] == 2)
+        assert(arr[2] == 3)
+        assert(arr.length() == 3)
+    }
+
+    test "for loop over narrow-typed array" {
+        let arr: [i32] = [10_i32, 20_i32, 30_i32]
+        let mut total: i64 = 0
+        for item in arr {
+            total = total + item
+        }
+        assert(total == 60)
+    }
+}

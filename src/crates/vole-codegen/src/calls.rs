@@ -711,6 +711,7 @@ impl Cg<'_, '_, '_> {
             rc_temp_args.extend(rc_owned);
         }
 
+        let args = self.coerce_call_args(func_ref, &args);
         let call_inst = self.builder.ins().call(func_ref, &args);
         self.field_cache.clear(); // Callee may mutate instance fields
 

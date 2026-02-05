@@ -1314,10 +1314,70 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.func_ref(key)
     }
 
+    /// Coerce call arguments to match a function signature's expected parameter types.
+    ///
+    /// In generic contexts, expressions may produce narrow integer types (i8, i16, i32)
+    /// while the callee expects i64 (or vice versa). This method inserts `sextend` or
+    /// `ireduce` instructions as needed so the Cranelift verifier is satisfied.
+    /// Float-to-int and int-to-float coercions are also handled via bitcast/fpromote.
+    pub fn coerce_call_args(
+        &mut self,
+        func_ref: cranelift::codegen::ir::FuncRef,
+        args: &[Value],
+    ) -> SmallVec<[Value; 8]> {
+        let sig_ref = self.builder.func.dfg.ext_funcs[func_ref].signature;
+        let expected: SmallVec<[Type; 8]> = self.builder.func.dfg.signatures[sig_ref]
+            .params
+            .iter()
+            .map(|p| p.value_type)
+            .collect();
+
+        let mut coerced: SmallVec<[Value; 8]> = SmallVec::with_capacity(args.len());
+        for (i, &arg) in args.iter().enumerate() {
+            let actual_ty = self.builder.func.dfg.value_type(arg);
+            let expected_ty = expected.get(i).copied();
+            let val = match expected_ty {
+                Some(exp) if actual_ty != exp => {
+                    if actual_ty.is_int() && exp.is_int() {
+                        if exp.bytes() > actual_ty.bytes() {
+                            self.builder.ins().sextend(exp, arg)
+                        } else {
+                            self.builder.ins().ireduce(exp, arg)
+                        }
+                    } else if actual_ty.is_float() && exp.is_int() {
+                        // float -> int via bitcast (for generic contexts using i64 for type params)
+                        if actual_ty == types::F64 && exp == types::I64 {
+                            self.builder.ins().bitcast(types::I64, MemFlags::new(), arg)
+                        } else if actual_ty == types::F32 && exp == types::I64 {
+                            let f64_val = self.builder.ins().fpromote(types::F64, arg);
+                            self.builder
+                                .ins()
+                                .bitcast(types::I64, MemFlags::new(), f64_val)
+                        } else {
+                            arg
+                        }
+                    } else if actual_ty.is_int() && exp.is_float() {
+                        if actual_ty == types::I64 && exp == types::F64 {
+                            self.builder.ins().bitcast(types::F64, MemFlags::new(), arg)
+                        } else {
+                            arg
+                        }
+                    } else {
+                        arg
+                    }
+                }
+                _ => arg,
+            };
+            coerced.push(val);
+        }
+        coerced
+    }
+
     /// Call a runtime function and return the first result (or error if no results)
     pub fn call_runtime(&mut self, runtime: RuntimeFn, args: &[Value]) -> CodegenResult<Value> {
         let func_ref = self.runtime_func_ref(runtime)?;
-        let call = self.builder.ins().call(func_ref, args);
+        let coerced = self.coerce_call_args(func_ref, args);
+        let call = self.builder.ins().call(func_ref, &coerced);
         let results = self.builder.inst_results(call);
         if results.is_empty() {
             Err(CodegenError::internal_with_context(
@@ -1370,7 +1430,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Call a runtime function that returns void
     pub fn call_runtime_void(&mut self, runtime: RuntimeFn, args: &[Value]) -> CodegenResult<()> {
         let func_ref = self.runtime_func_ref(runtime)?;
-        self.builder.ins().call(func_ref, args);
+        let coerced = self.coerce_call_args(func_ref, args);
+        self.builder.ins().call(func_ref, &coerced);
         Ok(())
     }
 

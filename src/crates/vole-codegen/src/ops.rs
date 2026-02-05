@@ -406,7 +406,8 @@ impl Cg<'_, '_, '_> {
         let func_ref = self.func_ref(func_key)?;
 
         // Call the method with `self` (the value) as the only argument
-        let call = self.builder.ins().call(func_ref, &[val.value]);
+        let coerced = self.coerce_call_args(func_ref, &[val.value]);
+        let call = self.builder.ins().call(func_ref, &coerced);
         let results = self.builder.inst_results(call);
 
         results.first().copied().ok_or(CodegenError::internal(
@@ -945,9 +946,9 @@ impl Cg<'_, '_, '_> {
         };
         let tag_val = self.builder.ins().iconst(types::I64, tag);
 
-        self.builder
-            .ins()
-            .call(array_set_ref, &[arr.value, idx.value, tag_val, store_value]);
+        let set_args =
+            self.coerce_call_args(array_set_ref, &[arr.value, idx.value, tag_val, store_value]);
+        self.builder.ins().call(array_set_ref, &set_args);
 
         Ok(result)
     }
