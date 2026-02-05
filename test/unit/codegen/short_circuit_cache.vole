@@ -1,0 +1,129 @@
+// Test: Field cache values don't leak across short-circuit || and && branches.
+//
+// Short-circuit boolean operators (|| and &&) use block-based codegen with
+// brif/merge. When a field access occurs in the right operand (evaluated
+// conditionally), the resulting cached Value is defined in a block that does
+// NOT dominate the merge block. If the cache isn't invalidated at the merge,
+// subsequent code that accesses the same field will reuse the stale cached
+// Value from the non-dominating block, causing a Cranelift verifier error:
+//   "uses value vN from non-dominating instM"
+//
+// The bug manifests when:
+// 1. A class field is accessed inside the right side of || or &&
+// 2. The same field is accessed again after the || or && completes
+// 3. The field access goes through get_field_cached (class instances, not structs)
+// 4. The field type requires ireduce (e.g. bool stored as i64, reduced to i8)
+
+class Box {
+    flag: bool,
+    count: i32,
+
+    // Access field in right side of ||, then again in a when condition.
+    // Without the fix, the field_cache retains a Value from inside ||'s
+    // else-block, which doesn't dominate the when condition block.
+    func or_then_when(x: bool) -> i32 {
+        let cond = (x || self.flag)
+        return when {
+            self.flag => 10_i32
+            _ => 20_i32
+        }
+    }
+
+    // Access field in right side of &&, then again afterwards.
+    func and_then_when(x: bool) -> i32 {
+        let cond = (x && self.flag)
+        return when {
+            self.flag => 30_i32
+            _ => 40_i32
+        }
+    }
+
+    // Multi-arm when where one arm condition uses || with a field access,
+    // and a later arm also accesses the same field.
+    func multi_arm_or(x: bool) -> i32 {
+        return when {
+            (x || self.flag) => self.count
+            self.flag => (self.count + 1_i32)
+            _ => 0_i32
+        }
+    }
+
+    // Nested: field access in || right side inside a when condition,
+    // followed by another when arm also accessing the field.
+    func nested_or_in_when(a: bool, b: bool) -> i32 {
+        return when {
+            (a || self.flag) => 100_i32
+            (b || self.flag) => 200_i32
+            _ => 300_i32
+        }
+    }
+
+    // && with field on the right, result used in when condition alongside
+    // another field access.
+    func and_in_when_condition(a: bool) -> i32 {
+        return when {
+            (a && self.flag) => self.count
+            _ => (self.count + 5_i32)
+        }
+    }
+}
+
+tests {
+    test "or then when - flag true" {
+        let b = Box { flag: true, count: 7_i32 }
+        assert(b.or_then_when(false) == 10_i32)
+        assert(b.or_then_when(true) == 10_i32)
+    }
+
+    test "or then when - flag false" {
+        let b = Box { flag: false, count: 7_i32 }
+        assert(b.or_then_when(false) == 20_i32)
+        assert(b.or_then_when(true) == 20_i32)
+    }
+
+    test "and then when - flag true" {
+        let b = Box { flag: true, count: 7_i32 }
+        assert(b.and_then_when(true) == 30_i32)
+        assert(b.and_then_when(false) == 30_i32)
+    }
+
+    test "and then when - flag false" {
+        let b = Box { flag: false, count: 7_i32 }
+        assert(b.and_then_when(true) == 40_i32)
+        assert(b.and_then_when(false) == 40_i32)
+    }
+
+    test "multi-arm or - flag true" {
+        let b = Box { flag: true, count: 42_i32 }
+        assert(b.multi_arm_or(false) == 42_i32)
+        assert(b.multi_arm_or(true) == 42_i32)
+    }
+
+    test "multi-arm or - flag false" {
+        let b = Box { flag: false, count: 42_i32 }
+        assert(b.multi_arm_or(true) == 42_i32)
+        assert(b.multi_arm_or(false) == 0_i32)
+    }
+
+    test "nested or in when" {
+        let b = Box { flag: true, count: 0_i32 }
+        assert(b.nested_or_in_when(false, false) == 100_i32)
+    }
+
+    test "nested or in when - flag false" {
+        let b = Box { flag: false, count: 0_i32 }
+        assert(b.nested_or_in_when(false, true) == 200_i32)
+        assert(b.nested_or_in_when(false, false) == 300_i32)
+    }
+
+    test "and in when condition" {
+        let b = Box { flag: true, count: 10_i32 }
+        assert(b.and_in_when_condition(true) == 10_i32)
+        assert(b.and_in_when_condition(false) == 15_i32)
+    }
+
+    test "and in when condition - flag false" {
+        let b = Box { flag: false, count: 10_i32 }
+        assert(b.and_in_when_condition(true) == 15_i32)
+    }
+}

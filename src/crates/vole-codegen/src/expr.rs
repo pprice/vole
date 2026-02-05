@@ -2446,6 +2446,7 @@ impl Cg<'_, '_, '_> {
             // If next arm has a condition, switch to its evaluation block
             if i + 1 < when_expr.arms.len() && when_expr.arms[i + 1].condition.is_some() {
                 self.switch_and_seal(else_target);
+                self.invalidate_value_caches();
                 cond_block_idx += 1;
             }
         }

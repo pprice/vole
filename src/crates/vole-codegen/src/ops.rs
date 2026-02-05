@@ -440,8 +440,9 @@ impl Cg<'_, '_, '_> {
         let false_arg = BlockArg::from(false_val);
         self.builder.ins().jump(merge_block, &[false_arg]);
 
-        // Merge block
+        // Merge block — values cached in either branch do not dominate here
         self.switch_and_seal(merge_block);
+        self.invalidate_value_caches();
         let result = self.builder.block_params(merge_block)[0];
 
         Ok(self.bool_value(result))
@@ -472,8 +473,9 @@ impl Cg<'_, '_, '_> {
         let right_arg = BlockArg::from(right.value);
         self.builder.ins().jump(merge_block, &[right_arg]);
 
-        // Merge block
+        // Merge block — values cached in either branch do not dominate here
         self.switch_and_seal(merge_block);
+        self.invalidate_value_caches();
         let result = self.builder.block_params(merge_block)[0];
 
         Ok(self.bool_value(result))
