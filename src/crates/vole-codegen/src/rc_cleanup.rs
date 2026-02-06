@@ -273,6 +273,12 @@ pub(crate) fn emit_rc_cleanup(
         } else {
             builder.ins().call(rc_dec_ref, &[val]);
         }
+        // Reset drop flag to 0 after cleanup. This prevents double-free when
+        // the variable is conditionally initialized inside a loop: without
+        // this, the stale flag=1 propagates via SSA phi nodes to the next
+        // iteration, causing rc_dec on already-freed memory.
+        let zero = builder.ins().iconst(types::I8, 0);
+        builder.def_var(local.drop_flag, zero);
         builder.ins().jump(after_block, &[]);
 
         builder.switch_to_block(after_block);
@@ -349,6 +355,9 @@ pub(crate) fn emit_union_rc_cleanup(
             builder.seal_block(next_block);
         }
 
+        // Reset drop flag after cleanup (same reason as emit_rc_cleanup).
+        let zero = builder.ins().iconst(types::I8, 0);
+        builder.def_var(union_local.drop_flag, zero);
         builder.ins().jump(after_block, &[]);
 
         builder.switch_to_block(after_block);
@@ -387,6 +396,9 @@ pub(crate) fn emit_composite_rc_cleanup(
                 .load(types::I64, MemFlags::new(), base_ptr, offset);
             builder.ins().call(rc_dec_ref, &[field_val]);
         }
+        // Reset drop flag after cleanup (same reason as emit_rc_cleanup).
+        let zero = builder.ins().iconst(types::I8, 0);
+        builder.def_var(composite.drop_flag, zero);
         builder.ins().jump(after_block, &[]);
 
         builder.switch_to_block(after_block);
