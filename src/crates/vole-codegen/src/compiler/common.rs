@@ -353,6 +353,12 @@ pub fn compile_function_body_with_cg(
                     .store(MemFlags::new(), val, sret_ptr, offset);
             }
             cg.builder.ins().return_(&[sret_ptr]);
+        } else if let Some(ret_type_id) = cg.return_type
+            && cg.arena().is_union(ret_type_id)
+        {
+            // For union return types, wrap the value in a union
+            let wrapped = cg.construct_union_id(value, ret_type_id)?;
+            cg.builder.ins().return_(&[wrapped.value]);
         } else {
             // Coerce the value to match the function return type if needed.
             // This handles generic functions where sema may infer a specific

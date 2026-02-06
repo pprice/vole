@@ -249,6 +249,49 @@ tests "expression syntax - interface default methods" {
     }
 }
 
+// =============================================================================
+// Expression syntax with union/optional return types
+// =============================================================================
+
+func return_nil_i32() -> i32? => nil
+func return_nil_f64() -> f64? => nil
+func return_nil_string() -> string? => nil
+func return_some_i32() -> i32? => 42_i32
+func return_some_f64() -> f64? => 3.14_f64
+func return_some_string() -> string? => "hello"
+
+tests "expression syntax - optional return types" {
+    test "expression body returning nil i32" {
+        let result = return_nil_i32()
+        assert(result == nil)
+    }
+
+    test "expression body returning nil f64" {
+        let result = return_nil_f64()
+        assert(result == nil)
+    }
+
+    test "expression body returning nil string" {
+        let result = return_nil_string()
+        assert(result == nil)
+    }
+
+    test "expression body returning some i32" {
+        let result = return_some_i32()
+        assert(result != nil)
+    }
+
+    test "expression body returning some f64" {
+        let result = return_some_f64()
+        assert(result != nil)
+    }
+
+    test "expression body returning some string" {
+        let result = return_some_string()
+        assert(result != nil)
+    }
+}
+
 tests "expression syntax - mixed with block syntax" {
     test "mixed static methods" {
         let simple = Mixed.simple()
