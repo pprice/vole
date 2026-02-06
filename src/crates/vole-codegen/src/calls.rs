@@ -260,11 +260,7 @@ impl Cg<'_, '_, '_> {
 
     /// Convert a general (non-optional) union value to string.
     /// Loads the tag, branches on each variant, converts each to string, then merges.
-    fn union_to_string(
-        &mut self,
-        ptr: Value,
-        variants: &[TypeId],
-    ) -> CodegenResult<Value> {
+    fn union_to_string(&mut self, ptr: Value, variants: &[TypeId]) -> CodegenResult<Value> {
         let merge_block = self.builder.create_block();
         self.builder
             .append_block_param(merge_block, self.ptr_type());
@@ -275,10 +271,7 @@ impl Cg<'_, '_, '_> {
             variant_blocks.push(self.builder.create_block());
         }
         // Load the tag
-        let tag = self
-            .builder
-            .ins()
-            .load(types::I8, MemFlags::new(), ptr, 0);
+        let tag = self.builder.ins().load(types::I8, MemFlags::new(), ptr, 0);
 
         // Chain of brif checks for each variant
         for (i, &block) in variant_blocks.iter().enumerate() {

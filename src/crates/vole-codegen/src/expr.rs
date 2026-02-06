@@ -714,12 +714,17 @@ impl Cg<'_, '_, '_> {
         let slot = self.alloc_stack(total_size);
 
         // Store the element value at each position.
-        // For RC elements, each copy beyond the first needs rc_inc since
-        // multiple slots share the same pointer.
+        // For RC elements, each copy needs rc_inc since multiple slots share the
+        // same pointer. When the element is borrowed (e.g. a variable reference),
+        // ALL copies including the first need rc_inc because the source variable's
+        // own cleanup will rc_dec independently of the array's composite cleanup.
+        // When the element is owned (e.g. a fresh call result), the first copy
+        // takes ownership (no inc) and subsequent copies need inc.
         let needs_rc =
             self.rc_scopes.has_active_scope() && self.rc_state(elem_value.type_id).needs_cleanup();
+        let is_borrowed = elem_value.is_borrowed();
         for i in 0..count {
-            if needs_rc && i > 0 {
+            if needs_rc && (i > 0 || is_borrowed) {
                 self.emit_rc_inc_for_type(elem_value.value, elem_value.type_id)?;
             }
             let offset = (i as i32) * (elem_size as i32);
