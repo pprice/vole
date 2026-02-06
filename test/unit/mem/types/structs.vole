@@ -352,3 +352,73 @@ tests "struct with RC fields" {
         assert(lbl == "box")
     }
 }
+
+// --- Returning structs with RC fields from functions ---
+// Regression: returning a struct with RC fields used to double-free the
+// fields because composite RC cleanup wasn't skipped for the return
+// variable (only simple RC locals were skipped).
+
+func make_named_point(name: string, x: i64, y: i64) -> NamedPoint {
+    let p = NamedPoint { label: name, x: x, y: y }
+    return p
+}
+
+func make_inner(name: string, value: i64) -> Inner {
+    let i = Inner { name: name, value: value }
+    return i
+}
+
+func make_outer(name: string, value: i64, label: string) -> Outer {
+    let o = Outer { inner: Inner { name: name, value: value }, label: label }
+    return o
+}
+
+func make_named_point_interp(x: i64) -> NamedPoint {
+    let p = NamedPoint { label: "{x}", x: x, y: x * 2 }
+    return p
+}
+
+func make_full_name_dynamic(first: i64, last: i64) -> FullName {
+    let n = FullName { first: "user_{first}", last: "name_{last}" }
+    return n
+}
+
+tests "returning struct with RC fields" {
+    test "return struct with dynamic string field" {
+        let p = make_named_point_interp(42_i64)
+        assert(p.label == "42")
+        assert(p.x == 42)
+        assert(p.y == 84)
+    }
+
+    test "return struct with two dynamic string fields" {
+        let n = make_full_name_dynamic(1_i64, 2_i64)
+        assert(n.first == "user_1")
+        assert(n.last == "name_2")
+    }
+
+    test "return struct with string param field" {
+        let p = make_named_point("origin", 0, 0)
+        assert(p.label == "origin")
+        assert(p.x == 0)
+    }
+
+    test "return nested struct with RC fields" {
+        let o = make_outer("deep", 99, "wrapper")
+        assert(o.inner.name == "deep")
+        assert(o.inner.value == 99)
+        assert(o.label == "wrapper")
+    }
+
+    test "return struct and discard" {
+        let _ = make_named_point_interp(7_i64)
+        assert(true)
+    }
+
+    test "return struct and pass to another function" {
+        let p = make_named_point_interp(10_i64)
+        let sum = accept_vec3(Vec3 { x: p.x, y: p.y, z: 0 })
+        assert(sum == 30)
+        assert(p.label == "10")
+    }
+}

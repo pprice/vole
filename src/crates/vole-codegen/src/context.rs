@@ -500,9 +500,24 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
         let rc_dec_ref = self.runtime_func_ref(RuntimeFn::RcDec)?;
 
-        // 1. Unions first: payloads may reference container-owned values.
+        // 1. Unions first (optionally filtering out skip_var): payloads may reference container-owned values.
         if !unions.is_empty() {
-            super::rc_cleanup::emit_union_rc_cleanup(self.builder, unions, rc_dec_ref);
+            let filtered_unions: Vec<_> = if let Some(skip) = skip_var {
+                unions
+                    .iter()
+                    .filter(|u| u.variable != skip)
+                    .cloned()
+                    .collect()
+            } else {
+                unions.to_vec()
+            };
+            if !filtered_unions.is_empty() {
+                super::rc_cleanup::emit_union_rc_cleanup(
+                    self.builder,
+                    &filtered_unions,
+                    rc_dec_ref,
+                );
+            }
         }
 
         // 2. Locals (optionally filtering out skip_var).
@@ -517,9 +532,24 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         };
         super::rc_cleanup::emit_rc_cleanup(self.builder, &filtered_locals, rc_dec_ref);
 
-        // 3. Composites last.
+        // 3. Composites last (optionally filtering out skip_var).
         if !composites.is_empty() {
-            super::rc_cleanup::emit_composite_rc_cleanup(self.builder, composites, rc_dec_ref);
+            let filtered_composites: Vec<_> = if let Some(skip) = skip_var {
+                composites
+                    .iter()
+                    .filter(|c| c.variable != skip)
+                    .cloned()
+                    .collect()
+            } else {
+                composites.to_vec()
+            };
+            if !filtered_composites.is_empty() {
+                super::rc_cleanup::emit_composite_rc_cleanup(
+                    self.builder,
+                    &filtered_composites,
+                    rc_dec_ref,
+                );
+            }
         }
 
         Ok(())

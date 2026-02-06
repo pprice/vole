@@ -382,11 +382,16 @@ impl Cg<'_, '_, '_> {
 
                     // RC bookkeeping for return values:
                     // - RC local variable: skip its cleanup (ownership transfers to caller)
+                    // - Composite RC local (struct/array/tuple with RC fields): skip its
+                    //   cleanup too — the caller takes ownership of the whole composite
+                    //   and its scope-exit cleanup will handle the RC fields.
                     // - Non-RC local / borrow (index, field, loop var): rc_inc for caller
                     // - Fresh allocation (call, literal): already owned, no action needed
                     let skip_var = if let ExprKind::Identifier(sym) = &value.kind
                         && let Some((var, _)) = self.vars.get(sym)
-                        && self.rc_scopes.is_rc_local(*var)
+                        && (self.rc_scopes.is_rc_local(*var)
+                            || self.rc_scopes.is_composite_rc_local(*var)
+                            || self.rc_scopes.is_union_rc_local(*var))
                     {
                         Some(*var)
                     } else {

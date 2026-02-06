@@ -152,6 +152,13 @@ impl RcScopeStack {
             .any(|s| s.composites.iter().any(|c| c.variable == variable))
     }
 
+    /// Returns true if `variable` is registered as a union RC local in any scope.
+    pub fn is_union_rc_local(&self, variable: Variable) -> bool {
+        self.scopes
+            .iter()
+            .any(|s| s.unions.iter().any(|u| u.variable == variable))
+    }
+
     /// Register a composite RC local in the current scope.
     pub fn register_composite(
         &mut self,
