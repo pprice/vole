@@ -20,8 +20,10 @@ impl Analyzer {
                 None
             }
             PatternKind::Literal(expr) => {
-                // Check literal type matches scrutinee type
-                if let Ok(lit_type_id) = self.check_expr(expr, interner)
+                // Check literal type matches scrutinee type, using bidirectional type
+                // inference so integer literals get the scrutinee's type (e.g. i32, not i64).
+                if let Ok(lit_type_id) =
+                    self.check_expr_expecting_id(expr, Some(scrutinee_type_id), interner)
                     && !self.types_compatible_id(lit_type_id, scrutinee_type_id, interner)
                     && !self.types_compatible_id(scrutinee_type_id, lit_type_id, interner)
                 {

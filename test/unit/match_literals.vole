@@ -96,3 +96,65 @@ tests "nested match" {
         assert(result == 12)
     }
 }
+
+tests "i32 match patterns" {
+    test "match i32 with suffixed literals" {
+        let x: i32 = 10_i32
+        let result = match x {
+            10_i32 => 100_i32
+            20_i32 => 200_i32
+            _ => 0_i32
+        }
+        assert(result == 100_i32)
+    }
+
+    test "match i32 with unsuffixed literals" {
+        let x: i32 = 42_i32
+        let result = match x {
+            1 => 10_i32
+            42 => 420_i32
+            _ => 0_i32
+        }
+        assert(result == 420_i32)
+    }
+
+    test "match i32 wildcard fallback" {
+        let x: i32 = 99_i32
+        let result = match x {
+            1_i32 => 10_i32
+            2_i32 => 20_i32
+            _ => 0_i32
+        }
+        assert(result == 0_i32)
+    }
+
+    test "match i32 from function return" {
+        func get_i32() -> i32 { return 7_i32 }
+        let result = match get_i32() {
+            7_i32 => 70_i32
+            _ => 0_i32
+        }
+        assert(result == 70_i32)
+    }
+}
+
+tests "i16 match patterns" {
+    test "match i16 with suffixed literals" {
+        let x: i16 = 5_i16
+        let result = match x {
+            5_i16 => 50_i16
+            _ => 0_i16
+        }
+        assert(result == 50_i16)
+    }
+
+    test "match i16 with unsuffixed literals" {
+        let x: i16 = 3_i16
+        let result = match x {
+            1 => 10_i16
+            3 => 30_i16
+            _ => 0_i16
+        }
+        assert(result == 30_i16)
+    }
+}

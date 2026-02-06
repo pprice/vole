@@ -1441,11 +1441,17 @@ impl Cg<'_, '_, '_> {
                     let lit_val = self.expr(lit_expr)?;
                     arm_variables = std::mem::replace(&mut self.vars, saved_vars);
 
+                    // Coerce literal value to match scrutinee's Cranelift type.
+                    // This handles suffixed literals like `191_i64` matched against
+                    // an i32 scrutinee (sema reports an error but codegen continues).
+                    let coerced_lit =
+                        self.convert_for_select(lit_val.value, lit_val.ty, scrutinee.ty);
+
                     // Use Vole type (not Cranelift type) to determine comparison method
                     let cmp = self.compile_equality_check(
                         scrutinee_type_id,
                         scrutinee.value,
-                        lit_val.value,
+                        coerced_lit,
                     )?;
                     Some(cmp)
                 }
