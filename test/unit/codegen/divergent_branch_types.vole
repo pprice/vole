@@ -1,0 +1,95 @@
+// Test that divergent branch arms (unreachable, panic) don't cause
+// Cranelift verifier errors when the branch result is non-i64 (e.g. f64).
+//
+// Previously, unreachable_expr always emitted iconst(i64, 0) as a dummy
+// value, which caused a type mismatch when the branch merge block expected
+// f64. The fix ensures divergent arms emit a trap instead of a mistyped
+// jump to the merge block.
+
+// when expression with unreachable arm returning f64
+func when_unreachable_f64(x: bool) -> f64 {
+    return when {
+        x => 1.0_f64
+        _ => unreachable
+    }
+}
+
+// Nested when with unreachable arm returning f64
+func nested_when_unreachable_f64(x: bool) -> f64 {
+    return when {
+        x => 1.0_f64
+        _ => when {
+            true => 83.93_f64
+            _ => unreachable
+        }
+    }
+}
+
+// match expression with unreachable arm returning f64
+func match_unreachable_f64(x: i64) -> f64 {
+    return match x {
+        1 => 10.5_f64
+        _ => 20.5_f64
+    }
+}
+
+// when expression where false branch is unreachable and result is f64
+func when_false_unreachable_f64(x: bool) -> f64 {
+    return when {
+        x => 42.0_f64
+        _ => unreachable
+    }
+}
+
+// when with unreachable and f32
+func when_unreachable_f32(x: bool) -> f32 {
+    return when {
+        x => 1.0_f32
+        _ => unreachable
+    }
+}
+
+// Deeply nested when/match with unreachable returning f64
+func deep_nested_unreachable(x: bool, y: bool) -> f64 {
+    return when {
+        x => 1.0_f64
+        _ => match when {
+            true => 38.91_f64
+            _ => 19.97_f64
+        } {
+            80.72_f64 => (-35.0_f64)
+            _ => when {
+                true => 83.93_f64
+                true => 16.29_f64
+                _ => unreachable
+            }
+        }
+    }
+}
+
+tests "divergent branch types" {
+    test "when with unreachable f64 arm" {
+        assert(when_unreachable_f64(true) == 1.0)
+    }
+
+    test "nested when with unreachable f64 arm" {
+        assert(nested_when_unreachable_f64(true) == 1.0)
+    }
+
+    test "match with f64 result" {
+        assert(match_unreachable_f64(1) == 10.5)
+        assert(match_unreachable_f64(2) == 20.5)
+    }
+
+    test "when false branch unreachable f64" {
+        assert(when_false_unreachable_f64(true) == 42.0)
+    }
+
+    test "when with unreachable f32 arm" {
+        assert(when_unreachable_f32(true) == 1.0_f32)
+    }
+
+    test "deeply nested unreachable f64" {
+        assert(deep_nested_unreachable(true, false) == 1.0)
+    }
+}

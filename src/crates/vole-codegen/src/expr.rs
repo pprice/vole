@@ -1681,7 +1681,10 @@ impl Cg<'_, '_, '_> {
             let body_val = self.expr(&arm.body)?;
             let _ = std::mem::replace(&mut self.vars, saved_vars);
 
-            if !is_void {
+            if body_val.type_id == TypeId::NEVER {
+                // Divergent arm (unreachable/panic) — terminate with trap
+                self.builder.ins().trap(TrapCode::unwrap_user(1));
+            } else if !is_void {
                 // If the arm body produces a borrowed RC value, emit rc_inc so
                 // the match result owns its reference (mirroring if_expr_blocks).
                 // Without this, borrowed payloads extracted from unions would be
@@ -1788,7 +1791,10 @@ impl Cg<'_, '_, '_> {
 
             let body_val = self.expr(&arm.body)?;
 
-            if !is_void {
+            if body_val.type_id == TypeId::NEVER {
+                // Divergent arm (unreachable/panic) — terminate with trap
+                self.builder.ins().trap(TrapCode::unwrap_user(1));
+            } else if !is_void {
                 if result_needs_rc && body_val.is_borrowed() {
                     self.emit_rc_inc_for_type(body_val.value, result_type_id)?;
                 }
@@ -2221,7 +2227,10 @@ impl Cg<'_, '_, '_> {
         self.switch_and_seal(then_block);
         self.invalidate_value_caches();
         let then_result = self.expr(&if_expr.then_branch)?;
-        if !is_void {
+        if then_result.type_id == TypeId::NEVER {
+            // Divergent branch (unreachable/panic) — terminate with trap
+            self.builder.ins().trap(TrapCode::unwrap_user(1));
+        } else if !is_void {
             if result_needs_rc && then_result.is_borrowed() {
                 self.emit_rc_inc_for_type(then_result.value, result_type_id)?;
             }
@@ -2241,7 +2250,10 @@ impl Cg<'_, '_, '_> {
             // No else branch - result is void/nil
             self.void_value()
         };
-        if !is_void {
+        if else_result.type_id == TypeId::NEVER {
+            // Divergent branch (unreachable/panic) — terminate with trap
+            self.builder.ins().trap(TrapCode::unwrap_user(1));
+        } else if !is_void {
             if result_needs_rc && else_result.is_borrowed() {
                 self.emit_rc_inc_for_type(else_result.value, result_type_id)?;
             }
@@ -2463,6 +2475,14 @@ impl Cg<'_, '_, '_> {
             self.invalidate_value_caches();
 
             let body_result = self.expr(&arm.body)?;
+
+            // Divergent arms (unreachable, panic) already emitted a trap.
+            // The current block is an unreachable continuation — terminate
+            // it with a trap instead of a jump with a mistyped dummy value.
+            if body_result.type_id == TypeId::NEVER {
+                self.builder.ins().trap(TrapCode::unwrap_user(1));
+                continue;
+            }
 
             if !is_void {
                 // For RC types, ensure each arm contributes an owned +1 ref.
