@@ -1,0 +1,34 @@
+// Module with struct-returning functions for cross-module sret tests.
+// Large structs (3+ flat slots) use sret calling convention where a
+// hidden first parameter carries the return buffer pointer.
+
+struct SmallStruct {
+    x: i32,
+    y: i64,
+}
+
+struct BigStruct {
+    field1: i64,
+    field2: u8,
+    field3: i32,
+    field4: bool,
+}
+
+struct BigWithString {
+    name: string,
+    value: i64,
+    flag: bool,
+    count: i32,
+}
+
+func make_small(x: i32, y: i64) -> SmallStruct {
+    return SmallStruct { x: x, y: y }
+}
+
+func make_big(a: bool, b: string, c: i64) -> BigStruct {
+    return BigStruct { field1: c, field2: 1_u8, field3: 42_i32, field4: a }
+}
+
+func make_big_with_string(name: string, value: i64) -> BigWithString {
+    return BigWithString { name: name, value: value, flag: true, count: 99_i32 }
+}

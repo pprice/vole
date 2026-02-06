@@ -198,10 +198,34 @@ impl Cg<'_, '_, '_> {
                 .codegen_ctx
                 .jit_module()
                 .declare_func_in_func(func_id, self.builder.func);
-            let coerced = self.coerce_call_args(func_ref, &args);
+
+            // Handle sret convention for large struct returns (3+ flat slots).
+            // The function signature has a hidden first parameter for the return
+            // buffer pointer that must be prepended to the call arguments.
+            let is_sret = self.is_sret_struct_return(return_type_id);
+            let mut call_args = args;
+            if is_sret {
+                let ptr_type = self.ptr_type();
+                let flat_count = self
+                    .struct_flat_slot_count(return_type_id)
+                    .expect("INTERNAL: sret module call: missing flat slot count");
+                let total_size = (flat_count as u32) * 8;
+                let slot = self.alloc_stack(total_size);
+                let sret_ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+                call_args.insert(0, sret_ptr);
+            }
+
+            let coerced = self.coerce_call_args(func_ref, &call_args);
             let call_inst = self.builder.ins().call(func_ref, &coerced);
             self.field_cache.clear(); // Callee may mutate instance fields
-            let result = self.call_result(call_inst, return_type_id);
+
+            // For sret, result[0] is the sret pointer we passed in
+            let result = if is_sret {
+                let results = self.builder.inst_results(call_inst);
+                CompiledValue::new(results[0], self.ptr_type(), return_type_id)
+            } else {
+                self.call_result(call_inst, return_type_id)
+            };
             self.consume_rc_args(&mut rc_temps)?;
             return Ok(result);
         }
