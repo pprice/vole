@@ -767,11 +767,18 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     fn generate_range(&mut self, ctx: &StmtContext, inclusive: bool) -> String {
         let start = self.rng.gen_range(0..3);
 
-        // Collect i64 locals that could serve as variable bounds
+        // Collect i64 locals that could serve as variable bounds.
+        // Only use protected_vars (while-loop counters/guards) which are
+        // guaranteed to hold small values. Arbitrary i64 locals can hold
+        // huge computed values that would cause for loops to iterate
+        // billions of times.
         let i64_locals: Vec<String> = ctx
             .locals
             .iter()
-            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::I64)))
+            .filter(|(name, ty, _)| {
+                matches!(ty, TypeInfo::Primitive(PrimitiveType::I64))
+                    && ctx.protected_vars.contains(name)
+            })
             .map(|(name, _, _)| name.clone())
             .collect();
 
@@ -1820,12 +1827,16 @@ mod tests {
             let mut generator = StmtGenerator::new(&mut rng, &config);
             let mut ctx = StmtContext::new(&[], &table);
 
-            // Add an i64 local so variable bounds can be used
+            // Add an i64 local marked as protected (simulating a while-loop counter)
+            // so it can be used as a variable bound in for-loop ranges.
+            // Only protected i64 locals are eligible as range bounds since they
+            // are guaranteed to hold small values.
             ctx.add_local(
                 "n".to_string(),
                 TypeInfo::Primitive(PrimitiveType::I64),
                 false,
             );
+            ctx.protected_vars.push("n".to_string());
 
             let stmt = generator.generate_for_statement(&mut ctx, 0);
             // Check if the range uses the variable name "n" as a bound
