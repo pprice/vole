@@ -17,6 +17,7 @@ struct ClassLikeBody<'a, 'b> {
     fields: &'b [FieldDef],
     external: Option<&'b ExternalBlock>,
     methods: &'b [FuncDecl],
+    statics: Option<&'b StaticsBlock>,
     keyword: &'b str,
 }
 
@@ -1452,6 +1453,7 @@ fn print_class_decl<'a>(
             fields: &class.fields,
             external: class.external.as_ref(),
             methods: &class.methods,
+            statics: class.statics.as_ref(),
             keyword: "class",
         },
         interner,
@@ -1476,6 +1478,7 @@ fn print_struct_decl<'a>(
             fields: &struct_decl.fields,
             external: None,
             methods: &struct_decl.methods,
+            statics: struct_decl.statics.as_ref(),
             keyword: "struct",
         },
         interner,
@@ -1539,10 +1542,11 @@ fn print_class_like_body<'a, 'b>(
         fields,
         external,
         methods,
+        statics,
         keyword,
     } = body;
 
-    if fields.is_empty() && external.is_none() && methods.is_empty() {
+    if fields.is_empty() && external.is_none() && methods.is_empty() && statics.is_none() {
         return arena
             .text(keyword.to_string())
             .append(arena.text(" "))
@@ -1576,6 +1580,11 @@ fn print_class_like_body<'a, 'b>(
             .map(|m| print_func_decl(arena, m, interner))
             .collect();
         sections.push(arena.intersperse(method_docs, arena.hardline().append(arena.hardline())));
+    }
+
+    // Statics section
+    if let Some(statics_block) = statics {
+        sections.push(print_statics_block(arena, statics_block, interner));
     }
 
     // Join sections with blank lines
@@ -1629,7 +1638,11 @@ fn print_interface_decl<'a>(
             .append(arena.intersperse(extend_names, arena.text(", ")))
     };
 
-    if iface.fields.is_empty() && iface.external_blocks.is_empty() && iface.methods.is_empty() {
+    if iface.fields.is_empty()
+        && iface.external_blocks.is_empty()
+        && iface.methods.is_empty()
+        && iface.statics.is_none()
+    {
         return arena
             .text("interface ")
             .append(arena.text(name))
@@ -1664,6 +1677,11 @@ fn print_interface_decl<'a>(
             .map(|m| print_interface_method(arena, m, interner))
             .collect();
         sections.push(arena.intersperse(method_docs, arena.hardline()));
+    }
+
+    // Statics section
+    if let Some(ref statics_block) = iface.statics {
+        sections.push(print_statics_block(arena, statics_block, interner));
     }
 
     // Join sections with blank lines
@@ -1728,7 +1746,10 @@ fn print_implement_block<'a>(
             .append(print_type_expr(arena, &impl_block.target_type, interner))
     };
 
-    if impl_block.external.is_none() && impl_block.methods.is_empty() {
+    if impl_block.external.is_none()
+        && impl_block.methods.is_empty()
+        && impl_block.statics.is_none()
+    {
         return header.append(arena.text(" {}"));
     }
 
@@ -1750,11 +1771,59 @@ fn print_implement_block<'a>(
         sections.push(arena.intersperse(method_docs, arena.hardline().append(arena.hardline())));
     }
 
+    // Statics section
+    if let Some(ref statics) = impl_block.statics {
+        sections.push(print_statics_block(arena, statics, interner));
+    }
+
     // Join sections with blank lines
     let body = arena.intersperse(sections, arena.hardline().append(arena.hardline()));
 
     header
         .append(arena.text(" {"))
+        .append(arena.hardline().append(body).nest(INDENT))
+        .append(arena.hardline())
+        .append(arena.text("}"))
+}
+
+/// Print a statics block containing static methods and optional external blocks.
+///
+/// ```vole
+/// statics {
+///     func create() -> Self { ... }
+///     external("native:mod") { func new() -> Self }
+/// }
+/// ```
+fn print_statics_block<'a>(
+    arena: &'a Arena<'a>,
+    statics: &StaticsBlock,
+    interner: &Interner,
+) -> DocBuilder<'a, Arena<'a>> {
+    if statics.methods.is_empty() && statics.external_blocks.is_empty() {
+        return arena.text("statics {}");
+    }
+
+    let mut sections: Vec<DocBuilder<'a, Arena<'a>>> = Vec::new();
+
+    // External blocks within statics
+    for ext in &statics.external_blocks {
+        sections.push(print_external_block(arena, ext, interner));
+    }
+
+    // Static methods
+    if !statics.methods.is_empty() {
+        let method_docs: Vec<_> = statics
+            .methods
+            .iter()
+            .map(|m| print_interface_method(arena, m, interner))
+            .collect();
+        sections.push(arena.intersperse(method_docs, arena.hardline().append(arena.hardline())));
+    }
+
+    let body = arena.intersperse(sections, arena.hardline().append(arena.hardline()));
+
+    arena
+        .text("statics {")
         .append(arena.hardline().append(body).nest(INDENT))
         .append(arena.hardline())
         .append(arena.text("}"))

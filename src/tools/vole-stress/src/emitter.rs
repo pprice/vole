@@ -151,11 +151,6 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             self.emit_implement_block(symbol);
         }
 
-        // Emit statics blocks for classes with static methods
-        for symbol in self.module.classes() {
-            self.emit_statics_block(symbol);
-        }
-
         // Emit module tests
         self.emit_module_tests();
     }
@@ -660,6 +655,20 @@ impl<'a, R: Rng> EmitContext<'a, R> {
                 self.emit_method(method);
             }
 
+            // Emit statics block inside the class body (not in a separate
+            // implement block) — the codegen expects statics blocks to live
+            // inside the class declaration where the TypeDefId is available.
+            if !info.static_methods.is_empty() {
+                self.emit_line("");
+                self.emit_line("statics {");
+                self.indent += 1;
+                for static_method in &info.static_methods {
+                    self.emit_static_method(static_method, &symbol.name, &info.fields);
+                }
+                self.indent -= 1;
+                self.emit_line("}");
+            }
+
             self.indent -= 1;
             self.emit_line("}");
         }
@@ -795,17 +804,22 @@ impl<'a, R: Rng> EmitContext<'a, R> {
     /// - Array types
     /// - Tuple types
     /// - Fixed-size array types
-    /// - Fallible types (with success type)
     /// - Class/struct types
     ///
     /// Not eligible:
     /// - Void (no return value to express)
     /// - Iterator (requires yield)
     /// - Never (requires panic/unreachable)
+    /// - TypeParam (no way to generate a valid literal for a generic type)
+    /// - Fallible (expression must itself be fallible, not just the success type)
     fn can_use_expr_body(&self, return_type: &TypeInfo) -> bool {
         !matches!(
             return_type,
-            TypeInfo::Void | TypeInfo::Iterator(_) | TypeInfo::Never
+            TypeInfo::Void
+                | TypeInfo::Iterator(_)
+                | TypeInfo::Never
+                | TypeInfo::TypeParam(_)
+                | TypeInfo::Fallible { .. }
         )
     }
 
@@ -892,16 +906,17 @@ impl<'a, R: Rng> EmitContext<'a, R> {
     /// Emit a never-returning function body.
     ///
     /// Never-returning functions diverge by calling `panic()` or using `unreachable`.
+    /// Uses `return` to satisfy the compiler's return analysis.
     /// Randomly chooses between:
-    /// - `panic("message")`
-    /// - `unreachable`
+    /// - `return panic("message")`
+    /// - `return unreachable`
     fn emit_never_body(&mut self) {
         // Randomly choose between panic and unreachable
         if self.rng.gen_bool(0.5) {
             let msg_id = self.rng.gen_range(0..100);
-            self.emit_line(&format!("panic(\"diverge{}\")", msg_id));
+            self.emit_line(&format!("return panic(\"diverge{}\")", msg_id));
         } else {
-            self.emit_line("unreachable");
+            self.emit_line("return unreachable");
         }
     }
 
@@ -1075,44 +1090,6 @@ impl<'a, R: Rng> EmitContext<'a, R> {
                 self.emit_self_method(method, &target_name, &target_fields);
             }
         }
-
-        self.indent -= 1;
-        self.emit_line("}");
-    }
-
-    /// Emit a statics block for a class with static methods.
-    ///
-    /// Produces:
-    /// ```vole
-    /// implement ClassName {
-    ///     statics {
-    ///         func staticName() -> ClassName { ... }
-    ///     }
-    /// }
-    /// ```
-    fn emit_statics_block(&mut self, symbol: &Symbol) {
-        let SymbolKind::Class(ref info) = symbol.kind else {
-            return;
-        };
-
-        // Skip if no static methods
-        if info.static_methods.is_empty() {
-            return;
-        }
-
-        self.emit_line("");
-        self.emit_line(&format!("implement {} {{", symbol.name));
-        self.indent += 1;
-
-        self.emit_line("statics {");
-        self.indent += 1;
-
-        for static_method in &info.static_methods {
-            self.emit_static_method(static_method, &symbol.name, &info.fields);
-        }
-
-        self.indent -= 1;
-        self.emit_line("}");
 
         self.indent -= 1;
         self.emit_line("}");
