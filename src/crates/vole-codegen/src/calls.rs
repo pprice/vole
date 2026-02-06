@@ -592,9 +592,15 @@ impl Cg<'_, '_, '_> {
         call: &CallExpr,
         callee_sym: Symbol,
     ) -> CodegenResult<CompiledValue> {
-        // Look up the function's NameId for param types and default args
+        // Look up the function's NameId for param types and default args.
+        // Use self.interner() (not self.query()) because callee_sym comes from the
+        // current AST, which may be a module with its own interner. ProgramQuery
+        // always uses the main program's interner, causing index-out-of-bounds when
+        // a module Symbol index exceeds the main interner's size.
         let module_id = self.current_module().unwrap_or(self.env.analyzed.module_id);
-        let name_id = self.query().try_function_name_id(module_id, callee_sym);
+        let name_id = self
+            .name_table()
+            .name_id(module_id, &[callee_sym], self.interner());
         self.call_func_id_impl(func_key, func_id, call, name_id)
     }
 
@@ -825,9 +831,12 @@ impl Cg<'_, '_, '_> {
         // Otherwise, we need to compile defaults for the missing parameters
         let module_id = self.current_module().unwrap_or(self.env.analyzed.module_id);
 
-        // Get the function ID from EntityRegistry
+        // Get the function ID from EntityRegistry.
+        // Use self.interner() to resolve module-local Symbols correctly (see call_func_id).
         let func_id = {
-            let name_id = self.query().try_function_name_id(module_id, callee_sym);
+            let name_id = self
+                .name_table()
+                .name_id(module_id, &[callee_sym], self.interner());
             name_id.and_then(|id| self.registry().function_by_name(id))
         };
 
