@@ -73,7 +73,16 @@ impl Cg<'_, '_, '_> {
             )
         })?;
 
-        Ok((lambda_type_id, sema_params.to_vec(), ret_id))
+        // In monomorphized context, substitute type parameters in the individual
+        // param/return types. We can't substitute the whole function type because
+        // the substituted function type may not be pre-computed in the arena.
+        let param_type_ids: Vec<TypeId> = sema_params
+            .iter()
+            .map(|&p| self.substitute_type(p))
+            .collect();
+        let return_type_id = self.substitute_type(ret_id);
+
+        Ok((lambda_type_id, param_type_ids, return_type_id))
     }
 
     /// Compile a pure lambda (no captures) - returns a closure pointer.
@@ -139,13 +148,15 @@ impl Cg<'_, '_, '_> {
 
             let config = FunctionCompileConfig::pure_lambda(&lambda.body, params, return_type_id);
 
+            // Forward parent substitutions so lambdas inside monomorphized
+            // methods re-resolve type-parameter method calls on concrete types.
             compile_function_inner_with_params(
                 lambda_builder,
                 self.codegen_ctx,
                 self.env,
                 config,
                 self.current_module(),
-                None,
+                self.substitutions,
             )?;
         }
 
@@ -254,13 +265,15 @@ impl Cg<'_, '_, '_> {
                 return_type_id,
             );
 
+            // Forward parent substitutions so lambdas inside monomorphized
+            // methods re-resolve type-parameter method calls on concrete types.
             compile_function_inner_with_params(
                 lambda_builder,
                 self.codegen_ctx,
                 self.env,
                 config,
                 self.current_module(),
-                None,
+                self.substitutions,
             )?;
         }
 

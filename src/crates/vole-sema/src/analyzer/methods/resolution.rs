@@ -258,19 +258,14 @@ impl Analyzer {
             "resolve_method_on_type_param: starting"
         );
 
-        // Look up the type parameter in type_param_stack
-        let type_param_scope = self.type_param_stack.current()?;
-
-        // Find the type parameter by name_id
-        let type_param = type_param_scope
-            .params()
-            .iter()
-            .find(|tp| tp.name_id == param_name_id);
-
-        let type_param = match type_param {
+        // Look up the type parameter across all scopes (not just innermost).
+        // This is critical for lambdas inside generic class methods: the lambda
+        // pushes its own scope (possibly empty), but the class-level constraints
+        // live in an outer scope.
+        let type_param = match self.type_param_stack.get_by_name_id(param_name_id) {
             Some(tp) => tp,
             None => {
-                tracing::trace!(?param_name_id, "type param not found in scope");
+                tracing::trace!(?param_name_id, "type param not found in any scope");
                 return None;
             }
         };

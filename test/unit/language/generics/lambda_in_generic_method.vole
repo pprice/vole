@@ -1,0 +1,113 @@
+// Test: lambdas inside generic class methods can use constraint methods on type params.
+// Bug fix: lambda compilation inside monomorphized class methods must forward type
+// parameter substitutions so constraint method calls resolve to concrete types.
+
+interface Subtractable {
+    func subtract(other: Self) -> i64
+}
+
+implement Subtractable for i64 {
+    func subtract(other: i64) -> i64 {
+        return self - other
+    }
+}
+
+// Basic: generic class returns a lambda that uses constraint methods
+class Differencer<T: Subtractable> {
+    value: T,
+
+    func make_subtractor() -> (T, T) -> i64 {
+        return (a: T, b: T) -> i64 => a.subtract(b)
+    }
+}
+
+// Multiple constraints with lambda
+interface Describable {
+    func describe() -> string
+}
+
+implement Describable for i64 {
+    func describe() -> string {
+        return "{self}"
+    }
+}
+
+class Processor<T: Subtractable + Describable> {
+    items: [T],
+
+    // Lambda uses one of multiple constraint methods
+    func make_describer() -> (T) -> string {
+        return (x: T) -> string => x.describe()
+    }
+
+    // Lambda used inline (not returned)
+    func describe_all() -> string {
+        let mut result = ""
+        for item in self.items {
+            let desc = ((x: T) -> string => x.describe())(item)
+            result = "{result}{desc},"
+        }
+        return result
+    }
+}
+
+// Capturing lambda inside generic method
+class Offset<T: Subtractable> {
+    base: T,
+
+    func make_offset_checker() -> (T) -> i64 {
+        let base = self.base
+        return (x: T) -> i64 => x.subtract(base)
+    }
+}
+
+// Block-bodied lambda (not expression-bodied)
+class Checker<T: Subtractable> {
+    threshold: T,
+
+    func make_checker() -> (T, T) -> i64 {
+        return (a: T, b: T) -> i64 => {
+            let diff = a.subtract(b)
+            return diff
+        }
+    }
+}
+
+tests {
+    test "lambda in generic method uses constraint methods" {
+        let diff = Differencer { value: 42 }
+        let sub_fn = diff.make_subtractor()
+
+        assert(sub_fn(10, 5) == 5)
+        assert(sub_fn(3, 7) == -4)
+        assert(sub_fn(5, 5) == 0)
+    }
+
+    test "lambda with multiple constraints" {
+        let proc = Processor { items: [10, 20, 30] }
+        let desc_fn = proc.make_describer()
+        assert(desc_fn(42) == "42")
+        assert(desc_fn(-1) == "-1")
+    }
+
+    test "inline lambda in generic method" {
+        let proc = Processor { items: [1, 2, 3] }
+        let result = proc.describe_all()
+        assert(result == "1,2,3,")
+    }
+
+    test "capturing lambda in generic method" {
+        let off = Offset { base: 10 }
+        let checker = off.make_offset_checker()
+        assert(checker(15) == 5)
+        assert(checker(10) == 0)
+        assert(checker(3) == -7)
+    }
+
+    test "block-bodied lambda in generic method" {
+        let chk = Checker { threshold: 100 }
+        let check_fn = chk.make_checker()
+        assert(check_fn(10, 3) == 7)
+        assert(check_fn(5, 5) == 0)
+    }
+}
