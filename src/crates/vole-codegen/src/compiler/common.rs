@@ -20,8 +20,9 @@ use crate::types::{CodegenCtx, CompileEnv};
 pub enum DefaultReturn {
     /// Return nothing (for void functions): `return_(&[])`
     Empty,
-    /// Return a zero i64 (for lambdas): `return_(&[iconst(i64, 0)])`
-    ZeroI64,
+    /// Return a zero value matching the function signature's return type.
+    /// Used for lambdas with block bodies that may not terminate explicitly.
+    Zero,
 }
 
 /// Configuration for compiling a function body.
@@ -107,7 +108,7 @@ impl<'a> FunctionCompileConfig<'a> {
             closure_ptr_type: None,
             return_type_id: Some(return_type_id),
             skip_block_params: 1, // Skip the closure pointer
-            default_return: DefaultReturn::ZeroI64,
+            default_return: DefaultReturn::Zero,
         }
     }
 
@@ -127,7 +128,7 @@ impl<'a> FunctionCompileConfig<'a> {
             closure_ptr_type: Some(closure_ptr_type),
             return_type_id: Some(return_type_id),
             skip_block_params: 1, // Skip the closure pointer
-            default_return: DefaultReturn::ZeroI64,
+            default_return: DefaultReturn::Zero,
         }
     }
 }
@@ -372,8 +373,22 @@ pub fn compile_function_body_with_cg(
             DefaultReturn::Empty => {
                 cg.builder.ins().return_(&[]);
             }
-            DefaultReturn::ZeroI64 => {
-                let zero = cg.builder.ins().iconst(types::I64, 0);
+            DefaultReturn::Zero => {
+                let ret_type = cg
+                    .builder
+                    .func
+                    .signature
+                    .returns
+                    .first()
+                    .map(|r| r.value_type)
+                    .unwrap_or(types::I64);
+                let zero = if ret_type == types::F64 {
+                    cg.builder.ins().f64const(0.0)
+                } else if ret_type == types::F32 {
+                    cg.builder.ins().f32const(0.0)
+                } else {
+                    cg.builder.ins().iconst(ret_type, 0)
+                };
                 cg.builder.ins().return_(&[zero]);
             }
         }
@@ -463,7 +478,7 @@ pub fn compile_function_inner_with_params<'ctx>(
 /// * `builder` - The FunctionBuilder to finalize (consumed)
 /// * `expr_value` - Optional compiled expression value to return
 /// * `terminated` - Whether the function body already terminated (return/break)
-/// * `default_return` - What to return when not terminated (Empty or ZeroI64)
+/// * `default_return` - What to return when not terminated (Empty or Zero)
 pub fn finalize_function_body(
     mut builder: FunctionBuilder,
     expr_value: Option<&crate::types::CompiledValue>,
@@ -477,8 +492,21 @@ pub fn finalize_function_body(
             DefaultReturn::Empty => {
                 builder.ins().return_(&[]);
             }
-            DefaultReturn::ZeroI64 => {
-                let zero = builder.ins().iconst(types::I64, 0);
+            DefaultReturn::Zero => {
+                let ret_type = builder
+                    .func
+                    .signature
+                    .returns
+                    .first()
+                    .map(|r| r.value_type)
+                    .unwrap_or(types::I64);
+                let zero = if ret_type == types::F64 {
+                    builder.ins().f64const(0.0)
+                } else if ret_type == types::F32 {
+                    builder.ins().f32const(0.0)
+                } else {
+                    builder.ins().iconst(ret_type, 0)
+                };
                 builder.ins().return_(&[zero]);
             }
         }

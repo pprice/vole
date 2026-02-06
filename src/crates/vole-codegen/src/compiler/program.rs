@@ -914,7 +914,7 @@ impl Compiler<'_> {
                     cg.rc_scopes.pop_scope();
                 }
 
-                finalize_function_body(builder, None, terminated, DefaultReturn::ZeroI64);
+                finalize_function_body(builder, None, terminated, DefaultReturn::Zero);
             }
 
             // Define the function
@@ -1259,7 +1259,7 @@ impl Compiler<'_> {
             let (terminated, _) =
                 Cg::new(&mut builder, &mut codegen_ctx, &env).compile_body(&test.body)?;
 
-            finalize_function_body(builder, None, terminated, DefaultReturn::ZeroI64);
+            finalize_function_body(builder, None, terminated, DefaultReturn::Zero);
         }
 
         // NOTE: We intentionally do NOT call define_function here.

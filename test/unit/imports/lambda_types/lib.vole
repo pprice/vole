@@ -1,0 +1,71 @@
+// Module with lambdas that return non-i64 types.
+// Used to test cross-module lambda compilation with various return types.
+// Regression test for vol-pz4y: DefaultReturn::ZeroI64 used i64 for all
+// lambda block bodies regardless of actual return type.
+
+// Pure function returning a lambda with i32 return type
+func make_i32_lambda() -> (i32) -> i32 {
+    return (x: i32) -> i32 => x + 1_i32
+}
+
+// Lambda with block body + conditional return (exercises DefaultReturn path)
+func make_i32_block_lambda() -> (i32) -> i32 {
+    return (x: i32) -> i32 => {
+        if x > 0_i32 {
+            return x * 2_i32
+        }
+    }
+}
+
+// Lambda with bool return type and conditional return
+func make_bool_block_lambda() -> (i64) -> bool {
+    return (x: i64) -> bool => {
+        if x > 0 {
+            return true
+        }
+    }
+}
+
+// Lambda with f64 return type and conditional return
+func make_f64_block_lambda() -> (f64) -> f64 {
+    return (x: f64) -> f64 => {
+        if x > 0.0 {
+            return x * 2.0
+        }
+    }
+}
+
+// Lambda with when expression body
+func make_when_lambda() -> (i32) -> i32 {
+    return (x: i32) -> i32 => when {
+        x > 0_i32 => x * 2_i32,
+        _ => 0_i32,
+    }
+}
+
+// Higher-order function taking an i32 lambda
+func apply_i32(f: (i32) -> i32, x: i32) -> i32 {
+    return f(x)
+}
+
+// Class with methods that use non-i64 lambdas
+class Processor {
+    value: i32,
+
+    func transform() -> i32 {
+        let f = (x: i32) -> i32 => x * 2_i32
+        return f(self.value)
+    }
+
+    func apply_lambda(f: (i32) -> i32) -> i32 {
+        return f(self.value)
+    }
+
+    func get_value() -> i32 {
+        return self.value
+    }
+}
+
+func new_processor(v: i32) -> Processor {
+    return Processor { value: v }
+}

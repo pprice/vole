@@ -1,0 +1,55 @@
+// Test cross-module lambda compilation with non-i64 return types.
+// Regression test for vol-pz4y: lambda block bodies with non-i64 return
+// types crashed because DefaultReturn used i64 regardless of the actual
+// function signature return type.
+
+let lib = import "./lib"
+
+tests {
+    test "cross-module i32 expression lambda" {
+        let f = lib.make_i32_lambda()
+        assert(f(10_i32) == 11_i32)
+    }
+
+    test "cross-module i32 block lambda with conditional return" {
+        let f = lib.make_i32_block_lambda()
+        assert(f(5_i32) == 10_i32)
+    }
+
+    test "cross-module bool block lambda with conditional return" {
+        let f = lib.make_bool_block_lambda()
+        assert(f(1) == true)
+    }
+
+    test "cross-module f64 block lambda with conditional return" {
+        let f = lib.make_f64_block_lambda()
+        assert(f(3.0) == 6.0)
+    }
+
+    test "cross-module when expression lambda" {
+        let f = lib.make_when_lambda()
+        assert(f(5_i32) == 10_i32)
+        assert(f(-1_i32) == 0_i32)
+    }
+
+    test "cross-module apply with i32 lambda" {
+        let result = lib.apply_i32((x: i32) -> i32 => x * 2_i32, 5_i32)
+        assert(result == 10_i32)
+    }
+
+    test "class method with i32 lambda" {
+        let p = lib.new_processor(5_i32)
+        assert(p.transform() == 10_i32)
+    }
+
+    test "class method apply lambda returning i32" {
+        let p = lib.new_processor(7_i32)
+        let result = p.apply_lambda((x: i32) -> i32 => x + 3_i32)
+        assert(result == 10_i32)
+    }
+
+    test "class get_value i32" {
+        let p = lib.new_processor(10_i32)
+        assert(p.get_value() == 10_i32)
+    }
+}
