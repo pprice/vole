@@ -8,7 +8,7 @@ use vole_frontend::{
     Symbol,
 };
 use vole_identity::{ModuleId, NameId, TypeDefId};
-use vole_runtime::type_registry::{FieldTypeTag, register_instance_type};
+use vole_runtime::type_registry::{FieldTypeTag, alloc_type_id, register_instance_type};
 use vole_sema::type_arena::TypeId;
 
 /// Convert a TypeId to a FieldTypeTag for runtime cleanup.
@@ -57,8 +57,7 @@ impl Compiler<'_> {
     /// Pre-register a class type (just the name and type_id)
     /// This is called first so that field type resolution can find other classes/records
     pub(super) fn pre_register_class(&mut self, class: &ClassDecl) {
-        let type_id = self.next_type_id;
-        self.next_type_id += 1;
+        let type_id = alloc_type_id();
 
         let query = self.query();
         let module_id = self.program_module();
@@ -569,13 +568,7 @@ impl Compiler<'_> {
         }
 
         // Allocate type_id for classes; structs use 0
-        let type_id = if is_class {
-            let id = self.next_type_id;
-            self.next_type_id += 1;
-            id
-        } else {
-            0
-        };
+        let type_id = if is_class { alloc_type_id() } else { 0 };
 
         // Build field slots and optionally collect field_type_tags (classes only)
         let (field_slots, physical_slot_count, field_type_tags) =

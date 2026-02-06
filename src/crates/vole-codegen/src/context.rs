@@ -375,9 +375,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             return cached_id;
         }
 
-        // Allocate a new type_id
-        let new_type_id = self.env.state.mono_type_id_counter.get();
-        self.env.state.mono_type_id_counter.set(new_type_id + 1);
+        // Allocate a new globally-unique type_id
+        let new_type_id = vole_runtime::type_registry::alloc_type_id();
 
         // Compute field type tags from concrete types
         let field_type_tags: Vec<vole_runtime::type_registry::FieldTypeTag> = concrete_field_types

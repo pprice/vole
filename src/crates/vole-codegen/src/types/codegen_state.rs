@@ -44,9 +44,6 @@ pub struct CodegenState {
     pub intrinsics_registry: IntrinsicsRegistry,
     /// Counter for generating unique lambda names (interior mutability)
     pub lambda_counter: Cell<usize>,
-    /// Counter for dynamically allocated monomorphized type_ids (interior mutability).
-    /// Initialized from `Compiler::next_type_id` after pass 1 completes.
-    pub mono_type_id_counter: Cell<u32>,
     /// Cache of runtime type_ids for monomorphized generic class instances.
     /// Maps (base TypeDefId, concrete type args) -> runtime type_id.
     /// When a generic class like `Wrapper<Tag>` is instantiated, we register
@@ -65,7 +62,6 @@ impl CodegenState {
             native_registry,
             intrinsics_registry: IntrinsicsRegistry::new(),
             lambda_counter: Cell::new(0),
-            mono_type_id_counter: Cell::new(0),
             mono_type_ids: RefCell::new(FxHashMap::default()),
         }
     }

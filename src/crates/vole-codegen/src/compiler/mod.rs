@@ -81,8 +81,6 @@ pub struct Compiler<'a> {
     test_func_keys: Vec<FunctionKey>,
     /// Codegen lookup tables (type_metadata, method_infos, vtables, etc.)
     state: CodegenState,
-    /// Next type ID to assign
-    next_type_id: u32,
     /// Opaque function identities and return types
     func_registry: FunctionRegistry,
     /// Global module bindings from top-level destructuring imports
@@ -123,7 +121,6 @@ impl<'a> Compiler<'a> {
             global_inits: FxHashMap::default(),
             test_func_keys: Vec::new(),
             state: CodegenState::new(native_registry),
-            next_type_id: 0,
             func_registry,
             global_module_bindings: FxHashMap::default(),
             skip_tests: false,

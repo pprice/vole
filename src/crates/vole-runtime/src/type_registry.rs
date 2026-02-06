@@ -6,6 +6,7 @@
 
 use rustc_hash::FxHashMap;
 use std::sync::RwLock;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 /// Field type info for cleanup purposes.
 ///
@@ -42,6 +43,19 @@ impl InstanceTypeInfo {
 
 /// Global type registry for field cleanup info
 static TYPE_REGISTRY: RwLock<Option<FxHashMap<u32, InstanceTypeInfo>>> = RwLock::new(None);
+
+/// Global counter for allocating unique runtime type IDs.
+///
+/// Each class instance needs a unique type_id so the runtime type registry
+/// can look up field cleanup info during instance_drop. This counter is
+/// global (not per-Compiler) to prevent type_id collisions when multiple
+/// Compiler instances register classes from different modules.
+static NEXT_TYPE_ID: AtomicU32 = AtomicU32::new(0);
+
+/// Allocate a unique runtime type ID. Thread-safe and globally unique.
+pub fn alloc_type_id() -> u32 {
+    NEXT_TYPE_ID.fetch_add(1, Ordering::Relaxed)
+}
 
 /// Initialize the type registry (call once at startup)
 pub fn init_type_registry() {
