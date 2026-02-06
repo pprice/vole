@@ -144,7 +144,7 @@ impl Cg<'_, '_, '_> {
                 self.codegen_ctx,
                 self.env,
                 config,
-                None,
+                self.current_module(),
                 None,
             )?;
         }
@@ -259,7 +259,7 @@ impl Cg<'_, '_, '_> {
                 self.codegen_ctx,
                 self.env,
                 config,
-                None,
+                self.current_module(),
                 None,
             )?;
         }
