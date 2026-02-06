@@ -1575,8 +1575,13 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // Get chainable methods for this class
         let methods = get_chainable_methods(table, mod_id, class_id);
 
-        // Filter to Self-returning methods only
-        let self_returning: Vec<_> = methods.iter().filter(|m| m.returns_self).collect();
+        // Filter to Self-returning methods, excluding the current method to prevent
+        // infinite recursion (e.g. selfMethod6 chaining back to selfMethod6).
+        let current_name = ctx.current_function_name.as_deref();
+        let self_returning: Vec<_> = methods
+            .iter()
+            .filter(|m| m.returns_self && Some(m.name.as_str()) != current_name)
+            .collect();
         if self_returning.is_empty() {
             return String::new();
         }

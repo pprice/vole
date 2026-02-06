@@ -1177,7 +1177,7 @@ impl<'a, R: Rng> EmitContext<'a, R> {
         self.indent += 1;
 
         // Generate the body that returns Self
-        self.emit_self_returning_body(&method.params, class_name, target_fields);
+        self.emit_self_returning_body(&method.name, &method.params, class_name, target_fields);
 
         self.indent -= 1;
         self.emit_line("}");
@@ -1186,6 +1186,7 @@ impl<'a, R: Rng> EmitContext<'a, R> {
     /// Emit a function body that returns the implementing class type (for Self return).
     fn emit_self_returning_body(
         &mut self,
+        method_name: &str,
         params: &[ParamInfo],
         class_name: &str,
         target_fields: &[FieldInfo],
@@ -1195,6 +1196,10 @@ impl<'a, R: Rng> EmitContext<'a, R> {
 
         // Now generate the statements using StmtGenerator
         let mut stmt_ctx = StmtContext::with_module(params, self.table, self.module.id);
+        // Set the current method name so that method chain generation can
+        // exclude this method, preventing infinite recursion (e.g. selfMethod6
+        // chaining back to selfMethod6).
+        stmt_ctx.current_function_name = Some(method_name.to_string());
         let mut stmt_gen = StmtGenerator::new(self.rng, &self.config.stmt_config);
         stmt_gen.set_indent(self.indent);
 
