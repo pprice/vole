@@ -351,3 +351,16 @@ static STACK_OVERFLOW_FLAG: AtomicBool = AtomicBool::new(false);
 pub fn take_stack_overflow() -> bool {
     STACK_OVERFLOW_FLAG.swap(false, Ordering::AcqRel)
 }
+
+/// Reset all global runtime state after siglongjmp recovery.
+///
+/// When a stack overflow triggers siglongjmp, Rust destructors are skipped
+/// on the unwound stack. This can leave global locks permanently held
+/// (e.g. the type registry's RwLock). This function force-resets all such
+/// state so that subsequent JIT compilation and execution can proceed.
+///
+/// Call this after every siglongjmp recovery (both in the test runner and
+/// in compile_and_run).
+pub fn recover_from_signal() {
+    crate::type_registry::force_unlock_type_registry();
+}

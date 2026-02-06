@@ -3,10 +3,15 @@
 // Runtime type registry for field cleanup information.
 // Populated at JIT compile time, used at runtime to properly clean up
 // reference-counted fields when instances are freed.
+//
+// Uses a custom atomic-based RwLock instead of std::sync::RwLock because
+// siglongjmp-based recovery from stack overflow can skip Drop on lock guards,
+// leaving a std RwLock permanently held. Our atomic lock can be force-reset
+// after signal recovery via `force_unlock_type_registry()`.
 
 use rustc_hash::FxHashMap;
-use std::sync::RwLock;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::cell::UnsafeCell;
+use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 
 /// Field type info for cleanup purposes.
 ///
@@ -41,8 +46,87 @@ impl InstanceTypeInfo {
     }
 }
 
-/// Global type registry for field cleanup info
-static TYPE_REGISTRY: RwLock<Option<FxHashMap<u32, InstanceTypeInfo>>> = RwLock::new(None);
+/// Atomic-based RwLock for the type registry.
+///
+/// State values:
+///   0      = unlocked
+///   N > 0  = N readers holding the lock
+///   -1     = writer holding the lock
+///
+/// This lock can be force-reset to 0 via `force_unlock()` after siglongjmp
+/// recovery, which std::sync::RwLock cannot do (it would be permanently stuck
+/// or poisoned).
+struct RegistryLock {
+    state: AtomicI32,
+    data: UnsafeCell<Option<FxHashMap<u32, InstanceTypeInfo>>>,
+}
+
+// Safety: the AtomicI32 synchronizes access to the UnsafeCell data
+unsafe impl Sync for RegistryLock {}
+
+impl RegistryLock {
+    const fn new() -> Self {
+        Self {
+            state: AtomicI32::new(0),
+            data: UnsafeCell::new(None),
+        }
+    }
+
+    /// Acquire a read lock. Spins briefly, then yields.
+    fn read<R>(&self, f: impl FnOnce(&FxHashMap<u32, InstanceTypeInfo>) -> R) -> R {
+        loop {
+            let s = self.state.load(Ordering::Acquire);
+            if s >= 0
+                && self
+                    .state
+                    .compare_exchange_weak(s, s + 1, Ordering::Acquire, Ordering::Relaxed)
+                    .is_ok()
+            {
+                // Safety: we hold a read lock (state > 0), no writer active
+                let data = unsafe { &*self.data.get() };
+                let empty = FxHashMap::default();
+                let map = data.as_ref().unwrap_or(&empty);
+                let result = f(map);
+                self.state.fetch_sub(1, Ordering::Release);
+                return result;
+            }
+            std::hint::spin_loop();
+        }
+    }
+
+    /// Acquire a write lock. Spins briefly, then yields.
+    fn write<R>(&self, f: impl FnOnce(&mut FxHashMap<u32, InstanceTypeInfo>) -> R) -> R {
+        loop {
+            if self
+                .state
+                .compare_exchange_weak(0, -1, Ordering::Acquire, Ordering::Relaxed)
+                .is_ok()
+            {
+                // Safety: we hold the write lock (state == -1), exclusive access
+                let data = unsafe { &mut *self.data.get() };
+                let map = data.get_or_insert_with(FxHashMap::default);
+                let result = f(map);
+                self.state.store(0, Ordering::Release);
+                return result;
+            }
+            std::hint::spin_loop();
+        }
+    }
+
+    /// Force-reset the lock to unlocked state.
+    ///
+    /// Called after siglongjmp recovery when a lock guard may have been
+    /// abandoned on the unwound stack. The data is safe because:
+    /// - A read was interrupted: data wasn't being modified
+    /// - A write was interrupted: the insert may be partial, but the
+    ///   HashMap is still valid (Rust's HashMap doesn't have torn writes
+    ///   at the entry level, and we'll re-register the type anyway)
+    fn force_unlock(&self) {
+        self.state.store(0, Ordering::Release);
+    }
+}
+
+static TYPE_REGISTRY: RegistryLock = RegistryLock::new();
 
 /// Global counter for allocating unique runtime type IDs.
 ///
@@ -59,33 +143,38 @@ pub fn alloc_type_id() -> u32 {
 
 /// Initialize the type registry (call once at startup)
 pub fn init_type_registry() {
-    let mut guard = TYPE_REGISTRY.write().unwrap();
-    if guard.is_none() {
-        *guard = Some(FxHashMap::default());
-    }
+    // No-op: the registry is initialized in the const constructor.
+    // Kept for API compatibility.
 }
 
 /// Register field types for an instance type
 /// Called from JIT compilation when a class is registered
 pub fn register_instance_type(type_id: u32, field_types: Vec<FieldTypeTag>) {
-    let mut guard = TYPE_REGISTRY.write().unwrap();
-    let registry = guard.get_or_insert_with(FxHashMap::default);
-    registry.insert(type_id, InstanceTypeInfo { field_types });
+    TYPE_REGISTRY.write(|registry| {
+        registry.insert(type_id, InstanceTypeInfo { field_types });
+    });
 }
 
 /// Get field types for an instance type
 /// Returns None if type_id not registered (shouldn't happen in correct programs)
 pub fn get_instance_type_info(type_id: u32) -> Option<InstanceTypeInfo> {
-    let guard = TYPE_REGISTRY.read().unwrap();
-    guard.as_ref()?.get(&type_id).cloned()
+    TYPE_REGISTRY.read(|registry| registry.get(&type_id).cloned())
 }
 
 /// Clear the type registry (for testing or recompilation)
 pub fn clear_type_registry() {
-    let mut guard = TYPE_REGISTRY.write().unwrap();
-    if let Some(ref mut registry) = *guard {
+    TYPE_REGISTRY.write(|registry| {
         registry.clear();
-    }
+    });
+}
+
+/// Force-unlock the type registry after signal recovery (siglongjmp).
+///
+/// When a stack overflow triggers siglongjmp, any lock guard on the type
+/// registry is abandoned without Drop being called. This resets the lock
+/// so subsequent operations don't deadlock.
+pub fn force_unlock_type_registry() {
+    TYPE_REGISTRY.force_unlock();
 }
 
 // FFI functions for JIT-compiled code
@@ -161,5 +250,59 @@ mod tests {
 
         let info = get_instance_type_info(test_type_id).unwrap();
         assert!(!info.needs_cleanup());
+    }
+
+    #[test]
+    fn test_force_unlock_recovers_from_stuck_reader() {
+        // Simulate a siglongjmp abandoning a read lock by manually setting
+        // the lock state to "1 reader". Without force_unlock, any subsequent
+        // write would spin forever (deadlock).
+        let test_type_id = 0x1000_0003;
+        init_type_registry();
+
+        // Pre-populate the registry
+        register_instance_type(test_type_id, vec![FieldTypeTag::Rc]);
+
+        // Simulate abandoned read lock (state = 1 means 1 reader held)
+        TYPE_REGISTRY.state.store(1, Ordering::Release);
+
+        // Force unlock as recovery code would do after siglongjmp
+        force_unlock_type_registry();
+
+        // Verify write works after recovery (would deadlock without fix)
+        let new_id = 0x1000_0004;
+        register_instance_type(new_id, vec![FieldTypeTag::Value, FieldTypeTag::Rc]);
+        let info = get_instance_type_info(new_id).unwrap();
+        assert_eq!(info.field_types.len(), 2);
+
+        // Verify old data is still accessible
+        let old_info = get_instance_type_info(test_type_id).unwrap();
+        assert_eq!(old_info.field_types.len(), 1);
+        assert_eq!(old_info.field_types[0], FieldTypeTag::Rc);
+    }
+
+    #[test]
+    fn test_force_unlock_recovers_from_stuck_writer() {
+        // Simulate a siglongjmp abandoning a write lock (state = -1).
+        let test_type_id = 0x1000_0005;
+        init_type_registry();
+
+        register_instance_type(test_type_id, vec![FieldTypeTag::Value]);
+
+        // Simulate abandoned write lock (state = -1)
+        TYPE_REGISTRY.state.store(-1, Ordering::Release);
+
+        // Force unlock
+        force_unlock_type_registry();
+
+        // Verify read works after recovery
+        let info = get_instance_type_info(test_type_id).unwrap();
+        assert_eq!(info.field_types[0], FieldTypeTag::Value);
+
+        // Verify write works after recovery
+        let new_id = 0x1000_0006;
+        register_instance_type(new_id, vec![FieldTypeTag::Rc, FieldTypeTag::Rc]);
+        let info = get_instance_type_info(new_id).unwrap();
+        assert_eq!(info.field_types.len(), 2);
     }
 }

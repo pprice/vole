@@ -13,8 +13,9 @@ use crate::codegen::{Compiler, JitContext, JitOptions};
 use crate::errors::{LexerError, ParserError, WithExtraHelp, render_to_writer_terminal};
 use crate::frontend::{AstPrinter, ParseError, Parser};
 use crate::runtime::{
-    JmpBuf, call_setjmp, clear_test_jmp_buf, set_capture_mode, set_stderr_capture,
-    set_stdout_capture, set_test_jmp_buf, take_stack_overflow, write_to_stderr_capture,
+    JmpBuf, call_setjmp, clear_test_jmp_buf, recover_from_signal, set_capture_mode,
+    set_stderr_capture, set_stdout_capture, set_test_jmp_buf, take_stack_overflow,
+    write_to_stderr_capture,
 };
 use crate::sema::{ModuleCache, TypeError, TypeWarning, optimize_all};
 use crate::transforms;
@@ -281,11 +282,16 @@ pub fn compile_and_run(
         let setjmp_val = call_setjmp(&mut jmp_buf);
         if setjmp_val == 0 {
             main();
-        } else if take_stack_overflow() {
-            // Stack overflow detected by signal handler
-            eprintln!("error: stack overflow (infinite recursion)");
+        } else {
+            // Returned via longjmp — reset global state that may have
+            // been left locked by the interrupted execution.
+            recover_from_signal();
+            if take_stack_overflow() {
+                // Stack overflow detected by signal handler
+                eprintln!("error: stack overflow (infinite recursion)");
+            }
+            // If longjmp occurred (from panic), we just continue
         }
-        // If longjmp occurred (from panic), we just continue
     }
 
     clear_test_jmp_buf();

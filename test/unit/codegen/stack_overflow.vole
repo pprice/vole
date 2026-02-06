@@ -17,6 +17,19 @@ func fallible_recurse(x: f64) -> fallible(i32, SimpleErr) {
     return result
 }
 
+class Counter {
+    value: i32,
+
+    func increment() -> i32 {
+        self.value = self.value + 1
+        return self.value
+    }
+
+    func get() -> i32 {
+        return self.value
+    }
+}
+
 tests "stack_overflow" {
     test "direct infinite recursion is caught" {
         // This should fail with stack overflow, not crash the process.
@@ -39,5 +52,17 @@ tests "stack_overflow" {
         let s = "hello"
         let t = "{s} world"
         assert(t == "hello world")
+    }
+
+    test "class instances work after recovery" {
+        // Exercises the type registry (register_instance_type /
+        // get_instance_type_info) which uses a global lock. After signal
+        // recovery the lock must be accessible.
+        let c = Counter { value: 0 }
+        let v1 = c.increment()
+        let v2 = c.increment()
+        assert(v1 == 1)
+        assert(v2 == 2)
+        assert(c.get() == 2)
     }
 }
