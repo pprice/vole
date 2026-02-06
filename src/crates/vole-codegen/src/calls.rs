@@ -170,6 +170,15 @@ impl Cg<'_, '_, '_> {
             }
         }
 
+        // Handle general union types (non-optional, e.g. bool | i64)
+        {
+            let arena = self.arena();
+            if let Some(variants) = arena.unwrap_union(val.type_id) {
+                let variants_vec: Vec<TypeId> = variants.to_vec();
+                return self.union_to_string(val.value, &variants_vec);
+            }
+        }
+
         let (runtime, call_val) = if val.ty == types::F64 {
             (RuntimeFn::F64ToString, val.value)
         } else if val.ty == types::F32 {
@@ -245,6 +254,69 @@ impl Cg<'_, '_, '_> {
         self.builder.ins().jump(merge_block, &[some_str.into()]);
 
         // Merge and return result
+        self.builder.switch_to_block(merge_block);
+        Ok(self.builder.block_params(merge_block)[0])
+    }
+
+    /// Convert a general (non-optional) union value to string.
+    /// Loads the tag, branches on each variant, converts each to string, then merges.
+    fn union_to_string(
+        &mut self,
+        ptr: Value,
+        variants: &[TypeId],
+    ) -> CodegenResult<Value> {
+        let merge_block = self.builder.create_block();
+        self.builder
+            .append_block_param(merge_block, self.ptr_type());
+
+        // For each variant, create a block that extracts and converts
+        let mut variant_blocks: Vec<_> = Vec::new();
+        for _ in variants {
+            variant_blocks.push(self.builder.create_block());
+        }
+        // Load the tag
+        let tag = self
+            .builder
+            .ins()
+            .load(types::I8, MemFlags::new(), ptr, 0);
+
+        // Chain of brif checks for each variant
+        for (i, &block) in variant_blocks.iter().enumerate() {
+            if i == variants.len() - 1 {
+                // Last variant: unconditional jump
+                self.builder.ins().jump(block, &[]);
+            } else {
+                let expected = self.builder.ins().iconst(types::I8, i as i64);
+                let is_match = self.builder.ins().icmp(IntCC::Equal, tag, expected);
+                let next_check = self.builder.create_block();
+                self.builder
+                    .ins()
+                    .brif(is_match, block, &[], next_check, &[]);
+                self.builder.switch_to_block(next_check);
+            }
+        }
+
+        // For each variant block, extract the payload and convert to string
+        for (i, &block) in variant_blocks.iter().enumerate() {
+            self.builder.switch_to_block(block);
+            let variant_type_id = variants[i];
+            let arena = self.arena();
+            let inner_cr_type = type_id_to_cranelift(variant_type_id, arena, self.ptr_type());
+            let inner_size = self.type_size(variant_type_id);
+
+            let inner_val = if inner_size > 0 {
+                self.builder
+                    .ins()
+                    .load(inner_cr_type, MemFlags::new(), ptr, 8)
+            } else {
+                self.builder.ins().iconst(inner_cr_type, 0)
+            };
+
+            let inner_compiled = CompiledValue::new(inner_val, inner_cr_type, variant_type_id);
+            let str_val = self.value_to_string(inner_compiled)?;
+            self.builder.ins().jump(merge_block, &[str_val.into()]);
+        }
+
         self.builder.switch_to_block(merge_block);
         Ok(self.builder.block_params(merge_block)[0])
     }
