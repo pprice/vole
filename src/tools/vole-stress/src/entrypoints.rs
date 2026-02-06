@@ -139,10 +139,10 @@ impl<'a, R: Rng> EntrypointContext<'a, R> {
             }
         }
 
-        // Test functions (non-generic ones)
+        // Test functions (non-generic, non-diverging ones)
         for symbol in module.functions() {
             if let SymbolKind::Function(ref info) = symbol.kind {
-                if info.type_params.is_empty() {
+                if info.type_params.is_empty() && !matches!(info.return_type, TypeInfo::Never) {
                     self.emit_function_test(module, &symbol.name, info);
                 }
             }
@@ -321,10 +321,10 @@ impl<'a, R: Rng> EntrypointContext<'a, R> {
             }
         }
 
-        // Exercise functions (call non-generic ones)
+        // Exercise functions (call non-generic, non-diverging ones)
         for symbol in module.functions() {
             if let SymbolKind::Function(ref info) = symbol.kind {
-                if info.type_params.is_empty() {
+                if info.type_params.is_empty() && !matches!(info.return_type, TypeInfo::Never) {
                     let args = self.generate_call_args(&info.params);
                     match &info.return_type {
                         TypeInfo::Iterator(elem_type) => {

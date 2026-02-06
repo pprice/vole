@@ -198,6 +198,11 @@ impl<'a, R: Rng> EmitContext<'a, R> {
                 return;
             }
 
+            // Skip never-returning (diverge) functions - calling them always panics
+            if matches!(info.return_type, TypeInfo::Never) {
+                return;
+            }
+
             self.emit_line(&format!("test \"{} works\" {{", symbol.name));
             self.indent += 1;
 

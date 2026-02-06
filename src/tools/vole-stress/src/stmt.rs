@@ -1120,9 +1120,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             .functions()
             .filter_map(|sym| {
                 if let SymbolKind::Function(ref info) = sym.kind {
-                    // Skip generic functions, void return, fallible return, and self
+                    // Skip generic functions, void return, fallible return,
+                    // never return (diverge), and self
                     if info.type_params.is_empty()
-                        && !matches!(info.return_type, TypeInfo::Void)
+                        && !matches!(info.return_type, TypeInfo::Void | TypeInfo::Never)
                         && !info.return_type.is_fallible()
                         && !info.return_type.is_iterator()
                         && current_name != Some(sym.name.as_str())
