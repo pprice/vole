@@ -603,7 +603,7 @@ fn run_source_tests_with_modules(
         let tests = compiler.take_tests();
         (jit, result, tests)
     } else {
-        // First file: compile normally and cache modules for future files
+        // Cache miss: compile normally and grow the cache for future files
         let mut jit = JitContext::with_options(options);
         let mut compiler = Compiler::new(&mut jit, &analyzed);
         compiler.set_source_file(file_path);
@@ -620,7 +620,8 @@ fn run_source_tests_with_modules(
 
         let tests = compiler.take_tests();
 
-        // If successful, create a separate modules JIT for caching
+        // If successful, grow the compiled modules cache with any new modules.
+        // This avoids recompiling the same modules for subsequent test files.
         if result.is_ok() && !analyzed.module_programs.is_empty() {
             let mut modules_jit = JitContext::with_options(options);
             let compile_result = {
@@ -631,10 +632,19 @@ fn run_source_tests_with_modules(
                 Ok(()) => {
                     let module_paths: Vec<String> =
                         analyzed.module_programs.keys().cloned().collect();
-                    match CompiledModules::new(modules_jit, module_paths) {
-                        Ok(modules) => *compiled_modules = Some(modules),
-                        Err(e) => {
-                            tracing::warn!("Modules finalization failed: {}", e);
+
+                    if let Some(existing) = compiled_modules.as_mut() {
+                        // Grow existing cache with new modules
+                        if let Err(e) = existing.extend(modules_jit, module_paths) {
+                            tracing::warn!("Modules cache extension failed: {}", e);
+                        }
+                    } else {
+                        // First time: create new cache
+                        match CompiledModules::new(modules_jit, module_paths) {
+                            Ok(modules) => *compiled_modules = Some(modules),
+                            Err(e) => {
+                                tracing::warn!("Modules finalization failed: {}", e);
+                            }
                         }
                     }
                 }

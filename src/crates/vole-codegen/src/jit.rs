@@ -8,12 +8,14 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::errors::{CodegenError, CodegenResult};
 
 /// Cache of compiled module functions that can be shared across JitContexts.
-/// The JitContext that compiled these functions must be kept alive.
+/// Supports incremental growth: new JIT contexts can be added without
+/// invalidating existing function pointers.
 pub struct CompiledModules {
-    /// The JIT context holding the compiled module code. Not accessed directly,
-    /// but must remain alive since function pointers in `functions` point to its code.
-    #[expect(dead_code, reason = "keeps compiled code alive for function pointers")]
-    jit: JitContext,
+    /// JIT contexts holding compiled module code. Function pointers in `functions`
+    /// point into these contexts' compiled code, so they must remain alive.
+    /// Multiple contexts accumulate as new modules are discovered across test files.
+    /// Only accessed via `push` (to add new contexts); never read directly.
+    jit_contexts: Vec<JitContext>,
     /// Function name -> function pointer for all compiled module functions
     pub functions: FxHashMap<String, *const u8>,
     /// Module paths that have been processed (even if they only have external functions)
@@ -44,10 +46,32 @@ impl CompiledModules {
             .collect();
 
         Ok(Self {
-            jit,
+            jit_contexts: vec![jit],
             functions,
             compiled_module_paths: module_paths.into_iter().collect(),
         })
+    }
+
+    /// Add a new JIT context's compiled functions to this cache.
+    /// The JIT context is kept alive so its function pointers remain valid.
+    /// New functions and module paths are merged into the existing maps.
+    pub fn extend(&mut self, mut jit: JitContext, module_paths: Vec<String>) -> CodegenResult<()> {
+        // Finalize to get function pointers
+        jit.finalize()?;
+
+        // Extract and merge function pointers (new functions override old ones)
+        for (name, &func_id) in &jit.func_ids {
+            let ptr = jit.module.get_finalized_function(func_id);
+            self.functions.insert(name.clone(), ptr);
+        }
+
+        // Merge module paths
+        self.compiled_module_paths.extend(module_paths);
+
+        // Keep the JIT context alive
+        self.jit_contexts.push(jit);
+
+        Ok(())
     }
 
     /// Check if a function by name is present in the compiled modules
