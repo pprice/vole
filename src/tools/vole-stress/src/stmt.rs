@@ -1368,13 +1368,13 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let name = ctx.new_local_name();
         let ty = TypeInfo::Class(module_id, *sym_id);
 
-        ctx.add_local(name.clone(), ty, false);
-
         // Try using a static method call if available
         if !class_info.static_methods.is_empty()
             && self.rng.gen_bool(self.config.static_call_probability)
         {
             let expr = self.generate_static_method_call(class_name, class_info, ctx);
+            // Add to scope AFTER generating the expression to avoid self-references
+            ctx.add_local(name.clone(), ty, false);
             return Some(format!("let {} = {}", name, expr));
         }
 
@@ -1389,6 +1389,9 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         if !chain.is_empty() {
             expr = format!("{}{}", expr, chain);
         }
+
+        // Add to scope AFTER generating all expressions to avoid self-references
+        ctx.add_local(name.clone(), ty, false);
 
         Some(format!("let {} = {}", name, expr))
     }
@@ -1423,10 +1426,12 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let name = ctx.new_local_name();
         let ty = TypeInfo::Struct(module_id, *sym_id);
 
-        ctx.add_local(name.clone(), ty, false);
-
-        // Generate field values for construction
+        // Generate field values for construction BEFORE adding to scope
+        // to avoid self-referential field initializers
         let fields = self.generate_field_values(&struct_info.fields, ctx);
+
+        // Add to scope AFTER generating field values
+        ctx.add_local(name.clone(), ty, false);
 
         Some(format!("let {} = {} {{ {} }}", name, struct_name, fields))
     }
