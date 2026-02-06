@@ -1028,14 +1028,11 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             eg.generate_simple(&success_type, &expr_ctx2)
         };
 
-        // Generate a simple boolean guard condition to prevent mutual recursion.
-        // The call only executes when the condition is true, providing a
-        // non-recursive fallback path through the else/default branch.
-        let guard_cond = {
-            let expr_ctx3 = ctx.to_expr_context();
-            let mut eg = ExprGenerator::new(self.rng, &self.config.expr_config);
-            eg.generate_simple(&TypeInfo::Primitive(PrimitiveType::Bool), &expr_ctx3)
-        };
+        // Use `false` as the guard condition to prevent mutual recursion.
+        // The call is syntactically present (exercising the type checker and
+        // codegen) but never executes at runtime, preventing infinite mutual
+        // recursion between functions that call each other.
+        let guard_cond = "false";
 
         let name = ctx.new_local_name();
         ctx.add_local(name.clone(), success_type, false);
@@ -1161,12 +1158,11 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             .collect();
         let args_str = args.join(", ");
 
-        // Generate a simple boolean guard condition to prevent mutual recursion
-        let guard_cond = {
-            let expr_ctx2 = ctx.to_expr_context();
-            let mut eg = ExprGenerator::new(self.rng, &self.config.expr_config);
-            eg.generate_simple(&TypeInfo::Primitive(PrimitiveType::Bool), &expr_ctx2)
-        };
+        // Use `false` as the guard condition to prevent mutual recursion.
+        // The discard call is syntactically present (exercising the type checker
+        // and codegen) but never executes at runtime, preventing infinite mutual
+        // recursion between functions that call each other.
+        let guard_cond = "false";
 
         // Emit a conditional discard: if guard { _ = func(args) }
         let indent = "    ".repeat(self.indent + 1);
