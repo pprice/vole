@@ -1264,6 +1264,19 @@ impl Analyzer {
                 for (param, &arg_id) in generic_info.type_params.iter().zip(type_args_id.iter()) {
                     subs.insert(param.name_id, arg_id);
                 }
+
+                // Eagerly substitute all field types into the arena so that codegen's
+                // read-only lookup_substitute can find them later. Without this,
+                // compound field types like [Entry<K> | Empty] substituted to
+                // [Entry<i64> | Empty] would never be created in the arena.
+                if !subs.is_empty() {
+                    let field_types = generic_info.field_types.clone();
+                    let mut arena = self.type_arena_mut();
+                    for field_type in field_types {
+                        arena.substitute(field_type, &subs);
+                    }
+                }
+
                 subs
             } else {
                 FxHashMap::default()
@@ -1383,6 +1396,22 @@ impl Analyzer {
             // Create the substituted function type using arena substitution (TypeId-based)
             let inferred_hb: FxHashMap<NameId, ArenaTypeId> =
                 inferred.iter().map(|(&k, &v)| (k, v)).collect();
+
+            // Eagerly substitute all field types into the arena so that codegen's
+            // read-only lookup_substitute can find them later. Without this,
+            // compound field types like [Entry<K> | Empty] substituted to
+            // [Entry<i64> | Empty] would never be created in the arena.
+            {
+                let generic_info = self.entity_registry().type_generic_info(type_def_id);
+                if let Some(generic_info) = generic_info {
+                    let field_types = generic_info.field_types;
+                    let mut arena = self.type_arena_mut();
+                    for field_type in field_types {
+                        arena.substitute(field_type, &inferred_hb);
+                    }
+                }
+            }
+
             let (subst_param_ids, subst_return_id) = {
                 let mut arena = self.type_arena_mut();
                 let params: Vec<ArenaTypeId> = param_type_ids

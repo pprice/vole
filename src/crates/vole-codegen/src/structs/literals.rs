@@ -144,6 +144,10 @@ impl Cg<'_, '_, '_> {
         let field_count = metadata.physical_slot_count as u32;
         // Prefer the type from semantic analysis (handles generic instantiation, module-aware)
         let result_type_id = self.get_expr_type(&expr.id).unwrap_or(metadata.vole_type);
+        // In monomorphized contexts, result_type_id may contain unsubstituted type params
+        // (e.g., Entry<K> instead of Entry<i64>). Substitute to get the concrete type so
+        // downstream code (union variant matching, etc.) sees the correct type.
+        let result_type_id = self.try_substitute_type(result_type_id);
         let field_slots = metadata.field_slots.clone();
 
         // For generic class instances, resolve a monomorphized type_id with correct

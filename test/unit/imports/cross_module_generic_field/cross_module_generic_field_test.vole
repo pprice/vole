@@ -1,0 +1,8 @@
+let { Store } = import "./lib"
+
+tests {
+    test "cross-module generic class with compound field type" {
+        let s = Store.new<i64>()
+        s.add(42)
+    }
+}

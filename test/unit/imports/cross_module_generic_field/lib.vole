@@ -1,0 +1,22 @@
+let { Empty } = import "std:collections/sentinels"
+let { Array } = import "std:array"
+
+class Entry<K> {
+    key: K,
+}
+
+class Store<K: Hashable> {
+    buckets: [Entry<K> | Empty],
+
+    statics {
+        func new() -> Store<K> {
+            return Store {
+                buckets: Array.filled<Entry<K> | Empty>(8, Empty),
+            }
+        }
+    }
+
+    func add(key: K) {
+        self.buckets[0] = Entry { key: key }
+    }
+}
