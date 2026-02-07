@@ -1,0 +1,138 @@
+// Test: Generic Set with non-i64 element types
+// Exercises Set<T> with string elements, custom Hashable+Equatable types,
+// and set operations (union, intersection) on generic instantiations.
+
+class Point {
+    x: i64,
+    y: i64,
+}
+
+implement Hashable for Point {
+    func hash() -> i64 {
+        return self.x * 31 + self.y
+    }
+}
+
+implement Equatable for Point {
+    func equals(other: Point) -> bool {
+        return self.x == other.x && self.y == other.y
+    }
+}
+
+tests {
+    test "set<string> basic ops" {
+        let s = Set.new<string>()
+        assert(s.add("hello"))
+        assert(s.add("world"))
+        assert(s.add("foo"))
+
+        assert(s.len() == 3)
+        assert(s.contains("hello"))
+        assert(s.contains("world"))
+        assert(s.contains("foo"))
+        assert(!s.contains("bar"))
+        assert(!s.is_empty())
+    }
+
+    test "set<string> add duplicate returns false" {
+        let s = Set.new<string>()
+        assert(s.add("apple"))
+        assert(s.add("banana"))
+        assert(!s.add("apple"))  // duplicate
+        assert(!s.add("banana")) // duplicate
+        assert(s.len() == 2)
+    }
+
+    test "set<string> remove" {
+        let s = Set.new<string>()
+        _ = s.add("one")
+        _ = s.add("two")
+        _ = s.add("three")
+        assert(s.len() == 3)
+
+        assert(s.remove("two"))
+        assert(s.len() == 2)
+        assert(!s.contains("two"))
+        assert(s.contains("one"))
+        assert(s.contains("three"))
+
+        assert(!s.remove("missing"))
+        assert(s.len() == 2)
+    }
+
+    test "set<Point> custom type" {
+        let s = Set.new<Point>()
+        let p1 = Point { x: 1, y: 2 }
+        let p2 = Point { x: 3, y: 4 }
+        let p3 = Point { x: 5, y: 6 }
+
+        assert(s.add(p1))
+        assert(s.add(p2))
+        assert(s.add(p3))
+
+        assert(s.len() == 3)
+        assert(s.contains(p1))
+        assert(s.contains(p2))
+        assert(s.contains(p3))
+
+        let p_missing = Point { x: 99, y: 99 }
+        assert(!s.contains(p_missing))
+    }
+
+    test "set<Point> equality-based contains" {
+        let s = Set.new<Point>()
+        let p_add = Point { x: 10, y: 20 }
+        _ = s.add(p_add)
+
+        // Create a different instance with the same x,y values
+        let p_check = Point { x: 10, y: 20 }
+        assert(s.contains(p_check))
+
+        // Adding the equal-but-different instance should return false (already exists)
+        assert(!s.add(p_check))
+        assert(s.len() == 1)
+
+        // A point with different values should not be contained
+        let p_other = Point { x: 10, y: 21 }
+        assert(!s.contains(p_other))
+    }
+
+    test "set<i64> union" {
+        let a = Set.new<i64>()
+        _ = a.add(1)
+        _ = a.add(2)
+        _ = a.add(3)
+
+        let b = Set.new<i64>()
+        _ = b.add(3)
+        _ = b.add(4)
+        _ = b.add(5)
+
+        let u = a.union(b)
+        assert(u.len() == 5)
+        assert(u.contains(1))
+        assert(u.contains(2))
+        assert(u.contains(3))
+        assert(u.contains(4))
+        assert(u.contains(5))
+    }
+
+    test "set<string> intersection" {
+        let a = Set.new<string>()
+        _ = a.add("alpha")
+        _ = a.add("beta")
+        _ = a.add("gamma")
+
+        let b = Set.new<string>()
+        _ = b.add("beta")
+        _ = b.add("gamma")
+        _ = b.add("delta")
+
+        let i = a.intersection(b)
+        assert(i.len() == 2)
+        assert(!i.contains("alpha"))
+        assert(i.contains("beta"))
+        assert(i.contains("gamma"))
+        assert(!i.contains("delta"))
+    }
+}

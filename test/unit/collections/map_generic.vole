@@ -1,0 +1,137 @@
+// Test: Generic Map with non-i64 key/value types
+// Exercises Map<K, V> with string keys, string values, and custom Hashable+Equatable types.
+
+class Point {
+    x: i64,
+    y: i64,
+}
+
+implement Hashable for Point {
+    func hash() -> i64 {
+        return self.x * 31 + self.y
+    }
+}
+
+implement Equatable for Point {
+    func equals(other: Point) -> bool {
+        return self.x == other.x && self.y == other.y
+    }
+}
+
+tests {
+    test "map<i64, string> basic ops" {
+        let m = Map.new<i64, string>()
+        m.set(1, "one")
+        m.set(2, "two")
+        m.set(3, "three")
+
+        assert(m.len() == 3)
+        assert((m.get(1) ?? "") == "one")
+        assert((m.get(2) ?? "") == "two")
+        assert((m.get(3) ?? "") == "three")
+        assert(m.get(999) == nil)
+    }
+
+    test "map<string, i64> string keys" {
+        let m = Map.new<string, i64>()
+        m.set("alpha", 1)
+        m.set("beta", 2)
+        m.set("gamma", 3)
+
+        assert(m.len() == 3)
+        assert((m.get("alpha") ?? 0) == 1)
+        assert((m.get("beta") ?? 0) == 2)
+        assert((m.get("gamma") ?? 0) == 3)
+        assert(m.get("missing") == nil)
+    }
+
+    test "map<string, string> both string" {
+        let m = Map.new<string, string>()
+        m.set("greeting", "hello")
+        m.set("farewell", "goodbye")
+
+        assert(m.len() == 2)
+        assert((m.get("greeting") ?? "") == "hello")
+        assert((m.get("farewell") ?? "") == "goodbye")
+        assert(m.get("unknown") == nil)
+    }
+
+    test "map<Point, string> custom key" {
+        let m = Map.new<Point, string>()
+        let p1 = Point { x: 1, y: 2 }
+        let p2 = Point { x: 3, y: 4 }
+        let p3 = Point { x: 5, y: 6 }
+
+        m.set(p1, "origin-near")
+        m.set(p2, "middle")
+        m.set(p3, "far")
+
+        assert(m.len() == 3)
+        assert((m.get(p1) ?? "") == "origin-near")
+        assert((m.get(p2) ?? "") == "middle")
+        assert((m.get(p3) ?? "") == "far")
+    }
+
+    test "map<Point, i64> lookup with equal-but-different instances" {
+        let m = Map.new<Point, i64>()
+        let p_set = Point { x: 10, y: 20 }
+        m.set(p_set, 42)
+
+        // Create a different instance with the same x,y values
+        let p_get = Point { x: 10, y: 20 }
+        assert((m.get(p_get) ?? 0) == 42)
+        assert(m.contains_key(p_get))
+
+        // Different point should not match
+        let p_other = Point { x: 10, y: 21 }
+        assert(m.get(p_other) == nil)
+        assert(!m.contains_key(p_other))
+    }
+
+    test "map<i64, string> remove returns nil for missing" {
+        let m = Map.new<i64, string>()
+        m.set(1, "one")
+        m.set(2, "two")
+
+        assert(m.remove(999) == nil)
+        assert(m.len() == 2)
+
+        let removed = m.remove(1)
+        assert((removed ?? "") == "one")
+        assert(m.len() == 1)
+        assert(m.get(1) == nil)
+        assert((m.get(2) ?? "") == "two")
+    }
+
+    test "map<i64, string> update existing key" {
+        let m = Map.new<i64, string>()
+        m.set(1, "first")
+        assert((m.get(1) ?? "") == "first")
+
+        m.set(1, "updated")
+        assert(m.len() == 1)
+        assert((m.get(1) ?? "") == "updated")
+
+        m.set(1, "final")
+        assert(m.len() == 1)
+        assert((m.get(1) ?? "") == "final")
+    }
+
+    test "map<string, i64> contains_key" {
+        let m = Map.new<string, i64>()
+        m.set("x", 10)
+        m.set("y", 20)
+        m.set("z", 30)
+
+        assert(m.contains_key("x"))
+        assert(m.contains_key("y"))
+        assert(m.contains_key("z"))
+        assert(!m.contains_key("w"))
+        assert(!m.contains_key(""))
+
+        _ = m.remove("y")
+        assert(!m.contains_key("y"))
+        assert(m.contains_key("x"))
+        assert(m.contains_key("z"))
+    }
+}
