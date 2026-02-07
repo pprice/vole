@@ -144,4 +144,108 @@ tests {
         assert(s.contains(t1))
         assert(s.contains(t3))
     }
+
+    // ---- Additional coverage ----
+
+    test "set<Color> is_empty" {
+        let s = Set.new<Color>()
+        assert(s.is_empty())
+
+        let c = Color { r: 1, g: 2, b: 3 }
+        _ = s.add(c)
+        assert(!s.is_empty())
+    }
+
+    test "set<Color> remove missing" {
+        let s = Set.new<Color>()
+        let c = Color { r: 10, g: 20, b: 30 }
+        _ = s.add(c)
+
+        let missing = Color { r: 99, g: 99, b: 99 }
+        assert(!s.remove(missing))
+        assert(s.len() == 1)
+    }
+
+    test "set<Tag> clear with RC fields" {
+        let s = Set.new<Tag>()
+        let t1 = Tag { label: "first", priority: 1 }
+        let t2 = Tag { label: "second", priority: 2 }
+        _ = s.add(t1)
+        _ = s.add(t2)
+        assert(s.len() == 2)
+
+        s.clear()
+        assert(s.len() == 0)
+        assert(s.is_empty())
+        let check = Tag { label: "first", priority: 1 }
+        assert(!s.contains(check))
+    }
+
+    test "set<Color> symmetric_difference" {
+        let red = Color { r: 255, g: 0, b: 0 }
+        let green = Color { r: 0, g: 255, b: 0 }
+        let blue = Color { r: 0, g: 0, b: 255 }
+        let white = Color { r: 255, g: 255, b: 255 }
+
+        let a = Set.new<Color>()
+        _ = a.add(red)
+        _ = a.add(green)
+        _ = a.add(blue)
+
+        let b = Set.new<Color>()
+        _ = b.add(green)
+        _ = b.add(blue)
+        _ = b.add(white)
+
+        let sd = a.symmetric_difference(b)
+        assert(sd.len() == 2)
+        let check_red = Color { r: 255, g: 0, b: 0 }
+        let check_white = Color { r: 255, g: 255, b: 255 }
+        let check_green = Color { r: 0, g: 255, b: 0 }
+        assert(sd.contains(check_red))
+        assert(sd.contains(check_white))
+        assert(!sd.contains(check_green))
+    }
+
+    test "set<Color> is_subset and is_superset" {
+        let red = Color { r: 255, g: 0, b: 0 }
+        let green = Color { r: 0, g: 255, b: 0 }
+        let blue = Color { r: 0, g: 0, b: 255 }
+
+        let small = Set.new<Color>()
+        _ = small.add(red)
+        _ = small.add(green)
+
+        let big = Set.new<Color>()
+        _ = big.add(red)
+        _ = big.add(green)
+        _ = big.add(blue)
+
+        assert(small.is_subset(big))
+        assert(!small.is_superset(big))
+        assert(!big.is_subset(small))
+        assert(big.is_superset(small))
+    }
+
+    test "set<Color> is_disjoint" {
+        let red = Color { r: 255, g: 0, b: 0 }
+        let green = Color { r: 0, g: 255, b: 0 }
+        let blue = Color { r: 0, g: 0, b: 255 }
+        let white = Color { r: 255, g: 255, b: 255 }
+
+        let a = Set.new<Color>()
+        _ = a.add(red)
+        _ = a.add(green)
+
+        let b = Set.new<Color>()
+        _ = b.add(blue)
+        _ = b.add(white)
+
+        assert(a.is_disjoint(b))
+
+        _ = b.add(red)
+        assert(!a.is_disjoint(b))
+    }
+
+    // NOTE: Set.iter() segfaults (vol-i5za), iter tests omitted until fixed.
 }

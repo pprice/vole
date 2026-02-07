@@ -168,4 +168,81 @@ tests {
         assert(d.contains(check_p1b))
         assert(!d.contains(check_p2))
     }
+
+    // ---- Additional coverage ----
+
+    test "set<string> clear" {
+        let s = Set.new<string>()
+        _ = s.add("a")
+        _ = s.add("b")
+        _ = s.add("c")
+        assert(s.len() == 3)
+
+        s.clear()
+        assert(s.len() == 0)
+        assert(s.is_empty())
+        assert(!s.contains("a"))
+    }
+
+    test "set<string> symmetric_difference" {
+        let a = Set.new<string>()
+        _ = a.add("alpha")
+        _ = a.add("beta")
+        _ = a.add("gamma")
+
+        let b = Set.new<string>()
+        _ = b.add("beta")
+        _ = b.add("gamma")
+        _ = b.add("delta")
+
+        let sd = a.symmetric_difference(b)
+        assert(sd.len() == 2)
+        assert(sd.contains("alpha"))
+        assert(!sd.contains("beta"))
+        assert(!sd.contains("gamma"))
+        assert(sd.contains("delta"))
+    }
+
+    test "set<string> is_subset and is_superset" {
+        let a = Set.new<string>()
+        _ = a.add("x")
+        _ = a.add("y")
+
+        let b = Set.new<string>()
+        _ = b.add("x")
+        _ = b.add("y")
+        _ = b.add("z")
+
+        assert(a.is_subset(b))
+        assert(!a.is_superset(b))
+        assert(!b.is_subset(a))
+        assert(b.is_superset(a))
+    }
+
+    test "set<string> is_disjoint" {
+        let a = Set.new<string>()
+        _ = a.add("cat")
+        _ = a.add("dog")
+
+        let b = Set.new<string>()
+        _ = b.add("fish")
+        _ = b.add("bird")
+
+        assert(a.is_disjoint(b))
+
+        _ = b.add("cat")
+        assert(!a.is_disjoint(b))
+    }
+
+    // NOTE: Set.iter() segfaults (vol-i5za), iter tests omitted until fixed.
+
+    test "set<Point> remove missing" {
+        let s = Set.new<Point>()
+        let p1 = Point { x: 1, y: 2 }
+        _ = s.add(p1)
+
+        let p_missing = Point { x: 99, y: 99 }
+        assert(!s.remove(p_missing))
+        assert(s.len() == 1)
+    }
 }

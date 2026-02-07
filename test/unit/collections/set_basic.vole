@@ -146,4 +146,47 @@ tests {
 
         assert(!a.is_disjoint(c))
     }
+
+    test "set::symmetric_difference" {
+        let a = Set.new<i64>()
+        _ = a.add(1)
+        _ = a.add(2)
+        _ = a.add(3)
+
+        let b = Set.new<i64>()
+        _ = b.add(2)
+        _ = b.add(3)
+        _ = b.add(4)
+
+        let sd = a.symmetric_difference(b)
+        assert(sd.len() == 2)
+        assert(sd.contains(1))
+        assert(!sd.contains(2))
+        assert(!sd.contains(3))
+        assert(sd.contains(4))
+    }
+
+    test "set::is_superset" {
+        let a = Set.new<i64>()
+        _ = a.add(1)
+        _ = a.add(2)
+        _ = a.add(3)
+
+        let b = Set.new<i64>()
+        _ = b.add(1)
+        _ = b.add(2)
+
+        assert(a.is_superset(b))
+        assert(!b.is_superset(a))
+
+        // Equal sets: both subset and superset of each other
+        let c = Set.new<i64>()
+        _ = c.add(1)
+        _ = c.add(2)
+        _ = c.add(3)
+        assert(a.is_superset(c))
+        assert(a.is_subset(c))
+    }
+
+    // NOTE: Set.iter() segfaults (vol-i5za), iter tests omitted until fixed.
 }
