@@ -1,26 +1,27 @@
 // stdlib/prelude/map.vole
 //
-// Map - Hash map collection for i64 keys and values
+// Map<K, V> - Generic hash map collection
 //
-// Note: Generic Map<K, V> requires fixing constraint resolution for lambdas
-// inside generic class methods. See vole-9x0.4 for tracking.
+// K must implement Hashable (for hashing) and Equatable (for key comparison).
 
 let { MapLike, Iterator } = import "./traits"
 
-class Map implements MapLike<i64, i64> {
+class Map<K: Hashable + Equatable, V> {
     _ptr: handle,  // Pointer to native VoleMap
 
     statics {
-        func new() -> Map {
-            return Map { _ptr: _map_new() }
+        func new() -> Map<K, V> {
+            let eq_fn = (a: K, b: K) -> bool => a.equals(b)
+            return Map { _ptr: _map_new_with_eq(eq_fn) }
         }
 
-        func with_capacity(capacity: i64) -> Map {
-            return Map { _ptr: _map_with_capacity(capacity) }
+        func with_capacity(capacity: i64) -> Map<K, V> {
+            let eq_fn = (a: K, b: K) -> bool => a.equals(b)
+            return Map { _ptr: _map_with_capacity_eq(capacity, eq_fn) }
         }
     }
 
-    func get(key: i64) -> i64? {
+    func get(key: K) -> V? {
         let h = key.hash()
         if !_map_has(self._ptr, key, h) {
             return nil
@@ -28,7 +29,7 @@ class Map implements MapLike<i64, i64> {
         return _map_get(self._ptr, key, h)
     }
 
-    func contains_key(key: i64) -> bool {
+    func contains_key(key: K) -> bool {
         return _map_contains_key(self._ptr, key, key.hash())
     }
 
@@ -40,27 +41,27 @@ class Map implements MapLike<i64, i64> {
         return _map_len(self._ptr) == 0
     }
 
-    func keys() -> Iterator<i64> {
+    func keys() -> Iterator<K> {
         return _map_keys_iter(self._ptr)
     }
 
-    func values() -> Iterator<i64> {
+    func values() -> Iterator<V> {
         return _map_values_iter(self._ptr)
     }
 
-    func entries() -> Iterator<[i64, i64]> {
+    func entries() -> Iterator<[K, V]> {
         return _map_entries_iter(self._ptr)
     }
 
-    func iter() -> Iterator<[i64, i64]> {
+    func iter() -> Iterator<[K, V]> {
         return _map_entries_iter(self._ptr)
     }
 
-    func set(key: i64, value: i64) {
+    func set(key: K, value: V) {
         _map_set(self._ptr, key, key.hash(), value)
     }
 
-    func remove(key: i64) -> i64? {
+    func remove(key: K) -> V? {
         let h = key.hash()
         if !_map_has(self._ptr, key, h) {
             return nil
@@ -73,18 +74,18 @@ class Map implements MapLike<i64, i64> {
     }
 }
 
-// Module-level native functions
+// Module-level native functions with generic type params for type erasure
 external("std:collections") {
-    func "map_new" as _map_new() -> handle
-    func "map_with_capacity" as _map_with_capacity(capacity: i64) -> handle
-    func "map_get" as _map_get(ptr: handle, key: i64, key_hash: i64) -> i64
-    func "map_has" as _map_has(ptr: handle, key: i64, key_hash: i64) -> bool
-    func "map_set" as _map_set(ptr: handle, key: i64, key_hash: i64, value: i64) -> void
-    func "map_remove" as _map_remove(ptr: handle, key: i64, key_hash: i64) -> i64
-    func "map_contains_key" as _map_contains_key(ptr: handle, key: i64, key_hash: i64) -> bool
+    func "map_new_with_eq" as _map_new_with_eq<K>(eq_closure: (K, K) -> bool) -> handle
+    func "map_with_capacity_eq" as _map_with_capacity_eq<K>(capacity: i64, eq_closure: (K, K) -> bool) -> handle
+    func "map_get" as _map_get<K, V>(ptr: handle, key: K, key_hash: i64) -> V
+    func "map_has" as _map_has<K>(ptr: handle, key: K, key_hash: i64) -> bool
+    func "map_set" as _map_set<K, V>(ptr: handle, key: K, key_hash: i64, value: V) -> void
+    func "map_remove" as _map_remove<K, V>(ptr: handle, key: K, key_hash: i64) -> V
+    func "map_contains_key" as _map_contains_key<K>(ptr: handle, key: K, key_hash: i64) -> bool
     func "map_len" as _map_len(ptr: handle) -> i64
     func "map_clear" as _map_clear(ptr: handle) -> void
-    func "map_keys_iter" as _map_keys_iter(ptr: handle) -> Iterator<i64>
-    func "map_values_iter" as _map_values_iter(ptr: handle) -> Iterator<i64>
-    func "map_entries_iter" as _map_entries_iter(ptr: handle) -> Iterator<[i64, i64]>
+    func "map_keys_iter" as _map_keys_iter<K>(ptr: handle) -> Iterator<K>
+    func "map_values_iter" as _map_values_iter<V>(ptr: handle) -> Iterator<V>
+    func "map_entries_iter" as _map_entries_iter<K, V>(ptr: handle) -> Iterator<[K, V]>
 }

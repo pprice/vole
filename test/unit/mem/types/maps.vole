@@ -6,13 +6,13 @@
 
 tests "map basics" {
     test "create empty map and scope exit" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         assert(m.len() == 0)
         assert(m.is_empty())
     }
 
     test "insert entries then scope exit" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 100)
         m.set(2, 200)
         m.set(3, 300)
@@ -21,7 +21,7 @@ tests "map basics" {
     }
 
     test "lookup values by key" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(10, 42)
         m.set(20, 84)
         assert(m.get(10) == 42)
@@ -32,7 +32,7 @@ tests "map basics" {
     }
 
     test "remove entry and verify cleanup" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 11)
         m.set(2, 22)
         m.set(3, 33)
@@ -46,7 +46,7 @@ tests "map basics" {
     }
 
     test "overwrite existing key" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 100)
         assert(m.get(1) == 100)
         m.set(1, 999)
@@ -55,11 +55,11 @@ tests "map basics" {
     }
 
     test "reassign map variable" {
-        let mut m = Map.new()
+        let mut m = Map.new<i64, i64>()
         m.set(1, 10)
         m.set(2, 20)
         assert(m.len() == 2)
-        m = Map.new()
+        m = Map.new<i64, i64>()
         assert(m.len() == 0)
         assert(m.is_empty())
         m.set(3, 30)

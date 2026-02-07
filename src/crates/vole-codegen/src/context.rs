@@ -1003,6 +1003,48 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.env.analyzed.query().expr_data().get_type(*node_id)
     }
 
+    /// Get expression type by NodeId, applying type param substitution for module code.
+    ///
+    /// This is used when the expression type needs to be concrete (e.g., for return types,
+    /// call results). Module code stores generic types (e.g., `V`) which must be substituted
+    /// to concrete types (e.g., `i64`) in monomorphized contexts.
+    ///
+    /// Falls back to `lookup_substitute` which returns None if the substituted type
+    /// doesn't exist in the arena. In that case, returns the original type.
+    #[inline]
+    pub fn get_expr_type_substituted(&self, node_id: &vole_frontend::NodeId) -> Option<TypeId> {
+        let ty = self.get_expr_type(node_id)?;
+        if self.current_module.is_some() && self.substitutions.is_some() {
+            Some(self.try_substitute_type(ty))
+        } else {
+            Some(ty)
+        }
+    }
+
+    /// Try to substitute a type, returning the original if substitution fails.
+    /// This is a best-effort version that doesn't panic if the substituted type
+    /// doesn't exist in the arena.
+    pub fn try_substitute_type(&self, ty: TypeId) -> TypeId {
+        if let Some(substitutions) = self.substitutions {
+            // Check cache first
+            if let Some(&cached) = self.substitution_cache.borrow().get(&ty) {
+                return cached;
+            }
+            let subs: FxHashMap<NameId, TypeId> =
+                substitutions.iter().map(|(&k, &v)| (k, v)).collect();
+            let arena = self.env.analyzed.type_arena();
+            if let Some(result) = arena.lookup_substitute(ty, &subs) {
+                self.substitution_cache.borrow_mut().insert(ty, result);
+                result
+            } else {
+                // Substituted type doesn't exist in arena; return original
+                ty
+            }
+        } else {
+            ty
+        }
+    }
+
     /// Get IsCheckResult for an is-expression or type pattern, checking module-specific results first
     #[inline]
     pub fn get_is_check_result(

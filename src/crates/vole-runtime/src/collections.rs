@@ -120,6 +120,11 @@ impl VoleMap {
             Some(cap) => HashTable::with_capacity(cap),
             None => HashTable::new(),
         };
+        // RC-inc the closure to keep it alive while the map exists.
+        // The caller's scope will RC-dec the closure local, so we need our own ref.
+        if let EqMode::Closure(c) = eq_mode {
+            crate::value::rc_inc(c as *mut u8);
+        }
         Self {
             table,
             eq_mode,
@@ -343,6 +348,10 @@ unsafe extern "C" fn map_drop(ptr: *mut u8) {
         let map_ptr = ptr as *mut RcMap;
         // Dec all contained RC keys/values before freeing the table
         (*map_ptr).map.dec_all_entries();
+        // Dec the equality closure if one was stored
+        if let EqMode::Closure(c) = (*map_ptr).map.eq_mode {
+            crate::value::rc_dec(c as *mut u8);
+        }
         // Drop the VoleMap in place (frees the HashTable), then deallocate
         std::ptr::drop_in_place(&mut (*map_ptr).map);
         let layout = Layout::new::<RcMap>();
@@ -387,6 +396,10 @@ impl VoleSet {
             Some(cap) => HashTable::with_capacity(cap),
             None => HashTable::new(),
         };
+        // RC-inc the closure to keep it alive while the set exists.
+        if let EqMode::Closure(c) = eq_mode {
+            crate::value::rc_inc(c as *mut u8);
+        }
         Self {
             table,
             eq_mode,
@@ -672,6 +685,10 @@ unsafe extern "C" fn set_drop(ptr: *mut u8) {
         let set_ptr = ptr as *mut RcSet;
         // Dec all contained RC elements before freeing the table
         (*set_ptr).set.dec_all_elements();
+        // Dec the equality closure if one was stored
+        if let EqMode::Closure(c) = (*set_ptr).set.eq_mode {
+            crate::value::rc_dec(c as *mut u8);
+        }
         // Drop the VoleSet in place (frees the HashTable), then deallocate
         std::ptr::drop_in_place(&mut (*set_ptr).set);
         let layout = Layout::new::<RcSet>();

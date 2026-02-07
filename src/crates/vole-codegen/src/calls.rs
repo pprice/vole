@@ -503,8 +503,9 @@ impl Cg<'_, '_, '_> {
                     return Ok(self.void_value());
                 }
                 // Sema records return types for all module external calls.
+                // Use substituted version for monomorphized module code (e.g., V -> i64).
                 let type_id = self
-                    .get_expr_type(&call_expr_id)
+                    .get_expr_type_substituted(&call_expr_id)
                     .expect("INTERNAL: external call: missing sema return type");
                 let type_id = self.maybe_convert_iterator_return_type(type_id);
                 return Ok(self.native_call_result(call_inst, native_func, type_id));
@@ -569,8 +570,9 @@ impl Cg<'_, '_, '_> {
                 return Ok(self.void_value());
             }
             // Sema records return types for all prelude external calls.
+            // Use substituted version for monomorphized module code (e.g., V -> i64).
             let type_id = self
-                .get_expr_type(&call_expr_id)
+                .get_expr_type_substituted(&call_expr_id)
                 .expect("INTERNAL: prelude call: missing sema return type");
             let type_id = self.maybe_convert_iterator_return_type(type_id);
             return Ok(self.native_call_result(call_inst, native_func, type_id));
@@ -636,8 +638,9 @@ impl Cg<'_, '_, '_> {
                 return Ok(self.void_value());
             }
             // Sema records return types for all module binding FFI calls.
+            // Use substituted version for monomorphized module code (e.g., V -> i64).
             let type_id = self
-                .get_expr_type(&call_expr_id)
+                .get_expr_type_substituted(&call_expr_id)
                 .expect("INTERNAL: module binding call: missing sema return type");
             let type_id = self.maybe_convert_iterator_return_type(type_id);
             return Ok(self.native_call_result(call_inst, native_func, type_id));

@@ -10,18 +10,18 @@
 
 tests "map creation and scope exit" {
     test "empty map scope exit" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         assert(m.len() == 0)
     }
 
     test "single entry map scope exit" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 10)
         assert(m.len() == 1)
     }
 
     test "populated map scope exit" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 10)
         m.set(2, 20)
         m.set(3, 30)
@@ -29,7 +29,7 @@ tests "map creation and scope exit" {
     }
 
     test "map with five entries scope exit" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 10)
         m.set(2, 20)
         m.set(3, 30)
@@ -41,22 +41,22 @@ tests "map creation and scope exit" {
     }
 
     test "map with_capacity scope exit" {
-        let m = Map.with_capacity(64)
+        let m = Map.with_capacity<i64, i64>(64)
         assert(m.len() == 0)
         assert(m.is_empty())
     }
 
     test "map with_capacity populated scope exit" {
-        let m = Map.with_capacity(32)
+        let m = Map.with_capacity<i64, i64>(32)
         m.set(100, 1000)
         m.set(200, 2000)
         assert(m.len() == 2)
     }
 
     test "multiple maps created and dropped" {
-        let a = Map.new()
-        let b = Map.new()
-        let c = Map.new()
+        let a = Map.new<i64, i64>()
+        let b = Map.new<i64, i64>()
+        let c = Map.new<i64, i64>()
         a.set(1, 10)
         b.set(2, 20)
         c.set(3, 30)
@@ -66,10 +66,10 @@ tests "map creation and scope exit" {
     }
 
     test "map created in inner block" {
-        let outer = Map.new()
+        let outer = Map.new<i64, i64>()
         outer.set(1, 100)
         if true {
-            let inner = Map.new()
+            let inner = Map.new<i64, i64>()
             inner.set(2, 200)
             assert(inner.len() == 1)
         }
@@ -78,14 +78,14 @@ tests "map creation and scope exit" {
 
     test "many maps created and dropped sequentially" {
         let mut total = 0
-        let a = Map.new()
+        let a = Map.new<i64, i64>()
         a.set(1, 1)
         total = total + a.len()
-        let b = Map.new()
+        let b = Map.new<i64, i64>()
         b.set(1, 1)
         b.set(2, 2)
         total = total + b.len()
-        let c = Map.new()
+        let c = Map.new<i64, i64>()
         c.set(1, 1)
         c.set(2, 2)
         c.set(3, 3)
@@ -96,19 +96,19 @@ tests "map creation and scope exit" {
 
 tests "map reassignment" {
     test "reassign to new empty map" {
-        let mut m = Map.new()
+        let mut m = Map.new<i64, i64>()
         m.set(1, 10)
         m.set(2, 20)
         assert(m.len() == 2)
-        m = Map.new()
+        m = Map.new<i64, i64>()
         assert(m.len() == 0)
         assert(m.is_empty())
     }
 
     test "reassign to new populated map" {
-        let mut m = Map.new()
+        let mut m = Map.new<i64, i64>()
         m.set(1, 10)
-        m = Map.new()
+        m = Map.new<i64, i64>()
         m.set(2, 20)
         m.set(3, 30)
         assert(m.len() == 2)
@@ -117,23 +117,23 @@ tests "map reassignment" {
     }
 
     test "reassign multiple times" {
-        let mut m = Map.new()
+        let mut m = Map.new<i64, i64>()
         m.set(1, 10)
         assert(m.len() == 1)
-        m = Map.new()
+        m = Map.new<i64, i64>()
         m.set(2, 20)
         assert(m.len() == 1)
-        m = Map.new()
+        m = Map.new<i64, i64>()
         m.set(3, 30)
         assert(m.len() == 1)
         assert(m.get(3) == 30)
     }
 
     test "reassign in conditional" {
-        let mut m = Map.new()
+        let mut m = Map.new<i64, i64>()
         m.set(1, 10)
         if true {
-            m = Map.new()
+            m = Map.new<i64, i64>()
             m.set(2, 20)
         }
         assert(m.get(2) == 20)
@@ -141,24 +141,24 @@ tests "map reassignment" {
     }
 
     test "reassign with_capacity to new" {
-        let mut m = Map.with_capacity(64)
+        let mut m = Map.with_capacity<i64, i64>(64)
         m.set(1, 10)
         m.set(2, 20)
-        m = Map.new()
+        m = Map.new<i64, i64>()
         assert(m.len() == 0)
         m.set(3, 30)
         assert(m.get(3) == 30)
     }
 
     test "reassign discards old map entries" {
-        let mut m = Map.new()
+        let mut m = Map.new<i64, i64>()
         m.set(1, 100)
         m.set(2, 200)
         m.set(3, 300)
         m.set(4, 400)
         m.set(5, 500)
         assert(m.len() == 5)
-        m = Map.new()
+        m = Map.new<i64, i64>()
         assert(m.is_empty())
         assert(m.get(1) == nil)
     }
@@ -169,7 +169,7 @@ tests "map in while loops" {
         let mut i = 0
         let mut last_len = 0
         while i < 5 {
-            let m = Map.new()
+            let m = Map.new<i64, i64>()
             m.set(i, i * 10)
             last_len = m.len()
             i = i + 1
@@ -178,7 +178,7 @@ tests "map in while loops" {
     }
 
     test "populate map across while loop iterations" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         let mut i = 0
         while i < 10 {
             m.set(i, i * i)
@@ -190,10 +190,10 @@ tests "map in while loops" {
     }
 
     test "reassign map in while loop" {
-        let mut m = Map.new()
+        let mut m = Map.new<i64, i64>()
         let mut i = 0
         while i < 3 {
-            m = Map.new()
+            m = Map.new<i64, i64>()
             m.set(i, i)
             i = i + 1
         }
@@ -202,7 +202,7 @@ tests "map in while loops" {
     }
 
     test "while loop set and read same iteration" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         let mut i = 0
         let mut total = 0
         while i < 5 {
@@ -215,7 +215,7 @@ tests "map in while loops" {
     }
 
     test "while loop map and string interleaved" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         let mut result = ""
         let mut i = 0
         while i < 3 {
@@ -232,7 +232,7 @@ tests "map in for loops" {
     test "create map in for loop body" {
         let mut total_len = 0
         for i in 0..5 {
-            let m = Map.new()
+            let m = Map.new<i64, i64>()
             m.set(i, i * 10)
             m.set(i + 100, i * 100)
             total_len = total_len + m.len()
@@ -241,7 +241,7 @@ tests "map in for loops" {
     }
 
     test "populate map across for loop iterations" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         for i in 0..10 {
             m.set(i, i + 1)
         }
@@ -251,9 +251,9 @@ tests "map in for loops" {
     }
 
     test "reassign map in for loop" {
-        let mut m = Map.new()
+        let mut m = Map.new<i64, i64>()
         for i in 0..4 {
-            m = Map.new()
+            m = Map.new<i64, i64>()
             m.set(i, i * 10)
         }
         assert(m.len() == 1)
@@ -263,7 +263,7 @@ tests "map in for loops" {
     test "nested loops with maps" {
         let mut count = 0
         for i in 0..3 {
-            let m = Map.new()
+            let m = Map.new<i64, i64>()
             for j in 0..3 {
                 m.set(j, i * 10 + j)
             }
@@ -275,7 +275,7 @@ tests "map in for loops" {
     test "for loop creating maps with increasing size" {
         let mut last_size = 0
         for size in 1..6 {
-            let m = Map.new()
+            let m = Map.new<i64, i64>()
             for j in 0..size {
                 m.set(j, j)
             }
@@ -285,7 +285,7 @@ tests "map in for loops" {
     }
 
     test "for loop set and get same iteration" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         let mut total = 0
         for i in 0..5 {
             m.set(i, i * 10)
@@ -298,7 +298,7 @@ tests "map in for loops" {
     test "for loop with string concat per iteration" {
         let mut result = ""
         for i in 0..5 {
-            let m = Map.new()
+            let m = Map.new<i64, i64>()
             m.set(0, i * 10)
             let v = m.get(0) ?? 0
             result = result + v.to_string() + " "
@@ -309,7 +309,7 @@ tests "map in for loops" {
 
 tests "map remove lifecycle" {
     test "remove single entry" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 10)
         m.set(2, 20)
         let removed = m.remove(1)
@@ -319,7 +319,7 @@ tests "map remove lifecycle" {
     }
 
     test "remove all entries one by one" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 10)
         m.set(2, 20)
         m.set(3, 30)
@@ -331,7 +331,7 @@ tests "map remove lifecycle" {
     }
 
     test "remove then re-add" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 10)
         let removed = m.remove(1)
         assert(removed == 10)
@@ -342,7 +342,7 @@ tests "map remove lifecycle" {
     }
 
     test "remove missing key returns nil" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 10)
         let removed = m.remove(99)
         assert(removed == nil)
@@ -350,7 +350,7 @@ tests "map remove lifecycle" {
     }
 
     test "remove in loop" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(0, 0)
         m.set(1, 10)
         m.set(2, 20)
@@ -365,7 +365,7 @@ tests "map remove lifecycle" {
     }
 
     test "remove and scope exit" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 100)
         m.set(2, 200)
         m.set(3, 300)
@@ -375,7 +375,7 @@ tests "map remove lifecycle" {
     }
 
     test "remove half the entries" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(0, 0)
         m.set(1, 2)
         m.set(2, 4)
@@ -397,7 +397,7 @@ tests "map remove lifecycle" {
     }
 
     test "remove and re-add cycle" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 0)
         _ = m.remove(1)
         m.set(1, 10)
@@ -410,13 +410,13 @@ tests "map remove lifecycle" {
 
 tests "map clear lifecycle" {
     test "clear empty map" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.clear()
         assert(m.len() == 0)
     }
 
     test "clear populated map" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 10)
         m.set(2, 20)
         m.set(3, 30)
@@ -426,7 +426,7 @@ tests "map clear lifecycle" {
     }
 
     test "clear then reuse" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 10)
         m.set(2, 20)
         m.clear()
@@ -438,7 +438,7 @@ tests "map clear lifecycle" {
     }
 
     test "clear multiple times" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 10)
         m.clear()
         assert(m.is_empty())
@@ -451,7 +451,7 @@ tests "map clear lifecycle" {
     }
 
     test "clear then scope exit" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 100)
         m.set(2, 200)
         m.clear()
@@ -459,7 +459,7 @@ tests "map clear lifecycle" {
     }
 
     test "clear and repopulate in loop" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         for cycle in 0..3 {
             m.set(0, cycle * 100)
             m.set(1, cycle * 100 + 1)
@@ -473,7 +473,7 @@ tests "map clear lifecycle" {
     }
 
     test "clear large map" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         for i in 0..50 {
             m.set(i, i)
         }
@@ -487,7 +487,7 @@ tests "map clear lifecycle" {
 
 tests "map overwrite lifecycle" {
     test "overwrite single key" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 10)
         m.set(1, 20)
         assert(m.len() == 1)
@@ -495,7 +495,7 @@ tests "map overwrite lifecycle" {
     }
 
     test "overwrite key multiple times" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 10)
         m.set(1, 20)
         m.set(1, 30)
@@ -505,7 +505,7 @@ tests "map overwrite lifecycle" {
     }
 
     test "overwrite in loop" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 0)
         for i in 0..10 {
             m.set(1, i)
@@ -515,7 +515,7 @@ tests "map overwrite lifecycle" {
     }
 
     test "overwrite different keys" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 10)
         m.set(2, 20)
         m.set(3, 30)
@@ -529,7 +529,7 @@ tests "map overwrite lifecycle" {
     }
 
     test "overwrite all keys in loop" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(0, 0)
         m.set(1, 1)
         m.set(2, 2)
@@ -546,7 +546,7 @@ tests "map overwrite lifecycle" {
 
 tests "map with many entries" {
     test "add 20 entries" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         for i in 0..20 {
             m.set(i, i * 10)
         }
@@ -557,7 +557,7 @@ tests "map with many entries" {
     }
 
     test "add 50 entries" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         for i in 0..50 {
             m.set(i, i + 1)
         }
@@ -567,7 +567,7 @@ tests "map with many entries" {
     }
 
     test "add 100 entries with with_capacity" {
-        let m = Map.with_capacity(128)
+        let m = Map.with_capacity<i64, i64>(128)
         for i in 0..100 {
             m.set(i, i)
         }
@@ -577,7 +577,7 @@ tests "map with many entries" {
     }
 
     test "add many then remove in same loop" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         for i in 0..30 {
             m.set(i, i * 2)
         }
@@ -588,7 +588,7 @@ tests "map with many entries" {
     }
 
     test "add 100 entries and verify via set-get same loop" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         let mut verified = 0
         for i in 0..100 {
             m.set(i, i * 3)
@@ -602,26 +602,26 @@ tests "map with many entries" {
 
 tests "map contains_key lifecycle" {
     test "contains_key on empty map" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         assert(!m.contains_key(1))
     }
 
     test "contains_key after set" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 10)
         assert(m.contains_key(1))
         assert(!m.contains_key(2))
     }
 
     test "contains_key after remove" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 10)
         _ = m.remove(1)
         assert(!m.contains_key(1))
     }
 
     test "contains_key after clear" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 10)
         m.set(2, 20)
         m.clear()
@@ -630,7 +630,7 @@ tests "map contains_key lifecycle" {
     }
 
     test "contains_key for many entries" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         for i in 0..10 {
             m.set(i, i)
             assert(m.contains_key(i))
@@ -640,7 +640,7 @@ tests "map contains_key lifecycle" {
     }
 
     test "contains_key after overwrite" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 10)
         assert(m.contains_key(1))
         m.set(1, 99)
@@ -650,25 +650,25 @@ tests "map contains_key lifecycle" {
 
 tests "map get optional lifecycle" {
     test "get returns nil for missing" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         assert(m.get(1) == nil)
     }
 
     test "get returns value for present" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 42)
         assert(m.get(1) == 42)
     }
 
     test "get after remove returns nil" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 42)
         _ = m.remove(1)
         assert(m.get(1) == nil)
     }
 
     test "get with nil coalescing" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 42)
         let v1 = m.get(1) ?? 0
         let v2 = m.get(99) ?? -1
@@ -677,7 +677,7 @@ tests "map get optional lifecycle" {
     }
 
     test "get multiple keys some missing" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 10)
         m.set(3, 30)
         m.set(5, 50)
@@ -689,7 +689,7 @@ tests "map get optional lifecycle" {
     }
 
     test "get after overwrite" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 10)
         assert(m.get(1) == 10)
         m.set(1, 99)
@@ -697,7 +697,7 @@ tests "map get optional lifecycle" {
     }
 
     test "nil coalescing used in set-get loop" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         let mut total = 0
         for i in 0..6 {
             if i % 2 == 0 {
@@ -711,7 +711,7 @@ tests "map get optional lifecycle" {
 
 tests "map combined with string operations" {
     test "map alongside string concat" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 10)
         let s = "hello" + " " + "world"
         assert(m.get(1) == 10)
@@ -719,7 +719,7 @@ tests "map combined with string operations" {
     }
 
     test "map value used in string interpolation" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 42)
         let v = m.get(1) ?? 0
         let s = "value={v}"
@@ -727,7 +727,7 @@ tests "map combined with string operations" {
     }
 
     test "map and string both go out of scope" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 10)
         let s = "hello"
         assert(m.len() == 1)
@@ -735,7 +735,7 @@ tests "map combined with string operations" {
     }
 
     test "map alongside string array" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 10)
         m.set(2, 20)
         let words = ["alpha", "beta", "gamma"]
@@ -746,7 +746,7 @@ tests "map combined with string operations" {
     }
 
     test "string result alongside map operations" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         let greeting = "  hello  ".trim()
         m.set(1, greeting.length())
         assert(m.get(1) == 5)
@@ -754,7 +754,7 @@ tests "map combined with string operations" {
     }
 
     test "string interpolation with map length" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 10)
         m.set(2, 20)
         m.set(3, 30)
@@ -764,7 +764,7 @@ tests "map combined with string operations" {
     }
 
     test "string concat and map set interleaved" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         let mut s = ""
         m.set(1, 10)
         s = s + "a"
@@ -779,7 +779,7 @@ tests "map combined with string operations" {
     test "string build in loop with new map each iteration" {
         let mut result = ""
         for i in 0..5 {
-            let m = Map.new()
+            let m = Map.new<i64, i64>()
             m.set(0, i * 10)
             let v = m.get(0) ?? 0
             result = result + v.to_string() + " "
@@ -790,8 +790,8 @@ tests "map combined with string operations" {
 
 tests "map complex lifecycle patterns" {
     test "multiple maps interleaved operations" {
-        let a = Map.new()
-        let b = Map.new()
+        let a = Map.new<i64, i64>()
+        let b = Map.new<i64, i64>()
         a.set(1, 10)
         b.set(1, 100)
         a.set(2, 20)
@@ -803,7 +803,7 @@ tests "map complex lifecycle patterns" {
     }
 
     test "map surviving conditional branches" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 10)
         if m.contains_key(1) {
             m.set(2, 20)
@@ -818,8 +818,8 @@ tests "map complex lifecycle patterns" {
     }
 
     test "two maps populated in same loop" {
-        let evens = Map.new()
-        let odds = Map.new()
+        let evens = Map.new<i64, i64>()
+        let odds = Map.new<i64, i64>()
         for i in 0..10 {
             if i % 2 == 0 {
                 evens.set(i, i)
@@ -836,7 +836,7 @@ tests "map complex lifecycle patterns" {
     }
 
     test "map with conditional set" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         for i in 0..20 {
             if i % 3 == 0 {
                 m.set(i, i * 10)
@@ -850,7 +850,7 @@ tests "map complex lifecycle patterns" {
     }
 
     test "map built then partially removed then cleared" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(0, 0)
         m.set(1, 1)
         m.set(2, 2)
@@ -882,23 +882,23 @@ tests "map complex lifecycle patterns" {
     }
 
     test "map reassign and repopulate alternating" {
-        let mut m = Map.new()
+        let mut m = Map.new<i64, i64>()
         m.set(1, 10)
         m.set(2, 20)
         assert(m.len() == 2)
-        m = Map.new()
+        m = Map.new<i64, i64>()
         m.set(3, 30)
         m.set(4, 40)
         m.set(5, 50)
         assert(m.len() == 3)
-        m = Map.new()
+        m = Map.new<i64, i64>()
         m.set(6, 60)
         assert(m.len() == 1)
         assert(m.get(6) == 60)
     }
 
     test "overwrite then remove" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 10)
         m.set(2, 20)
         m.set(3, 30)
@@ -920,13 +920,13 @@ tests "map complex lifecycle patterns" {
     }
 
     test "maps in nested conditional blocks" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 10)
         if true {
-            let inner1 = Map.new()
+            let inner1 = Map.new<i64, i64>()
             inner1.set(2, 20)
             if true {
-                let inner2 = Map.new()
+                let inner2 = Map.new<i64, i64>()
                 inner2.set(3, 30)
                 assert(inner2.len() == 1)
             }
@@ -936,7 +936,7 @@ tests "map complex lifecycle patterns" {
     }
 
     test "map with string tracking both RC types" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         let s1 = "hello"
         m.set(1, s1.length())
         let s2 = "world"
@@ -951,9 +951,9 @@ tests "map complex lifecycle patterns" {
     }
 
     test "map reassign in for loop with different sizes" {
-        let mut m = Map.new()
+        let mut m = Map.new<i64, i64>()
         for i in 0..5 {
-            m = Map.new()
+            m = Map.new<i64, i64>()
             for j in 0..i {
                 m.set(j, j * i)
             }

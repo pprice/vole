@@ -1598,7 +1598,30 @@ impl Compiler<'_> {
                     .iter()
                     .find(|m| self.query().resolve_symbol(m.name) == method_name_str);
                 if let Some(method) = method {
-                    self.compile_monomorphized_class_method(method, &instance)?;
+                    self.compile_monomorphized_class_method(method, &instance, None)?;
+                    continue;
+                }
+            }
+
+            // Fallback: search module programs for generic classes from imported modules (e.g. prelude)
+            // Clone the method AST to avoid borrow conflict with mutable self borrow.
+            {
+                let found = self
+                    .find_class_method_in_modules(instance.class_name, &method_name_str)
+                    .cloned();
+                if let Some(method) = found {
+                    // Determine the module path so compile can look up the correct interner
+                    let module_id = self.analyzed.name_table().module_of(instance.class_name);
+                    let module_path = self
+                        .analyzed
+                        .name_table()
+                        .module_path(module_id)
+                        .to_string();
+                    self.compile_monomorphized_class_method(
+                        &method,
+                        &instance,
+                        Some(&module_path),
+                    )?;
                     continue;
                 }
             }
@@ -1611,7 +1634,7 @@ impl Compiler<'_> {
                 &method_name_str,
                 program_module,
             ) {
-                self.compile_monomorphized_class_method(method, &instance)?;
+                self.compile_monomorphized_class_method(method, &instance, None)?;
                 continue;
             }
 
@@ -1626,11 +1649,14 @@ impl Compiler<'_> {
         Ok(())
     }
 
-    /// Compile a single monomorphized class method instance
+    /// Compile a single monomorphized class method instance.
+    /// When `module_path` is Some, the method AST comes from a loaded module
+    /// and its symbols must be resolved with that module's interner.
     fn compile_monomorphized_class_method(
         &mut self,
         method: &FuncDecl,
         instance: &ClassMethodMonomorphInstance,
+        module_path: Option<&str>,
     ) -> CodegenResult<()> {
         let mangled_name = self.query().display_name(instance.mangled_name);
         let func_key = self.func_registry.intern_name_id(instance.mangled_name);
@@ -1665,10 +1691,20 @@ impl Compiler<'_> {
 
         // Create function builder and compile
         let source_file_ptr = self.source_file_ptr();
+        let empty_inits = FxHashMap::default();
         let mut builder_ctx = FunctionBuilderContext::new();
+        // Determine module_id for Cg context (needed for expression data lookup)
+        let cg_module_id =
+            module_path.map(|_| self.analyzed.name_table().module_of(instance.class_name));
         {
             let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-            let env = compile_env!(self, source_file_ptr);
+            let env = if let Some(path) = module_path {
+                let (_, interner) = &self.analyzed.module_programs[path];
+                let module_id = cg_module_id.unwrap();
+                compile_env!(self, interner, &empty_inits, source_file_ptr, module_id)
+            } else {
+                compile_env!(self, source_file_ptr)
+            };
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
             let config = FunctionCompileConfig::method(
@@ -1682,7 +1718,7 @@ impl Compiler<'_> {
                 &mut codegen_ctx,
                 &env,
                 config,
-                None,
+                cg_module_id,
                 Some(&instance.substitutions),
             )?;
         }
@@ -1743,17 +1779,39 @@ impl Compiler<'_> {
                 "looking for static method to compile"
             );
 
-            // Try to find the static method in a class
+            let method_name_str = self.query().display_name(instance.method_name);
+
+            // Try to find the static method in a class from the main program
             if let Some(class) = class_asts.get(&instance.class_name)
                 && let Some(ref statics) = class.statics
             {
-                let method_name_str = self.query().display_name(instance.method_name);
                 let method = statics
                     .methods
                     .iter()
                     .find(|m| self.query().resolve_symbol(m.name) == method_name_str);
                 if let Some(method) = method {
-                    self.compile_monomorphized_static_method(method, &instance)?;
+                    self.compile_monomorphized_static_method(method, &instance, None)?;
+                    continue;
+                }
+            }
+
+            // Fallback: search module programs for generic classes from imported modules
+            {
+                let found = self
+                    .find_static_method_in_modules(instance.class_name, &method_name_str)
+                    .cloned();
+                if let Some(method) = found {
+                    let module_id = self.analyzed.name_table().module_of(instance.class_name);
+                    let module_path = self
+                        .analyzed
+                        .name_table()
+                        .module_path(module_id)
+                        .to_string();
+                    self.compile_monomorphized_static_method(
+                        &method,
+                        &instance,
+                        Some(&module_path),
+                    )?;
                     continue;
                 }
             }
@@ -1770,11 +1828,14 @@ impl Compiler<'_> {
         Ok(())
     }
 
-    /// Compile a single monomorphized static method instance
+    /// Compile a single monomorphized static method instance.
+    /// When `module_path` is Some, the method AST comes from a loaded module
+    /// and its symbols must be resolved with that module's interner.
     fn compile_monomorphized_static_method(
         &mut self,
         method: &InterfaceMethod,
         instance: &StaticMethodMonomorphInstance,
+        module_path: Option<&str>,
     ) -> CodegenResult<()> {
         let mangled_name = self.query().display_name(instance.mangled_name);
         let func_key = self.func_registry.intern_name_id(instance.mangled_name);
@@ -1808,10 +1869,20 @@ impl Compiler<'_> {
 
         // Create function builder and compile
         let source_file_ptr = self.source_file_ptr();
+        let empty_inits = FxHashMap::default();
         let mut builder_ctx = FunctionBuilderContext::new();
+        // Determine module_id for Cg context (needed for expression data lookup)
+        let cg_module_id =
+            module_path.map(|_| self.analyzed.name_table().module_of(instance.class_name));
         {
             let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-            let env = compile_env!(self, source_file_ptr);
+            let env = if let Some(path) = module_path {
+                let (_, interner) = &self.analyzed.module_programs[path];
+                let module_id = cg_module_id.unwrap();
+                compile_env!(self, interner, &empty_inits, source_file_ptr, module_id)
+            } else {
+                compile_env!(self, source_file_ptr)
+            };
             let mut codegen_ctx = CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
             let config = FunctionCompileConfig::top_level(body, params, Some(return_type_id));
@@ -1820,7 +1891,7 @@ impl Compiler<'_> {
                 &mut codegen_ctx,
                 &env,
                 config,
-                None,
+                cg_module_id,
                 Some(&instance.substitutions),
             )?;
         }
@@ -1934,6 +2005,86 @@ impl Compiler<'_> {
                     }
                 }
                 _ => {}
+            }
+        }
+        None
+    }
+
+    /// Find a method in a generic class defined in a loaded module (e.g. prelude).
+    /// Searches module_programs for the class's module and looks for the method in
+    /// the generic class declaration found there.
+    fn find_class_method_in_modules(
+        &self,
+        class_name_id: NameId,
+        method_name_str: &str,
+    ) -> Option<&FuncDecl> {
+        // Determine which module this class belongs to
+        let module_id = self.analyzed.name_table().module_of(class_name_id);
+        let module_path = self
+            .analyzed
+            .name_table()
+            .module_path(module_id)
+            .to_string();
+
+        // Look up the module program and its interner
+        let (module_program, module_interner) = self.analyzed.module_programs.get(&module_path)?;
+
+        // Search for the generic class in this module's declarations
+        for decl in &module_program.declarations {
+            if let Decl::Class(class) = decl
+                && !class.type_params.is_empty()
+            {
+                // Use module interner for name resolution (Symbol is per-interner)
+                let query = self.query();
+                if let Some(name_id) =
+                    query.try_name_id_with_interner(module_id, &[class.name], module_interner)
+                    && name_id == class_name_id
+                {
+                    // Found the class - look for the method using module interner
+                    return class
+                        .methods
+                        .iter()
+                        .find(|m| module_interner.resolve(m.name) == method_name_str);
+                }
+            }
+        }
+        None
+    }
+
+    /// Find a static method in a generic class defined in a loaded module (e.g. prelude).
+    /// Searches module_programs for the class's module and looks for the static method
+    /// in the generic class declaration found there.
+    fn find_static_method_in_modules(
+        &self,
+        class_name_id: NameId,
+        method_name_str: &str,
+    ) -> Option<&InterfaceMethod> {
+        let module_id = self.analyzed.name_table().module_of(class_name_id);
+        let module_path = self
+            .analyzed
+            .name_table()
+            .module_path(module_id)
+            .to_string();
+
+        let (module_program, module_interner) = self.analyzed.module_programs.get(&module_path)?;
+
+        for decl in &module_program.declarations {
+            if let Decl::Class(class) = decl
+                && !class.type_params.is_empty()
+            {
+                // Use module interner for name resolution (Symbol is per-interner)
+                if let Some(name_id) = self.query().try_name_id_with_interner(
+                    module_id,
+                    &[class.name],
+                    module_interner,
+                ) && name_id == class_name_id
+                    && let Some(ref statics) = class.statics
+                {
+                    return statics
+                        .methods
+                        .iter()
+                        .find(|m| module_interner.resolve(m.name) == method_name_str);
+                }
             }
         }
         None

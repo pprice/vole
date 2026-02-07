@@ -3,13 +3,13 @@
 
 tests {
     test "map::new creates empty map" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         assert(m.len() == 0)
         assert(m.is_empty())
     }
 
     test "map::set and get" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 100)
         m.set(2, 200)
 
@@ -19,7 +19,7 @@ tests {
     }
 
     test "map::get returns nil for missing key" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 100)
 
         assert(m.get(1) == 100)
@@ -27,7 +27,7 @@ tests {
     }
 
     test "map::contains_key" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 100)
 
         assert(m.contains_key(1))
@@ -35,7 +35,7 @@ tests {
     }
 
     test "map::remove" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 100)
         m.set(2, 200)
 
@@ -47,12 +47,12 @@ tests {
     }
 
     test "map::remove missing key returns nil" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         assert(m.remove(999) == nil)
     }
 
     test "map::clear" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 100)
         m.set(2, 200)
 
@@ -62,7 +62,7 @@ tests {
     }
 
     test "map::update existing key" {
-        let m = Map.new()
+        let m = Map.new<i64, i64>()
         m.set(1, 100)
         m.set(1, 999)
 

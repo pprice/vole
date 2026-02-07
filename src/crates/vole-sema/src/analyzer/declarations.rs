@@ -2591,15 +2591,19 @@ impl Analyzer {
                     // No type mappings, use the native_name as before
                     let native_name_str =
                         func.native_name.clone().unwrap_or_else(|| name_str.clone());
+                    // Extract name IDs before calling implement_registry_mut to avoid overlapping borrows
+                    let (module_path, native_name) = {
+                        let mut name_table = self.name_table_mut();
+                        (
+                            name_table.intern_raw(builtin_mod, &[&ext_block.module_path]),
+                            name_table.intern_raw(builtin_mod, &[&native_name_str]),
+                        )
+                    };
                     self.implement_registry_mut().register_external_func(
                         name_str,
                         ExternalMethodInfo {
-                            module_path: self
-                                .name_table_mut()
-                                .intern_raw(builtin_mod, &[&ext_block.module_path]),
-                            native_name: self
-                                .name_table_mut()
-                                .intern_raw(builtin_mod, &[&native_name_str]),
+                            module_path,
+                            native_name,
                         },
                     );
                 }
