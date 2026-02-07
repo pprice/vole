@@ -3,13 +3,13 @@
 
 tests {
     test "set::new creates empty set" {
-        let s = Set.new()
+        let s = Set.new<i64>()
         assert(s.len() == 0)
         assert(s.is_empty())
     }
 
     test "set::add and contains" {
-        let s = Set.new()
+        let s = Set.new<i64>()
         assert(s.add(42))  // returns true for new element
         assert(s.contains(42))
         assert(s.len() == 1)
@@ -17,14 +17,14 @@ tests {
     }
 
     test "set::add duplicate returns false" {
-        let s = Set.new()
+        let s = Set.new<i64>()
         assert(s.add(42))  // first add returns true
         assert(!s.add(42)) // second add returns false (already exists)
         assert(s.len() == 1)
     }
 
     test "set::remove" {
-        let s = Set.new()
+        let s = Set.new<i64>()
         _ = s.add(1)
         _ = s.add(2)
         _ = s.add(3)
@@ -38,12 +38,12 @@ tests {
     }
 
     test "set::remove missing returns false" {
-        let s = Set.new()
+        let s = Set.new<i64>()
         assert(!s.remove(999))  // returns false for missing element
     }
 
     test "set::clear" {
-        let s = Set.new()
+        let s = Set.new<i64>()
         _ = s.add(1)
         _ = s.add(2)
         _ = s.add(3)
@@ -56,7 +56,7 @@ tests {
     }
 
     test "set::with_capacity" {
-        let s = Set.with_capacity(100)
+        let s = Set.with_capacity<i64>(100)
         assert(s.len() == 0)
         assert(s.is_empty())
         _ = s.add(42)
@@ -64,11 +64,11 @@ tests {
     }
 
     test "set::union" {
-        let a = Set.new()
+        let a = Set.new<i64>()
         _ = a.add(1)
         _ = a.add(2)
 
-        let b = Set.new()
+        let b = Set.new<i64>()
         _ = b.add(2)
         _ = b.add(3)
 
@@ -80,12 +80,12 @@ tests {
     }
 
     test "set::intersection" {
-        let a = Set.new()
+        let a = Set.new<i64>()
         _ = a.add(1)
         _ = a.add(2)
         _ = a.add(3)
 
-        let b = Set.new()
+        let b = Set.new<i64>()
         _ = b.add(2)
         _ = b.add(3)
         _ = b.add(4)
@@ -99,12 +99,12 @@ tests {
     }
 
     test "set::difference" {
-        let a = Set.new()
+        let a = Set.new<i64>()
         _ = a.add(1)
         _ = a.add(2)
         _ = a.add(3)
 
-        let b = Set.new()
+        let b = Set.new<i64>()
         _ = b.add(2)
         _ = b.add(3)
         _ = b.add(4)
@@ -116,11 +116,11 @@ tests {
     }
 
     test "set::is_subset" {
-        let a = Set.new()
+        let a = Set.new<i64>()
         _ = a.add(1)
         _ = a.add(2)
 
-        let b = Set.new()
+        let b = Set.new<i64>()
         _ = b.add(1)
         _ = b.add(2)
         _ = b.add(3)
@@ -130,17 +130,17 @@ tests {
     }
 
     test "set::is_disjoint" {
-        let a = Set.new()
+        let a = Set.new<i64>()
         _ = a.add(1)
         _ = a.add(2)
 
-        let b = Set.new()
+        let b = Set.new<i64>()
         _ = b.add(3)
         _ = b.add(4)
 
         assert(a.is_disjoint(b))
 
-        let c = Set.new()
+        let c = Set.new<i64>()
         _ = c.add(2)
         _ = c.add(3)
 
