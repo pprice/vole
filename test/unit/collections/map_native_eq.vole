@@ -1,0 +1,156 @@
+// Test: Map/Set with native eq optimization (vole-9x0.3)
+// Exercises the code path where primitive key types use direct native equality
+// function pointers instead of closure trampolines.
+
+tests {
+    // ---- Map with primitive key types (should use native eq) ----
+
+    test "map<i64, i64> native eq" {
+        let m = Map.new<i64, i64>()
+        m.set(1, 100)
+        m.set(2, 200)
+        m.set(3, 300)
+        assert(m.len() == 3)
+        assert((m.get(1) ?? 0) == 100)
+        assert((m.get(2) ?? 0) == 200)
+        assert((m.get(3) ?? 0) == 300)
+        assert(m.get(999) == nil)
+
+        // Overwrite
+        m.set(2, 222)
+        assert(m.len() == 3)
+        assert((m.get(2) ?? 0) == 222)
+
+        // Remove
+        let removed = m.remove(1)
+        assert((removed ?? 0) == 100)
+        assert(m.len() == 2)
+        assert(m.get(1) == nil)
+    }
+
+    test "map<string, string> native eq" {
+        let m = Map.new<string, string>()
+        m.set("a", "alpha")
+        m.set("b", "beta")
+        m.set("c", "charlie")
+        assert(m.len() == 3)
+        assert((m.get("a") ?? "") == "alpha")
+        assert((m.get("b") ?? "") == "beta")
+        assert((m.get("c") ?? "") == "charlie")
+        assert(m.get("missing") == nil)
+    }
+
+    test "map<i64, string> overwrite and remove" {
+        let m = Map.new<i64, string>()
+        m.set(10, "ten")
+        m.set(20, "twenty")
+        m.set(30, "thirty")
+
+        // Overwrite existing key
+        m.set(20, "TWENTY")
+        assert(m.len() == 3)
+        assert((m.get(20) ?? "") == "TWENTY")
+
+        // Remove and check
+        let r = m.remove(10)
+        assert((r ?? "") == "ten")
+        assert(m.len() == 2)
+        assert(m.get(10) == nil)
+        assert(m.contains_key(20))
+        assert(m.contains_key(30))
+    }
+
+    test "map<string, i64> contains_key and has" {
+        let m = Map.new<string, i64>()
+        m.set("one", 1)
+        m.set("two", 2)
+
+        assert(m.contains_key("one"))
+        assert(m.contains_key("two"))
+        assert(!m.contains_key("three"))
+        assert(!m.contains_key("four"))
+    }
+
+    // ---- Set with primitive element types (should use native eq) ----
+
+    test "set<i64> native eq" {
+        let s = Set.new<i64>()
+        s.add(1)
+        s.add(2)
+        s.add(3)
+        assert(s.len() == 3)
+        assert(s.contains(1))
+        assert(s.contains(2))
+        assert(s.contains(3))
+        assert(!s.contains(4))
+
+        // Duplicate add returns false
+        assert(!s.add(2))
+        assert(s.len() == 3)
+
+        // Remove
+        assert(s.remove(2))
+        assert(s.len() == 2)
+        assert(!s.contains(2))
+    }
+
+    test "set<string> native eq" {
+        let s = Set.new<string>()
+        s.add("x")
+        s.add("y")
+        s.add("z")
+        assert(s.len() == 3)
+        assert(s.contains("x"))
+        assert(s.contains("y"))
+        assert(s.contains("z"))
+        assert(!s.contains("w"))
+    }
+
+    // ---- Map with_capacity (also optimized) ----
+
+    test "map<i64, string> with_capacity native eq" {
+        let m = Map.with_capacity<i64, string>(16)
+        m.set(10, "ten")
+        m.set(20, "twenty")
+        assert(m.len() == 2)
+        assert((m.get(10) ?? "") == "ten")
+        assert((m.get(20) ?? "") == "twenty")
+    }
+
+    // ---- Set with_capacity (also optimized) ----
+
+    test "set<i64> with_capacity native eq" {
+        let s = Set.with_capacity<i64>(16)
+        s.add(100)
+        s.add(200)
+        assert(s.len() == 2)
+        assert(s.contains(100))
+        assert(s.contains(200))
+    }
+
+    // ---- Set operations with native eq ----
+
+    test "set<i64> union and intersection" {
+        let a = Set.new<i64>()
+        a.add(1)
+        a.add(2)
+        a.add(3)
+
+        let b = Set.new<i64>()
+        b.add(2)
+        b.add(3)
+        b.add(4)
+
+        let u = a.union(b)
+        assert(u.len() == 4)
+        assert(u.contains(1))
+        assert(u.contains(2))
+        assert(u.contains(3))
+        assert(u.contains(4))
+
+        let inter = a.intersection(b)
+        assert(inter.len() == 2)
+        assert(inter.contains(2))
+        assert(inter.contains(3))
+    }
+}

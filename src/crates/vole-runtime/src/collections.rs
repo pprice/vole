@@ -891,6 +891,15 @@ pub extern "C" fn map_new_with_eq(eq_closure: *const Closure) -> *mut RcMap {
     alloc_rc_map(VoleMap::new_with_closure(eq_closure))
 }
 
+/// Create a new empty map with a native equality function pointer (fast path).
+/// Used when the key type's `.equals()` is an external FFI function,
+/// skipping closure indirection. `eq_fn_ptr` is a raw `extern "C" fn(i64, i64) -> bool`.
+#[unsafe(no_mangle)]
+pub extern "C" fn map_new_native_eq(eq_fn_ptr: i64) -> *mut RcMap {
+    let eq_fn: EqFn = unsafe { std::mem::transmute(eq_fn_ptr) };
+    alloc_rc_map(VoleMap::new(eq_fn))
+}
+
 /// Create a new map with RC flags for key/value types.
 /// `key_is_rc` and `value_is_rc` indicate whether the key/value types are RC-managed.
 #[unsafe(no_mangle)]
@@ -916,6 +925,22 @@ pub extern "C" fn map_new_with_eq_rc(
     ))
 }
 
+/// Create a new map with native equality function pointer and RC flags.
+/// Used for optimized Map creation when `.equals()` is external FFI.
+#[unsafe(no_mangle)]
+pub extern "C" fn map_new_native_eq_rc(
+    eq_fn_ptr: i64,
+    key_is_rc: i8,
+    value_is_rc: i8,
+) -> *mut RcMap {
+    let eq_fn: EqFn = unsafe { std::mem::transmute(eq_fn_ptr) };
+    alloc_rc_map(VoleMap::new_with_rc(
+        eq_fn,
+        key_is_rc != 0,
+        value_is_rc != 0,
+    ))
+}
+
 /// Create a new map with the given capacity (uses i64 equality by default)
 #[unsafe(no_mangle)]
 pub extern "C" fn map_with_capacity(capacity: i64) -> *mut RcMap {
@@ -929,6 +954,13 @@ pub extern "C" fn map_with_capacity_eq(capacity: i64, eq_closure: *const Closure
         capacity as usize,
         eq_closure,
     ))
+}
+
+/// Create a new map with capacity and native equality function pointer (fast path).
+#[unsafe(no_mangle)]
+pub extern "C" fn map_with_capacity_native_eq(capacity: i64, eq_fn_ptr: i64) -> *mut RcMap {
+    let eq_fn: EqFn = unsafe { std::mem::transmute(eq_fn_ptr) };
+    alloc_rc_map(VoleMap::with_capacity(capacity as usize, eq_fn))
 }
 
 /// Create a new map with capacity and RC flags.
@@ -957,6 +989,23 @@ pub extern "C" fn map_with_capacity_eq_rc(
     alloc_rc_map(VoleMap::with_capacity_closure_rc(
         capacity as usize,
         eq_closure,
+        key_is_rc != 0,
+        value_is_rc != 0,
+    ))
+}
+
+/// Create a new map with capacity, native equality, and RC flags (fast path).
+#[unsafe(no_mangle)]
+pub extern "C" fn map_with_capacity_native_eq_rc(
+    capacity: i64,
+    eq_fn_ptr: i64,
+    key_is_rc: i8,
+    value_is_rc: i8,
+) -> *mut RcMap {
+    let eq_fn: EqFn = unsafe { std::mem::transmute(eq_fn_ptr) };
+    alloc_rc_map(VoleMap::with_capacity_rc(
+        capacity as usize,
+        eq_fn,
         key_is_rc != 0,
         value_is_rc != 0,
     ))
@@ -1103,6 +1152,14 @@ pub extern "C" fn set_new_with_eq(eq_closure: *const Closure) -> *mut RcSet {
     alloc_rc_set(VoleSet::new_with_closure(eq_closure))
 }
 
+/// Create a new empty set with a native equality function pointer (fast path).
+/// Used when the element type's `.equals()` is an external FFI function.
+#[unsafe(no_mangle)]
+pub extern "C" fn set_new_native_eq(eq_fn_ptr: i64) -> *mut RcSet {
+    let eq_fn: EqFn = unsafe { std::mem::transmute(eq_fn_ptr) };
+    alloc_rc_set(VoleSet::new(eq_fn))
+}
+
 /// Create a new set with the given capacity (uses i64 equality by default)
 #[unsafe(no_mangle)]
 pub extern "C" fn set_with_capacity(capacity: i64) -> *mut RcSet {
@@ -1118,6 +1175,13 @@ pub extern "C" fn set_with_capacity_eq(capacity: i64, eq_closure: *const Closure
     ))
 }
 
+/// Create a new set with capacity and native equality function pointer (fast path).
+#[unsafe(no_mangle)]
+pub extern "C" fn set_with_capacity_native_eq(capacity: i64, eq_fn_ptr: i64) -> *mut RcSet {
+    let eq_fn: EqFn = unsafe { std::mem::transmute(eq_fn_ptr) };
+    alloc_rc_set(VoleSet::with_capacity(capacity as usize, eq_fn))
+}
+
 /// Create a new set with RC flag for element type.
 #[unsafe(no_mangle)]
 pub extern "C" fn set_new_rc(elem_is_rc: i8) -> *mut RcSet {
@@ -1128,6 +1192,13 @@ pub extern "C" fn set_new_rc(elem_is_rc: i8) -> *mut RcSet {
 #[unsafe(no_mangle)]
 pub extern "C" fn set_new_with_eq_rc(eq_closure: *const Closure, elem_is_rc: i8) -> *mut RcSet {
     alloc_rc_set(VoleSet::new_with_closure_rc(eq_closure, elem_is_rc != 0))
+}
+
+/// Create a new set with native equality and RC flag (fast path).
+#[unsafe(no_mangle)]
+pub extern "C" fn set_new_native_eq_rc(eq_fn_ptr: i64, elem_is_rc: i8) -> *mut RcSet {
+    let eq_fn: EqFn = unsafe { std::mem::transmute(eq_fn_ptr) };
+    alloc_rc_set(VoleSet::new_with_rc(eq_fn, elem_is_rc != 0))
 }
 
 /// Create a new set with capacity and RC flag.
@@ -1150,6 +1221,21 @@ pub extern "C" fn set_with_capacity_eq_rc(
     alloc_rc_set(VoleSet::with_capacity_closure_rc(
         capacity as usize,
         eq_closure,
+        elem_is_rc != 0,
+    ))
+}
+
+/// Create a new set with capacity, native equality, and RC flag (fast path).
+#[unsafe(no_mangle)]
+pub extern "C" fn set_with_capacity_native_eq_rc(
+    capacity: i64,
+    eq_fn_ptr: i64,
+    elem_is_rc: i8,
+) -> *mut RcSet {
+    let eq_fn: EqFn = unsafe { std::mem::transmute(eq_fn_ptr) };
+    alloc_rc_set(VoleSet::with_capacity_rc(
+        capacity as usize,
+        eq_fn,
         elem_is_rc != 0,
     ))
 }

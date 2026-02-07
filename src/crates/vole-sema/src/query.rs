@@ -490,6 +490,38 @@ impl<'a> ProgramQuery<'a> {
     }
 
     // =========================================================================
+    // Interface implementation queries
+    // =========================================================================
+
+    /// Get the interface implementation for a type.
+    /// Returns the MethodId if the type has a method with the given name.
+    #[must_use]
+    pub fn get_interface_impl(&self, type_id: TypeDefId, method_name: &str) -> Option<MethodId> {
+        let method_name_id = self.try_method_name_id_by_str(method_name)?;
+        self.resolve_method(type_id, method_name_id)
+    }
+
+    /// Check if a type's method is externally bound (native FFI).
+    #[must_use]
+    pub fn is_method_external(&self, type_id: TypeDefId, method_name: &str) -> bool {
+        self.get_interface_impl(type_id, method_name)
+            .and_then(|mid| self.method_external_binding(mid))
+            .is_some()
+    }
+
+    /// Get the external binding info for a type's method (if externally bound).
+    /// Returns the ExternalMethodInfo containing module_path and native_name.
+    #[must_use]
+    pub fn method_external_info(
+        &self,
+        type_id: TypeDefId,
+        method_name: &str,
+    ) -> Option<&'a ExternalMethodInfo> {
+        let mid = self.get_interface_impl(type_id, method_name)?;
+        self.method_external_binding(mid)
+    }
+
+    // =========================================================================
     // Well-known type checks
     // =========================================================================
 

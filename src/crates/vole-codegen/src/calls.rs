@@ -549,13 +549,27 @@ impl Cg<'_, '_, '_> {
                 );
             }
         }
-        let native_func = ext_info.as_ref().and_then(|info| {
+        let native_lookup = ext_info.as_ref().and_then(|info| {
             let name_table = self.name_table();
             let module_path = name_table.last_segment_str(info.module_path)?;
             let native_name = name_table.last_segment_str(info.native_name)?;
-            self.native_funcs().lookup(&module_path, &native_name)
+            let func = self.native_funcs().lookup(&module_path, &native_name)?;
+            Some((module_path.to_string(), native_name.to_string(), func))
         });
-        if let Some(native_func) = native_func {
+        if let Some((module_path, native_name, native_func)) = native_lookup {
+            // Optimization: for Map/Set constructors in monomorphized context,
+            // if the key/element type has a native equality function, use the
+            // native eq variant (EqMode::Native) instead of closure indirection.
+            if let Some(result) = self.try_optimize_collection_constructor(
+                &module_path,
+                &native_name,
+                native_func,
+                call,
+                call_expr_id,
+            )? {
+                return Ok(result);
+            }
+
             // Get expected Cranelift types from native function signature
             let expected_types: Vec<Type> = native_func
                 .signature
@@ -1679,6 +1693,194 @@ impl Cg<'_, '_, '_> {
     /// Find a lambda expression by NodeId in the program.
     fn find_lambda_by_node_id(&self, node_id: NodeId) -> Option<&LambdaExpr> {
         find_lambda_in_program(&self.analyzed().program, node_id)
+    }
+}
+
+// =============================================================================
+// Collection constructor native eq optimization (vole-9x0.3)
+// =============================================================================
+//
+// When Map/Set constructors are monomorphized with a primitive key type whose
+// `.equals()` is a native FFI function, we bypass the closure trampoline and
+// pass a direct native function pointer instead. This avoids:
+//   - Allocating a Closure struct
+//   - Indirect call overhead on every equality check
+//   - Extra RC bookkeeping for the closure lifetime
+//
+// The optimization maps:
+//   _map_new_with_eq(closure)           -> map_new_native_eq(eq_fn_ptr)
+//   _map_with_capacity_eq(cap, closure) -> map_with_capacity_native_eq(cap, eq_fn_ptr)
+//   _set_new_with_eq(closure)           -> set_new_native_eq(eq_fn_ptr)
+//   _set_with_capacity_eq(cap, closure) -> set_with_capacity_native_eq(cap, eq_fn_ptr)
+
+impl Cg<'_, '_, '_> {
+    /// Get the native equality function pointer for a primitive type, if available.
+    ///
+    /// Returns a raw function pointer to the collection-compatible `EqFn`
+    /// (signature: `extern "C" fn(i64, i64) -> bool`) for primitive types
+    /// whose `.equals()` is an external FFI binding.
+    fn native_eq_fn_ptr_for_type(&self, type_id: TypeId) -> Option<i64> {
+        use vole_runtime::collections::{bool_eq, f64_eq, i64_eq, string_eq};
+        match type_id {
+            TypeId::I64
+            | TypeId::I32
+            | TypeId::I16
+            | TypeId::I8
+            | TypeId::I128
+            | TypeId::U64
+            | TypeId::U32
+            | TypeId::U16
+            | TypeId::U8 => Some(i64_eq as *const u8 as i64),
+            TypeId::STRING => Some(string_eq as *const u8 as i64),
+            TypeId::F64 | TypeId::F32 => Some(f64_eq as *const u8 as i64),
+            TypeId::BOOL => Some(bool_eq as *const u8 as i64),
+            _ => None,
+        }
+    }
+
+    /// Get the native eq variant name for a collection constructor.
+    ///
+    /// Maps closure-based constructor names to their native eq counterparts.
+    fn native_eq_constructor_name(native_name: &str) -> Option<&'static str> {
+        match native_name {
+            "map_new_with_eq" => Some("map_new_native_eq"),
+            "map_with_capacity_eq" => Some("map_with_capacity_native_eq"),
+            "map_new_with_eq_rc" => Some("map_new_native_eq_rc"),
+            "map_with_capacity_eq_rc" => Some("map_with_capacity_native_eq_rc"),
+            "set_new_with_eq" => Some("set_new_native_eq"),
+            "set_with_capacity_eq" => Some("set_with_capacity_native_eq"),
+            "set_new_with_eq_rc" => Some("set_new_native_eq_rc"),
+            "set_with_capacity_eq_rc" => Some("set_with_capacity_native_eq_rc"),
+            _ => None,
+        }
+    }
+
+    /// Try to optimize a collection constructor call by using native equality.
+    ///
+    /// When in a monomorphized context and the key/element type is a primitive
+    /// with native `.equals()`, replaces the closure-based constructor with a
+    /// direct native function pointer variant.
+    fn try_optimize_collection_constructor(
+        &mut self,
+        module_path: &str,
+        native_name: &str,
+        _original_func: &NativeFunction,
+        call: &CallExpr,
+        call_expr_id: NodeId,
+    ) -> CodegenResult<Option<CompiledValue>> {
+        // Only optimize in monomorphized context
+        if self.substitutions.is_none() {
+            return Ok(None);
+        }
+
+        // Check if this is a collection constructor we can optimize
+        let opt_name = match Self::native_eq_constructor_name(native_name) {
+            Some(name) => name,
+            None => return Ok(None),
+        };
+
+        // Find the concrete key/element type from substitutions.
+        // Only checks the specific equality type param (K for Map, T for Set).
+        let eq_fn_ptr = self.find_native_eq_from_substitutions(native_name);
+        let Some(eq_fn_ptr) = eq_fn_ptr else {
+            return Ok(None);
+        };
+
+        tracing::debug!(
+            native_name,
+            optimized_to = opt_name,
+            "collection constructor: using native eq (skipping closure)"
+        );
+
+        // Look up the optimized native function
+        let opt_func = self
+            .native_funcs()
+            .lookup(module_path, opt_name)
+            .ok_or_else(|| {
+                CodegenError::not_found(
+                    "optimized collection constructor",
+                    format!("{}::{}", module_path, opt_name),
+                )
+            })?;
+
+        // Build args: replace closure arg with native eq fn ptr.
+        // The closure arg is always the last arg for _new variants,
+        // and the second-to-last for _rc variants.
+        let ptr_type = self.ptr_type();
+        let eq_ptr_val = self.builder.ins().iconst(ptr_type, eq_fn_ptr);
+
+        // Compile all arguments, then replace the closure with the fn ptr
+        let (compiled_args, rc_temps) = self.compile_call_args_tracking_rc(&call.args)?;
+
+        // Determine which arg index is the closure (eq_fn) argument.
+        // For _new_with_eq(closure): index 0
+        // For _with_capacity_eq(cap, closure): index 1
+        // For _new_with_eq_rc(closure, key_rc, val_rc): index 0
+        // For _with_capacity_eq_rc(cap, closure, key_rc, val_rc): index 1
+        let closure_idx = if native_name.contains("capacity") {
+            1
+        } else {
+            0
+        };
+
+        let mut args = Vec::with_capacity(compiled_args.len());
+        for (i, arg) in compiled_args.iter().enumerate() {
+            if i == closure_idx {
+                // Replace closure with native eq fn ptr.
+                // The closure was compiled by the let-binding above this call;
+                // it will be RC-dec'd by normal scope cleanup (refcount 1 -> 0).
+                // We do NOT rc_dec it here to avoid a double-free.
+                args.push(eq_ptr_val);
+            } else {
+                args.push(*arg);
+            }
+        }
+
+        let call_inst = self.call_native_indirect(opt_func, &args);
+
+        // Don't consume RC temps - the closure will be cleaned up by scope exit
+        drop(rc_temps);
+
+        if opt_func.signature.return_type == NativeType::Nil {
+            return Ok(Some(self.void_value()));
+        }
+
+        let type_id = self
+            .get_expr_type_substituted(&call_expr_id)
+            .expect("INTERNAL: optimized collection call: missing sema return type");
+        let type_id = self.maybe_convert_iterator_return_type(type_id);
+        Ok(Some(self.native_call_result(call_inst, opt_func, type_id)))
+    }
+
+    /// Find a native eq function pointer from the current monomorphization
+    /// substitutions for the equality type parameter.
+    ///
+    /// For Map constructors, the equality type is "K" (the key type).
+    /// For Set constructors, the equality type is "T" (the element type).
+    /// We only check the specific type parameter used for equality, not all
+    /// substitutions - otherwise `Map<Point, string>` would incorrectly match
+    /// string_eq from the V=string substitution.
+    fn find_native_eq_from_substitutions(&self, native_name: &str) -> Option<i64> {
+        let substitutions = self.substitutions?;
+        let name_table = self.name_table();
+
+        // Determine the type parameter name used for equality
+        let eq_param_name = if native_name.starts_with("map_") {
+            "K"
+        } else if native_name.starts_with("set_") {
+            "T"
+        } else {
+            return None;
+        };
+
+        // Find the substitution for the equality type parameter
+        for (&name_id, &concrete_type) in substitutions {
+            if let Some(name) = name_table.last_segment_str(name_id)
+                && name == eq_param_name {
+                    return self.native_eq_fn_ptr_for_type(concrete_type);
+                }
+        }
+        None
     }
 }
 

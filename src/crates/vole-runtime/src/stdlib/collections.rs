@@ -43,10 +43,31 @@ pub fn module() -> NativeModule {
         },
     );
 
+    // map_new_native_eq: (eq_fn_ptr) -> Map
+    // Fast path: native equality function pointer (no closure overhead)
+    m.register(
+        "map_new_native_eq",
+        collections::map_new_native_eq as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64], // Raw fn pointer
+            return_type: NativeType::I64,
+        },
+    );
+
     // map_with_capacity_eq: (capacity, eq_closure) -> Map
     m.register(
         "map_with_capacity_eq",
         collections::map_with_capacity_eq as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64, NativeType::I64],
+            return_type: NativeType::I64,
+        },
+    );
+
+    // map_with_capacity_native_eq: (capacity, eq_fn_ptr) -> Map
+    m.register(
+        "map_with_capacity_native_eq",
+        collections::map_with_capacity_native_eq as *const u8,
         NativeSignature {
             params: vec![NativeType::I64, NativeType::I64],
             return_type: NativeType::I64,
@@ -73,6 +94,16 @@ pub fn module() -> NativeModule {
         },
     );
 
+    // map_new_native_eq_rc: (eq_fn_ptr, key_is_rc, value_is_rc) -> Map
+    m.register(
+        "map_new_native_eq_rc",
+        collections::map_new_native_eq_rc as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64, NativeType::Bool, NativeType::Bool],
+            return_type: NativeType::I64,
+        },
+    );
+
     // map_with_capacity_rc: (capacity, key_is_rc, value_is_rc) -> Map
     m.register(
         "map_with_capacity_rc",
@@ -87,6 +118,21 @@ pub fn module() -> NativeModule {
     m.register(
         "map_with_capacity_eq_rc",
         collections::map_with_capacity_eq_rc as *const u8,
+        NativeSignature {
+            params: vec![
+                NativeType::I64,
+                NativeType::I64,
+                NativeType::Bool,
+                NativeType::Bool,
+            ],
+            return_type: NativeType::I64,
+        },
+    );
+
+    // map_with_capacity_native_eq_rc: (capacity, eq_fn_ptr, key_is_rc, value_is_rc) -> Map
+    m.register(
+        "map_with_capacity_native_eq_rc",
+        collections::map_with_capacity_native_eq_rc as *const u8,
         NativeSignature {
             params: vec![
                 NativeType::I64,
@@ -238,10 +284,31 @@ pub fn module() -> NativeModule {
         },
     );
 
+    // set_new_native_eq: (eq_fn_ptr) -> Set
+    // Fast path: native equality function pointer (no closure overhead)
+    m.register(
+        "set_new_native_eq",
+        collections::set_new_native_eq as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64], // Raw fn pointer
+            return_type: NativeType::I64,
+        },
+    );
+
     // set_with_capacity_eq: (capacity, eq_closure) -> Set
     m.register(
         "set_with_capacity_eq",
         collections::set_with_capacity_eq as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64, NativeType::I64],
+            return_type: NativeType::I64,
+        },
+    );
+
+    // set_with_capacity_native_eq: (capacity, eq_fn_ptr) -> Set
+    m.register(
+        "set_with_capacity_native_eq",
+        collections::set_with_capacity_native_eq as *const u8,
         NativeSignature {
             params: vec![NativeType::I64, NativeType::I64],
             return_type: NativeType::I64,
@@ -268,6 +335,16 @@ pub fn module() -> NativeModule {
         },
     );
 
+    // set_new_native_eq_rc: (eq_fn_ptr, elem_is_rc) -> Set
+    m.register(
+        "set_new_native_eq_rc",
+        collections::set_new_native_eq_rc as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64, NativeType::Bool],
+            return_type: NativeType::I64,
+        },
+    );
+
     // set_with_capacity_rc: (capacity, elem_is_rc) -> Set
     m.register(
         "set_with_capacity_rc",
@@ -282,6 +359,16 @@ pub fn module() -> NativeModule {
     m.register(
         "set_with_capacity_eq_rc",
         collections::set_with_capacity_eq_rc as *const u8,
+        NativeSignature {
+            params: vec![NativeType::I64, NativeType::I64, NativeType::Bool],
+            return_type: NativeType::I64,
+        },
+    );
+
+    // set_with_capacity_native_eq_rc: (capacity, eq_fn_ptr, elem_is_rc) -> Set
+    m.register(
+        "set_with_capacity_native_eq_rc",
+        collections::set_with_capacity_native_eq_rc as *const u8,
         NativeSignature {
             params: vec![NativeType::I64, NativeType::I64, NativeType::Bool],
             return_type: NativeType::I64,
