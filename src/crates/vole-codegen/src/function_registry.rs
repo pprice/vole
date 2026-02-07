@@ -68,6 +68,7 @@ runtime_fns! {
     ArrayIterNext => "vole_array_iter_next",
     ArrayIterCollect => "vole_array_iter_collect",
     ArraySet => "vole_array_set",
+    ArrayFilled => "vole_array_filled",
     MapIter => "vole_map_iter",
     MapIterNext => "vole_map_iter_next",
     MapIterCollect => "vole_map_iter_collect",

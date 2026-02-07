@@ -279,6 +279,39 @@ impl Analyzer {
             );
         }
 
+        // Fallback: variables holding imported class/struct types can call static methods.
+        // e.g., `let { Array } = import "std:array"; Array.filled<i64>(5, 0)`
+        // resolve_static_call_target skips variables, so check here if the variable's
+        // type has the requested static method before falling through to instance methods.
+        if let ExprKind::Identifier(sym) = &method_call.object.kind
+            && let Some(var_type_id) = self.get_variable_type_id(*sym)
+        {
+            let arena = self.type_arena();
+            if let Some((type_def_id, _, kind)) = arena.unwrap_nominal(var_type_id)
+                && kind.is_class_or_struct()
+            {
+                drop(arena);
+                let method_name_id = self.method_name_id(method_call.method, interner);
+                let has_static = self
+                    .entity_registry()
+                    .find_static_method_on_type(type_def_id, method_name_id)
+                    .is_some();
+                if has_static {
+                    let type_name_str = interner.resolve(*sym).to_string();
+                    return self.check_static_method_call(
+                        expr,
+                        type_def_id,
+                        &type_name_str,
+                        method_call.method,
+                        &method_call.type_args,
+                        &method_call.args,
+                        method_call.method_span,
+                        interner,
+                    );
+                }
+            }
+        }
+
         let object_type_id = self.check_expr(&method_call.object, interner)?;
         let method_name = interner.resolve(method_call.method);
 

@@ -583,6 +583,10 @@ impl JitContext {
         let sig = self.create_signature(&[ptr_ty, types::I64, types::I64, types::I64], None);
         self.import_function("vole_array_set", &sig);
 
+        // vole_array_filled(count: i64, tag: u64, value: u64) -> *mut RcArray
+        let sig = self.create_signature(&[types::I64, types::I64, types::I64], Some(ptr_ty));
+        self.import_function("vole_array_filled", &sig);
+
         // Closure functions
         // vole_closure_alloc(func_ptr: *const u8, num_captures: usize) -> *mut Closure
         let sig = self.create_signature(&[ptr_ty, types::I64], Some(ptr_ty));
@@ -1014,6 +1018,10 @@ impl JitContext {
         builder.symbol(
             "vole_array_set",
             vole_runtime::builtins::vole_array_set as *const u8,
+        );
+        builder.symbol(
+            "vole_array_filled",
+            vole_runtime::builtins::vole_array_filled as *const u8,
         );
 
         // Closure functions

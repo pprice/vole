@@ -1,0 +1,29 @@
+// stdlib/array.vole
+//
+// Array utilities - static methods for array construction.
+//
+// Usage: let { Array } = import "std:array"
+
+class Array<T> {
+    _unused: i64,
+
+    statics {
+        // Create an array of `count` elements, all set to `value`.
+        // Panics if count is negative.
+        //
+        // Usage:
+        //   let zeros = Array.filled<i64>(5, 0)       // [0, 0, 0, 0, 0]
+        //   let xs = Array.filled<string>(3, "x")     // ["x", "x", "x"]
+        func filled(count: i64, value: T) -> [T] {
+            // Body is intercepted by codegen (compiled as ArrayFilled runtime call).
+            // This stub exists only for sema type checking.
+            let arr: [T] = []
+            let i = 0
+            while i < count {
+                arr.push(value)
+                i = i + 1
+            }
+            return arr
+        }
+    }
+}

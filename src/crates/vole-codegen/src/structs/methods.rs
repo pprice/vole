@@ -1369,6 +1369,11 @@ impl Cg<'_, '_, '_> {
             return Ok(result);
         }
 
+        // Check for Array.filled<T> intrinsic (compiled as ArrayFilled runtime call)
+        if let Some(result) = self.try_array_filled_intrinsic(type_def_id, mc, expr_id)? {
+            return Ok(result);
+        }
+
         // Get the method's name_id for lookup
         let method_def = self.query().get_method(method_id);
         let method_name_id = method_def.name_id;
@@ -1604,5 +1609,84 @@ impl Cg<'_, '_, '_> {
         };
 
         Ok(Some(value))
+    }
+
+    /// Intercept `Array.filled<T>(count, value) -> [T]` and compile as a direct
+    /// `vole_array_filled(count, tag, value)` runtime call. Handles union boxing
+    /// so each array slot gets its own heap-allocated union pointer.
+    fn try_array_filled_intrinsic(
+        &mut self,
+        type_def_id: TypeDefId,
+        mc: &MethodCallExpr,
+        expr_id: NodeId,
+    ) -> CodegenResult<Option<CompiledValue>> {
+        // Check if this is Array.filled
+        let type_name_id = self.query().get_type(type_def_id).name_id;
+        let type_name = self.name_table().last_segment_str(type_name_id);
+        if type_name.as_deref() != Some("Array") {
+            return Ok(None);
+        }
+        let method_name = self.interner().resolve(mc.method);
+        if method_name != "filled" {
+            return Ok(None);
+        }
+
+        // We expect exactly two arguments: count and value
+        if mc.args.len() != 2 {
+            return Err(CodegenError::arg_count("Array.filled", 2, mc.args.len()));
+        }
+
+        // Get the return type [T] from sema to determine element type T
+        let return_type_id = self
+            .get_expr_type_substituted(&expr_id)
+            .ok_or_else(|| "Array.filled: missing return type from sema".to_string())?;
+        let elem_type_id = self
+            .arena()
+            .unwrap_array(return_type_id)
+            .ok_or_else(|| "Array.filled: expected array return type".to_string())?;
+
+        // Compile count argument
+        let count = self.expr(&mc.args[0])?;
+
+        // Compile value argument
+        let value = self.expr(&mc.args[1])?;
+
+        // Union-element arrays store boxed union pointers so get() returns a
+        // properly typed union value. Box the value once; the runtime rc_inc's
+        // the box pointer for each slot, keeping the shared box alive.
+        let value = if self.arena().is_union(elem_type_id) && !self.arena().is_union(value.type_id)
+        {
+            self.construct_union_heap_id(value, elem_type_id)?
+        } else {
+            value
+        };
+
+        // Copy structs to heap so data survives if the array escapes the stack frame
+        let value = if self.arena().is_struct(value.type_id) {
+            self.copy_struct_to_heap(value)?
+        } else {
+            value
+        };
+
+        // Compute tag for the element type
+        let tag = {
+            let arena = self.arena();
+            array_element_tag_id(value.type_id, arena)
+        };
+        let tag_val = self.builder.ins().iconst(types::I64, tag);
+
+        // Convert value to i64 for storage
+        let value_bits = convert_to_i64_for_storage(self.builder, &value);
+
+        // Call vole_array_filled(count, tag, value) -> *mut RcArray
+        let filled_ref = self.runtime_func_ref(RuntimeFn::ArrayFilled)?;
+        let args = self.coerce_call_args(filled_ref, &[count.value, tag_val, value_bits]);
+        let call = self.builder.ins().call(filled_ref, &args);
+        let result_val = self.builder.inst_results(call)[0];
+
+        let mut result = CompiledValue::new(result_val, self.ptr_type(), return_type_id);
+        result.rc_lifecycle = RcLifecycle::Owned;
+
+        Ok(Some(result))
     }
 }

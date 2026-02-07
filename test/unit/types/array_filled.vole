@@ -1,0 +1,47 @@
+let { Array } = import "std:array"
+
+class Entry { value: i64 }
+class Empty {}
+
+tests {
+    test "filled with i64" {
+        let arr = Array.filled<i64>(5, 0)
+        assert(arr.length() == 5)
+        let mut i = 0
+        while i < 5 {
+            assert(arr[i] == 0)
+            i = i + 1
+        }
+    }
+
+    test "filled with nonzero i64" {
+        let arr = Array.filled<i64>(3, 42)
+        assert(arr.length() == 3)
+        assert(arr[0] == 42)
+        assert(arr[1] == 42)
+        assert(arr[2] == 42)
+    }
+
+    test "filled with string (RC type)" {
+        let arr = Array.filled<string>(3, "x")
+        assert(arr.length() == 3)
+        assert(arr[0] == "x")
+        assert(arr[1] == "x")
+        assert(arr[2] == "x")
+    }
+
+    test "filled with union (Entry | Empty)" {
+        let arr = Array.filled<Entry | Empty>(8, Empty {})
+        assert(arr.length() == 8)
+    }
+
+    test "filled with optional (Entry?)" {
+        let arr = Array.filled<Entry?>(4, nil)
+        assert(arr.length() == 4)
+    }
+
+    test "filled with zero count" {
+        let arr = Array.filled<i64>(0, 0)
+        assert(arr.length() == 0)
+    }
+}

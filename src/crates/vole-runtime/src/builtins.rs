@@ -375,6 +375,33 @@ pub extern "C" fn vole_array_dec(ptr: *mut RcArray) {
     crate::value::rc_dec(ptr as *mut u8);
 }
 
+/// Create a new array of `count` elements, all set to the given tagged value.
+/// Each slot gets its own RC reference (incremented for every slot).
+/// The caller is responsible for managing the original value's RC lifecycle.
+/// Panics on negative count.
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_array_filled(count: i64, tag: u64, value: u64) -> *mut RcArray {
+    if count < 0 {
+        let msg = RcString::new(&format!(
+            "Array.filled: count must be non-negative, got {}",
+            count
+        ));
+        let file = b"<runtime>";
+        vole_panic(msg, file.as_ptr(), file.len(), 0);
+    }
+    let n = count as usize;
+    let arr = RcArray::with_capacity(n);
+    let tv = TaggedValue { tag, value };
+    unsafe {
+        for i in 0..n {
+            tv.rc_inc_if_needed();
+            std::ptr::write((*arr).data.add(i), tv);
+        }
+        (*arr).len = n;
+    }
+    arr
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
