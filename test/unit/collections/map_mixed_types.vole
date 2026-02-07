@@ -1,9 +1,5 @@
 // Test: Map with custom types for both K and V
 // Exercises Map<K, V> where both K and V are user-defined classes.
-//
-// NOTE: Multiple test blocks with Map<CustomClass, CustomClass> trigger
-// a pre-existing codegen bug with && in equals closures across compilation
-// units. All scenarios are combined into a single test to work around this.
 
 class Point {
     x: i64,
@@ -23,7 +19,7 @@ implement Equatable for Point {
 }
 
 tests {
-    test "map<Point, Point> custom type for both K and V" {
+    test "map<Point, Point> set and get" {
         let m = Map.new<Point, Point>()
         let k1 = Point { x: 1, y: 2 }
         let v1 = Point { x: 100, y: 200 }
@@ -42,35 +38,78 @@ tests {
         let got2 = m.get(k2) ?? Point { x: 0, y: 0 }
         assert(got2.x == 300)
         assert(got2.y == 400)
+    }
 
-        // Update value for existing key
-        let v1_new = Point { x: 111, y: 222 }
-        m.set(k1, v1_new)
-        assert(m.len() == 2)
-        let got1_new = m.get(k1) ?? Point { x: 0, y: 0 }
-        assert(got1_new.x == 111)
-        assert(got1_new.y == 222)
+    test "map<Point, Point> update value" {
+        let m = Map.new<Point, Point>()
+        let k = Point { x: 1, y: 2 }
+        let v = Point { x: 100, y: 200 }
+        m.set(k, v)
 
-        // Contains key
+        let v_new = Point { x: 111, y: 222 }
+        m.set(k, v_new)
+        assert(m.len() == 1)
+        let got = m.get(k) ?? Point { x: 0, y: 0 }
+        assert(got.x == 111)
+        assert(got.y == 222)
+    }
+
+    test "map<Point, Point> contains_key" {
+        let m = Map.new<Point, Point>()
+        let k1 = Point { x: 1, y: 2 }
+        let v1 = Point { x: 100, y: 200 }
+        let k2 = Point { x: 3, y: 4 }
+        let v2 = Point { x: 300, y: 400 }
+        m.set(k1, v1)
+        m.set(k2, v2)
+
         assert(m.contains_key(k1))
         assert(m.contains_key(k2))
         let missing = Point { x: 99, y: 99 }
         assert(!m.contains_key(missing))
+    }
 
-        // Get missing
+    test "map<Point, Point> get missing" {
+        let m = Map.new<Point, Point>()
+        let k = Point { x: 1, y: 2 }
+        let v = Point { x: 100, y: 200 }
+        m.set(k, v)
+
+        let missing = Point { x: 99, y: 99 }
         assert(m.get(missing) == nil)
+    }
 
-        // Remove
-        _ = m.remove(k1)
-        assert(m.len() == 1)
-        assert(m.get(k1) == nil)
+    test "map<Point, Point> remove" {
+        let m = Map.new<Point, Point>()
+        let k = Point { x: 1, y: 2 }
+        let v = Point { x: 100, y: 200 }
+        m.set(k, v)
 
-        // Remove missing
+        _ = m.remove(k)
+        assert(m.len() == 0)
+        assert(m.get(k) == nil)
+    }
+
+    test "map<Point, Point> remove missing" {
+        let m = Map.new<Point, Point>()
+        let k = Point { x: 1, y: 2 }
+        let v = Point { x: 100, y: 200 }
+        m.set(k, v)
+
+        let missing = Point { x: 99, y: 99 }
         assert(m.remove(missing) == nil)
         assert(m.len() == 1)
+    }
 
-        // is_empty and clear
+    test "map<Point, Point> is_empty and clear" {
+        let m = Map.new<Point, Point>()
+        assert(m.is_empty())
+
+        let k = Point { x: 1, y: 2 }
+        let v = Point { x: 100, y: 200 }
+        m.set(k, v)
         assert(!m.is_empty())
+
         m.clear()
         assert(m.is_empty())
         assert(m.len() == 0)
