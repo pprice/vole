@@ -335,6 +335,7 @@ impl Analyzer {
         let mut struct_names: Vec<(NameId, Symbol)> = Vec::new();
         let mut class_names: Vec<(NameId, Symbol)> = Vec::new();
         let mut error_names: Vec<(NameId, Symbol)> = Vec::new();
+        let mut sentinel_names: Vec<(NameId, Symbol)> = Vec::new();
         // Functions and external functions are collected for post-analysis type resolution
         // (needed for types that reference class/error types defined in the same module,
         // e.g. fallible return types that reference module-local error types)
@@ -436,6 +437,15 @@ impl Analyzer {
                         self.name_table_mut()
                             .intern(module_id, &[err.name], &module_interner);
                     error_names.push((name_id, err.name));
+                }
+                Decl::Sentinel(sentinel_decl) => {
+                    // Export sentinel types so they can be used as union variants
+                    let name_id = self.name_table_mut().intern(
+                        module_id,
+                        &[sentinel_decl.name],
+                        &module_interner,
+                    );
+                    sentinel_names.push((name_id, sentinel_decl.name));
                 }
                 _ => {} // Skip other declarations (implement blocks, etc.)
             }
@@ -663,6 +673,22 @@ impl Analyzer {
             if let Some(type_def_id) = type_def_id {
                 let error_type_id = self.type_arena_mut().error_type(type_def_id);
                 exports.insert(name_id, error_type_id);
+            }
+        }
+
+        // Now populate sentinel exports after sub-analysis has registered them
+        for (name_id, sentinel_sym) in sentinel_names {
+            let type_def_id = {
+                let sentinel_str = module_interner.resolve(sentinel_sym);
+                self.resolver_for_module(&module_interner, module_id)
+                    .resolve_type_str_or_interface(sentinel_str, &self.entity_registry())
+            };
+            if let Some(type_def_id) = type_def_id {
+                let sentinel_type_id = self
+                    .type_arena_mut()
+                    .struct_type(type_def_id, smallvec::smallvec![]);
+                self.type_arena_mut().mark_sentinel(sentinel_type_id);
+                exports.insert(name_id, sentinel_type_id);
             }
         }
 

@@ -1,0 +1,8 @@
+// stdlib/collections/sentinels.vole
+// Shared bucket-state markers for open-addressing hash table collections (Map, Set).
+//
+// Usage:
+//   let { Empty, Deleted } = import "std:collections/sentinels"
+
+sentinel Empty
+sentinel Deleted

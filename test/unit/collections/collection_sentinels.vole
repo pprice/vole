@@ -1,0 +1,127 @@
+// Tests for std:collections/sentinels module
+
+let sentinels = import "std:collections/sentinels"
+let { Empty, Deleted } = import "std:collections/sentinels"
+
+tests "collection sentinels import" {
+    test "Empty is constructible" {
+        let e = Empty
+        assert(true)
+    }
+
+    test "Deleted is constructible" {
+        let d = Deleted
+        assert(true)
+    }
+
+    test "Empty via module import" {
+        let e = sentinels.Empty
+        assert(true)
+    }
+
+    test "Deleted via module import" {
+        let d = sentinels.Deleted
+        assert(true)
+    }
+}
+
+tests "collection sentinels in union types" {
+    test "Empty in union with i64" {
+        let v: i64 | Empty = Empty
+        assert(v is Empty)
+    }
+
+    test "Deleted in union with i64" {
+        let v: i64 | Deleted = Deleted
+        assert(v is Deleted)
+    }
+
+    test "i64 in union with Empty" {
+        let v: i64 | Empty = 42
+        assert(v is i64)
+        assert(!(v is Empty))
+    }
+
+    test "i64 in union with Deleted" {
+        let v: i64 | Deleted = 99
+        assert(v is i64)
+        assert(!(v is Deleted))
+    }
+
+    test "three-way union Empty | Deleted | i64 - Empty" {
+        let v: Empty | Deleted | i64 = Empty
+        assert(v is Empty)
+        assert(!(v is Deleted))
+        assert(!(v is i64))
+    }
+
+    test "three-way union Empty | Deleted | i64 - Deleted" {
+        let v: Empty | Deleted | i64 = Deleted
+        assert(!(v is Empty))
+        assert(v is Deleted)
+        assert(!(v is i64))
+    }
+
+    test "three-way union Empty | Deleted | i64 - i64" {
+        let v: Empty | Deleted | i64 = 42
+        assert(!(v is Empty))
+        assert(!(v is Deleted))
+        assert(v is i64)
+    }
+}
+
+tests "collection sentinels match" {
+    test "match on Empty | Deleted union" {
+        let v: Empty | Deleted = Empty
+        let result = match v {
+            Empty => "empty"
+            Deleted => "deleted"
+        }
+        assert(result == "empty")
+    }
+
+    test "match on Empty | Deleted union - Deleted" {
+        let v: Empty | Deleted = Deleted
+        let result = match v {
+            Empty => "empty"
+            Deleted => "deleted"
+        }
+        assert(result == "deleted")
+    }
+
+    test "match on three-way union" {
+        let v: Empty | Deleted | i64 = 42
+        let result = match v {
+            Empty => "empty"
+            Deleted => "deleted"
+            i64 => "value"
+        }
+        assert(result == "value")
+    }
+}
+
+tests "collection sentinels equality" {
+    test "Empty equals Empty" {
+        let a = Empty
+        let b = Empty
+        assert(a == b)
+    }
+
+    test "Deleted equals Deleted" {
+        let a = Deleted
+        let b = Deleted
+        assert(a == b)
+    }
+
+    test "Empty bare equals Empty braced" {
+        let a = Empty
+        let b = Empty {}
+        assert(a == b)
+    }
+
+    test "Deleted bare equals Deleted braced" {
+        let a = Deleted
+        let b = Deleted {}
+        assert(a == b)
+    }
+}

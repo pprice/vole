@@ -71,6 +71,12 @@ impl Cg<'_, '_, '_> {
                     ));
                 }
 
+                // Sentinel exports are zero-field structs - emit i8(0)
+                if self.arena().is_sentinel(export_type_id) {
+                    let value = self.builder.ins().iconst(types::I8, 0);
+                    return Ok(CompiledValue::new(value, types::I8, export_type_id));
+                }
+
                 return Err(CodegenError::unsupported_with_context(
                     "non-constant module export",
                     format!("{} cannot be accessed at compile time", field_name),

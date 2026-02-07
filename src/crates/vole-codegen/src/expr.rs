@@ -227,8 +227,7 @@ impl Cg<'_, '_, '_> {
             // Identifier refers to a named function - create a closure wrapper
             self.function_reference(sym, func_type_id)
         } else if let Some(sentinel_type_id) = self.get_expr_type(&expr.id)
-            && let Some((type_def_id, _)) = self.arena().unwrap_struct(sentinel_type_id)
-            && self.registry().type_kind(type_def_id).is_sentinel()
+            && self.arena().is_sentinel(sentinel_type_id)
         {
             // Bare identifier refers to a sentinel type - emit i8(0)
             let value = self.builder.ins().iconst(types::I8, 0);
@@ -291,6 +290,10 @@ impl Cg<'_, '_, '_> {
                 "function as value",
                 format!("use {}() to call the function", export_name_str),
             ))
+        } else if self.arena().is_sentinel(export_type_id) {
+            // Sentinel exports are zero-field structs - emit i8(0)
+            let value = self.builder.ins().iconst(types::I8, 0);
+            Ok(CompiledValue::new(value, types::I8, export_type_id))
         } else {
             Err(CodegenError::not_found(
                 "module export constant",
