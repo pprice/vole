@@ -188,5 +188,39 @@ tests {
         assert(a.is_subset(c))
     }
 
-    // NOTE: Set.iter() segfaults (vol-i5za), iter tests omitted until fixed.
+    test "set::iter count" {
+        let s = Set.new<i64>()
+        _ = s.add(1)
+        _ = s.add(2)
+        _ = s.add(3)
+        assert(s.iter().count() == 3)
+    }
+
+    test "set::iter for-in loop" {
+        let s = Set.new<i64>()
+        _ = s.add(10)
+        _ = s.add(20)
+        _ = s.add(30)
+        let mut sum = 0
+        for x in s.iter() {
+            sum = sum + x
+        }
+        assert(sum == 60)
+    }
+
+    test "set::iter collect" {
+        let s = Set.new<i64>()
+        _ = s.add(1)
+        _ = s.add(2)
+        _ = s.add(3)
+        let arr = s.iter().collect()
+        assert(arr.length() == 3)
+    }
+
+    test "set::iter on empty set" {
+        let s = Set.new<i64>()
+        assert(s.iter().count() == 0)
+        let arr = s.iter().collect()
+        assert(arr.length() == 0)
+    }
 }

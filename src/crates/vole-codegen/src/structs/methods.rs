@@ -501,6 +501,13 @@ impl Cg<'_, '_, '_> {
             .get_substituted_return_type(&expr_id)
             .unwrap_or(return_type_id);
 
+        // Convert Iterator<T> return types to RuntimeIterator(T) so that chained
+        // method calls (e.g., s.iter().count()) use direct dispatch instead of
+        // interface vtable dispatch. Without this, class methods returning Iterator<T>
+        // (like Set.iter(), Map.keys()) would produce a raw RcIterator pointer typed
+        // as an interface, causing a segfault when the next method tries vtable lookup.
+        let return_type_id = self.maybe_convert_iterator_return_type(return_type_id);
+
         // Check if this is a monomorphized class method call
         // If so, use the monomorphized method's func_key instead
         let (method_func_ref, is_generic_class) = if let Some(monomorph_key) = self

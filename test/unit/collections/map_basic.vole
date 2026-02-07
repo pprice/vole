@@ -79,5 +79,66 @@ tests {
         assert(m.get(1) == 10)
     }
 
-    // NOTE: keys(), values(), entries(), iter() segfault (vol-i5za)
+    test "map::keys count" {
+        let m = Map.new<i64, i64>()
+        m.set(1, 10)
+        m.set(2, 20)
+        m.set(3, 30)
+        assert(m.keys().count() == 3)
+    }
+
+    test "map::values count" {
+        let m = Map.new<i64, i64>()
+        m.set(1, 10)
+        m.set(2, 20)
+        m.set(3, 30)
+        assert(m.values().count() == 3)
+    }
+
+    test "map::entries count" {
+        let m = Map.new<i64, i64>()
+        m.set(1, 10)
+        m.set(2, 20)
+        assert(m.entries().count() == 2)
+    }
+
+    test "map::iter count" {
+        let m = Map.new<i64, i64>()
+        m.set(1, 10)
+        m.set(2, 20)
+        m.set(3, 30)
+        assert(m.iter().count() == 3)
+    }
+
+    test "map::keys for-in loop" {
+        let m = Map.new<i64, i64>()
+        m.set(1, 10)
+        m.set(2, 20)
+        m.set(3, 30)
+        let mut sum = 0
+        for k in m.keys() {
+            sum = sum + k
+        }
+        assert(sum == 6)
+    }
+
+    test "map::values for-in loop" {
+        let m = Map.new<i64, i64>()
+        m.set(1, 10)
+        m.set(2, 20)
+        m.set(3, 30)
+        let mut sum = 0
+        for v in m.values() {
+            sum = sum + v
+        }
+        assert(sum == 60)
+    }
+
+    test "map::iter on empty map" {
+        let m = Map.new<i64, i64>()
+        assert(m.keys().count() == 0)
+        assert(m.values().count() == 0)
+        assert(m.entries().count() == 0)
+        assert(m.iter().count() == 0)
+    }
 }
