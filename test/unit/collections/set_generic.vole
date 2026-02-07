@@ -135,4 +135,37 @@ tests {
         assert(i.contains("gamma"))
         assert(!i.contains("delta"))
     }
+
+    // ---- Point set operations ----
+
+    test "set<Point> union and difference" {
+        let p1 = Point { x: 1, y: 1 }
+        let p2 = Point { x: 2, y: 2 }
+        let p3 = Point { x: 3, y: 3 }
+        let p4 = Point { x: 4, y: 4 }
+
+        let a = Set.new<Point>()
+        _ = a.add(p1)
+        _ = a.add(p2)
+        _ = a.add(p3)
+
+        let b = Set.new<Point>()
+        _ = b.add(p2)
+        _ = b.add(p3)
+        _ = b.add(p4)
+
+        let u = a.union(b)
+        assert(u.len() == 4)
+        let check_p1 = Point { x: 1, y: 1 }
+        let check_p4 = Point { x: 4, y: 4 }
+        assert(u.contains(check_p1))
+        assert(u.contains(check_p4))
+
+        let d = a.difference(b)
+        assert(d.len() == 1)
+        let check_p1b = Point { x: 1, y: 1 }
+        let check_p2 = Point { x: 2, y: 2 }
+        assert(d.contains(check_p1b))
+        assert(!d.contains(check_p2))
+    }
 }

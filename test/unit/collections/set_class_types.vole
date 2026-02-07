@@ -1,0 +1,147 @@
+// Test: Set with class types (methods, RC fields)
+// Exercises Set<T> where T is a class with methods or RC fields.
+
+class Color {
+    r: i64,
+    g: i64,
+    b: i64,
+
+    func brightness() -> i64 {
+        return self.r + self.g + self.b
+    }
+}
+
+implement Hashable for Color {
+    func hash() -> i64 {
+        return self.r * 65536 + self.g * 256 + self.b
+    }
+}
+
+implement Equatable for Color {
+    func equals(other: Color) -> bool {
+        return self.r == other.r && self.g == other.g && self.b == other.b
+    }
+}
+
+class Tag {
+    label: string,
+    priority: i64,
+}
+
+implement Hashable for Tag {
+    func hash() -> i64 {
+        return self.label.hash() * 31 + self.priority
+    }
+}
+
+implement Equatable for Tag {
+    func equals(other: Tag) -> bool {
+        return self.label.equals(other.label) && self.priority == other.priority
+    }
+}
+
+tests {
+    // ---- Class with methods ----
+
+    test "set<Color> basic ops" {
+        let s = Set.new<Color>()
+        let red = Color { r: 255, g: 0, b: 0 }
+        let green = Color { r: 0, g: 255, b: 0 }
+        let blue = Color { r: 0, g: 0, b: 255 }
+
+        assert(s.add(red))
+        assert(s.add(green))
+        assert(s.add(blue))
+        assert(s.len() == 3)
+
+        assert(s.contains(red))
+        assert(s.contains(green))
+        assert(s.contains(blue))
+
+        // Equal-but-different instance
+        let red2 = Color { r: 255, g: 0, b: 0 }
+        assert(s.contains(red2))
+        assert(!s.add(red2))
+        assert(s.len() == 3)
+
+        // Methods still work
+        assert(red.brightness() == 255)
+    }
+
+    test "set<Color> intersection and difference" {
+        let red = Color { r: 255, g: 0, b: 0 }
+        let green = Color { r: 0, g: 255, b: 0 }
+        let blue = Color { r: 0, g: 0, b: 255 }
+        let yellow = Color { r: 255, g: 255, b: 0 }
+
+        let a = Set.new<Color>()
+        _ = a.add(red)
+        _ = a.add(green)
+        _ = a.add(blue)
+
+        let b = Set.new<Color>()
+        _ = b.add(green)
+        _ = b.add(blue)
+        _ = b.add(yellow)
+
+        let inter = a.intersection(b)
+        assert(inter.len() == 2)
+        let check_green = Color { r: 0, g: 255, b: 0 }
+        let check_blue = Color { r: 0, g: 0, b: 255 }
+        let check_red = Color { r: 255, g: 0, b: 0 }
+        assert(inter.contains(check_green))
+        assert(inter.contains(check_blue))
+        assert(!inter.contains(check_red))
+
+        let diff = a.difference(b)
+        assert(diff.len() == 1)
+        let check_red2 = Color { r: 255, g: 0, b: 0 }
+        assert(diff.contains(check_red2))
+    }
+
+    // ---- Class with RC fields (string) ----
+
+    test "set<Tag> basic ops with string fields" {
+        let s = Set.new<Tag>()
+        let t1 = Tag { label: "urgent", priority: 1 }
+        let t2 = Tag { label: "low", priority: 3 }
+        let t3 = Tag { label: "medium", priority: 2 }
+
+        assert(s.add(t1))
+        assert(s.add(t2))
+        assert(s.add(t3))
+        assert(s.len() == 3)
+
+        assert(s.contains(t1))
+        assert(s.contains(t2))
+        assert(s.contains(t3))
+
+        // Equal-but-different instance
+        let t1_copy = Tag { label: "urgent", priority: 1 }
+        assert(s.contains(t1_copy))
+        assert(!s.add(t1_copy))
+
+        // Same label, different priority should not match
+        let t1_diff = Tag { label: "urgent", priority: 2 }
+        assert(!s.contains(t1_diff))
+    }
+
+    test "set<Tag> remove" {
+        let s = Set.new<Tag>()
+        let t1 = Tag { label: "alpha", priority: 1 }
+        let t2 = Tag { label: "beta", priority: 2 }
+        let t3 = Tag { label: "gamma", priority: 3 }
+        _ = s.add(t1)
+        _ = s.add(t2)
+        _ = s.add(t3)
+        assert(s.len() == 3)
+
+        let t2_check = Tag { label: "beta", priority: 2 }
+        assert(s.remove(t2_check))
+        assert(s.len() == 2)
+        let t2_check2 = Tag { label: "beta", priority: 2 }
+        assert(!s.contains(t2_check2))
+        assert(s.contains(t1))
+        assert(s.contains(t3))
+    }
+}

@@ -1,0 +1,118 @@
+// Test: Map with class types as values
+// Exercises classes (with and without methods) as Map values.
+
+class Point {
+    x: i64,
+    y: i64,
+}
+
+class Color {
+    r: i64,
+    g: i64,
+    b: i64,
+
+    func brightness() -> i64 {
+        return self.r + self.g + self.b
+    }
+
+    func is_dark() -> bool {
+        return self.brightness() < 128
+    }
+}
+
+class Person {
+    name: string,
+    age: i64,
+}
+
+tests {
+    test "map<i64, Point> class as value" {
+        let m = Map.new<i64, Point>()
+        let p1 = Point { x: 10, y: 20 }
+        let p2 = Point { x: 30, y: 40 }
+
+        m.set(1, p1)
+        m.set(2, p2)
+
+        assert(m.len() == 2)
+        let got = m.get(1) ?? Point { x: 0, y: 0 }
+        assert(got.x == 10)
+        assert(got.y == 20)
+
+        let got2 = m.get(2) ?? Point { x: 0, y: 0 }
+        assert(got2.x == 30)
+        assert(got2.y == 40)
+
+        assert(m.get(999) == nil)
+    }
+
+    test "map<string, Color> class with methods as value" {
+        let m = Map.new<string, Color>()
+        let red = Color { r: 255, g: 0, b: 0 }
+        let dark = Color { r: 5, g: 5, b: 5 }
+
+        m.set("red", red)
+        m.set("dark", dark)
+
+        let got_red = m.get("red") ?? Color { r: 0, g: 0, b: 0 }
+        assert(got_red.r == 255)
+        assert(got_red.brightness() == 255)
+        assert(!got_red.is_dark())
+
+        let got_dark = m.get("dark") ?? Color { r: 0, g: 0, b: 0 }
+        assert(got_dark.brightness() == 15)
+        assert(got_dark.is_dark())
+    }
+
+    test "map<i64, Person> class with RC fields as value" {
+        let m = Map.new<i64, Person>()
+        let p1 = Person { name: "Alice", age: 30 }
+        let p2 = Person { name: "Bob", age: 25 }
+        m.set(1, p1)
+        m.set(2, p2)
+
+        assert(m.len() == 2)
+
+        let got1 = m.get(1) ?? Person { name: "", age: 0 }
+        assert(got1.age == 30)
+        let n1 = got1.name
+        assert(n1 == "Alice")
+
+        let got2 = m.get(2) ?? Person { name: "", age: 0 }
+        assert(got2.age == 25)
+        let n2 = got2.name
+        assert(n2 == "Bob")
+    }
+
+    test "map<i64, Person> update RC value" {
+        let m = Map.new<i64, Person>()
+        let p1 = Person { name: "Alice", age: 30 }
+        m.set(1, p1)
+
+        let p2 = Person { name: "Alice-Updated", age: 31 }
+        m.set(1, p2)
+        assert(m.len() == 1)
+
+        let got = m.get(1) ?? Person { name: "", age: 0 }
+        assert(got.age == 31)
+        let n = got.name
+        assert(n == "Alice-Updated")
+    }
+
+    test "map<string, Person> string key with RC value" {
+        let m = Map.new<string, Person>()
+        let p1 = Person { name: "Alice", age: 30 }
+        let p2 = Person { name: "Bob", age: 25 }
+        m.set("first", p1)
+        m.set("second", p2)
+
+        assert(m.len() == 2)
+
+        let got = m.get("first") ?? Person { name: "", age: 0 }
+        assert(got.age == 30)
+        let n = got.name
+        assert(n == "Alice")
+
+        assert(m.get("missing") == nil)
+    }
+}

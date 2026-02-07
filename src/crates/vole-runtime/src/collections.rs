@@ -202,7 +202,14 @@ impl VoleMap {
         let eq_mode = self.eq_mode;
         self.table
             .find(hash, |(_, k, _)| eq_mode.eq(*k, key))
-            .map(|(_, _, v)| *v)
+            .map(|(_, _, v)| {
+                // rc_inc the returned value so the caller gets its own reference.
+                // The map retains its reference; the caller will rc_dec at scope exit.
+                if self.value_is_rc {
+                    rc_inc_raw(*v);
+                }
+                *v
+            })
     }
 
     pub fn set(&mut self, key: i64, key_hash: i64, value: i64) {
@@ -213,22 +220,23 @@ impl VoleMap {
         if let Some((_, _, v)) = self.table.find_mut(hash, |(_, k, _)| eq_mode.eq(*k, key)) {
             let old_value = *v;
             *v = value;
-            // Overwrite: dec the evicted old value, caller transferred ownership of new value.
-            // The key stays — caller's key ref is consumed but we don't need to inc (existing key
-            // in the table keeps its ref). We dec the caller's key since we're not storing it.
+            // Overwrite: inc the new value (map takes its own reference),
+            // dec the evicted old value. The existing key in the table stays.
             if self.value_is_rc {
+                rc_inc_raw(value);
                 rc_dec_raw(old_value);
-            }
-            if self.key_is_rc {
-                // Caller transferred ownership of the key, but we already have this key.
-                // Dec the caller's key since we're not keeping the duplicate.
-                rc_dec_raw(key);
             }
             return;
         }
 
-        // Insert new entry — caller transfers ownership of both key and value.
-        // No inc needed.
+        // Insert new entry — map takes its own reference via rc_inc.
+        // The caller retains its own reference and will rc_dec at scope exit.
+        if self.key_is_rc {
+            rc_inc_raw(key);
+        }
+        if self.value_is_rc {
+            rc_inc_raw(value);
+        }
         self.table
             .insert_unique(hash, (hash, key, value), |(h, _, _)| *h);
     }
@@ -461,15 +469,16 @@ impl VoleSet {
             .find(hash, |(_, v)| eq_mode.eq(*v, value))
             .is_some()
         {
-            // Caller transferred ownership but we already have this value.
-            // Dec the duplicate since we're not keeping it.
-            if self.elem_is_rc {
-                rc_dec_raw(value);
-            }
+            // Already present - the set keeps its existing reference,
+            // the caller keeps its own reference. No RC changes needed.
             return false;
         }
 
-        // Insert new entry — caller transfers ownership, no inc needed.
+        // Insert new entry — set takes its own reference via rc_inc.
+        // The caller retains its own reference and will rc_dec at scope exit.
+        if self.elem_is_rc {
+            rc_inc_raw(value);
+        }
         self.table.insert_unique(hash, (hash, value), |(h, _)| *h);
         true
     }

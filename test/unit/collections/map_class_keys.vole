@@ -1,0 +1,82 @@
+// Test: Map with class types as keys
+// Classes with methods (not just data) as Map keys.
+// Note: Classes with RC fields as keys crash (vol-ofmb).
+
+class Color {
+    r: i64,
+    g: i64,
+    b: i64,
+
+    func brightness() -> i64 {
+        return self.r + self.g + self.b
+    }
+
+    func is_dark() -> bool {
+        return self.brightness() < 128
+    }
+}
+
+implement Hashable for Color {
+    func hash() -> i64 {
+        return self.r * 65536 + self.g * 256 + self.b
+    }
+}
+
+implement Equatable for Color {
+    func equals(other: Color) -> bool {
+        return self.r == other.r && self.g == other.g && self.b == other.b
+    }
+}
+
+tests {
+    test "map<Color, string> class with methods as key" {
+        let m = Map.new<Color, string>()
+        let red = Color { r: 255, g: 0, b: 0 }
+        let green = Color { r: 0, g: 255, b: 0 }
+        let blue = Color { r: 0, g: 0, b: 255 }
+
+        m.set(red, "red")
+        m.set(green, "green")
+        m.set(blue, "blue")
+
+        assert(m.len() == 3)
+        assert((m.get(red) ?? "") == "red")
+        assert((m.get(green) ?? "") == "green")
+        assert((m.get(blue) ?? "") == "blue")
+
+        // Equal-but-different instance lookup
+        let red2 = Color { r: 255, g: 0, b: 0 }
+        assert((m.get(red2) ?? "") == "red")
+        assert(m.contains_key(red2))
+    }
+
+    test "map<Color, i64> class methods still work on keys" {
+        let m = Map.new<Color, i64>()
+        let dark = Color { r: 10, g: 10, b: 10 }
+        let bright = Color { r: 200, g: 200, b: 200 }
+
+        m.set(dark, dark.brightness())
+        m.set(bright, bright.brightness())
+
+        assert((m.get(dark) ?? 0) == 30)
+        assert((m.get(bright) ?? 0) == 600)
+        assert(dark.is_dark())
+        assert(!bright.is_dark())
+    }
+
+    test "map<Color, string> remove" {
+        let m = Map.new<Color, string>()
+        let red = Color { r: 255, g: 0, b: 0 }
+        let green = Color { r: 0, g: 255, b: 0 }
+
+        m.set(red, "red")
+        m.set(green, "green")
+        assert(m.len() == 2)
+
+        let removed = m.remove(red)
+        assert((removed ?? "") == "red")
+        assert(m.len() == 1)
+        assert(m.get(red) == nil)
+        assert((m.get(green) ?? "") == "green")
+    }
+}
