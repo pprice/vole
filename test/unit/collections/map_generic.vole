@@ -134,4 +134,48 @@ tests {
         assert(m.contains_key("x"))
         assert(m.contains_key("z"))
     }
+
+    test "map<string, string> is_empty" {
+        let m = Map.new<string, string>()
+        assert(m.is_empty())
+
+        m.set("k", "v")
+        assert(!m.is_empty())
+    }
+
+    test "map<string, i64> clear" {
+        let m = Map.new<string, i64>()
+        m.set("a", 1)
+        m.set("b", 2)
+        m.set("c", 3)
+        assert(m.len() == 3)
+
+        m.clear()
+        assert(m.len() == 0)
+        assert(m.is_empty())
+        assert(m.get("a") == nil)
+    }
+
+    test "map<Point, i64> remove missing" {
+        let m = Map.new<Point, i64>()
+        let p = Point { x: 1, y: 2 }
+        m.set(p, 42)
+
+        let missing = Point { x: 99, y: 99 }
+        assert(m.remove(missing) == nil)
+        assert(m.len() == 1)
+    }
+
+    test "map<Point, i64> contains_key" {
+        let m = Map.new<Point, i64>()
+        let p1 = Point { x: 1, y: 2 }
+        let p2 = Point { x: 3, y: 4 }
+        m.set(p1, 10)
+        m.set(p2, 20)
+
+        assert(m.contains_key(p1))
+        assert(m.contains_key(p2))
+        let missing = Point { x: 99, y: 99 }
+        assert(!m.contains_key(missing))
+    }
 }

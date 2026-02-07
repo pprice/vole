@@ -130,6 +130,40 @@ tests {
 
     // ---- Set operations with native eq ----
 
+    test "map<i64, i64> is_empty and clear native eq" {
+        let m = Map.new<i64, i64>()
+        assert(m.is_empty())
+
+        m.set(1, 10)
+        m.set(2, 20)
+        assert(!m.is_empty())
+
+        m.clear()
+        assert(m.is_empty())
+        assert(m.len() == 0)
+        assert(m.get(1) == nil)
+    }
+
+    test "map<string, string> remove missing native eq" {
+        let m = Map.new<string, string>()
+        m.set("x", "X")
+        assert(m.remove("y") == nil)
+        assert(m.len() == 1)
+    }
+
+    test "set<i64> is_empty and clear native eq" {
+        let s = Set.new<i64>()
+        assert(s.is_empty())
+
+        s.add(1)
+        s.add(2)
+        assert(!s.is_empty())
+
+        s.clear()
+        assert(s.is_empty())
+        assert(s.len() == 0)
+    }
+
     test "set<i64> union and intersection" {
         let a = Set.new<i64>()
         a.add(1)

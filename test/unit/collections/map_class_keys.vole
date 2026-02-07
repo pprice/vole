@@ -79,4 +79,56 @@ tests {
         assert(m.get(red) == nil)
         assert((m.get(green) ?? "") == "green")
     }
+
+    test "map<Color, string> get missing" {
+        let m = Map.new<Color, string>()
+        let red = Color { r: 255, g: 0, b: 0 }
+        m.set(red, "red")
+
+        let missing = Color { r: 1, g: 2, b: 3 }
+        assert(m.get(missing) == nil)
+    }
+
+    test "map<Color, string> update" {
+        let m = Map.new<Color, string>()
+        let red = Color { r: 255, g: 0, b: 0 }
+        m.set(red, "crimson")
+        assert((m.get(red) ?? "") == "crimson")
+
+        m.set(red, "scarlet")
+        assert(m.len() == 1)
+        assert((m.get(red) ?? "") == "scarlet")
+    }
+
+    test "map<Color, string> contains_key missing" {
+        let m = Map.new<Color, string>()
+        let red = Color { r: 255, g: 0, b: 0 }
+        m.set(red, "red")
+
+        let missing = Color { r: 0, g: 0, b: 0 }
+        assert(!m.contains_key(missing))
+    }
+
+    test "map<Color, string> remove missing" {
+        let m = Map.new<Color, string>()
+        let red = Color { r: 255, g: 0, b: 0 }
+        m.set(red, "red")
+
+        let missing = Color { r: 0, g: 0, b: 0 }
+        assert(m.remove(missing) == nil)
+        assert(m.len() == 1)
+    }
+
+    test "map<Color, string> is_empty and clear" {
+        let m = Map.new<Color, string>()
+        assert(m.is_empty())
+
+        let c = Color { r: 1, g: 2, b: 3 }
+        m.set(c, "test")
+        assert(!m.is_empty())
+
+        m.clear()
+        assert(m.is_empty())
+        assert(m.len() == 0)
+    }
 }

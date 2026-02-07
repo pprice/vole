@@ -115,4 +115,82 @@ tests {
 
         assert(m.get("missing") == nil)
     }
+
+    test "map<i64, Point> contains_key" {
+        let m = Map.new<i64, Point>()
+        let p = Point { x: 5, y: 10 }
+        m.set(1, p)
+
+        assert(m.contains_key(1))
+        assert(!m.contains_key(2))
+    }
+
+    test "map<i64, Point> remove" {
+        let m = Map.new<i64, Point>()
+        let p1 = Point { x: 1, y: 2 }
+        let p2 = Point { x: 3, y: 4 }
+        m.set(1, p1)
+        m.set(2, p2)
+
+        let removed = m.remove(1) ?? Point { x: 0, y: 0 }
+        assert(removed.x == 1)
+        assert(removed.y == 2)
+        assert(m.len() == 1)
+        assert(!m.contains_key(1))
+        assert(m.contains_key(2))
+    }
+
+    test "map<i64, Person> remove with RC value" {
+        let m = Map.new<i64, Person>()
+        let p1 = Person { name: "Alice", age: 30 }
+        let p2 = Person { name: "Bob", age: 25 }
+        m.set(1, p1)
+        m.set(2, p2)
+
+        let removed = m.remove(1) ?? Person { name: "", age: 0 }
+        assert(removed.age == 30)
+        let rn = removed.name
+        assert(rn == "Alice")
+        assert(m.len() == 1)
+        assert(m.get(1) == nil)
+    }
+
+    test "map<i64, Point> remove missing" {
+        let m = Map.new<i64, Point>()
+        let p = Point { x: 1, y: 2 }
+        m.set(1, p)
+
+        assert(m.remove(999) == nil)
+        assert(m.len() == 1)
+    }
+
+    test "map<i64, Color> is_empty and clear" {
+        let m = Map.new<i64, Color>()
+        assert(m.is_empty())
+
+        let c = Color { r: 1, g: 2, b: 3 }
+        m.set(1, c)
+        assert(!m.is_empty())
+        assert(m.len() == 1)
+
+        m.clear()
+        assert(m.is_empty())
+        assert(m.len() == 0)
+        assert(m.get(1) == nil)
+    }
+
+    test "map<i64, Person> clear with RC values" {
+        let m = Map.new<i64, Person>()
+        let p1 = Person { name: "Alice", age: 30 }
+        let p2 = Person { name: "Bob", age: 25 }
+        m.set(1, p1)
+        m.set(2, p2)
+        assert(m.len() == 2)
+
+        m.clear()
+        assert(m.len() == 0)
+        assert(m.is_empty())
+        assert(m.get(1) == nil)
+        assert(m.get(2) == nil)
+    }
 }

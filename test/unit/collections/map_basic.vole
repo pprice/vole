@@ -69,4 +69,15 @@ tests {
         assert(m.len() == 1)
         assert(m.get(1) == 999)
     }
+
+    test "map::with_capacity" {
+        let m = Map.with_capacity<i64, i64>(100)
+        assert(m.len() == 0)
+        assert(m.is_empty())
+        m.set(1, 10)
+        assert(m.len() == 1)
+        assert(m.get(1) == 10)
+    }
+
+    // NOTE: keys(), values(), entries(), iter() segfault (vol-i5za)
 }

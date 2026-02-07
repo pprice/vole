@@ -51,9 +51,28 @@ tests {
         assert(got1_new.x == 111)
         assert(got1_new.y == 222)
 
+        // Contains key
+        assert(m.contains_key(k1))
+        assert(m.contains_key(k2))
+        let missing = Point { x: 99, y: 99 }
+        assert(!m.contains_key(missing))
+
+        // Get missing
+        assert(m.get(missing) == nil)
+
         // Remove
         _ = m.remove(k1)
         assert(m.len() == 1)
         assert(m.get(k1) == nil)
+
+        // Remove missing
+        assert(m.remove(missing) == nil)
+        assert(m.len() == 1)
+
+        // is_empty and clear
+        assert(!m.is_empty())
+        m.clear()
+        assert(m.is_empty())
+        assert(m.len() == 0)
     }
 }
