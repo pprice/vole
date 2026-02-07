@@ -406,7 +406,7 @@ impl Cg<'_, '_, '_> {
     /// Construct a union value on the heap (for storing in class fields).
     /// Unlike the stack-based construct_union_id, this allocates on the heap so the
     /// union persists beyond the current function's stack frame.
-    fn construct_union_heap_id(
+    pub(crate) fn construct_union_heap_id(
         &mut self,
         value: CompiledValue,
         union_type_id: TypeId,

@@ -869,8 +869,27 @@ impl Analyzer {
                 .cloned()
         })?;
 
-        let return_type_id = method_impl.func_type.return_type_id;
-        let func_type_id = method_impl.func_type.intern(&mut self.type_arena_mut());
+        // For array methods, substitute Inference placeholders with the actual element type.
+        // Builtin array methods are registered with Placeholder(Inference) for the element type
+        // (e.g. push(Inference) -> void), which must be replaced with the concrete element type.
+        let array_elem_type = self.type_arena().unwrap_array(object_type_id);
+        let func_type = if let Some(elem_type) = array_elem_type {
+            let mut arena = self.type_arena_mut();
+            let new_params: crate::type_arena::TypeIdVec = method_impl
+                .func_type
+                .params_id
+                .iter()
+                .map(|&p| arena.substitute_inference(p, elem_type))
+                .collect();
+            let new_ret =
+                arena.substitute_inference(method_impl.func_type.return_type_id, elem_type);
+            FunctionType::from_ids(&new_params, new_ret, method_impl.func_type.is_closure)
+        } else {
+            method_impl.func_type.clone()
+        };
+
+        let return_type_id = func_type.return_type_id;
+        let func_type_id = func_type.intern(&mut self.type_arena_mut());
 
         // Compute concrete_return_hint for builtin iterator methods.
         let concrete_return_hint =

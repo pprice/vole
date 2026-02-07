@@ -971,6 +971,18 @@ impl Cg<'_, '_, '_> {
             // Dynamic array assignment
             let idx = self.expr(index)?;
 
+            // If the array element type is a union, box the value into a union pointer.
+            let elem_type = self.arena().unwrap_array(arr.type_id);
+            let val = if let Some(elem_id) = elem_type {
+                if self.arena().is_union(elem_id) && !self.arena().is_union(val.type_id) {
+                    self.construct_union_heap_id(val, elem_id)?
+                } else {
+                    val
+                }
+            } else {
+                val
+            };
+
             // i128 cannot fit in a TaggedValue (u64 payload)
             if val.ty == types::I128 {
                 return Err(CodegenError::type_mismatch(

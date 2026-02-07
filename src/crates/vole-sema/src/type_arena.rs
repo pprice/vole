@@ -1825,6 +1825,91 @@ impl TypeArena {
             | SemaType::Structural(_) => ty,
         }
     }
+
+    /// Substitute Inference placeholders with a concrete type.
+    ///
+    /// Used when resolving builtin methods on generic types like Array<T>:
+    /// the registered method signature has Placeholder(Inference) for the
+    /// element type, which must be replaced with the actual element type.
+    pub fn substitute_inference(&mut self, ty: TypeId, concrete: TypeId) -> TypeId {
+        match self.get(ty).clone() {
+            SemaType::Placeholder(PlaceholderKind::Inference) => concrete,
+
+            SemaType::Array(elem) => {
+                let new_elem = self.substitute_inference(elem, concrete);
+                self.array(new_elem)
+            }
+
+            SemaType::Union(variants) => {
+                let new_variants: TypeIdVec = variants
+                    .iter()
+                    .map(|&v| self.substitute_inference(v, concrete))
+                    .collect();
+                self.union(new_variants)
+            }
+
+            SemaType::Tuple(elements) => {
+                let new_elements: TypeIdVec = elements
+                    .iter()
+                    .map(|&e| self.substitute_inference(e, concrete))
+                    .collect();
+                self.tuple(new_elements)
+            }
+
+            SemaType::Function {
+                params,
+                ret,
+                is_closure,
+            } => {
+                let new_params: TypeIdVec = params
+                    .iter()
+                    .map(|&p| self.substitute_inference(p, concrete))
+                    .collect();
+                let new_ret = self.substitute_inference(ret, concrete);
+                self.function(new_params, new_ret, is_closure)
+            }
+
+            SemaType::Class {
+                type_def_id,
+                type_args,
+            } => {
+                let new_args: TypeIdVec = type_args
+                    .iter()
+                    .map(|&a| self.substitute_inference(a, concrete))
+                    .collect();
+                self.class(type_def_id, new_args)
+            }
+
+            SemaType::Interface {
+                type_def_id,
+                type_args,
+            } => {
+                let new_args: TypeIdVec = type_args
+                    .iter()
+                    .map(|&a| self.substitute_inference(a, concrete))
+                    .collect();
+                self.interface(type_def_id, new_args)
+            }
+
+            SemaType::RuntimeIterator(elem) => {
+                let new_elem = self.substitute_inference(elem, concrete);
+                self.runtime_iterator(new_elem)
+            }
+
+            SemaType::FixedArray { element, size } => {
+                let new_elem = self.substitute_inference(element, concrete);
+                self.fixed_array(new_elem, size)
+            }
+
+            SemaType::Fallible { success, error } => {
+                let new_success = self.substitute_inference(success, concrete);
+                let new_error = self.substitute_inference(error, concrete);
+                self.fallible(new_success, new_error)
+            }
+
+            _ => ty,
+        }
+    }
 }
 
 impl Default for TypeArena {

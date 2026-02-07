@@ -1,0 +1,119 @@
+// Tests for arrays with union/optional/sentinel element types
+
+sentinel Empty
+sentinel Deleted
+
+class Entry {
+    key: i64,
+    value: i64,
+}
+
+tests {
+    test "array of class | sentinel - push and length" {
+        let arr: [Entry | Empty] = []
+        arr.push(Entry { key: 1, value: 10 })
+        arr.push(Empty)
+        arr.push(Entry { key: 2, value: 20 })
+        assert(arr.length() == 3)
+    }
+
+    test "array of class | sentinel - is check" {
+        let arr: [Entry | Empty] = []
+        arr.push(Entry { key: 1, value: 10 })
+        arr.push(Empty)
+        let a = arr[0]
+        let b = arr[1]
+        assert(a is Entry)
+        assert(b is Empty)
+    }
+
+    test "array of class | sentinel | sentinel - three-way union" {
+        let arr: [Entry | Empty | Deleted] = []
+        arr.push(Empty)
+        arr.push(Entry { key: 5, value: 50 })
+        arr.push(Deleted)
+        assert(arr.length() == 3)
+        assert(arr[0] is Empty)
+        assert(arr[1] is Entry)
+        assert(arr[2] is Deleted)
+    }
+
+    test "array of optional class" {
+        let arr: [Entry?] = []
+        arr.push(Entry { key: 1, value: 10 })
+        arr.push(nil)
+        arr.push(Entry { key: 2, value: 20 })
+        assert(arr.length() == 3)
+        assert(arr[0] != nil)
+        assert(arr[1] == nil)
+        assert(arr[2] != nil)
+    }
+
+    test "array index assign with sentinel" {
+        let arr: [Entry | Empty] = []
+        arr.push(Entry { key: 1, value: 10 })
+        arr.push(Entry { key: 2, value: 20 })
+        arr[0] = Empty
+        assert(arr[0] is Empty)
+        assert(arr[1] is Entry)
+    }
+
+    test "match on union array element" {
+        let arr: [i64 | Empty] = []
+        arr.push(42)
+        arr.push(Empty)
+        let a = arr[0]
+        let result = match a {
+            i64 => "number"
+            Empty => "empty"
+        }
+        assert(result == "number")
+        let b = arr[1]
+        let result2 = match b {
+            i64 => "number"
+            Empty => "empty"
+        }
+        assert(result2 == "empty")
+    }
+
+    test "array of optional i64" {
+        let arr: [i64?] = []
+        arr.push(42)
+        arr.push(nil)
+        arr.push(99)
+        assert(arr.length() == 3)
+        assert(arr[0] != nil)
+        assert(arr[1] == nil)
+        assert(arr[2] != nil)
+    }
+
+    test "array of optional string" {
+        let arr: [string?] = []
+        arr.push("hello")
+        arr.push(nil)
+        arr.push("world")
+        assert(arr.length() == 3)
+        assert(arr[0] != nil)
+        assert(arr[1] == nil)
+    }
+
+    test "array of string | sentinel" {
+        let arr: [string | Empty] = []
+        arr.push("hello")
+        arr.push(Empty)
+        arr.push("world")
+        assert(arr.length() == 3)
+        assert(arr[0] is string)
+        assert(arr[1] is Empty)
+        assert(arr[2] is string)
+    }
+
+    test "array index assign with nil" {
+        let arr: [Entry?] = []
+        arr.push(Entry { key: 1, value: 10 })
+        arr.push(Entry { key: 2, value: 20 })
+        arr[0] = nil
+        assert(arr[0] == nil)
+        assert(arr[1] != nil)
+    }
+}

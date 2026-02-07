@@ -738,6 +738,10 @@ pub(crate) fn array_element_tag_id(ty: TypeId, arena: &TypeArena) -> i64 {
     if arena.is_handle(ty) {
         return 8; // TYPE_RNG / generic handle
     }
+    // Sentinel types (nil, Done, user-defined) are non-RC stack values
+    if arena.is_sentinel(ty) {
+        return 2; // TYPE_I64 - sentinels are small non-RC values
+    }
     match arena.get(ty) {
         ArenaType::Primitive(PrimitiveType::String) => 1, // TYPE_STRING
         ArenaType::Primitive(PrimitiveType::I64)
@@ -749,7 +753,9 @@ pub(crate) fn array_element_tag_id(ty: TypeId, arena: &TypeArena) -> i64 {
         ArenaType::Array(_) => 5,                       // TYPE_ARRAY
         ArenaType::Function { .. } => 6,                // TYPE_CLOSURE
         ArenaType::Class { .. } => 7,                   // TYPE_INSTANCE
-        _ => 2,                                         // default to integer for non-RC types
+        // Union types are stored as heap-allocated tagged pointers (need RC)
+        ArenaType::Union(_) => 7, // TYPE_INSTANCE (heap pointer)
+        _ => 2,                   // default to integer for non-RC types
     }
 }
 

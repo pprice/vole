@@ -917,6 +917,20 @@ impl Cg<'_, '_, '_> {
             value
         };
 
+        // If the array element type is a union, box the value into a union pointer.
+        // Union-element arrays store boxed union pointers so that get returns a
+        // properly typed union value without needing to re-box on read.
+        let elem_type = self.arena().unwrap_array(arr_obj.type_id);
+        let value = if let Some(elem_id) = elem_type {
+            if self.arena().is_union(elem_id) && !self.arena().is_union(value.type_id) {
+                self.construct_union_heap_id(value, elem_id)?
+            } else {
+                value
+            }
+        } else {
+            value
+        };
+
         // Get the runtime function reference
         let push_ref = self.runtime_func_ref(RuntimeFn::ArrayPush)?;
 
