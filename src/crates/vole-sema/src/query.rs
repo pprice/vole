@@ -11,7 +11,10 @@ use std::rc::Rc;
 use crate::entity_defs::{FieldDef, GlobalDef, Implementation, MethodDef, TypeDef};
 use crate::entity_registry::EntityRegistry;
 use crate::expression_data::ExpressionData;
-use crate::generic::{MonomorphCache, MonomorphInstance, MonomorphKey, StaticMethodMonomorphKey};
+use crate::generic::{
+    ClassMethodMonomorphKey, MonomorphCache, MonomorphInstance, MonomorphKey,
+    StaticMethodMonomorphKey,
+};
 use crate::implement_registry::{ExternalMethodInfo, ImplementRegistry};
 use crate::resolution::ResolvedMethod;
 use crate::type_arena::{TypeArena, TypeId};
@@ -92,10 +95,40 @@ impl<'a> ProgramQuery<'a> {
         self.expr_data.get_generic(node)
     }
 
+    /// Get the monomorphization key for a generic class method call
+    #[must_use]
+    pub fn class_method_generic_at(&self, node: NodeId) -> Option<&'a ClassMethodMonomorphKey> {
+        self.expr_data.get_class_method_generic(node)
+    }
+
+    /// Get the monomorphization key for a generic class method call, checking module-local
+    /// NodeId mappings first when `current_module` is provided.
+    #[must_use]
+    pub fn class_method_generic_at_in_module(
+        &self,
+        node: NodeId,
+        current_module: Option<&str>,
+    ) -> Option<&'a ClassMethodMonomorphKey> {
+        self.expr_data
+            .get_class_method_generic_in_module(node, current_module)
+    }
+
     /// Get the monomorphization key for a generic static method call
     #[must_use]
     pub fn static_method_generic_at(&self, node: NodeId) -> Option<&'a StaticMethodMonomorphKey> {
         self.expr_data.get_static_method_generic(node)
+    }
+
+    /// Get the monomorphization key for a generic static method call, checking module-local
+    /// NodeId mappings first when `current_module` is provided.
+    #[must_use]
+    pub fn static_method_generic_at_in_module(
+        &self,
+        node: NodeId,
+        current_module: Option<&str>,
+    ) -> Option<&'a StaticMethodMonomorphKey> {
+        self.expr_data
+            .get_static_method_generic_in_module(node, current_module)
     }
 
     /// Get the virtual module ID for a tests block by its span.

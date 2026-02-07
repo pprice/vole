@@ -1525,6 +1525,16 @@ impl Compiler<'_> {
         Ok(())
     }
 
+    /// Check if a class method monomorph is abstract (contains TypeParam substitutions).
+    /// Abstract entries are templates from generic class body analysis and are not compilable.
+    fn is_abstract_class_method_monomorph(&self, instance: &ClassMethodMonomorphInstance) -> bool {
+        let arena = self.analyzed.type_arena();
+        instance
+            .substitutions
+            .values()
+            .any(|&type_id| arena.unwrap_type_param(type_id).is_some())
+    }
+
     /// Declare all monomorphized class method instances
     fn declare_class_method_monomorphized_instances(&mut self) -> CodegenResult<()> {
         // Collect instances to avoid borrow issues
@@ -1542,6 +1552,11 @@ impl Compiler<'_> {
         for instance in instances {
             // External methods are runtime functions - no declaration needed
             if instance.external_info.is_some() {
+                continue;
+            }
+
+            // Skip abstract monomorph templates (e.g., T -> TypeParam(T)).
+            if self.is_abstract_class_method_monomorph(&instance) {
                 continue;
             }
 
@@ -1579,6 +1594,11 @@ impl Compiler<'_> {
                     method_name = ?instance.method_name,
                     "skipping external method - calls runtime function directly"
                 );
+                continue;
+            }
+
+            // Skip abstract monomorph templates (e.g., T -> TypeParam(T)).
+            if self.is_abstract_class_method_monomorph(&instance) {
                 continue;
             }
 

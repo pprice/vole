@@ -1,0 +1,16 @@
+class Box<T: Hashable> {
+    value: T,
+    statics {
+        func new(v: T) -> Box<T> { return Box { value: v } }
+    }
+    func outer() -> i64 { return self.inner() }
+    func inner() -> i64 { return self.value.hash() }
+}
+
+tests {
+    test "self method call chains in generic same-file class" {
+        let b = Box.new<i64>(42)
+        let h = b.outer()
+        assert(h == 42.hash())
+    }
+}

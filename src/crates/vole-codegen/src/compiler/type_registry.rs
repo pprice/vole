@@ -550,6 +550,7 @@ impl Compiler<'_> {
         let type_name_str = module_interner.resolve(type_decl.name());
         let type_kind = type_decl.type_kind();
         let is_class = type_decl.is_class();
+        let is_generic_type = type_decl.has_type_params();
 
         tracing::debug!(type_name = %type_name_str, type_kind, "finalize_module_type called");
 
@@ -579,13 +580,19 @@ impl Compiler<'_> {
             register_instance_type(type_id, field_type_tags);
         }
 
-        // Register instance methods using module interner
-        let method_infos = self.register_module_type_instance_methods(
-            type_decl,
-            type_def_id,
-            module_interner,
-            type_name_str,
-        );
+        // Register instance methods using module interner.
+        // Generic types are compiled via monomorphized instances, so skip direct
+        // method declaration here to avoid declaring functions that never compile.
+        let method_infos = if is_generic_type {
+            FxHashMap::default()
+        } else {
+            self.register_module_type_instance_methods(
+                type_decl,
+                type_def_id,
+                module_interner,
+                type_name_str,
+            )
+        };
 
         // Register type metadata
         let vole_type_id = self
@@ -610,8 +617,9 @@ impl Compiler<'_> {
             },
         );
 
-        // Register static methods
-        if let Some(statics) = type_decl.statics() {
+        // Register static methods for non-generic types.
+        // Generic type statics are emitted from static-method monomorph instances.
+        if !is_generic_type && let Some(statics) = type_decl.statics() {
             self.register_module_type_static_methods(
                 statics,
                 type_def_id,

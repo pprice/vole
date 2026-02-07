@@ -1070,6 +1070,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .query()
             .expr_data()
             .get_substituted_return_type(*node_id)
+            .map(|ty| self.try_substitute_type(ty))
     }
 
     /// Get declared variable type for let statements with explicit type annotations.

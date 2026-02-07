@@ -795,4 +795,258 @@ impl Analyzer {
 
         Ok(())
     }
+
+    /// Propagate concrete type substitutions to class method monomorphs created
+    /// from self-method calls inside generic class methods.
+    ///
+    /// When sema analyzes method bodies, `self` has abstract type params (e.g., `Box<T>`).
+    /// A call like `self.inner()` records a monomorph with identity substitutions
+    /// `{T: TypeParam(T)}`. When a concrete monomorph exists for `outer()` with `{T: i64}`,
+    /// this pass creates a matching concrete monomorph for `inner()` with `{T: i64}`.
+    ///
+    /// Iterates to fixpoint to handle transitive chains: a() -> self.b() -> self.c().
+    pub(super) fn propagate_class_method_monomorphs(&mut self) {
+        loop {
+            let new_instances = self.derive_concrete_class_method_monomorphs();
+            if new_instances.is_empty() {
+                break;
+            }
+
+            for (key, instance) in new_instances {
+                self.entity_registry_mut()
+                    .class_method_monomorph_cache
+                    .insert(key, instance);
+            }
+        }
+    }
+
+    /// Single iteration: derive concrete monomorphs from identity-substituted ones.
+    ///
+    /// Returns a list of (key, instance) pairs to insert into the cache.
+    fn derive_concrete_class_method_monomorphs(
+        &mut self,
+    ) -> Vec<(
+        ClassMethodMonomorphKey,
+        crate::generic::ClassMethodMonomorphInstance,
+    )> {
+        let all_instances: Vec<crate::generic::ClassMethodMonomorphInstance> = self
+            .entity_registry()
+            .class_method_monomorph_cache
+            .collect_instances();
+
+        // Partition into concrete and identity substitutions.
+        let mut concrete_subs_by_class: FxHashMap<NameId, Vec<FxHashMap<NameId, ArenaTypeId>>> =
+            FxHashMap::default();
+        let mut identity_instances: Vec<&crate::generic::ClassMethodMonomorphInstance> =
+            Vec::new();
+
+        {
+            let arena = self.type_arena();
+            for inst in &all_instances {
+                let has_type_param_value = inst
+                    .substitutions
+                    .values()
+                    .any(|&v| arena.unwrap_type_param(v).is_some());
+                if has_type_param_value {
+                    identity_instances.push(inst);
+                } else if !inst.substitutions.is_empty() {
+                    concrete_subs_by_class
+                        .entry(inst.class_name)
+                        .or_default()
+                        .push(inst.substitutions.clone());
+                }
+            }
+        }
+
+        for subs_list in concrete_subs_by_class.values_mut() {
+            subs_list.sort_by(|a, b| format!("{a:?}").cmp(&format!("{b:?}")));
+            subs_list.dedup();
+        }
+
+        let mut new_instances = Vec::new();
+
+        for identity_inst in &identity_instances {
+            let Some(concrete_subs_list) = concrete_subs_by_class.get(&identity_inst.class_name)
+            else {
+                continue;
+            };
+
+            for concrete_subs in concrete_subs_list {
+                let composed_subs =
+                    self.compose_substitutions(&identity_inst.substitutions, concrete_subs);
+
+                let Some(key) = self.build_class_method_monomorph_key(
+                    identity_inst.class_name,
+                    identity_inst.method_name,
+                    &composed_subs,
+                ) else {
+                    continue;
+                };
+
+                if self
+                    .entity_registry()
+                    .class_method_monomorph_cache
+                    .contains(&key)
+                {
+                    continue;
+                }
+
+                if new_instances
+                    .iter()
+                    .any(|(existing_key, _)| *existing_key == key)
+                {
+                    continue;
+                }
+
+                let type_keys = key.type_keys.clone();
+                let Some(instance) = self.create_derived_class_method_monomorph(
+                    identity_inst,
+                    &composed_subs,
+                    &type_keys,
+                ) else {
+                    continue;
+                };
+
+                tracing::debug!(
+                    class = ?identity_inst.class_name,
+                    method = ?identity_inst.method_name,
+                    subs = ?composed_subs,
+                    "propagated concrete class method monomorph"
+                );
+
+                new_instances.push((key, instance));
+            }
+        }
+
+        new_instances
+    }
+
+    /// Compose two substitution maps: apply `concrete` to the values of `identity`.
+    ///
+    /// Example:
+    /// identity = {T: TypeParam(T)}, concrete = {T: i64} => {T: i64}
+    fn compose_substitutions(
+        &self,
+        identity: &FxHashMap<NameId, ArenaTypeId>,
+        concrete: &FxHashMap<NameId, ArenaTypeId>,
+    ) -> FxHashMap<NameId, ArenaTypeId> {
+        let arena = self.type_arena();
+        let mut composed = FxHashMap::default();
+
+        for (&name_id, &type_id) in identity {
+            if let Some(param_name_id) = arena.unwrap_type_param(type_id)
+                && let Some(&concrete_type_id) = concrete.get(&param_name_id)
+            {
+                composed.insert(name_id, concrete_type_id);
+                continue;
+            }
+            composed.insert(name_id, type_id);
+        }
+
+        composed
+    }
+
+    /// Build a class-method monomorph key using the class's declared type param order.
+    fn build_class_method_monomorph_key(
+        &self,
+        class_name: NameId,
+        method_name: NameId,
+        substitutions: &FxHashMap<NameId, ArenaTypeId>,
+    ) -> Option<ClassMethodMonomorphKey> {
+        let registry = self.entity_registry();
+        let type_def_id = registry.type_by_name(class_name)?;
+        let generic_info = registry.type_generic_info(type_def_id)?;
+        let type_keys: Vec<ArenaTypeId> = generic_info
+            .type_params
+            .iter()
+            .filter_map(|tp| substitutions.get(&tp.name_id).copied())
+            .collect();
+        Some(ClassMethodMonomorphKey::new(
+            class_name,
+            method_name,
+            type_keys,
+        ))
+    }
+
+    /// Create a derived concrete class-method monomorph instance.
+    fn create_derived_class_method_monomorph(
+        &mut self,
+        identity_inst: &crate::generic::ClassMethodMonomorphInstance,
+        concrete_subs: &FxHashMap<NameId, ArenaTypeId>,
+        type_keys: &[ArenaTypeId],
+    ) -> Option<crate::generic::ClassMethodMonomorphInstance> {
+        let type_def_id = self.entity_registry().type_by_name(identity_inst.class_name)?;
+        let method_id = self
+            .entity_registry()
+            .find_method_on_type(type_def_id, identity_inst.method_name)?;
+        let signature_id = self.entity_registry().method_signature(method_id);
+
+        let (params, ret, is_closure) = {
+            let arena = self.type_arena();
+            let (params, ret, is_closure) = arena.unwrap_function(signature_id)?;
+            (params.to_vec(), ret, is_closure)
+        };
+
+        let (subst_params, subst_ret) = {
+            let mut arena = self.type_arena_mut();
+            let subst_params = params
+                .iter()
+                .map(|&param_type_id| arena.substitute(param_type_id, concrete_subs))
+                .collect::<Vec<_>>();
+            let subst_ret = arena.substitute(ret, concrete_subs);
+            (subst_params, subst_ret)
+        };
+        let func_type = FunctionType::from_ids(&subst_params, subst_ret, is_closure);
+
+        // Eagerly substitute field types so codegen can do immutable lookup_substitute.
+        let generic_info = { self.entity_registry().type_generic_info(type_def_id) };
+        if let Some(generic_info) = generic_info {
+            let field_types = generic_info.field_types;
+            let mut arena = self.type_arena_mut();
+            for field_type_id in field_types {
+                arena.substitute(field_type_id, concrete_subs);
+            }
+        }
+
+        let kind = { self.entity_registry().get_type(type_def_id).kind };
+        let type_args: crate::type_arena::TypeIdVec = type_keys.iter().copied().collect();
+        let self_type = match kind {
+            TypeDefKind::Class => self.type_arena_mut().class(type_def_id, type_args),
+            TypeDefKind::Struct | TypeDefKind::Sentinel => {
+                self.type_arena_mut().struct_type(type_def_id, type_args)
+            }
+            _ => return None,
+        };
+
+        let instance_id = self
+            .entity_registry_mut()
+            .class_method_monomorph_cache
+            .next_unique_id();
+        let class_name_str = self
+            .name_table()
+            .last_segment_str(identity_inst.class_name)
+            .unwrap_or_else(|| "class".to_string());
+        let method_name_str = self
+            .name_table()
+            .last_segment_str(identity_inst.method_name)
+            .unwrap_or_else(|| "method".to_string());
+        let mangled_name_str = format!(
+            "{}__method_{}__mono_{}",
+            class_name_str, method_name_str, instance_id
+        );
+        let mangled_name = self
+            .name_table_mut()
+            .intern_raw(self.current_module, &[&mangled_name_str]);
+
+        Some(crate::generic::ClassMethodMonomorphInstance {
+            class_name: identity_inst.class_name,
+            method_name: identity_inst.method_name,
+            mangled_name,
+            instance_id,
+            func_type,
+            substitutions: concrete_subs.clone(),
+            external_info: identity_inst.external_info.clone(),
+            self_type,
+        })
+    }
 }

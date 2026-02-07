@@ -318,6 +318,14 @@ pub struct AnalyzerContext {
     /// Per-module is_check_results (keyed by module path -> NodeId -> IsCheckResult).
     /// Stored separately since NodeIds are per-program and can't be merged into main is_check_results.
     pub module_is_check_results: RefCell<FxHashMap<String, FxHashMap<NodeId, IsCheckResult>>>,
+    /// Per-module class method generic call keys (module path -> NodeId -> ClassMethodMonomorphKey).
+    /// Needed because NodeIds are file-local and collide across modules.
+    pub module_class_method_calls:
+        RefCell<FxHashMap<String, FxHashMap<NodeId, ClassMethodMonomorphKey>>>,
+    /// Per-module static method generic call keys (module path -> NodeId -> StaticMethodMonomorphKey).
+    /// Needed because NodeIds are file-local and collide across modules.
+    pub module_static_method_calls:
+        RefCell<FxHashMap<String, FxHashMap<NodeId, StaticMethodMonomorphKey>>>,
     /// Optional shared cache for module analysis results.
     /// When set, modules are cached after analysis and reused across Analyzer instances.
     pub module_cache: Option<Rc<RefCell<ModuleCache>>>,
@@ -337,6 +345,8 @@ impl AnalyzerContext {
             module_expr_types: RefCell::new(FxHashMap::default()),
             module_method_resolutions: RefCell::new(FxHashMap::default()),
             module_is_check_results: RefCell::new(FxHashMap::default()),
+            module_class_method_calls: RefCell::new(FxHashMap::default()),
+            module_static_method_calls: RefCell::new(FxHashMap::default()),
             module_cache: cache,
             modules_in_progress: RefCell::new(FxHashSet::default()),
         }
@@ -560,6 +570,8 @@ impl Analyzer {
         let module_expr_types = self.ctx.module_expr_types.borrow().clone();
         let module_method_resolutions = self.ctx.module_method_resolutions.borrow().clone();
         let module_is_check_results = self.ctx.module_is_check_results.borrow().clone();
+        let module_class_method_calls = self.ctx.module_class_method_calls.borrow().clone();
+        let module_static_method_calls = self.ctx.module_static_method_calls.borrow().clone();
         let expression_data = ExpressionData::builder()
             .types(self.expr_types)
             .methods(self.method_resolutions.into_inner())
@@ -569,6 +581,8 @@ impl Analyzer {
             .module_types(module_expr_types)
             .module_methods(module_method_resolutions)
             .module_is_check_results(module_is_check_results)
+            .module_class_method_generics(module_class_method_calls)
+            .module_static_method_generics(module_static_method_calls)
             .substituted_return_types(self.substituted_return_types)
             .lambda_defaults(self.lambda_defaults)
             .tests_virtual_modules(self.tests_virtual_modules)
@@ -925,6 +939,11 @@ impl Analyzer {
 
         // Pass 2: type check function bodies and tests
         self.check_declaration_bodies(program, interner)?;
+
+        // Pass 2.5: Propagate concrete substitutions to class method monomorphs.
+        // Generic class bodies record identity monomorphs for self-calls (T -> TypeParam(T)).
+        // This pass derives concrete callee instances (e.g., T -> i64) from concrete callers.
+        self.propagate_class_method_monomorphs();
 
         // Pass 3: analyze monomorphized function bodies to discover nested generic calls
         // This iterates until no new MonomorphInstances are created

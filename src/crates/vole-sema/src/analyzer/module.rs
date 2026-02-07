@@ -489,6 +489,15 @@ impl Analyzer {
             .module_is_check_results
             .borrow_mut()
             .insert(module_key.clone(), sub_analyzer.is_check_results.clone());
+        // Store module-specific class/static method generic keys (NodeIds are per-program)
+        self.ctx
+            .module_class_method_calls
+            .borrow_mut()
+            .insert(module_key.clone(), sub_analyzer.class_method_calls.clone());
+        self.ctx
+            .module_static_method_calls
+            .borrow_mut()
+            .insert(module_key.clone(), sub_analyzer.static_method_calls.clone());
 
         // Now resolve deferred function types after sub-analysis has registered class types
         for (name_id, f) in deferred_functions {

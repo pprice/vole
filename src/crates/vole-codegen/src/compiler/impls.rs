@@ -1537,6 +1537,11 @@ impl Compiler<'_> {
         module_path: &str,
         module_global_inits: &FxHashMap<Symbol, Rc<Expr>>,
     ) -> CodegenResult<()> {
+        // Generic types are compiled via monomorphized instances.
+        if type_decl.has_type_params() {
+            return Ok(());
+        }
+
         let type_name_str = module_interner.resolve(type_decl.name());
         let type_kind = type_decl.type_kind();
         let is_class = type_decl.is_class();

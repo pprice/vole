@@ -42,6 +42,10 @@ pub struct ExpressionData {
     module_methods: FxHashMap<String, FxHashMap<NodeId, ResolvedMethod>>,
     /// Per-module is_check_results (for multi-module compilation)
     module_is_check_results: FxHashMap<String, FxHashMap<NodeId, IsCheckResult>>,
+    /// Per-module class method generic keys (for multi-module compilation)
+    module_class_method_generics: FxHashMap<String, FxHashMap<NodeId, ClassMethodMonomorphKey>>,
+    /// Per-module static method generic keys (for multi-module compilation)
+    module_static_method_generics: FxHashMap<String, FxHashMap<NodeId, StaticMethodMonomorphKey>>,
     /// Substituted return types for generic method calls.
     /// When sema resolves a call like `list.head()` on `List<i32>`, the generic
     /// return type `T` is substituted to `i32`. This map stores the concrete type
@@ -85,6 +89,8 @@ pub struct ExpressionDataBuilder {
     module_types: FxHashMap<String, FxHashMap<NodeId, TypeId>>,
     module_methods: FxHashMap<String, FxHashMap<NodeId, ResolvedMethod>>,
     module_is_check_results: FxHashMap<String, FxHashMap<NodeId, IsCheckResult>>,
+    module_class_method_generics: FxHashMap<String, FxHashMap<NodeId, ClassMethodMonomorphKey>>,
+    module_static_method_generics: FxHashMap<String, FxHashMap<NodeId, StaticMethodMonomorphKey>>,
     substituted_return_types: FxHashMap<NodeId, TypeId>,
     lambda_defaults: FxHashMap<NodeId, LambdaDefaults>,
     tests_virtual_modules: FxHashMap<Span, ModuleId>,
@@ -161,6 +167,30 @@ impl ExpressionDataBuilder {
         self
     }
 
+    /// Set per-module class method monomorphization keys.
+    pub fn module_class_method_generics(
+        mut self,
+        module_class_method_generics: FxHashMap<
+            String,
+            FxHashMap<NodeId, ClassMethodMonomorphKey>,
+        >,
+    ) -> Self {
+        self.module_class_method_generics = module_class_method_generics;
+        self
+    }
+
+    /// Set per-module static method monomorphization keys.
+    pub fn module_static_method_generics(
+        mut self,
+        module_static_method_generics: FxHashMap<
+            String,
+            FxHashMap<NodeId, StaticMethodMonomorphKey>,
+        >,
+    ) -> Self {
+        self.module_static_method_generics = module_static_method_generics;
+        self
+    }
+
     /// Set substituted return types for generic method calls.
     pub fn substituted_return_types(
         mut self,
@@ -208,6 +238,8 @@ impl ExpressionDataBuilder {
             module_types: self.module_types,
             module_methods: self.module_methods,
             module_is_check_results: self.module_is_check_results,
+            module_class_method_generics: self.module_class_method_generics,
+            module_static_method_generics: self.module_static_method_generics,
             substituted_return_types: self.substituted_return_types,
             lambda_defaults: self.lambda_defaults,
             tests_virtual_modules: self.tests_virtual_modules,
@@ -322,6 +354,22 @@ impl ExpressionData {
         self.class_method_generics.get(&node)
     }
 
+    /// Get the monomorphization key for a generic class method call, using module-local
+    /// NodeId space when `current_module` is provided.
+    pub fn get_class_method_generic_in_module(
+        &self,
+        node: NodeId,
+        current_module: Option<&str>,
+    ) -> Option<&ClassMethodMonomorphKey> {
+        if let Some(module) = current_module {
+            return self
+                .module_class_method_generics
+                .get(module)
+                .and_then(|module_keys| module_keys.get(&node));
+        }
+        self.class_method_generics.get(&node)
+    }
+
     /// Set the monomorphization key for a generic class method call
     pub fn set_class_method_generic(&mut self, node: NodeId, key: ClassMethodMonomorphKey) {
         self.class_method_generics.insert(node, key);
@@ -339,6 +387,22 @@ impl ExpressionData {
 
     /// Get the monomorphization key for a generic static method call
     pub fn get_static_method_generic(&self, node: NodeId) -> Option<&StaticMethodMonomorphKey> {
+        self.static_method_generics.get(&node)
+    }
+
+    /// Get the monomorphization key for a generic static method call, using module-local
+    /// NodeId space when `current_module` is provided.
+    pub fn get_static_method_generic_in_module(
+        &self,
+        node: NodeId,
+        current_module: Option<&str>,
+    ) -> Option<&StaticMethodMonomorphKey> {
+        if let Some(module) = current_module {
+            return self
+                .module_static_method_generics
+                .get(module)
+                .and_then(|module_keys| module_keys.get(&node));
+        }
         self.static_method_generics.get(&node)
     }
 

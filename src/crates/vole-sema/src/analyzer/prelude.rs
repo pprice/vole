@@ -136,6 +136,14 @@ impl Analyzer {
                 .module_is_check_results
                 .borrow_mut()
                 .insert(import_path.to_string(), cached.is_check_results.clone());
+            self.ctx
+                .module_class_method_calls
+                .borrow_mut()
+                .insert(import_path.to_string(), cached.class_method_generics.clone());
+            self.ctx
+                .module_static_method_calls
+                .borrow_mut()
+                .insert(import_path.to_string(), cached.static_method_generics.clone());
             return;
         }
 
@@ -186,6 +194,8 @@ impl Analyzer {
                     interner: prelude_interner.clone(),
                     expr_types: sub_analyzer.expr_types.clone(),
                     method_resolutions: sub_analyzer.method_resolutions.clone_inner(),
+                    class_method_generics: sub_analyzer.class_method_calls.clone(),
+                    static_method_generics: sub_analyzer.static_method_calls.clone(),
                     functions_by_name: sub_analyzer.functions_by_name.clone(),
                     is_check_results: sub_analyzer.is_check_results.clone(),
                 },
@@ -257,6 +267,14 @@ impl Analyzer {
             import_path.to_string(),
             sub_analyzer.is_check_results.clone(),
         );
+        self.ctx
+            .module_class_method_calls
+            .borrow_mut()
+            .insert(import_path.to_string(), sub_analyzer.class_method_calls.clone());
+        self.ctx
+            .module_static_method_calls
+            .borrow_mut()
+            .insert(import_path.to_string(), sub_analyzer.static_method_calls.clone());
     }
 
     /// Check if a function name refers to a generic function in a prelude module.

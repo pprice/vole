@@ -1,0 +1,9 @@
+let { Box } = import "./lib"
+
+tests {
+    test "self method call chains in generic module class" {
+        let b = Box.new<i64>(42)
+        let h = b.outer()
+        assert(h == 42.hash())
+    }
+}

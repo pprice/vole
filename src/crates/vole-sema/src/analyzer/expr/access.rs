@@ -1300,12 +1300,33 @@ impl Analyzer {
                 .name_table_mut()
                 .intern_raw(self.current_module, &[&mangled_name_str]);
 
+            // Class method monomorphs must carry a concrete signature.
+            // Leaving TypeParam-based signatures here can produce verifier
+            // mismatches later when branch values are concrete (e.g. i32) but
+            // block params are typed as generic storage words (i64).
+            let substituted_func_type = if substitutions.is_empty() {
+                func_type.clone()
+            } else {
+                let param_type_ids: Vec<ArenaTypeId> = func_type.params_id.iter().copied().collect();
+                let return_type_id: ArenaTypeId = func_type.return_type_id;
+                let (subst_param_ids, subst_return_id) = {
+                    let mut arena = self.type_arena_mut();
+                    let params: Vec<ArenaTypeId> = param_type_ids
+                        .iter()
+                        .map(|&param_id| arena.substitute(param_id, &substitutions))
+                        .collect();
+                    let ret = arena.substitute(return_type_id, &substitutions);
+                    (params, ret)
+                };
+                FunctionType::from_ids(&subst_param_ids, subst_return_id, func_type.is_closure)
+            };
+
             let instance = ClassMethodMonomorphInstance {
                 class_name: class_name_id,
                 method_name: method_name_id,
                 mangled_name,
                 instance_id,
-                func_type: func_type.clone(),
+                func_type: substituted_func_type,
                 substitutions,
                 external_info,
                 self_type: object_type_id,

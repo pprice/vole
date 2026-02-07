@@ -19,6 +19,7 @@ use crate::types::{
 use vole_frontend::{Expr, ExprKind, MethodCallExpr, NodeId, Symbol};
 use vole_identity::NamerLookup;
 use vole_identity::{MethodId, NameId, TypeDefId};
+use vole_sema::generic::ClassMethodMonomorphKey;
 use vole_sema::resolution::ResolvedMethod;
 use vole_sema::type_arena::TypeId;
 
@@ -403,12 +404,10 @@ impl Cg<'_, '_, '_> {
             })?;
             let type_name_id = self.query().get_type(type_def_id).name_id;
             let resolved_method_name_id = resolved.method_name_id();
-            let func_key = *self
+            let func_key = self
                 .method_func_keys()
                 .get(&(type_name_id, resolved_method_name_id))
-                .ok_or_else(|| {
-                    format!("Method {} not found in method_func_keys", method_name_str)
-                })?;
+                .copied();
             (func_key, resolved.return_type_id())
         } else {
             // Fallback path for monomorphized context: derive type_def_id from object type.
@@ -459,13 +458,6 @@ impl Cg<'_, '_, '_> {
                 .get(&(type_name_id, method_name_id))
                 .copied();
 
-            let Some(func_key) = func_key else {
-                return Err(CodegenError::not_found(
-                    "method",
-                    format!("{} (fallback path)", method_name_str),
-                ));
-            };
-
             // Get return type from entity registry
             let return_type_id = self
                 .analyzed()
@@ -511,21 +503,59 @@ impl Cg<'_, '_, '_> {
         // Check if this is a monomorphized class method call
         // If so, use the monomorphized method's func_key instead
         let (method_func_ref, is_generic_class) = if let Some(monomorph_key) = self
-            .analyzed()
-            .expression_data
-            .get_class_method_generic(expr_id)
+            .query()
+            .class_method_generic_at_in_module(expr_id, current_module_path.as_deref())
         {
+            // Calls inside generic class methods are recorded with abstract keys
+            // (TypeParam type_keys). In concrete monomorphized contexts, rewrite
+            // those keys using the current substitution map before cache lookup.
+            let effective_key = if let Some(subs) = self.substitutions {
+                let arena = self.arena();
+                let needs_substitution = monomorph_key
+                    .type_keys
+                    .iter()
+                    .any(|&type_id| arena.unwrap_type_param(type_id).is_some());
+                if needs_substitution {
+                    let concrete_keys: Vec<TypeId> = monomorph_key
+                        .type_keys
+                        .iter()
+                        .map(|&type_id| {
+                            if let Some(name_id) = arena.unwrap_type_param(type_id) {
+                                subs.get(&name_id).copied().unwrap_or(type_id)
+                            } else {
+                                type_id
+                            }
+                        })
+                        .collect();
+                    ClassMethodMonomorphKey::new(
+                        monomorph_key.class_name,
+                        monomorph_key.method_name,
+                        concrete_keys,
+                    )
+                } else {
+                    monomorph_key.clone()
+                }
+            } else {
+                monomorph_key.clone()
+            };
+
             // Look up the monomorphized instance
             if let Some(instance) = self
                 .registry()
                 .class_method_monomorph_cache
-                .get(monomorph_key)
+                .get(&effective_key)
             {
                 let monomorph_func_key = self.funcs().intern_name_id(instance.mangled_name);
                 // Monomorphized methods have concrete types, no i64 conversion needed
                 (self.func_ref(monomorph_func_key)?, false)
             } else {
                 // Fallback to regular method if monomorph not found
+                let func_key = func_key.ok_or_else(|| {
+                    CodegenError::not_found(
+                        "method",
+                        format!("{method_name_str} (no regular function key)"),
+                    )
+                })?;
                 (self.func_ref(func_key)?, false)
             }
         } else {
@@ -535,6 +565,12 @@ impl Cg<'_, '_, '_> {
                 .unwrap_class(obj.type_id)
                 .map(|(_, type_args)| !type_args.is_empty())
                 .unwrap_or(false);
+            let func_key = func_key.ok_or_else(|| {
+                CodegenError::not_found(
+                    "method",
+                    format!("{method_name_str} not found in method_func_keys"),
+                )
+            })?;
             (self.func_ref(func_key)?, is_generic_class)
         };
 
@@ -1378,10 +1414,14 @@ impl Cg<'_, '_, '_> {
         let method_def = self.query().get_method(method_id);
         let method_name_id = method_def.name_id;
 
-        // Check for monomorphized static method (for generic classes)
-        // Only check in main program context to avoid NodeId collisions with module code
-        if self.current_module.is_none()
-            && let Some(mono_key) = self.query().static_method_generic_at(expr_id)
+        // Check for monomorphized static method (for generic classes).
+        // Use module-aware lookup because NodeIds are file-local.
+        let current_module_path = self
+            .current_module()
+            .map(|module_id| self.name_table().module_path(module_id).to_string());
+        if let Some(mono_key) = self
+            .query()
+            .static_method_generic_at_in_module(expr_id, current_module_path.as_deref())
         {
             // Look up the monomorphized instance
             if let Some(instance) = self.registry().static_method_monomorph_cache.get(mono_key) {
