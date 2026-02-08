@@ -1536,9 +1536,14 @@ impl TypeArena {
                 if new_variants == *variants {
                     return Some(ty);
                 }
-                // For unions, we need to look up the normalized result
-                // Since union normalization is complex, we look up the exact union structure
-                let result_ty = SemaType::Union(new_variants);
+                // Re-sort substituted variants to match the normalized union order
+                // (mirrors what `union()` does when creating new union types).
+                // Without this, substituting `T | Done` with T=i64 produces [Done, i64]
+                // but the interned type is [i64, Done] due to sort-key ordering.
+                let mut sorted: Vec<TypeId> = new_variants.to_vec();
+                sorted.sort_by_cached_key(|&v| std::cmp::Reverse(self.union_sort_key(v)));
+                sorted.dedup();
+                let result_ty = SemaType::Union(sorted.into());
                 self.intern_map.get(&result_ty).copied()
             }
 

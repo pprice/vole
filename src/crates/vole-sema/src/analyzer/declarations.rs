@@ -2056,7 +2056,7 @@ impl Analyzer {
     ///
     /// Returns a non-empty scope only when the target type is generic and has unresolved
     /// type arguments (i.e., args that don't resolve to known concrete types).
-    fn infer_implement_type_params(
+    pub(super) fn infer_implement_type_params(
         &mut self,
         target_type: &TypeExpr,
         interner: &Interner,

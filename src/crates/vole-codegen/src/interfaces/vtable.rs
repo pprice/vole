@@ -72,7 +72,14 @@ struct VtableMethod {
     /// Individual TypeIds may be Invalid, which is handled gracefully by conversion functions.
     param_type_ids: Vec<TypeId>,
     /// Interned return TypeId for return value conversion (may be Invalid for void).
+    /// This is the concrete (substituted) type when available (e.g., `i64 | Done`).
     return_type_id: TypeId,
+    /// Tag remapping table for union returns from generic implement blocks.
+    /// When the callee is compiled with abstract type params (e.g., `T | Done`), the union
+    /// tag ordering may differ from the concrete type (e.g., `i64 | Done`).
+    /// Maps callee tag index -> concrete tag index.
+    /// Only set when the callee and concrete unions have different variant orderings.
+    union_tag_remap: Option<Vec<u8>>,
     target: VtableMethodTarget,
 }
 
@@ -438,7 +445,17 @@ impl InterfaceVtableRegistry {
                         0,
                     ));
                     let tag = builder.ins().load(types::I8, MemFlags::new(), result, 0);
-                    builder.ins().stack_store(tag, slot, 0);
+
+                    // Remap the tag if the callee used a different union variant ordering
+                    // (generic implement blocks: callee has `Done | T` but wrapper expects
+                    // `i64 | Done` ordering).
+                    let remapped_tag = if let Some(remap) = &method.union_tag_remap {
+                        remap_union_tag(&mut builder, tag, remap)
+                    } else {
+                        tag
+                    };
+
+                    builder.ins().stack_store(remapped_tag, slot, 0);
                     if union_size > 8 {
                         let payload = builder.ins().load(types::I64, MemFlags::new(), result, 8);
                         builder.ins().stack_store(payload, slot, 8);
@@ -1012,6 +1029,7 @@ fn resolve_vtable_target<C: VtableCtx>(
             returns_void,
             param_type_ids: param_ids,
             return_type_id: return_id,
+            union_tag_remap: None,
             target: VtableMethodTarget::Function,
         });
     }
@@ -1034,16 +1052,41 @@ fn resolve_vtable_target<C: VtableCtx>(
             .implement_registry()
             .get_method(&impl_type_id, method_name_id)
     {
-        // Use TypeId fields (required)
-        let param_type_ids = impl_.func_type.params_id.to_vec();
-        let return_type_id = impl_.func_type.return_type_id;
+        // Use substituted types when available (required for generic implement blocks
+        // where the registry stores abstract types like `T | Done` but we need concrete
+        // types like `i64 | Done` for correct union tag ordering in vtable wrappers).
+        let (param_type_ids, return_type_id) = substituted_types
+            .clone()
+            .unwrap_or_else(|| {
+                (
+                    impl_.func_type.params_id.to_vec(),
+                    impl_.func_type.return_type_id,
+                )
+            });
         let returns_void = matches!(ctx.arena().get(return_type_id), SemaType::Void);
+        // Build a tag remapping table when the callee's return type (abstract, e.g. `Done | T`)
+        // differs from the concrete return type (e.g. `i64 | Done`). The callee was compiled
+        // with the abstract union's tag ordering, but the wrapper must produce the concrete
+        // union's tag ordering.
+        let callee_ret = impl_.func_type.return_type_id;
+        let union_tag_remap = build_union_tag_remap(ctx.arena(), callee_ret, return_type_id, substitutions);
+        tracing::warn!(
+            method = %method_name_str,
+            callee_ret = ?callee_ret,
+            callee_ret_display = %ctx.arena().display_basic(callee_ret),
+            return_type = ?return_type_id,
+            return_type_display = %ctx.arena().display_basic(return_type_id),
+            substitutions = ?substitutions.iter().map(|(k, v)| (k, ctx.arena().display_basic(*v))).collect::<Vec<_>>(),
+            remap = ?union_tag_remap,
+            "implement registry: tag remap check"
+        );
         if let Some(external_info) = impl_.external_info {
             return Ok(VtableMethod {
                 param_count: impl_.func_type.params_id.len(),
                 returns_void,
                 param_type_ids,
                 return_type_id,
+                union_tag_remap,
                 target: VtableMethodTarget::External(external_info),
             });
         }
@@ -1059,6 +1102,7 @@ fn resolve_vtable_target<C: VtableCtx>(
             returns_void,
             param_type_ids,
             return_type_id,
+            union_tag_remap,
             target: VtableMethodTarget::Method(method_info),
         });
     }
@@ -1112,6 +1156,7 @@ fn resolve_vtable_target<C: VtableCtx>(
             returns_void,
             param_type_ids,
             return_type_id,
+            union_tag_remap: None,
             target: VtableMethodTarget::Method(method_info),
         });
     }
@@ -1141,6 +1186,7 @@ fn resolve_vtable_target<C: VtableCtx>(
                 returns_void,
                 param_type_ids,
                 return_type_id,
+                union_tag_remap: None,
                 target: VtableMethodTarget::External(*external_info),
             });
         }
@@ -1151,6 +1197,149 @@ fn resolve_vtable_target<C: VtableCtx>(
         "method implementation",
         format!("{} on type {:?}", method_name_str, concrete_type_id),
     ))
+}
+
+/// Build a tag remapping table for union returns from generic implement blocks.
+///
+/// Handles two cases:
+/// 1. **Concrete substitution**: callee uses `Done | T` (abstract) but wrapper expects
+///    `i64 | Done` (concrete). Tags differ because TypeParam(sort=40) < Sentinel(sort=50)
+///    but Primitive(sort=100) > Sentinel(sort=50).
+/// 2. **Abstract with TypeParams**: callee and wrapper use different abstract unions
+///    (e.g., callee has `Done | K` but concrete is `i64 | Done`). When substitution
+///    resolves TypeParam to another TypeParam, match non-TypeParam variants by identity
+///    and assign remaining positions to TypeParam variants.
+///
+/// Returns `None` if no remapping is needed (identity mapping).
+fn build_union_tag_remap(
+    arena: &vole_sema::type_arena::TypeArena,
+    callee_type_id: TypeId,
+    concrete_type_id: TypeId,
+    substitutions: &FxHashMap<NameId, TypeId>,
+) -> Option<Vec<u8>> {
+    let callee_variants = arena.unwrap_union(callee_type_id)?;
+
+    if callee_type_id == concrete_type_id {
+        // Same type: check for TypeParam misordering.
+        // TypeParams (sort=40) sort after sentinels (sort=50) in abstract unions,
+        // but at runtime become concrete types that sort before sentinels.
+        let has_type_params = callee_variants
+            .iter()
+            .any(|&v| matches!(arena.get(v), SemaType::TypeParam(_)));
+        if !has_type_params {
+            return None;
+        }
+        // TypeParam variants should get low tags (values), non-TypeParam get high tags (sentinels)
+        let mut type_param_indices: Vec<usize> = Vec::new();
+        let mut non_type_param_indices: Vec<usize> = Vec::new();
+        for (i, &v) in callee_variants.iter().enumerate() {
+            if matches!(arena.get(v), SemaType::TypeParam(_)) {
+                type_param_indices.push(i);
+            } else {
+                non_type_param_indices.push(i);
+            }
+        }
+        let mut remap = vec![0u8; callee_variants.len()];
+        let mut target_tag = 0u8;
+        for &i in &type_param_indices {
+            remap[i] = target_tag;
+            target_tag += 1;
+        }
+        for &i in &non_type_param_indices {
+            remap[i] = target_tag;
+            target_tag += 1;
+        }
+        let is_identity = remap.iter().enumerate().all(|(i, &t)| t == i as u8);
+        return if is_identity { None } else { Some(remap) };
+    }
+
+    // Different types: callee and concrete have different union layouts.
+    let concrete_variants = arena.unwrap_union(concrete_type_id)?;
+    if callee_variants.len() != concrete_variants.len() {
+        return None;
+    }
+
+    let mut remap = Vec::with_capacity(callee_variants.len());
+    let mut is_identity = true;
+
+    // Track which concrete positions are taken
+    let mut used_concrete: Vec<bool> = vec![false; concrete_variants.len()];
+
+    // First pass: match non-TypeParam callee variants by identity in concrete union
+    let mut pending_type_params: Vec<usize> = Vec::new();
+    for (callee_tag, &callee_variant) in callee_variants.iter().enumerate() {
+        match arena.get(callee_variant) {
+            SemaType::TypeParam(name_id) => {
+                // Try to resolve via substitution
+                let resolved = substitutions.get(name_id).copied();
+                let is_still_type_param = resolved
+                    .map(|r| matches!(arena.get(r), SemaType::TypeParam(_)))
+                    .unwrap_or(true);
+                if is_still_type_param {
+                    // Can't resolve to concrete, defer
+                    pending_type_params.push(callee_tag);
+                    remap.push(0); // placeholder
+                } else if let Some(concrete_variant) = resolved {
+                    if let Some(pos) = concrete_variants.iter().position(|&v| v == concrete_variant) {
+                        used_concrete[pos] = true;
+                        if callee_tag != pos { is_identity = false; }
+                        remap.push(pos as u8);
+                    } else {
+                        return None;
+                    }
+                } else {
+                    return None;
+                }
+            }
+            _ => {
+                // Match by TypeId identity
+                if let Some(pos) = concrete_variants.iter().position(|&v| v == callee_variant) {
+                    used_concrete[pos] = true;
+                    if callee_tag != pos { is_identity = false; }
+                    remap.push(pos as u8);
+                } else {
+                    return None;
+                }
+            }
+        }
+    }
+
+    // Second pass: assign remaining concrete positions to unresolved TypeParam variants
+    if !pending_type_params.is_empty() {
+        let free_positions: Vec<usize> = used_concrete
+            .iter()
+            .enumerate()
+            .filter(|(_, used)| !*used)
+            .map(|(i, _)| i)
+            .collect();
+        if free_positions.len() != pending_type_params.len() {
+            return None;
+        }
+        for (&callee_tag, &concrete_pos) in pending_type_params.iter().zip(free_positions.iter()) {
+            if callee_tag != concrete_pos { is_identity = false; }
+            remap[callee_tag] = concrete_pos as u8;
+        }
+    }
+
+    if is_identity { None } else { Some(remap) }
+}
+
+/// Emit Cranelift IR to remap a union tag byte using a compile-time remap table.
+///
+/// For the common 2-variant case (e.g., `[1, 0]`), emits a simple select:
+///   remapped = select (tag == 0), remap[0], remap[1]
+/// For larger unions, chains select instructions.
+fn remap_union_tag(builder: &mut FunctionBuilder, tag: Value, remap: &[u8]) -> Value {
+    assert!(!remap.is_empty(), "empty tag remap table");
+    // Start with the last entry as the default, then chain selects backwards
+    let mut result = builder.ins().iconst(types::I8, remap[remap.len() - 1] as i64);
+    for i in (0..remap.len() - 1).rev() {
+        let cmp_val = builder.ins().iconst(types::I8, i as i64);
+        let is_match = builder.ins().icmp(IntCC::Equal, tag, cmp_val);
+        let mapped = builder.ins().iconst(types::I8, remap[i] as i64);
+        result = builder.ins().select(is_match, mapped, result);
+    }
+    result
 }
 
 fn runtime_heap_alloc_ref<C: VtableCtx>(
