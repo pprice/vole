@@ -246,6 +246,8 @@ impl Analyzer {
                 });
                 Ok(self.analyze_lambda(lambda, expected_fn.as_ref(), interner))
             }
+            // Match expressions: propagate expected type for bidirectional inference
+            ExprKind::Match(match_expr) => self.check_match_expr(match_expr, expected, interner),
             // All other cases: infer type, then check compatibility
             _ => {
                 let inferred_id = self.check_expr_with_ctx(expr, interner, ctx)?;

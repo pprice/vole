@@ -1,0 +1,122 @@
+// Match arm type unification: construct union from differing arm types
+// When match arms produce different types, the result should be a union.
+
+class Cat { name: string }
+class Dog { name: string }
+
+tests "match arms infer union type" {
+    test "two class arms produce union" {
+        let animal: Cat | Dog = Cat { name: "Whiskers" }
+        let result = match animal {
+            Cat { name } => name
+            Dog { name } => 42
+        }
+        // result is string | i64; we can check the first branch
+        assert(result is string)
+    }
+
+    test "union result from class and sentinel" {
+        let animal: Cat | Dog = Dog { name: "Rex" }
+        let step = match animal {
+            Cat => 1
+            Dog => Done
+        }
+        assert(step is Done)
+    }
+
+    test "union result from integer and string" {
+        let x = 1
+        let result = match x {
+            1 => "one"
+            2 => 42
+            _ => "other"
+        }
+        assert(result is string)
+    }
+
+    test "union result with nil arm" {
+        let x = 1
+        let result = match x {
+            1 => "found"
+            _ => nil
+        }
+        assert(result is string)
+    }
+}
+
+tests "expected type propagation from let binding" {
+    test "let binding with union type annotation" {
+        let x = 1
+        let result: i64 | string = match x {
+            1 => 42
+            _ => "other"
+        }
+        assert(result is i64)
+    }
+
+    test "let binding with optional type" {
+        let x = 1
+        let result: string? = match x {
+            1 => "hello"
+            _ => nil
+        }
+        assert(result is string)
+    }
+}
+
+tests "expected type propagation from return" {
+    test "return union from function" {
+        func classify(x: i64) -> i64 | string {
+            return match x {
+                1 => 42
+                _ => "big"
+            }
+        }
+        assert(classify(1) is i64)
+        assert(classify(99) is string)
+    }
+
+    test "tail match expression return" {
+        func classify(x: i64) -> i64 | string {
+            return match x {
+                0 => 0
+                _ => "other"
+            }
+        }
+        assert(classify(0) is i64)
+        assert(classify(1) is string)
+    }
+}
+
+tests "never type in union arms" {
+    test "unreachable arm does not affect result type" {
+        let x: Cat | Dog = Cat { name: "Kitty" }
+        let result = match x {
+            Cat { name } => name
+            Dog => unreachable
+        }
+        assert(result == "Kitty")
+    }
+}
+
+tests "same type arms still work" {
+    test "all arms same type" {
+        let x = 2
+        let result = match x {
+            1 => "one"
+            2 => "two"
+            _ => "other"
+        }
+        assert(result == "two")
+    }
+
+    test "numeric arms with same type" {
+        let x = 3
+        let result = match x {
+            1 => 10
+            2 => 20
+            _ => 30
+        }
+        assert(result == 30)
+    }
+}

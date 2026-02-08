@@ -87,7 +87,7 @@ impl Analyzer {
             ExprKind::Range(range) => self.check_range_expr(range, expr.span, interner),
 
             // Pattern matching (existing helper)
-            ExprKind::Match(match_expr) => self.check_match_expr(match_expr, interner),
+            ExprKind::Match(match_expr) => self.check_match_expr(match_expr, None, interner),
 
             // Null coalesce and is expression
             ExprKind::NullCoalesce(nc) => self.check_null_coalesce_expr(nc, interner),

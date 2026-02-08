@@ -19,6 +19,7 @@ impl Analyzer {
     pub(super) fn check_match_expr(
         &mut self,
         match_expr: &MatchExpr,
+        expected: Option<ArenaTypeId>,
         interner: &Interner,
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
         // Check scrutinee type
@@ -69,7 +70,6 @@ impl Analyzer {
 
         // Check each arm, collect result types (using TypeId)
         let mut result_type_id: Option<ArenaTypeId> = None;
-        let mut first_arm_span: Option<Span> = None;
 
         // Track covered types for wildcard narrowing (using TypeId)
         let mut covered_type_ids: Vec<ArenaTypeId> = Vec::new();
@@ -140,11 +140,22 @@ impl Analyzer {
                 }
             }
 
-            // Check body expression with expected type from first arm (if known)
-            // Don't propagate never as expected type - it's a bottom type that unifies with anything
-            let expected_for_body = result_type_id.filter(|id| !id.is_never());
-            let body_type_id =
-                self.check_expr_expecting_id_in_arm(&arm.body, expected_for_body, interner)?;
+            // Check body with expected type hint for bidirectional inference (literal
+            // coercion, empty-array element inference, etc.). Prefer caller-provided
+            // expected (let binding / return), fall back to previous arms' type.
+            let hint = expected.or(result_type_id).filter(|id| !id.is_never());
+            let errors_before = self.errors.len();
+            let mut body_type_id =
+                self.check_expr_expecting_id_in_arm(&arm.body, hint, interner)?;
+
+            // When the hint (from a previous arm, not the caller) caused type-mismatch
+            // errors, this arm genuinely produces a different type. Discard the errors
+            // and re-infer without the hint so the natural type flows into the union.
+            let hint_caused_errors = self.errors.len() > errors_before;
+            if hint_caused_errors && expected.is_none() {
+                self.errors.truncate(errors_before);
+                body_type_id = self.check_expr_in_arm(&arm.body, interner)?;
+            }
 
             // Restore type overrides
             self.type_overrides = saved_overrides;
@@ -153,32 +164,20 @@ impl Analyzer {
             match result_type_id {
                 None => {
                     result_type_id = Some(body_type_id);
-                    first_arm_span = Some(arm.span);
                 }
                 Some(expected_id) if expected_id != body_type_id => {
                     // Handle never type (bottom): never unifies with any type
                     if expected_id.is_never() {
                         result_type_id = Some(body_type_id);
-                        first_arm_span = Some(arm.span);
                     } else if body_type_id.is_never() {
                         // This arm is never, keep previous result (do nothing)
                     } else if expected_id.is_unknown() || body_type_id.is_unknown() {
                         // Either is unknown, result is unknown
                         result_type_id = Some(ArenaTypeId::UNKNOWN);
                     } else {
-                        let expected_str = self.type_display_id(expected_id);
-                        let found = self.type_display_id(body_type_id);
-                        self.add_error(
-                            SemanticError::MatchArmTypeMismatch {
-                                expected: expected_str,
-                                found,
-                                first_arm: first_arm_span
-                                    .expect("first_arm_span set when result_type became Some")
-                                    .into(),
-                                span: arm.body.span.into(),
-                            },
-                            arm.body.span,
-                        );
+                        // Arms have different types — construct a union
+                        result_type_id =
+                            Some(self.type_arena_mut().union(vec![expected_id, body_type_id]));
                     }
                 }
                 _ => {}
