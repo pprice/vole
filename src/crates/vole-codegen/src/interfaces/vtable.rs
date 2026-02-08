@@ -144,12 +144,28 @@ impl InterfaceVtableRegistry {
         let interface_name_id = interface_def.name_id;
 
         // Build substitution map from type param names to concrete type args (already TypeIds)
-        let substitutions: FxHashMap<NameId, TypeId> = interface_def
+        let mut substitutions: FxHashMap<NameId, TypeId> = interface_def
             .type_params
             .iter()
             .zip(interface_type_arg_ids.iter())
             .map(|(param_name_id, &arg_id)| (*param_name_id, arg_id))
             .collect();
+
+        // Also map class type params to their concrete args.
+        // When sema pre-computes method signatures for a generic class implementing
+        // an interface (e.g. class Foo<K, V> implements Iterator<K>), it substitutes
+        // interface params with class params (T -> K), so stored signatures contain
+        // class type params (K | Done). We need K -> concrete_arg in the map too.
+        let class_info = ctx
+            .arena()
+            .unwrap_nominal(concrete_type_id)
+            .map(|(id, args, _)| (id, args.to_vec()));
+        if let Some((class_def_id, class_type_args)) = class_info {
+            let class_def = ctx.query().get_type(class_def_id);
+            for (param_name, arg_id) in class_def.type_params.iter().zip(class_type_args.iter()) {
+                substitutions.insert(*param_name, *arg_id);
+            }
+        }
 
         // Collect method IDs
         let method_ids =
@@ -424,8 +440,7 @@ impl InterfaceVtableRegistry {
                     let tag = builder.ins().load(types::I8, MemFlags::new(), result, 0);
                     builder.ins().stack_store(tag, slot, 0);
                     if union_size > 8 {
-                        let payload =
-                            builder.ins().load(types::I64, MemFlags::new(), result, 8);
+                        let payload = builder.ins().load(types::I64, MemFlags::new(), result, 8);
                         builder.ins().stack_store(payload, slot, 8);
                     }
 
@@ -436,9 +451,7 @@ impl InterfaceVtableRegistry {
                     let heap_ptr = builder.inst_results(alloc_call)[0];
 
                     let local_tag = builder.ins().stack_load(types::I8, slot, 0);
-                    builder
-                        .ins()
-                        .store(MemFlags::new(), local_tag, heap_ptr, 0);
+                    builder.ins().store(MemFlags::new(), local_tag, heap_ptr, 0);
                     if union_size > 8 {
                         let local_payload = builder.ins().stack_load(types::I64, slot, 8);
                         builder
@@ -968,18 +981,22 @@ fn resolve_vtable_target<C: VtableCtx>(
         .name_table()
         .display(interface_method.name_id);
 
-    // Apply substitutions to get concrete param/return types (read-only lookup)
-    let (substituted_param_ids, substituted_return_id) = {
+    // Apply substitutions to get concrete param/return types (read-only lookup).
+    // This may fail for generic classes implementing interfaces (e.g. Foo<K> implements
+    // Iterator<K>) because the concrete substituted types (i64 | Done) may not exist
+    // in the arena. In that case, we fall through to the direct method or implement
+    // registry paths which provide their own concrete types.
+    let substituted_types: Option<(Vec<TypeId>, TypeId)> = {
         let arena = ctx.arena();
         let (params, ret, _) = arena
             .unwrap_function(interface_method.signature_id)
             .expect("INTERNAL: vtable method: signature is not a function type");
-        let param_ids: Vec<TypeId> = params
+        let param_ids: Option<Vec<TypeId>> = params
             .iter()
-            .map(|&p| arena.expect_substitute(p, substitutions, "vtable method param"))
+            .map(|&p| arena.lookup_substitute(p, substitutions))
             .collect();
-        let ret_id = arena.expect_substitute(ret, substitutions, "vtable method return");
-        (param_ids, ret_id)
+        let ret_id = arena.lookup_substitute(ret, substitutions);
+        param_ids.zip(ret_id)
     };
 
     // Check if concrete type is a function/closure
@@ -1064,20 +1081,26 @@ fn resolve_vtable_target<C: VtableCtx>(
         let method_info = meta.method_infos.get(&method_name_id).copied()?;
 
         // Look up method signature via EntityRegistry - require TypeId fields
-        let (param_ids, ret_id) = ctx
+        let sig_from_entity = ctx
             .registry()
             .find_method_on_type(type_def_id, method_name_id)
-            .map(|m_id| {
+            .and_then(|m_id| {
                 let method = ctx.query().get_method(m_id);
                 let arena = ctx.arena();
+                let (params, ret, _) = arena.unwrap_function(method.signature_id)?;
+                Some((params.to_vec(), ret))
+            });
+        // Use entity registry signature, fall back to substituted interface types
+        let (param_ids, ret_id) = sig_from_entity
+            .or_else(|| substituted_types.clone())
+            .unwrap_or_else(|| {
+                // Last resort: use original interface method's unsubstituted types.
+                // This handles cases where both entity lookup and substitution fail.
+                let arena = ctx.arena();
                 let (params, ret, _) = arena
-                    .unwrap_function(method.signature_id)
+                    .unwrap_function(interface_method.signature_id)
                     .expect("INTERNAL: vtable method: signature is not a function type");
                 (params.to_vec(), ret)
-            })
-            .unwrap_or_else(|| {
-                // Use substituted types as fallback (from interface method)
-                (substituted_param_ids.clone(), substituted_return_id)
             });
         Some((method_info, param_ids, ret_id))
     })();

@@ -1148,12 +1148,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.env.interner
     }
 
-    /// Alias for type_metadata (backward compat)
-    #[inline]
-    pub fn type_meta(&self) -> &'ctx TypeMetadataMap {
-        &self.env.state.type_metadata
-    }
-
     /// Get unified method function key map
     /// Keyed by (type_name_id, method_name_id) for stable lookup across analyzer instances
     #[inline]
