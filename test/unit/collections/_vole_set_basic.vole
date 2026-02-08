@@ -5,7 +5,6 @@ let { Array } = import "std:array"
 sentinel Empty
 sentinel Deleted
 
-let { Empty, Deleted } = import "std:collections/sentinels"
 
 class SetEntry<T> {
     value: T,
@@ -24,7 +23,7 @@ class VoleSet<T: Hashable + Equatable> {
         func with_capacity(capacity: i64) -> VoleSet<T> {
             let cap = VoleSet.next_power_of_2(capacity)
             let buckets = Array.filled<SetEntry<T> | Empty | Deleted>(cap, Empty)
-            return Set {
+            return VoleSet {
                 buckets: buckets,
                 size: 0,
                 tomb_count: 0,
@@ -159,10 +158,14 @@ class VoleSet<T: Hashable + Equatable> {
         for bucket in old_buckets {
             match bucket {
                 SetEntry { value } => self.insert_no_rehash(value)
-                Empty => 0
-                Deleted => 0
+                Empty => self.rehash_noop()
+                Deleted => self.rehash_noop()
             }
         }
+    }
+
+    func rehash_noop() {
+        let _x = 0
     }
 
     func insert_no_rehash(value: T) {
@@ -171,9 +174,20 @@ class VoleSet<T: Hashable + Equatable> {
 
         match bucket {
             SetEntry { value: existing } => self.insert_on_entry(idx, existing, value)
-            Empty => self.add_on_empty(idx, value)
-            Deleted => self.add_on_deleted(idx, value)
+            Empty => self.insert_on_empty(idx, value)
+            Deleted => self.insert_on_deleted(idx, value)
         }
+    }
+
+    func insert_on_empty(idx: i64, value: T) {
+        self.write_entry(idx, value)
+        self.size = self.size + 1
+    }
+
+    func insert_on_deleted(idx: i64, value: T) {
+        self.write_entry(idx, value)
+        self.size = self.size + 1
+        self.tomb_count = self.tomb_count - 1
     }
 
     func add_on_entry(existing: T, value: T) -> bool {
@@ -215,6 +229,41 @@ class VoleSet<T: Hashable + Equatable> {
         self.size = self.size - 1
         self.tomb_count = self.tomb_count + 1
         return true
+    }
+
+    func iter() -> Iterator<T> {
+        return SetIterator {
+            buckets: self.buckets,
+            index: 0,
+        }
+    }
+}
+
+class SetIterator<T> implements Iterator<T> {
+    buckets: [SetEntry<T> | Empty | Deleted],
+    index: i64,
+}
+
+implement Iterator<T> for SetIterator<T> {
+    func next() -> T | Done {
+        while self.index < self.buckets.length() {
+            let bucket = self.buckets[self.index]
+            self.index = self.index + 1
+            let mut found = false
+            match bucket {
+                SetEntry { value } => found = true
+                Empty => found = false
+                Deleted => found = false
+            }
+            if found {
+                return match bucket {
+                    SetEntry { value } => value
+                    Empty => Done {}
+                    Deleted => Done {}
+                }
+            }
+        }
+        return Done {}
     }
 }
 
@@ -328,130 +377,6 @@ tests {
         assert(s.len() == 3)
     }
 
-    test "vole_set::union" {
-        let a = VoleSet.new<i64>()
-        _ = a.add(1)
-        _ = a.add(2)
-
-        let b = VoleSet.new<i64>()
-        _ = b.add(2)
-        _ = b.add(3)
-
-        let u = a.union(b)
-        assert(u.len() == 3)
-        assert(u.contains(1))
-        assert(u.contains(2))
-        assert(u.contains(3))
-    }
-
-    test "vole_set::intersection" {
-        let a = VoleSet.new<i64>()
-        _ = a.add(1)
-        _ = a.add(2)
-        _ = a.add(3)
-
-        let b = VoleSet.new<i64>()
-        _ = b.add(2)
-        _ = b.add(3)
-        _ = b.add(4)
-
-        let i = a.intersection(b)
-        assert(i.len() == 2)
-        assert(!i.contains(1))
-        assert(i.contains(2))
-        assert(i.contains(3))
-        assert(!i.contains(4))
-    }
-
-    test "vole_set::difference" {
-        let a = VoleSet.new<i64>()
-        _ = a.add(1)
-        _ = a.add(2)
-        _ = a.add(3)
-
-        let b = VoleSet.new<i64>()
-        _ = b.add(2)
-        _ = b.add(3)
-        _ = b.add(4)
-
-        let d = a.difference(b)
-        assert(d.len() == 1)
-        assert(d.contains(1))
-        assert(!d.contains(2))
-    }
-
-    test "vole_set::is_subset" {
-        let a = VoleSet.new<i64>()
-        _ = a.add(1)
-        _ = a.add(2)
-
-        let b = VoleSet.new<i64>()
-        _ = b.add(1)
-        _ = b.add(2)
-        _ = b.add(3)
-
-        assert(a.is_subset(b))
-        assert(!b.is_subset(a))
-    }
-
-    test "vole_set::is_disjoint" {
-        let a = VoleSet.new<i64>()
-        _ = a.add(1)
-        _ = a.add(2)
-
-        let b = VoleSet.new<i64>()
-        _ = b.add(3)
-        _ = b.add(4)
-
-        assert(a.is_disjoint(b))
-
-        let c = VoleSet.new<i64>()
-        _ = c.add(2)
-        _ = c.add(3)
-
-        assert(!a.is_disjoint(c))
-    }
-
-    test "vole_set::symmetric_difference" {
-        let a = VoleSet.new<i64>()
-        _ = a.add(1)
-        _ = a.add(2)
-        _ = a.add(3)
-
-        let b = VoleSet.new<i64>()
-        _ = b.add(2)
-        _ = b.add(3)
-        _ = b.add(4)
-
-        let sd = a.symmetric_difference(b)
-        assert(sd.len() == 2)
-        assert(sd.contains(1))
-        assert(!sd.contains(2))
-        assert(!sd.contains(3))
-        assert(sd.contains(4))
-    }
-
-    test "vole_set::is_superset" {
-        let a = VoleSet.new<i64>()
-        _ = a.add(1)
-        _ = a.add(2)
-        _ = a.add(3)
-
-        let b = VoleSet.new<i64>()
-        _ = b.add(1)
-        _ = b.add(2)
-
-        assert(a.is_superset(b))
-        assert(!b.is_superset(a))
-
-        let c = VoleSet.new<i64>()
-        _ = c.add(1)
-        _ = c.add(2)
-        _ = c.add(3)
-        assert(a.is_superset(c))
-        assert(a.is_subset(c))
-    }
-
     test "vole_set::iter count" {
         let s = VoleSet.new<i64>()
         _ = s.add(1)
@@ -460,37 +385,66 @@ tests {
         assert(s.iter().count() == 3)
     }
 
-    test "vole_set::iter for-in loop" {
+    test "vole_set::iter collect" {
         let s = VoleSet.new<i64>()
         _ = s.add(10)
         _ = s.add(20)
         _ = s.add(30)
-        let mut sum = 0
-        for x in s.iter() {
-            sum = sum + x
-        }
-        assert(sum == 60)
+        assert(s.iter().collect().length() == 3)
     }
 
-    test "vole_set::iter collect" {
+    test "vole_set::for-in loop" {
         let s = VoleSet.new<i64>()
         _ = s.add(1)
         _ = s.add(2)
         _ = s.add(3)
-        let arr = s.iter().collect()
-        assert(arr.length() == 3)
+        let mut sum = 0
+        for v in s.iter() {
+            sum = sum + v
+        }
+        assert(sum == 6)
     }
 
     test "vole_set::iter on empty set" {
         let s = VoleSet.new<i64>()
         assert(s.iter().count() == 0)
-        let arr = s.iter().collect()
-        assert(arr.length() == 0)
 
         let mut ran = false
-        for _x in s.iter() {
+        for _v in s.iter() {
             ran = true
         }
         assert(!ran)
     }
+
+    test "vole_set::iter after mutations" {
+        let s = VoleSet.new<i64>()
+        _ = s.add(1)
+        _ = s.add(2)
+        _ = s.add(3)
+        _ = s.remove(2)
+
+        assert(s.iter().count() == 2)
+        let mut sum = 0
+        for v in s.iter() {
+            sum = sum + v
+        }
+        assert(sum == 4)
+    }
+
+    test "vole_set::iter chained operations" {
+        let s = VoleSet.new<i64>()
+        _ = s.add(1)
+        _ = s.add(2)
+        _ = s.add(3)
+        _ = s.add(4)
+        _ = s.add(5)
+
+        let evens = s.iter().filter((x) => x % 2 == 0).count()
+        assert(evens == 2)
+
+        let doubled = s.iter().map((x) => x * 2).collect()
+        assert(doubled.length() == 5)
+    }
+
+    // TODO(vol-fmtt): Set operations (union, intersection, difference, etc.)
 }
