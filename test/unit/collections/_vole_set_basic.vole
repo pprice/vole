@@ -231,6 +231,58 @@ class VoleSet<T: Hashable + Equatable> {
         return true
     }
 
+    func union(other: VoleSet<T>) -> VoleSet<T> {
+        let result = VoleSet.new<T>()
+        for v in self.iter() { _ = result.add(v) }
+        for v in other.iter() { _ = result.add(v) }
+        return result
+    }
+
+    func intersection(other: VoleSet<T>) -> VoleSet<T> {
+        let result = VoleSet.new<T>()
+        for v in self.iter() {
+            if other.contains(v) { _ = result.add(v) }
+        }
+        return result
+    }
+
+    func difference(other: VoleSet<T>) -> VoleSet<T> {
+        let result = VoleSet.new<T>()
+        for v in self.iter() {
+            if !other.contains(v) { _ = result.add(v) }
+        }
+        return result
+    }
+
+    func symmetric_difference(other: VoleSet<T>) -> VoleSet<T> {
+        let result = VoleSet.new<T>()
+        for v in self.iter() {
+            if !other.contains(v) { _ = result.add(v) }
+        }
+        for v in other.iter() {
+            if !self.contains(v) { _ = result.add(v) }
+        }
+        return result
+    }
+
+    func is_subset(other: VoleSet<T>) -> bool {
+        for v in self.iter() {
+            if !other.contains(v) { return false }
+        }
+        return true
+    }
+
+    func is_superset(other: VoleSet<T>) -> bool {
+        return other.is_subset(self)
+    }
+
+    func is_disjoint(other: VoleSet<T>) -> bool {
+        for v in self.iter() {
+            if other.contains(v) { return false }
+        }
+        return true
+    }
+
     func iter() -> Iterator<T> {
         return SetIterator {
             buckets: self.buckets,
@@ -446,5 +498,239 @@ tests {
         assert(doubled.length() == 5)
     }
 
-    // TODO(vol-fmtt): Set operations (union, intersection, difference, etc.)
+    test "vole_set::union" {
+        let a = VoleSet.new<i64>()
+        _ = a.add(1)
+        _ = a.add(2)
+
+        let b = VoleSet.new<i64>()
+        _ = b.add(2)
+        _ = b.add(3)
+
+        let u = a.union(b)
+        assert(u.len() == 3)
+        assert(u.contains(1))
+        assert(u.contains(2))
+        assert(u.contains(3))
+    }
+
+    test "vole_set::intersection" {
+        let a = VoleSet.new<i64>()
+        _ = a.add(1)
+        _ = a.add(2)
+        _ = a.add(3)
+
+        let b = VoleSet.new<i64>()
+        _ = b.add(2)
+        _ = b.add(3)
+        _ = b.add(4)
+
+        let i = a.intersection(b)
+        assert(i.len() == 2)
+        assert(!i.contains(1))
+        assert(i.contains(2))
+        assert(i.contains(3))
+        assert(!i.contains(4))
+    }
+
+    test "vole_set::difference" {
+        let a = VoleSet.new<i64>()
+        _ = a.add(1)
+        _ = a.add(2)
+        _ = a.add(3)
+
+        let b = VoleSet.new<i64>()
+        _ = b.add(2)
+        _ = b.add(3)
+        _ = b.add(4)
+
+        let d = a.difference(b)
+        assert(d.len() == 1)
+        assert(d.contains(1))
+        assert(!d.contains(2))
+    }
+
+    test "vole_set::symmetric_difference" {
+        let a = VoleSet.new<i64>()
+        _ = a.add(1)
+        _ = a.add(2)
+        _ = a.add(3)
+
+        let b = VoleSet.new<i64>()
+        _ = b.add(2)
+        _ = b.add(3)
+        _ = b.add(4)
+
+        let sd = a.symmetric_difference(b)
+        assert(sd.len() == 2)
+        assert(sd.contains(1))
+        assert(!sd.contains(2))
+        assert(!sd.contains(3))
+        assert(sd.contains(4))
+    }
+
+    test "vole_set::is_subset" {
+        let a = VoleSet.new<i64>()
+        _ = a.add(1)
+        _ = a.add(2)
+
+        let b = VoleSet.new<i64>()
+        _ = b.add(1)
+        _ = b.add(2)
+        _ = b.add(3)
+
+        assert(a.is_subset(b))
+        assert(!b.is_subset(a))
+    }
+
+    test "vole_set::is_superset" {
+        let a = VoleSet.new<i64>()
+        _ = a.add(1)
+        _ = a.add(2)
+        _ = a.add(3)
+
+        let b = VoleSet.new<i64>()
+        _ = b.add(1)
+        _ = b.add(2)
+
+        assert(a.is_superset(b))
+        assert(!b.is_superset(a))
+
+        // Equal sets: both subset and superset of each other
+        let c = VoleSet.new<i64>()
+        _ = c.add(1)
+        _ = c.add(2)
+        _ = c.add(3)
+        assert(a.is_superset(c))
+        assert(a.is_subset(c))
+    }
+
+    test "vole_set::is_disjoint" {
+        let a = VoleSet.new<i64>()
+        _ = a.add(1)
+        _ = a.add(2)
+
+        let b = VoleSet.new<i64>()
+        _ = b.add(3)
+        _ = b.add(4)
+
+        assert(a.is_disjoint(b))
+
+        let c = VoleSet.new<i64>()
+        _ = c.add(2)
+        _ = c.add(3)
+
+        assert(!a.is_disjoint(c))
+    }
+
+    // ---- Generic type tests: VoleSet<string> ----
+
+    test "vole_set<string>::basic ops" {
+        let s = VoleSet.new<string>()
+        assert(s.add("hello"))
+        assert(s.add("world"))
+        assert(s.add("foo"))
+
+        assert(s.len() == 3)
+        assert(s.contains("hello"))
+        assert(s.contains("world"))
+        assert(s.contains("foo"))
+        assert(!s.contains("bar"))
+        assert(!s.is_empty())
+    }
+
+    test "vole_set<string>::add duplicate returns false" {
+        let s = VoleSet.new<string>()
+        assert(s.add("apple"))
+        assert(s.add("banana"))
+        assert(!s.add("apple"))
+        assert(!s.add("banana"))
+        assert(s.len() == 2)
+    }
+
+    test "vole_set<string>::remove" {
+        let s = VoleSet.new<string>()
+        _ = s.add("one")
+        _ = s.add("two")
+        _ = s.add("three")
+        assert(s.len() == 3)
+
+        assert(s.remove("two"))
+        assert(s.len() == 2)
+        assert(!s.contains("two"))
+        assert(s.contains("one"))
+        assert(s.contains("three"))
+
+        assert(!s.remove("missing"))
+        assert(s.len() == 2)
+    }
+
+    test "vole_set<string>::intersection" {
+        let a = VoleSet.new<string>()
+        _ = a.add("alpha")
+        _ = a.add("beta")
+        _ = a.add("gamma")
+
+        let b = VoleSet.new<string>()
+        _ = b.add("beta")
+        _ = b.add("gamma")
+        _ = b.add("delta")
+
+        let i = a.intersection(b)
+        assert(i.len() == 2)
+        assert(!i.contains("alpha"))
+        assert(i.contains("beta"))
+        assert(i.contains("gamma"))
+        assert(!i.contains("delta"))
+    }
+
+    test "vole_set<string>::symmetric_difference" {
+        let a = VoleSet.new<string>()
+        _ = a.add("alpha")
+        _ = a.add("beta")
+        _ = a.add("gamma")
+
+        let b = VoleSet.new<string>()
+        _ = b.add("beta")
+        _ = b.add("gamma")
+        _ = b.add("delta")
+
+        let sd = a.symmetric_difference(b)
+        assert(sd.len() == 2)
+        assert(sd.contains("alpha"))
+        assert(!sd.contains("beta"))
+        assert(!sd.contains("gamma"))
+        assert(sd.contains("delta"))
+    }
+
+    test "vole_set<string>::is_subset and is_superset" {
+        let a = VoleSet.new<string>()
+        _ = a.add("x")
+        _ = a.add("y")
+
+        let b = VoleSet.new<string>()
+        _ = b.add("x")
+        _ = b.add("y")
+        _ = b.add("z")
+
+        assert(a.is_subset(b))
+        assert(!a.is_superset(b))
+        assert(!b.is_subset(a))
+        assert(b.is_superset(a))
+    }
+
+    test "vole_set<string>::is_disjoint" {
+        let a = VoleSet.new<string>()
+        _ = a.add("cat")
+        _ = a.add("dog")
+
+        let b = VoleSet.new<string>()
+        _ = b.add("fish")
+        _ = b.add("bird")
+
+        assert(a.is_disjoint(b))
+
+        _ = b.add("cat")
+        assert(!a.is_disjoint(b))
+    }
 }

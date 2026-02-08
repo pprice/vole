@@ -24,7 +24,7 @@ class VoleMap<K: Hashable + Equatable, V> {
         func with_capacity(capacity: i64) -> VoleMap<K, V> {
             let cap = VoleMap.next_power_of_2(capacity)
             let buckets = Array.filled<MapEntry<K, V> | Empty | Deleted>(cap, Empty)
-            return Map {
+            return VoleMap {
                 buckets: buckets,
                 size: 0,
                 tomb_count: 0,
@@ -62,12 +62,10 @@ class VoleMap<K: Hashable + Equatable, V> {
     func get(key: K) -> V? {
         let idx = self.find_slot(key)
         let bucket = self.buckets[idx]
-
-        return match bucket {
-            MapEntry { key: existing_key, value: existing_value } => existing_value
-            Empty => nil
-            Deleted => nil
+        if bucket is MapEntry<K, V> {
+            return bucket.value
         }
+        return nil
     }
 
     func contains_key(key: K) -> bool {
@@ -102,12 +100,10 @@ class VoleMap<K: Hashable + Equatable, V> {
     func remove(key: K) -> V? {
         let idx = self.find_slot(key)
         let bucket = self.buckets[idx]
-
-        return match bucket {
-            MapEntry { key: existing_key, value: existing_value } => self.remove_entry(idx, existing_value)
-            Empty => nil
-            Deleted => nil
+        if bucket is MapEntry<K, V> {
+            return self.remove_entry(idx, bucket.value)
         }
+        return nil
     }
 
     func clear() {
@@ -188,10 +184,14 @@ class VoleMap<K: Hashable + Equatable, V> {
         for bucket in old_buckets {
             match bucket {
                 MapEntry { key, value } => self.insert_no_rehash(key, value)
-                Empty => 0
-                Deleted => 0
+                Empty => self.rehash_noop()
+                Deleted => self.rehash_noop()
             }
         }
+    }
+
+    func rehash_noop() {
+        let _x = 0
     }
 
     func insert_no_rehash(key: K, value: V) {
@@ -235,21 +235,23 @@ class MapKeyIterator<K, V> implements Iterator<K> {
 
 implement Iterator<K> for MapKeyIterator<K, V> {
     func next() -> K | Done {
-        let cap = self.buckets.length()
-        while self.index < cap {
+        while self.index < self.buckets.length() {
             let bucket = self.buckets[self.index]
             self.index = self.index + 1
-
-            let step = match bucket {
-                MapEntry { key, value } => key
-                Empty => Done {}
-                Deleted => Done {}
+            let mut found = false
+            match bucket {
+                MapEntry { key, value } => found = true
+                Empty => found = false
+                Deleted => found = false
             }
-            if !(step is Done) {
-                return step
+            if found {
+                return match bucket {
+                    MapEntry { key, value } => key
+                    Empty => Done {}
+                    Deleted => Done {}
+                }
             }
         }
-
         return Done {}
     }
 }
@@ -261,21 +263,23 @@ class MapValueIterator<K, V> implements Iterator<V> {
 
 implement Iterator<V> for MapValueIterator<K, V> {
     func next() -> V | Done {
-        let cap = self.buckets.length()
-        while self.index < cap {
+        while self.index < self.buckets.length() {
             let bucket = self.buckets[self.index]
             self.index = self.index + 1
-
-            let step = match bucket {
-                MapEntry { key, value } => value
-                Empty => Done {}
-                Deleted => Done {}
+            let mut found = false
+            match bucket {
+                MapEntry { key, value } => found = true
+                Empty => found = false
+                Deleted => found = false
             }
-            if !(step is Done) {
-                return step
+            if found {
+                return match bucket {
+                    MapEntry { key, value } => value
+                    Empty => Done {}
+                    Deleted => Done {}
+                }
             }
         }
-
         return Done {}
     }
 }
@@ -287,25 +291,26 @@ class MapEntryIterator<K, V> implements Iterator<[K, V]> {
 
 implement Iterator<[K, V]> for MapEntryIterator<K, V> {
     func next() -> [K, V] | Done {
-        let cap = self.buckets.length()
-        while self.index < cap {
+        while self.index < self.buckets.length() {
             let bucket = self.buckets[self.index]
             self.index = self.index + 1
-
-            let step = match bucket {
-                MapEntry { key, value } => [key, value]
-                Empty => Done {}
-                Deleted => Done {}
+            let mut found = false
+            match bucket {
+                MapEntry { key, value } => found = true
+                Empty => found = false
+                Deleted => found = false
             }
-            if !(step is Done) {
-                return step
+            if found {
+                return match bucket {
+                    MapEntry { key, value } => [key, value]
+                    Empty => Done {}
+                    Deleted => Done {}
+                }
             }
         }
-
         return Done {}
     }
 }
-
 
 
 tests {
@@ -505,5 +510,107 @@ tests {
             ran = true
         }
         assert(!ran)
+    }
+
+    // ---- Generic type tests ----
+
+    test "vole_map<i64, string>::basic ops" {
+        let m = VoleMap.new<i64, string>()
+        m.set(1, "one")
+        m.set(2, "two")
+        m.set(3, "three")
+
+        assert(m.len() == 3)
+        assert((m.get(1) ?? "") == "one")
+        assert((m.get(2) ?? "") == "two")
+        assert((m.get(3) ?? "") == "three")
+        assert(m.get(999) == nil)
+    }
+
+    test "vole_map<i64, string>::remove" {
+        let m = VoleMap.new<i64, string>()
+        m.set(1, "one")
+        m.set(2, "two")
+
+        assert(m.remove(999) == nil)
+        assert(m.len() == 2)
+
+        let removed = m.remove(1)
+        assert((removed ?? "") == "one")
+        assert(m.len() == 1)
+        assert(m.get(1) == nil)
+        assert((m.get(2) ?? "") == "two")
+    }
+
+    test "vole_map<i64, string>::update existing key" {
+        let m = VoleMap.new<i64, string>()
+        m.set(1, "first")
+        assert((m.get(1) ?? "") == "first")
+
+        m.set(1, "updated")
+        assert(m.len() == 1)
+        assert((m.get(1) ?? "") == "updated")
+    }
+
+    test "vole_map<string, i64>::string keys" {
+        let m = VoleMap.new<string, i64>()
+        m.set("alpha", 1)
+        m.set("beta", 2)
+        m.set("gamma", 3)
+
+        assert(m.len() == 3)
+        assert((m.get("alpha") ?? 0) == 1)
+        assert((m.get("beta") ?? 0) == 2)
+        assert((m.get("gamma") ?? 0) == 3)
+        assert(m.get("missing") == nil)
+    }
+
+    test "vole_map<string, i64>::contains_key" {
+        let m = VoleMap.new<string, i64>()
+        m.set("x", 10)
+        m.set("y", 20)
+        m.set("z", 30)
+
+        assert(m.contains_key("x"))
+        assert(m.contains_key("y"))
+        assert(m.contains_key("z"))
+        assert(!m.contains_key("w"))
+
+        _ = m.remove("y")
+        assert(!m.contains_key("y"))
+        assert(m.contains_key("x"))
+        assert(m.contains_key("z"))
+    }
+
+    test "vole_map<string, i64>::clear" {
+        let m = VoleMap.new<string, i64>()
+        m.set("a", 1)
+        m.set("b", 2)
+        m.set("c", 3)
+        assert(m.len() == 3)
+
+        m.clear()
+        assert(m.len() == 0)
+        assert(m.is_empty())
+        assert(m.get("a") == nil)
+    }
+
+    test "vole_map<string, string>::both string" {
+        let m = VoleMap.new<string, string>()
+        m.set("greeting", "hello")
+        m.set("farewell", "goodbye")
+
+        assert(m.len() == 2)
+        assert((m.get("greeting") ?? "") == "hello")
+        assert((m.get("farewell") ?? "") == "goodbye")
+        assert(m.get("unknown") == nil)
+    }
+
+    test "vole_map<string, string>::is_empty" {
+        let m = VoleMap.new<string, string>()
+        assert(m.is_empty())
+
+        m.set("k", "v")
+        assert(!m.is_empty())
     }
 }
