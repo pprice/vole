@@ -1,0 +1,63 @@
+let { Empty } = import "std:collections/sentinels"
+
+class Entry<K, V> {
+    key: K,
+    value: V,
+}
+
+tests "generic union match patterns" {
+    test "identifier pattern infers class type args from scrutinee" {
+        let u: Entry<i64, i64> | Empty = Entry { key: 1, value: 2 }
+
+        let result = match u {
+            Entry => 1
+            Empty => 0
+        }
+
+        assert(result == 1)
+    }
+
+    test "generic args in type pattern" {
+        let u: Entry<i64, i64> | Empty = Entry { key: 3, value: 4 }
+
+        let result = match u {
+            Entry<i64, i64> => 1
+            Empty => 0
+        }
+
+        assert(result == 1)
+    }
+
+    test "typed record destructure pattern with inferred args" {
+        let u: Entry<i64, i64> | Empty = Entry { key: 5, value: 6 }
+
+        let result = match u {
+            Entry { key, value } => key + value
+            Empty => 0
+        }
+
+        assert(result == 11)
+    }
+
+    test "typed record destructure pattern with explicit args" {
+        let u: Entry<i64, i64> | Empty = Entry { key: 7, value: 8 }
+
+        let result = match u {
+            Entry<i64, i64> { key, value } => key + value
+            Empty => 0
+        }
+
+        assert(result == 15)
+    }
+
+    test "empty branch still works" {
+        let u: Entry<i64, i64> | Empty = Empty
+
+        let result = match u {
+            Entry => 1
+            Empty => 0
+        }
+
+        assert(result == 0)
+    }
+}

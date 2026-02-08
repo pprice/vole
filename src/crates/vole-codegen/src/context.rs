@@ -1065,6 +1065,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Get substituted return type for generic method calls
     #[inline]
     pub fn get_substituted_return_type(&self, node_id: &vole_frontend::NodeId) -> Option<TypeId> {
+        // Module NodeIds are file-local. The sema substituted_return_types map is currently
+        // global, so looking it up directly in module context can collide with unrelated
+        // main-program NodeIds and produce wrong return types. For module code, use the
+        // module-local expression type map (with substitution) instead.
+        if self.current_module.is_some() {
+            return self.get_expr_type_substituted(node_id);
+        }
+
         self.env
             .analyzed
             .query()
@@ -1786,11 +1794,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         CompiledValue::new(value, self.cranelift_type(type_id), type_id)
     }
 
-    /// Mark a CompiledValue as borrowed if its type is RC-managed or is a
-    /// composite type (tuple, fixed array, struct) with RC fields.
+    /// Mark a CompiledValue as borrowed if its type is RC-managed, is a union
+    /// with RC variants, or is a composite type (tuple, fixed array, struct)
+    /// with RC fields.
     /// This sets lifecycle metadata without emitting any rc_inc/rc_dec.
     pub fn mark_borrowed_if_rc(&self, cv: &mut CompiledValue) {
         if self.rc_state(cv.type_id).needs_cleanup()
+            || self.rc_state(cv.type_id).union_variants().is_some()
             || self.composite_rc_field_offsets(cv.type_id).is_some()
         {
             cv.mark_borrowed();
@@ -3329,6 +3339,14 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         value: CompiledValue,
         target_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
+        // Resolve generic type params in monomorphized contexts before coercion checks.
+        // This keeps union/interface coercions from comparing concrete targets against
+        // unresolved TypeParam values.
+        let resolved_target_type_id = self.try_substitute_type(target_type_id);
+        let resolved_value_type_id = self.try_substitute_type(value.type_id);
+        let mut resolved_value = value;
+        resolved_value.type_id = resolved_value_type_id;
+
         let (
             is_target_interface,
             is_value_interface,
@@ -3339,22 +3357,22 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         ) = {
             let arena = self.arena();
             (
-                arena.is_interface(target_type_id),
-                arena.is_interface(value.type_id),
-                arena.is_union(target_type_id),
-                arena.is_union(value.type_id),
-                arena.is_unknown(target_type_id),
-                arena.is_unknown(value.type_id),
+                arena.is_interface(resolved_target_type_id),
+                arena.is_interface(resolved_value_type_id),
+                arena.is_union(resolved_target_type_id),
+                arena.is_union(resolved_value_type_id),
+                arena.is_unknown(resolved_target_type_id),
+                arena.is_unknown(resolved_value_type_id),
             )
         };
         if is_target_interface && !is_value_interface {
-            self.box_interface_value(value, target_type_id)
+            self.box_interface_value(resolved_value, resolved_target_type_id)
         } else if is_target_union && !is_value_union {
-            self.construct_union_id(value, target_type_id)
+            self.construct_union_id(resolved_value, resolved_target_type_id)
         } else if is_target_unknown && !is_value_unknown {
-            self.box_to_unknown(value)
+            self.box_to_unknown(resolved_value)
         } else {
-            Ok(value)
+            Ok(resolved_value)
         }
     }
 

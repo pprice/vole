@@ -1069,10 +1069,45 @@ impl Cg<'_, '_, '_> {
                         (pos, actual, variant_type_id)
                     }
                     None => {
+                        let expected = variants
+                            .iter()
+                            .map(|&variant| self.arena().display_basic(variant).to_string())
+                            .collect::<Vec<_>>()
+                            .join(" | ");
+                        let found = if let Some(name_id) =
+                            self.arena().unwrap_type_param(value.type_id)
+                        {
+                            format!(
+                                "{} ({:?})",
+                                self.name_table().display(name_id),
+                                name_id
+                            )
+                        } else {
+                            self.arena().display_basic(value.type_id).to_string()
+                        };
+                        let subs = self
+                            .substitutions
+                            .map(|m| {
+                                m.iter()
+                                    .map(|(k, v)| {
+                                        format!(
+                                            "{} ({:?}) -> {}",
+                                            self.name_table().display(*k),
+                                            k,
+                                            self.arena().display_basic(*v)
+                                        )
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            })
+                            .unwrap_or_else(|| "<none>".to_string());
                         return Err(CodegenError::type_mismatch(
                             "union variant",
-                            "compatible type",
-                            "incompatible type",
+                            format!("compatible type ({expected})"),
+                            format!(
+                                "{found} (union={}, substitutions={subs})",
+                                self.arena().display_basic(union_type_id)
+                            ),
                         ));
                     }
                 }

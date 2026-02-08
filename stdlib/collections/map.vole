@@ -1,0 +1,202 @@
+// stdlib/collections/map.vole
+// Pure Vole Map<K, V> using open addressing with linear probing.
+
+let { Array } = import "std:array"
+let { Empty, Deleted } = import "std:collections/sentinels"
+
+class MapEntry<K, V> {
+    key: K,
+    value: V,
+}
+
+class Map<K: Hashable + Equatable, V> {
+    buckets: [MapEntry<K, V> | Empty | Deleted],
+    size: i64,
+    tomb_count: i64,
+
+    statics {
+        func new() -> Map<K, V> {
+            return Map.with_capacity<K, V>(8)
+        }
+
+        func with_capacity(capacity: i64) -> Map<K, V> {
+            let cap = Map.next_power_of_2(capacity)
+            let buckets = Array.filled<MapEntry<K, V> | Empty | Deleted>(cap, Empty)
+            return Map {
+                buckets: buckets,
+                size: 0,
+                tomb_count: 0,
+            }
+        }
+
+        func next_power_of_2(n: i64) -> i64 {
+            if n <= 8 {
+                return 8
+            }
+
+            let mut power = 8
+            while power < n {
+                power = power * 2
+            }
+            return power
+        }
+    }
+
+    func set(key: K, value: V) {
+        if self.needs_rehash() {
+            self.rehash()
+        }
+
+        let idx = self.find_slot(key)
+        let bucket = self.buckets[idx]
+
+        match bucket {
+            MapEntry { key: existing_key, value: existing_value } => self.set_on_entry(idx, key, value)
+            Empty => self.set_on_empty(idx, key, value)
+            Deleted => self.set_on_deleted(idx, key, value)
+        }
+    }
+
+    func get(key: K) -> V? {
+        let idx = self.find_slot(key)
+        let bucket = self.buckets[idx]
+
+        return match bucket {
+            MapEntry { key: existing_key, value: existing_value } => existing_value
+            Empty => nil
+            Deleted => nil
+        }
+    }
+
+    func contains_key(key: K) -> bool {
+        return self.get(key) != nil
+    }
+
+    func remove(key: K) -> V? {
+        let idx = self.find_slot(key)
+        let bucket = self.buckets[idx]
+
+        return match bucket {
+            MapEntry { key: existing_key, value: existing_value } => self.remove_entry(idx, existing_value)
+            Empty => nil
+            Deleted => nil
+        }
+    }
+
+    func clear() {
+        let cap = self.buckets.length()
+        self.buckets = Array.filled<MapEntry<K, V> | Empty | Deleted>(cap, Empty)
+        self.size = 0
+        self.tomb_count = 0
+    }
+
+    func len() -> i64 {
+        return self.size
+    }
+
+    func is_empty() -> bool {
+        // Work around generic self-field comparison issue by using a local first.
+        let s = self.size
+        return s == 0
+    }
+
+    func find_slot(key: K) -> i64 {
+        let cap = self.buckets.length()
+        let mut idx = key.hash() & (cap - 1)
+        let mut first_deleted = -1
+        let mut probes = 0
+
+        while probes < cap {
+            let bucket = self.buckets[idx]
+
+            let mut same_key = false
+            let mut saw_deleted = false
+            let mut saw_empty = false
+
+            match bucket {
+                MapEntry { key: existing_key, value: existing_value } => same_key = existing_key.equals(key)
+                Deleted => saw_deleted = true
+                Empty => saw_empty = true
+            }
+
+            if same_key {
+                return idx
+            } else if saw_deleted {
+                if first_deleted == -1 {
+                    first_deleted = idx
+                }
+            } else if saw_empty {
+                if first_deleted != -1 {
+                    return first_deleted
+                }
+                return idx
+            }
+
+            idx = (idx + 1) & (cap - 1)
+            probes = probes + 1
+        }
+
+        if first_deleted != -1 {
+            return first_deleted
+        }
+
+        return idx
+    }
+
+    func needs_rehash() -> bool {
+        let cap = self.buckets.length()
+        let used = self.size + self.tomb_count
+        return (used * 100) / cap > 70
+    }
+
+    func rehash() {
+        let old_buckets = self.buckets
+        let old_cap = old_buckets.length()
+        let new_cap = old_cap * 2
+
+        self.buckets = Array.filled<MapEntry<K, V> | Empty | Deleted>(new_cap, Empty)
+        self.size = 0
+        self.tomb_count = 0
+
+        for bucket in old_buckets {
+            match bucket {
+                MapEntry { key, value } => self.insert_no_rehash(key, value)
+                Empty => 0
+                Deleted => 0
+            }
+        }
+    }
+
+    func insert_no_rehash(key: K, value: V) {
+        let idx = self.find_slot(key)
+        let bucket = self.buckets[idx]
+
+        match bucket {
+            MapEntry { key: existing_key, value: existing_value } => self.set_on_entry(idx, key, value)
+            Empty => self.set_on_empty(idx, key, value)
+            Deleted => self.set_on_deleted(idx, key, value)
+        }
+    }
+
+    func set_on_entry(idx: i64, key: K, value: V) {
+        self.buckets[idx] = MapEntry { key: key, value: value }
+    }
+
+    func set_on_empty(idx: i64, key: K, value: V) {
+        self.buckets[idx] = MapEntry { key: key, value: value }
+        self.size = self.size + 1
+    }
+
+    func set_on_deleted(idx: i64, key: K, value: V) {
+        self.buckets[idx] = MapEntry { key: key, value: value }
+        self.size = self.size + 1
+        self.tomb_count = self.tomb_count - 1
+    }
+
+    func remove_entry(idx: i64, value: V) -> V {
+        self.buckets[idx] = Deleted
+        self.size = self.size - 1
+        self.tomb_count = self.tomb_count + 1
+        return value
+    }
+}

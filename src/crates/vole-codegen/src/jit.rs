@@ -1206,7 +1206,16 @@ impl JitContext {
     pub fn finalize(&mut self) -> CodegenResult<()> {
         self.module.finalize_definitions().map_err(|e| {
             CodegenError::internal_with_context("finalization error", format!("{:?}", e))
-        })
+        })?;
+
+        if std::env::var_os("VOLE_DUMP_FN_PTRS").is_some() {
+            for (name, &func_id) in &self.func_ids {
+                let ptr = self.module.get_finalized_function(func_id);
+                eprintln!("fnptr {} {:p}", name, ptr);
+            }
+        }
+
+        Ok(())
     }
 
     /// Get a function pointer by name

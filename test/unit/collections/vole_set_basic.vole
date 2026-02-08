@@ -1,0 +1,112 @@
+// Tests for pure Vole Set core (std:collections/set)
+
+let { Set } = import "std:collections/set"
+
+tests {
+    test "vole_set::new creates empty set" {
+        let s = Set.new<i64>()
+        assert(s.len() == 0)
+        assert(s.is_empty())
+    }
+
+    test "vole_set::add and contains i64" {
+        let s = Set.new<i64>()
+        assert(s.add(42))
+        assert(s.contains(42))
+        assert(!s.contains(7))
+        assert(s.len() == 1)
+    }
+
+    test "vole_set::add duplicate returns false" {
+        let s = Set.new<i64>()
+        assert(s.add(5))
+        assert(!s.add(5))
+        assert(s.len() == 1)
+    }
+
+    test "vole_set::remove existing returns true" {
+        let s = Set.new<i64>()
+        _ = s.add(1)
+        _ = s.add(2)
+        _ = s.add(3)
+
+        assert(s.remove(2))
+        assert(!s.contains(2))
+        assert(s.contains(1))
+        assert(s.contains(3))
+        assert(s.len() == 2)
+    }
+
+    test "vole_set::remove missing returns false" {
+        let s = Set.new<i64>()
+        _ = s.add(9)
+        assert(!s.remove(404))
+        assert(s.len() == 1)
+    }
+
+    test "vole_set::clear resets set" {
+        let s = Set.new<i64>()
+        _ = s.add(1)
+        _ = s.add(2)
+        _ = s.add(3)
+
+        s.clear()
+        assert(s.len() == 0)
+        assert(s.is_empty())
+        assert(!s.contains(1))
+    }
+
+    test "vole_set::with_capacity" {
+        let s = Set.with_capacity<i64>(100)
+        assert(s.len() == 0)
+        assert(s.is_empty())
+
+        _ = s.add(7)
+        assert(s.contains(7))
+    }
+
+    test "vole_set::rehash preserves entries" {
+        let s = Set.new<i64>()
+
+        let mut i = 0
+        while i < 40 {
+            _ = s.add(i)
+            i = i + 1
+        }
+
+        assert(s.len() == 40)
+
+        let mut j = 0
+        while j < 40 {
+            assert(s.contains(j))
+            j = j + 1
+        }
+    }
+
+    test "vole_set::string values" {
+        let s = Set.new<string>()
+        assert(s.add("alpha"))
+        assert(s.add("beta"))
+        assert(!s.add("alpha"))
+
+        assert(s.contains("alpha"))
+        assert(s.contains("beta"))
+        assert(!s.contains("gamma"))
+        assert(s.len() == 2)
+    }
+
+    test "vole_set::reuses deleted slots" {
+        let s = Set.new<i64>()
+        _ = s.add(10)
+        _ = s.add(20)
+        _ = s.add(30)
+        assert(s.remove(20))
+
+        assert(s.add(40))
+        assert(!s.contains(20))
+        assert(s.contains(10))
+        assert(s.contains(30))
+        assert(s.contains(40))
+        assert(s.len() == 3)
+    }
+}

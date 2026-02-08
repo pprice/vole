@@ -1171,10 +1171,12 @@ impl Analyzer {
                     .insert(expr.id, final_return_id);
             }
 
-            // Record static method monomorphization if there are any type params
-            if let Some(ref inferred) = maybe_inferred
-                && !inferred.is_empty()
-            {
+            // Record static method monomorphization whenever the call participates
+            // in generic static-method analysis. Inference may legitimately produce
+            // an empty map for class-independent static methods (e.g. helpers that
+            // only use concrete parameter/return types), but codegen still needs a
+            // monomorphized callable target for generic class static methods.
+            if let Some(ref inferred) = maybe_inferred {
                 self.record_static_method_monomorph(
                     expr,
                     type_def_id,

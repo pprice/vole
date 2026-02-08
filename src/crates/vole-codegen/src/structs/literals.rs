@@ -427,12 +427,19 @@ impl Cg<'_, '_, '_> {
         }
 
         // Find the tag for the value type
-        let tag = variants
-            .iter()
-            .position(|&v| v == value.type_id)
-            .ok_or_else(|| {
-                CodegenError::type_mismatch("union variant", "compatible type", "incompatible type")
-            })?;
+        let tag = variants.iter().position(|&v| v == value.type_id).ok_or_else(|| {
+            let expected = variants
+                .iter()
+                .map(|&variant| self.arena().display_basic(variant).to_string())
+                .collect::<Vec<_>>()
+                .join(" | ");
+            let found = self.arena().display_basic(value.type_id).to_string();
+            CodegenError::type_mismatch(
+                "union variant",
+                format!("compatible type ({expected})"),
+                found,
+            )
+        })?;
 
         // Get heap_alloc function ref
         let heap_alloc_ref = self.runtime_func_ref(RuntimeFn::HeapAlloc)?;

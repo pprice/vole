@@ -238,10 +238,21 @@ impl<'src> Parser<'src> {
             TokenType::Identifier => {
                 self.advance();
                 let name = self.interner.intern(&token.lexeme);
+                let type_expr = self.parse_pattern_type_expr_after_ident(name)?;
 
-                // Check for record destructure pattern: TypeName { x, y }
+                // Check for record destructure pattern: TypeName { x, y } / TypeName<T> { x, y }
                 if self.check(TokenType::LBrace) {
-                    return self.parse_typed_record_pattern(name, token.span);
+                    return self.parse_typed_record_pattern(type_expr, token.span);
+                }
+
+                // Explicit type syntax in patterns is always a type pattern.
+                if !matches!(type_expr, TypeExpr::Named(_)) {
+                    let span = token.span.merge(self.previous.span);
+                    return Ok(Pattern {
+                        id: self.next_id(),
+                        kind: PatternKind::Type { type_expr },
+                        span,
+                    });
                 }
 
                 Ok(Pattern {
@@ -323,7 +334,7 @@ impl<'src> Parser<'src> {
     /// Parse a typed record destructure pattern: TypeName { x, y } or TypeName { x: a, y: b }
     fn parse_typed_record_pattern(
         &mut self,
-        type_name: Symbol,
+        type_name: TypeExpr,
         start_span: Span,
     ) -> Result<Pattern, ParseError> {
         self.advance(); // consume '{'
@@ -376,5 +387,48 @@ impl<'src> Parser<'src> {
             },
             span,
         })
+    }
+
+    /// Parse type syntax after an identifier in pattern context.
+    ///
+    /// Supports:
+    /// - `TypeName`
+    /// - `TypeName<T, U>`
+    /// - `module.TypeName`
+    /// - `module.TypeName<T, U>`
+    fn parse_pattern_type_expr_after_ident(
+        &mut self,
+        first: Symbol,
+    ) -> Result<TypeExpr, ParseError> {
+        let mut segments = vec![first];
+
+        while self.match_token(TokenType::Dot) {
+            let seg_token = self.current.clone();
+            self.consume(TokenType::Identifier, "expected identifier after '.'")?;
+            segments.push(self.interner.intern(&seg_token.lexeme));
+        }
+
+        let args = if self.check(TokenType::Lt) {
+            self.advance(); // consume '<'
+            let mut type_args = Vec::new();
+            if !self.check_gt_in_type_context() {
+                type_args.push(self.parse_type()?);
+                while self.match_token(TokenType::Comma) {
+                    type_args.push(self.parse_type()?);
+                }
+            }
+            self.consume_gt_in_type_context()?;
+            type_args
+        } else {
+            Vec::new()
+        };
+
+        if segments.len() > 1 {
+            Ok(TypeExpr::QualifiedPath { segments, args })
+        } else if args.is_empty() {
+            Ok(TypeExpr::Named(first))
+        } else {
+            Ok(TypeExpr::Generic { name: first, args })
+        }
     }
 }

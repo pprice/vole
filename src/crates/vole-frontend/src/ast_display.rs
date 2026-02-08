@@ -1254,7 +1254,11 @@ impl<'a> AstPrinter<'a> {
                 }
                 out.push(']');
             }
-            PatternKind::Record { fields, .. } => {
+            PatternKind::Record { type_name, fields } => {
+                if let Some(type_expr) = type_name {
+                    self.write_type_inline(out, type_expr);
+                    out.push(' ');
+                }
                 out.push_str("{ ");
                 for (i, field) in fields.iter().enumerate() {
                     if i > 0 {

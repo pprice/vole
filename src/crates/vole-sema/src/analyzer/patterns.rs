@@ -3,8 +3,10 @@
 use super::*;
 use crate::analysis_cache::IsCheckResult;
 use crate::type_arena::TypeId as ArenaTypeId;
+use crate::type_arena::TypeIdVec;
 use crate::types::StructFieldId;
-use vole_frontend::PatternKind;
+use rustc_hash::FxHashMap;
+use vole_frontend::{PatternKind, Symbol, TypeExpr};
 
 impl Analyzer {
     /// Check pattern and return TypeId directly.
@@ -42,71 +44,22 @@ impl Analyzer {
             }
             PatternKind::Identifier { name } => {
                 let span = pattern.span;
-                // Check if this identifier is a known class type via Resolver
-                let type_id_opt = self
-                    .resolver(interner)
-                    .resolve_type(*name, &self.entity_registry());
+                if let Some(pattern_type_id) =
+                    self.resolve_identifier_pattern_type_id(*name, scrutinee_type_id, interner)
+                {
+                    self.check_type_pattern_compatibility_id(
+                        pattern_type_id,
+                        scrutinee_type_id,
+                        span,
+                        interner,
+                    );
 
-                if let Some(type_def_id) = type_id_opt {
-                    let type_kind = self.entity_registry().type_kind(type_def_id);
-                    match type_kind {
-                        TypeDefKind::Class => {
-                            // Build class type as TypeId directly
-                            let pattern_type_id = {
-                                let mut arena = self.type_arena_mut();
-                                arena.class(type_def_id, vec![])
-                            };
-                            self.check_type_pattern_compatibility_id(
-                                pattern_type_id,
-                                scrutinee_type_id,
-                                span,
-                                interner,
-                            );
+                    // Compute IsCheckResult for codegen
+                    let is_check_result =
+                        self.compute_type_pattern_check_result(pattern_type_id, scrutinee_type_id);
+                    self.record_is_check_result(pattern.id, is_check_result);
 
-                            // Compute IsCheckResult for codegen
-                            let is_check_result = self.compute_type_pattern_check_result(
-                                pattern_type_id,
-                                scrutinee_type_id,
-                            );
-                            self.record_is_check_result(pattern.id, is_check_result);
-
-                            Some(pattern_type_id)
-                        }
-                        TypeDefKind::Struct | TypeDefKind::Sentinel => {
-                            // Structs/sentinels participate in unions via auto-boxing (v-7d4b)
-                            let pattern_type_id = {
-                                let mut arena = self.type_arena_mut();
-                                arena.struct_type(type_def_id, vec![])
-                            };
-                            self.check_type_pattern_compatibility_id(
-                                pattern_type_id,
-                                scrutinee_type_id,
-                                span,
-                                interner,
-                            );
-
-                            // Compute IsCheckResult for codegen
-                            let is_check_result = self.compute_type_pattern_check_result(
-                                pattern_type_id,
-                                scrutinee_type_id,
-                            );
-                            self.record_is_check_result(pattern.id, is_check_result);
-
-                            Some(pattern_type_id)
-                        }
-                        _ => {
-                            // Regular identifier binding pattern for other type kinds
-                            self.scope.define(
-                                *name,
-                                Variable {
-                                    ty: scrutinee_type_id,
-                                    mutable: false,
-                                    declaration_span: pattern.span,
-                                },
-                            );
-                            None
-                        }
-                    }
+                    Some(pattern_type_id)
                 } else {
                     // Regular identifier binding pattern
                     self.scope.define(
@@ -122,8 +75,8 @@ impl Analyzer {
             }
             PatternKind::Type { type_expr } => {
                 let span = pattern.span;
-                // Resolve type and check compatibility using TypeId
-                let pattern_type_id = self.resolve_type_id(type_expr, interner);
+                let pattern_type_id =
+                    self.resolve_pattern_type_expr_id(type_expr, scrutinee_type_id, interner);
                 self.check_type_pattern_compatibility_id(
                     pattern_type_id,
                     scrutinee_type_id,
@@ -254,120 +207,56 @@ impl Analyzer {
             PatternKind::Record { type_name, fields } => {
                 let span = pattern.span;
                 // Typed record pattern: TypeName { x, y }
-                if let Some(name) = type_name {
-                    // Look up the type via Resolver
-                    let type_id_opt = self
-                        .resolver(interner)
-                        .resolve_type(*name, &self.entity_registry());
+                if let Some(type_expr) = type_name {
+                    let pattern_type_id =
+                        self.resolve_pattern_type_expr_id(type_expr, scrutinee_type_id, interner);
 
-                    if let Some(type_id) = type_id_opt {
-                        // Extract kind and generic_info upfront to avoid holding borrow
-                        let kind = self.entity_registry().type_kind(type_id);
-                        let generic_info = self.entity_registry().type_generic_info(type_id);
-
-                        // Get fields from generic_info
-                        let get_fields_from_info =
-                            |gi: &crate::entity_defs::GenericTypeInfo| -> Vec<StructFieldId> {
-                                gi.field_names
-                                    .iter()
-                                    .zip(gi.field_types.iter())
-                                    .enumerate()
-                                    .map(|(i, (&name_id, &ty))| StructFieldId {
-                                        name_id,
-                                        ty,
-                                        slot: i,
-                                    })
-                                    .collect()
-                            };
-
-                        let (pattern_type_id, type_fields) = match kind {
-                            TypeDefKind::Class => {
-                                if self.entity_registry().build_class_type(type_id).is_some() {
-                                    let fields_ref = generic_info
-                                        .as_ref()
-                                        .map(get_fields_from_info)
-                                        .unwrap_or_default();
-                                    let class_type_id =
-                                        self.type_arena_mut().class(type_id, Vec::new());
-                                    (Some(class_type_id), fields_ref)
-                                } else {
-                                    (None, vec![])
-                                }
-                            }
-                            TypeDefKind::Struct | TypeDefKind::Sentinel => {
-                                // Struct/sentinel destructuring in match (auto-boxed in unions)
-                                let fields_ref = generic_info
-                                    .as_ref()
-                                    .map(get_fields_from_info)
-                                    .unwrap_or_default();
-                                let struct_type_id =
-                                    self.type_arena_mut().struct_type(type_id, Vec::new());
-                                (Some(struct_type_id), fields_ref)
-                            }
-                            TypeDefKind::ErrorType => {
-                                // Error type destructuring: error Overflow { value, max }
-                                // Get fields from EntityRegistry
-                                let field_ids = self.entity_registry().type_fields(type_id);
-                                let fields_ref: Vec<StructFieldId> = field_ids
-                                    .into_iter()
-                                    .map(|field_id| {
-                                        let (name_id, ty) =
-                                            self.entity_registry().field_name_and_type(field_id);
-                                        let slot = self.entity_registry().get_field(field_id).slot;
-                                        StructFieldId { name_id, ty, slot }
-                                    })
-                                    .collect();
-                                let error_type_id = self.type_arena_mut().error_type(type_id);
-                                (Some(error_type_id), fields_ref)
-                            }
-                            _ => {
-                                self.add_error(
-                                    SemanticError::PatternTypeMismatch {
-                                        expected: "class, struct, or error".to_string(),
-                                        found: interner.resolve(*name).to_string(),
-                                        span: (span).into(),
-                                    },
-                                    span,
-                                );
-                                (None, vec![])
-                            }
-                        };
-
-                        // Check pattern fields
-                        self.check_record_pattern_fields_id(fields, &type_fields, span, interner);
-
-                        // Check compatibility with scrutinee
-                        if let Some(pattern_type_id) = pattern_type_id {
-                            self.check_type_pattern_compatibility_id(
-                                pattern_type_id,
-                                scrutinee_type_id,
+                    if pattern_type_id.is_invalid() {
+                        if let Some(name) = Self::named_type_symbol(type_expr) {
+                            let type_name = interner.resolve(name);
+                            self.add_error(
+                                SemanticError::UnknownType {
+                                    name: type_name.to_string(),
+                                    hint: unknown_type_hint(type_name),
+                                    span: span.into(),
+                                },
                                 span,
-                                interner,
                             );
-
-                            // Compute IsCheckResult for codegen
-                            let is_check_result = self.compute_type_pattern_check_result(
-                                pattern_type_id,
-                                scrutinee_type_id,
-                            );
-                            self.record_is_check_result(pattern.id, is_check_result);
-
-                            Some(pattern_type_id)
-                        } else {
-                            None
                         }
-                    } else {
-                        let type_name = interner.resolve(*name);
+                        return None;
+                    }
+
+                    let Some(type_fields) = self.record_pattern_fields_for_type_id(pattern_type_id)
+                    else {
+                        let found = self.type_display_id(pattern_type_id);
                         self.add_error(
-                            SemanticError::UnknownType {
-                                name: type_name.to_string(),
-                                hint: unknown_type_hint(type_name),
-                                span: (span).into(),
+                            SemanticError::PatternTypeMismatch {
+                                expected: "class, struct, or error".to_string(),
+                                found,
+                                span: span.into(),
                             },
                             span,
                         );
-                        None
-                    }
+                        return None;
+                    };
+
+                    // Check pattern fields
+                    self.check_record_pattern_fields_id(fields, &type_fields, span, interner);
+
+                    // Check compatibility with scrutinee
+                    self.check_type_pattern_compatibility_id(
+                        pattern_type_id,
+                        scrutinee_type_id,
+                        span,
+                        interner,
+                    );
+
+                    // Compute IsCheckResult for codegen
+                    let is_check_result =
+                        self.compute_type_pattern_check_result(pattern_type_id, scrutinee_type_id);
+                    self.record_is_check_result(pattern.id, is_check_result);
+
+                    Some(pattern_type_id)
                 } else {
                     // Anonymous record pattern - check against scrutinee's fields
                     self.check_anonymous_record_pattern_id(
@@ -380,6 +269,160 @@ impl Analyzer {
                 }
             }
         }
+    }
+
+    fn named_type_symbol(type_expr: &TypeExpr) -> Option<Symbol> {
+        match type_expr {
+            TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => Some(*sym),
+            _ => None,
+        }
+    }
+
+    fn terminal_type_symbol(type_expr: &TypeExpr) -> Option<Symbol> {
+        match type_expr {
+            TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => Some(*sym),
+            TypeExpr::QualifiedPath { segments, .. } => segments.last().copied(),
+            _ => None,
+        }
+    }
+
+    fn infer_pattern_type_args_for_def(
+        &self,
+        type_def_id: TypeDefId,
+        scrutinee_type_id: ArenaTypeId,
+    ) -> TypeIdVec {
+        let arena = self.type_arena();
+
+        if let Some((scrutinee_def_id, type_args, _)) = arena.unwrap_nominal(scrutinee_type_id)
+            && scrutinee_def_id == type_def_id
+        {
+            return type_args.clone();
+        }
+
+        if let Some(variants) = arena.unwrap_union(scrutinee_type_id) {
+            for &variant_type_id in variants {
+                if let Some((variant_def_id, type_args, _)) = arena.unwrap_nominal(variant_type_id)
+                    && variant_def_id == type_def_id
+                {
+                    return type_args.clone();
+                }
+            }
+        }
+
+        TypeIdVec::new()
+    }
+
+    fn resolve_identifier_pattern_type_id(
+        &mut self,
+        name: Symbol,
+        scrutinee_type_id: ArenaTypeId,
+        interner: &Interner,
+    ) -> Option<ArenaTypeId> {
+        let type_def_id = self
+            .resolver(interner)
+            .resolve_type(name, &self.entity_registry())?;
+        let type_kind = self.entity_registry().type_kind(type_def_id);
+        match type_kind {
+            TypeDefKind::Class => {
+                let type_args =
+                    self.infer_pattern_type_args_for_def(type_def_id, scrutinee_type_id);
+                Some(self.type_arena_mut().class(type_def_id, type_args))
+            }
+            TypeDefKind::Struct | TypeDefKind::Sentinel => {
+                let type_args =
+                    self.infer_pattern_type_args_for_def(type_def_id, scrutinee_type_id);
+                Some(self.type_arena_mut().struct_type(type_def_id, type_args))
+            }
+            _ => None,
+        }
+    }
+
+    fn resolve_pattern_type_expr_id(
+        &mut self,
+        type_expr: &TypeExpr,
+        scrutinee_type_id: ArenaTypeId,
+        interner: &Interner,
+    ) -> ArenaTypeId {
+        if let TypeExpr::Named(name) = type_expr
+            && let Some(pattern_type_id) =
+                self.resolve_identifier_pattern_type_id(*name, scrutinee_type_id, interner)
+        {
+            return pattern_type_id;
+        }
+        self.resolve_type_id(type_expr, interner)
+    }
+
+    fn instantiate_nominal_pattern_fields(
+        &mut self,
+        type_def_id: TypeDefId,
+        type_args: &[ArenaTypeId],
+    ) -> Vec<StructFieldId> {
+        let Some(generic_info) = self.entity_registry().type_generic_info(type_def_id) else {
+            return vec![];
+        };
+
+        let substitutions: FxHashMap<_, _> = generic_info
+            .type_params
+            .iter()
+            .zip(type_args.iter())
+            .map(|(param, &arg)| (param.name_id, arg))
+            .collect();
+
+        generic_info
+            .field_names
+            .iter()
+            .zip(generic_info.field_types.iter())
+            .enumerate()
+            .map(|(slot, (&name_id, &field_type_id))| {
+                let ty = if substitutions.is_empty() {
+                    field_type_id
+                } else {
+                    self.type_arena_mut()
+                        .substitute(field_type_id, &substitutions)
+                };
+                StructFieldId { name_id, ty, slot }
+            })
+            .collect()
+    }
+
+    fn record_pattern_fields_for_type_id(
+        &mut self,
+        pattern_type_id: ArenaTypeId,
+    ) -> Option<Vec<StructFieldId>> {
+        let class_info = {
+            let arena = self.type_arena();
+            arena
+                .unwrap_class(pattern_type_id)
+                .map(|(type_def_id, type_args)| (type_def_id, type_args.clone()))
+        };
+        if let Some((type_def_id, type_args)) = class_info {
+            return Some(self.instantiate_nominal_pattern_fields(type_def_id, &type_args));
+        }
+
+        let struct_info = {
+            let arena = self.type_arena();
+            arena
+                .unwrap_struct(pattern_type_id)
+                .map(|(type_def_id, type_args)| (type_def_id, type_args.clone()))
+        };
+        if let Some((type_def_id, type_args)) = struct_info {
+            return Some(self.instantiate_nominal_pattern_fields(type_def_id, &type_args));
+        }
+
+        if let Some(type_def_id) = self.type_arena().unwrap_error(pattern_type_id) {
+            let field_ids = self.entity_registry().type_fields(type_def_id);
+            let fields_ref: Vec<StructFieldId> = field_ids
+                .into_iter()
+                .map(|field_id| {
+                    let (name_id, ty) = self.entity_registry().field_name_and_type(field_id);
+                    let slot = self.entity_registry().get_field(field_id).slot;
+                    StructFieldId { name_id, ty, slot }
+                })
+                .collect();
+            return Some(fields_ref);
+        }
+
+        None
     }
 
     /// Check type pattern compatibility (TypeId version)
@@ -565,12 +608,13 @@ impl Analyzer {
                 self.check_pattern_id(pattern, error_type_id, interner)
             }
             PatternKind::Record {
-                type_name: Some(name),
+                type_name: Some(type_expr),
                 ..
             } => {
                 // Try to resolve the record type name from the error union
-                if let Some(type_def_id) =
-                    self.resolve_error_type_from_union(*name, error_type_id, interner)
+                if let Some(name) = Self::terminal_type_symbol(type_expr)
+                    && let Some(type_def_id) =
+                        self.resolve_error_type_from_union(name, error_type_id, interner)
                 {
                     // Resolve using the found TypeDefId
                     let kind = self.entity_registry().type_kind(type_def_id);
@@ -700,7 +744,8 @@ impl Analyzer {
             let mut covered: Vec<bool> = vec![false; variants.len()];
 
             for arm in arms {
-                let pattern_type_id = self.get_pattern_type_id(&arm.pattern, interner);
+                let pattern_type_id =
+                    self.get_pattern_type_id(&arm.pattern, scrutinee_type_id, interner);
 
                 if let Some(pt_id) = pattern_type_id {
                     for (i, &variant_id) in variants.iter().enumerate() {
@@ -716,7 +761,8 @@ impl Analyzer {
 
         // For non-union types, check if any pattern covers the exact type
         for arm in arms {
-            let pattern_type_id = self.get_pattern_type_id(&arm.pattern, interner);
+            let pattern_type_id =
+                self.get_pattern_type_id(&arm.pattern, scrutinee_type_id, interner);
             if let Some(pt_id) = pattern_type_id
                 && pt_id == scrutinee_type_id
             {
@@ -731,10 +777,13 @@ impl Analyzer {
     fn get_pattern_type_id(
         &mut self,
         pattern: &Pattern,
+        scrutinee_type_id: ArenaTypeId,
         interner: &Interner,
     ) -> Option<ArenaTypeId> {
         match &pattern.kind {
-            PatternKind::Type { type_expr } => Some(self.resolve_type_id(type_expr, interner)),
+            PatternKind::Type { type_expr } => {
+                Some(self.resolve_pattern_type_expr_id(type_expr, scrutinee_type_id, interner))
+            }
             PatternKind::Identifier { name } => {
                 // Well-known sentinel values resolve directly to their reserved TypeIds
                 let name_str = interner.resolve(*name);
@@ -745,47 +794,12 @@ impl Analyzer {
                     return Some(ArenaTypeId::DONE);
                 }
 
-                // Look up via Resolver - get type_def_id first to drop ResolverGuard
-                let type_def_id = self
-                    .resolver(interner)
-                    .resolve_type(*name, &self.entity_registry());
-                type_def_id.and_then(|type_def_id| {
-                    let kind = self.entity_registry().get_type(type_def_id).kind;
-                    match kind {
-                        TypeDefKind::Class => {
-                            self.type_arena_mut().class(type_def_id, vec![]).into()
-                        }
-                        TypeDefKind::Struct | TypeDefKind::Sentinel => self
-                            .type_arena_mut()
-                            .struct_type(type_def_id, vec![])
-                            .into(),
-                        _ => None,
-                    }
-                })
+                self.resolve_identifier_pattern_type_id(*name, scrutinee_type_id, interner)
             }
             PatternKind::Record {
-                type_name: Some(name),
+                type_name: Some(type_expr),
                 ..
-            } => {
-                // Typed record pattern: Point { x, y } covers type Point
-                // Get type_def_id first to drop ResolverGuard
-                let type_def_id = self
-                    .resolver(interner)
-                    .resolve_type(*name, &self.entity_registry());
-                type_def_id.and_then(|type_def_id| {
-                    let kind = self.entity_registry().get_type(type_def_id).kind;
-                    match kind {
-                        TypeDefKind::Class => {
-                            self.type_arena_mut().class(type_def_id, vec![]).into()
-                        }
-                        TypeDefKind::Struct | TypeDefKind::Sentinel => self
-                            .type_arena_mut()
-                            .struct_type(type_def_id, vec![])
-                            .into(),
-                        _ => None,
-                    }
-                })
-            }
+            } => Some(self.resolve_pattern_type_expr_id(type_expr, scrutinee_type_id, interner)),
             _ => None,
         }
     }

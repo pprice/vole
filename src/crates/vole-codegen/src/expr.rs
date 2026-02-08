@@ -12,7 +12,7 @@ use rustc_hash::FxHashMap;
 
 use vole_frontend::{
     AssignTarget, BlockExpr, Expr, ExprKind, IfExpr, MatchExpr, NodeId, Pattern, PatternKind,
-    RangeExpr, RecordFieldPattern, Symbol, UnaryOp, WhenExpr,
+    RangeExpr, RecordFieldPattern, Symbol, TypeExpr, UnaryOp, WhenExpr,
 };
 use vole_identity::ModuleId;
 use vole_sema::IsCheckResult;
@@ -1028,7 +1028,7 @@ impl Cg<'_, '_, '_> {
     /// Resolve a simple TypeExpr to a TypeId (for monomorphized generic fallback).
     /// Handles primitive types, named types (nil, Done, etc.), never, unknown - enough
     /// for `is` checks in generic function bodies that sema didn't analyze.
-    fn resolve_simple_type_expr(&self, type_expr: &vole_frontend::TypeExpr) -> Option<TypeId> {
+    fn resolve_simple_type_expr(&self, type_expr: &TypeExpr) -> Option<TypeId> {
         use vole_frontend::{PrimitiveType, TypeExpr as TE};
         let arena = self.arena();
         match type_expr {
@@ -1058,6 +1058,55 @@ impl Cg<'_, '_, '_> {
                 let type_def_id = query.resolve_type_def_by_str(module_id, name)?;
                 self.registry().get_type(type_def_id).base_type_id
             }
+            _ => None,
+        }
+    }
+
+    /// Recover the concrete pattern type for a typed record arm.
+    ///
+    /// Prefer sema's `IsCheckResult` (which already includes generic inference),
+    /// then fall back to simple type resolution for non-generic monomorph cases.
+    fn pattern_type_id_for_record_arm(
+        &self,
+        scrutinee_type_id: TypeId,
+        pattern_id: NodeId,
+        type_expr: &TypeExpr,
+    ) -> Option<TypeId> {
+        let is_record_type = |ty: TypeId| {
+            self.arena().unwrap_nominal(ty).is_some_and(|(_, _, kind)| {
+                kind.is_class_or_struct()
+                    || matches!(kind, vole_sema::type_arena::NominalKind::Error)
+            })
+        };
+
+        if let Some(is_check_result) = self.get_is_check_result(pattern_id) {
+            match is_check_result {
+                IsCheckResult::CheckTag(tag) => {
+                    let variants = self.arena().unwrap_union(scrutinee_type_id)?;
+                    return variants
+                        .get(tag as usize)
+                        .copied()
+                        .filter(|&ty| is_record_type(ty));
+                }
+                IsCheckResult::AlwaysTrue => {
+                    if is_record_type(scrutinee_type_id) {
+                        return Some(scrutinee_type_id);
+                    }
+                    return None;
+                }
+                IsCheckResult::AlwaysFalse => return None,
+                IsCheckResult::CheckUnknown(_) => {}
+            }
+        }
+
+        self.resolve_simple_type_expr(type_expr)
+            .filter(|&ty| is_record_type(ty))
+    }
+
+    fn type_expr_terminal_symbol(type_expr: &TypeExpr) -> Option<Symbol> {
+        match type_expr {
+            TypeExpr::Named(sym) | TypeExpr::Generic { name: sym, .. } => Some(*sym),
+            TypeExpr::QualifiedPath { segments, .. } => segments.last().copied(),
             _ => None,
         }
     }
@@ -1307,7 +1356,8 @@ impl Cg<'_, '_, '_> {
         self.switch_and_seal(merge_block);
 
         let result = self.builder.block_params(merge_block)[0];
-        Ok(CompiledValue::owned(result, cranelift_type, inner_type_id))
+        let cv = CompiledValue::new(result, cranelift_type, inner_type_id);
+        Ok(self.mark_rc_owned(cv))
     }
 
     /// Load a captured variable from closure
@@ -1381,7 +1431,25 @@ impl Cg<'_, '_, '_> {
         tracing::trace!(scrutinee_type = %scrutinee_type_str, "match scrutinee");
 
         // Get the result type from semantic analysis (same as when_expr / if_expr)
-        let result_type_id = self.get_expr_type(&expr_id).unwrap_or(TypeId::VOID);
+        let mut result_type_id = self
+            .get_expr_type_substituted(&expr_id)
+            .unwrap_or(TypeId::VOID);
+        // Match expressions that mix a non-union value with `nil` can be inferred
+        // as the non-union value in some monomorphized contexts, which erases nil
+        // arms to zero values. If this function returns a union type, use that
+        // union return type for the match result.
+        if !self.arena().is_union(result_type_id) {
+            let has_nil_arm = match_expr.arms.iter().any(|arm| {
+                self.get_expr_type_substituted(&arm.body.id)
+                    .is_some_and(|ty| self.arena().is_nil(ty))
+            });
+            if has_nil_arm && let Some(ret_type_id) = self.return_type {
+                let ret_type_id = self.try_substitute_type(ret_type_id);
+                if self.arena().is_union(ret_type_id) {
+                    result_type_id = ret_type_id;
+                }
+            }
+        }
         let result_cranelift_type = self.cranelift_type(result_type_id);
         let is_void = self.arena().is_void(result_type_id);
 
@@ -1559,29 +1627,16 @@ impl Cg<'_, '_, '_> {
                 }
                 PatternKind::Record { type_name, fields } => {
                     // Destructuring in match - TypeName { x, y } or { x, y }
-                    let (pattern_check, pattern_type_id) = if let Some(name) = type_name {
+                    let (pattern_check, pattern_type_id) = if let Some(type_expr) = type_name {
                         // Typed destructure pattern - need to check type first
-                        // Look up TypeDefId from Symbol
-                        let query = self.query();
-                        let module_id = self
-                            .current_module_id()
-                            .unwrap_or(self.env.analyzed.module_id);
-
-                        let type_def_id = query
-                            .try_name_id(module_id, &[*name])
-                            .and_then(|name_id| query.try_type_def_id(name_id));
-
-                        if let Some(type_meta) =
-                            type_def_id.and_then(|id| self.type_meta().get(&id))
-                        {
-                            (
-                                self.compile_type_pattern_check(&scrutinee, arm.pattern.id)?,
-                                Some(type_meta.vole_type),
-                            )
-                        } else {
-                            // Unknown type name - never matches
-                            (Some(self.builder.ins().iconst(types::I8, 0)), None)
-                        }
+                        let pattern_check =
+                            self.compile_type_pattern_check(&scrutinee, arm.pattern.id)?;
+                        let pattern_type_id = self.pattern_type_id_for_record_arm(
+                            scrutinee_type_id,
+                            arm.pattern.id,
+                            type_expr,
+                        );
+                        (pattern_check, pattern_type_id)
                     } else {
                         // Untyped destructure pattern - always matches (type checked in sema)
                         (None, None)
@@ -1704,13 +1759,14 @@ impl Cg<'_, '_, '_> {
 
             // Compile body with the arm's variables
             let saved_vars = std::mem::replace(&mut self.vars, arm_variables);
-            let body_val = self.expr(&arm.body)?;
+            let mut body_val = self.expr(&arm.body)?;
             let _ = std::mem::replace(&mut self.vars, saved_vars);
 
             if body_val.type_id == TypeId::NEVER {
                 // Divergent arm (unreachable/panic) — terminate with trap
                 self.builder.ins().trap(TrapCode::unwrap_user(1));
             } else if !is_void {
+                body_val = self.coerce_to_type(body_val, result_type_id)?;
                 // If the arm body produces a borrowed RC value, emit rc_inc so
                 // the match result owns its reference (mirroring if_expr_blocks).
                 // Without this, borrowed payloads extracted from unions would be
@@ -1815,12 +1871,13 @@ impl Cg<'_, '_, '_> {
             self.builder.seal_block(body_blocks[i]);
             self.invalidate_value_caches();
 
-            let body_val = self.expr(&arm.body)?;
+            let mut body_val = self.expr(&arm.body)?;
 
             if body_val.type_id == TypeId::NEVER {
                 // Divergent arm (unreachable/panic) — terminate with trap
                 self.builder.ins().trap(TrapCode::unwrap_user(1));
             } else if !is_void {
+                body_val = self.coerce_to_type(body_val, result_type_id)?;
                 if result_needs_rc && body_val.is_borrowed() {
                     self.emit_rc_inc_for_type(body_val.value, result_type_id)?;
                 }
@@ -2096,7 +2153,7 @@ impl Cg<'_, '_, '_> {
     fn if_expr(&mut self, if_expr: &IfExpr, expr_id: NodeId) -> CodegenResult<CompiledValue> {
         // Get the result type from semantic analysis (stored on the if expression itself)
         let result_type_id = self
-            .get_expr_type(&expr_id)
+            .get_expr_type_substituted(&expr_id)
             .unwrap_or(self.arena().primitives.void);
 
         // Check for statically known `is` condition (important for monomorphized generics
@@ -2327,7 +2384,7 @@ impl Cg<'_, '_, '_> {
     fn when_expr(&mut self, when_expr: &WhenExpr, expr_id: NodeId) -> CodegenResult<CompiledValue> {
         // Get the result type from semantic analysis (stored on the when expression itself)
         let result_type_id = self
-            .get_expr_type(&expr_id)
+            .get_expr_type_substituted(&expr_id)
             .unwrap_or(self.arena().primitives.void);
 
         let is_void = self.arena().is_void(result_type_id);
@@ -2570,9 +2627,19 @@ impl Cg<'_, '_, '_> {
                 self.compile_error_identifier_pattern(*name, scrutinee, tag, arm_variables)
             }
             PatternKind::Record {
-                type_name: Some(name),
+                type_name: Some(type_expr),
                 fields,
-            } => self.compile_error_record_pattern(*name, fields, scrutinee, tag, arm_variables),
+            } => {
+                if let Some(name) = Self::type_expr_terminal_symbol(type_expr) {
+                    self.compile_error_record_pattern(name, fields, scrutinee, tag, arm_variables)
+                } else {
+                    let is_error =
+                        self.builder
+                            .ins()
+                            .icmp_imm(IntCC::NotEqual, tag, FALLIBLE_SUCCESS_TAG);
+                    Ok(Some(is_error))
+                }
+            }
             _ => {
                 // Catch-all for other patterns (like wildcard)
                 let is_error =

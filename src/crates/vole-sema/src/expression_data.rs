@@ -362,10 +362,11 @@ impl ExpressionData {
         current_module: Option<&str>,
     ) -> Option<&ClassMethodMonomorphKey> {
         if let Some(module) = current_module {
-            return self
-                .module_class_method_generics
-                .get(module)
-                .and_then(|module_keys| module_keys.get(&node));
+            if let Some(module_keys) = self.module_class_method_generics.get(module)
+                && let Some(key) = module_keys.get(&node)
+            {
+                return Some(key);
+            }
         }
         self.class_method_generics.get(&node)
     }
@@ -398,10 +399,11 @@ impl ExpressionData {
         current_module: Option<&str>,
     ) -> Option<&StaticMethodMonomorphKey> {
         if let Some(module) = current_module {
-            return self
-                .module_static_method_generics
-                .get(module)
-                .and_then(|module_keys| module_keys.get(&node));
+            if let Some(module_keys) = self.module_static_method_generics.get(module)
+                && let Some(key) = module_keys.get(&node)
+            {
+                return Some(key);
+            }
         }
         self.static_method_generics.get(&node)
     }

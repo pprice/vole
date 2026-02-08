@@ -67,10 +67,17 @@ pub(crate) fn get_field_slot_and_type_id_cg(
         .map(|(&param, &arg)| (param, arg))
         .collect();
 
-    // Merge in function-level substitutions (monomorphization context)
+    // Merge in function-level substitutions (monomorphization context).
+    // Prefer concrete function substitutions over placeholder type args from
+    // partially-specialized generic instances.
     if let Some(func_subs) = cg.substitutions {
         for (&k, &v) in func_subs {
-            combined_subs.entry(k).or_insert(v);
+            let should_override = combined_subs
+                .get(&k)
+                .is_some_and(|&existing| arena.unwrap_type_param(existing).is_some());
+            if should_override || !combined_subs.contains_key(&k) {
+                combined_subs.insert(k, v);
+            }
         }
     }
 

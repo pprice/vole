@@ -944,6 +944,7 @@ impl Analyzer {
         // Generic class bodies record identity monomorphs for self-calls (T -> TypeParam(T)).
         // This pass derives concrete callee instances (e.g., T -> i64) from concrete callers.
         self.propagate_class_method_monomorphs();
+        self.propagate_static_method_monomorphs();
 
         // Pass 3: analyze monomorphized function bodies to discover nested generic calls
         // This iterates until no new MonomorphInstances are created

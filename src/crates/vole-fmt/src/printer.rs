@@ -942,7 +942,7 @@ fn print_pattern<'a>(
             );
             arena.text("[").append(inner).append(arena.text("]"))
         }
-        PatternKind::Record { fields, .. } => {
+        PatternKind::Record { type_name, fields } => {
             let inner = arena.intersperse(
                 fields.iter().map(|field| {
                     let field_name = interner.resolve(field.field_name);
@@ -955,7 +955,14 @@ fn print_pattern<'a>(
                 }),
                 arena.text(", "),
             );
-            arena.text("{ ").append(inner).append(arena.text(" }"))
+            let record = arena.text("{ ").append(inner).append(arena.text(" }"));
+            if let Some(type_expr) = type_name {
+                print_type_expr(arena, type_expr, interner)
+                    .append(arena.text(" "))
+                    .append(record)
+            } else {
+                record
+            }
         }
     }
 }

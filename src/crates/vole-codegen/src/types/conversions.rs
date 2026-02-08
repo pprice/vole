@@ -753,8 +753,10 @@ pub(crate) fn array_element_tag_id(ty: TypeId, arena: &TypeArena) -> i64 {
         ArenaType::Array(_) => 5,                       // TYPE_ARRAY
         ArenaType::Function { .. } => 6,                // TYPE_CLOSURE
         ArenaType::Class { .. } => 7,                   // TYPE_INSTANCE
-        // Union types are stored as heap-allocated tagged pointers (need RC)
-        ArenaType::Union(_) => 7, // TYPE_INSTANCE (heap pointer)
+        // Union values boxed by codegen use raw heap buffers (tag+payload), not
+        // RcHeader-prefixed allocations. Treat them as plain words so runtime
+        // containers do not rc_inc/rc_dec these pointers as Rc instances.
+        ArenaType::Union(_) => 2, // TYPE_I64
         _ => 2,                   // default to integer for non-RC types
     }
 }

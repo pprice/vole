@@ -1081,8 +1081,9 @@ pub enum PatternKind {
     Tuple { elements: Vec<Pattern> },
     /// Record destructuring pattern: { x, y } or TypeName { x, y }
     Record {
-        /// Optional type name for typed patterns in match arms (e.g., Point in `Point { x, y }`)
-        type_name: Option<Symbol>,
+        /// Optional type expression for typed patterns in match arms
+        /// (e.g., `Point` or `MapEntry<K, V>` in `Point { x, y }` / `MapEntry<K, V> { key }`)
+        type_name: Option<TypeExpr>,
         fields: Vec<RecordFieldPattern>,
     },
 }

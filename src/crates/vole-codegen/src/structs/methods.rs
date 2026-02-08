@@ -19,7 +19,7 @@ use crate::types::{
 use vole_frontend::{Expr, ExprKind, MethodCallExpr, NodeId, Symbol};
 use vole_identity::NamerLookup;
 use vole_identity::{MethodId, NameId, TypeDefId};
-use vole_sema::generic::ClassMethodMonomorphKey;
+use vole_sema::generic::{ClassMethodMonomorphKey, StaticMethodMonomorphKey};
 use vole_sema::resolution::ResolvedMethod;
 use vole_sema::type_arena::TypeId;
 
@@ -481,24 +481,30 @@ impl Cg<'_, '_, '_> {
 
             // In monomorphized context, the return type may still reference type
             // parameters (e.g. a method `getItem() -> T`). Apply substitutions to
-            // get the concrete return type so subsequent operations on the returned
-            // value use the correct type.
-            let return_type_id = self.substitute_type(return_type_id);
+            // get the concrete return type. Use best-effort substitution because
+            // this fallback path can see partially specialized signatures; the
+            // expression-level type (looked up below) remains the source of truth.
+            let return_type_id = self.try_substitute_type(return_type_id);
 
             (func_key, return_type_id)
         };
 
-        // Use sema's cached substituted return type if available (avoids recomputation)
-        let return_type_id = self
-            .get_substituted_return_type(&expr_id)
-            .unwrap_or(return_type_id);
+        // In monomorphized contexts, method resolution already carries concrete
+        // return types. Prefer that over expression-cache lookups, which can be
+        // stale or collide across generic/module NodeIds.
+        let mut return_type_id = if self.substitutions.is_some() {
+            return_type_id
+        } else {
+            self.get_substituted_return_type(&expr_id)
+                .unwrap_or(return_type_id)
+        };
 
         // Convert Iterator<T> return types to RuntimeIterator(T) so that chained
         // method calls (e.g., s.iter().count()) use direct dispatch instead of
         // interface vtable dispatch. Without this, class methods returning Iterator<T>
         // (like Set.iter(), Map.keys()) would produce a raw RcIterator pointer typed
         // as an interface, causing a segfault when the next method tries vtable lookup.
-        let return_type_id = self.maybe_convert_iterator_return_type(return_type_id);
+        return_type_id = self.maybe_convert_iterator_return_type(return_type_id);
 
         // Check if this is a monomorphized class method call
         // If so, use the monomorphized method's func_key instead
@@ -545,6 +551,8 @@ impl Cg<'_, '_, '_> {
                 .class_method_monomorph_cache
                 .get(&effective_key)
             {
+                return_type_id =
+                    self.maybe_convert_iterator_return_type(instance.func_type.return_type_id);
                 let monomorph_func_key = self.funcs().intern_name_id(instance.mangled_name);
                 // Monomorphized methods have concrete types, no i64 conversion needed
                 (self.func_ref(monomorph_func_key)?, false)
@@ -1423,40 +1431,118 @@ impl Cg<'_, '_, '_> {
             .query()
             .static_method_generic_at_in_module(expr_id, current_module_path.as_deref())
         {
+            // Static method call sites inside generic class methods are often recorded
+            // with abstract TypeParam keys. Rewrite those keys through the current
+            // substitution map before looking in the monomorph cache.
+            let effective_key = if let Some(subs) = self.substitutions {
+                let arena = self.arena();
+                let needs_substitution = mono_key
+                    .class_type_keys
+                    .iter()
+                    .chain(mono_key.method_type_keys.iter())
+                    .any(|&type_id| arena.unwrap_type_param(type_id).is_some());
+                if needs_substitution {
+                    let map_keys = |keys: &[TypeId]| {
+                        keys.iter()
+                            .map(|&type_id| {
+                                if let Some(name_id) = arena.unwrap_type_param(type_id) {
+                                    subs.get(&name_id).copied().unwrap_or(type_id)
+                                } else {
+                                    type_id
+                                }
+                            })
+                            .collect::<Vec<TypeId>>()
+                    };
+                    StaticMethodMonomorphKey::new(
+                        mono_key.class_name,
+                        mono_key.method_name,
+                        map_keys(&mono_key.class_type_keys),
+                        map_keys(&mono_key.method_type_keys),
+                    )
+                } else {
+                    mono_key.clone()
+                }
+            } else {
+                mono_key.clone()
+            };
+
             // Look up the monomorphized instance
-            if let Some(instance) = self.registry().static_method_monomorph_cache.get(mono_key) {
-                // Compile arguments with substituted param types (TypeId-based)
-                let param_type_ids = &instance.func_type.params_id;
-                let mut args = Vec::new();
-                let mut rc_temps: Vec<CompiledValue> = Vec::new();
-                for (arg, &param_type_id) in mc.args.iter().zip(param_type_ids.iter()) {
-                    let compiled = self.expr(arg)?;
-                    if compiled.is_owned() {
-                        rc_temps.push(compiled);
-                    }
-                    let compiled = self.coerce_to_type(compiled, param_type_id)?;
-                    args.push(compiled.value);
-                }
-
-                // Get monomorphized function reference and call
-                let func_key = self.funcs().intern_name_id(instance.mangled_name);
-                let func_ref = self.func_ref(func_key)?;
-                let coerced = self.coerce_call_args(func_ref, &args);
-                let call = self.builder.ins().call(func_ref, &coerced);
-                self.field_cache.clear();
-                // call_result must run before consume_rc_args to copy union data
-                // from callee's stack before rc_dec calls can clobber it
-                let return_type_id = instance.func_type.return_type_id;
-                let mut result = self.call_result(call, return_type_id);
-                self.consume_rc_args(&mut rc_temps)?;
-
-                // Mark RC-typed results as Owned so they get properly cleaned up
-                if self.rc_state(return_type_id).needs_cleanup() {
-                    result.rc_lifecycle = RcLifecycle::Owned;
-                }
-
-                return Ok(result);
+            if let Some(instance) = self
+                .registry()
+                .static_method_monomorph_cache
+                .get(&effective_key)
+            {
+                return self.call_static_monomorph_instance(instance, mc);
             }
+        }
+
+        // Fallback: choose a compatible cached static monomorph instance by class/method.
+        // This handles class-independent static helpers where sema records an abstract key
+        // (or no concrete key in module-local NodeId space), while still preferring a
+        // concrete instance that matches the current substitution map when available.
+        let type_name_id = self.query().get_type(type_def_id).name_id;
+        let fallback_instance = {
+            let subs = self.substitutions;
+            let module_prefix = current_module_path.as_deref();
+            let arena = self.arena();
+            self.registry()
+                .static_method_monomorph_cache
+                .instances()
+                .filter_map(|(key, instance)| {
+                    if key.class_name != type_name_id || key.method_name != method_name_id {
+                        return None;
+                    }
+
+                    let substitution_matches = if let Some(subs) = subs {
+                        let mut matches = 0usize;
+                        let mut incompatible = false;
+                        for (name_id, inst_ty) in &instance.substitutions {
+                            if let Some(ctx_ty) = subs.get(name_id).copied() {
+                                if ctx_ty == *inst_ty {
+                                    matches += 1;
+                                } else if arena.unwrap_type_param(*inst_ty).is_none() {
+                                    // Concrete mismatch: this candidate does not match
+                                    // the current monomorphized call context.
+                                    incompatible = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if incompatible {
+                            return None;
+                        }
+                        matches
+                    } else {
+                        0
+                    };
+                    let module_match = module_prefix.is_some_and(|prefix| {
+                        self.query().display_name(instance.mangled_name).starts_with(prefix)
+                    });
+                    let concrete_key = key
+                        .class_type_keys
+                        .iter()
+                        .all(|&type_id| arena.unwrap_type_param(type_id).is_none())
+                        && key
+                            .method_type_keys
+                            .iter()
+                            .all(|&type_id| arena.unwrap_type_param(type_id).is_none());
+
+                    // Prefer substitution-compatible concrete instances first.
+                    // Module prefix is only a tie-breaker.
+                    let score = (
+                        substitution_matches,
+                        concrete_key as usize,
+                        module_match as usize,
+                        instance.substitutions.len(),
+                    );
+
+                    Some((score, instance))
+                })
+                .max_by_key(|(score, _)| *score)
+                .map(|(_, instance)| instance)
+        };
+        if let Some(instance) = fallback_instance {
+            return self.call_static_monomorph_instance(instance, mc);
         }
 
         // Look up the static method info via unified method_func_keys map
@@ -1476,9 +1562,19 @@ impl Cg<'_, '_, '_> {
                         format!("({}, {})", tn, mn)
                     })
                     .collect();
+                let static_candidates: Vec<_> = self
+                    .registry()
+                    .static_method_monomorph_cache
+                    .instances()
+                    .filter(|(k, _)| k.class_name == type_name_id && k.method_name == method_name_id)
+                    .map(|(k, inst)| {
+                        let mangled = self.query().display_name(inst.mangled_name);
+                        format!("{:?} -> {}", k, mangled)
+                    })
+                    .collect();
                 format!(
-                    "Static method not found: {}::{} (type_name_id={:?}, method_name_id={:?}). Registered: {:?}",
-                    type_name, method_name, type_name_id, method_name_id, registered_keys
+                    "Static method not found: {}::{} (type_name_id={:?}, method_name_id={:?}). Registered: {:?}. Static candidates: {:?}",
+                    type_name, method_name, type_name_id, method_name_id, registered_keys, static_candidates
                 )
             })?;
 
@@ -1517,6 +1613,44 @@ impl Cg<'_, '_, '_> {
         self.field_cache.clear();
         // call_result must run before consume_rc_args to copy union data
         // from callee's stack before rc_dec calls can clobber it
+        let mut result = self.call_result(call, return_type_id);
+        self.consume_rc_args(&mut rc_temps)?;
+
+        // Mark RC-typed results as Owned so they get properly cleaned up
+        if self.rc_state(return_type_id).needs_cleanup() {
+            result.rc_lifecycle = RcLifecycle::Owned;
+        }
+
+        Ok(result)
+    }
+
+    fn call_static_monomorph_instance(
+        &mut self,
+        instance: &vole_sema::generic::StaticMethodMonomorphInstance,
+        mc: &MethodCallExpr,
+    ) -> CodegenResult<CompiledValue> {
+        // Compile arguments with substituted param types (TypeId-based)
+        let param_type_ids = &instance.func_type.params_id;
+        let mut args = Vec::new();
+        let mut rc_temps: Vec<CompiledValue> = Vec::new();
+        for (arg, &param_type_id) in mc.args.iter().zip(param_type_ids.iter()) {
+            let compiled = self.expr(arg)?;
+            if compiled.is_owned() {
+                rc_temps.push(compiled);
+            }
+            let compiled = self.coerce_to_type(compiled, param_type_id)?;
+            args.push(compiled.value);
+        }
+
+        // Get monomorphized function reference and call
+        let func_key = self.funcs().intern_name_id(instance.mangled_name);
+        let func_ref = self.func_ref(func_key)?;
+        let coerced = self.coerce_call_args(func_ref, &args);
+        let call = self.builder.ins().call(func_ref, &coerced);
+        self.field_cache.clear();
+        // call_result must run before consume_rc_args to copy union data
+        // from callee's stack before rc_dec calls can clobber it
+        let return_type_id = instance.func_type.return_type_id;
         let mut result = self.call_result(call, return_type_id);
         self.consume_rc_args(&mut rc_temps)?;
 
