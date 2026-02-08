@@ -501,10 +501,17 @@ impl Cg<'_, '_, '_> {
 
         // Convert Iterator<T> return types to RuntimeIterator(T) so that chained
         // method calls (e.g., s.iter().count()) use direct dispatch instead of
-        // interface vtable dispatch. Without this, class methods returning Iterator<T>
-        // (like Set.iter(), Map.keys()) would produce a raw RcIterator pointer typed
-        // as an interface, causing a segfault when the next method tries vtable lookup.
-        return_type_id = self.maybe_convert_iterator_return_type(return_type_id);
+        // interface vtable dispatch. Only do this for module-defined types (stdlib)
+        // whose methods return raw RcIterator pointers. User-defined class methods
+        // return interface-boxed iterators which must use vtable dispatch instead.
+        let is_module_type = self.arena().unwrap_nominal(obj.type_id).is_some_and(
+            |(type_def_id, _, _)| {
+                self.query().get_type(type_def_id).module != self.env.analyzed.module_id
+            },
+        );
+        if is_module_type {
+            return_type_id = self.maybe_convert_iterator_return_type(return_type_id);
+        }
 
         // Check if this is a monomorphized class method call
         // If so, use the monomorphized method's func_key instead
@@ -551,8 +558,11 @@ impl Cg<'_, '_, '_> {
                 .class_method_monomorph_cache
                 .get(&effective_key)
             {
-                return_type_id =
-                    self.maybe_convert_iterator_return_type(instance.func_type.return_type_id);
+                return_type_id = if is_module_type {
+                    self.maybe_convert_iterator_return_type(instance.func_type.return_type_id)
+                } else {
+                    instance.func_type.return_type_id
+                };
                 let monomorph_func_key = self.funcs().intern_name_id(instance.mangled_name);
                 // Monomorphized methods have concrete types, no i64 conversion needed
                 (self.func_ref(monomorph_func_key)?, false)

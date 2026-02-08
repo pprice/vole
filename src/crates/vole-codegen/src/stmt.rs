@@ -883,16 +883,23 @@ impl Cg<'_, '_, '_> {
         let mut iter = self.expr(&for_stmt.iterable)?;
 
         // Get element type using arena methods
-        let elem_type_id = {
+        let (elem_type_id, is_interface_iter) = {
             let arena = self.arena();
             if let Some(elem_id) = arena.unwrap_runtime_iterator(iter.type_id) {
-                elem_id
+                (elem_id, false)
             } else if let Some((_, type_args)) = arena.unwrap_interface(iter.type_id) {
-                type_args.first().copied().unwrap_or_else(|| arena.i64())
+                (type_args.first().copied().unwrap_or_else(|| arena.i64()), true)
             } else {
-                arena.i64()
+                (arena.i64(), false)
             }
         };
+
+        // For interface-boxed iterators (user-defined Iterator<T> implementations),
+        // wrap in an RcIterator via vole_interface_iter so the native loop dispatch works.
+        if is_interface_iter {
+            let wrapped = self.call_runtime(RuntimeFn::InterfaceIter, &[iter.value])?;
+            iter = self.compiled(wrapped, iter.type_id);
+        }
 
         // Create a stack slot for the out_value parameter
         let slot_data = self.alloc_stack(8);

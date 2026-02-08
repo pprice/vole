@@ -105,6 +105,7 @@ runtime_fns! {
     SbNew => "vole_sb_new",
     SbPushString => "vole_sb_push_string",
     SbFinish => "vole_sb_finish",
+    InterfaceIter => "vole_interface_iter",
     RcInc => "rc_inc",
     RcDec => "rc_dec",
 }
