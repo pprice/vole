@@ -384,3 +384,97 @@ tests "multiple independent iterators" {
         assert(arr2[0] == 10)
     }
 }
+
+tests "manual iterator with for-in" {
+    test "for-in over counter" {
+        let mut total = 0
+        for x in count_to(5) {
+            total = total + x
+        }
+        // 0 + 1 + 2 + 3 + 4 = 10
+        assert(total == 10)
+    }
+
+    test "for-in over range" {
+        let mut total = 0
+        for x in range(10, 15) {
+            total = total + x
+        }
+        // 10 + 11 + 12 + 13 + 14 = 60
+        assert(total == 60)
+    }
+
+    test "for-in over empty iterator" {
+        let mut count = 0
+        for x in count_to(0) {
+            count = count + 1
+        }
+        assert(count == 0)
+    }
+
+    test "for-in over single-element iterator" {
+        let mut total = 0
+        for x in count_to(1) {
+            total = total + x
+        }
+        assert(total == 0)
+    }
+
+    test "for-in collects values correctly" {
+        let arr: [i64] = []
+        for x in range(3, 7) {
+            arr.push(x)
+        }
+        assert(arr.length() == 4)
+        assert(arr[0] == 3)
+        assert(arr[1] == 4)
+        assert(arr[2] == 5)
+        assert(arr[3] == 6)
+    }
+
+    test "for-in over range with step" {
+        let mut total = 0
+        for x in range_step(0, 10, 3) {
+            total = total + x
+        }
+        // 0 + 3 + 6 + 9 = 18
+        assert(total == 18)
+    }
+
+    test "for-in with break-like pattern using counter" {
+        let mut last_seen = -1
+        for x in count_to(10).take(3) {
+            last_seen = x
+        }
+        assert(last_seen == 2)
+    }
+
+    test "for-in over filtered iterator" {
+        let mut total = 0
+        for x in count_to(10).filter((x) => x % 2 == 0) {
+            total = total + x
+        }
+        // 0 + 2 + 4 + 6 + 8 = 20
+        assert(total == 20)
+    }
+
+    test "for-in over mapped iterator" {
+        let mut total = 0
+        for x in range(1, 4).map((x) => x * 100) {
+            total = total + x
+        }
+        // 100 + 200 + 300 = 600
+        assert(total == 600)
+    }
+
+    test "for-in over chained skip-take" {
+        let arr: [i64] = []
+        for x in count_to(20).skip(5).take(3) {
+            arr.push(x)
+        }
+        assert(arr.length() == 3)
+        assert(arr[0] == 5)
+        assert(arr[1] == 6)
+        assert(arr[2] == 7)
+    }
+}
