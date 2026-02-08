@@ -73,6 +73,28 @@ tests "manual iterator basics" {
         }
     }
 
+    test "one-value iterator returns done repeatedly after exhaustion" {
+        let iter = count_to(1)
+
+        let first = iter.next()
+        match first {
+            Done => assert(false)
+            i64 => assert(true)
+        }
+
+        let second = iter.next()
+        match second {
+            Done => assert(true)
+            i64 => assert(false)
+        }
+
+        let third = iter.next()
+        match third {
+            Done => assert(true)
+            i64 => assert(false)
+        }
+    }
+
     test "range iterator returns Done when exhausted" {
         let iter = range(5, 8)
         _ = iter.next()  // 5
@@ -212,6 +234,18 @@ tests "manual iterator with sum and count" {
     test "filtered sum" {
         // Evens in 0..10: 0 + 2 + 4 + 6 + 8 = 20
         assert(count_to(10).filter((x) => x % 2 == 0).sum() == 20)
+    }
+
+    test "terminal operations on exhausted iterator terminate" {
+        let iter = count_to(1)
+        _ = iter.next()  // consume only value
+
+        assert(iter.count() == 0)
+        assert(iter.sum() == 0)
+        assert(iter.collect().length() == 0)
+        assert(iter.first() == nil)
+        assert(iter.last() == nil)
+        assert(iter.nth(0) == nil)
     }
 }
 

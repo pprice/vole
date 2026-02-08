@@ -1,0 +1,496 @@
+// Tests for pure Vole Set core (std:collections/set)
+
+let { Array } = import "std:array"
+
+sentinel Empty
+sentinel Deleted
+
+let { Empty, Deleted } = import "std:collections/sentinels"
+
+class SetEntry<T> {
+    value: T,
+}
+
+class VoleSet<T: Hashable + Equatable> {
+    buckets: [SetEntry<T> | Empty | Deleted],
+    size: i64,
+    tomb_count: i64,
+
+    statics {
+        func new() -> VoleSet<T> {
+            return VoleSet.with_capacity<T>(8)
+        }
+
+        func with_capacity(capacity: i64) -> VoleSet<T> {
+            let cap = VoleSet.next_power_of_2(capacity)
+            let buckets = Array.filled<SetEntry<T> | Empty | Deleted>(cap, Empty)
+            return Set {
+                buckets: buckets,
+                size: 0,
+                tomb_count: 0,
+            }
+        }
+
+        func next_power_of_2(n: i64) -> i64 {
+            if n <= 8 {
+                return 8
+            }
+
+            let mut power = 8
+            while power < n {
+                power = power * 2
+            }
+            return power
+        }
+    }
+
+    func add(value: T) -> bool {
+        if self.needs_rehash() {
+            self.rehash()
+        }
+
+        let idx = self.find_slot(value)
+        let bucket = self.buckets[idx]
+
+        return match bucket {
+            SetEntry { value: existing } => self.add_on_entry(existing, value)
+            Empty => self.add_on_empty(idx, value)
+            Deleted => self.add_on_deleted(idx, value)
+        }
+    }
+
+    func contains(value: T) -> bool {
+        let idx = self.find_slot(value)
+        let bucket = self.buckets[idx]
+
+        return match bucket {
+            SetEntry { value: existing } => existing.equals(value)
+            Empty => false
+            Deleted => false
+        }
+    }
+
+    func remove(value: T) -> bool {
+        let idx = self.find_slot(value)
+        let bucket = self.buckets[idx]
+
+        return match bucket {
+            SetEntry { value: existing } => self.remove_entry(idx, existing, value)
+            Empty => false
+            Deleted => false
+        }
+    }
+
+    func clear() {
+        let cap = self.buckets.length()
+        self.buckets = Array.filled<SetEntry<T> | Empty | Deleted>(cap, Empty)
+        self.size = 0
+        self.tomb_count = 0
+    }
+
+    func len() -> i64 {
+        return self.size
+    }
+
+    func is_empty() -> bool {
+        // Work around generic self-field comparison issue by using a local first.
+        let s = self.size
+        return s == 0
+    }
+
+    func find_slot(value: T) -> i64 {
+        let cap = self.buckets.length()
+        let mut idx = value.hash() & (cap - 1)
+        let mut first_deleted = -1
+        let mut probes = 0
+
+        while probes < cap {
+            let bucket = self.buckets[idx]
+
+            let mut same_value = false
+            let mut saw_deleted = false
+            let mut saw_empty = false
+
+            match bucket {
+                SetEntry { value: existing } => same_value = existing.equals(value)
+                Deleted => saw_deleted = true
+                Empty => saw_empty = true
+            }
+
+            if same_value {
+                return idx
+            } else if saw_deleted {
+                if first_deleted == -1 {
+                    first_deleted = idx
+                }
+            } else if saw_empty {
+                if first_deleted != -1 {
+                    return first_deleted
+                }
+                return idx
+            }
+
+            idx = (idx + 1) & (cap - 1)
+            probes = probes + 1
+        }
+
+        if first_deleted != -1 {
+            return first_deleted
+        }
+
+        return idx
+    }
+
+    func needs_rehash() -> bool {
+        let cap = self.buckets.length()
+        let used = self.size + self.tomb_count
+        return (used * 100) / cap > 70
+    }
+
+    func rehash() {
+        let old_buckets = self.buckets
+        let old_cap = old_buckets.length()
+        let new_cap = old_cap * 2
+
+        self.buckets = Array.filled<SetEntry<T> | Empty | Deleted>(new_cap, Empty)
+        self.size = 0
+        self.tomb_count = 0
+
+        for bucket in old_buckets {
+            match bucket {
+                SetEntry { value } => self.insert_no_rehash(value)
+                Empty => 0
+                Deleted => 0
+            }
+        }
+    }
+
+    func insert_no_rehash(value: T) {
+        let idx = self.find_slot(value)
+        let bucket = self.buckets[idx]
+
+        match bucket {
+            SetEntry { value: existing } => self.insert_on_entry(idx, existing, value)
+            Empty => self.add_on_empty(idx, value)
+            Deleted => self.add_on_deleted(idx, value)
+        }
+    }
+
+    func add_on_entry(existing: T, value: T) -> bool {
+        if existing.equals(value) {
+            return false
+        }
+        return false
+    }
+
+    func insert_on_entry(idx: i64, existing: T, value: T) {
+        if !existing.equals(value) {
+            self.write_entry(idx, value)
+        }
+    }
+
+    func write_entry(idx: i64, value: T) {
+        self.buckets[idx] = SetEntry { value: value }
+    }
+
+    func add_on_empty(idx: i64, value: T) -> bool {
+        self.write_entry(idx, value)
+        self.size = self.size + 1
+        return true
+    }
+
+    func add_on_deleted(idx: i64, value: T) -> bool {
+        self.write_entry(idx, value)
+        self.size = self.size + 1
+        self.tomb_count = self.tomb_count - 1
+        return true
+    }
+
+    func remove_entry(idx: i64, existing: T, value: T) -> bool {
+        if !existing.equals(value) {
+            return false
+        }
+
+        self.buckets[idx] = Deleted
+        self.size = self.size - 1
+        self.tomb_count = self.tomb_count + 1
+        return true
+    }
+}
+
+
+
+tests {
+    test "vole_set::new creates empty set" {
+        let s = VoleSet.new<i64>()
+        assert(s.len() == 0)
+        assert(s.is_empty())
+    }
+
+    test "vole_set::add and contains i64" {
+        let s = VoleSet.new<i64>()
+        assert(s.add(42))
+        assert(s.contains(42))
+        assert(!s.contains(7))
+        assert(s.len() == 1)
+    }
+
+    test "vole_set::add duplicate returns false" {
+        let s = VoleSet.new<i64>()
+        assert(s.add(5))
+        assert(!s.add(5))
+        assert(s.len() == 1)
+    }
+
+    test "vole_set::remove existing returns true" {
+        let s = VoleSet.new<i64>()
+        _ = s.add(1)
+        _ = s.add(2)
+        _ = s.add(3)
+
+        assert(s.remove(2))
+        assert(!s.contains(2))
+        assert(s.contains(1))
+        assert(s.contains(3))
+        assert(s.len() == 2)
+    }
+
+    test "vole_set::remove missing returns false" {
+        let s = VoleSet.new<i64>()
+        _ = s.add(9)
+        assert(!s.remove(404))
+        assert(s.len() == 1)
+    }
+
+    test "vole_set::clear resets set" {
+        let s = VoleSet.new<i64>()
+        _ = s.add(1)
+        _ = s.add(2)
+        _ = s.add(3)
+
+        s.clear()
+        assert(s.len() == 0)
+        assert(s.is_empty())
+        assert(!s.contains(1))
+    }
+
+    test "vole_set::with_capacity" {
+        let s = VoleSet.with_capacity<i64>(100)
+        assert(s.len() == 0)
+        assert(s.is_empty())
+
+        _ = s.add(7)
+        assert(s.contains(7))
+    }
+
+    test "vole_set::rehash preserves entries" {
+        let s = VoleSet.new<i64>()
+
+        let mut i = 0
+        while i < 40 {
+            _ = s.add(i)
+            i = i + 1
+        }
+
+        assert(s.len() == 40)
+
+        let mut j = 0
+        while j < 40 {
+            assert(s.contains(j))
+            j = j + 1
+        }
+    }
+
+    test "vole_set::string values" {
+        let s = VoleSet.new<string>()
+        assert(s.add("alpha"))
+        assert(s.add("beta"))
+        assert(!s.add("alpha"))
+
+        assert(s.contains("alpha"))
+        assert(s.contains("beta"))
+        assert(!s.contains("gamma"))
+        assert(s.len() == 2)
+    }
+
+    test "vole_set::reuses deleted slots" {
+        let s = VoleSet.new<i64>()
+        _ = s.add(10)
+        _ = s.add(20)
+        _ = s.add(30)
+        assert(s.remove(20))
+
+        assert(s.add(40))
+        assert(!s.contains(20))
+        assert(s.contains(10))
+        assert(s.contains(30))
+        assert(s.contains(40))
+        assert(s.len() == 3)
+    }
+
+    test "vole_set::union" {
+        let a = VoleSet.new<i64>()
+        _ = a.add(1)
+        _ = a.add(2)
+
+        let b = VoleSet.new<i64>()
+        _ = b.add(2)
+        _ = b.add(3)
+
+        let u = a.union(b)
+        assert(u.len() == 3)
+        assert(u.contains(1))
+        assert(u.contains(2))
+        assert(u.contains(3))
+    }
+
+    test "vole_set::intersection" {
+        let a = VoleSet.new<i64>()
+        _ = a.add(1)
+        _ = a.add(2)
+        _ = a.add(3)
+
+        let b = VoleSet.new<i64>()
+        _ = b.add(2)
+        _ = b.add(3)
+        _ = b.add(4)
+
+        let i = a.intersection(b)
+        assert(i.len() == 2)
+        assert(!i.contains(1))
+        assert(i.contains(2))
+        assert(i.contains(3))
+        assert(!i.contains(4))
+    }
+
+    test "vole_set::difference" {
+        let a = VoleSet.new<i64>()
+        _ = a.add(1)
+        _ = a.add(2)
+        _ = a.add(3)
+
+        let b = VoleSet.new<i64>()
+        _ = b.add(2)
+        _ = b.add(3)
+        _ = b.add(4)
+
+        let d = a.difference(b)
+        assert(d.len() == 1)
+        assert(d.contains(1))
+        assert(!d.contains(2))
+    }
+
+    test "vole_set::is_subset" {
+        let a = VoleSet.new<i64>()
+        _ = a.add(1)
+        _ = a.add(2)
+
+        let b = VoleSet.new<i64>()
+        _ = b.add(1)
+        _ = b.add(2)
+        _ = b.add(3)
+
+        assert(a.is_subset(b))
+        assert(!b.is_subset(a))
+    }
+
+    test "vole_set::is_disjoint" {
+        let a = VoleSet.new<i64>()
+        _ = a.add(1)
+        _ = a.add(2)
+
+        let b = VoleSet.new<i64>()
+        _ = b.add(3)
+        _ = b.add(4)
+
+        assert(a.is_disjoint(b))
+
+        let c = VoleSet.new<i64>()
+        _ = c.add(2)
+        _ = c.add(3)
+
+        assert(!a.is_disjoint(c))
+    }
+
+    test "vole_set::symmetric_difference" {
+        let a = VoleSet.new<i64>()
+        _ = a.add(1)
+        _ = a.add(2)
+        _ = a.add(3)
+
+        let b = VoleSet.new<i64>()
+        _ = b.add(2)
+        _ = b.add(3)
+        _ = b.add(4)
+
+        let sd = a.symmetric_difference(b)
+        assert(sd.len() == 2)
+        assert(sd.contains(1))
+        assert(!sd.contains(2))
+        assert(!sd.contains(3))
+        assert(sd.contains(4))
+    }
+
+    test "vole_set::is_superset" {
+        let a = VoleSet.new<i64>()
+        _ = a.add(1)
+        _ = a.add(2)
+        _ = a.add(3)
+
+        let b = VoleSet.new<i64>()
+        _ = b.add(1)
+        _ = b.add(2)
+
+        assert(a.is_superset(b))
+        assert(!b.is_superset(a))
+
+        let c = VoleSet.new<i64>()
+        _ = c.add(1)
+        _ = c.add(2)
+        _ = c.add(3)
+        assert(a.is_superset(c))
+        assert(a.is_subset(c))
+    }
+
+    test "vole_set::iter count" {
+        let s = VoleSet.new<i64>()
+        _ = s.add(1)
+        _ = s.add(2)
+        _ = s.add(3)
+        assert(s.iter().count() == 3)
+    }
+
+    test "vole_set::iter for-in loop" {
+        let s = VoleSet.new<i64>()
+        _ = s.add(10)
+        _ = s.add(20)
+        _ = s.add(30)
+        let mut sum = 0
+        for x in s.iter() {
+            sum = sum + x
+        }
+        assert(sum == 60)
+    }
+
+    test "vole_set::iter collect" {
+        let s = VoleSet.new<i64>()
+        _ = s.add(1)
+        _ = s.add(2)
+        _ = s.add(3)
+        let arr = s.iter().collect()
+        assert(arr.length() == 3)
+    }
+
+    test "vole_set::iter on empty set" {
+        let s = VoleSet.new<i64>()
+        assert(s.iter().count() == 0)
+        let arr = s.iter().collect()
+        assert(arr.length() == 0)
+
+        let mut ran = false
+        for _x in s.iter() {
+            ran = true
+        }
+        assert(!ran)
+    }
+}

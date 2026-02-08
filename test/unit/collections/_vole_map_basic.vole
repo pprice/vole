@@ -1,0 +1,509 @@
+// Tests for pure Vole Map core (std:collections/map)
+
+
+let { Array } = import "std:array"
+
+sentinel Empty
+sentinel Deleted
+
+class MapEntry<K, V> {
+    key: K,
+    value: V,
+}
+
+class VoleMap<K: Hashable + Equatable, V> {
+    buckets: [MapEntry<K, V> | Empty | Deleted],
+    size: i64,
+    tomb_count: i64,
+
+    statics {
+        func new() -> VoleMap<K, V> {
+            return VoleMap.with_capacity<K, V>(8)
+        }
+
+        func with_capacity(capacity: i64) -> VoleMap<K, V> {
+            let cap = VoleMap.next_power_of_2(capacity)
+            let buckets = Array.filled<MapEntry<K, V> | Empty | Deleted>(cap, Empty)
+            return Map {
+                buckets: buckets,
+                size: 0,
+                tomb_count: 0,
+            }
+        }
+
+        func next_power_of_2(n: i64) -> i64 {
+            if n <= 8 {
+                return 8
+            }
+
+            let mut power = 8
+            while power < n {
+                power = power * 2
+            }
+            return power
+        }
+    }
+
+    func set(key: K, value: V) {
+        if self.needs_rehash() {
+            self.rehash()
+        }
+
+        let idx = self.find_slot(key)
+        let bucket = self.buckets[idx]
+
+        match bucket {
+            MapEntry { key: existing_key, value: existing_value } => self.set_on_entry(idx, key, value)
+            Empty => self.set_on_empty(idx, key, value)
+            Deleted => self.set_on_deleted(idx, key, value)
+        }
+    }
+
+    func get(key: K) -> V? {
+        let idx = self.find_slot(key)
+        let bucket = self.buckets[idx]
+
+        return match bucket {
+            MapEntry { key: existing_key, value: existing_value } => existing_value
+            Empty => nil
+            Deleted => nil
+        }
+    }
+
+    func contains_key(key: K) -> bool {
+        return self.get(key) != nil
+    }
+
+    func keys() -> Iterator<K> {
+        return MapKeyIterator {
+            buckets: self.buckets,
+            index: 0,
+        }
+    }
+
+    func values() -> Iterator<V> {
+        return MapValueIterator {
+            buckets: self.buckets,
+            index: 0,
+        }
+    }
+
+    func entries() -> Iterator<[K, V]> {
+        return MapEntryIterator {
+            buckets: self.buckets,
+            index: 0,
+        }
+    }
+
+    func iter() -> Iterator<[K, V]> {
+        return self.entries()
+    }
+
+    func remove(key: K) -> V? {
+        let idx = self.find_slot(key)
+        let bucket = self.buckets[idx]
+
+        return match bucket {
+            MapEntry { key: existing_key, value: existing_value } => self.remove_entry(idx, existing_value)
+            Empty => nil
+            Deleted => nil
+        }
+    }
+
+    func clear() {
+        let cap = self.buckets.length()
+        self.buckets = Array.filled<MapEntry<K, V> | Empty | Deleted>(cap, Empty)
+        self.size = 0
+        self.tomb_count = 0
+    }
+
+    func len() -> i64 {
+        return self.size
+    }
+
+    func is_empty() -> bool {
+        // Work around generic self-field comparison issue by using a local first.
+        let s = self.size
+        return s == 0
+    }
+
+    func find_slot(key: K) -> i64 {
+        let cap = self.buckets.length()
+        let mut idx = key.hash() & (cap - 1)
+        let mut first_deleted = -1
+        let mut probes = 0
+
+        while probes < cap {
+            let bucket = self.buckets[idx]
+
+            let mut same_key = false
+            let mut saw_deleted = false
+            let mut saw_empty = false
+
+            match bucket {
+                MapEntry { key: existing_key, value: existing_value } => same_key = existing_key.equals(key)
+                Deleted => saw_deleted = true
+                Empty => saw_empty = true
+            }
+
+            if same_key {
+                return idx
+            } else if saw_deleted {
+                if first_deleted == -1 {
+                    first_deleted = idx
+                }
+            } else if saw_empty {
+                if first_deleted != -1 {
+                    return first_deleted
+                }
+                return idx
+            }
+
+            idx = (idx + 1) & (cap - 1)
+            probes = probes + 1
+        }
+
+        if first_deleted != -1 {
+            return first_deleted
+        }
+
+        return idx
+    }
+
+    func needs_rehash() -> bool {
+        let cap = self.buckets.length()
+        let used = self.size + self.tomb_count
+        return (used * 100) / cap > 70
+    }
+
+    func rehash() {
+        let old_buckets = self.buckets
+        let old_cap = old_buckets.length()
+        let new_cap = old_cap * 2
+
+        self.buckets = Array.filled<MapEntry<K, V> | Empty | Deleted>(new_cap, Empty)
+        self.size = 0
+        self.tomb_count = 0
+
+        for bucket in old_buckets {
+            match bucket {
+                MapEntry { key, value } => self.insert_no_rehash(key, value)
+                Empty => 0
+                Deleted => 0
+            }
+        }
+    }
+
+    func insert_no_rehash(key: K, value: V) {
+        let idx = self.find_slot(key)
+        let bucket = self.buckets[idx]
+
+        match bucket {
+            MapEntry { key: existing_key, value: existing_value } => self.set_on_entry(idx, key, value)
+            Empty => self.set_on_empty(idx, key, value)
+            Deleted => self.set_on_deleted(idx, key, value)
+        }
+    }
+
+    func set_on_entry(idx: i64, key: K, value: V) {
+        self.buckets[idx] = MapEntry { key: key, value: value }
+    }
+
+    func set_on_empty(idx: i64, key: K, value: V) {
+        self.buckets[idx] = MapEntry { key: key, value: value }
+        self.size = self.size + 1
+    }
+
+    func set_on_deleted(idx: i64, key: K, value: V) {
+        self.buckets[idx] = MapEntry { key: key, value: value }
+        self.size = self.size + 1
+        self.tomb_count = self.tomb_count - 1
+    }
+
+    func remove_entry(idx: i64, value: V) -> V {
+        self.buckets[idx] = Deleted
+        self.size = self.size - 1
+        self.tomb_count = self.tomb_count + 1
+        return value
+    }
+}
+
+class MapKeyIterator<K, V> implements Iterator<K> {
+    buckets: [MapEntry<K, V> | Empty | Deleted],
+    index: i64,
+}
+
+implement Iterator<K> for MapKeyIterator<K, V> {
+    func next() -> K | Done {
+        let cap = self.buckets.length()
+        while self.index < cap {
+            let bucket = self.buckets[self.index]
+            self.index = self.index + 1
+
+            let step = match bucket {
+                MapEntry { key, value } => key
+                Empty => Done {}
+                Deleted => Done {}
+            }
+            if !(step is Done) {
+                return step
+            }
+        }
+
+        return Done {}
+    }
+}
+
+class MapValueIterator<K, V> implements Iterator<V> {
+    buckets: [MapEntry<K, V> | Empty | Deleted],
+    index: i64,
+}
+
+implement Iterator<V> for MapValueIterator<K, V> {
+    func next() -> V | Done {
+        let cap = self.buckets.length()
+        while self.index < cap {
+            let bucket = self.buckets[self.index]
+            self.index = self.index + 1
+
+            let step = match bucket {
+                MapEntry { key, value } => value
+                Empty => Done {}
+                Deleted => Done {}
+            }
+            if !(step is Done) {
+                return step
+            }
+        }
+
+        return Done {}
+    }
+}
+
+class MapEntryIterator<K, V> implements Iterator<[K, V]> {
+    buckets: [MapEntry<K, V> | Empty | Deleted],
+    index: i64,
+}
+
+implement Iterator<[K, V]> for MapEntryIterator<K, V> {
+    func next() -> [K, V] | Done {
+        let cap = self.buckets.length()
+        while self.index < cap {
+            let bucket = self.buckets[self.index]
+            self.index = self.index + 1
+
+            let step = match bucket {
+                MapEntry { key, value } => [key, value]
+                Empty => Done {}
+                Deleted => Done {}
+            }
+            if !(step is Done) {
+                return step
+            }
+        }
+
+        return Done {}
+    }
+}
+
+
+
+tests {
+    test "vole_map::new creates empty map" {
+        let m = VoleMap.new<i64, i64>()
+        assert(m.len() == 0)
+        assert(m.is_empty())
+    }
+
+    test "vole_map::set and get i64/i64" {
+        let m = VoleMap.new<i64, i64>()
+        m.set(1, 100)
+        m.set(2, 200)
+
+        assert(m.len() == 2)
+        assert(m.get(1) == 100)
+        assert(m.get(2) == 200)
+    }
+
+    test "vole_map::contains_key" {
+        let m = VoleMap.new<i64, i64>()
+        m.set(10, 99)
+
+        assert(m.contains_key(10))
+        assert(!m.contains_key(11))
+    }
+
+    test "vole_map::get missing returns nil" {
+        let m = VoleMap.new<i64, i64>()
+        m.set(3, 30)
+
+        assert(m.get(3) == 30)
+        assert(m.get(999) == nil)
+    }
+
+    test "vole_map::remove existing returns value" {
+        let m = VoleMap.new<i64, i64>()
+        m.set(1, 10)
+        m.set(2, 20)
+
+        let removed = m.remove(1)
+        assert(removed == 10)
+        assert(m.len() == 1)
+        assert(!m.contains_key(1))
+        assert(m.contains_key(2))
+    }
+
+    test "vole_map::remove missing returns nil" {
+        let m = VoleMap.new<i64, i64>()
+        assert(m.remove(404) == nil)
+    }
+
+    test "vole_map::clear resets map" {
+        let m = VoleMap.new<i64, i64>()
+        m.set(1, 10)
+        m.set(2, 20)
+        m.clear()
+
+        assert(m.len() == 0)
+        assert(m.is_empty())
+        assert(m.get(1) == nil)
+        assert(m.get(2) == nil)
+    }
+
+    test "vole_map::overwrite existing key" {
+        let m = VoleMap.new<i64, i64>()
+        m.set(1, 10)
+        m.set(1, 99)
+
+        assert(m.len() == 1)
+        assert(m.get(1) == 99)
+    }
+
+    test "vole_map::with_capacity" {
+        let m = VoleMap.with_capacity<i64, i64>(100)
+        assert(m.len() == 0)
+        assert(m.is_empty())
+
+        m.set(7, 70)
+        assert(m.get(7) == 70)
+    }
+
+    test "vole_map::rehash preserves entries" {
+        let m = VoleMap.new<i64, i64>()
+
+        // Insert enough entries to trigger growth from the initial capacity.
+        let mut i = 0
+        while i < 40 {
+            m.set(i, i * 100)
+            i = i + 1
+        }
+
+        assert(m.len() == 40)
+
+        let mut j = 0
+        while j < 40 {
+            assert(m.get(j) == j * 100)
+            j = j + 1
+        }
+    }
+
+    test "vole_map::i64 to string" {
+        let m = VoleMap.new<i64, string>()
+        m.set(1, "one")
+        m.set(2, "two")
+
+        assert((m.get(1) ?? "") == "one")
+        assert((m.get(2) ?? "") == "two")
+        assert(m.get(3) == nil)
+    }
+
+    test "vole_map::string to string" {
+        let m = VoleMap.new<string, string>()
+        m.set("a", "alpha")
+        m.set("b", "beta")
+
+        assert((m.get("a") ?? "") == "alpha")
+        assert((m.get("b") ?? "") == "beta")
+        assert(m.get("c") == nil)
+    }
+
+    test "vole_map::keys count" {
+        let m = VoleMap.new<i64, i64>()
+        m.set(1, 10)
+        m.set(2, 20)
+        m.set(3, 30)
+        assert(m.keys().count() == 3)
+    }
+
+    test "vole_map::values count" {
+        let m = VoleMap.new<i64, i64>()
+        m.set(1, 10)
+        m.set(2, 20)
+        m.set(3, 30)
+        assert(m.values().count() == 3)
+    }
+
+    test "vole_map::entries count" {
+        let m = VoleMap.new<i64, i64>()
+        m.set(1, 10)
+        m.set(2, 20)
+        assert(m.entries().count() == 2)
+    }
+
+    test "vole_map::iter count" {
+        let m = VoleMap.new<i64, i64>()
+        m.set(1, 10)
+        m.set(2, 20)
+        m.set(3, 30)
+        assert(m.iter().count() == 3)
+    }
+
+    test "vole_map::iter collect" {
+        let m = VoleMap.new<i64, i64>()
+        m.set(1, 10)
+        m.set(2, 20)
+        m.set(3, 30)
+        assert(m.keys().collect().length() == 3)
+        assert(m.values().collect().length() == 3)
+        assert(m.entries().collect().length() == 3)
+        assert(m.iter().collect().length() == 3)
+    }
+
+    test "vole_map::keys for-in loop" {
+        let m = VoleMap.new<i64, i64>()
+        m.set(1, 10)
+        m.set(2, 20)
+        m.set(3, 30)
+        let mut sum = 0
+        for k in m.keys() {
+            sum = sum + k
+        }
+        assert(sum == 6)
+    }
+
+    test "vole_map::values for-in loop" {
+        let m = VoleMap.new<i64, i64>()
+        m.set(1, 10)
+        m.set(2, 20)
+        m.set(3, 30)
+        let mut sum = 0
+        for v in m.values() {
+            sum = sum + v
+        }
+        assert(sum == 60)
+    }
+
+    test "vole_map::iter on empty map" {
+        let m = VoleMap.new<i64, i64>()
+        assert(m.keys().count() == 0)
+        assert(m.values().count() == 0)
+        assert(m.entries().count() == 0)
+        assert(m.iter().count() == 0)
+
+        let mut ran = false
+        for _k in m.keys() {
+            ran = true
+        }
+        assert(!ran)
+    }
+}
