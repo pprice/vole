@@ -2047,7 +2047,87 @@ impl Analyzer {
         }
     }
 
+    /// Infer type parameter scope for a standalone implement block from its target class.
+    ///
+    /// When an implement block targets a generic class (e.g., `implement Iterator<K> for
+    /// MapKeyIterator<K, V>`), the type params K and V are not declared in the AST node.
+    /// This method looks up the target class definition to find its declared type params,
+    /// then matches the syntax args from the implement block positionally to build a scope.
+    ///
+    /// Returns a non-empty scope only when the target type is generic and has unresolved
+    /// type arguments (i.e., args that don't resolve to known concrete types).
+    fn infer_implement_type_params(
+        &mut self,
+        target_type: &TypeExpr,
+        interner: &Interner,
+    ) -> TypeParamScope {
+        let mut scope = TypeParamScope::new();
+
+        // Only Generic target types can introduce type params
+        let TypeExpr::Generic { name, args } = target_type else {
+            return scope;
+        };
+
+        // Look up the target class definition
+        let name_str = interner.resolve(*name);
+        let type_def_id = self
+            .resolver(interner)
+            .resolve_type_str_or_interface(name_str, &self.entity_registry());
+        let Some(type_def_id) = type_def_id else {
+            return scope;
+        };
+
+        // Get the class's declared type params from its generic info
+        let declared_param_count = self
+            .entity_registry()
+            .get_type(type_def_id)
+            .generic_info
+            .as_ref()
+            .map(|info| info.type_params.len())
+            .unwrap_or(0);
+
+        if declared_param_count == 0 || args.len() != declared_param_count {
+            return scope;
+        }
+
+        // Match each syntax arg against the class's declared params.
+        // An arg is a type param if it's a Named symbol that doesn't resolve to a known type.
+        let mut seen = Vec::new();
+        for arg in args {
+            if let TypeExpr::Named(sym) = arg {
+                let arg_name = interner.resolve(*sym);
+                let is_known_type = self
+                    .resolver(interner)
+                    .resolve_type_str_or_interface(arg_name, &self.entity_registry())
+                    .is_some();
+                if !is_known_type && !seen.contains(sym) {
+                    seen.push(*sym);
+                    let builtin_mod = self.name_table_mut().builtin_module();
+                    let tp_name_id = self.name_table_mut().intern_raw(builtin_mod, &[arg_name]);
+                    scope.add(TypeParamInfo {
+                        name: *sym,
+                        name_id: tp_name_id,
+                        constraint: None,
+                        type_param_id: None,
+                        variance: TypeParamVariance::default(),
+                    });
+                }
+            }
+        }
+
+        scope
+    }
+
     fn collect_implement_block(&mut self, impl_block: &ImplementBlock, interner: &Interner) {
+        // Infer type param scope from the target class definition.
+        // This enables `implement Iterator<K> for MapKeyIterator<K, V>` where K and V
+        // are not explicitly declared but inferred from MapKeyIterator's type params.
+        let inferred_scope = self.infer_implement_type_params(&impl_block.target_type, interner);
+        let has_type_param_scope = !inferred_scope.is_empty();
+        if has_type_param_scope {
+            self.type_param_stack.push_scope(inferred_scope);
+        }
+
         // Extract trait name symbol from trait_type (if present)
         let trait_name = impl_block.trait_type.as_ref().and_then(interface_base_name);
 
@@ -2231,10 +2311,16 @@ impl Analyzer {
                         },
                         impl_block.span,
                     );
+                    if has_type_param_scope {
+                        self.type_param_stack.pop();
+                    }
                     return; // Skip processing the duplicate implement block
                 }
                 ImplAction::Skip => {
                     // Same implement block already processed - skip silently
+                    if has_type_param_scope {
+                        self.type_param_stack.pop();
+                    }
                     return;
                 }
                 ImplAction::SetSpan => {
@@ -2477,6 +2563,11 @@ impl Analyzer {
                     }
                 }
             }
+        }
+
+        // Pop the inferred type param scope if we pushed one
+        if has_type_param_scope {
+            self.type_param_stack.pop();
         }
     }
 

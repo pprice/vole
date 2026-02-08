@@ -1,0 +1,112 @@
+// Test standalone implement blocks for generic classes.
+// Verifies that the sema infers type params from the target class definition
+// when processing `implement Interface for GenericClass<T>`.
+
+// --- Non-parameterized interface on a generic class ---
+
+interface Describable {
+    func describe() -> string
+}
+
+class Wrapper<T> {
+    value: T,
+}
+
+implement Describable for Wrapper<T> {
+    func describe() -> string {
+        return "wrapper"
+    }
+}
+
+// --- Parameterized interface on a generic class (single type param) ---
+
+interface Producer<T> {
+    func produce() -> T
+}
+
+class Box<T> {
+    item: T,
+}
+
+implement Producer<T> for Box<T> {
+    func produce() -> T {
+        return self.item
+    }
+}
+
+// --- Different type param names than the class declaration ---
+
+class Holder<X> {
+    data: X,
+}
+
+implement Producer<A> for Holder<A> {
+    func produce() -> A {
+        return self.data
+    }
+}
+
+// --- Non-generic implement block regression check ---
+// A concrete (non-generic) implement block should still work.
+
+class Counter {
+    count: i64,
+}
+
+implement Describable for Counter {
+    func describe() -> string {
+        return "counter"
+    }
+}
+
+// --- Multiple type params ---
+
+class Pair<K, V> {
+    first: K,
+    second: V,
+}
+
+implement Describable for Pair<K, V> {
+    func describe() -> string {
+        return "pair"
+    }
+}
+
+tests "generic implement blocks - non-parameterized interface" {
+    test "implement Describable for Wrapper<T> with i64" {
+        let w = Wrapper { value: 42 }
+        assert(w.describe() == "wrapper")
+    }
+
+    test "implement Describable for Wrapper<T> with string" {
+        let w = Wrapper { value: "hello" }
+        assert(w.describe() == "wrapper")
+    }
+
+    test "implement Describable for Pair<K, V>" {
+        let p = Pair { first: 1, second: "two" }
+        assert(p.describe() == "pair")
+    }
+
+    test "non-generic implement block still works" {
+        let c = Counter { count: 5 }
+        assert(c.describe() == "counter")
+    }
+}
+
+tests "generic implement blocks - parameterized interface" {
+    test "implement Producer<T> for Box<T> with i64" {
+        let b = Box { item: 99 }
+        assert(b.produce() == 99)
+    }
+
+    test "implement Producer<T> for Box<T> with string" {
+        let b = Box { item: "test" }
+        assert(b.produce() == "test")
+    }
+
+    test "implement Producer<A> for Holder<A> with different param name" {
+        let h = Holder { data: 77 }
+        assert(h.produce() == 77)
+    }
+}
