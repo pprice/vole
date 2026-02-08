@@ -195,14 +195,16 @@ macro_rules! drop_iter_source {
         }
     };
     (Interface, $iter_ref:expr) => {
+        // rc_dec the data_ptr (releases the iterator's own reference,
+        // acquired via rc_inc in vole_interface_iter). Do NOT dealloc
+        // the boxed interface - the JIT scope cleanup still holds the
+        // box pointer and will read data_ptr from it for its own rc_dec.
         let boxed = $iter_ref.source.interface.boxed_interface;
         if !boxed.is_null() {
             let data_ptr = *(boxed as *const *mut u8);
             if !data_ptr.is_null() {
                 rc_dec(data_ptr);
             }
-            let layout = Layout::from_size_align(16, 8).unwrap();
-            dealloc(boxed as *mut u8, layout);
         }
     };
     (Enumerate, $iter_ref:expr) => {
@@ -813,6 +815,17 @@ pub extern "C" fn vole_array_iter(array: *const RcArray) -> *mut RcIterator {
 /// Returns pointer to heap-allocated iterator.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_interface_iter(boxed_interface: *const u8) -> *mut RcIterator {
+    // rc_inc the data_ptr so the iterator owns its own reference.
+    // The JIT scope cleanup will independently rc_dec via the boxed interface,
+    // so both sides need their own reference.
+    if !boxed_interface.is_null() {
+        unsafe {
+            let data_ptr = *(boxed_interface as *const *mut u8);
+            if !data_ptr.is_null() {
+                rc_inc(data_ptr);
+            }
+        }
+    }
     let iter = RcIterator::new(
         IteratorKind::Interface,
         IteratorSource {
@@ -837,6 +850,15 @@ pub extern "C" fn vole_interface_iter_tagged(
     boxed_interface: *const u8,
     elem_tag: u64,
 ) -> *mut RcIterator {
+    // rc_inc the data_ptr so the iterator owns its own reference.
+    if !boxed_interface.is_null() {
+        unsafe {
+            let data_ptr = *(boxed_interface as *const *mut u8);
+            if !data_ptr.is_null() {
+                rc_inc(data_ptr);
+            }
+        }
+    }
     let iter = RcIterator::new_with_tag(
         IteratorKind::Interface,
         IteratorSource {

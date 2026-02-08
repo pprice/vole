@@ -10,7 +10,7 @@ use crate::RuntimeFn;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CodegenCtx, CompileEnv};
 use crate::types::{
-    CompiledValue, MethodInfo, method_name_id_by_str, type_id_to_cranelift,
+    CompiledValue, MethodInfo, method_name_id_by_str, type_id_size, type_id_to_cranelift,
     type_metadata_by_name_id, value_to_word, word_to_value_type_id,
 };
 use vole_frontend::Symbol;
@@ -403,21 +403,67 @@ impl InterfaceVtableRegistry {
                         "interface wrapper missing return value",
                     ));
                 };
-                let heap_alloc_ref = runtime_heap_alloc_ref(ctx, &mut builder)?;
-                let arena = ctx.arena();
-                let word = value_to_word(
-                    &mut builder,
-                    &CompiledValue::new(
-                        result,
-                        type_id_to_cranelift(method.return_type_id, arena, ctx.ptr_type()),
-                        method.return_type_id,
-                    ),
-                    ctx.ptr_type(),
-                    Some(heap_alloc_ref),
-                    ctx.arena(),
-                    ctx.registry(),
-                )?;
-                builder.ins().return_(&[word]);
+
+                // If the return type is a union, the callee returned a pointer to
+                // its own stack frame. We must copy tag+payload into heap-allocated
+                // storage so the pointer survives after this wrapper returns.
+                // value_to_word's fast-path assumes pointer-typed values are already
+                // heap-boxed, so we handle union boxing explicitly here.
+                if ctx.arena().is_union(method.return_type_id) {
+                    let ptr_type = ctx.ptr_type();
+                    let union_size =
+                        type_id_size(method.return_type_id, ptr_type, ctx.registry(), ctx.arena());
+
+                    // First copy to wrapper-local stack so callee memory is safe to
+                    // reference while we call heap_alloc below.
+                    let slot = builder.create_sized_stack_slot(StackSlotData::new(
+                        StackSlotKind::ExplicitSlot,
+                        union_size,
+                        0,
+                    ));
+                    let tag = builder.ins().load(types::I8, MemFlags::new(), result, 0);
+                    builder.ins().stack_store(tag, slot, 0);
+                    if union_size > 8 {
+                        let payload =
+                            builder.ins().load(types::I64, MemFlags::new(), result, 8);
+                        builder.ins().stack_store(payload, slot, 8);
+                    }
+
+                    // Heap-allocate and copy from local stack to heap.
+                    let heap_alloc_ref = runtime_heap_alloc_ref(ctx, &mut builder)?;
+                    let size_val = builder.ins().iconst(ptr_type, union_size as i64);
+                    let alloc_call = builder.ins().call(heap_alloc_ref, &[size_val]);
+                    let heap_ptr = builder.inst_results(alloc_call)[0];
+
+                    let local_tag = builder.ins().stack_load(types::I8, slot, 0);
+                    builder
+                        .ins()
+                        .store(MemFlags::new(), local_tag, heap_ptr, 0);
+                    if union_size > 8 {
+                        let local_payload = builder.ins().stack_load(types::I64, slot, 8);
+                        builder
+                            .ins()
+                            .store(MemFlags::new(), local_payload, heap_ptr, 8);
+                    }
+
+                    builder.ins().return_(&[heap_ptr]);
+                } else {
+                    let heap_alloc_ref = runtime_heap_alloc_ref(ctx, &mut builder)?;
+                    let arena = ctx.arena();
+                    let word = value_to_word(
+                        &mut builder,
+                        &CompiledValue::new(
+                            result,
+                            type_id_to_cranelift(method.return_type_id, arena, ctx.ptr_type()),
+                            method.return_type_id,
+                        ),
+                        ctx.ptr_type(),
+                        Some(heap_alloc_ref),
+                        ctx.arena(),
+                        ctx.registry(),
+                    )?;
+                    builder.ins().return_(&[word]);
+                }
             }
 
             builder.finalize();
