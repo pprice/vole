@@ -499,19 +499,10 @@ impl Cg<'_, '_, '_> {
                 .unwrap_or(return_type_id)
         };
 
-        // Convert Iterator<T> return types to RuntimeIterator(T) so that chained
-        // method calls (e.g., s.iter().count()) use direct dispatch instead of
-        // interface vtable dispatch. Only do this for module-defined types (stdlib)
-        // whose methods return raw RcIterator pointers. User-defined class methods
-        // return interface-boxed iterators which must use vtable dispatch instead.
-        let is_module_type = self.arena().unwrap_nominal(obj.type_id).is_some_and(
-            |(type_def_id, _, _)| {
-                self.query().get_type(type_def_id).module != self.env.analyzed.module_id
-            },
-        );
-        if is_module_type {
-            return_type_id = self.maybe_convert_iterator_return_type(return_type_id);
-        }
+        // NOTE: RuntimeIterator conversion for Iterator<T> return types is handled
+        // in the external method call paths above (which return early). Non-external
+        // methods (pure Vole classes) return interface-boxed iterators and use vtable
+        // dispatch — no RuntimeIterator conversion needed here.
 
         // Check if this is a monomorphized class method call
         // If so, use the monomorphized method's func_key instead
@@ -558,11 +549,7 @@ impl Cg<'_, '_, '_> {
                 .class_method_monomorph_cache
                 .get(&effective_key)
             {
-                return_type_id = if is_module_type {
-                    self.maybe_convert_iterator_return_type(instance.func_type.return_type_id)
-                } else {
-                    instance.func_type.return_type_id
-                };
+                return_type_id = instance.func_type.return_type_id;
                 let monomorph_func_key = self.funcs().intern_name_id(instance.mangled_name);
                 // Monomorphized methods have concrete types, no i64 conversion needed
                 (self.func_ref(monomorph_func_key)?, false)
@@ -1178,14 +1165,13 @@ impl Cg<'_, '_, '_> {
             && type_def_id == iterator_type_id
             && let Some(&elem_type_id) = type_args.first()
         {
-            // Look up existing RuntimeIterator type - sema must have created it
+            // Look up existing RuntimeIterator type if sema created one.
+            // If not found, this is a user-defined Iterator (e.g., pure Vole
+            // MapKeyIterator/SetIterator) — keep the original Interface type
+            // for vtable dispatch.
             if let Some(runtime_iter_id) = arena.lookup_runtime_iterator(elem_type_id) {
                 return runtime_iter_id;
             }
-            panic!(
-                "codegen: RuntimeIterator({:?}) not found in arena - sema must create all RuntimeIterator types",
-                elem_type_id
-            );
         }
         ty
     }

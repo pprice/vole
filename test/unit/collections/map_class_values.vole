@@ -1,5 +1,6 @@
 // Test: Map with class types as values
 // Exercises classes (with and without methods) as Map values.
+let { Map } = import "std:collections/map"
 
 class Point {
     x: i64,

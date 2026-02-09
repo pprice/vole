@@ -1,6 +1,7 @@
 // Test: Map with class types as keys
 // Classes with methods (not just data) as Map keys.
 // Note: Classes with RC fields as keys crash (vol-ofmb).
+let { Map } = import "std:collections/map"
 
 class Color {
     r: i64,

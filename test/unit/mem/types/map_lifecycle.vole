@@ -7,6 +7,7 @@
 // Note: Two separate loops accessing the same Map in one test triggers a
 // codegen verifier error (variable becomes detached between loops), so tests
 // avoid that pattern.
+let { Map } = import "std:collections/map"
 
 tests "map creation and scope exit" {
     test "empty map scope exit" {

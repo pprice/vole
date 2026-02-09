@@ -1,0 +1,41 @@
+// Smoke test: import Map from std:collections/map
+let { Map } = import "std:collections/map"
+
+tests {
+    test "stdlib map::basic smoke" {
+        let m = Map.new<i64, i64>()
+        m.set(1, 100)
+        m.set(2, 200)
+
+        assert(m.len() == 2)
+        assert(m.get(1) == 100)
+        assert(m.get(2) == 200)
+        assert(m.get(3) == nil)
+    }
+
+    test "stdlib map::string keys" {
+        let m = Map.new<string, i64>()
+        m.set("a", 1)
+        m.set("b", 2)
+
+        assert((m.get("a") ?? 0) == 1)
+        assert((m.get("b") ?? 0) == 2)
+    }
+
+    test "stdlib map::iterators" {
+        let m = Map.new<i64, i64>()
+        m.set(1, 10)
+        m.set(2, 20)
+        m.set(3, 30)
+
+        assert(m.keys().count() == 3)
+        assert(m.values().count() == 3)
+        assert(m.entries().count() == 3)
+
+        let mut sum = 0
+        for k in m.keys() {
+            sum = sum + k
+        }
+        assert(sum == 6)
+    }
+}

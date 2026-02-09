@@ -1,5 +1,6 @@
 // Test: Map with custom types for both K and V
 // Exercises Map<K, V> where both K and V are user-defined classes.
+let { Map } = import "std:collections/map"
 
 class Point {
     x: i64,

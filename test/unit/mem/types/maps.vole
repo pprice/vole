@@ -3,6 +3,7 @@
 // Maps are heap-allocated and reference-counted. These tests exercise
 // creation, insertion, lookup, removal, and reassignment to verify RC
 // inc/dec correctness when maps go out of scope.
+let { Map } = import "std:collections/map"
 
 tests "map basics" {
     test "create empty map and scope exit" {

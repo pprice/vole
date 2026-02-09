@@ -1,5 +1,6 @@
 // Test: Basic Map operations (i64 keys and values)
 // Note: Iterator methods temporarily excluded until RuntimeIterator codegen is fixed
+let { Map } = import "std:collections/map"
 
 tests {
     test "map::new creates empty map" {

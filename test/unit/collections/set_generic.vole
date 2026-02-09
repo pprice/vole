@@ -1,6 +1,7 @@
 // Test: Generic Set with non-i64 element types
 // Exercises Set<T> with string elements, custom Hashable+Equatable types,
 // and set operations (union, intersection) on generic instantiations.
+let { Set } = import "std:collections/set"
 
 class Point {
     x: i64,

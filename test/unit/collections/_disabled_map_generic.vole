@@ -1,5 +1,6 @@
 // Test: Generic Map with non-i64 key/value types
 // Exercises Map<K, V> with string keys, string values, and custom Hashable+Equatable types.
+let { Map } = import "std:collections/map"
 
 class Point {
     x: i64,

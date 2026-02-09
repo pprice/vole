@@ -1,5 +1,6 @@
 // Test: Set with class types (methods, RC fields)
 // Exercises Set<T> where T is a class with methods or RC fields.
+let { Set } = import "std:collections/set"
 
 class Color {
     r: i64,

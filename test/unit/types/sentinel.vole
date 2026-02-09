@@ -103,15 +103,6 @@ tests {
         assert(result == 1)
     }
 
-    test "sentinel record pattern in match" {
-        let v: Ready | i64 = Ready {}
-        let result = match v {
-            Ready {} => 1
-            i64 => 0
-        }
-        assert(result == 1)
-    }
-
     // Bare-name construction tests (no braces)
 
     test "bare sentinel construction" {

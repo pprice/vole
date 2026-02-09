@@ -2,6 +2,7 @@
 // Regression test for vol-9zx3: Two sequential for-loops on same Map variable
 // caused Cranelift verifier error "argument is not attached" when loop parameter
 // optimization incorrectly used a parameter that was being removed.
+let { Map } = import "std:collections/map"
 
 tests {
     test "two for loops on same map - populate then read" {

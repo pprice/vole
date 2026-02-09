@@ -1,5 +1,6 @@
 // test/unit/collections/set_basic.vole
 // Tests for Set<i64> hash set
+let { Set } = import "std:collections/set"
 
 tests {
     test "set::new creates empty set" {

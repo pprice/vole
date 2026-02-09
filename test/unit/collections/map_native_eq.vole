@@ -1,6 +1,8 @@
 // Test: Map/Set with native eq optimization (vole-9x0.3)
 // Exercises the code path where primitive key types use direct native equality
 // function pointers instead of closure trampolines.
+let { Map } = import "std:collections/map"
+let { Set } = import "std:collections/set"
 
 tests {
     // ---- Map with primitive key types (should use native eq) ----

@@ -1,4 +1,4 @@
-let { Empty } = import "std:collections/sentinels"
+sentinel Empty
 let { Array } = import "std:array"
 
 class Entry<K> {

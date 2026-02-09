@@ -1,4 +1,4 @@
-let { Empty } = import "std:collections/sentinels"
+sentinel Empty
 
 class Entry<K, V> {
     key: K,

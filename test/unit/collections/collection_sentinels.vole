@@ -1,7 +1,7 @@
-// Tests for std:collections/sentinels module
+// Tests for sentinel types used in collections
 
-let sentinels = import "std:collections/sentinels"
-let { Empty, Deleted } = import "std:collections/sentinels"
+sentinel Empty
+sentinel Deleted
 
 tests "collection sentinels import" {
     test "Empty is constructible" {
@@ -14,13 +14,13 @@ tests "collection sentinels import" {
         assert(true)
     }
 
-    test "Empty via module import" {
-        let e = sentinels.Empty
+    test "Empty braced construction" {
+        let e = Empty {}
         assert(true)
     }
 
-    test "Deleted via module import" {
-        let d = sentinels.Deleted
+    test "Deleted braced construction" {
+        let d = Deleted {}
         assert(true)
     }
 }
