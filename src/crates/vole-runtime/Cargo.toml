@@ -11,9 +11,6 @@ libc = "0.2"
 # Macro for concatenating identifiers (used in to_string_ffi! macro)
 paste = "1"
 
-# High-performance hash map for Map<K,V> and Set<T> collections
-hashbrown = "0.16"
-
 # High-performance hash map for internal registries
 rustc-hash = "2.1"
 
