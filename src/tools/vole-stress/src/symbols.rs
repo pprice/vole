@@ -451,6 +451,8 @@ pub struct ClassInfo {
 pub struct StructInfo {
     /// Fields of the struct. Only primitive types.
     pub fields: Vec<FieldInfo>,
+    /// Static methods (inside `statics { }` block).
+    pub static_methods: Vec<StaticMethodInfo>,
 }
 
 /// Information about a class/error/struct field.

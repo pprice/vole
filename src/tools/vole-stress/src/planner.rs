@@ -46,6 +46,10 @@ pub struct PlanConfig {
     /// Only applies to non-generic classes with fields. Static methods
     /// are constructor-like methods that return the class type.
     pub static_methods_per_class: (usize, usize),
+    /// Number of static methods per struct (range).
+    /// Only applies to structs with fields. Static methods
+    /// are constructor-like methods that return the struct type.
+    pub static_methods_per_struct: (usize, usize),
     /// Number of methods per interface (range).
     pub methods_per_interface: (usize, usize),
     /// Number of fields per error (range).
@@ -100,6 +104,7 @@ impl Default for PlanConfig {
             fields_per_class: (1, 4),
             methods_per_class: (1, 3),
             static_methods_per_class: (0, 2),
+            static_methods_per_struct: (0, 2),
             methods_per_interface: (1, 2),
             fields_per_error: (0, 2),
             params_per_function: (0, 3),
@@ -403,7 +408,10 @@ fn plan_struct<R: Rng>(
         fields.push(plan_field(rng, names));
     }
 
-    let kind = SymbolKind::Struct(StructInfo { fields });
+    let kind = SymbolKind::Struct(StructInfo {
+        fields,
+        static_methods: vec![],
+    });
     table
         .get_module_mut(module_id)
         .map(|m| m.add_symbol(name, kind))
@@ -1561,36 +1569,43 @@ fn plan_nested_class_fields<R: Rng>(rng: &mut R, table: &mut SymbolTable, config
     }
 }
 
-/// Add static methods to non-generic classes with fields.
+/// Add static methods to non-generic classes and structs with fields.
 ///
-/// Static methods are constructor-like methods that return the class type.
-/// They are called on the class name: `ClassName.methodName(args)`.
+/// Static methods are constructor-like methods that return Self.
+/// They are called on the type name: `TypeName.methodName(args)`.
 ///
-/// Only non-generic classes with fields can have static methods, since the
-/// static method body constructs an instance of the class.
+/// Only non-generic classes with fields and structs with fields can have
+/// static methods, since the static method body constructs an instance.
 fn plan_static_methods<R: Rng>(
     rng: &mut R,
     table: &mut SymbolTable,
     names: &mut NameGen,
     config: &PlanConfig,
 ) {
-    // Skip if static methods are disabled
+    plan_class_static_methods(rng, table, names, config);
+    plan_struct_static_methods(rng, table, names, config);
+}
+
+/// Add static methods to non-generic classes with fields.
+fn plan_class_static_methods<R: Rng>(
+    rng: &mut R,
+    table: &mut SymbolTable,
+    names: &mut NameGen,
+    config: &PlanConfig,
+) {
     if config.static_methods_per_class.1 == 0 {
         return;
     }
 
-    // Process each module
     for module_idx in 0..table.module_count() {
         let module_id = ModuleId(module_idx);
 
-        // Collect non-generic classes with fields
         let classes: Vec<SymbolId> = table
             .get_module(module_id)
             .map(|m| {
                 m.classes()
                     .filter_map(|s| {
                         if let SymbolKind::Class(ref info) = s.kind {
-                            // Only non-generic classes with at least one field
                             if info.type_params.is_empty() && !info.fields.is_empty() {
                                 Some(s.id)
                             } else {
@@ -1604,24 +1619,75 @@ fn plan_static_methods<R: Rng>(
             })
             .unwrap_or_default();
 
-        // Add static methods to each eligible class
         for class_id in classes {
             let static_count = rng
                 .gen_range(config.static_methods_per_class.0..=config.static_methods_per_class.1);
-
             if static_count == 0 {
                 continue;
             }
-
             let mut static_methods = Vec::with_capacity(static_count);
             for _ in 0..static_count {
                 static_methods.push(plan_static_method(rng, names, config));
             }
-
-            // Add the static methods to the class
             if let Some(module) = table.get_module_mut(module_id)
                 && let Some(symbol) = module.get_symbol_mut(class_id)
                 && let SymbolKind::Class(ref mut info) = symbol.kind
+            {
+                info.static_methods = static_methods;
+            }
+        }
+    }
+}
+
+/// Add static methods to structs with fields.
+fn plan_struct_static_methods<R: Rng>(
+    rng: &mut R,
+    table: &mut SymbolTable,
+    names: &mut NameGen,
+    config: &PlanConfig,
+) {
+    if config.static_methods_per_struct.1 == 0 {
+        return;
+    }
+
+    for module_idx in 0..table.module_count() {
+        let module_id = ModuleId(module_idx);
+
+        // Only structs with 1-2 fields can have statics, because
+        // struct statics return Self and structs with 3+ fields use sret
+        // calling convention which has a codegen bug (vol-aufd).
+        let structs: Vec<SymbolId> = table
+            .get_module(module_id)
+            .map(|m| {
+                m.structs()
+                    .filter_map(|s| {
+                        if let SymbolKind::Struct(ref info) = s.kind {
+                            if !info.fields.is_empty() && info.fields.len() <= 2 {
+                                Some(s.id)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        for struct_id in structs {
+            let static_count = rng
+                .gen_range(config.static_methods_per_struct.0..=config.static_methods_per_struct.1);
+            if static_count == 0 {
+                continue;
+            }
+            let mut static_methods = Vec::with_capacity(static_count);
+            for _ in 0..static_count {
+                static_methods.push(plan_static_method(rng, names, config));
+            }
+            if let Some(module) = table.get_module_mut(module_id)
+                && let Some(symbol) = module.get_symbol_mut(struct_id)
+                && let SymbolKind::Struct(ref mut info) = symbol.kind
             {
                 info.static_methods = static_methods;
             }

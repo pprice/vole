@@ -7,8 +7,8 @@ use rand::Rng;
 
 use crate::expr::{ExprConfig, ExprContext, ExprGenerator, get_chainable_methods};
 use crate::symbols::{
-    ClassInfo, FunctionInfo, ModuleId, ParamInfo, PrimitiveType, SymbolKind, SymbolTable, TypeInfo,
-    TypeParam,
+    ClassInfo, FunctionInfo, ModuleId, ParamInfo, PrimitiveType, StaticMethodInfo, SymbolKind,
+    SymbolTable, TypeInfo, TypeParam,
 };
 
 /// Configuration for statement generation.
@@ -415,6 +415,13 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // Occasionally generate a discard statement (_ = func()) to exercise the syntax
         if self.rng.gen_bool(self.config.discard_probability) {
             if let Some(stmt) = self.try_generate_discard_statement(ctx) {
+                return stmt;
+            }
+        }
+
+        // Occasionally generate a standalone static method call
+        if self.rng.gen_bool(self.config.static_call_probability) {
+            if let Some(stmt) = self.try_generate_static_call_statement(ctx) {
                 return stmt;
             }
         }
@@ -1634,7 +1641,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         if !class_info.static_methods.is_empty()
             && self.rng.gen_bool(self.config.static_call_probability)
         {
-            let expr = self.generate_static_method_call(class_name, class_info, ctx);
+            let expr = self.generate_static_call(class_name, &class_info.static_methods, ctx);
             // Add to scope AFTER generating the expression to avoid self-references
             ctx.add_local(name.clone(), ty, false);
             return Some(format!("let {} = {}", name, expr));
@@ -1687,6 +1694,15 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         let name = ctx.new_local_name();
         let ty = TypeInfo::Struct(module_id, *sym_id);
+
+        // Try using a static method call if available
+        if !struct_info.static_methods.is_empty()
+            && self.rng.gen_bool(self.config.static_call_probability)
+        {
+            let expr = self.generate_static_call(struct_name, &struct_info.static_methods, ctx);
+            ctx.add_local(name.clone(), ty, false);
+            return Some(format!("let {} = {}", name, expr));
+        }
 
         // Generate field values for construction BEFORE adding to scope
         // to avoid self-referential field initializers
@@ -1792,18 +1808,18 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         Some(format!("let {} = {}", pattern, var_name))
     }
 
-    /// Generate a static method call on a class.
+    /// Generate a static method call on a type (class or struct).
     ///
-    /// Returns something like `ClassName.staticMethod(arg1, arg2)`.
-    fn generate_static_method_call(
+    /// Returns something like `TypeName.staticMethod(arg1, arg2)`.
+    fn generate_static_call(
         &mut self,
-        class_name: &str,
-        class_info: &ClassInfo,
+        type_name: &str,
+        static_methods: &[StaticMethodInfo],
         ctx: &mut StmtContext,
     ) -> String {
         // Pick a random static method
-        let idx = self.rng.gen_range(0..class_info.static_methods.len());
-        let static_method = &class_info.static_methods[idx];
+        let idx = self.rng.gen_range(0..static_methods.len());
+        let static_method = &static_methods[idx];
 
         // Generate arguments for the static method
         let expr_ctx = ctx.to_expr_context();
@@ -1816,7 +1832,68 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             })
             .collect();
 
-        format!("{}.{}({})", class_name, static_method.name, args.join(", "))
+        format!("{}.{}({})", type_name, static_method.name, args.join(", "))
+    }
+
+    /// Try to generate a standalone static method call statement.
+    ///
+    /// Searches the current module for classes or structs with static methods
+    /// and generates `let localN = TypeName.staticMethod(args)`.
+    ///
+    /// Returns `None` if no type with static methods is available.
+    fn try_generate_static_call_statement(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let module_id = ctx.module_id?;
+        let module = ctx.table.get_module(module_id)?;
+
+        // Collect all types with static methods: (sym_id, name, statics, type_info_fn)
+        let mut candidates: Vec<(
+            crate::symbols::SymbolId,
+            String,
+            Vec<StaticMethodInfo>,
+            bool,
+        )> = Vec::new();
+
+        // Classes: non-generic with primitive fields and static methods
+        for sym in module.classes() {
+            if let SymbolKind::Class(ref info) = sym.kind {
+                if info.type_params.is_empty()
+                    && has_primitive_field(info)
+                    && !info.static_methods.is_empty()
+                {
+                    // is_class = true
+                    candidates.push((sym.id, sym.name.clone(), info.static_methods.clone(), true));
+                }
+            }
+        }
+
+        // Structs with static methods
+        for sym in module.structs() {
+            if let SymbolKind::Struct(ref info) = sym.kind {
+                if !info.static_methods.is_empty() {
+                    // is_class = false
+                    candidates.push((sym.id, sym.name.clone(), info.static_methods.clone(), false));
+                }
+            }
+        }
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..candidates.len());
+        let (sym_id, type_name, static_methods, is_class) = &candidates[idx];
+
+        let name = ctx.new_local_name();
+        let ty = if *is_class {
+            TypeInfo::Class(module_id, *sym_id)
+        } else {
+            TypeInfo::Struct(module_id, *sym_id)
+        };
+
+        let expr = self.generate_static_call(type_name, static_methods, ctx);
+        ctx.add_local(name.clone(), ty, false);
+
+        Some(format!("let {} = {}", name, expr))
     }
 
     /// Try to generate a method chain for a class instance.

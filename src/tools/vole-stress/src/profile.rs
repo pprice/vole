@@ -112,6 +112,7 @@ fn minimal_profile() -> Profile {
         fields_per_class: (0, 0),
         methods_per_class: (0, 0),
         static_methods_per_class: (0, 0),
+        static_methods_per_struct: (0, 0),
         methods_per_interface: (0, 0),
         fields_per_error: (0, 0),
     };
@@ -210,6 +211,7 @@ fn full_profile() -> Profile {
         fields_per_class: (2, 5),
         methods_per_class: (2, 4),
         static_methods_per_class: (1, 2),
+        static_methods_per_struct: (1, 2),
         methods_per_interface: (2, 3),
         fields_per_error: (1, 3),
 
@@ -354,6 +356,7 @@ fn deep_nesting_profile() -> Profile {
         fields_per_class: (1, 2),
         methods_per_class: (1, 2),
         static_methods_per_class: (0, 0),
+        static_methods_per_struct: (0, 0),
         methods_per_interface: (0, 0),
         fields_per_error: (0, 0),
     };
@@ -463,6 +466,7 @@ fn wide_types_profile() -> Profile {
         methods_per_class: (10, 20),
         // A few static methods for variety
         static_methods_per_class: (0, 1),
+        static_methods_per_struct: (0, 1),
         // Many methods per interface: 10-20
         methods_per_interface: (10, 20),
         // Wide error fields: 5-15
@@ -585,6 +589,7 @@ fn many_modules_profile() -> Profile {
         fields_per_class: (1, 3),
         methods_per_class: (1, 2),
         static_methods_per_class: (0, 0),
+        static_methods_per_struct: (0, 0),
         methods_per_interface: (1, 2),
         fields_per_error: (0, 1),
         // Simple function signatures
@@ -712,6 +717,7 @@ fn generics_heavy_profile() -> Profile {
         methods_per_class: (3, 5),
         // No static methods - focus on generics (statics are non-generic only)
         static_methods_per_class: (0, 0),
+        static_methods_per_struct: (0, 0),
         // Many interface methods for constraint satisfaction
         methods_per_interface: (2, 4),
         // Simple error fields

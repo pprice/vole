@@ -630,7 +630,7 @@ impl<'a, R: Rng> EmitContext<'a, R> {
     fn emit_struct(&mut self, symbol: &Symbol) {
         if let SymbolKind::Struct(ref info) = symbol.kind {
             self.emit_line("");
-            if info.fields.is_empty() {
+            if info.fields.is_empty() && info.static_methods.is_empty() {
                 self.emit_line(&format!("struct {} {{}}", symbol.name));
             } else {
                 self.emit_line(&format!("struct {} {{", symbol.name));
@@ -638,6 +638,19 @@ impl<'a, R: Rng> EmitContext<'a, R> {
                 for field in &info.fields {
                     self.emit_field(field);
                 }
+
+                // Emit statics block inside the struct body
+                if !info.static_methods.is_empty() {
+                    self.emit_line("");
+                    self.emit_line("statics {");
+                    self.indent += 1;
+                    for static_method in &info.static_methods {
+                        self.emit_static_method(static_method, &symbol.name, &info.fields);
+                    }
+                    self.indent -= 1;
+                    self.emit_line("}");
+                }
+
                 self.indent -= 1;
                 self.emit_line("}");
             }
