@@ -61,6 +61,9 @@ pub struct StmtConfig {
     /// Probability of generating an `arr.push(value)` statement
     /// when mutable dynamic arrays are in scope. Set to 0.0 to disable.
     pub array_push_probability: f64,
+    /// Probability of generating an array index compound assignment (`arr[i] += expr`)
+    /// when mutable dynamic arrays with numeric element types are in scope.
+    pub array_index_compound_assign_probability: f64,
     /// Probability that `generate_array_let` produces a `let mut` binding.
     pub mutable_array_probability: f64,
 }
@@ -88,6 +91,7 @@ impl Default for StmtConfig {
             static_call_probability: 0.3,
             array_index_assign_probability: 0.10,
             array_push_probability: 0.08,
+            array_index_compound_assign_probability: 0.10,
             mutable_array_probability: 0.4,
         }
     }
@@ -390,6 +394,15 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             && self.rng.gen_bool(self.config.array_push_probability)
         {
             return self.generate_array_push(ctx);
+        }
+
+        // If mutable numeric arrays are in scope, occasionally generate compound assignment
+        if !Self::mutable_numeric_arrays(ctx).is_empty()
+            && self
+                .rng
+                .gen_bool(self.config.array_index_compound_assign_probability)
+        {
+            return self.generate_array_index_compound_assignment(ctx);
         }
 
         // ~20% chance to call a function-typed parameter if one is in scope
@@ -1085,6 +1098,68 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let value = expr_gen.generate_simple(&elem_type, &expr_ctx);
 
         format!("{}.push({})", arr_name, value)
+    }
+
+    /// Get mutable dynamic arrays with numeric element types.
+    ///
+    /// Returns `(name, element_type)` pairs for locals of type `[T]` where T is
+    /// a numeric primitive (i8..i128, u8..u64, f32, f64), that are mutable and
+    /// not in `protected_vars`. Used for compound assignment on array elements.
+    fn mutable_numeric_arrays(ctx: &StmtContext) -> Vec<(String, PrimitiveType)> {
+        ctx.locals
+            .iter()
+            .filter_map(|(name, ty, is_mut)| {
+                if *is_mut && !ctx.protected_vars.contains(name) {
+                    if let TypeInfo::Array(elem) = ty {
+                        if let TypeInfo::Primitive(
+                            p @ (PrimitiveType::I8
+                            | PrimitiveType::I16
+                            | PrimitiveType::I32
+                            | PrimitiveType::I64
+                            | PrimitiveType::I128
+                            | PrimitiveType::U8
+                            | PrimitiveType::U16
+                            | PrimitiveType::U32
+                            | PrimitiveType::U64
+                            | PrimitiveType::F32
+                            | PrimitiveType::F64),
+                        ) = **elem
+                        {
+                            return Some((name.clone(), p));
+                        }
+                    }
+                }
+                None
+            })
+            .collect()
+    }
+
+    /// Generate an array index compound assignment: `arr[i] += expr`.
+    ///
+    /// Picks a random mutable dynamic array with numeric element type in scope,
+    /// generates a bounds-safe index (0 or 1), a compound operator (+=, -=, *=),
+    /// and a type-compatible RHS expression.
+    fn generate_array_index_compound_assignment(&mut self, ctx: &mut StmtContext) -> String {
+        let candidates = Self::mutable_numeric_arrays(ctx);
+        // Caller guarantees non-empty via the check in generate_statement
+        let idx = self.rng.gen_range(0..candidates.len());
+        let (arr_name, elem_type) = &candidates[idx];
+
+        // Use index 0 or 1 to stay in bounds (arrays have at least 2 elements)
+        let index = self.rng.gen_range(0..=1);
+
+        // Pick a random compound operator (avoid /= and %= to prevent division by zero)
+        let op = match self.rng.gen_range(0..3) {
+            0 => "+=",
+            1 => "-=",
+            _ => "*=",
+        };
+
+        let expr_ctx = ctx.to_expr_context();
+        let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+        let value = expr_gen.generate_simple(&TypeInfo::Primitive(*elem_type), &expr_ctx);
+
+        format!("{}[{}] {} {}", arr_name, index, op, value)
     }
 
     /// Try to generate a raise statement in a fallible function body.

@@ -165,6 +165,7 @@ fn minimal_profile() -> Profile {
             // No array mutation in minimal
             array_index_assign_probability: 0.0,
             array_push_probability: 0.0,
+            array_index_compound_assign_probability: 0.0,
             mutable_array_probability: 0.0,
         },
         // No destructured imports in minimal (no multi-layer modules)
@@ -289,6 +290,7 @@ fn full_profile() -> Profile {
             // Array mutation: index assignment and push on mutable dynamic arrays
             array_index_assign_probability: 0.10,
             array_push_probability: 0.08,
+            array_index_compound_assign_probability: 0.10,
             mutable_array_probability: 0.4,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
@@ -414,6 +416,7 @@ fn deep_nesting_profile() -> Profile {
             // Some array mutation for variety
             array_index_assign_probability: 0.08,
             array_push_probability: 0.05,
+            array_index_compound_assign_probability: 0.08,
             mutable_array_probability: 0.3,
         },
         // No destructured imports in deep-nesting (single module focus)
@@ -540,6 +543,7 @@ fn wide_types_profile() -> Profile {
             // Some array mutation
             array_index_assign_probability: 0.08,
             array_push_probability: 0.05,
+            array_index_compound_assign_probability: 0.08,
             mutable_array_probability: 0.3,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
@@ -658,6 +662,7 @@ fn many_modules_profile() -> Profile {
             // No array mutation - focus on module loading
             array_index_assign_probability: 0.0,
             array_push_probability: 0.0,
+            array_index_compound_assign_probability: 0.0,
             mutable_array_probability: 0.0,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
@@ -791,6 +796,7 @@ fn generics_heavy_profile() -> Profile {
             // Some array mutation for variety
             array_index_assign_probability: 0.08,
             array_push_probability: 0.05,
+            array_index_compound_assign_probability: 0.08,
             mutable_array_probability: 0.3,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
