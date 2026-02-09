@@ -506,6 +506,13 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~8% chance to generate a struct copy (let copy = structVar)
+        if self.rng.gen_bool(0.08) {
+            if let Some(stmt) = self.try_generate_struct_copy(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -1891,6 +1898,59 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         let pattern = format!("{{ {} }}", pattern_parts.join(", "));
         Some(format!("let {} = {}", pattern, var_name))
+    }
+
+    /// Try to generate a struct copy statement.
+    ///
+    /// Looks for struct-typed variables in scope and generates a copy:
+    /// ```vole
+    /// let copy = structVar
+    /// ```
+    /// This exercises struct value-type copy semantics.
+    ///
+    /// Returns `None` if no struct-typed variable is in scope.
+    fn try_generate_struct_copy(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Find struct-typed variables in locals
+        let struct_locals: Vec<_> = ctx
+            .locals
+            .iter()
+            .filter_map(|(name, ty, _)| {
+                if let TypeInfo::Struct(_mod_id, _sym_id) = ty {
+                    Some((name.clone(), ty.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Also check params for struct types
+        let struct_params: Vec<_> = ctx
+            .params
+            .iter()
+            .filter_map(|p| {
+                if matches!(&p.param_type, TypeInfo::Struct(_, _)) {
+                    Some((p.name.clone(), p.param_type.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let all_structs: Vec<_> = struct_locals.into_iter().chain(struct_params).collect();
+
+        if all_structs.is_empty() {
+            return None;
+        }
+
+        // Pick a random struct-typed variable
+        let idx = self.rng.gen_range(0..all_structs.len());
+        let (var_name, struct_type) = &all_structs[idx];
+
+        // Create a new variable name for the copy
+        let copy_name = ctx.new_local_name();
+        ctx.add_local(copy_name.clone(), struct_type.clone(), false);
+
+        Some(format!("let {} = {}", copy_name, var_name))
     }
 
     /// Generate a static method call on a type (class or struct).

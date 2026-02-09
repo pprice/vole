@@ -835,16 +835,30 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         let mut candidates: Vec<String> = Vec::new();
 
         for (name, ty) in ctx.locals {
-            if let TypeInfo::Class(mod_id, sym_id) = ty {
-                self.collect_field_paths(
-                    ctx.table,
-                    *mod_id,
-                    *sym_id,
-                    name.clone(),
-                    &target,
-                    &mut candidates,
-                    0, // depth
-                );
+            match ty {
+                TypeInfo::Class(mod_id, sym_id) => {
+                    self.collect_field_paths(
+                        ctx.table,
+                        *mod_id,
+                        *sym_id,
+                        name.clone(),
+                        &target,
+                        &mut candidates,
+                        0, // depth
+                    );
+                }
+                TypeInfo::Struct(mod_id, sym_id) => {
+                    self.collect_field_paths(
+                        ctx.table,
+                        *mod_id,
+                        *sym_id,
+                        name.clone(),
+                        &target,
+                        &mut candidates,
+                        0, // depth
+                    );
+                }
+                _ => {}
             }
         }
 
@@ -880,16 +894,20 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         let Some(sym) = table.get_symbol(mod_id, sym_id) else {
             return;
         };
-        let SymbolKind::Class(ref info) = sym.kind else {
-            return;
+
+        let fields = match &sym.kind {
+            SymbolKind::Class(info) => {
+                // Skip generic classes
+                if !info.type_params.is_empty() {
+                    return;
+                }
+                &info.fields
+            }
+            SymbolKind::Struct(info) => &info.fields,
+            _ => return,
         };
 
-        // Skip generic classes
-        if !info.type_params.is_empty() {
-            return;
-        }
-
-        for field in &info.fields {
+        for field in fields {
             let field_path = format!("{}.{}", prefix, field.name);
 
             // Check if this field matches the target type
@@ -897,17 +915,21 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                 candidates.push(field_path.clone());
             }
 
-            // If this field is a class type, recurse into it
-            if let TypeInfo::Class(nested_mod_id, nested_sym_id) = &field.field_type {
-                self.collect_field_paths(
-                    table,
-                    *nested_mod_id,
-                    *nested_sym_id,
-                    field_path,
-                    target,
-                    candidates,
-                    depth + 1,
-                );
+            // If this field is a class or struct type, recurse into it
+            match &field.field_type {
+                TypeInfo::Class(nested_mod_id, nested_sym_id)
+                | TypeInfo::Struct(nested_mod_id, nested_sym_id) => {
+                    self.collect_field_paths(
+                        table,
+                        *nested_mod_id,
+                        *nested_sym_id,
+                        field_path,
+                        target,
+                        candidates,
+                        depth + 1,
+                    );
+                }
+                _ => {}
             }
         }
     }
