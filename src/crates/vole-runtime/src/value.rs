@@ -98,8 +98,6 @@ pub const TYPE_ARRAY: u32 = 5;
 pub const TYPE_CLOSURE: u32 = 6;
 pub const TYPE_INSTANCE: u32 = 7;
 pub const TYPE_RNG: u32 = 8;
-pub const TYPE_MAP: u32 = 9;
-pub const TYPE_SET: u32 = 10;
 pub const TYPE_ITERATOR: u32 = 11;
 
 /// Check if a type tag represents an RC-managed (heap-allocated) type.
@@ -108,14 +106,7 @@ pub const TYPE_ITERATOR: u32 = 11;
 pub fn tag_needs_rc(tag: u64) -> bool {
     matches!(
         tag as u32,
-        TYPE_STRING
-            | TYPE_ARRAY
-            | TYPE_CLOSURE
-            | TYPE_INSTANCE
-            | TYPE_RNG
-            | TYPE_MAP
-            | TYPE_SET
-            | TYPE_ITERATOR
+        TYPE_STRING | TYPE_ARRAY | TYPE_CLOSURE | TYPE_INSTANCE | TYPE_RNG | TYPE_ITERATOR
     )
 }
 

@@ -86,8 +86,6 @@ pub fn type_name(type_id: u32) -> &'static str {
         6 => "Closure",
         7 => "Instance",
         8 => "Rng",
-        9 => "Map",
-        10 => "Set",
         11 => "Iterator",
         _ => "Unknown",
     }
@@ -105,8 +103,7 @@ pub fn reset() {
 mod tests {
     use super::*;
     use crate::value::{
-        TYPE_ARRAY, TYPE_CLOSURE, TYPE_INSTANCE, TYPE_ITERATOR, TYPE_MAP, TYPE_RNG, TYPE_SET,
-        TYPE_STRING,
+        TYPE_ARRAY, TYPE_CLOSURE, TYPE_INSTANCE, TYPE_ITERATOR, TYPE_RNG, TYPE_STRING,
     };
     use std::sync::Mutex;
 
@@ -180,17 +177,17 @@ mod tests {
     fn test_snapshot_and_delta_on_type_counter() {
         let _guard = TEST_LOCK.lock().unwrap();
         enable_tracking();
-        let before = type_count(TYPE_SET);
+        let before = type_count(TYPE_CLOSURE);
 
-        track_alloc(TYPE_SET);
-        track_alloc(TYPE_SET);
-        assert_eq!(type_count(TYPE_SET), before + 2);
+        track_alloc(TYPE_CLOSURE);
+        track_alloc(TYPE_CLOSURE);
+        assert_eq!(type_count(TYPE_CLOSURE), before + 2);
 
-        track_dealloc(TYPE_SET);
-        assert_eq!(type_count(TYPE_SET), before + 1);
+        track_dealloc(TYPE_CLOSURE);
+        assert_eq!(type_count(TYPE_CLOSURE), before + 1);
 
         // Clean up
-        track_dealloc(TYPE_SET);
+        track_dealloc(TYPE_CLOSURE);
     }
 
     #[test]
@@ -252,8 +249,6 @@ mod tests {
             TYPE_CLOSURE,
             TYPE_INSTANCE,
             TYPE_RNG,
-            TYPE_MAP,
-            TYPE_SET,
             TYPE_ITERATOR,
         ];
 
