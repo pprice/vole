@@ -143,7 +143,8 @@ fn compile_with_timing(source: &str, file_path: &str) -> Result<CompileTiming, S
         return Err(format!("lexer error: {:?}", lexer_errors[0]));
     }
 
-    let interner = parser.into_interner();
+    let mut interner = parser.into_interner();
+    interner.seed_builtin_symbols();
 
     // Semantic analysis phase
     let sema_start = Instant::now();
@@ -197,7 +198,8 @@ fn compile_to_jit(source: &str, file_path: &str) -> Result<JitContext, String> {
         return Err(format!("lexer error: {:?}", lexer_errors[0]));
     }
 
-    let interner = parser.into_interner();
+    let mut interner = parser.into_interner();
+    interner.seed_builtin_symbols();
 
     // Analyze
     let mut analyzer = Analyzer::new(file_path, source);

@@ -1083,10 +1083,18 @@ impl Compiler<'_> {
             });
 
             // Create function builder and compile
+            let no_global_inits = FxHashMap::default();
             let mut builder_ctx = FunctionBuilderContext::new();
             {
                 let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
-                let env = compile_env!(self, source_file_ptr);
+                // Use module interner + module_id when compiling module statics,
+                // otherwise AST Symbols from the module interner are resolved against
+                // the main program interner (which has different indices).
+                let env = if let Some(mid) = resolved_module_id {
+                    compile_env!(self, interner, &no_global_inits, source_file_ptr, mid)
+                } else {
+                    compile_env!(self, source_file_ptr)
+                };
                 let mut codegen_ctx =
                     CodegenCtx::new(&mut self.jit.module, &mut self.func_registry);
 
