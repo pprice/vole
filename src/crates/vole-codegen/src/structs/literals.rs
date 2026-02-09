@@ -460,6 +460,14 @@ impl Cg<'_, '_, '_> {
             .ins()
             .store(MemFlags::new(), tag_val, heap_ptr, 0);
 
+        // Store is_rc flag at offset 1: 1 if the variant is RC-managed, 0 otherwise.
+        // This flag is used by union_heap_cleanup to know whether to rc_dec the payload.
+        let is_rc = self.rc_state(value.type_id).needs_cleanup();
+        let is_rc_val = self.builder.ins().iconst(types::I8, is_rc as i64);
+        self.builder
+            .ins()
+            .store(MemFlags::new(), is_rc_val, heap_ptr, 1);
+
         // Sentinel types (nil, Done, user-defined) have no payload - only the tag matters
         if !self.arena().is_sentinel(value.type_id) {
             self.builder

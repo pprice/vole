@@ -353,17 +353,17 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .map(|&ft| arena.expect_substitute(ft, &subs, "mono_instance_type_id"))
             .collect();
 
-        // Check if any field type changes from non-RC to RC after substitution.
-        // If all concrete field types have the same RC-ness as the base registration,
+        // Check if any field type changes its cleanup tag after substitution.
+        // If all concrete field types have the same tag as the base registration,
         // we can reuse the base type_id.
-        let base_tags: Vec<bool> = generic_info
+        let base_tags: Vec<_> = generic_info
             .field_types
             .iter()
-            .map(|&ft| self.rc_state(ft).needs_cleanup())
+            .map(|&ft| self.field_type_tag(ft))
             .collect();
-        let concrete_tags: Vec<bool> = concrete_field_types
+        let concrete_tags: Vec<_> = concrete_field_types
             .iter()
-            .map(|&ft| self.rc_state(ft).needs_cleanup())
+            .map(|&ft| self.field_type_tag(ft))
             .collect();
         if base_tags == concrete_tags {
             return base_type_id;
@@ -381,13 +381,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // Compute field type tags from concrete types
         let field_type_tags: Vec<vole_runtime::type_registry::FieldTypeTag> = concrete_field_types
             .iter()
-            .map(|&ft| {
-                if self.rc_state(ft).needs_cleanup() {
-                    vole_runtime::type_registry::FieldTypeTag::Rc
-                } else {
-                    vole_runtime::type_registry::FieldTypeTag::Value
-                }
-            })
+            .map(|&ft| self.field_type_tag(ft))
             .collect();
 
         // Register in the runtime type registry
@@ -941,6 +935,25 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .borrow_mut()
             .insert(type_id, state.clone());
         state
+    }
+
+    /// Get the field type tag for a type, determining how instance fields of this
+    /// type should be cleaned up. RC types get `FieldTypeTag::Rc`, union types that
+    /// contain RC variants get `FieldTypeTag::UnionHeap`, everything else is `Value`.
+    pub fn field_type_tag(&self, type_id: TypeId) -> vole_runtime::type_registry::FieldTypeTag {
+        use vole_runtime::type_registry::FieldTypeTag;
+        if self.rc_state(type_id).needs_cleanup() {
+            FieldTypeTag::Rc
+        } else if let Some(variants) = self.arena().unwrap_union(type_id) {
+            for &variant in variants {
+                if self.rc_state(variant).needs_cleanup() {
+                    return FieldTypeTag::UnionHeap;
+                }
+            }
+            FieldTypeTag::Value
+        } else {
+            FieldTypeTag::Value
+        }
     }
 
     /// Get current module (as ModuleId)
@@ -1931,6 +1944,35 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             size,
             0,
         ))
+    }
+
+    /// Copy a union heap buffer (16 bytes: [tag:i8, is_rc:i8, pad(6), payload:i64])
+    /// to a stack-allocated union slot (16 bytes: [tag:i8, pad(7), payload:i64]).
+    /// This prevents use-after-free when reading union elements from dynamic arrays,
+    /// since the array slot may be overwritten (e.g. by rehash) while the value is
+    /// still in use.
+    pub fn copy_union_heap_to_stack(
+        &mut self,
+        heap_ptr: Value,
+        union_type_id: TypeId,
+    ) -> CompiledValue {
+        let union_size = self.type_size(union_type_id);
+        let slot = self.alloc_stack(union_size);
+        let tag = self
+            .builder
+            .ins()
+            .load(types::I8, MemFlags::new(), heap_ptr, 0);
+        self.builder.ins().stack_store(tag, slot, 0);
+        let payload = self
+            .builder
+            .ins()
+            .load(types::I64, MemFlags::new(), heap_ptr, 8);
+        self.builder.ins().stack_store(payload, slot, 8);
+        let ptr_type = self.ptr_type();
+        let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+        let mut cv = CompiledValue::new(ptr, ptr_type, union_type_id);
+        cv.mark_borrowed();
+        cv
     }
 
     /// Get the flat slot count for a struct (recursively counts leaf fields).

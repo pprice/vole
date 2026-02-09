@@ -5,7 +5,8 @@
 
 use crate::RcString;
 use crate::array::RcArray;
-use crate::value::TaggedValue;
+use crate::value::{TYPE_UNION_HEAP, TaggedValue};
+use std::alloc::Layout;
 use std::cell::{Cell, RefCell};
 use std::io::{self, Write};
 
@@ -393,13 +394,52 @@ pub extern "C" fn vole_array_filled(count: i64, tag: u64, value: u64) -> *mut Rc
     let arr = RcArray::with_capacity(n);
     let tv = TaggedValue { tag, value };
     unsafe {
-        for i in 0..n {
-            tv.rc_inc_if_needed();
-            std::ptr::write((*arr).data.add(i), tv);
+        if tag == TYPE_UNION_HEAP as u64 && value != 0 {
+            // Union heap buffers: each slot needs its own clone of the buffer
+            // (with rc_inc on the payload if RC). Sharing the same pointer
+            // would cause double-free on array drop.
+            for i in 0..n {
+                let cloned_ptr = clone_union_heap_buffer(value as *const u8);
+                std::ptr::write(
+                    (*arr).data.add(i),
+                    TaggedValue {
+                        tag,
+                        value: cloned_ptr as u64,
+                    },
+                );
+            }
+        } else {
+            for i in 0..n {
+                tv.rc_inc_if_needed();
+                std::ptr::write((*arr).data.add(i), tv);
+            }
         }
         (*arr).len = n;
     }
     arr
+}
+
+/// Clone a union heap buffer (16 bytes), incrementing the RC payload if present.
+///
+/// # Safety
+/// `src` must point to a valid union heap buffer: `[tag: i8, is_rc: i8, pad(6), payload: i64]`.
+unsafe fn clone_union_heap_buffer(src: *const u8) -> *mut u8 {
+    unsafe {
+        let layout = Layout::from_size_align_unchecked(16, 8);
+        let dst = std::alloc::alloc(layout);
+        if dst.is_null() {
+            std::alloc::handle_alloc_error(layout);
+        }
+        std::ptr::copy_nonoverlapping(src, dst, 16);
+        let is_rc = *dst.add(1);
+        if is_rc != 0 {
+            let payload = *(dst.add(8) as *const u64);
+            if payload != 0 {
+                crate::value::rc_inc(payload as *mut u8);
+            }
+        }
+        dst
+    }
 }
 
 #[cfg(test)]

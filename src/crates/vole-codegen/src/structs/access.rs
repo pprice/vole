@@ -266,7 +266,9 @@ impl Cg<'_, '_, '_> {
         self.switch_and_seal(merge_block);
 
         let result = self.builder.block_params(merge_block)[0];
-        Ok(CompiledValue::new(result, cranelift_type, result_type_id))
+        let mut cv = CompiledValue::new(result, cranelift_type, result_type_id);
+        self.mark_borrowed_if_rc(&mut cv);
+        Ok(cv)
     }
 
     pub fn field_assign(
@@ -364,10 +366,35 @@ impl Cg<'_, '_, '_> {
             value
         };
 
+        // RC bookkeeping for instance field overwrite:
+        // 1. Load old value (before store) via InstanceGetField
+        // 2. rc_inc new if it's a borrow
+        // 3. Store new value
+        // 4. rc_dec old (after store, in case old == new)
+        let rc_old =
+            if self.rc_scopes.has_active_scope() && self.rc_state(field_type_id).needs_cleanup() {
+                let get_func_ref = self.runtime_func_ref(RuntimeFn::InstanceGetField)?;
+                let slot_val = self.builder.ins().iconst(types::I32, slot as i64);
+                let call = self
+                    .builder
+                    .ins()
+                    .call(get_func_ref, &[obj.value, slot_val]);
+                Some(self.builder.inst_results(call)[0])
+            } else {
+                None
+            };
+        if rc_old.is_some() && value.is_borrowed() {
+            self.emit_rc_inc_for_type(value.value, field_type_id)?;
+        }
+
         // Store field value, handling i128 which needs 2 slots
         let set_func_ref = self.runtime_func_ref(RuntimeFn::InstanceSetField)?;
         super::helpers::store_field_value(self.builder, set_func_ref, obj.value, slot, &value);
         self.field_cache.clear(); // Invalidate cached field reads
+
+        if let Some(old_val) = rc_old {
+            self.emit_rc_dec_for_type(old_val, field_type_id)?;
+        }
 
         // The assignment consumed the temp — ownership transfers
         // to the instance field; the instance's cleanup handles the dec.

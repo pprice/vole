@@ -99,6 +99,11 @@ pub const TYPE_CLOSURE: u32 = 6;
 pub const TYPE_INSTANCE: u32 = 7;
 pub const TYPE_RNG: u32 = 8;
 pub const TYPE_ITERATOR: u32 = 11;
+/// Heap-allocated union buffer: `[tag: i8, is_rc: i8, pad(6), payload: i64]`.
+/// Not RC-managed itself (no RcHeader), but may contain an RC payload.
+/// When cleaned up: if `is_rc` byte (offset 1) is non-zero, `rc_dec` the payload
+/// at offset 8, then free the 16-byte buffer.
+pub const TYPE_UNION_HEAP: u32 = 12;
 
 /// Check if a type tag represents an RC-managed (heap-allocated) type.
 /// These types need rc_inc/rc_dec when ownership changes.
@@ -167,10 +172,17 @@ impl TaggedValue {
     }
 
     /// If this tagged value holds an RC type, decrement its reference count.
+    /// Also handles union heap buffers: frees the buffer and conditionally
+    /// rc_dec's the payload if the is_rc flag is set.
     #[inline]
     pub fn rc_dec_if_needed(&self) {
-        if self.needs_rc() && self.value != 0 {
+        if self.value == 0 {
+            return;
+        }
+        if self.needs_rc() {
             rc_dec(self.value as *mut u8);
+        } else if self.tag == TYPE_UNION_HEAP as u64 {
+            union_heap_cleanup(self.value as *mut u8);
         }
     }
 
@@ -180,6 +192,30 @@ impl TaggedValue {
         if self.needs_rc() && self.value != 0 {
             rc_inc(self.value as *mut u8);
         }
+    }
+}
+
+/// Clean up a heap-allocated union buffer.
+///
+/// Union heap buffer layout: `[tag: i8, is_rc: i8, pad(6), payload: i64]` = 16 bytes.
+/// If `is_rc` (byte at offset 1) is non-zero, the payload at offset 8 is an RC pointer
+/// that needs `rc_dec`. After handling the payload, the 16-byte buffer is freed.
+///
+/// # Safety
+/// `ptr` must point to a valid union heap buffer allocated by `vole_heap_alloc(16)`.
+pub fn union_heap_cleanup(ptr: *mut u8) {
+    if ptr.is_null() {
+        return;
+    }
+    unsafe {
+        let is_rc = *ptr.add(1);
+        let payload = *(ptr.add(8) as *const u64);
+        if is_rc != 0 && payload != 0 {
+            rc_dec(payload as *mut u8);
+        }
+        // Free the 16-byte heap buffer
+        let layout = std::alloc::Layout::from_size_align_unchecked(16, 8);
+        std::alloc::dealloc(ptr, layout);
     }
 }
 

@@ -1,8 +1,8 @@
 // src/runtime/instance.rs
 
 use crate::alloc_track;
-use crate::type_registry::get_instance_type_info;
-use crate::value::{RcHeader, TYPE_INSTANCE, rc_dec, rc_inc};
+use crate::type_registry::{FieldTypeTag, get_instance_type_info};
+use crate::value::{RcHeader, TYPE_INSTANCE, rc_dec, rc_inc, union_heap_cleanup};
 use std::alloc::{Layout, alloc, dealloc};
 use std::ptr;
 
@@ -136,10 +136,18 @@ unsafe extern "C" fn instance_drop(ptr: *mut u8) {
                 if field_value == 0 {
                     continue; // Null pointer, skip
                 }
-                if field_type.needs_cleanup() {
-                    // All RC types (String, Array, Instance) go through rc_dec,
-                    // which will call their respective drop_fn.
-                    rc_dec(field_value as *mut u8);
+                match field_type {
+                    FieldTypeTag::Rc => {
+                        // RC types (String, Array, Instance) go through rc_dec,
+                        // which will call their respective drop_fn.
+                        rc_dec(field_value as *mut u8);
+                    }
+                    FieldTypeTag::UnionHeap => {
+                        // Union heap buffer: conditionally rc_dec the payload,
+                        // then free the buffer.
+                        union_heap_cleanup(field_value as *mut u8);
+                    }
+                    FieldTypeTag::Value => {}
                 }
             }
         }

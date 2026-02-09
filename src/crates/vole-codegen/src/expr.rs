@@ -875,6 +875,13 @@ impl Cg<'_, '_, '_> {
 
             let raw_value =
                 self.call_runtime_cached(RuntimeFn::ArrayGetValue, &[obj.value, idx.value])?;
+            // Union elements in dynamic arrays are stored as heap buffers
+            // (16 bytes: [tag, is_rc, pad(6), payload]). Copy to a stack
+            // slot to prevent use-after-free when the array is mutated.
+            if self.arena().is_union(element_id) {
+                let cv = self.copy_union_heap_to_stack(raw_value, element_id);
+                return Ok(cv);
+            }
             let mut cv = self.convert_field_value(raw_value, element_id);
             self.mark_borrowed_if_rc(&mut cv);
             return Ok(cv);

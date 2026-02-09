@@ -23,12 +23,14 @@ pub enum FieldTypeTag {
     Value,
     /// Reference-counted field (String, Array, Instance) - needs rc_dec
     Rc,
+    /// Union heap buffer field (e.g. `Person?` in a class) - needs union_heap_cleanup
+    UnionHeap,
 }
 
 impl FieldTypeTag {
     /// Check if this field type needs reference count cleanup
     pub fn needs_cleanup(&self) -> bool {
-        matches!(self, FieldTypeTag::Rc)
+        matches!(self, FieldTypeTag::Rc | FieldTypeTag::UnionHeap)
     }
 }
 
@@ -198,6 +200,7 @@ pub extern "C" fn vole_register_instance_type(
             (0..field_count as usize)
                 .map(|i| match *field_types.add(i) {
                     1 => FieldTypeTag::Rc,
+                    2 => FieldTypeTag::UnionHeap,
                     _ => FieldTypeTag::Value,
                 })
                 .collect()

@@ -25,10 +25,12 @@ fn type_id_to_field_tag(ty: TypeId, arena: &vole_sema::type_arena::TypeArena) ->
     {
         FieldTypeTag::Rc
     } else if let Some(variants) = arena.unwrap_union(ty) {
-        // If any variant is a reference type, mark as needing cleanup
+        // Union fields use heap buffers. If any variant is RC, the buffer
+        // needs union_heap_cleanup (not plain rc_dec) to handle the inner
+        // payload and free the buffer.
         for &variant in variants {
             if type_id_to_field_tag(variant, arena).needs_cleanup() {
-                return FieldTypeTag::Rc;
+                return FieldTypeTag::UnionHeap;
             }
         }
         FieldTypeTag::Value
