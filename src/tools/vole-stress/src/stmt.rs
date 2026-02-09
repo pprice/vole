@@ -55,6 +55,14 @@ pub struct StmtConfig {
     /// Probability of using a static method call instead of direct construction
     /// when instantiating a class with static methods. Set to 0.0 to disable.
     pub static_call_probability: f64,
+    /// Probability of generating an array index assignment (`arr[i] = expr`)
+    /// when mutable dynamic arrays are in scope. Set to 0.0 to disable.
+    pub array_index_assign_probability: f64,
+    /// Probability of generating an `arr.push(value)` statement
+    /// when mutable dynamic arrays are in scope. Set to 0.0 to disable.
+    pub array_push_probability: f64,
+    /// Probability that `generate_array_let` produces a `let mut` binding.
+    pub mutable_array_probability: f64,
 }
 
 impl Default for StmtConfig {
@@ -78,6 +86,9 @@ impl Default for StmtConfig {
             early_return_probability: 0.15,
             else_if_probability: 0.3,
             static_call_probability: 0.3,
+            array_index_assign_probability: 0.10,
+            array_push_probability: 0.08,
+            mutable_array_probability: 0.4,
         }
     }
 }
@@ -363,6 +374,22 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // If mutable locals are in scope, occasionally generate a direct reassignment
         if self.has_mutable_locals(ctx) && self.rng.gen_bool(self.config.reassign_probability) {
             return self.generate_reassignment(ctx);
+        }
+
+        // If mutable dynamic arrays are in scope, occasionally generate index assignment
+        if !Self::mutable_dynamic_arrays(ctx).is_empty()
+            && self
+                .rng
+                .gen_bool(self.config.array_index_assign_probability)
+        {
+            return self.generate_array_index_assignment(ctx);
+        }
+
+        // If mutable dynamic arrays are in scope, occasionally generate push
+        if !Self::mutable_dynamic_arrays(ctx).is_empty()
+            && self.rng.gen_bool(self.config.array_push_probability)
+        {
+            return self.generate_array_push(ctx);
         }
 
         // ~20% chance to call a function-typed parameter if one is in scope
@@ -727,10 +754,26 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
     /// Generate a for statement.
     ///
-    /// Randomly chooses between exclusive (`start..end`) and inclusive
-    /// (`start..=end`) range syntax with ~50/50 probability.
-    /// Optionally uses a local i64 variable as the upper bound.
+    /// Randomly chooses between:
+    /// - Numeric range iteration: `for x in start..end { ... }`
+    /// - Array iteration: `for elem in arr { ... }` (when array variables are in scope)
+    ///
+    /// For numeric ranges, randomly picks exclusive (`start..end`) or inclusive
+    /// (`start..=end`) syntax with ~50/50 probability, optionally using a local
+    /// i64 variable as the upper bound.
     fn generate_for_statement(&mut self, ctx: &mut StmtContext, depth: usize) -> String {
+        // Check if we can iterate over an array variable (~40% when available)
+        let expr_ctx = ctx.to_expr_context();
+        let array_vars = expr_ctx.array_vars();
+        if !array_vars.is_empty() && self.rng.gen_bool(0.4) {
+            return self.generate_for_in_array(ctx, depth, &array_vars);
+        }
+
+        self.generate_for_in_range(ctx, depth)
+    }
+
+    /// Generate a for-in-range statement: `for x in start..end { ... }`.
+    fn generate_for_in_range(&mut self, ctx: &mut StmtContext, depth: usize) -> String {
         let iter_name = ctx.new_local_name();
 
         // Generate range with randomly chosen syntax
@@ -761,6 +804,41 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         let body_block = self.format_block(&body_stmts);
         format!("for {} in {} {}", iter_name, range, body_block)
+    }
+
+    /// Generate a for-in-array statement: `for elem in arr { ... }`.
+    ///
+    /// The loop variable gets the array's element type. Picks a random
+    /// array-typed variable from the provided candidates.
+    fn generate_for_in_array(
+        &mut self,
+        ctx: &mut StmtContext,
+        depth: usize,
+        array_vars: &[(String, TypeInfo)],
+    ) -> String {
+        let iter_name = ctx.new_local_name();
+
+        let idx = self.rng.gen_range(0..array_vars.len());
+        let (arr_name, elem_type) = &array_vars[idx];
+
+        let was_in_loop = ctx.in_loop;
+        let was_in_while_loop = ctx.in_while_loop;
+        ctx.in_loop = true;
+        ctx.in_while_loop = false;
+
+        let locals_before = ctx.locals.len();
+
+        // Add loop variable with the array's element type
+        ctx.add_local(iter_name.clone(), elem_type.clone(), false);
+
+        let body_stmts = self.generate_block(ctx, depth + 1);
+
+        ctx.locals.truncate(locals_before);
+        ctx.in_loop = was_in_loop;
+        ctx.in_while_loop = was_in_while_loop;
+
+        let body_block = self.format_block(&body_stmts);
+        format!("for {} in {} {}", iter_name, arr_name, body_block)
     }
 
     /// Generate a range expression for a for loop.
@@ -951,6 +1029,62 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let rhs = expr_gen.generate(var_type, &expr_ctx, 0);
 
         format!("{} = {}", var_name, rhs)
+    }
+
+    /// Get mutable dynamic arrays in scope that are not protected.
+    ///
+    /// Returns `(name, element_type)` pairs for locals of type `[T]`
+    /// that are mutable and not in `protected_vars`.
+    fn mutable_dynamic_arrays(ctx: &StmtContext) -> Vec<(String, TypeInfo)> {
+        ctx.locals
+            .iter()
+            .filter_map(|(name, ty, is_mut)| {
+                if *is_mut && !ctx.protected_vars.contains(name) {
+                    if let TypeInfo::Array(elem) = ty {
+                        return Some((name.clone(), *elem.clone()));
+                    }
+                }
+                None
+            })
+            .collect()
+    }
+
+    /// Generate an array index assignment: `arr[i] = expr`.
+    ///
+    /// Picks a random mutable dynamic array in scope, generates a bounds-safe
+    /// index (0 or 1, since arrays have 2-4 elements), and generates a
+    /// type-compatible RHS expression matching the element type.
+    fn generate_array_index_assignment(&mut self, ctx: &mut StmtContext) -> String {
+        let candidates = Self::mutable_dynamic_arrays(ctx);
+        // Caller guarantees non-empty via the check in generate_statement
+        let idx = self.rng.gen_range(0..candidates.len());
+        let (arr_name, elem_type) = &candidates[idx];
+
+        // Use index 0 or 1 to stay in bounds (arrays have at least 2 elements)
+        let index = self.rng.gen_range(0..=1);
+
+        let expr_ctx = ctx.to_expr_context();
+        let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+        let value = expr_gen.generate_simple(&elem_type, &expr_ctx);
+
+        format!("{}[{}] = {}", arr_name, index, value)
+    }
+
+    /// Generate an array push statement: `arr.push(value)`.
+    ///
+    /// Picks a random mutable dynamic array in scope and generates a
+    /// type-compatible value expression matching the element type.
+    fn generate_array_push(&mut self, ctx: &mut StmtContext) -> String {
+        let candidates = Self::mutable_dynamic_arrays(ctx);
+        // Caller guarantees non-empty via the check in generate_statement
+        let idx = self.rng.gen_range(0..candidates.len());
+        let (arr_name, elem_type) = &candidates[idx];
+
+        let expr_ctx = ctx.to_expr_context();
+        let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+        let value = expr_gen.generate_simple(&elem_type, &expr_ctx);
+
+        format!("{}.push({})", arr_name, value)
     }
 
     /// Try to generate a raise statement in a fallible function body.
@@ -1271,10 +1405,14 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     /// Produces `let localN = [elem1, elem2, elem3]` with 2-4 elements of
     /// a random primitive type. The local is added to scope as an array type
     /// so it can be used for array indexing expressions later.
+    ///
+    /// With `mutable_array_probability`, produces `let mut` bindings to enable
+    /// index assignment and push operations on the array.
     fn generate_array_let(&mut self, ctx: &mut StmtContext) -> String {
         let name = ctx.new_local_name();
         let elem_prim = PrimitiveType::random_array_element_type(self.rng);
         let elem_ty = TypeInfo::Primitive(elem_prim);
+        let is_mutable = self.rng.gen_bool(self.config.mutable_array_probability);
 
         // Generate 2-4 elements so indexing with 0..=2 is safe
         let elem_count = self.rng.gen_range(2..=4);
@@ -1285,9 +1423,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             .collect();
 
         let array_ty = TypeInfo::Array(Box::new(elem_ty));
-        ctx.add_local(name.clone(), array_ty, false);
+        ctx.add_local(name.clone(), array_ty, is_mutable);
 
-        format!("let {} = [{}]", name, elements.join(", "))
+        let mutability = if is_mutable { "let mut" } else { "let" };
+        format!("{} {} = [{}]", mutability, name, elements.join(", "))
     }
 
     /// Generate a tuple let-binding with destructuring.

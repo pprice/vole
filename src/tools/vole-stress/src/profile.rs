@@ -162,6 +162,10 @@ fn minimal_profile() -> Profile {
             else_if_probability: 0.0,
             // No static method calls in minimal
             static_call_probability: 0.0,
+            // No array mutation in minimal
+            array_index_assign_probability: 0.0,
+            array_push_probability: 0.0,
+            mutable_array_probability: 0.0,
         },
         // No destructured imports in minimal (no multi-layer modules)
         destructured_import_probability: 0.0,
@@ -282,6 +286,10 @@ fn full_profile() -> Profile {
             else_if_probability: 0.30,
             // Use static method calls ~30% of the time when constructing classes
             static_call_probability: 0.30,
+            // Array mutation: index assignment and push on mutable dynamic arrays
+            array_index_assign_probability: 0.10,
+            array_push_probability: 0.08,
+            mutable_array_probability: 0.4,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -403,6 +411,10 @@ fn deep_nesting_profile() -> Profile {
             else_if_probability: 0.40,
             // No static method calls in deep-nesting (focus is on control flow depth)
             static_call_probability: 0.0,
+            // Some array mutation for variety
+            array_index_assign_probability: 0.08,
+            array_push_probability: 0.05,
+            mutable_array_probability: 0.3,
         },
         // No destructured imports in deep-nesting (single module focus)
         destructured_import_probability: 0.0,
@@ -525,6 +537,10 @@ fn wide_types_profile() -> Profile {
             else_if_probability: 0.25,
             // Use static method calls ~20% of the time
             static_call_probability: 0.20,
+            // Some array mutation
+            array_index_assign_probability: 0.08,
+            array_push_probability: 0.05,
+            mutable_array_probability: 0.3,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -639,6 +655,10 @@ fn many_modules_profile() -> Profile {
             else_if_probability: 0.0,
             // No static method calls - focus on module loading
             static_call_probability: 0.0,
+            // No array mutation - focus on module loading
+            array_index_assign_probability: 0.0,
+            array_push_probability: 0.0,
+            mutable_array_probability: 0.0,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -768,6 +788,10 @@ fn generics_heavy_profile() -> Profile {
             else_if_probability: 0.25,
             // No static method calls - focus on generics (statics are non-generic only)
             static_call_probability: 0.0,
+            // Some array mutation for variety
+            array_index_assign_probability: 0.08,
+            array_push_probability: 0.05,
+            mutable_array_probability: 0.3,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
