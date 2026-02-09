@@ -1,0 +1,101 @@
+// Regression test for vol-msw0: inline class construction (3+ fields)
+// as argument to Map/Set generic methods.
+let { Map } = import "std:collections/map"
+let { Set } = import "std:collections/set"
+
+class Color {
+    r: i64,
+    g: i64,
+    b: i64,
+}
+
+implement Hashable for Color {
+    func hash() -> i64 {
+        return self.r * 65536 + self.g * 256 + self.b
+    }
+}
+
+implement Equatable for Color {
+    func equals(other: Color) -> bool {
+        return self.r == other.r && self.g == other.g && self.b == other.b
+    }
+}
+
+tests {
+    test "inline Color as Map key" {
+        let m = Map.new<Color, string>()
+        m.set(Color { r: 255, g: 0, b: 0 }, "red")
+        m.set(Color { r: 0, g: 255, b: 0 }, "green")
+        assert(m.len() == 2)
+        let red = Color { r: 255, g: 0, b: 0 }
+        assert((m.get(red) ?? "") == "red")
+    }
+
+    test "inline Color as Map value" {
+        let m = Map.new<string, Color>()
+        m.set("red", Color { r: 255, g: 0, b: 0 })
+        let got = m.get("red") ?? Color { r: 0, g: 0, b: 0 }
+        assert(got.r == 255)
+        assert(got.g == 0)
+        assert(got.b == 0)
+    }
+
+    test "inline Color in Map.get" {
+        let m = Map.new<Color, i64>()
+        let red = Color { r: 255, g: 0, b: 0 }
+        m.set(red, 42)
+        assert(m.get(Color { r: 255, g: 0, b: 0 }) == 42)
+        assert(m.get(Color { r: 0, g: 0, b: 0 }) == nil)
+    }
+
+    test "inline Color in Map.contains_key" {
+        let m = Map.new<Color, i64>()
+        let red = Color { r: 255, g: 0, b: 0 }
+        m.set(red, 42)
+        assert(m.contains_key(Color { r: 255, g: 0, b: 0 }))
+        assert(!m.contains_key(Color { r: 1, g: 2, b: 3 }))
+    }
+
+    test "inline Color in Map.remove" {
+        let m = Map.new<Color, i64>()
+        let red = Color { r: 255, g: 0, b: 0 }
+        m.set(red, 42)
+        let removed = m.remove(Color { r: 255, g: 0, b: 0 })
+        assert(removed == 42)
+        assert(m.len() == 0)
+    }
+
+    test "inline Color in Set.add" {
+        let s = Set.new<Color>()
+        _ = s.add(Color { r: 255, g: 0, b: 0 })
+        _ = s.add(Color { r: 0, g: 255, b: 0 })
+        _ = s.add(Color { r: 0, g: 0, b: 255 })
+        assert(s.len() == 3)
+    }
+
+    test "inline Color in Set.contains" {
+        let s = Set.new<Color>()
+        let red = Color { r: 255, g: 0, b: 0 }
+        _ = s.add(red)
+        assert(s.contains(Color { r: 255, g: 0, b: 0 }))
+        assert(!s.contains(Color { r: 0, g: 0, b: 0 }))
+    }
+
+    test "inline Color in Set.remove" {
+        let s = Set.new<Color>()
+        let red = Color { r: 255, g: 0, b: 0 }
+        _ = s.add(red)
+        assert(s.remove(Color { r: 255, g: 0, b: 0 }))
+        assert(s.len() == 0)
+    }
+
+    test "both Map key and value inline" {
+        let m = Map.new<Color, Color>()
+        m.set(Color { r: 1, g: 0, b: 0 }, Color { r: 100, g: 200, b: 255 })
+        let key = Color { r: 1, g: 0, b: 0 }
+        let got = m.get(key) ?? Color { r: 0, g: 0, b: 0 }
+        assert(got.r == 100)
+        assert(got.g == 200)
+        assert(got.b == 255)
+    }
+}

@@ -1,0 +1,99 @@
+// Regression test for vol-msw0: inline struct construction as argument
+// to generic method/function. Classes with 3+ fields previously triggered
+// a Cranelift codegen verifier error when constructed inline as arguments.
+
+class Color {
+    r: i64,
+    g: i64,
+    b: i64,
+}
+
+class RGBA {
+    r: i64,
+    g: i64,
+    b: i64,
+    a: i64,
+}
+
+class Tag {
+    label: i64,
+    value: i64,
+}
+
+class Box<T> {
+    value: T,
+
+    func set(v: T) {
+        self.value = v
+    }
+
+    func get() -> T {
+        return self.value
+    }
+}
+
+func identity<T>(x: T) -> T {
+    return x
+}
+
+tests {
+    // 2-field class inline (baseline - always worked)
+    test "inline 2-field class as generic function arg" {
+        let t = identity(Tag { label: 1, value: 2 })
+        assert(t.label == 1)
+        assert(t.value == 2)
+    }
+
+    // 3-field class inline (the original failing pattern)
+    test "inline 3-field class as generic function arg" {
+        let c = identity(Color { r: 1, g: 2, b: 3 })
+        assert(c.r == 1)
+        assert(c.g == 2)
+        assert(c.b == 3)
+    }
+
+    // 4-field class inline (also failed)
+    test "inline 4-field class as generic function arg" {
+        let c = identity(RGBA { r: 1, g: 2, b: 3, a: 255 })
+        assert(c.r == 1)
+        assert(c.g == 2)
+        assert(c.b == 3)
+        assert(c.a == 255)
+    }
+
+    // Generic method set with inline 3-field class
+    test "inline 3-field class as generic method arg" {
+        let b = Box { value: Color { r: 0, g: 0, b: 0 } }
+        b.set(Color { r: 10, g: 20, b: 30 })
+        let c = b.get()
+        assert(c.r == 10)
+        assert(c.g == 20)
+        assert(c.b == 30)
+    }
+
+    // Generic method set with inline 4-field class
+    test "inline 4-field class as generic method arg" {
+        let b = Box { value: RGBA { r: 0, g: 0, b: 0, a: 0 } }
+        b.set(RGBA { r: 10, g: 20, b: 30, a: 255 })
+        let c = b.get()
+        assert(c.r == 10)
+        assert(c.a == 255)
+    }
+
+    // Inline in constructor field
+    test "inline 3-field class in generic constructor" {
+        let b = Box { value: Color { r: 99, g: 88, b: 77 } }
+        let c = b.get()
+        assert(c.r == 99)
+        assert(c.g == 88)
+        assert(c.b == 77)
+    }
+
+    // Multiple inline structs in same call
+    test "two inline classes in generic function args" {
+        let c1 = identity(Color { r: 1, g: 2, b: 3 })
+        let c2 = identity(Color { r: 4, g: 5, b: 6 })
+        assert(c1.r == 1)
+        assert(c2.r == 4)
+    }
+}
