@@ -144,6 +144,7 @@ fn minimal_profile() -> Profile {
             for_probability: 0.0,
             break_continue_probability: 0.0,
             compound_assign_probability: 0.0,
+            reassign_probability: 0.0,
             // No fallible (no error types in minimal)
             raise_probability: 0.0,
             try_probability: 0.0,
@@ -263,6 +264,7 @@ fn full_profile() -> Profile {
             for_probability: 0.2,
             break_continue_probability: 0.12,
             compound_assign_probability: 0.15,
+            reassign_probability: 0.15,
             // Fallible: raise in fallible bodies, try when calling fallible funcs
             raise_probability: 0.12,
             try_probability: 0.15,
@@ -383,6 +385,7 @@ fn deep_nesting_profile() -> Profile {
             for_probability: 0.15,
             break_continue_probability: 0.12,
             compound_assign_probability: 0.15,
+            reassign_probability: 0.12,
             // No fallible - focus is on nesting depth
             raise_probability: 0.0,
             try_probability: 0.0,
@@ -504,6 +507,7 @@ fn wide_types_profile() -> Profile {
             for_probability: 0.1,
             break_continue_probability: 0.12,
             compound_assign_probability: 0.15,
+            reassign_probability: 0.12,
             // Some fallible support
             raise_probability: 0.08,
             try_probability: 0.10,
@@ -617,6 +621,7 @@ fn many_modules_profile() -> Profile {
             for_probability: 0.0,
             break_continue_probability: 0.0,
             compound_assign_probability: 0.0,
+            reassign_probability: 0.0,
             // No fallible - focus on module loading
             raise_probability: 0.0,
             try_probability: 0.0,
@@ -745,6 +750,7 @@ fn generics_heavy_profile() -> Profile {
             for_probability: 0.15,
             break_continue_probability: 0.12,
             compound_assign_probability: 0.15,
+            reassign_probability: 0.12,
             // Some fallible support
             raise_probability: 0.08,
             try_probability: 0.10,

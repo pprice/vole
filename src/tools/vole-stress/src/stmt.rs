@@ -30,6 +30,8 @@ pub struct StmtConfig {
     pub break_continue_probability: f64,
     /// Probability of generating a compound assignment (+=, -=, *=).
     pub compound_assign_probability: f64,
+    /// Probability of generating a direct variable reassignment (x = new_value).
+    pub reassign_probability: f64,
     /// Probability of generating a raise statement in fallible functions.
     pub raise_probability: f64,
     /// Probability of generating a try expression when calling fallible functions.
@@ -66,6 +68,7 @@ impl Default for StmtConfig {
             for_probability: 0.15,
             break_continue_probability: 0.12,
             compound_assign_probability: 0.15,
+            reassign_probability: 0.15,
             raise_probability: 0.10,
             try_probability: 0.12,
             tuple_probability: 0.10,
@@ -355,6 +358,11 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             && self.rng.gen_bool(self.config.compound_assign_probability)
         {
             return self.generate_compound_assignment(ctx);
+        }
+
+        // If mutable locals are in scope, occasionally generate a direct reassignment
+        if self.has_mutable_locals(ctx) && self.rng.gen_bool(self.config.reassign_probability) {
+            return self.generate_reassignment(ctx);
         }
 
         // ~20% chance to call a function-typed parameter if one is in scope
@@ -903,6 +911,46 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let rhs = expr_gen.literal_for_primitive(*prim);
 
         format!("{} {} {}", var_name, op, rhs)
+    }
+
+    /// Check if there are any mutable locals (of any type) that can be reassigned.
+    ///
+    /// Excludes protected variables (e.g., while-loop counters and guards).
+    fn has_mutable_locals(&self, ctx: &StmtContext) -> bool {
+        ctx.locals.iter().any(|(name, ty, is_mut)| {
+            *is_mut
+                && !ctx.protected_vars.contains(name)
+                && !matches!(ty, TypeInfo::Void | TypeInfo::TypeParam(_))
+        })
+    }
+
+    /// Generate a direct variable reassignment statement (x = new_value).
+    ///
+    /// Picks a random mutable local (excluding protected variables), then
+    /// generates a type-compatible RHS expression via `ExprGenerator::generate`.
+    fn generate_reassignment(&mut self, ctx: &mut StmtContext) -> String {
+        // Collect mutable locals eligible for reassignment
+        let candidates: Vec<(String, TypeInfo)> = ctx
+            .locals
+            .iter()
+            .filter(|(name, ty, is_mut)| {
+                *is_mut
+                    && !ctx.protected_vars.contains(name)
+                    && !matches!(ty, TypeInfo::Void | TypeInfo::TypeParam(_))
+            })
+            .map(|(name, ty, _)| (name.clone(), ty.clone()))
+            .collect();
+
+        // Pick a random candidate (caller guarantees non-empty via has_mutable_locals)
+        let idx = self.rng.gen_range(0..candidates.len());
+        let (var_name, var_type) = &candidates[idx];
+
+        // Generate a type-compatible RHS expression
+        let expr_ctx = ctx.to_expr_context();
+        let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+        let rhs = expr_gen.generate(var_type, &expr_ctx, 0);
+
+        format!("{} = {}", var_name, rhs)
     }
 
     /// Try to generate a raise statement in a fallible function body.
