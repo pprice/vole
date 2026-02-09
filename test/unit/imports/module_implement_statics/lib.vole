@@ -1,0 +1,22 @@
+// Module with implement statics block — regression test for vol-cufg
+// compile_implement_statics must use the module's interner, not the caller's.
+
+class Counter {
+    value: i64,
+
+    statics {
+        func from_range(lo: i64, hi: i64) -> Counter {
+            let mid = (lo + hi) / 2
+            return Counter { value: mid }
+        }
+
+        func zero() -> Counter {
+            let initial = 0
+            return Counter { value: initial }
+        }
+    }
+
+    func get() -> i64 {
+        return self.value
+    }
+}

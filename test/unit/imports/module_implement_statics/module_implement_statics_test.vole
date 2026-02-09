@@ -1,0 +1,26 @@
+// Regression test for vol-cufg: compile_implement_statics must use the
+// module's own interner when compiling statics in imported modules.
+// The statics body uses local variables (mid, initial) whose Symbol
+// indices come from the module's interner — using the caller's interner
+// panics or silently resolves to the wrong string.
+
+let { Counter } = import "./lib.vole"
+
+tests "module implement statics" {
+    test "static method with local variables" {
+        let c = Counter.from_range(10, 20)
+        assert(c.get() == 15)
+    }
+
+    test "static method zero" {
+        let c = Counter.zero()
+        assert(c.get() == 0)
+    }
+
+    test "multiple static calls" {
+        let a = Counter.from_range(0, 100)
+        let b = Counter.from_range(-50, 50)
+        assert(a.get() == 50)
+        assert(b.get() == 0)
+    }
+}
