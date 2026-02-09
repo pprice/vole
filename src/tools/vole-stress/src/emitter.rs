@@ -228,11 +228,6 @@ impl<'a, R: Rng> EmitContext<'a, R> {
     /// Only handles single-type-parameter, unconstrained generic functions
     /// where the type param appears in at least one parameter position (so
     /// the compiler can infer the concrete type from arguments).
-    ///
-    /// NOTE: Generic function calls inside regular function/method bodies
-    /// are avoided because calling a generic function in a module that is
-    /// later imported triggers a compiler bug ("function not found").
-    /// Test blocks are safe because they are not compiled during imports.
     fn emit_generic_function_test(&mut self, symbol: &Symbol, info: &FunctionInfo) {
         // Only single-type-param unconstrained generics for now.
         if info.type_params.len() != 1 || !info.type_params[0].constraints.is_empty() {
@@ -615,7 +610,7 @@ impl<'a, R: Rng> EmitContext<'a, R> {
     fn collect_importable_names(&self, module: &ModuleSymbols) -> Vec<String> {
         let mut names = Vec::new();
 
-        // Non-generic functions
+        // Non-generic functions (generic functions cannot be imported yet)
         for symbol in module.functions() {
             if let SymbolKind::Function(ref info) = symbol.kind {
                 if info.type_params.is_empty() {

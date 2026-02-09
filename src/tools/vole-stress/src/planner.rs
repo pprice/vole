@@ -1768,16 +1768,14 @@ fn plan_struct_static_methods<R: Rng>(
     for module_idx in 0..table.module_count() {
         let module_id = ModuleId(module_idx);
 
-        // Only structs with 1-2 fields can have statics, because
-        // struct statics return Self and structs with 3+ fields use sret
-        // calling convention which has a codegen bug (vol-aufd).
+        // Collect all structs with at least one field.
         let structs: Vec<SymbolId> = table
             .get_module(module_id)
             .map(|m| {
                 m.structs()
                     .filter_map(|s| {
                         if let SymbolKind::Struct(ref info) = s.kind {
-                            if !info.fields.is_empty() && info.fields.len() <= 2 {
+                            if !info.fields.is_empty() {
                                 Some(s.id)
                             } else {
                                 None
