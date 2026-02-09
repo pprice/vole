@@ -87,6 +87,10 @@ pub struct PlanConfig {
     /// Probability (0.0-1.0) that a function returns a struct type.
     /// Only applies to non-generic functions when structs are available in the module.
     pub struct_return_probability: f64,
+    /// Probability (0.0-1.0) that a function parameter uses an interface type.
+    /// Only applies to non-generic functions when non-generic interfaces with
+    /// implementing classes are available in the module. Exercises vtable dispatch.
+    pub interface_param_probability: f64,
 }
 
 impl Default for PlanConfig {
@@ -122,6 +126,7 @@ impl Default for PlanConfig {
             nested_class_field_probability: 0.20,
             struct_param_probability: 0.10,
             struct_return_probability: 0.10,
+            interface_param_probability: 0.10,
         }
     }
 }
@@ -224,6 +229,11 @@ pub fn plan<R: Rng>(rng: &mut R, config: &PlanConfig) -> SymbolTable {
 
     // Phase 7: Add standalone implement blocks with Self-returning methods
     plan_standalone_implement_blocks(rng, &mut table, &mut names, config);
+
+    // Phase 8: Add interface-typed parameters to some non-generic functions.
+    // Runs after implement blocks so we know which interfaces have concrete
+    // implementing classes (needed for callers to construct valid arguments).
+    plan_interface_params(rng, &mut table, &mut names, config);
 
     table
 }
@@ -718,6 +728,48 @@ fn collect_module_structs(table: &SymbolTable, module_id: ModuleId) -> Vec<(Symb
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default()
+}
+
+/// Collect non-generic interfaces that have at least one implementing class.
+///
+/// Returns `(SymbolId, interface_name)` pairs. Only interfaces that are
+/// actually implemented by a class in the same module are returned, because
+/// an interface-typed parameter requires a concrete value at call sites.
+fn collect_implemented_interfaces(
+    table: &SymbolTable,
+    module_id: ModuleId,
+) -> Vec<(SymbolId, String)> {
+    let module = match table.get_module(module_id) {
+        Some(m) => m,
+        None => return vec![],
+    };
+
+    // Collect interface IDs that at least one class implements
+    let mut implemented: std::collections::HashSet<SymbolId> = std::collections::HashSet::new();
+    for sym in module.classes() {
+        if let SymbolKind::Class(ref info) = sym.kind {
+            for &(impl_mod, impl_sym) in &info.implements {
+                if impl_mod == module_id {
+                    implemented.insert(impl_sym);
+                }
+            }
+        }
+    }
+
+    module
+        .interfaces()
+        .filter_map(|s| {
+            if let SymbolKind::Interface(ref info) = s.kind {
+                if info.type_params.is_empty()
+                    && !info.methods.is_empty()
+                    && implemented.contains(&s.id)
+                {
+                    return Some((s.id, s.name.clone()));
+                }
+            }
+            None
+        })
+        .collect()
 }
 
 /// Plan a method signature.
@@ -1342,6 +1394,69 @@ fn plan_standalone_implement_blocks<R: Rng>(
 
             if let Some(module) = table.get_module_mut(module_id) {
                 module.add_symbol(impl_name, kind);
+            }
+        }
+    }
+}
+
+/// Add interface-typed parameters to some non-generic functions.
+///
+/// Runs as a late phase after interface implementations are established.
+/// For each module, finds non-generic functions and non-generic interfaces
+/// that have at least one implementing class. Adds an interface-typed
+/// parameter to the function so callers must pass a concrete implementor
+/// (exercising vtable dispatch when the function calls methods on it).
+fn plan_interface_params<R: Rng>(
+    rng: &mut R,
+    table: &mut SymbolTable,
+    names: &mut NameGen,
+    config: &PlanConfig,
+) {
+    if config.interface_param_probability <= 0.0 {
+        return;
+    }
+
+    for module_idx in 0..table.module_count() {
+        let module_id = ModuleId(module_idx);
+        let ifaces = collect_implemented_interfaces(table, module_id);
+        if ifaces.is_empty() {
+            continue;
+        }
+
+        // Collect non-generic function symbol IDs
+        let func_ids: Vec<SymbolId> = table
+            .get_module(module_id)
+            .map(|m| {
+                m.functions()
+                    .filter_map(|s| {
+                        if let SymbolKind::Function(ref info) = s.kind {
+                            if info.type_params.is_empty() {
+                                return Some(s.id);
+                            }
+                        }
+                        None
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        for func_id in func_ids {
+            if !rng.gen_bool(config.interface_param_probability) {
+                continue;
+            }
+            let iface_idx = rng.gen_range(0..ifaces.len());
+            let (iface_sym_id, _) = &ifaces[iface_idx];
+            let param_name = names.next("ifaceParam");
+            let param = ParamInfo {
+                name: param_name,
+                param_type: TypeInfo::Interface(module_id, *iface_sym_id),
+            };
+
+            if let Some(module) = table.get_module_mut(module_id)
+                && let Some(symbol) = module.get_symbol_mut(func_id)
+                && let SymbolKind::Function(ref mut info) = symbol.kind
+            {
+                info.params.push(param);
             }
         }
     }

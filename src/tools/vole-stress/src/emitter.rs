@@ -13,9 +13,9 @@ use crate::entrypoints::{emit_integration_tests, emit_main};
 use crate::expr::{ExprConfig, ExprContext, ExprGenerator};
 use crate::stmt::{StmtConfig, StmtContext, StmtGenerator};
 use crate::symbols::{
-    ClassInfo, FieldInfo, FunctionInfo, ImplementBlockInfo, InterfaceInfo, MethodInfo,
-    ModuleSymbols, ParamInfo, PrimitiveType, StaticMethodInfo, Symbol, SymbolKind, SymbolTable,
-    TypeInfo, TypeParam,
+    ClassInfo, FieldInfo, FunctionInfo, ImplementBlockInfo, InterfaceInfo, MethodInfo, ModuleId,
+    ModuleSymbols, ParamInfo, PrimitiveType, StaticMethodInfo, Symbol, SymbolId, SymbolKind,
+    SymbolTable, TypeInfo, TypeParam,
 };
 
 /// Configuration for the emitter phase.
@@ -382,6 +382,10 @@ impl<'a, R: Rng> EmitContext<'a, R> {
                 }
                 "nil".to_string()
             }
+            TypeInfo::Interface(mod_id, sym_id) => {
+                // For interface types, find a class that implements it and construct one
+                self.generate_interface_test_value(*mod_id, *sym_id)
+            }
             TypeInfo::Function {
                 param_types,
                 return_type,
@@ -451,6 +455,34 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             }
             PrimitiveType::Nil => "nil".to_string(),
         }
+    }
+
+    /// Generate a test value for an interface type by finding an implementing class.
+    fn generate_interface_test_value(
+        &mut self,
+        iface_mod: ModuleId,
+        iface_sym: SymbolId,
+    ) -> String {
+        // Find a non-generic class in the same module that implements this interface
+        let module = match self.table.get_module(iface_mod) {
+            Some(m) => m,
+            None => return "nil".to_string(),
+        };
+
+        for sym in module.classes() {
+            if let SymbolKind::Class(ref info) = sym.kind {
+                if info.type_params.is_empty()
+                    && info
+                        .implements
+                        .iter()
+                        .any(|&(m, s)| m == iface_mod && s == iface_sym)
+                {
+                    let fields = self.generate_class_field_values(&info.fields);
+                    return format!("{} {{ {} }}", sym.name, fields);
+                }
+            }
+        }
+        "nil".to_string()
     }
 
     /// Generate field values for class construction.

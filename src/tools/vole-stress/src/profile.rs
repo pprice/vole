@@ -107,6 +107,7 @@ fn minimal_profile() -> Profile {
         nested_class_field_probability: 0.0,
         struct_param_probability: 0.0,
         struct_return_probability: 0.0,
+        interface_param_probability: 0.0,
         // These won't be used since we have no classes or structs
         fields_per_struct: (0, 0),
         fields_per_class: (0, 0),
@@ -170,6 +171,8 @@ fn minimal_profile() -> Profile {
             mutable_array_probability: 0.0,
             // No instance method calls in minimal (no classes)
             method_call_probability: 0.0,
+            // No interface dispatch in minimal (no interfaces)
+            interface_dispatch_probability: 0.0,
         },
         // No destructured imports in minimal (no multi-layer modules)
         destructured_import_probability: 0.0,
@@ -244,6 +247,8 @@ fn full_profile() -> Profile {
         nested_class_field_probability: 0.25,
         struct_param_probability: 0.10,
         struct_return_probability: 0.10,
+        // ~12% of non-generic functions get an interface-typed param (vtable dispatch)
+        interface_param_probability: 0.12,
     };
 
     let emit = EmitConfig {
@@ -298,6 +303,8 @@ fn full_profile() -> Profile {
             mutable_array_probability: 0.4,
             // Instance method calls on class-typed locals (~12%)
             method_call_probability: 0.12,
+            // Interface vtable dispatch on interface-typed locals/params (~10%)
+            interface_dispatch_probability: 0.10,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -355,6 +362,7 @@ fn deep_nesting_profile() -> Profile {
         nested_class_field_probability: 0.15,
         struct_param_probability: 0.10,
         struct_return_probability: 0.10,
+        interface_param_probability: 0.0,
         // Minimal class/struct structure
         fields_per_struct: (0, 0),
         fields_per_class: (1, 2),
@@ -427,6 +435,8 @@ fn deep_nesting_profile() -> Profile {
             mutable_array_probability: 0.3,
             // Some instance method calls for variety
             method_call_probability: 0.08,
+            // No interface dispatch in deep-nesting (no interfaces)
+            interface_dispatch_probability: 0.0,
         },
         // No destructured imports in deep-nesting (single module focus)
         destructured_import_probability: 0.0,
@@ -502,6 +512,8 @@ fn wide_types_profile() -> Profile {
         nested_class_field_probability: 0.20,
         struct_param_probability: 0.10,
         struct_return_probability: 0.10,
+        // Some interface-typed params for vtable dispatch coverage
+        interface_param_probability: 0.08,
     };
 
     let emit = EmitConfig {
@@ -557,6 +569,8 @@ fn wide_types_profile() -> Profile {
             mutable_array_probability: 0.3,
             // Some instance method calls
             method_call_probability: 0.10,
+            // Some interface vtable dispatch
+            interface_dispatch_probability: 0.08,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -624,6 +638,7 @@ fn many_modules_profile() -> Profile {
         nested_class_field_probability: 0.10,
         struct_param_probability: 0.10,
         struct_return_probability: 0.10,
+        interface_param_probability: 0.0,
     };
 
     let emit = EmitConfig {
@@ -679,6 +694,8 @@ fn many_modules_profile() -> Profile {
             mutable_array_probability: 0.0,
             // No instance method calls - focus on module loading
             method_call_probability: 0.0,
+            // No interface dispatch - focus on module loading
+            interface_dispatch_probability: 0.0,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -758,6 +775,7 @@ fn generics_heavy_profile() -> Profile {
         nested_class_field_probability: 0.0,
         struct_param_probability: 0.0,
         struct_return_probability: 0.0,
+        interface_param_probability: 0.0,
     };
 
     let emit = EmitConfig {
@@ -817,6 +835,8 @@ fn generics_heavy_profile() -> Profile {
             // No instance method calls - focus on generics (generic classes
             // are skipped, and non-generic classes are rare in this profile)
             method_call_probability: 0.0,
+            // No interface dispatch - focus on generics
+            interface_dispatch_probability: 0.0,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.

@@ -7,8 +7,8 @@ use rand::Rng;
 
 use crate::expr::{ExprConfig, ExprContext, ExprGenerator, get_chainable_methods};
 use crate::symbols::{
-    ClassInfo, FunctionInfo, ModuleId, ParamInfo, PrimitiveType, StaticMethodInfo, SymbolKind,
-    SymbolTable, TypeInfo, TypeParam,
+    ClassInfo, FunctionInfo, InterfaceInfo, ModuleId, ParamInfo, PrimitiveType, StaticMethodInfo,
+    SymbolId, SymbolKind, SymbolTable, TypeInfo, TypeParam,
 };
 
 /// Configuration for statement generation.
@@ -70,6 +70,9 @@ pub struct StmtConfig {
     /// When class-typed locals are in scope, this controls generating
     /// `instance.method(args)` calls. Set to 0.0 to disable.
     pub method_call_probability: f64,
+    /// Probability of generating a method call on an interface-typed variable
+    /// (vtable dispatch). Set to 0.0 to disable.
+    pub interface_dispatch_probability: f64,
 }
 
 impl Default for StmtConfig {
@@ -98,6 +101,7 @@ impl Default for StmtConfig {
             array_index_compound_assign_probability: 0.10,
             mutable_array_probability: 0.4,
             method_call_probability: 0.12,
+            interface_dispatch_probability: 0.10,
         }
     }
 }
@@ -438,6 +442,16 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // Occasionally generate a method call on an interface-typed variable (vtable dispatch)
+        if self
+            .rng
+            .gen_bool(self.config.interface_dispatch_probability)
+        {
+            if let Some(stmt) = self.try_generate_interface_method_call(ctx) {
+                return stmt;
+            }
+        }
+
         let choice: f64 = self.rng.gen_range(0.0..1.0);
 
         if choice < self.config.if_probability {
@@ -469,6 +483,16 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // ~15% chance to generate a class-typed local for field access
         if self.rng.gen_bool(0.15) {
             if let Some(stmt) = self.try_generate_class_let(ctx) {
+                return stmt;
+            }
+        }
+
+        // Chance to generate an interface-typed local via upcast (for vtable dispatch)
+        if self
+            .rng
+            .gen_bool(self.config.interface_dispatch_probability)
+        {
+            if let Some(stmt) = self.try_generate_interface_let(ctx) {
                 return stmt;
             }
         }
@@ -1757,6 +1781,149 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
     }
 
+    /// Try to generate an interface-typed local via upcast from a class instance.
+    ///
+    /// Finds a non-generic interface with methods in the current module that has
+    /// at least one implementing class. Constructs the class and assigns it to a
+    /// local with the interface type annotation, e.g.:
+    ///   `let local5: IFace1 = MyClass { field1: 42_i64 }`
+    ///
+    /// Returns `None` if no suitable interface/class pair is available.
+    fn try_generate_interface_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let module_id = ctx.module_id?;
+        let (iface_sym_id, iface_name, _iface_info, class_name, class_info) =
+            self.find_implementor_pair(ctx.table, module_id)?;
+
+        let name = ctx.new_local_name();
+
+        // Generate field values for the class construction
+        let fields = self.generate_field_values(&class_info.fields, ctx);
+        let expr = format!("{} {{ {} }}", class_name, fields);
+
+        // Register as interface-typed (enables vtable dispatch calls later)
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Interface(module_id, iface_sym_id),
+            false,
+        );
+
+        let iface_type_str = iface_name;
+        Some(format!("let {}: {} = {}", name, iface_type_str, expr))
+    }
+
+    /// Try to generate a method call on an interface-typed variable (vtable dispatch).
+    ///
+    /// Finds interface-typed locals or params in scope, looks up the interface
+    /// methods, and generates a call. This exercises the codegen's vtable
+    /// dispatch path.
+    ///
+    /// Generated output shapes:
+    /// - `let local6 = ifaceVar.methodName(42_i64)` (primitive return)
+    /// - `ifaceVar.methodName(42_i64)` (void return)
+    fn try_generate_interface_method_call(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let expr_ctx = ctx.to_expr_context();
+        let iface_vars = expr_ctx.interface_typed_vars();
+        if iface_vars.is_empty() {
+            return None;
+        }
+
+        // Pick a random interface-typed variable
+        let idx = self.rng.gen_range(0..iface_vars.len());
+        let (var_name, mod_id, sym_id) = &iface_vars[idx];
+
+        // Look up the interface to get its methods
+        let sym = ctx.table.get_symbol(*mod_id, *sym_id)?;
+        let iface_info = match &sym.kind {
+            SymbolKind::Interface(info) => info,
+            _ => return None,
+        };
+
+        if iface_info.methods.is_empty() {
+            return None;
+        }
+
+        // Pick a random method
+        let method_idx = self.rng.gen_range(0..iface_info.methods.len());
+        let method = &iface_info.methods[method_idx];
+
+        // Generate type-correct arguments
+        let args: Vec<String> = method
+            .params
+            .iter()
+            .map(|p| {
+                let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+                expr_gen.generate_simple(&p.param_type, &expr_ctx)
+            })
+            .collect();
+
+        let call_expr = format!("{}.{}({})", var_name, method.name, args.join(", "));
+
+        // Bind result to a local when the return type is primitive or optional
+        match &method.return_type {
+            TypeInfo::Primitive(_) | TypeInfo::Optional(_) => {
+                let name = ctx.new_local_name();
+                let ty = method.return_type.clone();
+                ctx.add_local(name.clone(), ty, false);
+                Some(format!("let {} = {}", name, call_expr))
+            }
+            TypeInfo::Void => Some(call_expr),
+            _ => Some(format!("_ = {}", call_expr)),
+        }
+    }
+
+    /// Find a (interface, implementing class) pair in a module.
+    ///
+    /// Returns `(iface_sym_id, iface_name, iface_info, class_name, class_info)` for a
+    /// randomly chosen non-generic interface that has at least one implementing class.
+    fn find_implementor_pair(
+        &mut self,
+        table: &SymbolTable,
+        module_id: ModuleId,
+    ) -> Option<(SymbolId, String, InterfaceInfo, String, ClassInfo)> {
+        let module = table.get_module(module_id)?;
+
+        // Collect (iface_sym_id, iface_name, iface_info, class_name, class_info) candidates
+        let mut candidates: Vec<(SymbolId, String, InterfaceInfo, String, ClassInfo)> = Vec::new();
+
+        for iface_sym in module.interfaces() {
+            let iface_info = match &iface_sym.kind {
+                SymbolKind::Interface(info)
+                    if info.type_params.is_empty() && !info.methods.is_empty() =>
+                {
+                    info
+                }
+                _ => continue,
+            };
+
+            // Find a non-generic class implementing this interface
+            for class_sym in module.classes() {
+                if let SymbolKind::Class(ref class_info) = class_sym.kind {
+                    if class_info.type_params.is_empty()
+                        && class_info
+                            .implements
+                            .iter()
+                            .any(|&(m, s)| m == module_id && s == iface_sym.id)
+                    {
+                        candidates.push((
+                            iface_sym.id,
+                            iface_sym.name.clone(),
+                            iface_info.clone(),
+                            class_sym.name.clone(),
+                            class_info.clone(),
+                        ));
+                    }
+                }
+            }
+        }
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..candidates.len());
+        Some(candidates.swap_remove(idx))
+    }
+
     /// Try to generate a let statement that constructs a struct instance.
     ///
     /// Returns `None` if no suitable struct is available in the current module.
@@ -1991,12 +2158,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let module = ctx.table.get_module(module_id)?;
 
         // Collect all types with static methods: (sym_id, name, statics, type_info_fn)
-        let mut candidates: Vec<(
-            crate::symbols::SymbolId,
-            String,
-            Vec<StaticMethodInfo>,
-            bool,
-        )> = Vec::new();
+        let mut candidates: Vec<(SymbolId, String, Vec<StaticMethodInfo>, bool)> = Vec::new();
 
         // Classes: non-generic with primitive fields and static methods
         for sym in module.classes() {
@@ -2049,7 +2211,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         &mut self,
         table: &SymbolTable,
         mod_id: ModuleId,
-        class_id: crate::symbols::SymbolId,
+        class_id: SymbolId,
         ctx: &mut StmtContext,
     ) -> String {
         // Get chainable methods for this class

@@ -337,6 +337,25 @@ impl<'a> ExprContext<'a> {
         vars
     }
 
+    /// Get all interface-typed variables in scope.
+    ///
+    /// Returns `(name, mod_id, sym_id)` triples for variables of interface type.
+    /// Used to generate vtable-dispatch method calls on interface-typed locals/params.
+    pub fn interface_typed_vars(&self) -> Vec<(String, ModuleId, SymbolId)> {
+        let mut vars = Vec::new();
+        for (name, ty) in self.locals {
+            if let TypeInfo::Interface(mod_id, sym_id) = ty {
+                vars.push((name.clone(), *mod_id, *sym_id));
+            }
+        }
+        for param in self.params {
+            if let TypeInfo::Interface(mod_id, sym_id) = &param.param_type {
+                vars.push((param.name.clone(), *mod_id, *sym_id));
+            }
+        }
+        vars
+    }
+
     /// Get all type-param-typed variables in scope that have interface constraints.
     ///
     /// Returns `(var_name, type_param_name, constraints)` tuples for variables
@@ -527,6 +546,7 @@ fn types_compatible(actual: &TypeInfo, expected: &TypeInfo) -> bool {
         }
         (TypeInfo::Struct(ma, sa), TypeInfo::Struct(me, se)) => ma == me && sa == se,
         (TypeInfo::Class(ma, sa), TypeInfo::Class(me, se)) => ma == me && sa == se,
+        (TypeInfo::Interface(ma, sa), TypeInfo::Interface(me, se)) => ma == me && sa == se,
         _ => false,
     }
 }
@@ -613,6 +633,16 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             TypeInfo::Struct(mod_id, sym_id) => {
                 // For struct types, try to find an existing variable or construct
                 self.generate_struct_expr(*mod_id, *sym_id, ctx)
+            }
+            TypeInfo::Interface(mod_id, sym_id) => {
+                // For interface types, try to find an existing variable or construct
+                if let Some(var) = ctx.find_matching_var(ty)
+                    && self.rng.gen_bool(0.7)
+                {
+                    var
+                } else {
+                    self.generate_interface_value(*mod_id, *sym_id, ctx)
+                }
             }
             _ => self.generate_simple(ty, ctx),
         }
@@ -738,6 +768,40 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             .collect();
 
         format!("{} {{ {} }}", struct_name, field_values.join(", "))
+    }
+
+    /// Generate a value of an interface type by constructing an implementing class.
+    ///
+    /// Finds a non-generic class in the same module that implements the given
+    /// interface and constructs it. Falls back to an i64 literal if no implementor
+    /// is found (callers should avoid passing interface types when no implementor
+    /// exists, but this provides a safe fallback).
+    fn generate_interface_value(
+        &mut self,
+        iface_mod: ModuleId,
+        iface_sym: SymbolId,
+        ctx: &ExprContext,
+    ) -> String {
+        let module = match ctx.table.get_module(iface_mod) {
+            Some(m) => m,
+            None => return self.literal_for_primitive(PrimitiveType::I64),
+        };
+
+        // Find a non-generic class implementing this interface
+        for class_sym in module.classes() {
+            if let SymbolKind::Class(ref class_info) = class_sym.kind {
+                if class_info.type_params.is_empty()
+                    && class_info
+                        .implements
+                        .iter()
+                        .any(|&(m, s)| m == iface_mod && s == iface_sym)
+                {
+                    return self.generate_class_construction(iface_mod, class_sym.id, ctx);
+                }
+            }
+        }
+
+        self.literal_for_primitive(PrimitiveType::I64)
     }
 
     /// Try to generate an array index expression on an array-typed local.
@@ -1147,6 +1211,10 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             TypeInfo::Struct(mod_id, sym_id) => {
                 // Generate a struct construction expression
                 self.generate_struct_construction(*mod_id, *sym_id, ctx)
+            }
+            TypeInfo::Interface(mod_id, sym_id) => {
+                // Generate a class that implements this interface
+                self.generate_interface_value(*mod_id, *sym_id, ctx)
             }
             _ => self.literal_for_primitive(PrimitiveType::I64),
         }
