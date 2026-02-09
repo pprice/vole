@@ -66,6 +66,10 @@ pub struct StmtConfig {
     pub array_index_compound_assign_probability: f64,
     /// Probability that `generate_array_let` produces a `let mut` binding.
     pub mutable_array_probability: f64,
+    /// Probability of generating an instance method call on a class-typed local.
+    /// When class-typed locals are in scope, this controls generating
+    /// `instance.method(args)` calls. Set to 0.0 to disable.
+    pub method_call_probability: f64,
 }
 
 impl Default for StmtConfig {
@@ -93,6 +97,7 @@ impl Default for StmtConfig {
             array_push_probability: 0.08,
             array_index_compound_assign_probability: 0.10,
             mutable_array_probability: 0.4,
+            method_call_probability: 0.12,
         }
     }
 }
@@ -422,6 +427,13 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // Occasionally generate a standalone static method call
         if self.rng.gen_bool(self.config.static_call_probability) {
             if let Some(stmt) = self.try_generate_static_call_statement(ctx) {
+                return stmt;
+            }
+        }
+
+        // Occasionally generate an instance method call on a class-typed local
+        if self.rng.gen_bool(self.config.method_call_probability) {
+            if let Some(stmt) = self.try_generate_method_call(ctx) {
                 return stmt;
             }
         }
@@ -1663,6 +1675,79 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         ctx.add_local(name.clone(), ty, false);
 
         Some(format!("let {} = {}", name, expr))
+    }
+
+    /// Try to generate an instance method call on a class-typed local.
+    ///
+    /// Finds class-typed locals in scope, picks a non-generic class method,
+    /// generates type-correct arguments, and binds the result to a new local
+    /// when the return type is primitive or optional.
+    ///
+    /// Generated output shapes:
+    /// - `let local5 = instance.methodName(42_i64, true)` (primitive return)
+    /// - `instance.methodName(42_i64)` (void return)
+    fn try_generate_method_call(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let _ = ctx.module_id?;
+
+        // Find class-typed locals in scope (non-generic classes only)
+        let class_locals: Vec<_> = ctx
+            .locals
+            .iter()
+            .filter_map(|(name, ty, _)| {
+                if let TypeInfo::Class(mod_id, sym_id) = ty {
+                    let sym = ctx.table.get_symbol(*mod_id, *sym_id)?;
+                    if let SymbolKind::Class(ref info) = sym.kind {
+                        if info.type_params.is_empty() && !info.methods.is_empty() {
+                            return Some((name.clone(), *mod_id, *sym_id, info.methods.clone()));
+                        }
+                    }
+                }
+                None
+            })
+            .collect();
+
+        if class_locals.is_empty() {
+            return None;
+        }
+
+        // Pick a random class-typed local
+        let idx = self.rng.gen_range(0..class_locals.len());
+        let (instance_name, _mod_id, _sym_id, methods) = &class_locals[idx];
+
+        // Pick a random method
+        let method_idx = self.rng.gen_range(0..methods.len());
+        let method = &methods[method_idx];
+
+        // Generate type-correct arguments for non-self parameters
+        let expr_ctx = ctx.to_expr_context();
+        let args: Vec<String> = method
+            .params
+            .iter()
+            .map(|p| {
+                let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+                expr_gen.generate_simple(&p.param_type, &expr_ctx)
+            })
+            .collect();
+
+        let call_expr = format!("{}.{}({})", instance_name, method.name, args.join(", "));
+
+        // Bind result to a local when the return type is primitive or optional
+        match &method.return_type {
+            TypeInfo::Primitive(_) | TypeInfo::Optional(_) => {
+                let name = ctx.new_local_name();
+                let ty = method.return_type.clone();
+                ctx.add_local(name.clone(), ty, false);
+                Some(format!("let {} = {}", name, call_expr))
+            }
+            TypeInfo::Void => {
+                // Void return (including self-returning placeholders) - bare call
+                Some(call_expr)
+            }
+            _ => {
+                // Other return types - use discard to avoid unused warnings
+                Some(format!("_ = {}", call_expr))
+            }
+        }
     }
 
     /// Try to generate a let statement that constructs a struct instance.

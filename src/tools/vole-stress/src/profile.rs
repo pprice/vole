@@ -168,6 +168,8 @@ fn minimal_profile() -> Profile {
             array_push_probability: 0.0,
             array_index_compound_assign_probability: 0.0,
             mutable_array_probability: 0.0,
+            // No instance method calls in minimal (no classes)
+            method_call_probability: 0.0,
         },
         // No destructured imports in minimal (no multi-layer modules)
         destructured_import_probability: 0.0,
@@ -294,6 +296,8 @@ fn full_profile() -> Profile {
             array_push_probability: 0.08,
             array_index_compound_assign_probability: 0.10,
             mutable_array_probability: 0.4,
+            // Instance method calls on class-typed locals (~12%)
+            method_call_probability: 0.12,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -421,6 +425,8 @@ fn deep_nesting_profile() -> Profile {
             array_push_probability: 0.05,
             array_index_compound_assign_probability: 0.08,
             mutable_array_probability: 0.3,
+            // Some instance method calls for variety
+            method_call_probability: 0.08,
         },
         // No destructured imports in deep-nesting (single module focus)
         destructured_import_probability: 0.0,
@@ -549,6 +555,8 @@ fn wide_types_profile() -> Profile {
             array_push_probability: 0.05,
             array_index_compound_assign_probability: 0.08,
             mutable_array_probability: 0.3,
+            // Some instance method calls
+            method_call_probability: 0.10,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -669,6 +677,8 @@ fn many_modules_profile() -> Profile {
             array_push_probability: 0.0,
             array_index_compound_assign_probability: 0.0,
             mutable_array_probability: 0.0,
+            // No instance method calls - focus on module loading
+            method_call_probability: 0.0,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -804,6 +814,9 @@ fn generics_heavy_profile() -> Profile {
             array_push_probability: 0.05,
             array_index_compound_assign_probability: 0.08,
             mutable_array_probability: 0.3,
+            // No instance method calls - focus on generics (generic classes
+            // are skipped, and non-generic classes are rare in this profile)
+            method_call_probability: 0.0,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
