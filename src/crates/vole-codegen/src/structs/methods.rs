@@ -1606,14 +1606,36 @@ impl Cg<'_, '_, '_> {
             args.extend(default_args);
         }
 
+        // Handle sret convention for large struct returns (3+ flat slots).
+        // The function signature has a hidden first parameter for the return
+        // buffer pointer that must be prepended to the call arguments.
+        let is_sret = self.is_sret_struct_return(return_type_id);
+        if is_sret {
+            let ptr_type = self.ptr_type();
+            let flat_count = self
+                .struct_flat_slot_count(return_type_id)
+                .expect("INTERNAL: sret static call: missing flat slot count");
+            let total_size = (flat_count as u32) * 8;
+            let slot = self.alloc_stack(total_size);
+            let sret_ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+            args.insert(0, sret_ptr);
+        }
+
         // Get function reference and call
         let func_ref = self.func_ref(func_key)?;
         let coerced = self.coerce_call_args(func_ref, &args);
         let call = self.builder.ins().call(func_ref, &coerced);
         self.field_cache.clear();
-        // call_result must run before consume_rc_args to copy union data
-        // from callee's stack before rc_dec calls can clobber it
-        let mut result = self.call_result(call, return_type_id);
+
+        // For sret, result[0] is the sret pointer we passed in
+        let mut result = if is_sret {
+            let results = self.builder.inst_results(call);
+            CompiledValue::new(results[0], self.ptr_type(), return_type_id)
+        } else {
+            // call_result must run before consume_rc_args to copy union data
+            // from callee's stack before rc_dec calls can clobber it
+            self.call_result(call, return_type_id)
+        };
         self.consume_rc_args(&mut rc_temps)?;
 
         // Mark RC-typed results as Owned so they get properly cleaned up
@@ -1643,15 +1665,36 @@ impl Cg<'_, '_, '_> {
         }
 
         // Get monomorphized function reference and call
+        let return_type_id = instance.func_type.return_type_id;
+
+        // Handle sret convention for large struct returns (3+ flat slots).
+        let is_sret = self.is_sret_struct_return(return_type_id);
+        if is_sret {
+            let ptr_type = self.ptr_type();
+            let flat_count = self
+                .struct_flat_slot_count(return_type_id)
+                .expect("INTERNAL: sret static monomorph call: missing flat slot count");
+            let total_size = (flat_count as u32) * 8;
+            let slot = self.alloc_stack(total_size);
+            let sret_ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+            args.insert(0, sret_ptr);
+        }
+
         let func_key = self.funcs().intern_name_id(instance.mangled_name);
         let func_ref = self.func_ref(func_key)?;
         let coerced = self.coerce_call_args(func_ref, &args);
         let call = self.builder.ins().call(func_ref, &coerced);
         self.field_cache.clear();
-        // call_result must run before consume_rc_args to copy union data
-        // from callee's stack before rc_dec calls can clobber it
-        let return_type_id = instance.func_type.return_type_id;
-        let mut result = self.call_result(call, return_type_id);
+
+        // For sret, result[0] is the sret pointer we passed in
+        let mut result = if is_sret {
+            let results = self.builder.inst_results(call);
+            CompiledValue::new(results[0], self.ptr_type(), return_type_id)
+        } else {
+            // call_result must run before consume_rc_args to copy union data
+            // from callee's stack before rc_dec calls can clobber it
+            self.call_result(call, return_type_id)
+        };
         self.consume_rc_args(&mut rc_temps)?;
 
         // Mark RC-typed results as Owned so they get properly cleaned up

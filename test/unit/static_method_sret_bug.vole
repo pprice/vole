@@ -1,0 +1,100 @@
+// Test: static methods returning structs with 3+ fields (sret convention)
+// This tests the fix for vol-aufd: static method calls were missing the sret
+// (return pointer) argument when the return type is a struct with 3+ fields.
+
+struct Vec3 {
+    x: i64,
+    y: i64,
+    z: i64,
+
+    statics {
+        func origin() -> Vec3 {
+            return Vec3 { x: 0, y: 0, z: 0 }
+        }
+
+        func create(x: i64, y: i64, z: i64) -> Vec3 {
+            return Vec3 { x: x, y: y, z: z }
+        }
+
+        func add(a: Vec3, b: Vec3) -> Vec3 {
+            return Vec3 { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z }
+        }
+    }
+}
+
+class Config {
+    width: i64,
+    height: i64,
+    depth: i64,
+    scale: i64,
+
+    statics {
+        func default_config() -> Config {
+            return Config { width: 800, height: 600, depth: 32, scale: 1 }
+        }
+
+        func small() -> Config {
+            return Config { width: 320, height: 240, depth: 16, scale: 2 }
+        }
+    }
+
+    func volume() -> i64 {
+        return self.width * self.height * self.depth
+    }
+}
+
+tests {
+    // Struct with 3 fields (triggers sret)
+    test "struct static method returns 3-field struct" {
+        let v = Vec3.origin()
+        assert(v.x == 0)
+        assert(v.y == 0)
+        assert(v.z == 0)
+    }
+
+    test "struct static method with params returns 3-field struct" {
+        let v = Vec3.create(1, 2, 3)
+        assert(v.x == 1)
+        assert(v.y == 2)
+        assert(v.z == 3)
+    }
+
+    test "struct static method taking and returning 3-field struct" {
+        let a = Vec3.create(1, 2, 3)
+        let b = Vec3.create(4, 5, 6)
+        let c = Vec3.add(a, b)
+        assert(c.x == 5)
+        assert(c.y == 7)
+        assert(c.z == 9)
+    }
+
+    // Class with 4 fields (triggers sret)
+    test "class static method returns 4-field class" {
+        let c = Config.default_config()
+        assert(c.width == 800)
+        assert(c.height == 600)
+        assert(c.depth == 32)
+        assert(c.scale == 1)
+    }
+
+    test "class static method returns 4-field class - small" {
+        let c = Config.small()
+        assert(c.width == 320)
+        assert(c.height == 240)
+        assert(c.depth == 16)
+        assert(c.scale == 2)
+    }
+
+    test "class static method result used for instance method" {
+        let c = Config.default_config()
+        assert(c.volume() == 800 * 600 * 32)
+    }
+
+    // Static calling static with sret
+    test "nested static calls with sret" {
+        let v = Vec3.add(Vec3.create(10, 20, 30), Vec3.create(1, 2, 3))
+        assert(v.x == 11)
+        assert(v.y == 22)
+        assert(v.z == 33)
+    }
+}
