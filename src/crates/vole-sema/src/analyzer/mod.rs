@@ -1059,8 +1059,8 @@ impl Analyzer {
                         // type parameters (e.g., K, V) are available during body checking.
                         // Without this, match patterns and is-expressions inside the method
                         // body can't resolve union variant types properly.
-                        let inferred_scope = self
-                            .infer_implement_type_params(&impl_block.target_type, interner);
+                        let inferred_scope =
+                            self.infer_implement_type_params(&impl_block.target_type, interner);
                         let has_type_param_scope = !inferred_scope.is_empty();
                         if has_type_param_scope {
                             self.type_param_stack.push_scope(inferred_scope);

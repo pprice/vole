@@ -845,7 +845,7 @@ impl Analyzer {
     fn derive_concrete_static_method_monomorphs(
         &mut self,
     ) -> Vec<(
-        crate::generic::StaticMethodMonomorphKey,
+        StaticMethodMonomorphKey,
         crate::generic::StaticMethodMonomorphInstance,
     )> {
         let all_instances: Vec<crate::generic::StaticMethodMonomorphInstance> = self
@@ -953,8 +953,7 @@ impl Analyzer {
         // Partition into concrete and identity substitutions.
         let mut concrete_subs_by_class: FxHashMap<NameId, Vec<FxHashMap<NameId, ArenaTypeId>>> =
             FxHashMap::default();
-        let mut identity_instances: Vec<&crate::generic::ClassMethodMonomorphInstance> =
-            Vec::new();
+        let mut identity_instances: Vec<&crate::generic::ClassMethodMonomorphInstance> = Vec::new();
 
         {
             let arena = self.type_arena();
@@ -1090,7 +1089,7 @@ impl Analyzer {
         class_name: NameId,
         method_name: NameId,
         substitutions: &FxHashMap<NameId, ArenaTypeId>,
-    ) -> Option<crate::generic::StaticMethodMonomorphKey> {
+    ) -> Option<StaticMethodMonomorphKey> {
         let registry = self.entity_registry();
         let type_def_id = registry.type_by_name(class_name)?;
         let class_type_keys: Vec<ArenaTypeId> = registry
@@ -1112,7 +1111,7 @@ impl Analyzer {
             .filter_map(|tp| substitutions.get(&tp.name_id).copied())
             .collect();
 
-        Some(crate::generic::StaticMethodMonomorphKey::new(
+        Some(StaticMethodMonomorphKey::new(
             class_name,
             method_name,
             class_type_keys,
@@ -1127,7 +1126,9 @@ impl Analyzer {
         concrete_subs: &FxHashMap<NameId, ArenaTypeId>,
         type_keys: &[ArenaTypeId],
     ) -> Option<crate::generic::ClassMethodMonomorphInstance> {
-        let type_def_id = self.entity_registry().type_by_name(identity_inst.class_name)?;
+        let type_def_id = self
+            .entity_registry()
+            .type_by_name(identity_inst.class_name)?;
         let method_id = self
             .entity_registry()
             .find_method_on_type(type_def_id, identity_inst.method_name)?;
@@ -1197,7 +1198,7 @@ impl Analyzer {
             instance_id,
             func_type,
             substitutions: concrete_subs.clone(),
-            external_info: identity_inst.external_info.clone(),
+            external_info: identity_inst.external_info,
             self_type,
         })
     }
@@ -1208,7 +1209,9 @@ impl Analyzer {
         identity_inst: &crate::generic::StaticMethodMonomorphInstance,
         concrete_subs: &FxHashMap<NameId, ArenaTypeId>,
     ) -> Option<crate::generic::StaticMethodMonomorphInstance> {
-        let type_def_id = self.entity_registry().type_by_name(identity_inst.class_name)?;
+        let type_def_id = self
+            .entity_registry()
+            .type_by_name(identity_inst.class_name)?;
         let method_id = self
             .entity_registry()
             .find_static_method_on_type(type_def_id, identity_inst.method_name)?;

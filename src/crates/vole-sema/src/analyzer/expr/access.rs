@@ -1309,7 +1309,8 @@ impl Analyzer {
             let substituted_func_type = if substitutions.is_empty() {
                 func_type.clone()
             } else {
-                let param_type_ids: Vec<ArenaTypeId> = func_type.params_id.iter().copied().collect();
+                let param_type_ids: Vec<ArenaTypeId> =
+                    func_type.params_id.iter().copied().collect();
                 let return_type_id: ArenaTypeId = func_type.return_type_id;
                 let (subst_param_ids, subst_return_id) = {
                     let mut arena = self.type_arena_mut();

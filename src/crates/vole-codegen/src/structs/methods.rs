@@ -1512,7 +1512,9 @@ impl Cg<'_, '_, '_> {
                         0
                     };
                     let module_match = module_prefix.is_some_and(|prefix| {
-                        self.query().display_name(instance.mangled_name).starts_with(prefix)
+                        self.query()
+                            .display_name(instance.mangled_name)
+                            .starts_with(prefix)
                     });
                     let concrete_key = key
                         .class_type_keys

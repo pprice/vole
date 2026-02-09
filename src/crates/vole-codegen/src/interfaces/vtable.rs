@@ -1055,21 +1055,20 @@ fn resolve_vtable_target<C: VtableCtx>(
         // Use substituted types when available (required for generic implement blocks
         // where the registry stores abstract types like `T | Done` but we need concrete
         // types like `i64 | Done` for correct union tag ordering in vtable wrappers).
-        let (param_type_ids, return_type_id) = substituted_types
-            .clone()
-            .unwrap_or_else(|| {
-                (
-                    impl_.func_type.params_id.to_vec(),
-                    impl_.func_type.return_type_id,
-                )
-            });
+        let (param_type_ids, return_type_id) = substituted_types.unwrap_or_else(|| {
+            (
+                impl_.func_type.params_id.to_vec(),
+                impl_.func_type.return_type_id,
+            )
+        });
         let returns_void = matches!(ctx.arena().get(return_type_id), SemaType::Void);
         // Build a tag remapping table when the callee's return type (abstract, e.g. `Done | T`)
         // differs from the concrete return type (e.g. `i64 | Done`). The callee was compiled
         // with the abstract union's tag ordering, but the wrapper must produce the concrete
         // union's tag ordering.
         let callee_ret = impl_.func_type.return_type_id;
-        let union_tag_remap = build_union_tag_remap(ctx.arena(), callee_ret, return_type_id, substitutions);
+        let union_tag_remap =
+            build_union_tag_remap(ctx.arena(), callee_ret, return_type_id, substitutions);
         tracing::warn!(
             method = %method_name_str,
             callee_ret = ?callee_ret,
@@ -1280,9 +1279,14 @@ fn build_union_tag_remap(
                     pending_type_params.push(callee_tag);
                     remap.push(0); // placeholder
                 } else if let Some(concrete_variant) = resolved {
-                    if let Some(pos) = concrete_variants.iter().position(|&v| v == concrete_variant) {
+                    if let Some(pos) = concrete_variants
+                        .iter()
+                        .position(|&v| v == concrete_variant)
+                    {
                         used_concrete[pos] = true;
-                        if callee_tag != pos { is_identity = false; }
+                        if callee_tag != pos {
+                            is_identity = false;
+                        }
                         remap.push(pos as u8);
                     } else {
                         return None;
@@ -1295,7 +1299,9 @@ fn build_union_tag_remap(
                 // Match by TypeId identity
                 if let Some(pos) = concrete_variants.iter().position(|&v| v == callee_variant) {
                     used_concrete[pos] = true;
-                    if callee_tag != pos { is_identity = false; }
+                    if callee_tag != pos {
+                        is_identity = false;
+                    }
                     remap.push(pos as u8);
                 } else {
                     return None;
@@ -1316,7 +1322,9 @@ fn build_union_tag_remap(
             return None;
         }
         for (&callee_tag, &concrete_pos) in pending_type_params.iter().zip(free_positions.iter()) {
-            if callee_tag != concrete_pos { is_identity = false; }
+            if callee_tag != concrete_pos {
+                is_identity = false;
+            }
             remap[callee_tag] = concrete_pos as u8;
         }
     }
@@ -1332,7 +1340,9 @@ fn build_union_tag_remap(
 fn remap_union_tag(builder: &mut FunctionBuilder, tag: Value, remap: &[u8]) -> Value {
     assert!(!remap.is_empty(), "empty tag remap table");
     // Start with the last entry as the default, then chain selects backwards
-    let mut result = builder.ins().iconst(types::I8, remap[remap.len() - 1] as i64);
+    let mut result = builder
+        .ins()
+        .iconst(types::I8, remap[remap.len() - 1] as i64);
     for i in (0..remap.len() - 1).rev() {
         let cmp_val = builder.ins().iconst(types::I8, i as i64);
         let is_match = builder.ins().icmp(IntCC::Equal, tag, cmp_val);

@@ -888,7 +888,10 @@ impl Cg<'_, '_, '_> {
             if let Some(elem_id) = arena.unwrap_runtime_iterator(iter.type_id) {
                 (elem_id, false)
             } else if let Some((_, type_args)) = arena.unwrap_interface(iter.type_id) {
-                (type_args.first().copied().unwrap_or_else(|| arena.i64()), true)
+                (
+                    type_args.first().copied().unwrap_or_else(|| arena.i64()),
+                    true,
+                )
             } else {
                 (arena.i64(), false)
             }
@@ -1078,20 +1081,15 @@ impl Cg<'_, '_, '_> {
                     None => {
                         let expected = variants
                             .iter()
-                            .map(|&variant| self.arena().display_basic(variant).to_string())
+                            .map(|&variant| self.arena().display_basic(variant))
                             .collect::<Vec<_>>()
                             .join(" | ");
-                        let found = if let Some(name_id) =
-                            self.arena().unwrap_type_param(value.type_id)
-                        {
-                            format!(
-                                "{} ({:?})",
-                                self.name_table().display(name_id),
-                                name_id
-                            )
-                        } else {
-                            self.arena().display_basic(value.type_id).to_string()
-                        };
+                        let found =
+                            if let Some(name_id) = self.arena().unwrap_type_param(value.type_id) {
+                                format!("{} ({:?})", self.name_table().display(name_id), name_id)
+                            } else {
+                                self.arena().display_basic(value.type_id)
+                            };
                         let subs = self
                             .substitutions
                             .map(|m| {

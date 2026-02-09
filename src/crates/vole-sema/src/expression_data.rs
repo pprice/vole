@@ -170,10 +170,7 @@ impl ExpressionDataBuilder {
     /// Set per-module class method monomorphization keys.
     pub fn module_class_method_generics(
         mut self,
-        module_class_method_generics: FxHashMap<
-            String,
-            FxHashMap<NodeId, ClassMethodMonomorphKey>,
-        >,
+        module_class_method_generics: FxHashMap<String, FxHashMap<NodeId, ClassMethodMonomorphKey>>,
     ) -> Self {
         self.module_class_method_generics = module_class_method_generics;
         self
@@ -362,11 +359,14 @@ impl ExpressionData {
         current_module: Option<&str>,
     ) -> Option<&ClassMethodMonomorphKey> {
         if let Some(module) = current_module {
-            if let Some(module_keys) = self.module_class_method_generics.get(module)
-                && let Some(key) = module_keys.get(&node)
-            {
-                return Some(key);
-            }
+            // When compiling code from a specific module, ONLY look in that
+            // module's NodeId space.  Falling back to the top-level map would
+            // cause cross-file NodeId collisions (NodeIds restart at 0 per
+            // parse unit, so a test file NodeId can alias a module NodeId).
+            return self
+                .module_class_method_generics
+                .get(module)
+                .and_then(|keys| keys.get(&node));
         }
         self.class_method_generics.get(&node)
     }
@@ -399,11 +399,13 @@ impl ExpressionData {
         current_module: Option<&str>,
     ) -> Option<&StaticMethodMonomorphKey> {
         if let Some(module) = current_module {
-            if let Some(module_keys) = self.module_static_method_generics.get(module)
-                && let Some(key) = module_keys.get(&node)
-            {
-                return Some(key);
-            }
+            // Same rationale as get_class_method_generic_in_module: avoid
+            // cross-file NodeId collisions by never falling through to the
+            // top-level map when we know which module we are compiling.
+            return self
+                .module_static_method_generics
+                .get(module)
+                .and_then(|keys| keys.get(&node));
         }
         self.static_method_generics.get(&node)
     }
