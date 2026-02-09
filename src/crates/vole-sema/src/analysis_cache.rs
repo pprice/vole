@@ -16,7 +16,7 @@
 //! resolutions (which are keyed by NodeId, which is per-program).
 
 use crate::compilation_db::CompilationDb;
-use crate::generic::{ClassMethodMonomorphKey, StaticMethodMonomorphKey};
+use crate::generic::{ClassMethodMonomorphKey, MonomorphKey, StaticMethodMonomorphKey};
 use crate::resolution::ResolvedMethod;
 use crate::type_arena::TypeId;
 use crate::types::FunctionType;
@@ -58,6 +58,8 @@ pub struct CachedModule {
     pub expr_types: FxHashMap<NodeId, TypeId>,
     /// Method resolutions from analysis (NodeId → ResolvedMethod)
     pub method_resolutions: FxHashMap<NodeId, ResolvedMethod>,
+    /// Generic function monomorph keys (NodeId -> MonomorphKey)
+    pub generic_calls: FxHashMap<NodeId, MonomorphKey>,
     /// Generic class method monomorph keys (NodeId -> ClassMethodMonomorphKey)
     pub class_method_generics: FxHashMap<NodeId, ClassMethodMonomorphKey>,
     /// Generic static method monomorph keys (NodeId -> StaticMethodMonomorphKey)

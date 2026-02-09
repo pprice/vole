@@ -1,0 +1,7 @@
+let { use_identity } = import "./lib.vole"
+
+tests {
+    test "call non-generic wrapper that uses generic fn" {
+        assert(use_identity() == 42)
+    }
+}

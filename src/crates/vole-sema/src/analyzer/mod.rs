@@ -318,6 +318,9 @@ pub struct AnalyzerContext {
     /// Per-module is_check_results (keyed by module path -> NodeId -> IsCheckResult).
     /// Stored separately since NodeIds are per-program and can't be merged into main is_check_results.
     pub module_is_check_results: RefCell<FxHashMap<String, FxHashMap<NodeId, IsCheckResult>>>,
+    /// Per-module generic function call keys (module path -> NodeId -> MonomorphKey).
+    /// Needed because NodeIds are file-local and collide across modules.
+    pub module_generic_calls: RefCell<FxHashMap<String, FxHashMap<NodeId, MonomorphKey>>>,
     /// Per-module class method generic call keys (module path -> NodeId -> ClassMethodMonomorphKey).
     /// Needed because NodeIds are file-local and collide across modules.
     pub module_class_method_calls:
@@ -345,6 +348,7 @@ impl AnalyzerContext {
             module_expr_types: RefCell::new(FxHashMap::default()),
             module_method_resolutions: RefCell::new(FxHashMap::default()),
             module_is_check_results: RefCell::new(FxHashMap::default()),
+            module_generic_calls: RefCell::new(FxHashMap::default()),
             module_class_method_calls: RefCell::new(FxHashMap::default()),
             module_static_method_calls: RefCell::new(FxHashMap::default()),
             module_cache: cache,
@@ -570,6 +574,7 @@ impl Analyzer {
         let module_expr_types = self.ctx.module_expr_types.borrow().clone();
         let module_method_resolutions = self.ctx.module_method_resolutions.borrow().clone();
         let module_is_check_results = self.ctx.module_is_check_results.borrow().clone();
+        let module_generic_calls = self.ctx.module_generic_calls.borrow().clone();
         let module_class_method_calls = self.ctx.module_class_method_calls.borrow().clone();
         let module_static_method_calls = self.ctx.module_static_method_calls.borrow().clone();
         let expression_data = ExpressionData::builder()
@@ -581,6 +586,7 @@ impl Analyzer {
             .module_types(module_expr_types)
             .module_methods(module_method_resolutions)
             .module_is_check_results(module_is_check_results)
+            .module_generics(module_generic_calls)
             .module_class_method_generics(module_class_method_calls)
             .module_static_method_generics(module_static_method_calls)
             .substituted_return_types(self.substituted_return_types)

@@ -95,6 +95,17 @@ impl<'a> ProgramQuery<'a> {
         self.expr_data.get_generic(node)
     }
 
+    /// Get the monomorphization key for a generic call, checking module-local
+    /// NodeId mappings first when `current_module` is provided.
+    #[must_use]
+    pub fn monomorph_for_in_module(
+        &self,
+        node: NodeId,
+        current_module: Option<&str>,
+    ) -> Option<&'a MonomorphKey> {
+        self.expr_data.get_generic_in_module(node, current_module)
+    }
+
     /// Get the monomorphization key for a generic class method call
     #[must_use]
     pub fn class_method_generic_at(&self, node: NodeId) -> Option<&'a ClassMethodMonomorphKey> {

@@ -489,7 +489,11 @@ impl Analyzer {
             .module_is_check_results
             .borrow_mut()
             .insert(module_key.clone(), sub_analyzer.is_check_results.clone());
-        // Store module-specific class/static method generic keys (NodeIds are per-program)
+        // Store module-specific generic function/class/static method keys (NodeIds are per-program)
+        self.ctx
+            .module_generic_calls
+            .borrow_mut()
+            .insert(module_key.clone(), sub_analyzer.generic_calls.clone());
         self.ctx
             .module_class_method_calls
             .borrow_mut()

@@ -1,0 +1,8 @@
+func identity<T>(x: T) -> T {
+    return x
+}
+
+func use_identity() -> i64 {
+    let x = identity(42)
+    return x
+}

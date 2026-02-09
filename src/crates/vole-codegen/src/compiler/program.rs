@@ -462,6 +462,16 @@ impl Compiler<'_> {
         }
 
         // ============================================
+        // PASS 1.5: Declare and compile monomorphized generic function instances
+        // Module functions may call generic functions defined in the same module
+        // (e.g., `identity<T>` called from `use_identity`). These monomorphized
+        // instances must be declared and compiled before PASS 2 compiles the
+        // non-generic function bodies that reference them.
+        // ============================================
+        self.declare_monomorphized_instances()?;
+        self.compile_module_monomorphized_instances()?;
+
+        // ============================================
         // PASS 2: Compile ALL function bodies across ALL modules
         // Now all functions are declared, so cross-module calls work
         // ============================================
@@ -1373,6 +1383,37 @@ impl Compiler<'_> {
                     func_name,
                 ));
             }
+        }
+
+        Ok(())
+    }
+
+    /// Compile monomorphized function instances that belong to modules.
+    /// Skips external functions and main-program functions (those are compiled later).
+    fn compile_module_monomorphized_instances(&mut self) -> CodegenResult<()> {
+        let instances = self
+            .analyzed
+            .entity_registry()
+            .monomorph_cache
+            .collect_instances();
+
+        for instance in instances {
+            if self.is_external_func(instance.original_name) {
+                continue;
+            }
+
+            // Only compile instances whose original function lives in a module
+            let module_id = self.analyzed.name_table().module_of(instance.original_name);
+            let module_path = self
+                .analyzed
+                .name_table()
+                .module_path(module_id)
+                .to_string();
+            if !self.analyzed.module_programs.contains_key(&module_path) {
+                continue;
+            }
+
+            self.compile_monomorphized_module_function(&instance)?;
         }
 
         Ok(())

@@ -136,6 +136,10 @@ impl Analyzer {
                 .module_is_check_results
                 .borrow_mut()
                 .insert(import_path.to_string(), cached.is_check_results.clone());
+            self.ctx
+                .module_generic_calls
+                .borrow_mut()
+                .insert(import_path.to_string(), cached.generic_calls.clone());
             self.ctx.module_class_method_calls.borrow_mut().insert(
                 import_path.to_string(),
                 cached.class_method_generics.clone(),
@@ -194,6 +198,7 @@ impl Analyzer {
                     interner: prelude_interner.clone(),
                     expr_types: sub_analyzer.expr_types.clone(),
                     method_resolutions: sub_analyzer.method_resolutions.clone_inner(),
+                    generic_calls: sub_analyzer.generic_calls.clone(),
                     class_method_generics: sub_analyzer.class_method_calls.clone(),
                     static_method_generics: sub_analyzer.static_method_calls.clone(),
                     functions_by_name: sub_analyzer.functions_by_name.clone(),
@@ -267,6 +272,10 @@ impl Analyzer {
             import_path.to_string(),
             sub_analyzer.is_check_results.clone(),
         );
+        self.ctx
+            .module_generic_calls
+            .borrow_mut()
+            .insert(import_path.to_string(), sub_analyzer.generic_calls.clone());
         self.ctx.module_class_method_calls.borrow_mut().insert(
             import_path.to_string(),
             sub_analyzer.class_method_calls.clone(),

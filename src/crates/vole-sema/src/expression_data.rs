@@ -42,6 +42,8 @@ pub struct ExpressionData {
     module_methods: FxHashMap<String, FxHashMap<NodeId, ResolvedMethod>>,
     /// Per-module is_check_results (for multi-module compilation)
     module_is_check_results: FxHashMap<String, FxHashMap<NodeId, IsCheckResult>>,
+    /// Per-module generic function call keys (for multi-module compilation)
+    module_generics: FxHashMap<String, FxHashMap<NodeId, MonomorphKey>>,
     /// Per-module class method generic keys (for multi-module compilation)
     module_class_method_generics: FxHashMap<String, FxHashMap<NodeId, ClassMethodMonomorphKey>>,
     /// Per-module static method generic keys (for multi-module compilation)
@@ -89,6 +91,7 @@ pub struct ExpressionDataBuilder {
     module_types: FxHashMap<String, FxHashMap<NodeId, TypeId>>,
     module_methods: FxHashMap<String, FxHashMap<NodeId, ResolvedMethod>>,
     module_is_check_results: FxHashMap<String, FxHashMap<NodeId, IsCheckResult>>,
+    module_generics: FxHashMap<String, FxHashMap<NodeId, MonomorphKey>>,
     module_class_method_generics: FxHashMap<String, FxHashMap<NodeId, ClassMethodMonomorphKey>>,
     module_static_method_generics: FxHashMap<String, FxHashMap<NodeId, StaticMethodMonomorphKey>>,
     substituted_return_types: FxHashMap<NodeId, TypeId>,
@@ -167,6 +170,15 @@ impl ExpressionDataBuilder {
         self
     }
 
+    /// Set per-module generic function monomorphization keys.
+    pub fn module_generics(
+        mut self,
+        module_generics: FxHashMap<String, FxHashMap<NodeId, MonomorphKey>>,
+    ) -> Self {
+        self.module_generics = module_generics;
+        self
+    }
+
     /// Set per-module class method monomorphization keys.
     pub fn module_class_method_generics(
         mut self,
@@ -235,6 +247,7 @@ impl ExpressionDataBuilder {
             module_types: self.module_types,
             module_methods: self.module_methods,
             module_is_check_results: self.module_is_check_results,
+            module_generics: self.module_generics,
             module_class_method_generics: self.module_class_method_generics,
             module_static_method_generics: self.module_static_method_generics,
             substituted_return_types: self.substituted_return_types,
@@ -308,6 +321,26 @@ impl ExpressionData {
 
     /// Get the monomorphization key for a generic function call
     pub fn get_generic(&self, node: NodeId) -> Option<&MonomorphKey> {
+        self.generics.get(&node)
+    }
+
+    /// Get the monomorphization key for a generic function call, using module-local
+    /// NodeId space when `current_module` is provided.
+    pub fn get_generic_in_module(
+        &self,
+        node: NodeId,
+        current_module: Option<&str>,
+    ) -> Option<&MonomorphKey> {
+        if let Some(module) = current_module {
+            // When compiling code from a specific module, ONLY look in that
+            // module's NodeId space.  Falling back to the top-level map would
+            // cause cross-file NodeId collisions (NodeIds restart at 0 per
+            // parse unit, so a test file NodeId can alias a module NodeId).
+            return self
+                .module_generics
+                .get(module)
+                .and_then(|keys| keys.get(&node));
+        }
         self.generics.get(&node)
     }
 
