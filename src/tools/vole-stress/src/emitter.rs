@@ -193,13 +193,16 @@ impl<'a, R: Rng> EmitContext<'a, R> {
     /// Emit a test for a function.
     fn emit_function_test(&mut self, symbol: &Symbol) {
         if let SymbolKind::Function(ref info) = symbol.kind {
-            // Skip functions with type parameters (generics) - too complex to test simply
-            if !info.type_params.is_empty() {
+            // Skip never-returning (diverge) functions - calling them always panics
+            if matches!(info.return_type, TypeInfo::Never) {
                 return;
             }
 
-            // Skip never-returning (diverge) functions - calling them always panics
-            if matches!(info.return_type, TypeInfo::Never) {
+            // For generic functions, delegate to specialised test emitter.
+            // Only single-type-param unconstrained generics are supported;
+            // multi-param or constrained generics are still skipped.
+            if !info.type_params.is_empty() {
+                self.emit_generic_function_test(symbol, info);
                 return;
             }
 
@@ -211,43 +214,108 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             let call = format!("{}({})", symbol.name, args);
 
             // Generate the test body based on return type
-            match &info.return_type {
-                TypeInfo::Iterator(elem_type) => {
-                    // Generator function - exercise with iterator methods
-                    let chain = self.generate_iterator_chain(elem_type);
-                    self.emit_line(&format!("let _result = {}{}", call, chain));
-                    self.emit_line("assert(true)");
-                }
-                TypeInfo::Fallible { success, .. } => {
-                    // Fallible function - wrap in match to handle success/error
-                    let default_val = self.generate_test_value(success);
-                    self.emit_line(&format!(
-                        "let _result = match {} {{ success x => x, error => {}, _ => {} }}",
-                        call, default_val, default_val
-                    ));
-                    self.emit_line("assert(true)");
-                }
-                TypeInfo::Void => {
-                    // Void function - just call it and assert true
-                    self.emit_line(&call);
-                    self.emit_line("assert(true)");
-                }
-                TypeInfo::Optional(_) => {
-                    // Optional return - check it doesn't panic
-                    self.emit_line(&format!("let result = {}", call));
-                    self.emit_line("assert(result != nil || result == nil)");
-                }
-                _ => {
-                    // Non-void, non-optional return - just verify call succeeds
-                    // (non-optional types can't be compared to nil in Vole)
-                    self.emit_line(&format!("let _ = {}", call));
-                    self.emit_line("assert(true)");
-                }
-            }
+            self.emit_call_assertion(&call, &info.return_type);
 
             self.indent -= 1;
             self.emit_line("}");
             self.emit_line("");
+        }
+    }
+
+    /// Emit a test for a generic function by substituting a concrete type
+    /// for its type parameter, then calling with typed arguments.
+    ///
+    /// Only handles single-type-parameter, unconstrained generic functions
+    /// where the type param appears in at least one parameter position (so
+    /// the compiler can infer the concrete type from arguments).
+    ///
+    /// NOTE: Generic function calls inside regular function/method bodies
+    /// are avoided because calling a generic function in a module that is
+    /// later imported triggers a compiler bug ("function not found").
+    /// Test blocks are safe because they are not compiled during imports.
+    fn emit_generic_function_test(&mut self, symbol: &Symbol, info: &FunctionInfo) {
+        // Only single-type-param unconstrained generics for now.
+        if info.type_params.len() != 1 || !info.type_params[0].constraints.is_empty() {
+            return;
+        }
+
+        let tp_name = &info.type_params[0].name;
+
+        // The type param must appear in at least one parameter so the
+        // compiler can infer the concrete type from the arguments.
+        let tp_in_params = info
+            .params
+            .iter()
+            .any(|p| p.param_type.contains_type_param(tp_name));
+        if !tp_in_params {
+            return;
+        }
+
+        // Pick a concrete primitive type for substitution.
+        let concrete_prim = PrimitiveType::random_expr_type(self.rng);
+        let concrete_type = TypeInfo::Primitive(concrete_prim);
+
+        // Substitute type param in all parameter types and the return type.
+        let concrete_params: Vec<ParamInfo> = info
+            .params
+            .iter()
+            .map(|p| ParamInfo {
+                name: p.name.clone(),
+                param_type: p.param_type.substitute_type_param(tp_name, &concrete_type),
+            })
+            .collect();
+        let concrete_return = info
+            .return_type
+            .substitute_type_param(tp_name, &concrete_type);
+
+        // Generate the test.
+        self.emit_line(&format!("test \"{} works\" {{", symbol.name));
+        self.indent += 1;
+
+        let args = self.generate_test_args(&concrete_params);
+        let call = format!("{}({})", symbol.name, args);
+
+        self.emit_call_assertion(&call, &concrete_return);
+
+        self.indent -= 1;
+        self.emit_line("}");
+        self.emit_line("");
+    }
+
+    /// Emit an assertion for a function call based on its return type.
+    fn emit_call_assertion(&mut self, call: &str, return_type: &TypeInfo) {
+        match return_type {
+            TypeInfo::Iterator(elem_type) => {
+                // Generator function - exercise with iterator methods
+                let chain = self.generate_iterator_chain(elem_type);
+                self.emit_line(&format!("let _result = {}{}", call, chain));
+                self.emit_line("assert(true)");
+            }
+            TypeInfo::Fallible { success, .. } => {
+                // Fallible function - wrap in match to handle success/error
+                let default_val = self.generate_test_value(success);
+                self.emit_line(&format!(
+                    "let _result = match {} {{ success x => x, error => {}, _ => {} }}",
+                    call, default_val, default_val
+                ));
+                self.emit_line("assert(true)");
+            }
+            TypeInfo::Void => {
+                // Void function - just call it and assert true
+                self.emit_line(call);
+                self.emit_line("assert(true)");
+            }
+            TypeInfo::Optional(_) => {
+                // Optional return - check it doesn't panic
+                self.emit_line(&format!("let result = {}", call));
+                self.emit_line("assert(result != nil || result == nil)");
+            }
+            _ => {
+                // Non-void, non-optional return - just verify call succeeds
+                // (non-optional types can't be compared to nil in Vole)
+                self.emit_line(&format!("let _ = {}", call));
+                self.emit_line("assert(true)");
+            }
         }
     }
 

@@ -334,6 +334,65 @@ impl TypeInfo {
         }
     }
 
+    /// Substitute a named type parameter with a concrete type.
+    ///
+    /// Returns a new `TypeInfo` with all occurrences of `TypeParam(param_name)`
+    /// replaced by `replacement`. Non-matching types are cloned unchanged.
+    /// Recursively substitutes inside composite types (Optional, Array, etc.).
+    pub fn substitute_type_param(&self, param_name: &str, replacement: &TypeInfo) -> TypeInfo {
+        match self {
+            TypeInfo::TypeParam(name) if name == param_name => replacement.clone(),
+            TypeInfo::Optional(inner) => TypeInfo::Optional(Box::new(
+                inner.substitute_type_param(param_name, replacement),
+            )),
+            TypeInfo::Array(elem) => TypeInfo::Array(Box::new(
+                elem.substitute_type_param(param_name, replacement),
+            )),
+            TypeInfo::FixedArray(elem, size) => TypeInfo::FixedArray(
+                Box::new(elem.substitute_type_param(param_name, replacement)),
+                *size,
+            ),
+            TypeInfo::Tuple(elems) => TypeInfo::Tuple(
+                elems
+                    .iter()
+                    .map(|e| e.substitute_type_param(param_name, replacement))
+                    .collect(),
+            ),
+            TypeInfo::Union(variants) => TypeInfo::Union(
+                variants
+                    .iter()
+                    .map(|v| v.substitute_type_param(param_name, replacement))
+                    .collect(),
+            ),
+            TypeInfo::Fallible { success, error } => TypeInfo::Fallible {
+                success: Box::new(success.substitute_type_param(param_name, replacement)),
+                error: Box::new(error.substitute_type_param(param_name, replacement)),
+            },
+            TypeInfo::Iterator(elem) => TypeInfo::Iterator(Box::new(
+                elem.substitute_type_param(param_name, replacement),
+            )),
+            _ => self.clone(),
+        }
+    }
+
+    /// Check whether the given type parameter name appears anywhere in this type.
+    pub fn contains_type_param(&self, param_name: &str) -> bool {
+        match self {
+            TypeInfo::TypeParam(name) => name == param_name,
+            TypeInfo::Optional(inner) | TypeInfo::Array(inner) | TypeInfo::Iterator(inner) => {
+                inner.contains_type_param(param_name)
+            }
+            TypeInfo::FixedArray(elem, _) => elem.contains_type_param(param_name),
+            TypeInfo::Tuple(elems) | TypeInfo::Union(elems) => {
+                elems.iter().any(|e| e.contains_type_param(param_name))
+            }
+            TypeInfo::Fallible { success, error } => {
+                success.contains_type_param(param_name) || error.contains_type_param(param_name)
+            }
+            _ => false,
+        }
+    }
+
     /// Generate Vole syntax for this type.
     pub fn to_vole_syntax(&self, table: &SymbolTable) -> String {
         match self {
@@ -1009,5 +1068,62 @@ mod tests {
 
         let leaves = table.leaf_modules();
         assert!(leaves.is_empty());
+    }
+
+    #[test]
+    fn substitute_type_param_primitive_unchanged() {
+        let ty = TypeInfo::Primitive(PrimitiveType::I64);
+        let result = ty.substitute_type_param("T", &TypeInfo::Primitive(PrimitiveType::Bool));
+        assert_eq!(result, TypeInfo::Primitive(PrimitiveType::I64));
+    }
+
+    #[test]
+    fn substitute_type_param_replaces_matching() {
+        let ty = TypeInfo::TypeParam("T".to_string());
+        let result = ty.substitute_type_param("T", &TypeInfo::Primitive(PrimitiveType::I64));
+        assert_eq!(result, TypeInfo::Primitive(PrimitiveType::I64));
+    }
+
+    #[test]
+    fn substitute_type_param_ignores_non_matching() {
+        let ty = TypeInfo::TypeParam("U".to_string());
+        let result = ty.substitute_type_param("T", &TypeInfo::Primitive(PrimitiveType::I64));
+        assert_eq!(result, TypeInfo::TypeParam("U".to_string()));
+    }
+
+    #[test]
+    fn substitute_type_param_recursive_optional() {
+        let ty = TypeInfo::Optional(Box::new(TypeInfo::TypeParam("T".to_string())));
+        let result = ty.substitute_type_param("T", &TypeInfo::Primitive(PrimitiveType::String));
+        assert_eq!(
+            result,
+            TypeInfo::Optional(Box::new(TypeInfo::Primitive(PrimitiveType::String)))
+        );
+    }
+
+    #[test]
+    fn substitute_type_param_recursive_array() {
+        let ty = TypeInfo::Array(Box::new(TypeInfo::TypeParam("T".to_string())));
+        let result = ty.substitute_type_param("T", &TypeInfo::Primitive(PrimitiveType::I32));
+        assert_eq!(
+            result,
+            TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I32)))
+        );
+    }
+
+    #[test]
+    fn substitute_type_param_recursive_tuple() {
+        let ty = TypeInfo::Tuple(vec![
+            TypeInfo::TypeParam("T".to_string()),
+            TypeInfo::Primitive(PrimitiveType::Bool),
+        ]);
+        let result = ty.substitute_type_param("T", &TypeInfo::Primitive(PrimitiveType::F64));
+        assert_eq!(
+            result,
+            TypeInfo::Tuple(vec![
+                TypeInfo::Primitive(PrimitiveType::F64),
+                TypeInfo::Primitive(PrimitiveType::Bool),
+            ])
+        );
     }
 }
