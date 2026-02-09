@@ -275,10 +275,12 @@ impl Cg<'_, '_, '_> {
                     *method_index,
                     *func_type_id,
                 )?;
-                // For global init receivers, free the temporary interface+closure.
-                if receiver_is_global_init_rc_iface {
-                    self.emit_rc_dec_for_type(obj.value, obj.type_id)?;
-                }
+                // Consume the owned RC receiver after the call. For temporaries
+                // (e.g. make_nums().collect()), this rc_dec's the interface's
+                // data_ptr so the underlying instance is freed. For borrowed
+                // receivers (variables), consume_rc_value is a no-op.
+                let mut obj = obj;
+                self.consume_rc_value(&mut obj)?;
                 return Ok(result);
             }
 
@@ -301,9 +303,9 @@ impl Cg<'_, '_, '_> {
                     method_name_id,
                     resolved.func_type_id(),
                 )?;
-                if receiver_is_global_init_rc_iface {
-                    self.emit_rc_dec_for_type(obj.value, obj.type_id)?;
-                }
+                // Consume the owned RC receiver after the call (same as above).
+                let mut obj = obj;
+                self.consume_rc_value(&mut obj)?;
                 return Ok(result);
             }
 
