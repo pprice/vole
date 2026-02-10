@@ -153,6 +153,7 @@ fn run() -> Result<(), String> {
         entrypoint,
         test_filter: cli.test.clone(),
         verbose: cli.verbose,
+        max_iterations: cli.max_iterations,
     };
     let mut reducer = Reducer::new(config);
     reducer.run()?;

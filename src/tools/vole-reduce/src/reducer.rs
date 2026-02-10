@@ -42,6 +42,7 @@ pub struct Reducer<'a> {
     pub entrypoint: PathBuf,
     pub test_filter: Option<String>,
     pub verbose: bool,
+    pub max_iterations: u32,
     pub stats: ReductionStats,
 }
 
@@ -57,6 +58,7 @@ pub struct ReducerConfig<'a> {
     pub entrypoint: PathBuf,
     pub test_filter: Option<String>,
     pub verbose: bool,
+    pub max_iterations: u32,
 }
 
 impl<'a> Reducer<'a> {
@@ -71,6 +73,7 @@ impl<'a> Reducer<'a> {
             entrypoint: config.entrypoint,
             test_filter: config.test_filter,
             verbose: config.verbose,
+            max_iterations: config.max_iterations,
             stats: ReductionStats::default(),
         }
     }
@@ -84,6 +87,7 @@ impl<'a> Reducer<'a> {
         passes::decl_elimination::run(self)?;
         passes::body_reduction::run(self)?;
         passes::single_file_collapse::run(self)?;
+        passes::line_delta::run(self)?;
 
         self.stats.total_lines_after = count_vole_lines(&self.workspace.result)?;
         Ok(())
