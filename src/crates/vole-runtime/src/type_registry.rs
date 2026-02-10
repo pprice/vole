@@ -257,55 +257,65 @@ mod tests {
 
     #[test]
     fn test_force_unlock_recovers_from_stuck_reader() {
-        // Simulate a siglongjmp abandoning a read lock by manually setting
-        // the lock state to "1 reader". Without force_unlock, any subsequent
-        // write would spin forever (deadlock).
-        let test_type_id = 0x1000_0003;
-        init_type_registry();
+        // Test force_unlock on a LOCAL lock to avoid poisoning the global
+        // TYPE_REGISTRY for parallel tests.
+        let lock = RegistryLock::new();
 
-        // Pre-populate the registry
-        register_instance_type(test_type_id, vec![FieldTypeTag::Rc]);
+        // Pre-populate
+        lock.write(|map| {
+            map.insert(1, InstanceTypeInfo { field_types: vec![FieldTypeTag::Rc] });
+        });
 
         // Simulate abandoned read lock (state = 1 means 1 reader held)
-        TYPE_REGISTRY.state.store(1, Ordering::Release);
+        lock.state.store(1, Ordering::Release);
 
         // Force unlock as recovery code would do after siglongjmp
-        force_unlock_type_registry();
+        lock.force_unlock();
 
         // Verify write works after recovery (would deadlock without fix)
-        let new_id = 0x1000_0004;
-        register_instance_type(new_id, vec![FieldTypeTag::Value, FieldTypeTag::Rc]);
-        let info = get_instance_type_info(new_id).unwrap();
+        lock.write(|map| {
+            map.insert(2, InstanceTypeInfo {
+                field_types: vec![FieldTypeTag::Value, FieldTypeTag::Rc],
+            });
+        });
+
+        let info = lock.read(|map| map.get(&2).cloned()).unwrap();
         assert_eq!(info.field_types.len(), 2);
 
         // Verify old data is still accessible
-        let old_info = get_instance_type_info(test_type_id).unwrap();
+        let old_info = lock.read(|map| map.get(&1).cloned()).unwrap();
         assert_eq!(old_info.field_types.len(), 1);
         assert_eq!(old_info.field_types[0], FieldTypeTag::Rc);
     }
 
     #[test]
     fn test_force_unlock_recovers_from_stuck_writer() {
-        // Simulate a siglongjmp abandoning a write lock (state = -1).
-        let test_type_id = 0x1000_0005;
-        init_type_registry();
+        // Test force_unlock on a LOCAL lock to avoid poisoning the global
+        // TYPE_REGISTRY for parallel tests.
+        let lock = RegistryLock::new();
 
-        register_instance_type(test_type_id, vec![FieldTypeTag::Value]);
+        // Pre-populate
+        lock.write(|map| {
+            map.insert(1, InstanceTypeInfo { field_types: vec![FieldTypeTag::Value] });
+        });
 
         // Simulate abandoned write lock (state = -1)
-        TYPE_REGISTRY.state.store(-1, Ordering::Release);
+        lock.state.store(-1, Ordering::Release);
 
         // Force unlock
-        force_unlock_type_registry();
+        lock.force_unlock();
 
         // Verify read works after recovery
-        let info = get_instance_type_info(test_type_id).unwrap();
+        let info = lock.read(|map| map.get(&1).cloned()).unwrap();
         assert_eq!(info.field_types[0], FieldTypeTag::Value);
 
         // Verify write works after recovery
-        let new_id = 0x1000_0006;
-        register_instance_type(new_id, vec![FieldTypeTag::Rc, FieldTypeTag::Rc]);
-        let info = get_instance_type_info(new_id).unwrap();
+        lock.write(|map| {
+            map.insert(2, InstanceTypeInfo {
+                field_types: vec![FieldTypeTag::Rc, FieldTypeTag::Rc],
+            });
+        });
+        let info = lock.read(|map| map.get(&2).cloned()).unwrap();
         assert_eq!(info.field_types.len(), 2);
     }
 }
