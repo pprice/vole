@@ -468,7 +468,7 @@ impl Compiler<'_> {
         // instances must be declared and compiled before PASS 2 compiles the
         // non-generic function bodies that reference them.
         // ============================================
-        self.declare_monomorphized_instances()?;
+        self.declare_monomorphized_instances(true)?;
         self.compile_module_monomorphized_instances()?;
 
         // ============================================
@@ -1319,7 +1319,7 @@ impl Compiler<'_> {
     }
 
     /// Declare all monomorphized function instances
-    fn declare_monomorphized_instances(&mut self) -> CodegenResult<()> {
+    fn declare_monomorphized_instances(&mut self, modules_only: bool) -> CodegenResult<()> {
         // Collect instances to avoid borrow issues
         let instances = self
             .analyzed
@@ -1332,6 +1332,20 @@ impl Compiler<'_> {
             // They're called directly via native_registry
             if self.is_external_func(instance.original_name) {
                 continue;
+            }
+
+            // When compiling modules only, skip monomorphs whose original function
+            // lives in the main program — they would be declared but never compiled.
+            if modules_only {
+                let module_id = self.analyzed.name_table().module_of(instance.original_name);
+                let module_path = self
+                    .analyzed
+                    .name_table()
+                    .module_path(module_id)
+                    .to_string();
+                if !self.analyzed.module_programs.contains_key(&module_path) {
+                    continue;
+                }
             }
 
             self.declare_monomorph_instance(&instance, false);
@@ -2203,7 +2217,7 @@ impl Compiler<'_> {
     fn declare_all_monomorphized_instances(&mut self, _program: &Program) -> CodegenResult<()> {
         // Note: Nested generic calls are now discovered during sema analysis,
         // so we don't need to expand instances here.
-        self.declare_monomorphized_instances()?;
+        self.declare_monomorphized_instances(false)?;
         self.declare_class_method_monomorphized_instances()?;
         self.declare_static_method_monomorphized_instances()?;
         Ok(())
