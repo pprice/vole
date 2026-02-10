@@ -8,3 +8,4 @@ pub mod body_reduction;
 pub mod decl_elimination;
 pub mod import_trimming;
 pub mod module_elimination;
+pub mod single_file_collapse;

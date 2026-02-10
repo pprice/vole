@@ -83,6 +83,7 @@ impl<'a> Reducer<'a> {
         passes::import_trimming::run(self)?;
         passes::decl_elimination::run(self)?;
         passes::body_reduction::run(self)?;
+        passes::single_file_collapse::run(self)?;
 
         self.stats.total_lines_after = count_vole_lines(&self.workspace.result)?;
         Ok(())
