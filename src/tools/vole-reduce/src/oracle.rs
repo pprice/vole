@@ -254,8 +254,11 @@ impl Oracle {
 
     /// Returns `true` if all user-specified oracle criteria match.
     fn user_criteria_match(&self, result: &OracleResult) -> bool {
+        // Check stderr pattern against both stderr and stdout, since many
+        // tools (including vole) output error messages to stdout.
         if let Some(ref pat) = self.stderr_pattern
             && !pat.is_match(&result.stderr)
+            && !pat.is_match(&result.stdout)
         {
             return false;
         }
@@ -342,6 +345,10 @@ fn build_no_repro_message(result: &OracleResult) -> String {
     if !result.stderr.is_empty() {
         let snippet = extract_stderr_snippet(&result.stderr);
         msg.push_str(&format!("  stderr:    {snippet}\n"));
+    }
+    if !result.stdout.is_empty() {
+        let snippet = extract_stderr_snippet(&result.stdout);
+        msg.push_str(&format!("  stdout:    {snippet}\n"));
     }
 
     msg
