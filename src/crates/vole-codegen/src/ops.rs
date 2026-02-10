@@ -159,13 +159,19 @@ impl Cg<'_, '_, '_> {
                 let y = self.expr(&left_bin.right)?;
                 let z = self.expr(&bin.right)?;
 
+                // Promote operands to the target float type (e.g. i64 → f64)
+                let arena = self.env.analyzed.type_arena();
+                let x_val = convert_to_type(self.builder, x, x.ty, arena);
+                let y_val = convert_to_type(self.builder, y, x.ty, arena);
+                let z_val = convert_to_type(self.builder, z, x.ty, arena);
+
                 let result = if bin.op == BinaryOp::Add {
                     // (x * y) + z → fma(x, y, z)
-                    self.builder.ins().fma(x.value, y.value, z.value)
+                    self.builder.ins().fma(x_val, y_val, z_val)
                 } else {
                     // (x * y) - z → fma(x, y, -z)
-                    let neg_z = self.builder.ins().fneg(z.value);
-                    self.builder.ins().fma(x.value, y.value, neg_z)
+                    let neg_z = self.builder.ins().fneg(z_val);
+                    self.builder.ins().fma(x_val, y_val, neg_z)
                 };
 
                 return Ok(Some(CompiledValue::new(result, x.ty, x.type_id)));
@@ -182,8 +188,14 @@ impl Cg<'_, '_, '_> {
                 let x = self.expr(&right_bin.left)?;
                 let y = self.expr(&right_bin.right)?;
 
+                // Promote operands to the target float type (e.g. i64 → f64)
+                let arena = self.env.analyzed.type_arena();
+                let x_val = convert_to_type(self.builder, x, z.ty, arena);
+                let y_val = convert_to_type(self.builder, y, z.ty, arena);
+                let z_val = convert_to_type(self.builder, z, z.ty, arena);
+
                 // z + (x * y) → fma(x, y, z)
-                let result = self.builder.ins().fma(x.value, y.value, z.value);
+                let result = self.builder.ins().fma(x_val, y_val, z_val);
 
                 return Ok(Some(CompiledValue::new(result, z.ty, z.type_id)));
             }
@@ -199,9 +211,15 @@ impl Cg<'_, '_, '_> {
                 let x = self.expr(&right_bin.left)?;
                 let y = self.expr(&right_bin.right)?;
 
+                // Promote operands to the target float type (e.g. i64 → f64)
+                let arena = self.env.analyzed.type_arena();
+                let x_val = convert_to_type(self.builder, x, z.ty, arena);
+                let y_val = convert_to_type(self.builder, y, z.ty, arena);
+                let z_val = convert_to_type(self.builder, z, z.ty, arena);
+
                 // z - (x * y) → fma(-x, y, z)
-                let neg_x = self.builder.ins().fneg(x.value);
-                let result = self.builder.ins().fma(neg_x, y.value, z.value);
+                let neg_x = self.builder.ins().fneg(x_val);
+                let result = self.builder.ins().fma(neg_x, y_val, z_val);
 
                 return Ok(Some(CompiledValue::new(result, z.ty, z.type_id)));
             }

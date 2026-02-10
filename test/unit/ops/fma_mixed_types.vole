@@ -1,0 +1,33 @@
+tests {
+    test "fma with int * float + float" {
+        let x: i64 = 3
+        let y: f64 = 2.5
+        let z: f64 = 1.0
+        let result = (x * y) + z
+        assert(result == 8.5)
+    }
+
+    test "fma with float + int * float" {
+        let x: i64 = 4
+        let y: f64 = 1.5
+        let z: f64 = 2.0
+        let result = z + (x * y)
+        assert(result == 8.0)
+    }
+
+    test "fma with float * float - int" {
+        let x: f64 = 5.0
+        let y: f64 = 3.0
+        let z: i64 = 10
+        let result = (x * y) - z
+        assert(result == 5.0)
+    }
+
+    test "fma with float - int * float" {
+        let x: i64 = 2
+        let y: f64 = 3.0
+        let z: f64 = 20.0
+        let result = z - (x * y)
+        assert(result == 14.0)
+    }
+}
