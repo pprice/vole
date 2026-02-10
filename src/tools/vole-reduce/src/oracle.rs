@@ -23,7 +23,6 @@ use crate::cli::{Cli, OracleMode};
 ///
 /// Used by reduction passes to classify oracle outcomes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(dead_code)] // Public API for reduction passes (vol-lck0).
 pub enum MatchResult {
     /// The bug reproduces identically.
     Same,
@@ -39,7 +38,7 @@ pub struct OracleResult {
     pub exit_code: Option<i32>,
     pub signal: Option<i32>,
     pub stderr: String,
-    #[allow(dead_code)] // Used by reduction pass logging (vol-lck0).
+    #[allow(dead_code)] // Available for future passes (import trimming, etc.).
     pub stdout: String,
     pub timed_out: bool,
     pub duration: Duration,
@@ -217,7 +216,6 @@ fn kill_process_group(pid: u32) {
 // Checking / matching
 // ---------------------------------------------------------------------------
 
-#[allow(dead_code)] // Public API for reduction passes (vol-lck0).
 impl Oracle {
     /// Check whether `result` matches the baseline according to the oracle mode.
     pub fn check(&self, result: &OracleResult, baseline: &Baseline) -> MatchResult {
@@ -281,7 +279,6 @@ impl Oracle {
 }
 
 /// Classify a non-matching result as `Different` (some failure) or `Pass`.
-#[allow(dead_code)] // Called by Oracle::check (vol-lck0).
 fn classify_non_match(result: &OracleResult) -> MatchResult {
     let has_failure =
         result.exit_code.is_some_and(|c| c != 0) || result.signal.is_some() || result.timed_out;
