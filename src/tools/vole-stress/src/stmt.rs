@@ -1745,9 +1745,16 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let idx = self.rng.gen_range(0..class_locals.len());
         let (instance_name, _mod_id, _sym_id, methods) = &class_locals[idx];
 
-        // Pick a random method
-        let method_idx = self.rng.gen_range(0..methods.len());
-        let method = &methods[method_idx];
+        // Pick a random method, excluding the current method to prevent self-recursion
+        let current_name = ctx.current_function_name.as_deref();
+        let eligible: Vec<_> = methods
+            .iter()
+            .filter(|m| Some(m.name.as_str()) != current_name)
+            .collect();
+        if eligible.is_empty() {
+            return None;
+        }
+        let method = eligible[self.rng.gen_range(0..eligible.len())];
 
         // Generate type-correct arguments for non-self parameters
         let expr_ctx = ctx.to_expr_context();
@@ -1838,13 +1845,17 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             _ => return None,
         };
 
-        if iface_info.methods.is_empty() {
+        // Pick a random method, excluding the current method to prevent self-recursion
+        let current_name = ctx.current_function_name.as_deref();
+        let eligible: Vec<_> = iface_info
+            .methods
+            .iter()
+            .filter(|m| Some(m.name.as_str()) != current_name)
+            .collect();
+        if eligible.is_empty() {
             return None;
         }
-
-        // Pick a random method
-        let method_idx = self.rng.gen_range(0..iface_info.methods.len());
-        let method = &iface_info.methods[method_idx];
+        let method = eligible[self.rng.gen_range(0..eligible.len())];
 
         // Generate type-correct arguments
         let args: Vec<String> = method

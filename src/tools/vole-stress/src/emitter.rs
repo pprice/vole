@@ -856,7 +856,7 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             self.indent += 1;
             // Methods don't have their own type params (they use class type params),
             // but for now we pass empty to avoid complications with class type params.
-            self.emit_function_body(&method.return_type, &method.params, None, &[]);
+            self.emit_function_body(&method.return_type, &method.params, Some(&method.name), &[]);
             self.indent -= 1;
             self.emit_line("}");
         }
