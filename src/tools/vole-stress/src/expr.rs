@@ -1677,10 +1677,9 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
 
     /// Generate an array expression.
     fn generate_array(&mut self, elem: &TypeInfo, ctx: &ExprContext, depth: usize) -> String {
-        let len = self.rng.gen_range(0..=4);
-        if len == 0 {
-            return "[]".to_string();
-        }
+        // Minimum 2 elements: array index generation uses 0..=1 hardcoded indices,
+        // so arrays must always have at least 2 elements to prevent OOB panics.
+        let len = self.rng.gen_range(2..=4);
 
         let elements: Vec<String> = (0..len)
             .map(|_| self.generate(elem, ctx, depth + 1))
