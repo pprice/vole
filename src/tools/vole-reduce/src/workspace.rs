@@ -115,6 +115,8 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
 /// Set up the reduction workspace.
 ///
 /// Creates the output directory structure and copies the input into it.
+///
+/// Returns a [`Workspace`] describing the created directory layout.
 pub fn setup(input: &Path, output: Option<&Path>, force: bool) -> Result<Workspace, String> {
     let output_root = match output {
         Some(p) => p.to_path_buf(),
@@ -177,4 +179,85 @@ pub fn setup(input: &Path, output: Option<&Path>, force: bool) -> Result<Workspa
         divergent,
         log,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Create a temporary directory with a `.vole` file for testing.
+    fn make_temp_input() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let vole_file = dir.path().join("main.vole");
+        fs::write(&vole_file, "func main() { }\n").unwrap();
+        (dir, vole_file)
+    }
+
+    #[test]
+    fn setup_creates_workspace_structure() {
+        let (input_dir, _) = make_temp_input();
+        let output_dir = tempfile::tempdir().unwrap();
+        let output_path = output_dir.path().join("ws");
+
+        let ws = setup(input_dir.path(), Some(&output_path), false).unwrap();
+
+        assert!(ws.original.exists());
+        assert!(ws.result.exists());
+        assert!(ws.divergent.exists());
+        assert!(ws.log.exists());
+        assert!(ws.original.join("main.vole").exists());
+        assert!(ws.result.join("main.vole").exists());
+    }
+
+    #[test]
+    fn setup_rejects_existing_output_without_force() {
+        let (input_dir, _) = make_temp_input();
+        let output_dir = tempfile::tempdir().unwrap();
+        let output_path = output_dir.path().join("ws");
+
+        // Create the first workspace.
+        setup(input_dir.path(), Some(&output_path), false).unwrap();
+
+        // Second setup without --force should fail.
+        let result = setup(input_dir.path(), Some(&output_path), false);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("already exists"));
+    }
+
+    #[test]
+    fn setup_force_overwrites_existing_output() {
+        let (input_dir, _) = make_temp_input();
+        let output_dir = tempfile::tempdir().unwrap();
+        let output_path = output_dir.path().join("ws");
+
+        // Create the first workspace.
+        setup(input_dir.path(), Some(&output_path), false).unwrap();
+
+        // Second setup with --force should succeed.
+        let ws = setup(input_dir.path(), Some(&output_path), true).unwrap();
+        assert!(ws.result.exists());
+    }
+
+    #[test]
+    fn setup_copies_files_correctly() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.vole");
+        let b = dir.path().join("b.vole");
+        fs::write(&a, "file a content\n").unwrap();
+        fs::write(&b, "file b content\n").unwrap();
+
+        let output_dir = tempfile::tempdir().unwrap();
+        let output_path = output_dir.path().join("ws");
+
+        let ws = setup(dir.path(), Some(&output_path), false).unwrap();
+
+        let original_a = fs::read_to_string(ws.original.join("a.vole")).unwrap();
+        let result_b = fs::read_to_string(ws.result.join("b.vole")).unwrap();
+        assert_eq!(original_a, "file a content\n");
+        assert_eq!(result_b, "file b content\n");
+    }
 }

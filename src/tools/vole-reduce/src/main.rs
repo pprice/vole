@@ -125,6 +125,18 @@ fn resolve_entrypoint(input: &Path, result_dir: &Path) -> Result<std::path::Path
     ))
 }
 
+/// Append text to the log file.
+fn append_to_log(log_path: &Path, text: &str) -> Result<(), String> {
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(log_path)
+        .map_err(|e| format!("failed to open log file '{}': {e}", log_path.display()))?;
+    file.write_all(text.as_bytes())
+        .map_err(|e| format!("failed to write to log file '{}': {e}", log_path.display()))?;
+    Ok(())
+}
+
 fn run() -> Result<(), String> {
     let cli = Cli::parse();
     cli::validate(&cli)?;
@@ -159,7 +171,10 @@ fn run() -> Result<(), String> {
     reducer.run()?;
     reducer.print_stats();
 
-    println!("Result: {}", ws.result.display());
+    // Append the summary to the log file.
+    let summary = reducer.format_log_summary();
+    append_to_log(&ws.log, &summary)?;
+
     Ok(())
 }
 

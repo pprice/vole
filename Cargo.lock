@@ -1689,6 +1689,7 @@ dependencies = [
  "clap",
  "libc",
  "regex",
+ "tempfile",
  "vole-frontend",
 ]
 

@@ -403,3 +403,166 @@ fn expand_placeholders(template: &str, file_path: &str, dir_path: &str) -> Strin
         .replace("{file}", file_path)
         .replace("{dir}", dir_path)
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a minimal Oracle for testing the check logic.
+    fn make_oracle(
+        stderr_pattern: Option<&str>,
+        signal: Option<i32>,
+        exit_code: Option<i32>,
+        mode: OracleMode,
+    ) -> Oracle {
+        Oracle {
+            stderr_pattern: stderr_pattern.map(|p| Regex::new(p).unwrap()),
+            signal,
+            exit_code,
+            timeout_secs: None,
+            predicate: None,
+            mode,
+            command_template: String::new(),
+        }
+    }
+
+    fn make_result(exit_code: Option<i32>, signal: Option<i32>, stderr: &str) -> OracleResult {
+        OracleResult {
+            exit_code,
+            signal,
+            stderr: stderr.to_string(),
+            stdout: String::new(),
+            timed_out: false,
+            duration: Duration::from_secs(0),
+        }
+    }
+
+    fn make_baseline(exit_code: Option<i32>, signal: Option<i32>) -> Baseline {
+        Baseline {
+            exit_code,
+            signal,
+            stderr_snippet: String::new(),
+        }
+    }
+
+    // -- Strict mode tests --
+
+    #[test]
+    fn strict_same_when_all_match() {
+        let oracle = make_oracle(None, None, Some(1), OracleMode::Strict);
+        let result = make_result(Some(1), None, "");
+        let baseline = make_baseline(Some(1), None);
+        assert_eq!(oracle.check(&result, &baseline), MatchResult::Same);
+    }
+
+    #[test]
+    fn strict_pass_when_exit_code_differs() {
+        let oracle = make_oracle(None, None, Some(1), OracleMode::Strict);
+        let result = make_result(Some(0), None, "");
+        let baseline = make_baseline(Some(1), None);
+        assert_eq!(oracle.check(&result, &baseline), MatchResult::Pass);
+    }
+
+    #[test]
+    fn strict_different_when_baseline_exit_code_mismatch() {
+        // Oracle criteria match, but baseline exit code differs.
+        let oracle = make_oracle(None, None, Some(1), OracleMode::Strict);
+        let result = make_result(Some(1), None, "");
+        let baseline = make_baseline(Some(2), None);
+        assert_eq!(oracle.check(&result, &baseline), MatchResult::Different);
+    }
+
+    #[test]
+    fn strict_same_with_stderr_pattern() {
+        let oracle = make_oracle(Some("undefined"), None, Some(1), OracleMode::Strict);
+        let result = make_result(Some(1), None, "error: undefined variable 'x'");
+        let baseline = make_baseline(Some(1), None);
+        assert_eq!(oracle.check(&result, &baseline), MatchResult::Same);
+    }
+
+    #[test]
+    fn strict_pass_when_stderr_no_match() {
+        let oracle = make_oracle(Some("segfault"), None, Some(1), OracleMode::Strict);
+        let result = make_result(Some(0), None, "all good");
+        let baseline = make_baseline(Some(1), None);
+        assert_eq!(oracle.check(&result, &baseline), MatchResult::Pass);
+    }
+
+    // -- Loose mode tests --
+
+    #[test]
+    fn loose_same_when_criteria_match() {
+        let oracle = make_oracle(None, None, Some(1), OracleMode::Loose);
+        let result = make_result(Some(1), None, "");
+        let baseline = make_baseline(Some(99), None);
+        // Loose mode ignores baseline.
+        assert_eq!(oracle.check(&result, &baseline), MatchResult::Same);
+    }
+
+    #[test]
+    fn loose_different_when_different_failure() {
+        let oracle = make_oracle(None, None, Some(1), OracleMode::Loose);
+        let result = make_result(Some(2), None, "");
+        let baseline = make_baseline(Some(1), None);
+        assert_eq!(oracle.check(&result, &baseline), MatchResult::Different);
+    }
+
+    // -- Signal tests --
+
+    #[test]
+    fn strict_same_on_signal_match() {
+        let oracle = make_oracle(None, Some(11), None, OracleMode::Strict);
+        let result = make_result(None, Some(11), "");
+        let baseline = make_baseline(None, Some(11));
+        assert_eq!(oracle.check(&result, &baseline), MatchResult::Same);
+    }
+
+    #[test]
+    fn strict_different_on_signal_baseline_mismatch() {
+        let oracle = make_oracle(None, Some(11), None, OracleMode::Strict);
+        let result = make_result(None, Some(11), "");
+        let baseline = make_baseline(None, Some(6));
+        assert_eq!(oracle.check(&result, &baseline), MatchResult::Different);
+    }
+
+    // -- Classify non-match --
+
+    #[test]
+    fn classify_pass_when_exit_zero() {
+        let result = make_result(Some(0), None, "");
+        assert_eq!(classify_non_match(&result), MatchResult::Pass);
+    }
+
+    #[test]
+    fn classify_different_when_nonzero_exit() {
+        let result = make_result(Some(2), None, "");
+        assert_eq!(classify_non_match(&result), MatchResult::Different);
+    }
+
+    // -- Expand placeholders --
+
+    #[test]
+    fn expand_replaces_file_and_dir() {
+        let result = expand_placeholders("vole test {file} --dir {dir}", "/a/b.vole", "/a");
+        assert_eq!(result, "vole test /a/b.vole --dir /a");
+    }
+
+    // -- Establish baseline --
+
+    #[test]
+    fn establish_baseline_rejects_non_reproducing() {
+        let oracle = make_oracle(Some("segfault"), None, None, OracleMode::Strict);
+        // Use a command that succeeds cleanly (the bug won't reproduce).
+        let oracle = Oracle {
+            command_template: "true".to_string(),
+            ..oracle
+        };
+        let result = oracle.establish_baseline(Path::new("/tmp"), "/tmp/test.vole", "/tmp");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("does not reproduce"));
+    }
+}

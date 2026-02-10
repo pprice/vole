@@ -10,5 +10,8 @@ libc = "0.2"
 regex = "1"
 vole-frontend = { path = "../../crates/vole-frontend" }
 
+[dev-dependencies]
+tempfile = "3"
+
 [lints]
 workspace = true

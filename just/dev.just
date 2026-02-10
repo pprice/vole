@@ -145,3 +145,7 @@ valgrind file="test/unit/mem/basics/cleanup.vole":
     #!/usr/bin/env bash
     cargo build --bin vole 2>&1
     valgrind --leak-check=full --error-exitcode=1 ./target/debug/vole test "{{file}}"
+
+# Run test case minimizer (see vole-reduce --help for full options)
+reduce *ARGS:
+    cargo run -p vole-reduce -- {{ARGS}}

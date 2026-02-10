@@ -122,3 +122,102 @@ pub fn validate(cli: &Cli) -> Result<(), String> {
 
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a minimal CLI struct for testing validation logic.
+    fn make_cli(path: &str) -> Cli {
+        Cli {
+            path: PathBuf::from(path),
+            stderr: None,
+            signal: None,
+            exit_code: None,
+            timeout: None,
+            predicate: None,
+            test: None,
+            command: None,
+            output: None,
+            force: false,
+            max_iterations: 500,
+            verbose: false,
+            oracle_mode: OracleMode::Strict,
+        }
+    }
+
+    #[test]
+    fn validate_rejects_no_oracle() {
+        let cli = make_cli("/tmp");
+        let result = validate(&cli);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("at least one oracle option"));
+    }
+
+    #[test]
+    fn validate_accepts_exit_code_oracle() {
+        let mut cli = make_cli("/tmp");
+        cli.exit_code = Some(1);
+        let result = validate(&cli);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_stderr_oracle() {
+        let mut cli = make_cli("/tmp");
+        cli.stderr = Some("panic".to_string());
+        let result = validate(&cli);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_invalid_stderr_regex() {
+        let mut cli = make_cli("/tmp");
+        cli.stderr = Some("[invalid".to_string());
+        let result = validate(&cli);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("invalid --stderr regex"));
+    }
+
+    #[test]
+    fn validate_rejects_negative_timeout() {
+        let mut cli = make_cli("/tmp");
+        cli.timeout = Some(-1.0);
+        let result = validate(&cli);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("--timeout must be positive"));
+    }
+
+    #[test]
+    fn validate_rejects_nonexistent_path() {
+        let mut cli = make_cli("/nonexistent/path/does/not/exist");
+        cli.exit_code = Some(1);
+        let result = validate(&cli);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("does not exist"));
+    }
+
+    #[test]
+    fn has_oracle_all_none() {
+        let cli = make_cli("/tmp");
+        assert!(!has_oracle(&cli));
+    }
+
+    #[test]
+    fn has_oracle_with_signal() {
+        let mut cli = make_cli("/tmp");
+        cli.signal = Some(11);
+        assert!(has_oracle(&cli));
+    }
+
+    #[test]
+    fn has_oracle_with_predicate() {
+        let mut cli = make_cli("/tmp");
+        cli.predicate = Some("test -f crash.log".to_string());
+        assert!(has_oracle(&cli));
+    }
+}

@@ -6,6 +6,7 @@
 //! and invoked from here.
 
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use crate::oracle::{Baseline, Oracle};
 use crate::passes;
@@ -26,6 +27,14 @@ pub struct ReductionStats {
     pub total_lines_before: u64,
     /// Total line count of all `.vole` files after reduction.
     pub total_lines_after: u64,
+    /// Total number of `.vole` files before reduction.
+    pub files_before: u32,
+    /// Total number of `.vole` files after reduction.
+    pub files_after: u32,
+    /// Number of divergent failure snapshots saved.
+    pub divergent_failures: u32,
+    /// Total wall-clock time spent in oracle invocations.
+    pub total_oracle_time: Duration,
 }
 
 // ---------------------------------------------------------------------------
@@ -81,6 +90,9 @@ impl<'a> Reducer<'a> {
     /// Run all reduction passes in order.
     pub fn run(&mut self) -> Result<(), String> {
         self.stats.total_lines_before = count_vole_lines(&self.workspace.result)?;
+        self.stats.files_before = count_vole_files(&self.workspace.result)?;
+
+        let start = Instant::now();
 
         passes::module_elimination::run(self)?;
         passes::import_trimming::run(self)?;
@@ -89,28 +101,94 @@ impl<'a> Reducer<'a> {
         passes::single_file_collapse::run(self)?;
         passes::line_delta::run(self)?;
 
+        self.stats.total_oracle_time = start.elapsed();
         self.stats.total_lines_after = count_vole_lines(&self.workspace.result)?;
+        self.stats.files_after = count_vole_files(&self.workspace.result)?;
+        self.stats.divergent_failures = count_divergent_snapshots(&self.workspace.divergent)?;
         Ok(())
     }
 
     /// Print a summary of the reduction statistics.
     pub fn print_stats(&self) {
-        println!("Reduction complete.");
-        println!("  oracle invocations:    {}", self.stats.oracle_invocations);
-        println!(
-            "  successful reductions: {}",
-            self.stats.successful_reductions
-        );
-        println!("  lines before:          {}", self.stats.total_lines_before);
-        println!("  lines after:           {}", self.stats.total_lines_after);
-
-        if self.stats.total_lines_before > 0 {
-            let pct = 100.0
-                - (self.stats.total_lines_after as f64 / self.stats.total_lines_before as f64)
-                    * 100.0;
-            println!("  reduction:             {pct:.1}%");
-        }
+        let s = &self.stats;
+        println!("--- Reduction Summary ---");
         println!();
+
+        // Lines
+        print!(
+            "  Lines:               {} -> {}",
+            s.total_lines_before, s.total_lines_after
+        );
+        if s.total_lines_before > 0 {
+            let pct = 100.0 - (s.total_lines_after as f64 / s.total_lines_before as f64) * 100.0;
+            println!(" ({pct:.1}% reduction)");
+        } else {
+            println!();
+        }
+
+        // Files
+        println!(
+            "  Files:               {} -> {}",
+            s.files_before, s.files_after
+        );
+
+        // Oracle
+        println!(
+            "  Oracle invocations:  {} ({:.1}s total)",
+            s.oracle_invocations,
+            s.total_oracle_time.as_secs_f64(),
+        );
+        println!("  Successful removals: {}", s.successful_reductions);
+
+        // Divergent failures
+        if s.divergent_failures > 0 {
+            println!("  Divergent failures:  {}", s.divergent_failures);
+        }
+
+        // Result path
+        println!("  Result:              {}", self.workspace.result.display());
+        println!();
+    }
+
+    /// Format a summary string suitable for writing to the log file.
+    pub fn format_log_summary(&self) -> String {
+        let s = &self.stats;
+        let mut out = String::new();
+        out.push_str("--- Reduction Summary ---\n\n");
+
+        out.push_str(&format!(
+            "  Lines:               {} -> {}",
+            s.total_lines_before, s.total_lines_after,
+        ));
+        if s.total_lines_before > 0 {
+            let pct = 100.0 - (s.total_lines_after as f64 / s.total_lines_before as f64) * 100.0;
+            out.push_str(&format!(" ({pct:.1}% reduction)"));
+        }
+        out.push('\n');
+        out.push_str(&format!(
+            "  Files:               {} -> {}\n",
+            s.files_before, s.files_after,
+        ));
+        out.push_str(&format!(
+            "  Oracle invocations:  {} ({:.1}s total)\n",
+            s.oracle_invocations,
+            s.total_oracle_time.as_secs_f64(),
+        ));
+        out.push_str(&format!(
+            "  Successful removals: {}\n",
+            s.successful_reductions,
+        ));
+        if s.divergent_failures > 0 {
+            out.push_str(&format!(
+                "  Divergent failures:  {}\n",
+                s.divergent_failures,
+            ));
+        }
+        out.push_str(&format!(
+            "  Result:              {}\n",
+            self.workspace.result.display(),
+        ));
+        out
     }
 }
 
@@ -129,6 +207,35 @@ fn count_vole_lines(dir: &Path) -> Result<u64, String> {
         }
     }
     Ok(total)
+}
+
+/// Count `.vole` files in a directory tree.
+fn count_vole_files(dir: &Path) -> Result<u32, String> {
+    let mut count: u32 = 0;
+    for entry in walkdir(dir)? {
+        if entry.extension().is_some_and(|ext| ext == "vole") {
+            count += 1;
+        }
+    }
+    Ok(count)
+}
+
+/// Count divergent snapshot directories.
+fn count_divergent_snapshots(divergent_dir: &Path) -> Result<u32, String> {
+    if !divergent_dir.exists() {
+        return Ok(0);
+    }
+    let entries = std::fs::read_dir(divergent_dir)
+        .map_err(|e| format!("failed to read '{}': {e}", divergent_dir.display()))?;
+    let mut count: u32 = 0;
+    for entry in entries {
+        let entry = entry
+            .map_err(|e| format!("failed to read entry in '{}': {e}", divergent_dir.display()))?;
+        if entry.path().is_dir() {
+            count += 1;
+        }
+    }
+    Ok(count)
 }
 
 /// Recursively collect all file paths under `dir`.
