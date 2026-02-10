@@ -758,7 +758,7 @@ impl Cg<'_, '_, '_> {
 
             let expected_ty = expected_types.get(i + user_param_offset).copied();
 
-            // Narrow/extend integer types if needed
+            // Narrow/extend integer types or promote/demote floats if needed
             let arg_value = if let Some(expected) = expected_ty {
                 if compiled.ty.is_int() && expected.is_int() && expected.bits() < compiled.ty.bits()
                 {
@@ -768,6 +768,10 @@ impl Cg<'_, '_, '_> {
                     && expected.bits() > compiled.ty.bits()
                 {
                     self.builder.ins().sextend(expected, compiled.value)
+                } else if compiled.ty == types::F32 && expected == types::F64 {
+                    self.builder.ins().fpromote(types::F64, compiled.value)
+                } else if compiled.ty == types::F64 && expected == types::F32 {
+                    self.builder.ins().fdemote(types::F32, compiled.value)
                 } else {
                     compiled.value
                 }
@@ -937,7 +941,7 @@ impl Cg<'_, '_, '_> {
                 let default_expr: &Expr = unsafe { &**default_ptr };
                 let compiled = self.expr(default_expr)?;
 
-                // Narrow/extend integer types if needed
+                // Narrow/extend integer types or promote/demote floats if needed
                 let arg_value = if compiled.ty.is_int()
                     && expected_ty.is_int()
                     && expected_ty.bits() < compiled.ty.bits()
@@ -948,6 +952,10 @@ impl Cg<'_, '_, '_> {
                     && expected_ty.bits() > compiled.ty.bits()
                 {
                     self.builder.ins().sextend(expected_ty, compiled.value)
+                } else if compiled.ty == types::F32 && expected_ty == types::F64 {
+                    self.builder.ins().fpromote(types::F64, compiled.value)
+                } else if compiled.ty == types::F64 && expected_ty == types::F32 {
+                    self.builder.ins().fdemote(types::F32, compiled.value)
                 } else {
                     compiled.value
                 };

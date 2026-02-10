@@ -1451,6 +1451,10 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                         } else {
                             arg
                         }
+                    } else if actual_ty == types::F32 && exp == types::F64 {
+                        self.builder.ins().fpromote(types::F64, arg)
+                    } else if actual_ty == types::F64 && exp == types::F32 {
+                        self.builder.ins().fdemote(types::F32, arg)
                     } else {
                         arg
                     }
@@ -1593,6 +1597,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 .builder
                 .ins()
                 .bitcast(types::F64, MemFlags::new(), value);
+        }
+        // Coerce between float types
+        if value_ty == types::F32 && expected_ty == types::F64 {
+            return self.builder.ins().fpromote(types::F64, value);
+        }
+        if value_ty == types::F64 && expected_ty == types::F32 {
+            return self.builder.ins().fdemote(types::F32, value);
         }
         value
     }

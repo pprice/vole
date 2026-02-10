@@ -1,0 +1,48 @@
+// Regression test: f32 values passed through generic type parameters
+// must be correctly promoted/demoted when Cranelift types differ.
+
+class Box32 {
+    field1: f32,
+
+    func get() -> f32 {
+        return self.field1
+    }
+}
+
+class Box64 {
+    field1: f64,
+
+    func get() -> f64 {
+        return self.field1
+    }
+}
+
+func identity<T>(x: T) -> T {
+    return x
+}
+
+tests {
+    test "f32 through generic identity" {
+        let x: f32 = 1.5
+        let result = identity(x)
+        assert(result == 1.5_f32)
+    }
+
+    test "f64 through generic identity" {
+        let x: f64 = 2.5
+        let result = identity(x)
+        assert(result == 2.5)
+    }
+
+    test "f32 class field access" {
+        let b = Box32 { field1: 3.14_f32 }
+        let v = b.get()
+        assert(v == 3.14_f32)
+    }
+
+    test "f64 class field access" {
+        let b = Box64 { field1: 2.718 }
+        let v = b.get()
+        assert(v == 2.718)
+    }
+}
