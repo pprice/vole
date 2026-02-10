@@ -6,6 +6,7 @@ description = "Test case minimizer for Vole compiler bugs"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
+libc = "0.2"
 regex = "1"
 vole-frontend = { path = "../../crates/vole-frontend" }
 

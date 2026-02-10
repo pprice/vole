@@ -2,15 +2,18 @@
 //! vole-reduce: Test case minimizer for Vole compiler bugs.
 
 mod cli;
+mod oracle;
 mod workspace;
 
+use std::path::Path;
 use std::process::ExitCode;
 
 use clap::Parser;
 
 use cli::{Cli, OracleMode};
+use oracle::Oracle;
 
-fn print_summary(cli: &Cli, ws: &workspace::Workspace) {
+fn print_summary(cli: &Cli, ws: &workspace::Workspace, oracle: &Oracle) {
     println!("vole-reduce: Test case minimizer");
     println!();
     println!("  input:          {}", cli.path.display());
@@ -44,16 +47,8 @@ fn print_summary(cli: &Cli, ws: &workspace::Workspace) {
     }
     println!();
 
-    // Command summary
-    if let Some(ref cmd) = cli.command {
-        println!("  command:        {}", cmd);
-    } else {
-        let filter = cli.test.as_deref().unwrap_or("*");
-        println!(
-            "  command:        cargo run -- test <path> --filter {} --max-failures 1",
-            filter
-        );
-    }
+    // Command
+    println!("  command:        {}", oracle.command_template());
     if let Some(ref name) = cli.test {
         println!("  test filter:    {}", name);
     }
@@ -65,6 +60,21 @@ fn print_summary(cli: &Cli, ws: &workspace::Workspace) {
     println!("    result:       {}", ws.result.display());
     println!("    divergent:    {}", ws.divergent.display());
     println!("    log:          {}", ws.log.display());
+    println!();
+}
+
+/// Resolve the `{file}` placeholder value.
+///
+/// If the input was a single file, returns the corresponding path inside the
+/// workspace result directory. If it was a directory, returns the result dir
+/// itself.
+fn resolve_file_placeholder(input: &Path, result_dir: &Path) -> String {
+    if input.is_file()
+        && let Some(name) = input.file_name()
+    {
+        return result_dir.join(name).display().to_string();
+    }
+    result_dir.display().to_string()
 }
 
 fn run() -> Result<(), String> {
@@ -72,8 +82,18 @@ fn run() -> Result<(), String> {
     cli::validate(&cli)?;
 
     let ws = workspace::setup(&cli.path, cli.output.as_deref(), cli.force)?;
+    let oracle = Oracle::from_cli(&cli)?;
 
-    print_summary(&cli, &ws);
+    print_summary(&cli, &ws, &oracle);
+
+    // Resolve placeholder values for the command template.
+    let file_path = resolve_file_placeholder(&cli.path, &ws.result);
+    let dir_path = ws.result.display().to_string();
+
+    // Establish baseline against the original (unmodified) working copy.
+    let _baseline = oracle.establish_baseline(&ws.result, &file_path, &dir_path)?;
+
+    println!("Ready to reduce. (Reduction passes not yet implemented.)");
     Ok(())
 }
 
