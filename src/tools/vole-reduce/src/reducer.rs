@@ -40,6 +40,7 @@ pub struct Reducer<'a> {
     pub dir_path: String,
     pub baseline: &'a Baseline,
     pub entrypoint: PathBuf,
+    pub test_filter: Option<String>,
     pub verbose: bool,
     pub stats: ReductionStats,
 }
@@ -54,6 +55,7 @@ pub struct ReducerConfig<'a> {
     pub dir_path: String,
     pub baseline: &'a Baseline,
     pub entrypoint: PathBuf,
+    pub test_filter: Option<String>,
     pub verbose: bool,
 }
 
@@ -67,6 +69,7 @@ impl<'a> Reducer<'a> {
             dir_path: config.dir_path,
             baseline: config.baseline,
             entrypoint: config.entrypoint,
+            test_filter: config.test_filter,
             verbose: config.verbose,
             stats: ReductionStats::default(),
         }
@@ -78,6 +81,7 @@ impl<'a> Reducer<'a> {
 
         passes::module_elimination::run(self)?;
         passes::import_trimming::run(self)?;
+        passes::decl_elimination::run(self)?;
 
         self.stats.total_lines_after = count_vole_lines(&self.workspace.result)?;
         Ok(())

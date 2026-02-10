@@ -151,6 +151,7 @@ fn run() -> Result<(), String> {
         dir_path,
         baseline: &baseline,
         entrypoint,
+        test_filter: cli.test.clone(),
         verbose: cli.verbose,
     };
     let mut reducer = Reducer::new(config);
