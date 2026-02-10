@@ -502,6 +502,11 @@ impl Analyzer {
             .module_static_method_calls
             .borrow_mut()
             .insert(module_key.clone(), sub_analyzer.static_method_calls.clone());
+        // Store module-specific declared_var_types (NodeIds are per-program)
+        self.ctx
+            .module_declared_var_types
+            .borrow_mut()
+            .insert(module_key.clone(), sub_analyzer.declared_var_types.clone());
 
         // Now resolve deferred function types after sub-analysis has registered class types
         for (name_id, f) in deferred_functions {

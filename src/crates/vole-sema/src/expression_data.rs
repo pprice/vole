@@ -66,6 +66,9 @@ pub struct ExpressionData {
     /// Maps init expression NodeId → declared TypeId, enabling codegen to handle
     /// union wrapping, numeric widening, and interface boxing without re-resolving types.
     declared_var_types: FxHashMap<NodeId, TypeId>,
+    /// Per-module declared variable types (for multi-module compilation).
+    /// Stored separately since NodeIds are per-program and can collide across modules.
+    module_declared_var_types: FxHashMap<String, FxHashMap<NodeId, TypeId>>,
 }
 
 /// Builder for `ExpressionData` to reduce construction boilerplate.
@@ -99,6 +102,7 @@ pub struct ExpressionDataBuilder {
     tests_virtual_modules: FxHashMap<Span, ModuleId>,
     is_check_results: FxHashMap<NodeId, IsCheckResult>,
     declared_var_types: FxHashMap<NodeId, TypeId>,
+    module_declared_var_types: FxHashMap<String, FxHashMap<NodeId, TypeId>>,
 }
 
 impl ExpressionDataBuilder {
@@ -236,6 +240,15 @@ impl ExpressionDataBuilder {
         self
     }
 
+    /// Set per-module declared variable types for let statements with explicit type annotations.
+    pub fn module_declared_var_types(
+        mut self,
+        module_declared_var_types: FxHashMap<String, FxHashMap<NodeId, TypeId>>,
+    ) -> Self {
+        self.module_declared_var_types = module_declared_var_types;
+        self
+    }
+
     /// Build the `ExpressionData` from this builder.
     pub fn build(self) -> ExpressionData {
         ExpressionData {
@@ -255,6 +268,7 @@ impl ExpressionDataBuilder {
             tests_virtual_modules: self.tests_virtual_modules,
             is_check_results: self.is_check_results,
             declared_var_types: self.declared_var_types,
+            module_declared_var_types: self.module_declared_var_types,
         }
     }
 }
@@ -584,6 +598,18 @@ impl ExpressionData {
     /// Used for let statements with explicit type annotations (e.g., `let x: SomeType = ...`).
     pub fn get_declared_var_type(&self, init_node: NodeId) -> Option<TypeId> {
         self.declared_var_types.get(&init_node).copied()
+    }
+
+    /// Get the declared type for a variable's init expression from a specific module's data.
+    /// Only checks the module-specific map (does NOT fall through to main program's map).
+    pub fn get_module_declared_var_type(
+        &self,
+        module_path: &str,
+        init_node: NodeId,
+    ) -> Option<TypeId> {
+        self.module_declared_var_types
+            .get(module_path)
+            .and_then(|dvt| dvt.get(&init_node).copied())
     }
 
     /// Set the declared type for a variable's init expression.

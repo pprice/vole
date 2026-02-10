@@ -148,6 +148,10 @@ impl Analyzer {
                 import_path.to_string(),
                 cached.static_method_generics.clone(),
             );
+            self.ctx
+                .module_declared_var_types
+                .borrow_mut()
+                .insert(import_path.to_string(), cached.declared_var_types.clone());
             return;
         }
 
@@ -203,6 +207,7 @@ impl Analyzer {
                     static_method_generics: sub_analyzer.static_method_calls.clone(),
                     functions_by_name: sub_analyzer.functions_by_name.clone(),
                     is_check_results: sub_analyzer.is_check_results.clone(),
+                    declared_var_types: sub_analyzer.declared_var_types.clone(),
                 },
             );
         }
@@ -283,6 +288,10 @@ impl Analyzer {
         self.ctx.module_static_method_calls.borrow_mut().insert(
             import_path.to_string(),
             sub_analyzer.static_method_calls.clone(),
+        );
+        self.ctx.module_declared_var_types.borrow_mut().insert(
+            import_path.to_string(),
+            sub_analyzer.declared_var_types.clone(),
         );
     }
 

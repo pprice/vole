@@ -329,6 +329,9 @@ pub struct AnalyzerContext {
     /// Needed because NodeIds are file-local and collide across modules.
     pub module_static_method_calls:
         RefCell<FxHashMap<String, FxHashMap<NodeId, StaticMethodMonomorphKey>>>,
+    /// Per-module declared variable types (module path -> NodeId -> ArenaTypeId).
+    /// Needed because NodeIds are file-local and collide across modules.
+    pub module_declared_var_types: RefCell<FxHashMap<String, FxHashMap<NodeId, ArenaTypeId>>>,
     /// Optional shared cache for module analysis results.
     /// When set, modules are cached after analysis and reused across Analyzer instances.
     pub module_cache: Option<Rc<RefCell<ModuleCache>>>,
@@ -351,6 +354,7 @@ impl AnalyzerContext {
             module_generic_calls: RefCell::new(FxHashMap::default()),
             module_class_method_calls: RefCell::new(FxHashMap::default()),
             module_static_method_calls: RefCell::new(FxHashMap::default()),
+            module_declared_var_types: RefCell::new(FxHashMap::default()),
             module_cache: cache,
             modules_in_progress: RefCell::new(FxHashSet::default()),
         }
@@ -577,6 +581,7 @@ impl Analyzer {
         let module_generic_calls = self.ctx.module_generic_calls.borrow().clone();
         let module_class_method_calls = self.ctx.module_class_method_calls.borrow().clone();
         let module_static_method_calls = self.ctx.module_static_method_calls.borrow().clone();
+        let module_declared_var_types = self.ctx.module_declared_var_types.borrow().clone();
         let expression_data = ExpressionData::builder()
             .types(self.expr_types)
             .methods(self.method_resolutions.into_inner())
@@ -594,6 +599,7 @@ impl Analyzer {
             .tests_virtual_modules(self.tests_virtual_modules)
             .is_check_results(self.is_check_results)
             .declared_var_types(self.declared_var_types)
+            .module_declared_var_types(module_declared_var_types)
             .build();
         AnalysisOutput {
             expression_data,

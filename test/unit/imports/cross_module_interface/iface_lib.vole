@@ -1,0 +1,44 @@
+interface IGreeter {
+    func greet() -> string
+    func id() -> i64
+}
+
+class SimpleGreeter implements IGreeter {
+    name: string,
+
+    func greet() -> string {
+        return "hello"
+    }
+
+    func id() -> i64 {
+        return 1
+    }
+}
+
+class FancyGreeter implements IGreeter {
+    prefix: string,
+
+    func greet() -> string {
+        return "greetings"
+    }
+
+    func id() -> i64 {
+        return 2
+    }
+}
+
+func call_greet() -> string {
+    let g: IGreeter = SimpleGreeter { name: "test" }
+    return g.greet()
+}
+
+func call_id() -> i64 {
+    let g: IGreeter = FancyGreeter { prefix: "dear" }
+    return g.id()
+}
+
+func dispatch_both() -> i64 {
+    let a: IGreeter = SimpleGreeter { name: "a" }
+    let b: IGreeter = FancyGreeter { prefix: "b" }
+    return a.id() + b.id()
+}

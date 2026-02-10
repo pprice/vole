@@ -529,26 +529,23 @@ impl Cg<'_, '_, '_> {
             .builder
             .ins()
             .load(types::I8, MemFlags::new(), value.value, 1);
-        let is_rc_nonzero = self.builder.ins().icmp_imm(
-            IntCC::NotEqual,
-            is_rc,
-            0,
-        );
-        let payload_nonzero = self.builder.ins().icmp_imm(
-            IntCC::NotEqual,
-            payload,
-            0,
-        );
+        let is_rc_nonzero = self.builder.ins().icmp_imm(IntCC::NotEqual, is_rc, 0);
+        let payload_nonzero = self.builder.ins().icmp_imm(IntCC::NotEqual, payload, 0);
         let needs_inc = self.builder.ins().band(is_rc_nonzero, payload_nonzero);
 
         let then_block = self.builder.create_block();
         let merge_block = self.builder.create_block();
-        self.builder.ins().brif(needs_inc, then_block, &[], merge_block, &[]);
+        self.builder
+            .ins()
+            .brif(needs_inc, then_block, &[], merge_block, &[]);
 
         self.builder.switch_to_block(then_block);
         self.builder.seal_block(then_block);
         let rc_inc_ref = self.runtime_func_ref(RuntimeFn::RcInc)?;
-        let payload_ptr = self.builder.ins().bitcast(ptr_type, MemFlags::new(), payload);
+        let payload_ptr = self
+            .builder
+            .ins()
+            .bitcast(ptr_type, MemFlags::new(), payload);
         self.builder.ins().call(rc_inc_ref, &[payload_ptr]);
         self.builder.ins().jump(merge_block, &[]);
 

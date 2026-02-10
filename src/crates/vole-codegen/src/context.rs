@@ -1096,13 +1096,20 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Get declared variable type for let statements with explicit type annotations.
     /// Used for union wrapping, numeric widening, and interface boxing.
-    /// Only available for main program code (not module code) since declared_var_types
-    /// are stored with main program NodeIds only.
+    /// For module code, checks module-specific declared_var_types only.
     #[inline]
     pub fn get_declared_var_type(&self, init_node_id: &vole_frontend::NodeId) -> Option<TypeId> {
-        // Don't use declared_var_types for module code - NodeIds would collide
-        if self.current_module.is_some() {
-            return None;
+        if let Some(module_id) = self.current_module {
+            let name_table = self.name_table();
+            let module_path = name_table.module_path(module_id);
+            // Only check module-specific map — NodeIds collide across modules,
+            // so falling through to main program's map would return wrong types.
+            return self
+                .env
+                .analyzed
+                .query()
+                .expr_data()
+                .get_module_declared_var_type(module_path, *init_node_id);
         }
         self.env
             .analyzed

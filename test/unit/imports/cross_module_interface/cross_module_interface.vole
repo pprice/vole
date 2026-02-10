@@ -1,0 +1,24 @@
+let lib = import "./iface_lib.vole"
+
+tests {
+    test "cross-module interface dispatch via function" {
+        let result = lib.call_greet()
+        assert(result == "hello")
+    }
+
+    test "cross-module interface dispatch second method" {
+        let result = lib.call_id()
+        assert(result == 2)
+    }
+
+    test "cross-module interface dispatch multiple implementations" {
+        let result = lib.dispatch_both()
+        assert(result == 3)
+    }
+
+    test "cross-module interface box from caller" {
+        let g: lib.IGreeter = lib.SimpleGreeter { name: "direct" }
+        assert(g.greet() == "hello")
+        assert(g.id() == 1)
+    }
+}

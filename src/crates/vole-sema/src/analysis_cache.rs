@@ -68,6 +68,8 @@ pub struct CachedModule {
     pub functions_by_name: FxHashMap<String, FunctionType>,
     /// Type check results for `is` expressions and type patterns (NodeId → IsCheckResult)
     pub is_check_results: FxHashMap<NodeId, IsCheckResult>,
+    /// Declared variable types for let statements with type annotations (NodeId → TypeId)
+    pub declared_var_types: FxHashMap<NodeId, TypeId>,
 }
 
 /// Cache for module analysis results.
