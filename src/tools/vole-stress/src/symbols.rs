@@ -62,6 +62,20 @@ pub enum TypeInfo {
     TypeParam(String),
 }
 
+impl TypeInfo {
+    /// Returns true if this type is or contains an interface type.
+    pub fn contains_interface(&self) -> bool {
+        match self {
+            TypeInfo::Interface(..) => true,
+            TypeInfo::Optional(inner) | TypeInfo::Array(inner) | TypeInfo::Iterator(inner) => {
+                inner.contains_interface()
+            }
+            TypeInfo::Union(variants) => variants.iter().any(|v| v.contains_interface()),
+            _ => false,
+        }
+    }
+}
+
 /// Primitive types in Vole.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)]

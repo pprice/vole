@@ -894,8 +894,13 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // Add loop variable with the array's element type
         ctx.add_local(iter_name.clone(), elem_type.clone(), false);
 
+        // Protect the iterated array from reassignment inside the loop body.
+        // Shrinking the array while iterating causes out-of-bounds panics.
+        ctx.protected_vars.push(arr_name.clone());
+
         let body_stmts = self.generate_block(ctx, depth + 1);
 
+        ctx.protected_vars.pop();
         ctx.locals.truncate(locals_before);
         ctx.in_loop = was_in_loop;
         ctx.in_while_loop = was_in_while_loop;

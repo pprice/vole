@@ -139,10 +139,16 @@ impl<'a, R: Rng> EntrypointContext<'a, R> {
             }
         }
 
-        // Test functions (non-generic, non-diverging ones)
+        // Test functions (non-generic, non-diverging ones without interface params)
         for symbol in module.functions() {
             if let SymbolKind::Function(ref info) = symbol.kind {
-                if info.type_params.is_empty() && !matches!(info.return_type, TypeInfo::Never) {
+                if info.type_params.is_empty()
+                    && !matches!(info.return_type, TypeInfo::Never)
+                    && !info
+                        .params
+                        .iter()
+                        .any(|p| p.param_type.contains_interface())
+                {
                     self.emit_function_test(module, &symbol.name, info);
                 }
             }
@@ -321,10 +327,16 @@ impl<'a, R: Rng> EntrypointContext<'a, R> {
             }
         }
 
-        // Exercise functions (call non-generic, non-diverging ones)
+        // Exercise functions (call non-generic, non-diverging ones without interface params)
         for symbol in module.functions() {
             if let SymbolKind::Function(ref info) = symbol.kind {
-                if info.type_params.is_empty() && !matches!(info.return_type, TypeInfo::Never) {
+                if info.type_params.is_empty()
+                    && !matches!(info.return_type, TypeInfo::Never)
+                    && !info
+                        .params
+                        .iter()
+                        .any(|p| p.param_type.contains_interface())
+                {
                     let args = self.generate_call_args(&info.params);
                     match &info.return_type {
                         TypeInfo::Iterator(elem_type) => {
