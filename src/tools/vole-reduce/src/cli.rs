@@ -109,10 +109,10 @@ pub fn validate(cli: &Cli) -> Result<(), String> {
     }
 
     // Validate timeout is positive
-    if let Some(secs) = cli.timeout {
-        if secs <= 0.0 {
-            return Err(format!("--timeout must be positive, got {}", secs));
-        }
+    if let Some(secs) = cli.timeout
+        && secs <= 0.0
+    {
+        return Err(format!("--timeout must be positive, got {}", secs));
     }
 
     // Validate input path exists
