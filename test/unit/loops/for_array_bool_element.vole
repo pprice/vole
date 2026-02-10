@@ -1,0 +1,43 @@
+tests {
+    test "for-in bool array element used in when condition" {
+        let arr = [ false, false, true, false ]
+        let mut count = 0
+        for item in arr {
+            let x = when {
+                item => 1_i32
+                _ => 2_i32
+            }
+            count = count + x
+        }
+        assert(count == 7)
+    }
+
+    test "for-in bool array element used in logical expression" {
+        let arr = [ true, false, true ]
+        let mut count = 0
+        for item in arr {
+            if item {
+                count = count + 1
+            }
+        }
+        assert(count == 2)
+    }
+
+    test "for-in i8 array element" {
+        let arr = [ 10_i8, 20_i8, 30_i8 ]
+        let mut sum: i64 = 0
+        for item in arr {
+            sum = sum + item
+        }
+        assert(sum == 60)
+    }
+
+    test "for-in i16 array element" {
+        let arr = [ 100_i16, 200_i16 ]
+        let mut sum: i64 = 0
+        for item in arr {
+            sum = sum + item
+        }
+        assert(sum == 300)
+    }
+}
