@@ -1683,6 +1683,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "vole-reduce"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "regex",
+ "vole-frontend",
+]
+
+[[package]]
 name = "vole-runtime"
 version = "0.1.0"
 dependencies = [
