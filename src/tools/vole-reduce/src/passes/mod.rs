@@ -4,6 +4,7 @@
 //! Each pass attempts a different strategy for shrinking the test case while
 //! preserving the original bug (as determined by the oracle).
 
+pub mod body_reduction;
 pub mod decl_elimination;
 pub mod import_trimming;
 pub mod module_elimination;
