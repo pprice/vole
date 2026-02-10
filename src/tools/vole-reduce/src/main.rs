@@ -5,6 +5,7 @@ mod cli;
 mod oracle;
 mod passes;
 mod reducer;
+mod span_remove;
 mod workspace;
 
 use std::path::Path;

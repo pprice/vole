@@ -73,13 +73,11 @@ impl<'a> Reducer<'a> {
     }
 
     /// Run all reduction passes in order.
-    ///
-    /// Currently only module elimination is implemented. Future passes
-    /// (import trimming, statement elimination, etc.) will be added here.
     pub fn run(&mut self) -> Result<(), String> {
         self.stats.total_lines_before = count_vole_lines(&self.workspace.result)?;
 
         passes::module_elimination::run(self)?;
+        passes::import_trimming::run(self)?;
 
         self.stats.total_lines_after = count_vole_lines(&self.workspace.result)?;
         Ok(())
