@@ -1,0 +1,54 @@
+class Box {
+    field1: f64 | string,
+}
+
+class Container {
+    field1: i64,
+    field2: f64 | string,
+}
+
+func make_box_f64(x: f64 | string) -> Box {
+    return Box { field1: x }
+}
+
+func make_box_str(x: f64 | string) -> Box {
+    return Box { field1: x }
+}
+
+func make_container(x: f64 | string) -> Container {
+    return Container { field1: 42, field2: x }
+}
+
+tests {
+    test "class with union field from f64 via function" {
+        let b = make_box_f64(5.23)
+        assert(true)
+    }
+
+    test "class with union field from string via function" {
+        let b = make_box_str("hello")
+        assert(true)
+    }
+
+    test "class with union and non-union fields via function" {
+        let c = make_container(5.23)
+        assert(c.field1 == 42)
+    }
+
+    test "class with union field from string multi-field" {
+        let c = make_container("world")
+        assert(c.field1 == 42)
+    }
+
+    test "class with union field direct construction" {
+        let x: f64 | string = 3.14
+        let b = Box { field1: x }
+        assert(true)
+    }
+
+    test "class with union field direct construction string" {
+        let x: f64 | string = "test"
+        let b = Box { field1: x }
+        assert(true)
+    }
+}

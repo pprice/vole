@@ -1124,6 +1124,13 @@ impl Cg<'_, '_, '_> {
         let tag_val = self.builder.ins().iconst(types::I8, tag as i64);
         self.builder.ins().stack_store(tag_val, slot, 0);
 
+        // Store is_rc flag at offset 1 (matches heap union layout used by
+        // construct_union_heap_id). copy_union_to_heap reads this byte to
+        // decide whether to rc_inc the payload when promoting to the heap.
+        let is_rc = self.rc_state(actual_type_id).needs_cleanup();
+        let is_rc_val = self.builder.ins().iconst(types::I8, is_rc as i64);
+        self.builder.ins().stack_store(is_rc_val, slot, 1);
+
         // Sentinel types (nil, Done, user-defined) have no payload - only the tag matters
         if !self.arena().is_sentinel(actual_type_id) {
             self.builder.ins().stack_store(actual_value, slot, 8);

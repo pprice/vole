@@ -254,9 +254,13 @@ impl Cg<'_, '_, '_> {
             // RC: inc borrowed field values (e.g., reading from a variable) so the
             // instance gets its own reference. instance_drop will rc_dec these fields
             // when the instance refcount reaches zero.
+            // Skip union types: union fields are copied to new heap buffers below
+            // (via copy_union_to_heap / construct_union_heap_id), which handle
+            // RC-incrementing the payload. The union buffer itself is not RC-managed.
             if self.rc_scopes.has_active_scope()
                 && self.rc_state(value.type_id).needs_cleanup()
                 && value.is_borrowed()
+                && !self.arena().is_union(value.type_id)
             {
                 self.emit_rc_inc_for_type(value.value, value.type_id)?;
             }
@@ -274,6 +278,11 @@ impl Cg<'_, '_, '_> {
 
                 if field_is_union && !value_is_union {
                     self.construct_union_heap_id(value, field_type_id)?
+                } else if field_is_union && value_is_union {
+                    // Union value stored in class field must be heap-allocated.
+                    // The value may be stack-allocated (from construct_union_id),
+                    // so copy the 16-byte buffer to the heap.
+                    self.copy_union_to_heap(value)?
                 } else if field_is_interface {
                     self.box_interface_value(value, field_type_id)?
                 } else {
@@ -323,6 +332,8 @@ impl Cg<'_, '_, '_> {
 
                 if field_is_union && !value_is_union {
                     self.construct_union_heap_id(value, field_type_id)?
+                } else if field_is_union && value_is_union {
+                    self.copy_union_to_heap(value)?
                 } else if field_is_interface {
                     self.box_interface_value(value, field_type_id)?
                 } else {
@@ -476,6 +487,75 @@ impl Cg<'_, '_, '_> {
         }
 
         Ok(CompiledValue::new(heap_ptr, self.ptr_type(), union_type_id))
+    }
+
+    /// Copy a union value (possibly stack-allocated) to a heap-allocated buffer.
+    ///
+    /// Union buffers are 16 bytes: `[tag: i8, is_rc: i8, pad(6), payload: i64]`.
+    /// Class fields with FieldTypeTag::UnionHeap expect heap-allocated buffers
+    /// that will be freed by `union_heap_cleanup` during instance_drop.
+    pub(crate) fn copy_union_to_heap(
+        &mut self,
+        value: CompiledValue,
+    ) -> CodegenResult<CompiledValue> {
+        let heap_alloc_ref = self.runtime_func_ref(RuntimeFn::HeapAlloc)?;
+        let ptr_type = self.ptr_type();
+        let union_size = self.type_size(value.type_id);
+        let size_val = self.builder.ins().iconst(ptr_type, union_size as i64);
+        let alloc_call = self.builder.ins().call(heap_alloc_ref, &[size_val]);
+        let heap_ptr = self.builder.inst_results(alloc_call)[0];
+
+        // Copy tag (offset 0) and is_rc (offset 1) as i16 for one load
+        let tag_and_rc = self
+            .builder
+            .ins()
+            .load(types::I16, MemFlags::new(), value.value, 0);
+        self.builder
+            .ins()
+            .store(MemFlags::new(), tag_and_rc, heap_ptr, 0);
+
+        // Copy payload (offset 8)
+        let payload = self
+            .builder
+            .ins()
+            .load(types::I64, MemFlags::new(), value.value, 8);
+        self.builder
+            .ins()
+            .store(MemFlags::new(), payload, heap_ptr, 8);
+
+        // If the payload is RC-managed, increment its refcount since both the
+        // original and the copy will need independent cleanup
+        let is_rc = self
+            .builder
+            .ins()
+            .load(types::I8, MemFlags::new(), value.value, 1);
+        let is_rc_nonzero = self.builder.ins().icmp_imm(
+            IntCC::NotEqual,
+            is_rc,
+            0,
+        );
+        let payload_nonzero = self.builder.ins().icmp_imm(
+            IntCC::NotEqual,
+            payload,
+            0,
+        );
+        let needs_inc = self.builder.ins().band(is_rc_nonzero, payload_nonzero);
+
+        let then_block = self.builder.create_block();
+        let merge_block = self.builder.create_block();
+        self.builder.ins().brif(needs_inc, then_block, &[], merge_block, &[]);
+
+        self.builder.switch_to_block(then_block);
+        self.builder.seal_block(then_block);
+        let rc_inc_ref = self.runtime_func_ref(RuntimeFn::RcInc)?;
+        let payload_ptr = self.builder.ins().bitcast(ptr_type, MemFlags::new(), payload);
+        self.builder.ins().call(rc_inc_ref, &[payload_ptr]);
+        self.builder.ins().jump(merge_block, &[]);
+
+        self.builder.switch_to_block(merge_block);
+        self.builder.seal_block(merge_block);
+
+        Ok(CompiledValue::new(heap_ptr, ptr_type, value.type_id))
     }
 
     /// Compile a struct literal to a stack-allocated value.
