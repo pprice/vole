@@ -44,6 +44,7 @@ pub fn available_profiles() -> Vec<&'static str> {
         "many-modules",
         "generics-heavy",
         "stdlib-heavy",
+        "closures-heavy",
     ]
 }
 
@@ -59,6 +60,7 @@ pub fn get_profile(name: &str) -> Result<Profile, UnknownProfileError> {
         "many-modules" => Ok(many_modules_profile()),
         "generics-heavy" => Ok(generics_heavy_profile()),
         "stdlib-heavy" => Ok(stdlib_heavy_profile()),
+        "closures-heavy" => Ok(closures_heavy_profile()),
         _ => Err(UnknownProfileError(name.to_string())),
     }
 }
@@ -1074,6 +1076,119 @@ fn stdlib_heavy_profile() -> Profile {
         destructured_import_probability: 0.0,
         // ~20% expression-bodied functions
         expr_body_probability: 0.20,
+    };
+
+    Profile { plan, emit }
+}
+
+/// Closures-heavy profile - stress lambda/closure and function type codegen.
+///
+/// This profile generates code emphasizing:
+/// - Lambda expressions as arguments and return values
+/// - Higher-order functions (functions taking/returning functions)
+/// - Expression-bodied functions (=> syntax)
+/// - Method chains with closures (map, filter, reduce)
+/// - Iterator pipelines with closure-heavy transforms
+/// - Elevated match/when expression probabilities (closures in arms)
+fn closures_heavy_profile() -> Profile {
+    let plan = PlanConfig {
+        // Moderate structure — focus is on function bodies, not module layout
+        layers: 2,
+        modules_per_layer: 3,
+
+        structs_per_module: (1, 2),
+        classes_per_module: (1, 3),
+        interfaces_per_module: (1, 2),
+        errors_per_module: (0, 1),
+        // Many functions to maximize lambda/closure opportunities
+        functions_per_module: (4, 8),
+        globals_per_module: (1, 2),
+
+        fields_per_struct: (1, 3),
+        fields_per_class: (2, 4),
+        methods_per_class: (2, 4),
+        static_methods_per_class: (0, 1),
+        static_methods_per_struct: (0, 1),
+        methods_per_interface: (1, 3),
+        fields_per_error: (0, 2),
+
+        // More params = more closure opportunities in generated bodies
+        params_per_function: (2, 5),
+
+        // Moderate generics
+        type_params_per_class: (0, 1),
+        type_params_per_interface: (0, 1),
+        type_params_per_function: (0, 1),
+        constraints_per_type_param: (0, 1),
+
+        interface_extends_probability: 0.3,
+        implement_blocks_per_module: (1, 2),
+
+        cross_layer_import_probability: 0.2,
+        enable_diamond_dependencies: false,
+
+        // Elevated generator probability — generators produce iterators
+        // that are consumed with closure-heavy chains (map/filter/reduce)
+        fallible_probability: 0.10,
+        generator_probability: 0.25,
+        never_probability: 0.01,
+        nested_class_field_probability: 0.15,
+        struct_param_probability: 0.05,
+        struct_return_probability: 0.05,
+        interface_param_probability: 0.10,
+    };
+
+    let emit = EmitConfig {
+        stmt_config: StmtConfig {
+            expr_config: ExprConfig {
+                max_depth: 4,
+                binary_probability: 0.35,
+                // Elevated conditional expressions — closures in arms
+                when_probability: 0.15,
+                match_probability: 0.12,
+                if_expr_probability: 0.20,
+                // HIGH lambda probability — the core focus of this profile
+                lambda_probability: 0.35,
+                // Elevated method chaining — drives closure usage in chains
+                method_chain_probability: 0.30,
+                max_chain_depth: 3,
+                unreachable_probability: 0.03,
+                max_match_arms: 5,
+            },
+            max_depth: 3,
+            statements_per_block: (2, 4),
+            if_probability: 0.20,
+            while_probability: 0.10,
+            for_probability: 0.15,
+            break_continue_probability: 0.08,
+            compound_assign_probability: 0.10,
+            reassign_probability: 0.10,
+            raise_probability: 0.08,
+            try_probability: 0.10,
+            tuple_probability: 0.10,
+            fixed_array_probability: 0.08,
+            struct_destructure_probability: 0.10,
+            discard_probability: 0.05,
+            early_return_probability: 0.10,
+            else_if_probability: 0.25,
+            static_call_probability: 0.20,
+            array_index_assign_probability: 0.08,
+            array_push_probability: 0.06,
+            array_index_compound_assign_probability: 0.08,
+            mutable_array_probability: 0.4,
+            method_call_probability: 0.12,
+            interface_dispatch_probability: 0.10,
+            match_probability: 0.08,
+            string_match_probability: 0.06,
+            when_let_probability: 0.08,
+            nested_loop_probability: 0.04,
+            union_match_probability: 0.08,
+            // HIGH iterator map/filter — generates many closure-bearing chains
+            iter_map_filter_probability: 0.25,
+        },
+        destructured_import_probability: 0.0,
+        // HIGH expression-body — exercises => lambda-like syntax on functions
+        expr_body_probability: 0.40,
     };
 
     Profile { plan, emit }
