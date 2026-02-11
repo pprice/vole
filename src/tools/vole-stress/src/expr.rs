@@ -1003,6 +1003,10 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
     /// Looks for optional-typed variables in scope whose inner type matches
     /// the target type. Returns `Some("optVar ?? defaultExpr")` on success.
     /// The result type is the inner type T (not T?).
+    ///
+    /// When multiple optional variables of matching type are in scope,
+    /// ~30% of the time generates a chained coalescing expression like
+    /// `optA ?? optB ?? defaultExpr` (up to 3 optionals in the chain).
     fn try_generate_null_coalesce(
         &mut self,
         target: &TypeInfo,
@@ -1015,12 +1019,43 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         }
 
         let idx = self.rng.gen_range(0..candidates.len());
-        let (var_name, _inner_ty) = &candidates[idx];
+        let (first_var, _inner_ty) = &candidates[idx];
+
+        // When 2+ optional vars match, sometimes chain them: a ?? b ?? default
+        if candidates.len() >= 2 && self.rng.gen_bool(0.30) {
+            // Pick 1-2 additional optional vars for the chain (up to 3 total)
+            let max_extra = (candidates.len() - 1).min(2);
+            let extra_count = self.rng.gen_range(1..=max_extra);
+
+            let mut chain_parts = vec![first_var.clone()];
+            let mut used = std::collections::HashSet::new();
+            used.insert(idx);
+
+            for _ in 0..extra_count {
+                // Pick a different candidate
+                let remaining: Vec<usize> = (0..candidates.len())
+                    .filter(|i| !used.contains(i))
+                    .collect();
+                if remaining.is_empty() {
+                    break;
+                }
+                let pick = self.rng.gen_range(0..remaining.len());
+                let chosen_idx = remaining[pick];
+                used.insert(chosen_idx);
+                chain_parts.push(candidates[chosen_idx].0.clone());
+            }
+
+            // Generate a default value of the inner type as the final fallback
+            let default_expr = self.generate(target, ctx, depth + 1);
+            chain_parts.push(default_expr);
+
+            return Some(format!("({})", chain_parts.join(" ?? ")));
+        }
 
         // Generate a default value of the inner type
         let default_expr = self.generate(target, ctx, depth + 1);
 
-        Some(format!("({} ?? {})", var_name, default_expr))
+        Some(format!("({} ?? {})", first_var, default_expr))
     }
 
     /// Try to generate a `str.length()` call for an i64 expression.
@@ -2486,6 +2521,93 @@ mod tests {
                 "Should not generate ?? with mismatched inner type, got: {}",
                 expr,
             );
+        }
+    }
+
+    #[test]
+    fn test_null_coalesce_chained_with_multiple_optionals() {
+        let config = ExprConfig::default();
+        let table = SymbolTable::new();
+        // Multiple optional<i64> variables to enable chained coalescing
+        let locals = vec![
+            (
+                "opt_a".to_string(),
+                TypeInfo::Optional(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+            ),
+            (
+                "opt_b".to_string(),
+                TypeInfo::Optional(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+            ),
+            (
+                "opt_c".to_string(),
+                TypeInfo::Optional(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+            ),
+        ];
+
+        let mut found_chained = false;
+        for seed in 0..2000 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let ctx = ExprContext::new(&[], &locals, &table);
+            if let Some(expr) = generator.try_generate_null_coalesce(
+                &TypeInfo::Primitive(PrimitiveType::I64),
+                &ctx,
+                0,
+            ) {
+                // Count the number of ?? operators in the expression
+                let coalesce_count = expr.matches("??").count();
+                if coalesce_count >= 2 {
+                    // Chained: e.g. (opt_a ?? opt_b ?? 42_i64)
+                    found_chained = true;
+                    break;
+                }
+            }
+        }
+        assert!(
+            found_chained,
+            "Expected at least one chained null coalescing expression (2+ ??) across 2000 seeds",
+        );
+    }
+
+    #[test]
+    fn test_null_coalesce_single_optional_never_chains() {
+        let config = ExprConfig::default();
+        let table = SymbolTable::new();
+        // Only one optional variable - the top-level pattern should be
+        // `(only_opt ?? <default>)` with exactly one leading `??` from
+        // our coalesce.  (The default sub-expression may itself contain
+        // `??` from recursive generation, so we only check the prefix.)
+        let locals = vec![(
+            "only_opt".to_string(),
+            TypeInfo::Optional(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+        )];
+
+        for seed in 0..500 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let ctx = ExprContext::new(&[], &locals, &table);
+            if let Some(expr) = generator.try_generate_null_coalesce(
+                &TypeInfo::Primitive(PrimitiveType::I64),
+                &ctx,
+                0,
+            ) {
+                // The expression should start with `(only_opt ?? ` --
+                // i.e. only one optional var before the default.
+                assert!(
+                    expr.starts_with("(only_opt ?? "),
+                    "With one optional var, chain should start with '(only_opt ?? ', got: {}",
+                    expr,
+                );
+                // Ensure there's no second optional chained before the default
+                // (strip the first `(only_opt ?? ` prefix, the remainder should
+                // not start with another `only_opt ??`)
+                let rest = &expr["(only_opt ?? ".len()..];
+                assert!(
+                    !rest.starts_with("only_opt ?? "),
+                    "Should not chain the same optional var twice at top level, got: {}",
+                    expr,
+                );
+            }
         }
     }
 
