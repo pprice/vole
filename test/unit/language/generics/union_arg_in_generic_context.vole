@@ -1,0 +1,58 @@
+interface IFace {}
+
+class Foo {
+    field1: i64,
+    statics {}
+}
+
+implement IFace for Foo {}
+
+implement Foo {
+    func method_with_union(x: i128 | i16) -> Self {
+        if (x is i16) {
+            let a = 1
+        }
+        return Foo { field1: 0 }
+    }
+
+    func method_with_union2(x: string | i32 | bool) -> i32 {
+        if (x is string) {
+            return 1
+        }
+        if (x is bool) {
+            return 2
+        }
+        return 3
+    }
+}
+
+func generic_caller<T: IFace>(t: T) -> i64 {
+    let r = Foo { field1: 0 }.method_with_union(1_i128)
+    return r.field1
+}
+
+func generic_caller2<T: IFace>(t: T) -> i32 {
+    return Foo { field1: 0 }.method_with_union2("hello")
+}
+
+tests "union arg coercion in generic context" {
+    test "method with union param called from generic function" {
+        let result = generic_caller(Foo { field1: 0 })
+        assert(result == 0)
+    }
+
+    test "method with union param - string variant from generic" {
+        let result = generic_caller2(Foo { field1: 0 })
+        assert(result == 1)
+    }
+
+    test "method with union param - direct call still works" {
+        let r = Foo { field1: 0 }.method_with_union(42_i16)
+        assert(r.field1 == 0)
+    }
+
+    test "chained method with union param from generic" {
+        let r = Foo { field1: 0 }.method_with_union(1_i128).method_with_union(2_i16)
+        assert(r.field1 == 0)
+    }
+}

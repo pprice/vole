@@ -397,8 +397,11 @@ impl Cg<'_, '_, '_> {
             }
         }
 
-        // Get func_key and return_type_id from resolution or fallback
-        let (func_key, return_type_id) = if let Some(resolved) = resolution {
+        // Get func_key, return_type_id, and fallback_param_type_ids from resolution or fallback.
+        // fallback_param_type_ids is used when resolution doesn't provide param types (e.g. in
+        // monomorphized generic contexts where sema skips the generic body).
+        let (func_key, return_type_id, fallback_param_type_ids) = if let Some(resolved) = resolution
+        {
             // Use ResolvedMethod's type_def_id and method_name_id for method_func_keys lookup
             // Uses type's NameId for stable lookup across different analyzer instances
             let type_def_id = resolved.type_def_id().ok_or_else(|| {
@@ -410,7 +413,7 @@ impl Cg<'_, '_, '_> {
                 .method_func_keys()
                 .get(&(type_name_id, resolved_method_name_id))
                 .copied();
-            (func_key, resolved.return_type_id())
+            (func_key, resolved.return_type_id(), None)
         } else {
             // Fallback path for monomorphized context: derive type_def_id from object type.
             // When inside a monomorphized method body, the object type may still be a type
@@ -460,12 +463,17 @@ impl Cg<'_, '_, '_> {
                 .get(&(type_name_id, method_name_id))
                 .copied();
 
-            // Get return type from entity registry
-            let return_type_id = self
+            // Get return type and param types from entity registry
+            let (return_type_id, fb_param_ids) = self
                 .analyzed()
                 .entity_registry()
                 .find_method_binding(type_def_id, method_name_id)
-                .map(|binding| binding.func_type.return_type_id)
+                .map(|binding| {
+                    (
+                        binding.func_type.return_type_id,
+                        Some(binding.func_type.params_id.clone()),
+                    )
+                })
                 .or_else(|| {
                     self.analyzed()
                         .entity_registry()
@@ -473,13 +481,14 @@ impl Cg<'_, '_, '_> {
                         .map(|mid| {
                             let method = self.analyzed().entity_registry().get_method(mid);
                             let arena = self.analyzed().type_arena();
-                            arena
+                            let (params, ret) = arena
                                 .unwrap_function(method.signature_id)
-                                .map(|(_, ret, _)| ret)
-                                .unwrap_or(TypeId::VOID)
+                                .map(|(params, ret, _)| (Some(params.clone()), ret))
+                                .unwrap_or((None, TypeId::VOID));
+                            (ret, params)
                         })
                 })
-                .unwrap_or(TypeId::VOID);
+                .unwrap_or((TypeId::VOID, None));
 
             // In monomorphized context, the return type may still reference type
             // parameters (e.g. a method `getItem() -> T`). Apply substitutions to
@@ -488,7 +497,7 @@ impl Cg<'_, '_, '_> {
             // expression-level type (looked up below) remains the source of truth.
             let return_type_id = self.try_substitute_type(return_type_id);
 
-            (func_key, return_type_id)
+            (func_key, return_type_id, fb_param_ids)
         };
 
         // In monomorphized contexts, method resolution already carries concrete
@@ -581,12 +590,15 @@ impl Cg<'_, '_, '_> {
             (self.func_ref(func_key)?, is_generic_class)
         };
 
-        // Use TypeId-based params for interface boxing check
-        let param_type_ids = resolution.and_then(|resolved: &ResolvedMethod| {
-            self.arena()
-                .unwrap_function(resolved.func_type_id())
-                .map(|(params, _, _)| params.clone())
-        });
+        // Use TypeId-based params for argument coercion (e.g. concrete -> union, concrete -> interface).
+        // Try resolution first, fall back to entity registry params from monomorphized context.
+        let param_type_ids = resolution
+            .and_then(|resolved: &ResolvedMethod| {
+                self.arena()
+                    .unwrap_function(resolved.func_type_id())
+                    .map(|(params, _, _)| params.clone())
+            })
+            .or(fallback_param_type_ids);
         let mut args: ArgVec = smallvec![obj.value];
         let mut rc_temps: Vec<CompiledValue> = Vec::new();
         if let Some(param_type_ids) = &param_type_ids {
