@@ -8,3 +8,4 @@ perf.data*
 .tickets
 .serena/
 .claude/stress-hunt-state.json
+.claude/stress-hunt-repros/
