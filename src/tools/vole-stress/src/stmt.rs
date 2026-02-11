@@ -87,6 +87,10 @@ pub struct StmtConfig {
     /// (multiple loop scopes, break/continue targeting the correct loop).
     /// Set to 0.0 to disable.
     pub nested_loop_probability: f64,
+    /// Probability of generating a `let x = match union_var { Type1 => ..., Type2 => ... }`
+    /// statement when union-typed variables are in scope. Exercises the match-on-union
+    /// codepath with type-pattern arms. Set to 0.0 to disable.
+    pub union_match_probability: f64,
 }
 
 impl Default for StmtConfig {
@@ -120,6 +124,7 @@ impl Default for StmtConfig {
             string_match_probability: 0.06,
             when_let_probability: 0.08,
             nested_loop_probability: 0.06,
+            union_match_probability: 0.08,
         }
     }
 }
@@ -581,6 +586,13 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // Union match expression let-binding: let x = match union_var { Type1 => ..., ... }
+        if self.rng.gen_bool(self.config.union_match_probability) {
+            if let Some(stmt) = self.try_generate_union_match_let(ctx) {
+                return stmt;
+            }
+        }
+
         // When expression let-binding: let x = when { cond => val, _ => val }
         if self.rng.gen_bool(self.config.when_let_probability) {
             if let Some(stmt) = self.try_generate_when_let(ctx) {
@@ -809,6 +821,81 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         Some(format!(
             "let {} = when {{\n{}\n{}}}",
             result_name,
+            arms.join("\n"),
+            close_indent,
+        ))
+    }
+
+    /// Try to generate a match expression let-binding on a union-typed variable.
+    ///
+    /// Finds a union-typed variable in scope and generates:
+    /// ```vole
+    /// let result = match union_var {
+    ///     i32 => <expr>
+    ///     string => <expr>
+    ///     bool => <expr>
+    /// }
+    /// ```
+    ///
+    /// Each variant gets its own type-pattern arm. Only primitive variants
+    /// are supported (class/interface variants are skipped to keep things simple).
+    ///
+    /// Returns `None` if no union-typed variable with all-primitive variants
+    /// is in scope.
+    fn try_generate_union_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Find union-typed variables in scope (locals + params) with all-primitive variants
+        let mut candidates: Vec<(String, Vec<TypeInfo>)> = Vec::new();
+        for (name, ty, _) in &ctx.locals {
+            if let TypeInfo::Union(variants) = ty {
+                if variants.iter().all(|v| matches!(v, TypeInfo::Primitive(_))) {
+                    candidates.push((name.clone(), variants.clone()));
+                }
+            }
+        }
+        for param in ctx.params.iter() {
+            if let TypeInfo::Union(variants) = &param.param_type {
+                if variants.iter().all(|v| matches!(v, TypeInfo::Primitive(_))) {
+                    candidates.push((param.name.clone(), variants.clone()));
+                }
+            }
+        }
+        if candidates.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..candidates.len());
+        let (scrutinee, variants) = &candidates[idx];
+        let scrutinee = scrutinee.clone();
+        let variants = variants.clone();
+
+        // Pick a result type for all arms (same type to keep it simple)
+        let result_type = self.random_primitive_type();
+        let result_name = ctx.new_local_name();
+
+        let indent = "    ".repeat(self.indent + 1);
+        let expr_ctx = ctx.to_expr_context();
+        let mut arms = Vec::new();
+
+        // Generate one arm per variant type
+        for variant in &variants {
+            if let TypeInfo::Primitive(prim) = variant {
+                let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+                let arm_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
+                arms.push(format!("{}{} => {}", indent, prim.as_str(), arm_expr));
+            }
+        }
+
+        if arms.is_empty() {
+            return None;
+        }
+
+        let close_indent = "    ".repeat(self.indent);
+        ctx.add_local(result_name.clone(), result_type, false);
+
+        Some(format!(
+            "let {} = match {} {{\n{}\n{}}}",
+            result_name,
+            scrutinee,
             arms.join("\n"),
             close_indent,
         ))

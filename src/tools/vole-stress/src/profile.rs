@@ -181,6 +181,8 @@ fn minimal_profile() -> Profile {
             when_let_probability: 0.04,
             // No nested loops in minimal
             nested_loop_probability: 0.0,
+            // No union match in minimal (no union-typed params likely)
+            union_match_probability: 0.0,
         },
         // No destructured imports in minimal (no multi-layer modules)
         destructured_import_probability: 0.0,
@@ -321,6 +323,8 @@ fn full_profile() -> Profile {
             when_let_probability: 0.08,
             // Nested for-loops with break/continue (~6%)
             nested_loop_probability: 0.06,
+            // Union match expression let-bindings (~10%)
+            union_match_probability: 0.10,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -460,6 +464,8 @@ fn deep_nesting_profile() -> Profile {
             when_let_probability: 0.08,
             // Higher nested loop probability for deep nesting profile
             nested_loop_probability: 0.10,
+            // Some union match for variety
+            union_match_probability: 0.06,
         },
         // No destructured imports in deep-nesting (single module focus)
         destructured_import_probability: 0.0,
@@ -602,6 +608,8 @@ fn wide_types_profile() -> Profile {
             when_let_probability: 0.06,
             // Some nested for-loops with break/continue
             nested_loop_probability: 0.04,
+            // Some union match expressions
+            union_match_probability: 0.06,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -735,6 +743,8 @@ fn many_modules_profile() -> Profile {
             when_let_probability: 0.04,
             // No nested loops in many-modules - focus on module loading
             nested_loop_probability: 0.0,
+            // No union match in many-modules - focus on module loading
+            union_match_probability: 0.0,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -884,6 +894,8 @@ fn generics_heavy_profile() -> Profile {
             when_let_probability: 0.06,
             // Some nested for-loops with break/continue
             nested_loop_probability: 0.04,
+            // Some union match expressions
+            union_match_probability: 0.06,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.

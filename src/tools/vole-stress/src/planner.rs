@@ -810,9 +810,16 @@ fn plan_param<R: Rng>(rng: &mut R, names: &mut NameGen) -> ParamInfo {
     }
 }
 
-/// Plan a union type with 2-3 primitive variants.
+/// Plan a union type with 2-5 primitive variants.
+///
+/// Distribution: 2 variants ~40%, 3 variants ~30%, 4 variants ~20%, 5 variants ~10%.
 fn plan_union_type<R: Rng>(rng: &mut R) -> TypeInfo {
-    let variant_count = rng.gen_range(2..=3);
+    let variant_count = match rng.gen_range(0..10) {
+        0..=3 => 2,
+        4..=6 => 3,
+        7..=8 => 4,
+        _ => 5,
+    };
     let mut variants = Vec::with_capacity(variant_count);
     let all_types = [
         PrimitiveType::I8,
