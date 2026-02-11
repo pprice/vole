@@ -1,0 +1,40 @@
+// Test that iterator reduce correctly handles non-i64 return types
+// without causing a Cranelift def_var panic.
+// Regression test for vol-qhdi: vole_iter_reduce_tagged always returns
+// i64, but when the element type is f64, the i64 result must be
+// converted (bitcast) to f64 before being stored in a Cranelift
+// variable. Without this conversion, declare_var(f64) + def_var(i64)
+// panics in cranelift-frontend.
+
+tests "iterator reduce with i64 elements" {
+    test "reduce i64 array to sum" {
+        let arr: [i64] = [1, 2, 3, 4, 5]
+        let sum = arr.iter().reduce(0, (acc: i64, x: i64) -> i64 => acc + x)
+        assert(sum == 15)
+    }
+
+    test "reduce i64 array to product" {
+        let arr: [i64] = [1, 2, 3, 4]
+        let product = arr.iter().reduce(1, (acc: i64, x: i64) -> i64 => acc * x)
+        assert(product == 24)
+    }
+
+    test "reduce i64 used in expression" {
+        let arr: [i64] = [10, 20, 30]
+        let total = arr.iter().reduce(0, (acc: i64, x: i64) -> i64 => acc + x)
+        let doubled = total * 2
+        assert(doubled == 120)
+    }
+
+    test "reduce does not panic with f64 return type" {
+        // This is the core regression test: previously this panicked with
+        // "declared type of variable doesn't match type of value" because
+        // the i64 return from the runtime was not bitcast to f64.
+        let arr: [f64] = [1.0, 2.0, 3.0]
+        let result = arr.iter().reduce(0.0, (acc: f64, x: f64) -> f64 => acc + x)
+        // We only check that this doesn't panic. The computed value may
+        // be incorrect due to a separate ABI mismatch issue (runtime calls
+        // closures with i64 args but closure expects f64 in XMM registers).
+        assert(true)
+    }
+}

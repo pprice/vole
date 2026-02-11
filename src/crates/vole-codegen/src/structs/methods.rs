@@ -1101,11 +1101,27 @@ impl Cg<'_, '_, '_> {
             args.push(tag_val); // acc_tag
             args.push(tag_val); // elem_tag
             let result_val = self.call_runtime(RuntimeFn::IterReduceTagged, &args)?;
-            CompiledValue::new(
-                result_val,
-                self.cranelift_type(return_type_id),
-                return_type_id,
-            )
+            // IterReduceTagged always returns i64 (word-sized generic value).
+            // When the element type is not i64 (e.g. f64, bool, i8), convert
+            // the raw i64 bits back to the proper Cranelift type.
+            let expected_cty = self.cranelift_type(return_type_id);
+            let actual_cty = self.builder.func.dfg.value_type(result_val);
+            let converted = if actual_cty != expected_cty {
+                let ptr_type = self.ptr_type();
+                let registry = self.registry();
+                let arena = self.env.analyzed.type_arena();
+                word_to_value_type_id(
+                    self.builder,
+                    result_val,
+                    return_type_id,
+                    ptr_type,
+                    registry,
+                    arena,
+                )
+            } else {
+                result_val
+            };
+            CompiledValue::new(converted, expected_cty, return_type_id)
         } else {
             self.call_external_id(&external_info, &args, return_type_id)?
         };
