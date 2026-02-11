@@ -1549,11 +1549,9 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     /// Generate a range expression for a for loop.
     ///
     /// Produces either exclusive (`start..end`) or inclusive (`start..=end`)
-    /// syntax. The upper bound may reference an existing local i64 variable
-    /// (~30% chance when one is available).
+    /// syntax. The bounds may reference existing local i64 variables or
+    /// simple arithmetic expressions (~30% chance when variables are available).
     fn generate_range(&mut self, ctx: &StmtContext, inclusive: bool) -> String {
-        let start = self.rng.gen_range(0..3);
-
         // Collect i64 locals that could serve as variable bounds.
         // Only use protected_vars (while-loop counters/guards) which are
         // guaranteed to hold small values. Arbitrary i64 locals can hold
@@ -1569,29 +1567,65 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             .map(|(name, _, _)| name.clone())
             .collect();
 
-        // Try to use a local i64 variable as the upper bound (~30% chance)
-        let var_bound = if !i64_locals.is_empty() && self.rng.gen_bool(0.3) {
+        // Generate start bound: ~20% chance to use a variable/expression
+        // when protected i64 locals are available, otherwise use a literal.
+        let start_str = if !i64_locals.is_empty() && self.rng.gen_bool(0.2) {
             let idx = self.rng.gen_range(0..i64_locals.len());
-            Some(i64_locals[idx].clone())
+            let var = &i64_locals[idx];
+            self.generate_range_bound_expr(var)
         } else {
-            None
+            let start = self.rng.gen_range(0..3);
+            format!("{}", start)
         };
 
-        if let Some(var_name) = var_bound {
-            // Variable bound: use the variable name directly
+        // Generate end bound: ~30% chance to use a variable/expression
+        // when protected i64 locals are available, otherwise use a literal.
+        if !i64_locals.is_empty() && self.rng.gen_bool(0.3) {
+            let idx = self.rng.gen_range(0..i64_locals.len());
+            let var = &i64_locals[idx];
+            let end_str = self.generate_range_bound_expr(var);
             if inclusive {
-                format!("{}..={}", start, var_name)
+                format!("{}..={}", start_str, end_str)
             } else {
-                format!("{}..{}", start, var_name)
+                format!("{}..{}", start_str, end_str)
             }
         } else if inclusive {
             // Inclusive literal bound: `start..=end` iterates start through end.
-            let end = start + self.rng.gen_range(0..5);
-            format!("{}..={}", start, end.max(start))
+            let end = self.rng.gen_range(0..5);
+            format!("{}..={}", start_str, end.max(0))
         } else {
             // Exclusive literal bound: `start..end` iterates start through end-1.
-            let end = start + self.rng.gen_range(1..5);
-            format!("{}..{}", start, end)
+            let end = self.rng.gen_range(1..6);
+            format!("{}..{}", start_str, end)
+        }
+    }
+
+    /// Generate a range bound expression from a protected i64 variable.
+    ///
+    /// Returns either the variable directly or a simple arithmetic expression
+    /// involving the variable (e.g., `var + 1`, `var * 2`). All expressions
+    /// are kept small-valued since the input variable is a protected (small)
+    /// i64 local.
+    fn generate_range_bound_expr(&mut self, var: &str) -> String {
+        match self.rng.gen_range(0..5) {
+            // Plain variable reference
+            0 | 1 => var.to_string(),
+            // Addition: var + small_literal
+            2 => {
+                let offset = self.rng.gen_range(1..=3);
+                format!("({} + {})", var, offset)
+            }
+            // Subtraction: var - small_literal (can go negative, but that
+            // just means an empty range which is fine)
+            3 => {
+                let offset = self.rng.gen_range(1..=2);
+                format!("({} - {})", var, offset)
+            }
+            // Multiplication: var * small_literal
+            _ => {
+                let factor = self.rng.gen_range(1..=2);
+                format!("({} * {})", var, factor)
+            }
         }
     }
 
@@ -3896,7 +3930,12 @@ mod tests {
 
             let stmt = generator.generate_for_statement(&mut ctx, 0);
             // Check if the range uses the variable name "n" as a bound
-            if stmt.contains("..n") || stmt.contains("..=n") {
+            // (either directly or in an expression like (n + 1))
+            if stmt.contains("..n")
+                || stmt.contains("..=n")
+                || stmt.contains("..(n")
+                || stmt.contains("..=(n")
+            {
                 found_var_bound = true;
                 break;
             }
@@ -3904,6 +3943,52 @@ mod tests {
         assert!(
             found_var_bound,
             "Expected variable bound in for-loop range across 500 seeds",
+        );
+    }
+
+    #[test]
+    fn test_for_statement_expression_bound() {
+        let table = SymbolTable::new();
+        let config = StmtConfig::default();
+
+        let mut found_expr_bound = false;
+        let mut found_start_expr = false;
+        for seed in 0..2000 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = StmtGenerator::new(&mut rng, &config);
+            let mut ctx = StmtContext::new(&[], &table);
+
+            ctx.add_local(
+                "n".to_string(),
+                TypeInfo::Primitive(PrimitiveType::I64),
+                false,
+            );
+            ctx.protected_vars.push("n".to_string());
+
+            let stmt = generator.generate_for_statement(&mut ctx, 0);
+            // Check for arithmetic expression bounds like (n + 1), (n - 1), (n * 2)
+            if stmt.contains("(n +") || stmt.contains("(n -") || stmt.contains("(n *") {
+                found_expr_bound = true;
+            }
+            // Check for expression as start bound (before the ..)
+            if let Some(in_pos) = stmt.find("in ") {
+                let after_in = &stmt[in_pos + 3..];
+                if after_in.starts_with('(') || after_in.starts_with('n') {
+                    found_start_expr = true;
+                }
+            }
+
+            if found_expr_bound && found_start_expr {
+                break;
+            }
+        }
+        assert!(
+            found_expr_bound,
+            "Expected arithmetic expression bound (e.g., (n + 1)) in for-loop range across 2000 seeds",
+        );
+        assert!(
+            found_start_expr,
+            "Expected variable/expression as start bound in for-loop range across 2000 seeds",
         );
     }
 
