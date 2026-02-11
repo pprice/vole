@@ -1,0 +1,96 @@
+// Regression test: boolean values flowing through block parameters
+// as i64 must be narrowed to i8 for Not, binary_and, and binary_or.
+// See: stress-hunt round 12 — Cranelift verifier error where i64 values
+// were passed to i8-typed merge block parameters.
+
+func bool_from_when(x: i64) -> bool {
+    return when {
+        x > 0 => true,
+        _ => false,
+    }
+}
+
+func bool_from_match(x: i64) -> bool {
+    return match x {
+        1 => true,
+        2 => true,
+        _ => false,
+    }
+}
+
+func bool_from_if(x: i64) -> bool {
+    if x > 0 { return true }
+    return false
+}
+
+func nested_bool_when(x: i64, y: i64) -> bool {
+    return when {
+        x > 0 => when {
+            y > 0 => true,
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+tests "boolean block parameters" {
+    test "not on when result" {
+        assert(!bool_from_when(-1))
+        assert(bool_from_when(1))
+        assert(!bool_from_when(0))
+    }
+
+    test "not on match result" {
+        assert(!bool_from_match(0))
+        assert(bool_from_match(1))
+        assert(bool_from_match(2))
+        assert(!bool_from_match(3))
+    }
+
+    test "not on if result" {
+        assert(!bool_from_if(-1))
+        assert(bool_from_if(1))
+    }
+
+    test "and with when result" {
+        assert(bool_from_when(1) && true)
+        assert(!(bool_from_when(-1) && true))
+        assert(true && bool_from_when(1))
+        assert(!(true && bool_from_when(-1)))
+    }
+
+    test "or with when result" {
+        assert(bool_from_when(1) || false)
+        assert(!(bool_from_when(-1) || false))
+        assert(false || bool_from_when(1))
+        assert(!(false || bool_from_when(-1)))
+    }
+
+    test "chained boolean ops with block params" {
+        let a = bool_from_when(1)
+        let b = bool_from_match(1)
+        let c = bool_from_if(1)
+        assert(a && b && c)
+        assert(a || b || c)
+        assert(!(!a && !b && !c))
+    }
+
+    test "nested when boolean" {
+        assert(nested_bool_when(1, 1))
+        assert(!nested_bool_when(1, -1))
+        assert(!nested_bool_when(-1, 1))
+        assert(!nested_bool_when(-1, -1))
+    }
+
+    test "not on nested when" {
+        assert(!nested_bool_when(-1, -1))
+        assert(!!nested_bool_when(1, 1))
+    }
+
+    test "and/or combining multiple when results" {
+        let x = bool_from_when(1) && bool_from_match(1)
+        let y = bool_from_when(-1) || bool_from_match(0)
+        assert(x)
+        assert(!y)
+    }
+}

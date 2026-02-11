@@ -449,7 +449,14 @@ impl Cg<'_, '_, '_> {
         // Then block: left was true, evaluate right
         self.switch_and_seal(then_block);
         let right = self.expr(&bin.right)?;
-        let right_arg = BlockArg::from(right.value);
+        // Right operand may be wider than i8 (e.g. from nested boolean
+        // expressions that flow through i64 block parameters), narrow it.
+        let right_val = if self.builder.func.dfg.value_type(right.value) != types::I8 {
+            self.builder.ins().ireduce(types::I8, right.value)
+        } else {
+            right.value
+        };
+        let right_arg = BlockArg::from(right_val);
         self.builder.ins().jump(merge_block, &[right_arg]);
 
         // Else block: left was false, short-circuit with false
@@ -488,7 +495,14 @@ impl Cg<'_, '_, '_> {
         // Else block: left was false, evaluate right
         self.switch_and_seal(else_block);
         let right = self.expr(&bin.right)?;
-        let right_arg = BlockArg::from(right.value);
+        // Right operand may be wider than i8 (e.g. from nested boolean
+        // expressions that flow through i64 block parameters), narrow it.
+        let right_val = if self.builder.func.dfg.value_type(right.value) != types::I8 {
+            self.builder.ins().ireduce(types::I8, right.value)
+        } else {
+            right.value
+        };
+        let right_arg = BlockArg::from(right_val);
         self.builder.ins().jump(merge_block, &[right_arg]);
 
         // Merge block — values cached in either branch do not dominate here

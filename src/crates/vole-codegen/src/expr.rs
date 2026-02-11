@@ -442,8 +442,16 @@ impl Cg<'_, '_, '_> {
                 }
             }
             UnaryOp::Not => {
+                // Boolean not: 1 - value.  Operand may be wider than i8 when
+                // a boolean flows through block parameters (e.g. deeply nested
+                // when/match expressions), so narrow to i8 first.
+                let op_val = if operand.ty != types::I8 {
+                    self.builder.ins().ireduce(types::I8, operand.value)
+                } else {
+                    operand.value
+                };
                 let one = self.builder.ins().iconst(types::I8, 1);
-                self.builder.ins().isub(one, operand.value)
+                self.builder.ins().isub(one, op_val)
             }
             UnaryOp::BitNot => self.builder.ins().bnot(operand.value),
         };
@@ -2260,23 +2268,27 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Convert a value for use in select (ensure matching types).
-    fn convert_for_select(&mut self, value: Value, from_ty: Type, to_ty: Type) -> Value {
-        if from_ty == to_ty {
+    fn convert_for_select(&mut self, value: Value, _from_ty: Type, to_ty: Type) -> Value {
+        // Use the actual Cranelift value type rather than the reported type,
+        // since CompiledValue.ty can be stale when values flow through deeply
+        // nested when/match block parameters.
+        let actual_ty = self.builder.func.dfg.value_type(value);
+        if actual_ty == to_ty {
             return value;
         }
         // Handle integer width mismatches
-        if from_ty.is_int() && to_ty.is_int() {
-            if to_ty.bits() < from_ty.bits() {
+        if actual_ty.is_int() && to_ty.is_int() {
+            if to_ty.bits() < actual_ty.bits() {
                 return self.builder.ins().ireduce(to_ty, value);
-            } else if to_ty.bits() > from_ty.bits() {
+            } else if to_ty.bits() > actual_ty.bits() {
                 return self.builder.ins().sextend(to_ty, value);
             }
         }
         // Handle float promotions/demotions
-        if from_ty == types::F32 && to_ty == types::F64 {
+        if actual_ty == types::F32 && to_ty == types::F64 {
             return self.builder.ins().fpromote(types::F64, value);
         }
-        if from_ty == types::F64 && to_ty == types::F32 {
+        if actual_ty == types::F64 && to_ty == types::F32 {
             return self.builder.ins().fdemote(types::F32, value);
         }
         // For same-size types or unknown conversions, return as-is
