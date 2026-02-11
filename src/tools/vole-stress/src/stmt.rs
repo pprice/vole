@@ -171,6 +171,10 @@ pub struct StmtContext<'a> {
     pub local_counter: usize,
     /// Name of the function currently being generated (to prevent self-recursion).
     pub current_function_name: Option<String>,
+    /// Symbol ID of the free function currently being generated.
+    /// When set, only free functions with a lower symbol ID may be called,
+    /// preventing mutual recursion between free functions.
+    pub current_function_sym_id: Option<SymbolId>,
     /// The class whose method body is being generated (to prevent mutual recursion).
     /// When set, method calls on instances of this class are suppressed.
     pub current_class_sym_id: Option<(ModuleId, SymbolId)>,
@@ -200,6 +204,7 @@ impl<'a> StmtContext<'a> {
             fallible_error_type: None,
             local_counter: 0,
             current_function_name: None,
+            current_function_sym_id: None,
             current_class_sym_id: None,
             protected_vars: Vec::new(),
             return_type: None,
@@ -224,6 +229,7 @@ impl<'a> StmtContext<'a> {
             fallible_error_type: None,
             local_counter: 0,
             current_function_name: None,
+            current_function_sym_id: None,
             current_class_sym_id: None,
             protected_vars: Vec::new(),
             return_type: None,
@@ -2511,8 +2517,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let module = ctx.table.get_module(module_id)?;
 
         // Find fallible functions in this module (non-generic),
-        // excluding the current function to prevent direct self-recursion.
+        // excluding the current function to prevent direct self-recursion,
+        // and only allowing lower-indexed functions to prevent mutual recursion.
         let current_name = ctx.current_function_name.as_deref();
+        let current_fn_sym_id = ctx.current_function_sym_id;
         let fallible_funcs: Vec<(String, FunctionInfo)> = module
             .functions()
             .filter_map(|sym| {
@@ -2521,6 +2529,12 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                         && info.return_type.is_fallible()
                         && current_name != Some(sym.name.as_str())
                     {
+                        // Only call lower-indexed functions to prevent cycles
+                        if let Some(cur_id) = current_fn_sym_id {
+                            if sym.id.0 >= cur_id.0 {
+                                return None;
+                            }
+                        }
                         return Some((sym.name.clone(), info.clone()));
                     }
                 }
@@ -2646,8 +2660,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let module = ctx.table.get_module(module_id)?;
 
         // Find non-generic functions with non-void, non-fallible return types,
-        // excluding the current function to prevent direct self-recursion.
+        // excluding the current function to prevent direct self-recursion,
+        // and only allowing lower-indexed functions to prevent mutual recursion.
         let current_name = ctx.current_function_name.as_deref();
+        let current_fn_sym_id = ctx.current_function_sym_id;
         let candidates: Vec<(String, FunctionInfo)> = module
             .functions()
             .filter_map(|sym| {
@@ -2660,6 +2676,12 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                         && !info.return_type.is_iterator()
                         && current_name != Some(sym.name.as_str())
                     {
+                        // Only call lower-indexed functions to prevent cycles
+                        if let Some(cur_id) = current_fn_sym_id {
+                            if sym.id.0 >= cur_id.0 {
+                                return None;
+                            }
+                        }
                         return Some((sym.name.clone(), info.clone()));
                     }
                 }
@@ -3198,6 +3220,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             };
 
         // Collect non-generic functions with at least one interface-typed param
+        let current_fn_sym_id = ctx.current_function_sym_id;
         let candidates: Vec<(String, Vec<ParamInfo>, TypeInfo)> = module
             .functions()
             .filter_map(|s| {
@@ -3210,6 +3233,14 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                             .any(|p| p.param_type.contains_interface())
                         && Some(s.name.as_str()) != ctx.current_function_name.as_deref()
                     {
+                        // When inside a free function body, only call functions
+                        // with a lower symbol ID to prevent mutual recursion.
+                        if let Some(cur_id) = current_fn_sym_id {
+                            if s.id.0 >= cur_id.0 {
+                                return None;
+                            }
+                        }
+
                         // When inside a method body, skip functions whose
                         // interface-typed params overlap with the current
                         // class's implemented interfaces (prevents cross-

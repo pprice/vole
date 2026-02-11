@@ -958,7 +958,13 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             self.indent += 1;
             // Methods don't have their own type params (they use class type params),
             // but for now we pass empty to avoid complications with class type params.
-            self.emit_function_body(&method.return_type, &method.params, Some(&method.name), &[]);
+            self.emit_function_body(
+                &method.return_type,
+                &method.params,
+                Some(&method.name),
+                &[],
+                None,
+            );
             self.indent -= 1;
             self.emit_line("}");
         }
@@ -985,6 +991,7 @@ impl<'a, R: Rng> EmitContext<'a, R> {
                     &info.params,
                     Some(&symbol.name),
                     &info.type_params,
+                    Some(symbol.id),
                 );
                 self.indent -= 1;
                 self.emit_line("}");
@@ -1058,6 +1065,7 @@ impl<'a, R: Rng> EmitContext<'a, R> {
         params: &[ParamInfo],
         function_name: Option<&str>,
         type_params: &[TypeParam],
+        function_sym_id: Option<SymbolId>,
     ) {
         // Generator functions (returning Iterator<T>) get a special body with yield
         if let TypeInfo::Iterator(elem_type) = return_type {
@@ -1075,6 +1083,10 @@ impl<'a, R: Rng> EmitContext<'a, R> {
 
         // Track the current function name to prevent self-recursion
         stmt_ctx.current_function_name = function_name.map(String::from);
+
+        // Track the current free function's symbol ID to prevent mutual recursion.
+        // When set, only free functions with a lower symbol ID may be called.
+        stmt_ctx.current_function_sym_id = function_sym_id;
 
         // Track the current class to prevent mutual recursion between methods
         stmt_ctx.current_class_sym_id = self.current_class;
