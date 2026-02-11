@@ -1,0 +1,66 @@
+// Test: union-typed parameters passed through interface dispatch
+// Regression test for segfault when using `is` check on union params
+// received via interface dispatch. The bug was that the caller passed
+// the concrete variant value (e.g. i16) as a raw word instead of
+// constructing the tagged union before boxing to a word, so the callee
+// received the numeric value as a pointer and crashed reading the tag.
+
+interface TypeChecker {
+    func check_type(input: i16 | i8) -> bool
+    func check_three(input: i16 | i8 | i128) -> string
+}
+
+class I8Checker implements TypeChecker {
+    func check_type(input: i16 | i8) -> bool {
+        return (input is i8)
+    }
+    func check_three(input: i16 | i8 | i128) -> string {
+        return match input {
+            _ if (input is i8) => "i8"
+            _ if (input is i16) => "i16"
+            _ => "i128"
+        }
+    }
+}
+
+func dispatch_check(checker: TypeChecker, input: i16 | i8) -> bool {
+    return checker.check_type(input)
+}
+
+func dispatch_check_three(checker: TypeChecker, input: i16 | i8 | i128) -> string {
+    return checker.check_three(input)
+}
+
+tests "union params through interface dispatch" {
+    test "is check on i16 via dispatch" {
+        let checker: TypeChecker = I8Checker {}
+        let result = checker.check_type(453_i16)
+        assert(!result)
+    }
+
+    test "is check on i8 via dispatch" {
+        let checker: TypeChecker = I8Checker {}
+        let result = checker.check_type(7_i8)
+        assert(result)
+    }
+
+    test "is check via helper function" {
+        let result_i16 = dispatch_check(I8Checker {}, 100_i16)
+        assert(!result_i16)
+        let result_i8 = dispatch_check(I8Checker {}, 42_i8)
+        assert(result_i8)
+    }
+
+    test "three-variant union via dispatch" {
+        let checker: TypeChecker = I8Checker {}
+        assert(dispatch_check_three(checker, 10_i16) == "i16")
+        assert(dispatch_check_three(checker, 10_i8) == "i8")
+        assert(dispatch_check_three(checker, 10_i128) == "i128")
+    }
+
+    test "union param used in match via dispatch" {
+        let checker: TypeChecker = I8Checker {}
+        let result = checker.check_three(99_i16)
+        assert(result == "i16")
+    }
+}

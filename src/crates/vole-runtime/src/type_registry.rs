@@ -263,7 +263,12 @@ mod tests {
 
         // Pre-populate
         lock.write(|map| {
-            map.insert(1, InstanceTypeInfo { field_types: vec![FieldTypeTag::Rc] });
+            map.insert(
+                1,
+                InstanceTypeInfo {
+                    field_types: vec![FieldTypeTag::Rc],
+                },
+            );
         });
 
         // Simulate abandoned read lock (state = 1 means 1 reader held)
@@ -274,9 +279,12 @@ mod tests {
 
         // Verify write works after recovery (would deadlock without fix)
         lock.write(|map| {
-            map.insert(2, InstanceTypeInfo {
-                field_types: vec![FieldTypeTag::Value, FieldTypeTag::Rc],
-            });
+            map.insert(
+                2,
+                InstanceTypeInfo {
+                    field_types: vec![FieldTypeTag::Value, FieldTypeTag::Rc],
+                },
+            );
         });
 
         let info = lock.read(|map| map.get(&2).cloned()).unwrap();
@@ -296,7 +304,12 @@ mod tests {
 
         // Pre-populate
         lock.write(|map| {
-            map.insert(1, InstanceTypeInfo { field_types: vec![FieldTypeTag::Value] });
+            map.insert(
+                1,
+                InstanceTypeInfo {
+                    field_types: vec![FieldTypeTag::Value],
+                },
+            );
         });
 
         // Simulate abandoned write lock (state = -1)
@@ -311,9 +324,12 @@ mod tests {
 
         // Verify write works after recovery
         lock.write(|map| {
-            map.insert(2, InstanceTypeInfo {
-                field_types: vec![FieldTypeTag::Rc, FieldTypeTag::Rc],
-            });
+            map.insert(
+                2,
+                InstanceTypeInfo {
+                    field_types: vec![FieldTypeTag::Rc, FieldTypeTag::Rc],
+                },
+            );
         });
         let info = lock.read(|map| map.get(&2).cloned()).unwrap();
         assert_eq!(info.field_types.len(), 2);

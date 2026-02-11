@@ -1302,12 +1302,12 @@ impl Cg<'_, '_, '_> {
         let word_bytes = word_type.bytes() as i32;
 
         // Unwrap function type to get params and return type
-        let (param_count, return_type_id, is_void_return) = {
+        let (param_count, param_type_ids, return_type_id, is_void_return) = {
             let arena = self.arena();
             let (params, ret_id, _is_closure) = arena
                 .unwrap_function(func_type_id)
                 .ok_or_else(|| "Expected function type for interface dispatch".to_string())?;
-            (params.len(), ret_id, arena.is_void(ret_id))
+            (params.len(), params.to_vec(), ret_id, arena.is_void(ret_id))
         };
 
         // Load data pointer from boxed interface (first word)
@@ -1345,8 +1345,17 @@ impl Cg<'_, '_, '_> {
         // access both data and vtable. This is needed for Iterator methods that create
         // RcIterator adapters via vole_interface_iter.
         let mut call_args: ArgVec = smallvec![obj.value];
-        for arg in args {
+        for (i, arg) in args.iter().enumerate() {
             let compiled = self.expr(arg)?;
+            // Coerce arguments to their expected parameter types before converting
+            // to word representation. Without this, union-typed parameters would be
+            // passed as their concrete variant (e.g. i16) rather than as a tagged
+            // union pointer, causing the callee's `is` checks to segfault.
+            let compiled = if let Some(&expected_type_id) = param_type_ids.get(i) {
+                self.coerce_to_type(compiled, expected_type_id)?
+            } else {
+                compiled
+            };
             let arena = self.env.analyzed.type_arena();
             let registry = self.env.analyzed.entity_registry();
             let word = value_to_word(
