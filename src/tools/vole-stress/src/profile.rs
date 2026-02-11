@@ -45,6 +45,7 @@ pub fn available_profiles() -> Vec<&'static str> {
         "generics-heavy",
         "stdlib-heavy",
         "closures-heavy",
+        "fallible-heavy",
     ]
 }
 
@@ -61,6 +62,7 @@ pub fn get_profile(name: &str) -> Result<Profile, UnknownProfileError> {
         "generics-heavy" => Ok(generics_heavy_profile()),
         "stdlib-heavy" => Ok(stdlib_heavy_profile()),
         "closures-heavy" => Ok(closures_heavy_profile()),
+        "fallible-heavy" => Ok(fallible_heavy_profile()),
         _ => Err(UnknownProfileError(name.to_string())),
     }
 }
@@ -1289,6 +1291,178 @@ fn closures_heavy_profile() -> Profile {
     Profile { plan, emit }
 }
 
+/// Fallible-heavy profile - stress fallible functions, try/raise patterns, error handling.
+///
+/// This profile generates code emphasizing:
+/// - Many error types per module (2-4) to provide diverse error payloads
+/// - High fallible function probability (~60% of non-generic functions)
+/// - Frequent raise statements inside fallible function bodies
+/// - Frequent try expressions calling other fallible functions
+/// - Early returns with raise for guard-style error handling
+/// - No generics (fallible functions require no type params, so disabling
+///   generics maximizes the proportion of functions that become fallible)
+///
+/// Structurally moderate (2 layers, 4 modules per layer) -- the focus is
+/// on exercising fallible codegen paths (error coercion, try propagation,
+/// raise lowering, fallible return type checking), not module breadth.
+///
+/// Target: stress fallible return type planning, raise/try emission,
+/// error type field construction, and match-on-fallible unwrapping.
+fn fallible_heavy_profile() -> Profile {
+    let plan = PlanConfig {
+        // Moderate module structure -- focus is on fallible functions, not module graph
+        layers: 2,
+        modules_per_layer: 4,
+
+        // Some structs for variety
+        structs_per_module: (1, 2),
+        // Moderate classes -- some methods will be fallible-callers
+        classes_per_module: (2, 3),
+        // Some interfaces for variety
+        interfaces_per_module: (1, 2),
+        // HIGH error count -- every module needs plenty of error types for
+        // fallible functions to use as their error channel
+        errors_per_module: (2, 4),
+        // Many functions -- maximizes number of fallible function sites
+        functions_per_module: (5, 8),
+        // Some globals
+        globals_per_module: (1, 3),
+
+        // Class/interface/struct structure
+        fields_per_struct: (2, 4),
+        fields_per_class: (2, 4),
+        methods_per_class: (2, 3),
+        static_methods_per_class: (0, 1),
+        static_methods_per_struct: (0, 1),
+        methods_per_interface: (1, 3),
+        // Rich error fields so error constructors are non-trivial
+        fields_per_error: (2, 4),
+
+        // Moderate function parameters
+        params_per_function: (1, 4),
+
+        // NO generics -- fallible return types are only assigned to non-generic
+        // functions, so eliminating generics maximizes fallible coverage
+        type_params_per_class: (0, 0),
+        type_params_per_interface: (0, 0),
+        type_params_per_function: (0, 0),
+        constraints_per_type_param: (0, 0),
+
+        // Some interface relationships for variety
+        interface_extends_probability: 0.3,
+        implement_blocks_per_module: (1, 2),
+
+        // Standard imports
+        cross_layer_import_probability: 0.3,
+        enable_diamond_dependencies: true,
+
+        // HIGH fallible probability -- the core focus of this profile.
+        // ~60% of functions will have fallible return types.
+        fallible_probability: 0.60,
+        // No generators -- keep focus on fallible paths
+        generator_probability: 0.0,
+        // Some never-returning functions for unreachable-after-raise patterns
+        never_probability: 0.03,
+        // Moderate nested class fields for variety
+        nested_class_field_probability: 0.15,
+        struct_param_probability: 0.08,
+        struct_return_probability: 0.08,
+        // Some interface-typed params for variety
+        interface_param_probability: 0.08,
+    };
+
+    let emit = EmitConfig {
+        stmt_config: StmtConfig {
+            expr_config: ExprConfig {
+                // Moderate expression depth
+                max_depth: 3,
+                // Standard binary expressions
+                binary_probability: 0.35,
+                // Some when/match/if expressions for variety
+                when_probability: 0.12,
+                match_probability: 0.10,
+                if_expr_probability: 0.15,
+                // Some lambdas for variety
+                lambda_probability: 0.10,
+                // Standard method chaining
+                method_chain_probability: 0.15,
+                max_chain_depth: 2,
+                // Some unreachable
+                unreachable_probability: 0.05,
+                max_match_arms: 5,
+                // Some inline expressions in args
+                inline_expr_arg_probability: 0.10,
+                // Some tuple indexing
+                tuple_index_probability: 0.10,
+                // ~25% chained coalescing
+                chained_coalesce_probability: 0.25,
+                // Some string methods
+                string_method_probability: 0.10,
+            },
+            // Moderate statement depth -- enough for if-raise guard patterns
+            max_depth: 3,
+            // Reasonable statements per block
+            statements_per_block: (2, 4),
+            // Standard control flow
+            if_probability: 0.25,
+            while_probability: 0.10,
+            for_probability: 0.15,
+            break_continue_probability: 0.08,
+            compound_assign_probability: 0.10,
+            reassign_probability: 0.10,
+            // HIGH raise probability -- the core focus: raise in fallible bodies
+            raise_probability: 0.30,
+            // HIGH try probability -- the core focus: try when calling fallible funcs
+            try_probability: 0.35,
+            // Some tuples
+            tuple_probability: 0.10,
+            // Some fixed arrays
+            fixed_array_probability: 0.08,
+            // Some struct destructuring
+            struct_destructure_probability: 0.10,
+            // Some class destructuring
+            class_destructure_probability: 0.08,
+            // Some discards -- useful for discarding fallible results
+            discard_probability: 0.08,
+            // Elevated early returns -- guard-style raise-then-return patterns
+            early_return_probability: 0.20,
+            // Some else-if chains for multi-condition error checking
+            else_if_probability: 0.30,
+            // Some static method calls
+            static_call_probability: 0.20,
+            // Some array mutation
+            array_index_assign_probability: 0.08,
+            array_push_probability: 0.05,
+            array_index_compound_assign_probability: 0.08,
+            mutable_array_probability: 0.3,
+            // Some instance method calls
+            method_call_probability: 0.10,
+            // Some interface dispatch
+            interface_dispatch_probability: 0.08,
+            // Some match expressions
+            match_probability: 0.08,
+            // Some string match
+            string_match_probability: 0.06,
+            // Some when-expression let-bindings
+            when_let_probability: 0.06,
+            // Some nested loops
+            nested_loop_probability: 0.04,
+            // Some union match
+            union_match_probability: 0.08,
+            // Some iterator map/filter
+            iter_map_filter_probability: 0.08,
+            // Some interface function calls
+            iface_function_call_probability: 0.08,
+        },
+        // Destructured imports are disabled due to a compiler bug (vol-vzjx)
+        destructured_import_probability: 0.0,
+        // ~15% expression-bodied functions
+        expr_body_probability: 0.15,
+    };
+
+    Profile { plan, emit }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1667,6 +1841,67 @@ mod tests {
         assert!(
             err.to_string().contains("generics-heavy"),
             "error message should mention generics-heavy profile"
+        );
+    }
+
+    #[test]
+    fn fallible_heavy_profile_exists() {
+        let profile = get_profile("fallible-heavy").expect("fallible-heavy profile should exist");
+
+        // High fallible probability (>= 0.5)
+        assert!(
+            profile.plan.fallible_probability >= 0.5,
+            "fallible_probability should be >= 0.5 for fallible-heavy"
+        );
+
+        // Many error types per module (min >= 2)
+        assert!(
+            profile.plan.errors_per_module.0 >= 2,
+            "errors_per_module min should be >= 2 for fallible-heavy"
+        );
+
+        // High raise probability (>= 0.25)
+        assert!(
+            profile.emit.stmt_config.raise_probability >= 0.25,
+            "raise_probability should be >= 0.25 for fallible-heavy"
+        );
+
+        // High try probability (>= 0.25)
+        assert!(
+            profile.emit.stmt_config.try_probability >= 0.25,
+            "try_probability should be >= 0.25 for fallible-heavy"
+        );
+
+        // No generics (fallible functions require no type params)
+        assert_eq!(
+            profile.plan.type_params_per_class,
+            (0, 0),
+            "type_params_per_class should be (0,0) for fallible-heavy"
+        );
+        assert_eq!(
+            profile.plan.type_params_per_function,
+            (0, 0),
+            "type_params_per_function should be (0,0) for fallible-heavy"
+        );
+    }
+
+    #[test]
+    fn available_profiles_includes_fallible_heavy() {
+        let profiles = available_profiles();
+        assert!(
+            profiles.contains(&"fallible-heavy"),
+            "available_profiles should include fallible-heavy"
+        );
+    }
+
+    #[test]
+    fn unknown_profile_error_includes_fallible_heavy() {
+        let result = get_profile("nonexistent");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("fallible-heavy"),
+            "error message should mention fallible-heavy profile"
         );
     }
 }
