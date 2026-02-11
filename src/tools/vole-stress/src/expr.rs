@@ -1129,6 +1129,27 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         Some(format!("{}.{}(\"{}\")", var, method, substrings[sub_idx]))
     }
 
+    /// Try to generate a string-returning string method call.
+    ///
+    /// Randomly picks one of `to_upper`, `to_lower`, or `trim`.
+    /// Looks for string-typed variables in scope and returns
+    /// `Some("strVar.method()")` on success. These are zero-argument
+    /// methods that transform a string and return a new string.
+    fn try_generate_string_transform_method(&mut self, ctx: &ExprContext) -> Option<String> {
+        let candidates = ctx.string_vars();
+        if candidates.is_empty() {
+            return None;
+        }
+        let idx = self.rng.gen_range(0..candidates.len());
+        let var = &candidates[idx];
+
+        // Pick a string-returning string method (all take no arguments)
+        let methods = ["to_upper", "to_lower", "trim"];
+        let method = methods[self.rng.gen_range(0..methods.len())];
+
+        Some(format!("{}.{}()", var, method))
+    }
+
     /// Try to generate an interface method call on a type-param-typed variable.
     ///
     /// Looks for variables in scope whose type is a type parameter with interface
@@ -1496,7 +1517,14 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                         // Interpolated string (~30%)
                         self.generate_interpolated_string(ctx)
                     }
-                    _ => self.generate_simple(&TypeInfo::Primitive(prim), ctx),
+                    _ => {
+                        // ~10%: string transform method (to_upper/to_lower/trim)
+                        if let Some(expr) = self.try_generate_string_transform_method(ctx) {
+                            expr
+                        } else {
+                            self.generate_simple(&TypeInfo::Primitive(prim), ctx)
+                        }
+                    }
                 }
             }
             // Wider integer and float types: generate simpler expressions
@@ -1907,9 +1935,15 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             TypeInfo::Array(_) if self.rng.gen_bool(0.3) => {
                 format!("{}.length()", name)
             }
-            // ~30% chance to use .length() on strings inside interpolation
+            // ~30% chance to use a string method inside interpolation
             TypeInfo::Primitive(PrimitiveType::String) if self.rng.gen_bool(0.3) => {
-                format!("{}.length()", name)
+                // Pick from .length(), .to_upper(), .to_lower(), .trim()
+                match self.rng.gen_range(0..4) {
+                    0 => format!("{}.length()", name),
+                    1 => format!("{}.to_upper()", name),
+                    2 => format!("{}.to_lower()", name),
+                    _ => format!("{}.trim()", name),
+                }
             }
             _ => name.to_string(),
         }
@@ -3338,5 +3372,95 @@ mod tests {
             seen_ends_with,
             "Expected .ends_with() to appear across 500 seeds"
         );
+    }
+
+    #[test]
+    fn test_string_transform_method_direct() {
+        let config = ExprConfig::default();
+        let table = SymbolTable::new();
+        let locals = vec![("s".to_string(), TypeInfo::Primitive(PrimitiveType::String))];
+
+        let valid_methods = [".to_upper()", ".to_lower()", ".trim()"];
+        let mut found = false;
+        for seed in 0..100 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let ctx = ExprContext::new(&[], &locals, &table);
+            if let Some(expr) = generator.try_generate_string_transform_method(&ctx) {
+                let has_valid_method = valid_methods.iter().any(|m| expr.contains(m));
+                assert!(
+                    has_valid_method,
+                    "Expected 's.<method>()' where method is to_upper/to_lower/trim, got: {}",
+                    expr,
+                );
+                assert!(
+                    expr.starts_with("s."),
+                    "Expected expression to start with 's.', got: {}",
+                    expr,
+                );
+                found = true;
+                break;
+            }
+        }
+        assert!(
+            found,
+            "Expected try_generate_string_transform_method to succeed at least once"
+        );
+    }
+
+    #[test]
+    fn test_string_transform_method_no_strings() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let config = ExprConfig::default();
+        let mut generator = ExprGenerator::new(&mut rng, &config);
+
+        let table = SymbolTable::new();
+        let ctx = ExprContext::new(&[], &[], &table);
+
+        assert!(
+            generator
+                .try_generate_string_transform_method(&ctx)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn test_string_transform_method_variety() {
+        // Ensure all three methods (to_upper, to_lower, trim) can be generated
+        let config = ExprConfig::default();
+        let table = SymbolTable::new();
+        let locals = vec![("s".to_string(), TypeInfo::Primitive(PrimitiveType::String))];
+
+        let mut seen_to_upper = false;
+        let mut seen_to_lower = false;
+        let mut seen_trim = false;
+        for seed in 0..500 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let ctx = ExprContext::new(&[], &locals, &table);
+            if let Some(expr) = generator.try_generate_string_transform_method(&ctx) {
+                if expr.contains(".to_upper()") {
+                    seen_to_upper = true;
+                }
+                if expr.contains(".to_lower()") {
+                    seen_to_lower = true;
+                }
+                if expr.contains(".trim()") {
+                    seen_trim = true;
+                }
+            }
+            if seen_to_upper && seen_to_lower && seen_trim {
+                break;
+            }
+        }
+        assert!(
+            seen_to_upper,
+            "Expected .to_upper() to appear across 500 seeds"
+        );
+        assert!(
+            seen_to_lower,
+            "Expected .to_lower() to appear across 500 seeds"
+        );
+        assert!(seen_trim, "Expected .trim() to appear across 500 seeds");
     }
 }
