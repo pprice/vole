@@ -1839,6 +1839,10 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                         // Negated compound boolean: !(a > b), !(a && b), !(a || b)
                         self.generate_negated_compound_bool(ctx, depth)
                     }
+                    10 => {
+                        // Compound boolean: (a > 0 && b < 10) || c
+                        self.generate_compound_bool(ctx, depth)
+                    }
                     _ => self.generate_simple(&TypeInfo::Primitive(prim), ctx),
                 }
             }
@@ -2051,6 +2055,61 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         };
 
         format!("(!{})", inner)
+    }
+
+    /// Generate a compound boolean expression with mixed `&&` and `||` operators.
+    ///
+    /// Produces expressions like `(a > 0 && b < 10) || c`, `(x || y) && (z > 5)`,
+    /// or `(a && b) || (c && d)`. This exercises the compiler's short-circuit
+    /// evaluation across parenthesized sub-groups with different operators,
+    /// which is more complex than the single-operator `generate_binary_bool`.
+    fn generate_compound_bool(&mut self, ctx: &ExprContext, depth: usize) -> String {
+        // Pick the top-level operator; sub-groups use the opposite to ensure mixing.
+        let top_op = if self.rng.gen_bool(0.5) { "||" } else { "&&" };
+        let inner_op = if top_op == "||" { "&&" } else { "||" };
+
+        // Generate 2-3 sub-groups joined by top_op.
+        let group_count = self.rng.gen_range(2..=3_usize);
+        let groups: Vec<String> = (0..group_count)
+            .map(|_| {
+                // Each sub-group is either a parenthesized pair joined by inner_op,
+                // or a single boolean atom (comparison or simple bool).
+                if self.rng.gen_bool(0.65) {
+                    // Parenthesized pair with the inner operator
+                    let a = self.generate_bool_atom(ctx, depth + 1);
+                    let b = self.generate_bool_atom(ctx, depth + 1);
+                    format!("({} {} {})", a, inner_op, b)
+                } else {
+                    // Single atom (no extra parens needed; generate wraps if needed)
+                    self.generate_bool_atom(ctx, depth + 1)
+                }
+            })
+            .collect();
+
+        format!("({})", groups.join(&format!(" {} ", top_op)))
+    }
+
+    /// Generate a simple boolean atom for use in compound expressions.
+    ///
+    /// Produces either a comparison (`x > 5`), a simple bool variable/literal,
+    /// or a negated simple bool. Avoids recursive compound generation to keep
+    /// the output bounded.
+    fn generate_bool_atom(&mut self, ctx: &ExprContext, depth: usize) -> String {
+        match self.rng.gen_range(0..4_u32) {
+            0..=1 => {
+                // Comparison: (a > b), (x == y), etc.
+                self.generate_comparison(ctx, depth)
+            }
+            2 => {
+                // Simple bool variable or literal
+                self.generate_simple(&TypeInfo::Primitive(PrimitiveType::Bool), ctx)
+            }
+            _ => {
+                // Negated simple bool: !x, !true
+                let inner = self.generate_simple(&TypeInfo::Primitive(PrimitiveType::Bool), ctx);
+                format!("(!{})", inner)
+            }
+        }
     }
 
     /// Generate a type test (`is`) expression on a union-typed variable.
@@ -4441,6 +4500,55 @@ mod tests {
         assert!(
             found,
             "Expected at least one .any/all() on string array across 200 seeds",
+        );
+    }
+
+    #[test]
+    fn test_compound_bool_generation() {
+        let config = ExprConfig::default();
+        let table = SymbolTable::new();
+        let params = vec![
+            ParamInfo {
+                name: "a".to_string(),
+                param_type: TypeInfo::Primitive(PrimitiveType::I64),
+            },
+            ParamInfo {
+                name: "b".to_string(),
+                param_type: TypeInfo::Primitive(PrimitiveType::Bool),
+            },
+        ];
+
+        let mut found_mixed_and_or = false;
+        let mut found_parenthesized_group = false;
+        for seed in 0..2000 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let ctx = ExprContext::new(&params, &[], &table);
+            let expr = generator.generate(&TypeInfo::Primitive(PrimitiveType::Bool), &ctx, 0);
+
+            // Compound bool: contains both && and || in the same expression
+            let has_and = expr.contains("&&");
+            let has_or = expr.contains("||");
+            if has_and && has_or {
+                found_mixed_and_or = true;
+                // Check for parenthesized sub-groups: pattern like "(X && Y) ||" or "(X || Y) &&"
+                if (expr.contains(") ||") || expr.contains(") &&"))
+                    && (expr.contains("|| (") || expr.contains("&& ("))
+                {
+                    found_parenthesized_group = true;
+                }
+            }
+            if found_mixed_and_or && found_parenthesized_group {
+                break;
+            }
+        }
+        assert!(
+            found_mixed_and_or,
+            "Expected at least one expression with both && and || across 2000 seeds"
+        );
+        assert!(
+            found_parenthesized_group,
+            "Expected at least one parenthesized compound bool (e.g. (a && b) || (c && d)) across 2000 seeds"
         );
     }
 }
