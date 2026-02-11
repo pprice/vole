@@ -82,6 +82,11 @@ pub struct StmtConfig {
     /// Probability of generating a `let x = when { cond => val, ... }` statement.
     /// Uses boolean conditions with a wildcard default arm. Set to 0.0 to disable.
     pub when_let_probability: f64,
+    /// Probability of generating nested for-loops with break/continue in the
+    /// inner loop. This exercises complex control flow paths in the compiler
+    /// (multiple loop scopes, break/continue targeting the correct loop).
+    /// Set to 0.0 to disable.
+    pub nested_loop_probability: f64,
 }
 
 impl Default for StmtConfig {
@@ -114,6 +119,7 @@ impl Default for StmtConfig {
             match_probability: 0.08,
             string_match_probability: 0.06,
             when_let_probability: 0.08,
+            nested_loop_probability: 0.06,
         }
     }
 }
@@ -481,6 +487,13 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 + self.config.for_probability
         {
             self.generate_for_statement(ctx, depth)
+        } else if choice
+            < self.config.if_probability
+                + self.config.while_probability
+                + self.config.for_probability
+                + self.config.nested_loop_probability
+        {
+            self.generate_nested_for_loop(ctx, depth)
         } else {
             // Default to let statement
             self.generate_let_statement(ctx)
@@ -1198,6 +1211,119 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             let end = start + self.rng.gen_range(1..5);
             format!("{}..{}", start, end)
         }
+    }
+
+    /// Generate nested for-loops where the inner loop uses `break` or `continue`.
+    ///
+    /// Produces patterns like:
+    /// ```vole
+    /// for i in 0..3 {
+    ///     for j in 0..5 {
+    ///         if j >= 2 {
+    ///             break
+    ///         }
+    ///         let localN = ...
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// This exercises complex control flow with multiple loop scopes, ensuring
+    /// that break/continue target the correct (inner) loop.
+    fn generate_nested_for_loop(&mut self, ctx: &mut StmtContext, depth: usize) -> String {
+        let outer_iter = ctx.new_local_name();
+        let inner_iter = ctx.new_local_name();
+
+        // Generate small ranges for both loops
+        let outer_end = self.rng.gen_range(2..=4);
+        let inner_end = self.rng.gen_range(3..=6);
+
+        let outer_inclusive = self.rng.gen_bool(0.3);
+        let inner_inclusive = self.rng.gen_bool(0.3);
+
+        let outer_range = if outer_inclusive {
+            format!("0..={}", outer_end)
+        } else {
+            format!("0..{}", outer_end)
+        };
+        let inner_range = if inner_inclusive {
+            format!("0..={}", inner_end)
+        } else {
+            format!("0..{}", inner_end)
+        };
+
+        // Set up the outer loop context
+        let was_in_loop = ctx.in_loop;
+        let was_in_while_loop = ctx.in_while_loop;
+        ctx.in_loop = true;
+        ctx.in_while_loop = false;
+
+        let outer_locals_before = ctx.locals.len();
+        ctx.add_local(
+            outer_iter.clone(),
+            TypeInfo::Primitive(PrimitiveType::I64),
+            false,
+        );
+
+        // Build the inner loop body with break or continue
+        let inner_locals_before = ctx.locals.len();
+        ctx.add_local(
+            inner_iter.clone(),
+            TypeInfo::Primitive(PrimitiveType::I64),
+            false,
+        );
+
+        // Generate the break/continue statement for the inner loop
+        let keyword = if self.rng.gen_bool(0.5) {
+            "break"
+        } else {
+            "continue"
+        };
+
+        // Build inner body: a conditional break/continue, then optionally a statement
+        let mut inner_stmts = Vec::new();
+
+        // Generate condition: use the inner iterator variable for the condition
+        let expr_ctx = ctx.to_expr_context();
+        let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+        let cond = expr_gen.generate(&TypeInfo::Primitive(PrimitiveType::Bool), &expr_ctx, 0);
+
+        let inner_indent = "    ".repeat(self.indent + 2);
+        let if_close_indent = "    ".repeat(self.indent + 1);
+        inner_stmts.push(format!(
+            "if {} {{\n{}{}\n{}}}",
+            cond, inner_indent, keyword, if_close_indent
+        ));
+
+        // Add 1-2 more statements inside the inner loop body
+        let extra_count = self.rng.gen_range(1..=2);
+        for _ in 0..extra_count {
+            inner_stmts.push(self.generate_statement(ctx, depth + 2));
+        }
+
+        // Restore inner loop variable
+        ctx.locals.truncate(inner_locals_before);
+
+        // Format the inner loop
+        let inner_body = self.format_block(&inner_stmts);
+        let inner_loop = format!("for {} in {} {}", inner_iter, inner_range, inner_body);
+
+        // Optionally add a statement before or after the inner loop in the outer body
+        let mut outer_stmts = Vec::new();
+        if self.rng.gen_bool(0.3) {
+            outer_stmts.push(self.generate_statement(ctx, depth + 1));
+        }
+        outer_stmts.push(inner_loop);
+        if self.rng.gen_bool(0.3) {
+            outer_stmts.push(self.generate_statement(ctx, depth + 1));
+        }
+
+        // Restore outer loop context
+        ctx.locals.truncate(outer_locals_before);
+        ctx.in_loop = was_in_loop;
+        ctx.in_while_loop = was_in_while_loop;
+
+        let outer_body = self.format_block(&outer_stmts);
+        format!("for {} in {} {}", outer_iter, outer_range, outer_body)
     }
 
     /// Generate a break, continue, or early return statement wrapped in a conditional.
