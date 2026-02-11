@@ -224,17 +224,25 @@ pub fn compile_function_body_with_cg(
             // we must rc_inc before scope cleanup so the caller receives an owned +1 ref.
             let skip_var = if let ExprKind::Identifier(sym) = &expr.kind
                 && let Some((var, _)) = cg.vars.get(sym)
-                && cg.rc_scopes.is_rc_local(*var)
+                && (cg.rc_scopes.is_rc_local(*var)
+                    || cg.rc_scopes.is_composite_rc_local(*var)
+                    || cg.rc_scopes.is_union_rc_local(*var))
             {
                 Some(*var)
             } else {
                 None
             };
-            if skip_var.is_none()
-                && cg.rc_state(value.type_id).needs_cleanup()
-                && value.is_borrowed()
-            {
-                cg.emit_rc_inc_for_type(value.value, value.type_id)?;
+            if skip_var.is_none() && value.is_borrowed() {
+                if cg.rc_state(value.type_id).needs_cleanup() {
+                    cg.emit_rc_inc_for_type(value.value, value.type_id)?;
+                } else if let Some(rc_tags) = cg.union_rc_variant_tags(value.type_id) {
+                    // Union with RC variants (e.g. [string]?): rc_inc the inner
+                    // payload so the caller's copy owns its own reference.
+                    // Without this, the caller's consume_rc_args and the
+                    // return value's scope-exit cleanup both rc_dec the same
+                    // inner value, causing a double-free / heap corruption.
+                    cg.emit_union_rc_inc(value.value, &rc_tags)?;
+                }
             }
 
             // The return value is consumed — ownership transfers to the caller.

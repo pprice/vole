@@ -1,0 +1,67 @@
+// Regression test for heap corruption when expression-body functions return
+// optional arrays or other union types with RC variants.
+// The expression-body RC bookkeeping was missing union_rc_local skip and
+// union_rc_variant_tags inc, causing double-free of inner RC values.
+
+interface Passthrough {
+    func pass_opt_array(x: [string]?) -> [string]?
+    func pass_opt_int_array(x: [i32]?) -> [i32]?
+}
+
+class MyClass implements Passthrough {
+    field1: i32,
+
+    // Expression-body returning optional array parameter
+    func pass_opt_array(x: [string]?) -> [string]? => x
+    func pass_opt_int_array(x: [i32]?) -> [i32]? => x
+}
+
+// Free function variants
+func free_pass_opt_strings(x: [string]?) -> [string]? => x
+func free_pass_opt_ints(x: [i32]?) -> [i32]? => x
+func free_pass_opt_arrays(x: [[i32]]?) -> [[i32]]? => x
+
+tests "expr_body_optional_array" {
+    test "class method: optional string array passthrough" {
+        let c = MyClass { field1: 1_i32 }
+        let result = c.pass_opt_array([ "hello", "world" ])
+        assert(result != nil)
+    }
+
+    test "class method: optional string array nil" {
+        let c = MyClass { field1: 1_i32 }
+        let result = c.pass_opt_array(nil)
+        assert(result == nil)
+    }
+
+    test "class method: optional int array passthrough" {
+        let c = MyClass { field1: 1_i32 }
+        let result = c.pass_opt_int_array([ 1_i32, 2_i32, 3_i32 ])
+        assert(result != nil)
+    }
+
+    test "free function: optional string array" {
+        let result = free_pass_opt_strings([ "a", "b", "c" ])
+        assert(result != nil)
+    }
+
+    test "free function: optional int array" {
+        let result = free_pass_opt_ints([ 10_i32, 20_i32 ])
+        assert(result != nil)
+    }
+
+    test "free function: optional nested array" {
+        let result = free_pass_opt_arrays([ [ 1_i32 ], [ 2_i32, 3_i32 ] ])
+        assert(result != nil)
+    }
+
+    test "repeated calls don't corrupt heap" {
+        let c = MyClass { field1: 1_i32 }
+        let _r1 = c.pass_opt_array([ "test1" ])
+        let _r2 = c.pass_opt_array([ "test2", "test3" ])
+        let _r3 = c.pass_opt_array(nil)
+        let _r4 = free_pass_opt_strings([ "a" ])
+        let _r5 = free_pass_opt_ints([ 42_i32 ])
+        assert(true)
+    }
+}
