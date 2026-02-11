@@ -378,13 +378,11 @@ fn deep_nesting_profile() -> Profile {
             expr_config: ExprConfig {
                 // Expression nesting depth. Must stay moderate because
                 // multi-arm expressions (when/match) have a branching
-                // factor of 3-7 per level.  At depth 8 some seeds hit
-                // worst-case ~7^8 ≈ 5 million leaf expressions, producing
-                // functions with 100K+ CLIF instructions that hang in
-                // Cranelift register allocation.  Depth 5 still gives
-                // meaningful nesting while keeping worst-case size bounded
-                // (~7^5 ≈ 17K leaves, well within Cranelift's budget).
-                max_depth: 5,
+                // factor of 3-7 per level.  Combined with statement
+                // nesting (which multiplies branches), depth 4 keeps
+                // worst-case output bounded: ~7^4 ≈ 2.4K expression
+                // leaves per block, times stmt branching.
+                max_depth: 4,
                 // High probability of binary expressions for deep a + (b + (c + ...))
                 binary_probability: 0.6,
                 // Multi-branch expressions at moderate probability
@@ -399,8 +397,10 @@ fn deep_nesting_profile() -> Profile {
                 // Some unreachable for variety
                 unreachable_probability: 0.05,
             },
-            // Deep statement nesting for nested control flow
-            max_depth: 6,
+            // Statement nesting for nested control flow. Combined with
+            // expression depth 4, this keeps total output per function
+            // bounded while still exercising deep nesting paths.
+            max_depth: 4,
             // Keep blocks small to bound total output size
             statements_per_block: (1, 2),
             // High probability of if for deep if-else chains
@@ -969,16 +969,16 @@ mod tests {
         // Verify deep nesting characteristics
         assert_eq!(profile.plan.layers, 1);
         assert_eq!(profile.plan.modules_per_layer, 1);
-        // Expression nesting depth (5+ avoids exponential blowup from
-        // multi-arm when/match while still achieving meaningful depth)
+        // Expression nesting depth (4+ balances depth vs output size
+        // when combined with statement nesting)
         assert!(
-            profile.emit.stmt_config.expr_config.max_depth >= 5,
-            "expression max_depth should be >= 5 for deep nesting"
+            profile.emit.stmt_config.expr_config.max_depth >= 4,
+            "expression max_depth should be >= 4 for deep nesting"
         );
         // Statement nesting depth
         assert!(
-            profile.emit.stmt_config.max_depth >= 6,
-            "statement max_depth should be >= 6 for deep nesting"
+            profile.emit.stmt_config.max_depth >= 4,
+            "statement max_depth should be >= 4 for deep nesting"
         );
         // High binary probability for deep a + (b + (c + ...))
         assert!(

@@ -7,3 +7,4 @@ perf.data*
 .idea
 .tickets
 .serena/
+.claude/stress-hunt-state.json

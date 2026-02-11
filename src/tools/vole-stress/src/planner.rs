@@ -245,9 +245,6 @@ fn plan_imports<R: Rng>(
     layers: &[Vec<ModuleId>],
     config: &PlanConfig,
 ) {
-    // Collect all modules from later layers for cross-layer imports
-    let later_layers: Vec<Vec<ModuleId>> = layers.iter().skip(1).cloned().collect();
-
     for layer_idx in 0..layers.len().saturating_sub(1) {
         let current_layer = &layers[layer_idx];
         let next_layer = &layers[layer_idx + 1];
@@ -281,9 +278,14 @@ fn plan_imports<R: Rng>(
 
             // Diamond dependencies: if enabled, try to ensure multiple modules
             // in this layer import a common module from a later layer
-            if config.enable_diamond_dependencies && !later_layers.is_empty() {
-                // Pick a "shared" module from some later layer (create diamond patterns)
-                let flat_later: Vec<ModuleId> = later_layers.iter().flatten().copied().collect();
+            if config.enable_diamond_dependencies {
+                // Only pick from layers strictly after the current one to avoid cycles
+                let flat_later: Vec<ModuleId> = layers
+                    .iter()
+                    .skip(layer_idx + 1)
+                    .flatten()
+                    .copied()
+                    .collect();
                 if !flat_later.is_empty() && rng.gen_bool(0.4) {
                     // Use a deterministic "shared" module based on layer index
                     let shared_idx = layer_idx % flat_later.len();
