@@ -173,6 +173,8 @@ fn minimal_profile() -> Profile {
             method_call_probability: 0.0,
             // No interface dispatch in minimal (no interfaces)
             interface_dispatch_probability: 0.0,
+            // Some match expressions even in minimal
+            match_probability: 0.06,
         },
         // No destructured imports in minimal (no multi-layer modules)
         destructured_import_probability: 0.0,
@@ -305,6 +307,8 @@ fn full_profile() -> Profile {
             method_call_probability: 0.12,
             // Interface vtable dispatch on interface-typed locals/params (~10%)
             interface_dispatch_probability: 0.10,
+            // Match expression let-bindings on i64 variables
+            match_probability: 0.08,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -436,6 +440,8 @@ fn deep_nesting_profile() -> Profile {
             method_call_probability: 0.08,
             // No interface dispatch in deep-nesting (no interfaces)
             interface_dispatch_probability: 0.0,
+            // Higher match probability for nesting-focused profile
+            match_probability: 0.10,
         },
         // No destructured imports in deep-nesting (single module focus)
         destructured_import_probability: 0.0,
@@ -570,6 +576,8 @@ fn wide_types_profile() -> Profile {
             method_call_probability: 0.10,
             // Some interface vtable dispatch
             interface_dispatch_probability: 0.08,
+            // Match expression let-bindings on i64 variables
+            match_probability: 0.08,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -695,6 +703,8 @@ fn many_modules_profile() -> Profile {
             method_call_probability: 0.0,
             // No interface dispatch - focus on module loading
             interface_dispatch_probability: 0.0,
+            // Some match expressions even in many-modules
+            match_probability: 0.06,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -836,6 +846,8 @@ fn generics_heavy_profile() -> Profile {
             method_call_probability: 0.0,
             // No interface dispatch - focus on generics
             interface_dispatch_probability: 0.0,
+            // Some match expressions in generics profile
+            match_probability: 0.06,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
