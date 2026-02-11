@@ -36,6 +36,11 @@ pub struct ExprConfig {
     /// Maximum number of arms in match/when expressions (excluding wildcard).
     /// Default 4. Higher values stress-test pattern matching codegen.
     pub max_match_arms: usize,
+    /// Probability of generating a `when` or `if` expression in argument/field-value
+    /// positions instead of a simple literal or variable reference.
+    /// Exercises the compiler's handling of complex expressions in call arguments
+    /// and struct/class field initializers. Set to 0.0 to disable.
+    pub inline_expr_arg_probability: f64,
 }
 
 impl Default for ExprConfig {
@@ -51,6 +56,7 @@ impl Default for ExprConfig {
             max_chain_depth: 2,
             unreachable_probability: 0.05,
             max_match_arms: 4,
+            inline_expr_arg_probability: 0.12,
         }
     }
 }
@@ -831,11 +837,11 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         let struct_name = symbol.name.clone();
         let fields = struct_info.fields.clone();
 
-        // Generate field values
+        // Generate field values — occasionally use inline expressions
         let field_values: Vec<String> = fields
             .iter()
             .map(|f| {
-                let value = self.generate_simple(&f.field_type, ctx);
+                let value = self.generate_arg_expr(&f.field_type, ctx);
                 format!("{}: {}", f.name, value)
             })
             .collect();
@@ -1439,12 +1445,36 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
     }
 
     /// Generate arguments for a method call.
+    ///
+    /// With probability `inline_expr_arg_probability`, each argument may be a
+    /// `when`/`if` expression rather than a plain literal or variable reference.
     fn generate_method_args(&mut self, params: &[ParamInfo], ctx: &ExprContext) -> String {
         params
             .iter()
-            .map(|p| self.generate_simple(&p.param_type, ctx))
+            .map(|p| self.generate_arg_expr(&p.param_type, ctx))
             .collect::<Vec<_>>()
             .join(", ")
+    }
+
+    /// Generate an expression suitable for an argument or field-value position.
+    ///
+    /// Most of the time this produces a simple expression (literal or variable
+    /// reference via `generate_simple`). With probability `inline_expr_arg_probability`,
+    /// it generates a richer inline expression — a two-arm `when` conditional — to
+    /// exercise the compiler's handling of complex expressions in call arguments
+    /// and struct/class field initializers.
+    ///
+    /// Only generates inline expressions for primitive types (i32, i64, f64, bool,
+    /// string) to avoid deeply nested class/struct constructions in argument position.
+    pub fn generate_arg_expr(&mut self, ty: &TypeInfo, ctx: &ExprContext) -> String {
+        let is_primitive = matches!(ty, TypeInfo::Primitive(_));
+        if is_primitive && self.rng.gen_bool(self.config.inline_expr_arg_probability) {
+            // Generate a two-arm `when { cond => val, _ => val }` expression.
+            // Use max_depth to keep the sub-expressions shallow.
+            self.generate_if_expr(ty, ctx, self.config.max_depth.saturating_sub(1))
+        } else {
+            self.generate_simple(ty, ctx)
+        }
     }
 
     /// Generate a simple expression (literal or variable reference).
@@ -1553,11 +1583,11 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         let class_name = symbol.name.clone();
         let fields = class_info.fields.clone();
 
-        // Generate field values
+        // Generate field values — occasionally use inline expressions
         let field_values: Vec<String> = fields
             .iter()
             .map(|f| {
-                let value = self.generate_simple(&f.field_type, ctx);
+                let value = self.generate_arg_expr(&f.field_type, ctx);
                 format!("{}: {}", f.name, value)
             })
             .collect();

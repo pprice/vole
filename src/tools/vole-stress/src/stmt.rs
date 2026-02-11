@@ -2758,13 +2758,14 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let method = eligible[self.rng.gen_range(0..eligible.len())];
 
         // Generate type-correct arguments for non-self parameters
+        // (occasionally inline when/if expressions via generate_arg_expr)
         let expr_ctx = ctx.to_expr_context();
         let args: Vec<String> = method
             .params
             .iter()
             .map(|p| {
                 let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
-                expr_gen.generate_simple(&p.param_type, &expr_ctx)
+                expr_gen.generate_arg_expr(&p.param_type, &expr_ctx)
             })
             .collect();
 
@@ -2881,13 +2882,13 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
         let method = eligible[self.rng.gen_range(0..eligible.len())];
 
-        // Generate type-correct arguments
+        // Generate type-correct arguments (occasionally inline when/if expressions)
         let args: Vec<String> = method
             .params
             .iter()
             .map(|p| {
                 let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
-                expr_gen.generate_simple(&p.param_type, &expr_ctx)
+                expr_gen.generate_arg_expr(&p.param_type, &expr_ctx)
             })
             .collect();
 
@@ -3187,14 +3188,14 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let idx = self.rng.gen_range(0..static_methods.len());
         let static_method = &static_methods[idx];
 
-        // Generate arguments for the static method
+        // Generate arguments for the static method (occasionally inline when/if expressions)
         let expr_ctx = ctx.to_expr_context();
         let args: Vec<String> = static_method
             .params
             .iter()
             .map(|p| {
                 let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
-                expr_gen.generate_simple(&p.param_type, &expr_ctx)
+                expr_gen.generate_arg_expr(&p.param_type, &expr_ctx)
             })
             .collect();
 
@@ -3300,13 +3301,13 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             let method_idx = self.rng.gen_range(0..self_returning.len());
             let method = self_returning[method_idx];
 
-            // Generate arguments for the method call
+            // Generate arguments for the method call (occasionally inline when/if)
             let args: Vec<String> = method
                 .params
                 .iter()
                 .map(|p| {
                     let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
-                    expr_gen.generate_simple(&p.param_type, &expr_ctx)
+                    expr_gen.generate_arg_expr(&p.param_type, &expr_ctx)
                 })
                 .collect();
 
