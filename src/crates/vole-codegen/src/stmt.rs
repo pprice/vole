@@ -397,11 +397,17 @@ impl Cg<'_, '_, '_> {
                     } else {
                         None
                     };
-                    if skip_var.is_none()
-                        && self.rc_state(compiled.type_id).needs_cleanup()
-                        && compiled.is_borrowed()
-                    {
-                        self.emit_rc_inc_for_type(compiled.value, compiled.type_id)?;
+                    if skip_var.is_none() && compiled.is_borrowed() {
+                        if self.rc_state(compiled.type_id).needs_cleanup() {
+                            self.emit_rc_inc_for_type(compiled.value, compiled.type_id)?;
+                        } else if let Some(rc_tags) = self.union_rc_variant_tags(compiled.type_id) {
+                            // Union with RC variants (e.g. [i64]?): rc_inc the inner
+                            // payload so the caller's copy owns its own reference.
+                            // Without this, the caller's consume_rc_args and the
+                            // return value's scope-exit cleanup both rc_dec the same
+                            // inner value, causing a double-free.
+                            self.emit_union_rc_inc(compiled.value, &rc_tags)?;
+                        }
                     }
                     self.emit_rc_cleanup_all_scopes(skip_var)?;
 

@@ -1,0 +1,57 @@
+// Regression: returning a borrowed union/optional containing an RC value
+// must rc_inc the inner payload so the caller's copy has its own reference.
+// Without this, the caller's consume_rc_args and the return value's scope-exit
+// cleanup both rc_dec the same inner value, causing a double-free.
+
+func passthrough_opt_array(param: [i64]?) -> [i64]? {
+    return param
+}
+
+func passthrough_opt_string(param: string?) -> string? {
+    return param
+}
+
+func passthrough_opt_array_via_local(param: [i64]?) -> [i64]? {
+    let x = param
+    return x
+}
+
+class Container {
+    func pass_opt(param: [i64]?) -> [i64]? {
+        return param
+    }
+}
+
+tests "union return RC" {
+    test "optional array passthrough" {
+        let _r = passthrough_opt_array([ 8_i64, 42_i64 ])
+        assert(_r != nil)
+    }
+
+    test "optional array passthrough nil" {
+        let _r = passthrough_opt_array(nil)
+        assert(_r == nil)
+    }
+
+    test "optional string passthrough" {
+        let _r = passthrough_opt_string("hello")
+        assert(_r != nil)
+    }
+
+    test "optional array via local" {
+        let _r = passthrough_opt_array_via_local([ 1_i64, 2_i64, 3_i64 ])
+        assert(_r != nil)
+    }
+
+    test "method optional array passthrough" {
+        let c = Container {}
+        let _r = c.pass_opt([ 10_i64, 20_i64 ])
+        assert(_r != nil)
+    }
+
+    test "existing variable as optional arg" {
+        let arr: [i64]? = [5_i64, 6_i64]
+        let _r = passthrough_opt_array(arr)
+        assert(_r != nil)
+    }
+}
