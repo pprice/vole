@@ -66,6 +66,18 @@ pub struct ExprConfig {
     /// `_ if <condition> => <guarded_result>, _ => <fallback_result>`.
     /// Set to 0.0 to disable.
     pub match_guard_probability: f64,
+    /// Probability that a generated closure captures variables from
+    /// the enclosing scope.  When this fires, primitive-typed locals
+    /// and parameters from the outer context are made visible inside
+    /// the closure body so the expression generator can reference them.
+    /// Set to 0.0 to disable.
+    ///
+    /// **Note:** Currently disabled (0.0) in all profiles due to a
+    /// compiler bug where closure captures in imported modules cause
+    /// "variable not found" errors during cross-module compilation.
+    /// Re-enable when the compiler resolves local-variable capture
+    /// across module boundaries.
+    pub closure_capture_probability: f64,
 }
 
 impl Default for ExprConfig {
@@ -87,6 +99,8 @@ impl Default for ExprConfig {
             string_method_probability: 0.15,
             multi_arm_when_probability: 0.30,
             match_guard_probability: 0.10,
+            // Disabled: cross-module closure capture compiler bug
+            closure_capture_probability: 0.0,
         }
     }
 }
@@ -668,6 +682,15 @@ fn is_integer_type(ty: &TypeInfo) -> bool {
             | TypeInfo::Primitive(PrimitiveType::U32)
             | TypeInfo::Primitive(PrimitiveType::U64)
     )
+}
+
+/// Check whether a type is safe to capture in a closure.
+///
+/// Only primitive types are capturable to avoid complex reference-counting
+/// interactions and type inference issues with class/struct/interface captures
+/// in generated code.
+fn is_capturable_type(ty: &TypeInfo) -> bool {
+    matches!(ty, TypeInfo::Primitive(_))
 }
 
 /// Check whether a type can be safely used inside string interpolation.
@@ -2983,6 +3006,11 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
     }
 
     /// Generate a lambda expression.
+    ///
+    /// When `closure_capture_probability` fires, primitive-typed variables
+    /// from the enclosing scope are made visible inside the lambda body so
+    /// the expression generator can reference them, producing closures that
+    /// capture outer variables.
     pub fn generate_lambda(
         &mut self,
         param_types: &[TypeInfo],
@@ -3007,7 +3035,30 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             })
             .collect();
 
-        let lambda_ctx = ExprContext::new(&lambda_params, &[], ctx.table);
+        // Optionally capture outer scope variables so the closure body can
+        // reference them.  Only primitive-typed variables are captured to
+        // avoid complex type interactions.
+        let captured_locals: Vec<(String, TypeInfo)> = if self.config.closure_capture_probability
+            > 0.0
+            && self.rng.gen_bool(self.config.closure_capture_probability)
+        {
+            let mut captures = Vec::new();
+            for (name, ty) in ctx.locals {
+                if is_capturable_type(ty) {
+                    captures.push((name.clone(), ty.clone()));
+                }
+            }
+            for param in ctx.params {
+                if is_capturable_type(&param.param_type) {
+                    captures.push((param.name.clone(), param.param_type.clone()));
+                }
+            }
+            captures
+        } else {
+            Vec::new()
+        };
+
+        let lambda_ctx = ExprContext::new(&lambda_params, &captured_locals, ctx.table);
 
         // Generate the body expression
         let body = self.generate(return_type, &lambda_ctx, depth + 1);

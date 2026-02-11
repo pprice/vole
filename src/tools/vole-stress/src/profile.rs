@@ -154,6 +154,8 @@ fn minimal_profile() -> Profile {
                 multi_arm_when_probability: 0.0,
                 // No match guards in minimal
                 match_guard_probability: 0.0,
+                // No closure capture in minimal (no lambdas)
+                closure_capture_probability: 0.0,
             },
             // Shallow statement depth
             max_depth: 1,
@@ -315,6 +317,9 @@ fn full_profile() -> Profile {
                 multi_arm_when_probability: 0.35,
                 // ~15% match guards on wildcard arms
                 match_guard_probability: 0.15,
+                // Disabled: cross-module closure capture compiler bug.
+                // Re-enable at ~0.30 once the bug is fixed.
+                closure_capture_probability: 0.0,
             },
             // Moderate statement depth for nested control flow
             max_depth: 3,
@@ -472,6 +477,9 @@ fn deep_nesting_profile() -> Profile {
                 multi_arm_when_probability: 0.25,
                 // ~10% match guards for nesting variety
                 match_guard_probability: 0.10,
+                // Disabled: cross-module closure capture compiler bug.
+                // Re-enable at ~0.20 once the bug is fixed.
+                closure_capture_probability: 0.0,
             },
             // Statement nesting for nested control flow. Combined with
             // expression depth 4, this keeps total output per function
@@ -638,6 +646,9 @@ fn wide_types_profile() -> Profile {
                 multi_arm_when_probability: 0.25,
                 // ~10% match guards
                 match_guard_probability: 0.10,
+                // Disabled: cross-module closure capture compiler bug.
+                // Re-enable at ~0.20 once the bug is fixed.
+                closure_capture_probability: 0.0,
             },
             // Moderate statement depth
             max_depth: 2,
@@ -792,6 +803,8 @@ fn many_modules_profile() -> Profile {
                 multi_arm_when_probability: 0.0,
                 // No match guards - focus on module loading
                 match_guard_probability: 0.0,
+                // No closure capture - focus on module loading
+                closure_capture_probability: 0.0,
             },
             // Shallow statement depth
             max_depth: 1,
@@ -961,6 +974,9 @@ fn generics_heavy_profile() -> Profile {
                 multi_arm_when_probability: 0.25,
                 // ~10% match guards
                 match_guard_probability: 0.10,
+                // Disabled: cross-module closure capture compiler bug.
+                // Re-enable at ~0.25 once the bug is fixed.
+                closure_capture_probability: 0.0,
             },
             // Moderate statement depth
             max_depth: 2,
@@ -1127,6 +1143,9 @@ fn stdlib_heavy_profile() -> Profile {
                 multi_arm_when_probability: 0.30,
                 // ~10% match guards
                 match_guard_probability: 0.10,
+                // Disabled: cross-module closure capture compiler bug.
+                // Re-enable at ~0.30 once the bug is fixed.
+                closure_capture_probability: 0.0,
             },
             // Moderate statement depth — not too deep structurally
             max_depth: 2,
@@ -1280,6 +1299,10 @@ fn closures_heavy_profile() -> Profile {
                 multi_arm_when_probability: 0.25,
                 // ~8% match guards
                 match_guard_probability: 0.08,
+                // Disabled: cross-module closure capture compiler bug.
+                // Re-enable at ~0.50 once the bug is fixed (core focus
+                // of this profile).
+                closure_capture_probability: 0.0,
             },
             max_depth: 3,
             statements_per_block: (2, 4),
@@ -1434,6 +1457,9 @@ fn fallible_heavy_profile() -> Profile {
                 multi_arm_when_probability: 0.25,
                 // ~10% match guards
                 match_guard_probability: 0.10,
+                // Disabled: cross-module closure capture compiler bug.
+                // Re-enable at ~0.20 once the bug is fixed.
+                closure_capture_probability: 0.0,
             },
             // Moderate statement depth -- enough for if-raise guard patterns
             max_depth: 3,
