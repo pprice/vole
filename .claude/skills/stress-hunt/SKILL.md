@@ -10,38 +10,44 @@ generation) and `vole-reduce` (test case minimization) in an iterative loop.
 
 ## Invocation
 
-Launch via ralph-loop:
+Launch via ralph-loop with a completion promise:
 
 ```
-/ralph-loop "/stress-hunt 10" --max-iterations 20
-/ralph-loop "/stress-hunt 5 full,many-modules" --max-iterations 10
+/ralph-loop "/stress-hunt 5 20" --completion-promise STRESS_HUNT_DONE
+/ralph-loop "/stress-hunt 10 10 full,many-modules" --completion-promise STRESS_HUNT_DONE
 ```
 
 Or invoke directly (single iteration):
 
 ```
-/stress-hunt 10                     # 10 seeds per round, all profiles
-/stress-hunt 5 full,many-modules    # 5 seeds per round, specific profiles
+/stress-hunt 5 20                       # 5 seeds per round, 20 max rounds
+/stress-hunt 10 10 full,many-modules    # 10 seeds, 10 rounds, specific profiles
 ```
 
-Parse `$ARGUMENTS`: first token is K (seeds per round), optional second token
-is comma-separated profile names. Default profiles if none specified:
+Parse `$ARGUMENTS`:
+- First token: K (seeds per round)
+- Second token: Z (max rounds) — default 20
+- Optional third token: comma-separated profile names
+
+Default profiles if none specified:
 `full`, `many-modules`, `deep-nesting`, `wide-types`, `generics-heavy`.
 
 ## How It Works
 
-Each ralph-loop iteration processes one round of K seeds through the workflow.
-When all K seeds in a round pass or are verified, the round is **completed**:
-passing seed directories are cleaned up, and K fresh seeds are generated for the
-next round. This continues until `--max-iterations` is exhausted.
+Each iteration processes one round of K seeds through the workflow. When all K
+seeds in a round pass or are verified, the round is **completed**: passing seed
+directories are cleaned up, and K fresh seeds are generated for the next round.
 
-There is no completion promise — the loop runs until max iterations.
+The skill tracks iterations internally via `round` in the state file. When
+`round > Z` (max rounds), output `<promise>STRESS_HUNT_DONE</promise>` to
+signal the ralph loop to stop.
 
 ## State File: `.claude/stress-hunt-state.json`
 
 ```json
 {
   "k": 10,
+  "max_rounds": 20,
   "profiles": ["full", "many-modules", "deep-nesting", "wide-types", "generics-heavy"],
   "seeds": [
     {
@@ -79,7 +85,7 @@ Read `.claude/stress-hunt-state.json`. Based on seed statuses, perform the
 - Distribute across profiles round-robin (seed 0 gets profile 0, seed 1 gets
   profile 1, etc., wrapping around)
 - Write initial state with all seeds as `pending`
-- Set round to 1, history to `[]`
+- Set `round` to 1, `max_rounds` to Z, `history` to `[]`
 
 ### 2. Generate + Test (`pending` seeds exist)
 
@@ -203,11 +209,9 @@ When all K seeds in the current round are `pass`, `verified`, or `skipped`:
 2. Clean up: `rm -rf` the `/tmp/vole-stress/` directories for all `pass`,
    `verified`, and `skipped` seeds in this round
 3. Print a summary: `Round N complete: X/K passed, Y bugs fixed, S skipped`
-4. Pick K fresh random seeds, distribute across profiles round-robin
-5. Replace `seeds` array with the new pending seeds
-6. Increment `round`
-
-The next ralph-loop iteration will generate and test the new batch.
+4. If `round >= max_rounds`: output `<promise>STRESS_HUNT_DONE</promise>` and stop
+5. Otherwise: pick K fresh random seeds, distribute across profiles round-robin,
+   replace `seeds` array, increment `round`
 
 ## Timeout Handling
 
