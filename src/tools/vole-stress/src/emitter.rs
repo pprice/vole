@@ -498,8 +498,11 @@ impl<'a, R: Rng> EmitContext<'a, R> {
                 self.generate_test_value(inner)
             }
             TypeInfo::Array(elem) => {
-                let elem_val = self.generate_test_value(elem);
-                format!("[{}]", elem_val)
+                // Minimum 2 elements: method bodies index arrays at 0..=1,
+                // so arrays must always have at least 2 elements to prevent OOB panics.
+                let elem_val1 = self.generate_test_value(elem);
+                let elem_val2 = self.generate_test_value(elem);
+                format!("[{}, {}]", elem_val1, elem_val2)
             }
             TypeInfo::Tuple(elems) => {
                 let values: Vec<String> =
@@ -1471,8 +1474,11 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             }
             TypeInfo::Array(elem) => {
                 drop(expr_gen);
-                let elem_val = self.literal_for_type(elem);
-                format!("[{}]", elem_val)
+                // Minimum 2 elements: method bodies index arrays at 0..=1,
+                // so arrays must always have at least 2 elements to prevent OOB panics.
+                let elem_val1 = self.literal_for_type(elem);
+                let elem_val2 = self.literal_for_type(elem);
+                format!("[{}, {}]", elem_val1, elem_val2)
             }
             TypeInfo::Tuple(elems) => {
                 drop(expr_gen);
@@ -1514,8 +1520,11 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             }
             TypeInfo::Array(elem) => {
                 drop(expr_gen);
-                let elem_val = self.constant_literal_for_type(elem);
-                format!("[{}]", elem_val)
+                // Minimum 2 elements: method bodies index arrays at 0..=1,
+                // so arrays must always have at least 2 elements to prevent OOB panics.
+                let elem_val1 = self.constant_literal_for_type(elem);
+                let elem_val2 = self.constant_literal_for_type(elem);
+                format!("[{}, {}]", elem_val1, elem_val2)
             }
             TypeInfo::FixedArray(elem, size) => {
                 drop(expr_gen);
