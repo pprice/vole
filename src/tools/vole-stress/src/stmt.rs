@@ -44,6 +44,11 @@ pub struct StmtConfig {
     /// When a struct-typed variable is in scope, this probability controls
     /// whether we destructure it into its field bindings.
     pub struct_destructure_probability: f64,
+    /// Probability of generating a class let-binding with destructuring.
+    /// When a class-typed variable is in scope, this probability controls
+    /// whether we destructure it into its field bindings.
+    /// E.g., `let { x, y } = classInstance`
+    pub class_destructure_probability: f64,
     /// Probability of generating a discard expression (_ = expr) statement.
     pub discard_probability: f64,
     /// Probability of generating an early return statement in function bodies.
@@ -116,6 +121,7 @@ impl Default for StmtConfig {
             tuple_probability: 0.10,
             fixed_array_probability: 0.10,
             struct_destructure_probability: 0.12,
+            class_destructure_probability: 0.10,
             discard_probability: 0.05,
             early_return_probability: 0.15,
             else_if_probability: 0.3,
@@ -575,6 +581,14 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             .gen_bool(self.config.struct_destructure_probability)
         {
             if let Some(stmt) = self.try_generate_struct_destructure(ctx) {
+                return stmt;
+            }
+        }
+
+        // Class destructuring: if we have a class-typed variable in scope,
+        // destructure it into its fields (let { x, y } = classInstance)
+        if self.rng.gen_bool(self.config.class_destructure_probability) {
+            if let Some(stmt) = self.try_generate_class_destructure(ctx) {
                 return stmt;
             }
         }
@@ -3122,6 +3136,116 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         Some(format!("let {} = {}", pattern, var_name))
     }
 
+    /// Try to generate a class destructuring statement.
+    ///
+    /// Looks for class-typed variables in scope and generates destructuring:
+    /// ```vole
+    /// let { field1: local1, field2: local2 } = classVar
+    /// ```
+    /// Adds each destructured field as a new local variable with its field type.
+    /// Only non-generic classes with at least one primitive field are considered.
+    ///
+    /// Returns `None` if no class-typed variable is in scope.
+    fn try_generate_class_destructure(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Ensure we're in a module context
+        let _ = ctx.module_id?;
+
+        // Find class-typed variables in locals
+        let class_locals: Vec<_> = ctx
+            .locals
+            .iter()
+            .filter_map(|(name, ty, _)| {
+                if let TypeInfo::Class(mod_id, sym_id) = ty {
+                    Some((name.clone(), *mod_id, *sym_id))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Also check params for class types
+        let class_params: Vec<_> = ctx
+            .params
+            .iter()
+            .filter_map(|p| {
+                if let TypeInfo::Class(mod_id, sym_id) = &p.param_type {
+                    Some((p.name.clone(), *mod_id, *sym_id))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let all_classes: Vec<_> = class_locals.into_iter().chain(class_params).collect();
+
+        if all_classes.is_empty() {
+            return None;
+        }
+
+        // Pick a random class-typed variable
+        let idx = self.rng.gen_range(0..all_classes.len());
+        let (var_name, class_mod_id, class_sym_id) = &all_classes[idx];
+
+        // Get the class info to find field names and types
+        let symbol = ctx.table.get_symbol(*class_mod_id, *class_sym_id)?;
+        let class_info = match &symbol.kind {
+            SymbolKind::Class(info) => info,
+            _ => return None,
+        };
+
+        // Only destructure non-generic classes with primitive fields
+        if !class_info.type_params.is_empty() {
+            return None;
+        }
+
+        // Filter to primitive-typed fields only (class/interface fields can't
+        // be destructured as simply)
+        let primitive_fields: Vec<usize> = class_info
+            .fields
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| f.field_type.is_primitive())
+            .map(|(i, _)| i)
+            .collect();
+
+        if primitive_fields.is_empty() {
+            return None;
+        }
+
+        // Decide whether to do full or partial destructuring
+        let do_partial = self.rng.gen_bool(0.3);
+        let fields_to_destruct = if do_partial && primitive_fields.len() > 1 {
+            // Partial: pick a random subset (at least 1 field)
+            let count = self.rng.gen_range(1..primitive_fields.len());
+            let mut indices = primitive_fields.clone();
+            // Shuffle and take first `count`
+            for i in (1..indices.len()).rev() {
+                let j = self.rng.gen_range(0..=i);
+                indices.swap(i, j);
+            }
+            indices.truncate(count);
+            indices.sort(); // Keep original order for readability
+            indices
+        } else {
+            // Full destructuring (of primitive fields)
+            primitive_fields
+        };
+
+        // Build the pattern and collect new locals.
+        // We always use the renamed syntax (field: binding) to avoid name collisions
+        // with other variables in scope.
+        let mut pattern_parts = Vec::new();
+        for &field_idx in &fields_to_destruct {
+            let field = &class_info.fields[field_idx];
+            let new_name = ctx.new_local_name();
+            pattern_parts.push(format!("{}: {}", field.name, new_name));
+            ctx.add_local(new_name, field.field_type.clone(), false);
+        }
+
+        let pattern = format!("{{ {} }}", pattern_parts.join(", "));
+        Some(format!("let {} = {}", pattern, var_name))
+    }
+
     /// Try to generate a struct copy statement.
     ///
     /// Looks for struct-typed variables in scope and generates a copy:
@@ -3915,6 +4039,7 @@ mod tests {
             if_probability: 0.0,
             while_probability: 0.0,
             for_probability: 0.0,
+            nested_loop_probability: 0.0,
             ..StmtConfig::default()
         };
 
@@ -4187,5 +4312,141 @@ mod tests {
             found_match,
             "Expected at least one string match let across 200 seeds"
         );
+    }
+
+    #[test]
+    fn test_class_destructure_generation() {
+        use crate::symbols::{ClassInfo, FieldInfo};
+
+        let mut table = SymbolTable::new();
+        let mod_id = table.add_module("test_mod".to_string(), "test_mod.vole".to_string());
+
+        // Create a class with two primitive fields
+        let sym_id = table.get_module_mut(mod_id).unwrap().add_symbol(
+            "Point".to_string(),
+            SymbolKind::Class(ClassInfo {
+                type_params: vec![],
+                fields: vec![
+                    FieldInfo {
+                        name: "x".to_string(),
+                        field_type: TypeInfo::Primitive(PrimitiveType::I64),
+                    },
+                    FieldInfo {
+                        name: "y".to_string(),
+                        field_type: TypeInfo::Primitive(PrimitiveType::I64),
+                    },
+                ],
+                methods: vec![],
+                implements: vec![],
+                static_methods: vec![],
+            }),
+        );
+
+        let config = StmtConfig {
+            class_destructure_probability: 0.99,
+            // Disable other generation paths so we almost always hit class destructuring
+            if_probability: 0.0,
+            while_probability: 0.0,
+            for_probability: 0.0,
+            nested_loop_probability: 0.0,
+            ..StmtConfig::default()
+        };
+
+        let mut found_destructure = false;
+        for seed in 0..500 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = StmtGenerator::new(&mut rng, &config);
+            let mut ctx = StmtContext::with_module(&[], &table, mod_id);
+
+            // Add a class-typed local so destructuring can fire
+            ctx.add_local("point".to_string(), TypeInfo::Class(mod_id, sym_id), false);
+
+            let stmt = generator.generate_statement(&mut ctx, 0);
+
+            // Check if this is a class destructuring statement
+            if stmt.starts_with("let {") && stmt.contains("= point") {
+                // Should reference field names with renamed bindings
+                assert!(
+                    stmt.contains("x:") || stmt.contains("y:"),
+                    "Class destructure should reference field names: {}",
+                    stmt
+                );
+                found_destructure = true;
+                break;
+            }
+        }
+        assert!(
+            found_destructure,
+            "Expected at least one class destructure across 500 seeds"
+        );
+    }
+
+    #[test]
+    fn test_class_destructure_no_classes_returns_none() {
+        let table = SymbolTable::new();
+
+        let config = StmtConfig {
+            class_destructure_probability: 0.99,
+            ..StmtConfig::default()
+        };
+
+        // No class-typed variables in scope: destructuring should never appear
+        for seed in 0..50 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = StmtGenerator::new(&mut rng, &config);
+            let mut ctx = StmtContext::new(&[], &table);
+
+            let result = generator.try_generate_class_destructure(&mut ctx);
+            assert!(
+                result.is_none(),
+                "Should return None without class-typed locals, got: {:?}",
+                result
+            );
+        }
+    }
+
+    #[test]
+    fn test_class_destructure_skips_generic_classes() {
+        use crate::symbols::{ClassInfo, FieldInfo, TypeParam};
+
+        let mut table = SymbolTable::new();
+        let mod_id = table.add_module("test_mod".to_string(), "test_mod.vole".to_string());
+
+        // Create a generic class (should be skipped)
+        let sym_id = table.get_module_mut(mod_id).unwrap().add_symbol(
+            "Box".to_string(),
+            SymbolKind::Class(ClassInfo {
+                type_params: vec![TypeParam {
+                    name: "T".to_string(),
+                    constraints: vec![],
+                }],
+                fields: vec![FieldInfo {
+                    name: "value".to_string(),
+                    field_type: TypeInfo::Primitive(PrimitiveType::I64),
+                }],
+                methods: vec![],
+                implements: vec![],
+                static_methods: vec![],
+            }),
+        );
+
+        let config = StmtConfig {
+            class_destructure_probability: 0.99,
+            ..StmtConfig::default()
+        };
+
+        for seed in 0..50 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = StmtGenerator::new(&mut rng, &config);
+            let mut ctx = StmtContext::with_module(&[], &table, mod_id);
+            ctx.add_local("boxed".to_string(), TypeInfo::Class(mod_id, sym_id), false);
+
+            let result = generator.try_generate_class_destructure(&mut ctx);
+            assert!(
+                result.is_none(),
+                "Should return None for generic class, got: {:?}",
+                result
+            );
+        }
     }
 }

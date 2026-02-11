@@ -163,6 +163,8 @@ fn minimal_profile() -> Profile {
             fixed_array_probability: 0.0,
             // No struct destructuring in minimal
             struct_destructure_probability: 0.0,
+            // No class destructuring in minimal (no classes)
+            class_destructure_probability: 0.0,
             // No discards in minimal
             discard_probability: 0.0,
             // No early returns in minimal
@@ -310,6 +312,8 @@ fn full_profile() -> Profile {
             fixed_array_probability: 0.12,
             // Struct destructuring when struct-typed variables are in scope
             struct_destructure_probability: 0.15,
+            // Class destructuring when class-typed variables are in scope
+            class_destructure_probability: 0.12,
             // Discard expressions (_ = func()) to exercise syntax
             discard_probability: 0.05,
             // Early returns in function bodies (~15%)
@@ -456,6 +460,8 @@ fn deep_nesting_profile() -> Profile {
             fixed_array_probability: 0.08,
             // Some struct destructuring for variety
             struct_destructure_probability: 0.08,
+            // Some class destructuring for variety
+            class_destructure_probability: 0.06,
             // Some discards for variety
             discard_probability: 0.05,
             // Some early returns for variety
@@ -605,6 +611,8 @@ fn wide_types_profile() -> Profile {
             fixed_array_probability: 0.10,
             // Some struct destructuring
             struct_destructure_probability: 0.10,
+            // Some class destructuring
+            class_destructure_probability: 0.08,
             // Some discards
             discard_probability: 0.05,
             // Some early returns
@@ -745,6 +753,8 @@ fn many_modules_profile() -> Profile {
             fixed_array_probability: 0.0,
             // No struct destructuring - focus on module loading
             struct_destructure_probability: 0.0,
+            // No class destructuring - focus on module loading
+            class_destructure_probability: 0.0,
             // No discards - focus on module loading
             discard_probability: 0.0,
             // No early returns - focus on module loading
@@ -900,6 +910,8 @@ fn generics_heavy_profile() -> Profile {
             fixed_array_probability: 0.10,
             // Some struct destructuring
             struct_destructure_probability: 0.10,
+            // Some class destructuring
+            class_destructure_probability: 0.08,
             // Some discards
             discard_probability: 0.05,
             // Some early returns
@@ -1053,6 +1065,8 @@ fn stdlib_heavy_profile() -> Profile {
             fixed_array_probability: 0.20,
             // Some struct destructuring
             struct_destructure_probability: 0.12,
+            // Some class destructuring
+            class_destructure_probability: 0.10,
             // Some discards
             discard_probability: 0.05,
             // Some early returns
@@ -1184,6 +1198,7 @@ fn closures_heavy_profile() -> Profile {
             tuple_probability: 0.10,
             fixed_array_probability: 0.08,
             struct_destructure_probability: 0.10,
+            class_destructure_probability: 0.08,
             discard_probability: 0.05,
             early_return_probability: 0.10,
             else_if_probability: 0.25,
