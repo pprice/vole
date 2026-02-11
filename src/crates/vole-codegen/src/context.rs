@@ -2644,6 +2644,29 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let sig_ref = self.builder.import_signature(sig);
         let func_ptr = native_func.ptr;
 
+        // Coerce args to match the native signature types. Boolean values
+        // flowing through block parameters (when/match) can be i64 while
+        // the native signature expects i8.
+        let coerced_args: Vec<Value> = args
+            .iter()
+            .zip(native_func.signature.params.iter())
+            .map(|(&arg, param_type)| {
+                let expected_ty = native_type_to_cranelift(param_type, ptr_type);
+                let actual_ty = self.builder.func.dfg.value_type(arg);
+                if actual_ty == expected_ty {
+                    arg
+                } else if actual_ty.is_int() && expected_ty.is_int() {
+                    if expected_ty.bits() < actual_ty.bits() {
+                        self.builder.ins().ireduce(expected_ty, arg)
+                    } else {
+                        self.builder.ins().sextend(expected_ty, arg)
+                    }
+                } else {
+                    arg
+                }
+            })
+            .collect();
+
         // Load the function pointer as a constant
         let func_ptr_val = self.builder.ins().iconst(ptr_type, func_ptr as i64);
 
@@ -2651,7 +2674,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let call_inst = self
             .builder
             .ins()
-            .call_indirect(sig_ref, func_ptr_val, args);
+            .call_indirect(sig_ref, func_ptr_val, &coerced_args);
         self.field_cache.clear(); // External calls may mutate instance fields
         let results = self.builder.inst_results(call_inst);
 

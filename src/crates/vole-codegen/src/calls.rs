@@ -1152,8 +1152,6 @@ impl Cg<'_, '_, '_> {
             }
         }
 
-        let sig_ref = self.builder.import_signature(sig);
-
         let mut args: ArgVec = smallvec![closure_ptr];
 
         // Check if this call has lambda defaults
@@ -1214,6 +1212,23 @@ impl Cg<'_, '_, '_> {
                 }
                 let compiled = self.coerce_to_type(compiled, param_type_id)?;
                 args.push(compiled.value);
+            }
+        }
+
+        // Coerce args to match signature types. Boolean values flowing through
+        // block parameters (when/match) can be i64 while the signature expects i8.
+        let sig_params: Vec<_> = sig.params.iter().map(|p| p.value_type).collect();
+        let sig_ref = self.builder.import_signature(sig);
+        for (i, &expected_ty) in sig_params.iter().enumerate() {
+            if i < args.len() {
+                let actual_ty = self.builder.func.dfg.value_type(args[i]);
+                if actual_ty != expected_ty && actual_ty.is_int() && expected_ty.is_int() {
+                    args[i] = if expected_ty.bits() < actual_ty.bits() {
+                        self.builder.ins().ireduce(expected_ty, args[i])
+                    } else {
+                        self.builder.ins().sextend(expected_ty, args[i])
+                    };
+                }
             }
         }
 
@@ -1312,14 +1327,35 @@ impl Cg<'_, '_, '_> {
             )));
         }
 
-        // Import the signature and emit an indirect call
+        // Import the signature and emit an indirect call.
+        // Coerce args to match signature types — boolean values from when/match
+        // block params can be i64 while the native signature expects i8.
+        let coerced_args: Vec<Value> = args
+            .iter()
+            .zip(sig.params.iter())
+            .map(|(&arg, param)| {
+                let expected_ty = param.value_type;
+                let actual_ty = self.builder.func.dfg.value_type(arg);
+                if actual_ty == expected_ty {
+                    arg
+                } else if actual_ty.is_int() && expected_ty.is_int() {
+                    if expected_ty.bits() < actual_ty.bits() {
+                        self.builder.ins().ireduce(expected_ty, arg)
+                    } else {
+                        self.builder.ins().sextend(expected_ty, arg)
+                    }
+                } else {
+                    arg
+                }
+            })
+            .collect();
         let sig_ref = self.builder.import_signature(sig);
         let ptr_type = self.ptr_type();
         let func_ptr_val = self.builder.ins().iconst(ptr_type, native_func.ptr as i64);
         let inst = self
             .builder
             .ins()
-            .call_indirect(sig_ref, func_ptr_val, args);
+            .call_indirect(sig_ref, func_ptr_val, &coerced_args);
         self.field_cache.clear(); // Native calls may mutate instance fields
         inst
     }
