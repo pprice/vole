@@ -1776,10 +1776,11 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let name = ctx.new_local_name();
 
         // Optionally prepend .sorted(), .reverse(), .unique(), or .skip(N) (~25%).
-        // .sorted() and .unique() require comparable elements (skip for bool).
+        // .sorted() requires numeric elements (i64, f64); .unique() skips bool.
+        let is_numeric_elem = matches!(elem_prim, PrimitiveType::I64 | PrimitiveType::F64);
         let prefix: String = if self.rng.gen_bool(0.25) {
             match self.rng.gen_range(0..4) {
-                0 if elem_prim != PrimitiveType::Bool => ".sorted()".to_string(),
+                0 if is_numeric_elem => ".sorted()".to_string(),
                 1 => ".reverse()".to_string(),
                 2 if elem_prim != PrimitiveType::Bool => ".unique()".to_string(),
                 3 => format!(".skip({})", self.rng.gen_range(0..=1)),
@@ -1790,22 +1791,31 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         };
 
         // Build the iterator chain: .iter() followed by 1-2 operations, then a terminal.
-        // 40% single .map(), 30% single .filter(), 30% chained .map().filter() or .filter().map()
-        let chain_choice = self.rng.gen_range(0..10);
+        // 30% single .map(), 25% single .filter(), 20% chained .map().filter() or .filter().map(),
+        // 15% .sorted() intermediate chains (numeric only, else fallback to .map())
+        let chain_choice = self.rng.gen_range(0..20);
 
-        let chain = if chain_choice < 4 {
+        let chain = if chain_choice < 6 {
             // Single .map()
             let map_body = self.generate_map_closure_body(elem_prim);
             format!(".map((x) => {})", map_body)
-        } else if chain_choice < 7 {
+        } else if chain_choice < 11 {
             // Single .filter()
             let filter_body = self.generate_filter_closure_body(elem_prim);
             format!(".filter((x) => {})", filter_body)
-        } else if chain_choice < 9 {
+        } else if chain_choice < 14 {
             // Chained .map().filter() — map uses 'x', filter uses 'y' to avoid shadowing
             let map_body = self.generate_map_closure_body(elem_prim);
             let filter_body = self.generate_filter_closure_body_param(elem_prim, "y");
             format!(".map((x) => {}).filter((y) => {})", map_body, filter_body)
+        } else if chain_choice < 17 && is_numeric_elem {
+            // .sorted() before .map() — numeric only
+            let map_body = self.generate_map_closure_body(elem_prim);
+            format!(".sorted().map((x) => {})", map_body)
+        } else if chain_choice < 20 && is_numeric_elem {
+            // .filter() then .sorted() — numeric only
+            let filter_body = self.generate_filter_closure_body(elem_prim);
+            format!(".filter((x) => {}).sorted()", filter_body)
         } else {
             // Chained .filter().map() — filter uses 'x', map uses 'y'
             let filter_body = self.generate_filter_closure_body(elem_prim);

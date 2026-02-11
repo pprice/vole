@@ -1161,7 +1161,7 @@ impl<'a, R: Rng> EmitContext<'a, R> {
         );
 
         // Choose a chain pattern
-        let pattern = self.rng.gen_range(0..12);
+        let pattern = self.rng.gen_range(0..16);
         match pattern {
             0..=3 => {
                 // Plain .collect()
@@ -1199,6 +1199,24 @@ impl<'a, R: Rng> EmitContext<'a, R> {
                 // .reduce(init, (acc, el) => expr) - accumulator closure
                 let (init, body) = self.generate_reduce_lambda(elem_type);
                 format!(".reduce({}, (acc, el) => {})", init, body)
+            }
+            12 if is_numeric => {
+                // .sorted().collect() - sort then collect (numeric only)
+                ".sorted().collect()".to_string()
+            }
+            13 if is_numeric => {
+                // .sorted().sum() - sort then sum (numeric only)
+                ".sorted().sum()".to_string()
+            }
+            14 if is_numeric => {
+                // .filter(...).sorted().collect() - filter then sort (numeric only)
+                let pred = self.generate_filter_predicate(elem_type);
+                format!(".filter({}).sorted().collect()", pred)
+            }
+            15 if is_numeric => {
+                // .sorted().take(N).collect() - sort then take (numeric only)
+                let n = self.rng.gen_range(1..=3);
+                format!(".sorted().take({}).collect()", n)
             }
             _ => {
                 // Fallback to .collect()

@@ -424,7 +424,7 @@ impl<'a, R: Rng> EntrypointContext<'a, R> {
                 | TypeInfo::Primitive(PrimitiveType::String)
         );
 
-        let pattern = self.rng.gen_range(0..12);
+        let pattern = self.rng.gen_range(0..16);
         match pattern {
             0..=3 => ".collect()".to_string(),
             4 => {
@@ -448,6 +448,16 @@ impl<'a, R: Rng> EntrypointContext<'a, R> {
             10..=11 if is_reducible => {
                 let (init, body) = self.generate_reduce_lambda(elem_type);
                 format!(".reduce({}, (acc, el) => {})", init, body)
+            }
+            12 if is_numeric => ".sorted().collect()".to_string(),
+            13 if is_numeric => ".sorted().sum()".to_string(),
+            14 if is_numeric => {
+                let pred = self.generate_filter_predicate(elem_type);
+                format!(".filter({}).sorted().collect()", pred)
+            }
+            15 if is_numeric => {
+                let n = self.rng.gen_range(1..=3);
+                format!(".sorted().take({}).collect()", n)
             }
             _ => ".collect()".to_string(),
         }
