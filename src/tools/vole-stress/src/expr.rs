@@ -1421,7 +1421,7 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             }
         }
 
-        let choice = self.rng.gen_range(0..10);
+        let choice = self.rng.gen_range(0..11);
 
         match prim {
             PrimitiveType::I32 | PrimitiveType::I64 | PrimitiveType::F64 => {
@@ -1494,6 +1494,10 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                         self.generate_is_expr(ctx).unwrap_or_else(|| {
                             self.generate_simple(&TypeInfo::Primitive(prim), ctx)
                         })
+                    }
+                    9 => {
+                        // Negated compound boolean: !(a > b), !(a && b), !(a || b)
+                        self.generate_negated_compound_bool(ctx, depth)
                     }
                     _ => self.generate_simple(&TypeInfo::Primitive(prim), ctx),
                 }
@@ -1672,6 +1676,25 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         let op = if self.rng.gen_bool(0.5) { "&&" } else { "||" };
 
         format!("({} {} {})", left, op, right)
+    }
+
+    /// Generate a negated compound boolean expression.
+    ///
+    /// Produces expressions like `!(a > b)`, `!(a && b)`, or `!(a || b)`.
+    /// This exercises the combination of boolean negation with compound
+    /// sub-expressions (comparisons and binary boolean operators), which
+    /// differs from the simple unary-not case that only negates literals
+    /// or variable references.
+    fn generate_negated_compound_bool(&mut self, ctx: &ExprContext, depth: usize) -> String {
+        let inner = if self.rng.gen_bool(0.5) {
+            // Negate a comparison: !(x > y), !(a == b), etc.
+            self.generate_comparison(ctx, depth + 1)
+        } else {
+            // Negate a binary boolean: !(a && b), !(a || b)
+            self.generate_binary_bool(ctx, depth + 1)
+        };
+
+        format!("(!{})", inner)
     }
 
     /// Generate a type test (`is`) expression on a union-typed variable.
@@ -3462,5 +3485,57 @@ mod tests {
             "Expected .to_lower() to appear across 500 seeds"
         );
         assert!(seen_trim, "Expected .trim() to appear across 500 seeds");
+    }
+
+    #[test]
+    fn test_negated_compound_bool_generation() {
+        let config = ExprConfig::default();
+        let table = SymbolTable::new();
+        let params = vec![
+            ParamInfo {
+                name: "a".to_string(),
+                param_type: TypeInfo::Primitive(PrimitiveType::I64),
+            },
+            ParamInfo {
+                name: "b".to_string(),
+                param_type: TypeInfo::Primitive(PrimitiveType::Bool),
+            },
+        ];
+
+        let mut found_negated_comparison = false;
+        let mut found_negated_binary_bool = false;
+        for seed in 0..1000 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let ctx = ExprContext::new(&params, &[], &table);
+            let expr = generator.generate(&TypeInfo::Primitive(PrimitiveType::Bool), &ctx, 0);
+
+            // Negated compound: starts with "(!" and contains comparison or boolean operators
+            if expr.starts_with("(!(") {
+                if expr.contains("&&") || expr.contains("||") {
+                    found_negated_binary_bool = true;
+                }
+                if expr.contains("==")
+                    || expr.contains("!=")
+                    || expr.contains(">=")
+                    || expr.contains("<=")
+                    || expr.contains("> ")
+                    || expr.contains("< ")
+                {
+                    found_negated_comparison = true;
+                }
+            }
+            if found_negated_comparison && found_negated_binary_bool {
+                break;
+            }
+        }
+        assert!(
+            found_negated_comparison,
+            "Expected at least one negated comparison (e.g. !(a > b)) across 1000 seeds"
+        );
+        assert!(
+            found_negated_binary_bool,
+            "Expected at least one negated binary bool (e.g. !(a && b)) across 1000 seeds"
+        );
     }
 }
