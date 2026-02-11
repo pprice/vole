@@ -137,6 +137,7 @@ fn minimal_profile() -> Profile {
                 max_chain_depth: 0,
                 // No unreachable in minimal
                 unreachable_probability: 0.0,
+                max_match_arms: 3,
             },
             // Shallow statement depth
             max_depth: 1,
@@ -281,6 +282,7 @@ fn full_profile() -> Profile {
                 max_chain_depth: 2,
                 // ~5% unreachable in match/when arms
                 unreachable_probability: 0.05,
+                max_match_arms: 6,
             },
             // Moderate statement depth for nested control flow
             max_depth: 3,
@@ -421,6 +423,7 @@ fn deep_nesting_profile() -> Profile {
                 max_chain_depth: 2,
                 // Some unreachable for variety
                 unreachable_probability: 0.05,
+                max_match_arms: 8,
             },
             // Statement nesting for nested control flow. Combined with
             // expression depth 4, this keeps total output per function
@@ -570,6 +573,7 @@ fn wide_types_profile() -> Profile {
                 max_chain_depth: 2,
                 // Some unreachable
                 unreachable_probability: 0.05,
+                max_match_arms: 5,
             },
             // Moderate statement depth
             max_depth: 2,
@@ -707,6 +711,7 @@ fn many_modules_profile() -> Profile {
                 max_chain_depth: 0,
                 // No unreachable - focus on module loading
                 unreachable_probability: 0.0,
+                max_match_arms: 3,
             },
             // Shallow statement depth
             max_depth: 1,
@@ -859,6 +864,7 @@ fn generics_heavy_profile() -> Profile {
                 max_chain_depth: 2,
                 // Some unreachable
                 unreachable_probability: 0.05,
+                max_match_arms: 5,
             },
             // Moderate statement depth
             max_depth: 2,
@@ -1008,6 +1014,7 @@ fn stdlib_heavy_profile() -> Profile {
                 max_chain_depth: 3,
                 // Some unreachable
                 unreachable_probability: 0.05,
+                max_match_arms: 8,
             },
             // Moderate statement depth — not too deep structurally
             max_depth: 2,

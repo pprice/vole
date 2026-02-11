@@ -33,6 +33,9 @@ pub struct ExprConfig {
     /// Probability of using `unreachable` in match/when wildcard arms.
     /// Only used when the arm is provably unreachable (e.g., all cases covered).
     pub unreachable_probability: f64,
+    /// Maximum number of arms in match/when expressions (excluding wildcard).
+    /// Default 4. Higher values stress-test pattern matching codegen.
+    pub max_match_arms: usize,
 }
 
 impl Default for ExprConfig {
@@ -47,6 +50,7 @@ impl Default for ExprConfig {
             method_chain_probability: 0.20,
             max_chain_depth: 2,
             unreachable_probability: 0.05,
+            max_match_arms: 4,
         }
     }
 }
@@ -1938,7 +1942,8 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         // Decide if we want to use unreachable in the default arm
         let use_unreachable = self.rng.gen_bool(self.config.unreachable_probability);
 
-        let arm_count = self.rng.gen_range(2..=4);
+        let max_arms = self.config.max_match_arms.max(2);
+        let arm_count = self.rng.gen_range(2..=max_arms);
         let mut arms = Vec::new();
 
         if use_unreachable {
@@ -2387,7 +2392,8 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
 
         // Normal match expression
         let subject = self.generate(subject_type, ctx, depth + 1);
-        let arm_count = self.rng.gen_range(2..=4);
+        let max_arms = self.config.max_match_arms.max(2);
+        let arm_count = self.rng.gen_range(2..=max_arms);
         let mut arms = Vec::new();
 
         // Generate some literal or guarded arms
@@ -2432,7 +2438,8 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             }
         };
 
-        let arm_count = self.rng.gen_range(2..=4);
+        let max_arms = self.config.max_match_arms.max(2);
+        let arm_count = self.rng.gen_range(2..=max_arms);
         let mut arms = Vec::new();
 
         // First arm matches the known subject value
@@ -2461,7 +2468,8 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         depth: usize,
     ) -> String {
         let subject = self.generate(subject_type, ctx, depth + 1);
-        let arm_count = self.rng.gen_range(2..=4);
+        let max_arms = self.config.max_match_arms.max(2);
+        let arm_count = self.rng.gen_range(2..=max_arms);
         let mut arms = Vec::new();
 
         for _ in 0..arm_count - 1 {
