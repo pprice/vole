@@ -43,6 +43,7 @@ pub fn available_profiles() -> Vec<&'static str> {
         "wide-types",
         "many-modules",
         "generics-heavy",
+        "stdlib-heavy",
     ]
 }
 
@@ -57,6 +58,7 @@ pub fn get_profile(name: &str) -> Result<Profile, UnknownProfileError> {
         "wide-types" => Ok(wide_types_profile()),
         "many-modules" => Ok(many_modules_profile()),
         "generics-heavy" => Ok(generics_heavy_profile()),
+        "stdlib-heavy" => Ok(stdlib_heavy_profile()),
         _ => Err(UnknownProfileError(name.to_string())),
     }
 }
@@ -915,6 +917,156 @@ fn generics_heavy_profile() -> Profile {
         destructured_import_probability: 0.0,
         // ~15% expression-bodied functions
         expr_body_probability: 0.15,
+    };
+
+    Profile { plan, emit }
+}
+
+/// Stdlib-heavy profile - stress standard library usage and method chaining.
+///
+/// This profile generates code that heavily exercises the standard library:
+/// - String methods, string interpolation, string matching
+/// - Array methods: push, index, iteration via map/filter/reduce/sum
+/// - Iterator chains: `.iter().map(...).filter(...).collect()`
+/// - Method chaining on class instances
+/// - Higher lambda usage for iterator callbacks
+///
+/// Structurally moderate (2 layers, 6-8 modules) — the focus is on
+/// expression richness and stdlib surface area, not structural depth.
+///
+/// Target: stress runtime builtins, string/array codegen paths,
+/// iterator protocol, and method dispatch.
+fn stdlib_heavy_profile() -> Profile {
+    let plan = PlanConfig {
+        // Moderate module structure — 2 layers, ~7 modules per layer
+        layers: 2,
+        modules_per_layer: 7,
+
+        // Standard declaration counts — not the focus of this profile
+        structs_per_module: (1, 2),
+        classes_per_module: (2, 4),
+        interfaces_per_module: (1, 2),
+        errors_per_module: (0, 1),
+        functions_per_module: (4, 7),
+        globals_per_module: (2, 4),
+
+        // Class/interface structure
+        fields_per_struct: (2, 4),
+        fields_per_class: (2, 4),
+        methods_per_class: (2, 4),
+        static_methods_per_class: (1, 2),
+        static_methods_per_struct: (1, 2),
+        methods_per_interface: (2, 3),
+        fields_per_error: (0, 2),
+
+        // Function parameters: moderate
+        params_per_function: (1, 4),
+
+        // Light generics — not the focus
+        type_params_per_class: (0, 1),
+        type_params_per_interface: (0, 1),
+        type_params_per_function: (0, 1),
+        constraints_per_type_param: (0, 1),
+
+        // Some interface relationships
+        interface_extends_probability: 0.3,
+        implement_blocks_per_module: (1, 2),
+
+        // Standard imports
+        cross_layer_import_probability: 0.3,
+        enable_diamond_dependencies: true,
+
+        // Some fallible functions for try coverage
+        fallible_probability: 0.10,
+        // Some generators — iterator chains pair well with generators
+        generator_probability: 0.12,
+        // No never-returning functions
+        never_probability: 0.0,
+        // Moderate nested class fields for method chaining targets
+        nested_class_field_probability: 0.20,
+        struct_param_probability: 0.10,
+        struct_return_probability: 0.10,
+        // Some interface-typed params for vtable dispatch on stdlib types
+        interface_param_probability: 0.10,
+    };
+
+    let emit = EmitConfig {
+        stmt_config: StmtConfig {
+            expr_config: ExprConfig {
+                // Moderate expression depth — deep enough for method chains
+                max_depth: 4,
+                // Standard binary expression probability
+                binary_probability: 0.4,
+                // Some when/match/if expressions
+                when_probability: 0.15,
+                match_probability: 0.12,
+                if_expr_probability: 0.15,
+                // Elevated lambda probability for iterator callbacks
+                lambda_probability: 0.25,
+                // High method chaining for stdlib method stress
+                method_chain_probability: 0.35,
+                max_chain_depth: 3,
+                // Some unreachable
+                unreachable_probability: 0.05,
+            },
+            // Moderate statement depth — not too deep structurally
+            max_depth: 2,
+            // Reasonable statements per block
+            statements_per_block: (2, 4),
+            // Standard control flow
+            if_probability: 0.25,
+            while_probability: 0.10,
+            // Elevated for-loop probability — iterating over arrays
+            for_probability: 0.25,
+            break_continue_probability: 0.10,
+            compound_assign_probability: 0.15,
+            reassign_probability: 0.15,
+            // Some fallible support
+            raise_probability: 0.08,
+            try_probability: 0.10,
+            // Moderate tuples
+            tuple_probability: 0.10,
+            // Elevated fixed-array probability — more arrays to call methods on
+            fixed_array_probability: 0.20,
+            // Some struct destructuring
+            struct_destructure_probability: 0.12,
+            // Some discards
+            discard_probability: 0.05,
+            // Some early returns
+            early_return_probability: 0.12,
+            // Some else-if chains
+            else_if_probability: 0.25,
+            // Some static method calls
+            static_call_probability: 0.25,
+            // Elevated array mutation — push and index assignment for stdlib stress
+            array_index_assign_probability: 0.15,
+            array_push_probability: 0.15,
+            array_index_compound_assign_probability: 0.15,
+            // High mutable array probability — more mutable arrays for mutation ops
+            mutable_array_probability: 0.6,
+            // Elevated instance method calls for method chaining
+            method_call_probability: 0.20,
+            // Some interface dispatch
+            interface_dispatch_probability: 0.10,
+            // Elevated match on i64 variables
+            match_probability: 0.10,
+            // Elevated string match — exercises string comparison paths
+            string_match_probability: 0.12,
+            // Some when-expression let-bindings
+            when_let_probability: 0.08,
+            // Some nested loops
+            nested_loop_probability: 0.06,
+            // Some union match
+            union_match_probability: 0.08,
+            // High iterator map/filter — the core of this profile
+            iter_map_filter_probability: 0.25,
+        },
+        // Destructured imports are disabled due to a compiler bug (vol-vzjx):
+        // Module-level destructured imports fail when the module is transitively imported.
+        // Re-enable at ~0.30 once the bug is fixed.
+        destructured_import_probability: 0.0,
+        // ~20% expression-bodied functions
+        expr_body_probability: 0.20,
     };
 
     Profile { plan, emit }
