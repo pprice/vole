@@ -1174,16 +1174,44 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     /// Generate a for statement.
     ///
     /// Randomly chooses between:
-    /// - Numeric range iteration: `for x in start..end { ... }`
-    /// - Array iteration: `for elem in arr { ... }` (when array variables are in scope)
+    /// - Iterator chain iteration: `for x in arr.iter().filter/map/sorted/take(...) { ... }`
+    ///   (~20% when primitive array variables are in scope)
+    /// - Array iteration: `for elem in arr { ... }` (~40% when array variables are in scope)
+    /// - Numeric range iteration: `for x in start..end { ... }` (fallback)
     ///
     /// For numeric ranges, randomly picks exclusive (`start..end`) or inclusive
     /// (`start..=end`) syntax with ~50/50 probability, optionally using a local
     /// i64 variable as the upper bound.
     fn generate_for_statement(&mut self, ctx: &mut StmtContext, depth: usize) -> String {
-        // Check if we can iterate over an array variable (~40% when available)
         let expr_ctx = ctx.to_expr_context();
         let array_vars = expr_ctx.array_vars();
+
+        // Check if we can iterate over an iterator chain (~20% when primitive arrays available)
+        if !array_vars.is_empty() && self.rng.gen_bool(0.2) {
+            // Filter to arrays with primitive element types suitable for closures
+            let prim_array_vars: Vec<(String, PrimitiveType)> = array_vars
+                .iter()
+                .filter_map(|(name, elem_ty)| {
+                    if let TypeInfo::Primitive(prim) = elem_ty {
+                        match prim {
+                            PrimitiveType::I64
+                            | PrimitiveType::F64
+                            | PrimitiveType::Bool
+                            | PrimitiveType::String => Some((name.clone(), *prim)),
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            if !prim_array_vars.is_empty() {
+                return self.generate_for_in_iterator(ctx, depth, &prim_array_vars);
+            }
+        }
+
+        // Check if we can iterate over an array variable (~40% when available)
         if !array_vars.is_empty() && self.rng.gen_bool(0.4) {
             return self.generate_for_in_array(ctx, depth, &array_vars);
         }
@@ -1263,6 +1291,106 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         let body_block = self.format_block(&body_stmts);
         format!("for {} in {} {}", iter_name, arr_name, body_block)
+    }
+
+    /// Generate a for-in-iterator statement: `for x in arr.iter().chain(...) { ... }`.
+    ///
+    /// Iterates over an iterator chain instead of a plain array. The chain is one of:
+    /// - `.filter((x) => PRED)` — element type stays the same
+    /// - `.map((x) => EXPR)` — element type preserved (same-type expressions only)
+    /// - `.sorted()` — for numeric element types only (i64, f64)
+    /// - `.take(N)` — take first N elements
+    ///
+    /// Only applies to arrays with primitive element types (i64, f64, bool, string).
+    fn generate_for_in_iterator(
+        &mut self,
+        ctx: &mut StmtContext,
+        depth: usize,
+        prim_array_vars: &[(String, PrimitiveType)],
+    ) -> String {
+        let iter_name = ctx.new_local_name();
+
+        let idx = self.rng.gen_range(0..prim_array_vars.len());
+        let (arr_name, elem_prim) = &prim_array_vars[idx];
+        let elem_prim = *elem_prim;
+        let arr_name = arr_name.clone();
+
+        let is_numeric = matches!(elem_prim, PrimitiveType::I64 | PrimitiveType::F64);
+
+        // Pick a random iterator chain operation.
+        // Weights: filter ~30%, map ~30%, sorted ~20% (numeric only), take ~20%
+        // For non-numeric types, sorted's weight is redistributed to filter/map/take.
+        let chain_expr = if is_numeric {
+            match self.rng.gen_range(0..10) {
+                0..3 => {
+                    // .filter((x) => PRED)
+                    let pred = self.generate_filter_closure_body(elem_prim);
+                    format!(".filter((x) => {})", pred)
+                }
+                3..6 => {
+                    // .map((x) => EXPR) — same type
+                    let body = self.generate_map_closure_body(elem_prim);
+                    format!(".map((x) => {})", body)
+                }
+                6..8 => {
+                    // .sorted() — numeric only
+                    ".sorted()".to_string()
+                }
+                _ => {
+                    // .take(N)
+                    let n = self.rng.gen_range(1..=3);
+                    format!(".take({})", n)
+                }
+            }
+        } else {
+            match self.rng.gen_range(0..10) {
+                0..4 => {
+                    // .filter((x) => PRED)
+                    let pred = self.generate_filter_closure_body(elem_prim);
+                    format!(".filter((x) => {})", pred)
+                }
+                4..7 => {
+                    // .map((x) => EXPR) — same type
+                    let body = self.generate_map_closure_body(elem_prim);
+                    format!(".map((x) => {})", body)
+                }
+                _ => {
+                    // .take(N)
+                    let n = self.rng.gen_range(1..=3);
+                    format!(".take({})", n)
+                }
+            }
+        };
+
+        // The element type is always preserved (filter/sorted/take don't change it,
+        // and we only use same-type map expressions).
+        let elem_type = TypeInfo::Primitive(elem_prim);
+
+        let was_in_loop = ctx.in_loop;
+        let was_in_while_loop = ctx.in_while_loop;
+        ctx.in_loop = true;
+        ctx.in_while_loop = false;
+
+        let locals_before = ctx.locals.len();
+
+        // Add loop variable with the element type
+        ctx.add_local(iter_name.clone(), elem_type, false);
+
+        // Protect the iterated array from reassignment inside the loop body
+        ctx.protected_vars.push(arr_name.clone());
+
+        let body_stmts = self.generate_block(ctx, depth + 1);
+
+        ctx.protected_vars.pop();
+        ctx.locals.truncate(locals_before);
+        ctx.in_loop = was_in_loop;
+        ctx.in_while_loop = was_in_while_loop;
+
+        let body_block = self.format_block(&body_stmts);
+        format!(
+            "for {} in {}.iter(){} {}",
+            iter_name, arr_name, chain_expr, body_block
+        )
     }
 
     /// Generate a range expression for a for loop.
