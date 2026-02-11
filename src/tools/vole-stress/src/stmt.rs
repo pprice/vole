@@ -698,6 +698,11 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let idx = self.rng.gen_range(0..candidates.len());
         let scrutinee = &candidates[idx];
 
+        // Decide if we want to use unreachable in the default arm
+        let use_unreachable = self
+            .rng
+            .gen_bool(self.config.expr_config.unreachable_probability);
+
         // Pick a result type for all arms (same type to keep it simple)
         let result_type = self.random_primitive_type();
         let result_name = ctx.new_local_name();
@@ -709,35 +714,74 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let expr_ctx = ctx.to_expr_context();
         let mut arms = Vec::new();
 
-        // Generate distinct integer literal patterns
-        let mut used_values = std::collections::HashSet::new();
-        for _ in 0..arm_count {
-            let mut val: i64 = self.rng.gen_range(0..20);
-            while used_values.contains(&val) {
-                val = self.rng.gen_range(0..20);
-            }
-            used_values.insert(val);
+        if use_unreachable {
+            // Match on a known literal so the wildcard is provably dead code
+            let known_val: i64 = self.rng.gen_range(0..20);
 
+            // First arm matches the known literal
             let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
             let arm_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
-            arms.push(format!("{}{} => {}", indent, val, arm_expr));
+            arms.push(format!("{}{} => {}", indent, known_val, arm_expr));
+
+            // Additional non-matching arms (dead code but syntactically valid)
+            let mut used_values = std::collections::HashSet::new();
+            used_values.insert(known_val);
+            for _ in 1..arm_count {
+                let mut val: i64 = self.rng.gen_range(0..20);
+                while used_values.contains(&val) {
+                    val = self.rng.gen_range(0..20);
+                }
+                used_values.insert(val);
+
+                let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+                let arm_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
+                arms.push(format!("{}{} => {}", indent, val, arm_expr));
+            }
+
+            // Wildcard arm with unreachable
+            arms.push(format!("{}_ => unreachable", indent));
+
+            let close_indent = "    ".repeat(self.indent);
+            ctx.add_local(result_name.clone(), result_type, false);
+
+            Some(format!(
+                "let {} = match {} {{\n{}\n{}}}",
+                result_name,
+                known_val,
+                arms.join("\n"),
+                close_indent,
+            ))
+        } else {
+            // Generate distinct integer literal patterns
+            let mut used_values = std::collections::HashSet::new();
+            for _ in 0..arm_count {
+                let mut val: i64 = self.rng.gen_range(0..20);
+                while used_values.contains(&val) {
+                    val = self.rng.gen_range(0..20);
+                }
+                used_values.insert(val);
+
+                let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+                let arm_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
+                arms.push(format!("{}{} => {}", indent, val, arm_expr));
+            }
+
+            // Wildcard arm
+            let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+            let wildcard_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
+            arms.push(format!("{}_ => {}", indent, wildcard_expr));
+
+            let close_indent = "    ".repeat(self.indent);
+            ctx.add_local(result_name.clone(), result_type, false);
+
+            Some(format!(
+                "let {} = match {} {{\n{}\n{}}}",
+                result_name,
+                scrutinee,
+                arms.join("\n"),
+                close_indent,
+            ))
         }
-
-        // Wildcard arm
-        let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
-        let wildcard_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
-        arms.push(format!("{}_ => {}", indent, wildcard_expr));
-
-        let close_indent = "    ".repeat(self.indent);
-        ctx.add_local(result_name.clone(), result_type, false);
-
-        Some(format!(
-            "let {} = match {} {{\n{}\n{}}}",
-            result_name,
-            scrutinee,
-            arms.join("\n"),
-            close_indent,
-        ))
     }
 
     /// Try to generate a match expression let-binding on a string variable.
@@ -772,6 +816,11 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let idx = self.rng.gen_range(0..candidates.len());
         let scrutinee = &candidates[idx];
 
+        // Decide if we want to use unreachable in the default arm
+        let use_unreachable = self
+            .rng
+            .gen_bool(self.config.expr_config.unreachable_probability);
+
         // Pick a result type for all arms (same type to keep it simple)
         let result_type = self.random_primitive_type();
         let result_name = ctx.new_local_name();
@@ -788,35 +837,75 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota", "kappa",
         ];
 
-        // Pick distinct string patterns
-        let mut used_indices = std::collections::HashSet::new();
-        for _ in 0..arm_count {
-            let mut pi = self.rng.gen_range(0..patterns.len());
-            while used_indices.contains(&pi) {
-                pi = self.rng.gen_range(0..patterns.len());
-            }
-            used_indices.insert(pi);
+        if use_unreachable {
+            // Pick a known string literal to match on so the wildcard is dead code
+            let known_idx = self.rng.gen_range(0..patterns.len());
+            let known_pattern = patterns[known_idx];
 
+            // First arm matches the known literal
             let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
             let arm_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
-            arms.push(format!("{}\"{}\" => {}", indent, patterns[pi], arm_expr));
+            arms.push(format!("{}\"{}\" => {}", indent, known_pattern, arm_expr));
+
+            // Additional non-matching arms (dead code but syntactically valid)
+            let mut used_indices = std::collections::HashSet::new();
+            used_indices.insert(known_idx);
+            for _ in 1..arm_count {
+                let mut pi = self.rng.gen_range(0..patterns.len());
+                while used_indices.contains(&pi) {
+                    pi = self.rng.gen_range(0..patterns.len());
+                }
+                used_indices.insert(pi);
+
+                let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+                let arm_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
+                arms.push(format!("{}\"{}\" => {}", indent, patterns[pi], arm_expr));
+            }
+
+            // Wildcard arm with unreachable
+            arms.push(format!("{}_ => unreachable", indent));
+
+            let close_indent = "    ".repeat(self.indent);
+            ctx.add_local(result_name.clone(), result_type, false);
+
+            Some(format!(
+                "let {} = match \"{}\" {{\n{}\n{}}}",
+                result_name,
+                known_pattern,
+                arms.join("\n"),
+                close_indent,
+            ))
+        } else {
+            // Pick distinct string patterns
+            let mut used_indices = std::collections::HashSet::new();
+            for _ in 0..arm_count {
+                let mut pi = self.rng.gen_range(0..patterns.len());
+                while used_indices.contains(&pi) {
+                    pi = self.rng.gen_range(0..patterns.len());
+                }
+                used_indices.insert(pi);
+
+                let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+                let arm_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
+                arms.push(format!("{}\"{}\" => {}", indent, patterns[pi], arm_expr));
+            }
+
+            // Wildcard arm
+            let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+            let wildcard_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
+            arms.push(format!("{}_ => {}", indent, wildcard_expr));
+
+            let close_indent = "    ".repeat(self.indent);
+            ctx.add_local(result_name.clone(), result_type, false);
+
+            Some(format!(
+                "let {} = match {} {{\n{}\n{}}}",
+                result_name,
+                scrutinee,
+                arms.join("\n"),
+                close_indent,
+            ))
         }
-
-        // Wildcard arm
-        let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
-        let wildcard_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
-        arms.push(format!("{}_ => {}", indent, wildcard_expr));
-
-        let close_indent = "    ".repeat(self.indent);
-        ctx.add_local(result_name.clone(), result_type, false);
-
-        Some(format!(
-            "let {} = match {} {{\n{}\n{}}}",
-            result_name,
-            scrutinee,
-            arms.join("\n"),
-            close_indent,
-        ))
     }
 
     /// Try to generate a when-expression let-binding.
@@ -838,6 +927,11 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let result_type = self.random_primitive_type();
         let result_name = ctx.new_local_name();
 
+        // Decide if we want to use unreachable in the default arm
+        let use_unreachable = self
+            .rng
+            .gen_bool(self.config.expr_config.unreachable_probability);
+
         // Generate 2-3 boolean condition arms plus a wildcard
         let arm_count = self.rng.gen_range(2..=3);
         let indent = "    ".repeat(self.indent + 1);
@@ -845,19 +939,39 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let expr_ctx = ctx.to_expr_context();
         let mut arms = Vec::new();
 
-        for _ in 0..arm_count {
-            let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
-            let cond =
-                expr_gen.generate_simple(&TypeInfo::Primitive(PrimitiveType::Bool), &expr_ctx);
+        if use_unreachable {
+            // First arm uses `true` so the wildcard is provably dead code
             let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
             let arm_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
-            arms.push(format!("{}{} => {}", indent, cond, arm_expr));
-        }
+            arms.push(format!("{}true => {}", indent, arm_expr));
 
-        // Wildcard arm
-        let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
-        let wildcard_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
-        arms.push(format!("{}_ => {}", indent, wildcard_expr));
+            // Additional arms (dead code but syntactically valid)
+            for _ in 1..arm_count {
+                let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+                let cond =
+                    expr_gen.generate_simple(&TypeInfo::Primitive(PrimitiveType::Bool), &expr_ctx);
+                let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+                let arm_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
+                arms.push(format!("{}{} => {}", indent, cond, arm_expr));
+            }
+
+            // Wildcard arm with unreachable
+            arms.push(format!("{}_ => unreachable", indent));
+        } else {
+            for _ in 0..arm_count {
+                let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+                let cond =
+                    expr_gen.generate_simple(&TypeInfo::Primitive(PrimitiveType::Bool), &expr_ctx);
+                let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+                let arm_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
+                arms.push(format!("{}{} => {}", indent, cond, arm_expr));
+            }
+
+            // Wildcard arm
+            let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+            let wildcard_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
+            arms.push(format!("{}_ => {}", indent, wildcard_expr));
+        }
 
         let close_indent = "    ".repeat(self.indent);
         ctx.add_local(result_name.clone(), result_type, false);
