@@ -1353,6 +1353,52 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         Some(format!("{}.to_string()", var))
     }
 
+    /// Try to generate a string interpolation containing a method call.
+    ///
+    /// Looks for string-typed or array-typed variables in scope and generates
+    /// an interpolated string that includes a method call on the variable.
+    /// For strings: `.to_upper()`, `.to_lower()`, `.trim()`, `.length()`.
+    /// For arrays: `.length()`.
+    /// Returns `None` if no suitable variables are in scope.
+    fn try_generate_method_call_interpolation(&mut self, ctx: &ExprContext) -> Option<String> {
+        // Collect candidate variables: strings and arrays
+        let string_vars = ctx.string_vars();
+        let array_vars = ctx.array_vars();
+
+        if string_vars.is_empty() && array_vars.is_empty() {
+            return None;
+        }
+
+        // Build a flat list of (name, is_string) candidates
+        let mut candidates: Vec<(&str, bool)> = Vec::new();
+        for name in &string_vars {
+            candidates.push((name.as_str(), true));
+        }
+        for (name, _elem_ty) in &array_vars {
+            candidates.push((name.as_str(), false));
+        }
+
+        let idx = self.rng.gen_range(0..candidates.len());
+        let (var_name, is_string) = candidates[idx];
+
+        // Generate the method call expression
+        let method_expr = if is_string {
+            match self.rng.gen_range(0..4) {
+                0 => format!("{}.to_upper()", var_name),
+                1 => format!("{}.to_lower()", var_name),
+                2 => format!("{}.trim()", var_name),
+                _ => format!("{}.length()", var_name),
+            }
+        } else {
+            format!("{}.length()", var_name)
+        };
+
+        // Wrap in an interpolated string with optional prefix text
+        let prefixes = ["len: ", "upper: ", "result: ", "val: ", "got ", ""];
+        let prefix = prefixes[self.rng.gen_range(0..prefixes.len())];
+        Some(format!("\"{}{{{}}}\"", prefix, method_expr))
+    }
+
     /// Try to generate a `str.split(",").collect()` call for a `[string]` expression.
     ///
     /// Looks for string-typed variables in scope and returns
@@ -1887,6 +1933,12 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                 // String method: to_upper/to_lower/trim/replace/replace_all/substring
                 if self.rng.gen_bool(self.config.string_method_probability) {
                     if let Some(expr) = self.try_generate_string_transform_method(ctx) {
+                        return expr;
+                    }
+                }
+                // ~12% chance: interpolated string with a method call
+                if self.rng.gen_bool(0.12) {
+                    if let Some(expr) = self.try_generate_method_call_interpolation(ctx) {
                         return expr;
                     }
                 }
@@ -3237,6 +3289,88 @@ mod tests {
         assert!(
             found_struct_field,
             "Expected at least one struct field access in interpolation across 2000 seeds"
+        );
+    }
+
+    #[test]
+    fn test_method_call_interpolation() {
+        let config = ExprConfig::default();
+        let table = SymbolTable::new();
+
+        // Set up a string and an array variable in scope
+        let locals = vec![
+            (
+                "msg".to_string(),
+                TypeInfo::Primitive(PrimitiveType::String),
+            ),
+            (
+                "nums".to_string(),
+                TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+            ),
+        ];
+
+        let mut found_string_method = false;
+        let mut found_array_length = false;
+
+        for seed in 0..500 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let ctx = ExprContext::new(&[], &locals, &table);
+
+            if let Some(result) = generator.try_generate_method_call_interpolation(&ctx) {
+                assert!(result.starts_with('"'), "Should be a string: {}", result);
+                assert!(result.ends_with('"'), "Should be a string: {}", result);
+                assert!(
+                    result.contains('{'),
+                    "Should have interpolation: {}",
+                    result
+                );
+
+                if result.contains("msg.to_upper()")
+                    || result.contains("msg.to_lower()")
+                    || result.contains("msg.trim()")
+                    || result.contains("msg.length()")
+                {
+                    found_string_method = true;
+                }
+                if result.contains("nums.length()") {
+                    found_array_length = true;
+                }
+            }
+            if found_string_method && found_array_length {
+                break;
+            }
+        }
+
+        assert!(
+            found_string_method,
+            "Expected at least one string method call interpolation across 500 seeds"
+        );
+        assert!(
+            found_array_length,
+            "Expected at least one array .length() interpolation across 500 seeds"
+        );
+    }
+
+    #[test]
+    fn test_method_call_interpolation_no_candidates() {
+        let config = ExprConfig::default();
+        let table = SymbolTable::new();
+
+        // Only numeric variables - no strings or arrays
+        let locals = vec![
+            ("x".to_string(), TypeInfo::Primitive(PrimitiveType::I64)),
+            ("y".to_string(), TypeInfo::Primitive(PrimitiveType::Bool)),
+        ];
+
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let mut generator = ExprGenerator::new(&mut rng, &config);
+        let ctx = ExprContext::new(&[], &locals, &table);
+
+        assert!(
+            generator
+                .try_generate_method_call_interpolation(&ctx)
+                .is_none()
         );
     }
 
