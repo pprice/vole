@@ -1588,6 +1588,9 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let tuple_name = ctx.new_local_name();
         let type_annotation = tuple_ty.to_vole_syntax(ctx.table);
 
+        // Add the tuple variable itself to scope so it can be used for tuple indexing
+        ctx.add_local(tuple_name.clone(), tuple_ty.clone(), false);
+
         // Generate destructuring names for each element
         let destruct_names: Vec<String> = elem_types.iter().map(|_| ctx.new_local_name()).collect();
 

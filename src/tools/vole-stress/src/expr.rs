@@ -880,6 +880,40 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         Some(format!("{}[{}{}]", var_name, index, suffix))
     }
 
+    /// Try to generate a tuple index expression on a tuple-typed local.
+    ///
+    /// Looks for tuple-typed variables in scope that contain an element
+    /// matching the target primitive type. Returns `Some("tupleVar[index]")`
+    /// using a constant integer literal index. Tuple indexing requires a
+    /// compile-time constant index in Vole (non-constant indices are rejected
+    /// by codegen).
+    fn try_generate_tuple_index(
+        &mut self,
+        prim: PrimitiveType,
+        ctx: &ExprContext,
+    ) -> Option<String> {
+        let target = TypeInfo::Primitive(prim);
+        let tuple_vars = ctx.tuple_vars();
+
+        // Build candidates: (var_name, index) pairs where elem type matches target
+        let mut candidates: Vec<(&str, usize)> = Vec::new();
+        for (name, elem_types) in &tuple_vars {
+            for (i, elem_ty) in elem_types.iter().enumerate() {
+                if types_compatible(elem_ty, &target) {
+                    candidates.push((name.as_str(), i));
+                }
+            }
+        }
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..candidates.len());
+        let (var_name, elem_index) = candidates[idx];
+        Some(format!("{}[{}]", var_name, elem_index))
+    }
+
     /// Try to generate a field access expression on a class-typed local.
     ///
     /// Looks for local variables with class type whose fields match the
@@ -1320,6 +1354,14 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         // when a fixed-array-typed variable with matching element type is in scope
         if self.rng.gen_bool(0.12) {
             if let Some(expr) = self.try_generate_fixed_array_index(prim, ctx) {
+                return expr;
+            }
+        }
+
+        // ~12% chance to generate tuple indexing: `tupleVar[index]`
+        // when a tuple-typed variable with a matching element type is in scope
+        if self.rng.gen_bool(0.12) {
+            if let Some(expr) = self.try_generate_tuple_index(prim, ctx) {
                 return expr;
             }
         }
