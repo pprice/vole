@@ -1320,15 +1320,21 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let (var_name, prim) = &candidates[idx];
 
         // Pick a random compound operator
-        let op = match self.rng.gen_range(0..3) {
+        let op = match self.rng.gen_range(0..4) {
             0 => "+=",
             1 => "-=",
-            _ => "*=",
+            2 => "*=",
+            _ => "%=",
         };
 
-        // Generate a simple numeric literal of the same type
+        // Generate a simple numeric literal of the same type.
+        // For %= use a non-zero literal to avoid division by zero.
         let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
-        let rhs = expr_gen.literal_for_primitive(*prim);
+        let rhs = if op == "%=" {
+            expr_gen.nonzero_literal_for_primitive(*prim)
+        } else {
+            expr_gen.literal_for_primitive(*prim)
+        };
 
         format!("{} {} {}", var_name, op, rhs)
     }
@@ -1477,16 +1483,22 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // Use index 0 or 1 to stay in bounds (arrays have at least 2 elements)
         let index = self.rng.gen_range(0..=1);
 
-        // Pick a random compound operator (avoid /= and %= to prevent division by zero)
-        let op = match self.rng.gen_range(0..3) {
+        // Pick a random compound operator (avoid /= to prevent division by zero;
+        // %= uses a non-zero literal to stay safe)
+        let op = match self.rng.gen_range(0..4) {
             0 => "+=",
             1 => "-=",
-            _ => "*=",
+            2 => "*=",
+            _ => "%=",
         };
 
         let expr_ctx = ctx.to_expr_context();
         let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
-        let value = expr_gen.generate_simple(&TypeInfo::Primitive(*elem_type), &expr_ctx);
+        let value = if op == "%=" {
+            expr_gen.nonzero_literal_for_primitive(*elem_type)
+        } else {
+            expr_gen.generate_simple(&TypeInfo::Primitive(*elem_type), &expr_ctx)
+        };
 
         format!("{}[{}] {} {}", arr_name, index, op, value)
     }
