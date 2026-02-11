@@ -1163,7 +1163,7 @@ impl<'a, R: Rng> EmitContext<'a, R> {
         let is_not_bool = !matches!(elem_type, TypeInfo::Primitive(PrimitiveType::Bool));
 
         // Choose a chain pattern
-        let pattern = self.rng.gen_range(0..22);
+        let pattern = self.rng.gen_range(0..24);
         match pattern {
             0..=3 => {
                 // Plain .collect()
@@ -1249,6 +1249,14 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             21 if is_not_bool => {
                 // .unique().count() — not valid for bool
                 ".unique().count()".to_string()
+            }
+            22 => {
+                // .first() — returns T?, always valid for any element type
+                ".first()".to_string()
+            }
+            23 => {
+                // .last() — returns T?, always valid for any element type
+                ".last()".to_string()
             }
             _ => {
                 // Fallback to .collect()

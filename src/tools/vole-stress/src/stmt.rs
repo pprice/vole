@@ -2008,9 +2008,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
 
         // Pick a terminal operation:
-        // 40% .collect() -> [T], 15% .count() -> i64, 15% .sum() -> T (numeric only),
-        // 15% .reduce() -> T (two-param closure), 15% .take(N).collect() -> [T]
-        let terminal_choice = self.rng.gen_range(0..20);
+        // 33% .collect() -> [T], 13% .count() -> i64, 13% .sum() -> T (numeric only),
+        // 13% .reduce() -> T (two-param closure), 12% .take(N).collect() -> [T],
+        // 8% .first() -> T? or T (with ??), 8% .last() -> T? or T (with ??)
+        let terminal_choice = self.rng.gen_range(0..24);
         let (terminal, result_type) = if terminal_choice < 8 {
             (
                 ".collect()".to_string(),
@@ -2048,12 +2049,37 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                     result_ty,
                 )
             }
-        } else {
+        } else if terminal_choice < 20 {
             let n = self.rng.gen_range(1..=3);
             (
                 format!(".take({}).collect()", n),
                 TypeInfo::Array(Box::new(TypeInfo::Primitive(elem_prim))),
             )
+        } else {
+            // .first() or .last() -> T? (optional)
+            // ~50% of the time, immediately unwrap with ?? to produce T instead of T?
+            // This exercises both optional-typed locals and null coalescing on
+            // iterator terminal results.
+            let method = if self.rng.gen_bool(0.5) {
+                ".first()"
+            } else {
+                ".last()"
+            };
+            if self.rng.gen_bool(0.5) {
+                // Produce T? — the optional local becomes a candidate for ?? elsewhere
+                (
+                    method.to_string(),
+                    TypeInfo::Optional(Box::new(TypeInfo::Primitive(elem_prim))),
+                )
+            } else {
+                // Immediately unwrap with ?? default — produces T directly
+                let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+                let default_val = expr_gen.literal_for_primitive(elem_prim);
+                (
+                    format!("{} ?? {}", method, default_val),
+                    TypeInfo::Primitive(elem_prim),
+                )
+            }
         };
 
         ctx.add_local(name.clone(), result_type, false);
@@ -4448,5 +4474,68 @@ mod tests {
                 result
             );
         }
+    }
+
+    #[test]
+    fn test_iter_first_last_terminal() {
+        use rand::SeedableRng;
+
+        let mut table = SymbolTable::new();
+        let mod_id = table.add_module("test_mod".to_string(), "test_mod.vole".to_string());
+
+        let config = StmtConfig {
+            iter_map_filter_probability: 0.99,
+            ..StmtConfig::default()
+        };
+
+        let mut found_first = false;
+        let mut found_last = false;
+        let mut found_optional_type = false;
+        let mut found_coalesced = false;
+
+        for seed in 0..2000 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = StmtGenerator::new(&mut rng, &config);
+            let mut ctx = StmtContext::with_module(&[], &table, mod_id);
+            ctx.add_local(
+                "nums".to_string(),
+                TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+                false,
+            );
+
+            if let Some(stmt) = generator.try_generate_iter_map_filter_let(&mut ctx) {
+                if stmt.contains(".first()") {
+                    found_first = true;
+                    // Check that the local was registered with the right type
+                    let last_local = ctx.locals.last().unwrap();
+                    if matches!(last_local.1, TypeInfo::Optional(_)) {
+                        found_optional_type = true;
+                    }
+                }
+                if stmt.contains(".last()") {
+                    found_last = true;
+                }
+                if stmt.contains("?? ") {
+                    found_coalesced = true;
+                }
+            }
+        }
+
+        assert!(
+            found_first,
+            "Expected at least one .first() terminal across 2000 seeds",
+        );
+        assert!(
+            found_last,
+            "Expected at least one .last() terminal across 2000 seeds",
+        );
+        assert!(
+            found_optional_type,
+            "Expected at least one .first()/.last() to produce an Optional type",
+        );
+        assert!(
+            found_coalesced,
+            "Expected at least one .first()/.last() with ?? coalescing across 2000 seeds",
+        );
     }
 }
