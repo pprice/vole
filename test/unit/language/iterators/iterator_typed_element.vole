@@ -1,0 +1,65 @@
+// Regression test: iterator loop variables must preserve their Cranelift type.
+// Previously, for_iterator always declared the loop variable as i64, causing
+// type mismatches when the variable flowed through when/select expressions
+// and then was used in float comparisons.
+
+interface Computable {}
+
+class Measurement implements Computable {
+    value: f64,
+    valid: bool,
+}
+
+func test_f64_iter_when_comparison() {
+    let values = [1.5_f64, 2.5_f64, 3.5_f64]
+    for x in values.iter() {
+        // when-expression returning f64 loop var in a comparison
+        let result = when { true => x, _ => x } <= when { true => x, _ => x }
+        assert(result)
+    }
+}
+
+func test_f64_iter_when_in_class_field() {
+    let values = [1.0_f64, 2.0_f64]
+    for x in values.iter() {
+        let m: Computable = Measurement {
+            value: x,
+            valid: (when { true => x, _ => x } <= when { true => x, _ => x }),
+        }
+    }
+}
+
+func test_f64_iter_arithmetic() {
+    let values = [10.0_f64, 20.0_f64, 30.0_f64]
+    let mut sum = 0.0_f64
+    for x in values.iter() {
+        sum = sum + x
+    }
+    assert(sum == 60.0_f64)
+}
+
+func test_f64_iter_take_comparison() {
+    let values = [5.0_f64, 3.0_f64, 1.0_f64]
+    for x in values.iter().take(2) {
+        let bigger = x > 0.0_f64
+        assert(bigger)
+    }
+}
+
+func test_f64_iter_when_arithmetic() {
+    let values = [4.0_f64, 6.0_f64]
+    let mut total = 0.0_f64
+    for x in values.iter() {
+        let v = when { true => x, _ => 0.0_f64 }
+        total = total + v
+    }
+    assert(total == 10.0_f64)
+}
+
+tests "iterator typed element" {
+    test "f64 iter with when comparison" { test_f64_iter_when_comparison() }
+    test "f64 iter when in class field" { test_f64_iter_when_in_class_field() }
+    test "f64 iter arithmetic" { test_f64_iter_arithmetic() }
+    test "f64 iter take comparison" { test_f64_iter_take_comparison() }
+    test "f64 iter when arithmetic" { test_f64_iter_when_arithmetic() }
+}

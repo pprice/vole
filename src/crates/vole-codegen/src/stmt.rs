@@ -943,10 +943,22 @@ impl Cg<'_, '_, '_> {
         let ptr_type = self.ptr_type();
         let slot_addr = self.builder.ins().stack_addr(ptr_type, slot_data, 0);
 
-        // Initialize element variable
-        let elem_var = self.builder.declare_var(types::I64);
-        let zero = self.builder.ins().iconst(types::I64, 0);
-        self.builder.def_var(elem_var, zero);
+        // Initialize element variable with its correct Cranelift type.
+        // ArrayIterNext returns i64, but the element may be a different type
+        // (e.g. f64, f32, bool) so we must narrow/bitcast after the call,
+        // matching what for_array does.
+        let elem_cr_type = self.cranelift_type(elem_type_id);
+        let elem_var = self.builder.declare_var(elem_cr_type);
+        let elem_zero = if elem_cr_type == types::F64 {
+            self.builder.ins().f64const(0.0)
+        } else if elem_cr_type == types::F32 {
+            self.builder.ins().f32const(0.0)
+        } else if elem_cr_type.is_int() && elem_cr_type.bits() < 64 {
+            self.builder.ins().iconst(elem_cr_type, 0)
+        } else {
+            self.builder.ins().iconst(types::I64, 0)
+        };
+        self.builder.def_var(elem_var, elem_zero);
         self.vars
             .insert(for_stmt.var_name, (elem_var, elem_type_id));
 
@@ -965,12 +977,27 @@ impl Cg<'_, '_, '_> {
             .ins()
             .brif(is_done, exit_block, &[], body_block, &[]);
 
-        // Body: load value from stack slot, run body
+        // Body: load value from stack slot, narrow to element type, run body
         self.builder.switch_to_block(body_block);
-        let elem_val = self
+        let raw_val = self
             .builder
             .ins()
             .load(types::I64, MemFlags::new(), slot_addr, 0);
+        // Convert from i64 storage to the element's actual Cranelift type
+        let elem_val = if elem_cr_type == types::F64 {
+            self.builder
+                .ins()
+                .bitcast(types::F64, MemFlags::new(), raw_val)
+        } else if elem_cr_type == types::F32 {
+            let i32_val = self.builder.ins().ireduce(types::I32, raw_val);
+            self.builder
+                .ins()
+                .bitcast(types::F32, MemFlags::new(), i32_val)
+        } else if elem_cr_type.is_int() && elem_cr_type.bits() < 64 {
+            self.builder.ins().ireduce(elem_cr_type, raw_val)
+        } else {
+            raw_val
+        };
         self.builder.def_var(elem_var, elem_val);
 
         self.compile_loop_body(&for_stmt.body, exit_block, continue_block)?;

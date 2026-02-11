@@ -2291,6 +2291,19 @@ impl Cg<'_, '_, '_> {
         if actual_ty == types::F64 && to_ty == types::F32 {
             return self.builder.ins().fdemote(types::F32, value);
         }
+        // Handle int-to-float bitcast (e.g. iterator loop vars stored as i64
+        // but semantically f64)
+        if actual_ty.is_int() && to_ty.is_float() {
+            if actual_ty.bits() == to_ty.bits() {
+                return self.builder.ins().bitcast(to_ty, MemFlags::new(), value);
+            } else if actual_ty.bits() > to_ty.bits() {
+                let narrowed = self
+                    .builder
+                    .ins()
+                    .ireduce(Type::int(to_ty.bits() as u16).unwrap(), value);
+                return self.builder.ins().bitcast(to_ty, MemFlags::new(), narrowed);
+            }
+        }
         // For same-size types or unknown conversions, return as-is
         value
     }
