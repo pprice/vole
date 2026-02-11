@@ -1775,6 +1775,18 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         let name = ctx.new_local_name();
 
+        // Optionally prepend .sorted() or .reverse() (~20% of the time).
+        // .sorted() requires comparable elements (skip for bool).
+        let prefix = if self.rng.gen_bool(0.2) {
+            if self.rng.gen_bool(0.5) && elem_prim != PrimitiveType::Bool {
+                ".sorted()"
+            } else {
+                ".reverse()"
+            }
+        } else {
+            ""
+        };
+
         // Build the iterator chain: .iter() followed by 1-2 operations, then a terminal.
         // 40% single .map(), 30% single .filter(), 30% chained .map().filter() or .filter().map()
         let chain_choice = self.rng.gen_range(0..10);
@@ -1849,7 +1861,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         };
 
         ctx.add_local(name.clone(), result_type, false);
-        let stmt = format!("let {} = {}.iter(){}{}", name, arr_name, chain, terminal);
+        let stmt = format!(
+            "let {} = {}.iter(){}{}{}",
+            name, arr_name, prefix, chain, terminal
+        );
 
         Some(stmt)
     }
