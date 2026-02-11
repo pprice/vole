@@ -1177,6 +1177,26 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         }
     }
 
+    /// Generate a string concatenation expression using the `+` operator.
+    ///
+    /// Produces expressions like `"hello" + " world"`, `str_var + " suffix"`,
+    /// or `str_var + other_var`. Concatenates 2-3 operands, each of which is
+    /// either a string variable in scope or a string literal.
+    fn generate_string_concat(&mut self, ctx: &ExprContext, depth: usize) -> String {
+        let str_ty = TypeInfo::Primitive(PrimitiveType::String);
+        let operand_count = self.rng.gen_range(2..=3);
+        let mut parts = Vec::new();
+
+        for _ in 0..operand_count {
+            // Use a simple string expression (variable or literal) to avoid
+            // deep nesting of complex sub-expressions in concatenation.
+            parts.push(self.generate_simple(&str_ty, ctx));
+        }
+
+        let _ = depth; // depth reserved for future nested concat support
+        format!("({})", parts.join(" + "))
+    }
+
     /// Try to generate an interface method call on a type-param-typed variable.
     ///
     /// Looks for variables in scope whose type is a type parameter with interface
@@ -1448,7 +1468,7 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             }
         }
 
-        let choice = self.rng.gen_range(0..11);
+        let choice = self.rng.gen_range(0..12);
 
         match prim {
             PrimitiveType::I32 | PrimitiveType::I64 | PrimitiveType::F64 => {
@@ -1547,6 +1567,10 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                     6..=8 => {
                         // Interpolated string (~30%)
                         self.generate_interpolated_string(ctx)
+                    }
+                    9 => {
+                        // String concatenation with + operator
+                        self.generate_string_concat(ctx, depth)
                     }
                     _ => {
                         // ~10%: string transform method (to_upper/to_lower/trim)
