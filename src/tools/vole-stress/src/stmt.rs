@@ -963,22 +963,54 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
     }
 
-    /// Generate a break or continue statement wrapped in a conditional.
+    /// Generate a break, continue, or early return statement wrapped in a conditional.
     ///
-    /// Wraps in `if <condition> { break }` to avoid always exiting on
-    /// the first iteration. Only called when `ctx.in_loop` is true.
+    /// Wraps in `if <condition> { break }` (or `continue` / `return expr`) to
+    /// avoid always exiting on the first iteration. Only called when
+    /// `ctx.in_loop` is true.
+    ///
+    /// When the enclosing function has a non-void return type, there is a 20%
+    /// chance of generating `return <expr>` instead of break/continue.  This
+    /// exercises the compiler's handling of return statements inside nested
+    /// control flow (for + if).
     ///
     /// Both `break` and `continue` are allowed in while loops because a
     /// guard variable at the top of the loop body guarantees termination
     /// even when `continue` skips the manual counter increment.
     fn generate_break_continue(&mut self, ctx: &mut StmtContext) -> String {
+        let expr_ctx = ctx.to_expr_context();
+
+        // 20% chance of early return from inside a loop when the function
+        // has a non-void return type.
+        let return_type = ctx.return_type.clone();
+        if let Some(ref ret_ty) = return_type {
+            if !matches!(ret_ty, TypeInfo::Void) && self.rng.gen_bool(0.20) {
+                let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+                let cond =
+                    expr_gen.generate(&TypeInfo::Primitive(PrimitiveType::Bool), &expr_ctx, 0);
+
+                let return_expr = {
+                    let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+                    expr_gen.generate(ret_ty, &expr_ctx, 0)
+                };
+
+                let indent = "    ".repeat(self.indent + 1);
+                return format!(
+                    "if {} {{\n{}return {}\n{}}}",
+                    cond,
+                    indent,
+                    return_expr,
+                    "    ".repeat(self.indent)
+                );
+            }
+        }
+
         let keyword = if self.rng.gen_bool(0.5) {
             "break"
         } else {
             "continue"
         };
 
-        let expr_ctx = ctx.to_expr_context();
         let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
         let cond = expr_gen.generate(&TypeInfo::Primitive(PrimitiveType::Bool), &expr_ctx, 0);
 
