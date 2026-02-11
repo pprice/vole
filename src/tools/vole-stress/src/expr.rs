@@ -618,6 +618,15 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             return self.generate_simple(ty, ctx);
         }
 
+        // ~15% chance to generate tuple indexing for any type:
+        // when a tuple-typed variable with a matching element is in scope,
+        // emit `tupleVar[index]` instead of constructing a new value.
+        if self.rng.gen_bool(0.15) {
+            if let Some(expr) = self.try_generate_tuple_index_for_type(ty, ctx) {
+                return expr;
+            }
+        }
+
         match ty {
             TypeInfo::Primitive(prim) => self.generate_primitive(*prim, ctx, depth),
             TypeInfo::Optional(inner) => self.generate_optional(inner, ctx, depth),
@@ -916,19 +925,18 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
     /// using a constant integer literal index. Tuple indexing requires a
     /// compile-time constant index in Vole (non-constant indices are rejected
     /// by codegen).
-    fn try_generate_tuple_index(
+    fn try_generate_tuple_index_for_type(
         &mut self,
-        prim: PrimitiveType,
+        target: &TypeInfo,
         ctx: &ExprContext,
     ) -> Option<String> {
-        let target = TypeInfo::Primitive(prim);
         let tuple_vars = ctx.tuple_vars();
 
         // Build candidates: (var_name, index) pairs where elem type matches target
         let mut candidates: Vec<(&str, usize)> = Vec::new();
         for (name, elem_types) in &tuple_vars {
             for (i, elem_ty) in elem_types.iter().enumerate() {
-                if types_compatible(elem_ty, &target) {
+                if types_compatible(elem_ty, target) {
                     candidates.push((name.as_str(), i));
                 }
             }
@@ -1516,7 +1524,9 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         // ~12% chance to generate tuple indexing: `tupleVar[index]`
         // when a tuple-typed variable with a matching element type is in scope
         if self.rng.gen_bool(0.12) {
-            if let Some(expr) = self.try_generate_tuple_index(prim, ctx) {
+            if let Some(expr) =
+                self.try_generate_tuple_index_for_type(&TypeInfo::Primitive(prim), ctx)
+            {
                 return expr;
             }
         }
