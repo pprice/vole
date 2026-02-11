@@ -424,7 +424,7 @@ impl<'a, R: Rng> EntrypointContext<'a, R> {
                 | TypeInfo::Primitive(PrimitiveType::String)
         );
 
-        let pattern = self.rng.gen_range(0..16);
+        let pattern = self.rng.gen_range(0..18);
         match pattern {
             0..=3 => ".collect()".to_string(),
             4 => {
@@ -458,6 +458,20 @@ impl<'a, R: Rng> EntrypointContext<'a, R> {
             15 if is_numeric => {
                 let n = self.rng.gen_range(1..=3);
                 format!(".sorted().take({}).collect()", n)
+            }
+            16 => {
+                // .enumerate().count() — always valid, any element type
+                ".enumerate().count()".to_string()
+            }
+            17 if is_numeric => {
+                // .enumerate().filter((e) => e[1] > 0).count() — numeric elements only
+                let pred = match elem_type {
+                    TypeInfo::Primitive(PrimitiveType::I64) => "(e) => e[1] > 0_i64",
+                    TypeInfo::Primitive(PrimitiveType::I32) => "(e) => e[1] > 0_i32",
+                    TypeInfo::Primitive(PrimitiveType::F64) => "(e) => e[1] > 0.0_f64",
+                    _ => "(e) => true",
+                };
+                format!(".enumerate().filter({}).count()", pred)
             }
             _ => ".collect()".to_string(),
         }

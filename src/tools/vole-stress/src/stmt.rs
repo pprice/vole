@@ -1792,36 +1792,78 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         // Build the iterator chain: .iter() followed by 1-2 operations, then a terminal.
         // 30% single .map(), 25% single .filter(), 20% chained .map().filter() or .filter().map(),
-        // 15% .sorted() intermediate chains (numeric only, else fallback to .map())
-        let chain_choice = self.rng.gen_range(0..20);
+        // 15% .sorted() intermediate chains (numeric only, else fallback to .map()),
+        // ~13% .enumerate() chains
+        //
+        // enumerate_terminal: when Some, the enumerate chain includes its own terminal
+        // and bypasses the normal terminal selection below.
+        let chain_choice = self.rng.gen_range(0..23);
 
-        let chain = if chain_choice < 6 {
+        let (chain, enumerate_terminal) = if chain_choice < 6 {
             // Single .map()
             let map_body = self.generate_map_closure_body(elem_prim);
-            format!(".map((x) => {})", map_body)
+            (format!(".map((x) => {})", map_body), None)
         } else if chain_choice < 11 {
             // Single .filter()
             let filter_body = self.generate_filter_closure_body(elem_prim);
-            format!(".filter((x) => {})", filter_body)
+            (format!(".filter((x) => {})", filter_body), None)
         } else if chain_choice < 14 {
             // Chained .map().filter() — map uses 'x', filter uses 'y' to avoid shadowing
             let map_body = self.generate_map_closure_body(elem_prim);
             let filter_body = self.generate_filter_closure_body_param(elem_prim, "y");
-            format!(".map((x) => {}).filter((y) => {})", map_body, filter_body)
+            (
+                format!(".map((x) => {}).filter((y) => {})", map_body, filter_body),
+                None,
+            )
         } else if chain_choice < 17 && is_numeric_elem {
             // .sorted() before .map() — numeric only
             let map_body = self.generate_map_closure_body(elem_prim);
-            format!(".sorted().map((x) => {})", map_body)
+            (format!(".sorted().map((x) => {})", map_body), None)
         } else if chain_choice < 20 && is_numeric_elem {
             // .filter() then .sorted() — numeric only
             let filter_body = self.generate_filter_closure_body(elem_prim);
-            format!(".filter((x) => {}).sorted()", filter_body)
+            (format!(".filter((x) => {}).sorted()", filter_body), None)
+        } else if chain_choice < 21 {
+            // .enumerate().count() — always valid, any element type
+            // enumerate wraps each element as [index, value] tuple;
+            // .count() avoids type complexity by just returning i64.
+            // Terminal is included in the chain; bypasses normal terminal selection.
+            (
+                ".enumerate().count()".to_string(),
+                Some(("".to_string(), TypeInfo::Primitive(PrimitiveType::I64))),
+            )
+        } else if chain_choice < 23 && is_numeric_elem {
+            // .enumerate().filter((e) => e[1] > 0).map((e) => e[1]) — numeric only
+            // Filter by original value (e[1]), then map back to original type.
+            // Normal terminal selection applies (element type is preserved).
+            let pred = match elem_prim {
+                PrimitiveType::I64 => "(e) => e[1] > 0_i64",
+                PrimitiveType::F64 => "(e) => e[1] > 0.0_f64",
+                _ => "(e) => true",
+            };
+            (
+                format!(".enumerate().filter({}).map((e) => e[1])", pred),
+                None,
+            )
         } else {
             // Chained .filter().map() — filter uses 'x', map uses 'y'
             let filter_body = self.generate_filter_closure_body(elem_prim);
             let map_body = self.generate_map_closure_body_param(elem_prim, "y");
-            format!(".filter((x) => {}).map((y) => {})", filter_body, map_body)
+            (
+                format!(".filter((x) => {}).map((y) => {})", filter_body, map_body),
+                None,
+            )
         };
+
+        // If the enumerate chain already includes its terminal, use that directly.
+        if let Some((terminal, result_type)) = enumerate_terminal {
+            ctx.add_local(name.clone(), result_type, false);
+            let stmt = format!(
+                "let {} = {}.iter(){}{}{}",
+                name, arr_name, prefix, chain, terminal
+            );
+            return Some(stmt);
+        }
 
         // Pick a terminal operation:
         // 40% .collect() -> [T], 15% .count() -> i64, 15% .sum() -> T (numeric only),
