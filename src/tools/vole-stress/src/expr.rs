@@ -1131,10 +1131,14 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
 
     /// Try to generate a string-returning string method call.
     ///
-    /// Randomly picks one of `to_upper`, `to_lower`, or `trim`.
-    /// Looks for string-typed variables in scope and returns
-    /// `Some("strVar.method()")` on success. These are zero-argument
-    /// methods that transform a string and return a new string.
+    /// Randomly picks one of `to_upper`, `to_lower`, `trim`, `replace`,
+    /// or `replace_all`. Looks for string-typed variables in scope and
+    /// returns `Some("strVar.method(...)")` on success.
+    ///
+    /// For `replace`/`replace_all`, uses fixed string literal arguments
+    /// to keep RNG consumption constant (exactly 2 RNG calls: one for
+    /// the variable, one for the method) regardless of which method is
+    /// selected.
     fn try_generate_string_transform_method(&mut self, ctx: &ExprContext) -> Option<String> {
         let candidates = ctx.string_vars();
         if candidates.is_empty() {
@@ -1143,11 +1147,20 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         let idx = self.rng.gen_range(0..candidates.len());
         let var = &candidates[idx];
 
-        // Pick a string-returning string method (all take no arguments)
-        let methods = ["to_upper", "to_lower", "trim"];
+        // Pick a string-returning string method.
+        // replace/replace_all take (old, new) args; others take none.
+        let methods = ["to_upper", "to_lower", "trim", "replace", "replace_all"];
         let method = methods[self.rng.gen_range(0..methods.len())];
 
-        Some(format!("{}.{}()", var, method))
+        match method {
+            "replace" | "replace_all" => {
+                // Use fixed literal arguments so no extra RNG is consumed.
+                // These patterns exercise search-and-replace without
+                // changing downstream RNG state.
+                Some(format!("{}.{}(\"str\", \"val\")", var, method))
+            }
+            _ => Some(format!("{}.{}()", var, method)),
+        }
     }
 
     /// Try to generate an interface method call on a type-param-typed variable.

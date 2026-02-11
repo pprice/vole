@@ -1826,9 +1826,12 @@ mod tests {
 
         let code = emit_module(&mut rng, &table, module, &emit_config);
 
-        // Should NOT use destructured import syntax
+        // Should NOT use destructured import syntax.
+        // Check for `} = import` which is the destructured import pattern
+        // (`let { Name } = import "path"`), NOT `let {` which also matches
+        // struct destructuring (`let { field: var } = expr`).
         assert!(
-            !code.contains("let {"),
+            !code.contains("} = import"),
             "Expected regular import syntax (no destructuring), got:\n{}",
             code
         );
