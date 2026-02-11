@@ -1,0 +1,37 @@
+tests "i128 division and modulo" {
+    test "i128 basic division" {
+        let x: i128 = 100_i128
+        let y = x / 3_i128
+        assert(y == 33_i128)
+    }
+
+    test "i128 basic modulo" {
+        let x: i128 = 100_i128
+        let y = x % 7_i128
+        assert(y == 2_i128)
+    }
+
+    test "i128 compound modulo assignment" {
+        let mut x: i128 = 8295_i128
+        x %= 9084_i128
+        assert(x == 8295_i128)
+    }
+
+    test "i128 compound division assignment" {
+        let mut x: i128 = 100_i128
+        x /= 4_i128
+        assert(x == 25_i128)
+    }
+
+    test "i128 negative division" {
+        let x: i128 = -100_i128
+        let y = x / 3_i128
+        assert(y == -33_i128)
+    }
+
+    test "i128 negative modulo" {
+        let x: i128 = -100_i128
+        let y = x % 7_i128
+        assert(y == -2_i128)
+    }
+}

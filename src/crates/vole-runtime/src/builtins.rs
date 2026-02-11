@@ -41,6 +41,40 @@ to_string_ffi!(f64, f64);
 to_string_ffi!(f32, f32);
 to_string_ffi!(i128, i128);
 
+// =============================================================================
+// i128 arithmetic helpers (Cranelift x64 doesn't support sdiv/srem for i128)
+// =============================================================================
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_i128_sdiv(a: i128, b: i128) -> i128 {
+    if b == 0 {
+        let msg = RcString::new("division by zero");
+        let file = b"<runtime>";
+        vole_panic(msg, file.as_ptr(), file.len(), 0);
+    }
+    if a == i128::MIN && b == -1 {
+        let msg = RcString::new("integer overflow in division");
+        let file = b"<runtime>";
+        vole_panic(msg, file.as_ptr(), file.len(), 0);
+    }
+    a / b
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn vole_i128_srem(a: i128, b: i128) -> i128 {
+    if b == 0 {
+        let msg = RcString::new("division by zero");
+        let file = b"<runtime>";
+        vole_panic(msg, file.as_ptr(), file.len(), 0);
+    }
+    if a == i128::MIN && b == -1 {
+        let msg = RcString::new("integer overflow in division");
+        let file = b"<runtime>";
+        vole_panic(msg, file.as_ptr(), file.len(), 0);
+    }
+    a % b
+}
+
 /// Convert bool to string (FFI entry point)
 /// Uses i8 representation (0 = false, non-0 = true)
 #[unsafe(no_mangle)]

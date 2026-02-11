@@ -314,6 +314,14 @@ impl JitContext {
         let sig = self.create_signature(&[types::I128], Some(ptr_ty));
         self.import_function("vole_i128_to_string", &sig);
 
+        // vole_i128_sdiv(a: i128, b: i128) -> i128
+        let sig = self.create_signature(&[types::I128, types::I128], Some(types::I128));
+        self.import_function("vole_i128_sdiv", &sig);
+
+        // vole_i128_srem(a: i128, b: i128) -> i128
+        let sig = self.create_signature(&[types::I128, types::I128], Some(types::I128));
+        self.import_function("vole_i128_srem", &sig);
+
         // vole_bool_to_string(value: i8) -> *mut RcString
         let sig = self.create_signature(&[types::I8], Some(ptr_ty));
         self.import_function("vole_bool_to_string", &sig);
@@ -753,6 +761,14 @@ impl JitContext {
         builder.symbol(
             "vole_i128_to_string",
             vole_runtime::builtins::vole_i128_to_string as *const u8,
+        );
+        builder.symbol(
+            "vole_i128_sdiv",
+            vole_runtime::builtins::vole_i128_sdiv as *const u8,
+        );
+        builder.symbol(
+            "vole_i128_srem",
+            vole_runtime::builtins::vole_i128_srem as *const u8,
         );
         builder.symbol(
             "vole_bool_to_string",

@@ -52,6 +52,8 @@ runtime_fns! {
     PrintChar => "vole_print_char",
     I64ToString => "vole_i64_to_string",
     I128ToString => "vole_i128_to_string",
+    I128Sdiv => "vole_i128_sdiv",
+    I128Srem => "vole_i128_srem",
     F64ToString => "vole_f64_to_string",
     F32ToString => "vole_f32_to_string",
     BoolToString => "vole_bool_to_string",

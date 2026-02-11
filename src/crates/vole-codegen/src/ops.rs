@@ -583,6 +583,9 @@ impl Cg<'_, '_, '_> {
             BinaryOp::Div => {
                 if result_ty == types::F64 || result_ty == types::F32 {
                     self.builder.ins().fdiv(left_val, right_val)
+                } else if result_ty == types::I128 {
+                    // Cranelift x64 doesn't support sdiv.i128; use runtime helper
+                    self.call_runtime(RuntimeFn::I128Sdiv, &[left_val, right_val])?
                 } else if left_type_id.is_unsigned_int() {
                     // Unsigned division: check for division by zero
                     self.emit_div_by_zero_check(right_val, line)?;
@@ -600,6 +603,9 @@ impl Cg<'_, '_, '_> {
                     let floor = self.builder.ins().floor(div);
                     let mul = self.builder.ins().fmul(floor, right_val);
                     self.builder.ins().fsub(left_val, mul)
+                } else if result_ty == types::I128 {
+                    // Cranelift x64 doesn't support srem.i128; use runtime helper
+                    self.call_runtime(RuntimeFn::I128Srem, &[left_val, right_val])?
                 } else if left_type_id.is_unsigned_int() {
                     // Unsigned remainder: check for division by zero
                     self.emit_div_by_zero_check(right_val, line)?;
