@@ -1,0 +1,22 @@
+// Regression test: Iterator interface methods (split, collect, lines, etc.)
+// must resolve correctly in cross-module contexts. Previously, the module
+// sub-analyzer's interner lacked builtin symbols like "Iterator", causing
+// method resolution to fail silently and produce INVALID type IDs.
+let helper = import "./iterator_cross_module_helper"
+
+tests "cross-module iterator methods" {
+    test "split and collect across modules" {
+        let parts = helper.split_string("hello;world;foo", ";")
+        assert(parts.length() == 3)
+    }
+
+    test "split and count across modules" {
+        let count = helper.split_and_count("a::b::c", "::")
+        assert(count == 3)
+    }
+
+    test "lines across modules" {
+        let lines = helper.get_lines("line1\nline2\nline3")
+        assert(lines.length() == 3)
+    }
+}

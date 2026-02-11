@@ -309,6 +309,9 @@ impl Analyzer {
         // Transform generators in the imported module (yield -> state machine)
         // This must happen before semantic analysis so codegen sees the desugared AST.
         let mut module_interner_mut = parser.into_interner();
+        // Seed the module interner with builtin symbols (Iterator, Iterable, etc.)
+        // so that method resolution can look up interface names via interner.lookup().
+        module_interner_mut.seed_builtin_symbols();
         let (_, transform_errors) =
             crate::transforms::transform_generators(&mut program, &mut module_interner_mut);
         if !transform_errors.is_empty() {

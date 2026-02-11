@@ -1,0 +1,15 @@
+// Helper module for cross-module iterator method tests.
+// This module uses Iterator interface methods (split, collect, etc.)
+// that must resolve correctly when imported by another module.
+
+func split_string(s: string, delim: string) -> [string] {
+    return s.split(delim).collect()
+}
+
+func split_and_count(s: string, delim: string) -> i64 {
+    return s.split(delim).count()
+}
+
+func get_lines(s: string) -> [string] {
+    return s.lines().collect()
+}
