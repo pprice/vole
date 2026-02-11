@@ -229,16 +229,22 @@ impl<'a, R: Rng> EmitContext<'a, R> {
     /// Emit a test for a generic function by substituting a concrete type
     /// for its type parameter, then calling with typed arguments.
     ///
-    /// Only handles single-type-parameter, unconstrained generic functions
-    /// where the type param appears in at least one parameter position (so
-    /// the compiler can infer the concrete type from arguments).
+    /// Handles single-type-parameter generic functions (both unconstrained and
+    /// constrained) where the type param appears in at least one parameter
+    /// position (so the compiler can infer the concrete type from arguments).
+    ///
+    /// For unconstrained generics, substitutes with a random primitive type.
+    /// For constrained generics (`T: Interface1 + Interface2`), finds a
+    /// non-generic class that implements all constraint interfaces and
+    /// substitutes with that class type.
     fn emit_generic_function_test(&mut self, symbol: &Symbol, info: &FunctionInfo) {
-        // Only single-type-param unconstrained generics for now.
-        if info.type_params.len() != 1 || !info.type_params[0].constraints.is_empty() {
+        // Only single-type-param generics for now.
+        if info.type_params.len() != 1 {
             return;
         }
 
         let tp_name = &info.type_params[0].name;
+        let constraints = &info.type_params[0].constraints;
 
         // The type param must appear in at least one parameter so the
         // compiler can infer the concrete type from the arguments.
@@ -250,9 +256,18 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             return;
         }
 
-        // Pick a concrete primitive type for substitution.
-        let concrete_prim = PrimitiveType::random_expr_type(self.rng);
-        let concrete_type = TypeInfo::Primitive(concrete_prim);
+        // Pick a concrete type for substitution.
+        let concrete_type = if constraints.is_empty() {
+            // Unconstrained: use a random primitive type.
+            let concrete_prim = PrimitiveType::random_expr_type(self.rng);
+            TypeInfo::Primitive(concrete_prim)
+        } else {
+            // Constrained: find a class implementing all constraint interfaces.
+            match self.find_class_satisfying_constraints(constraints) {
+                Some(ty) => ty,
+                None => return, // No suitable class found, skip test
+            }
+        };
 
         // Substitute type param in all parameter types and the return type.
         let concrete_params: Vec<ParamInfo> = info
@@ -279,6 +294,78 @@ impl<'a, R: Rng> EmitContext<'a, R> {
         self.indent -= 1;
         self.emit_line("}");
         self.emit_line("");
+    }
+
+    /// Find a non-generic class that implements ALL of the given constraint
+    /// interfaces. Returns `TypeInfo::Class(mod_id, sym_id)` if found.
+    ///
+    /// Only considers classes in the same module as the first constraint
+    /// interface (all constraints come from the same module in vole-stress).
+    fn find_class_satisfying_constraints(
+        &self,
+        constraints: &[(ModuleId, SymbolId)],
+    ) -> Option<TypeInfo> {
+        if constraints.is_empty() {
+            return None;
+        }
+
+        // All constraints are from the same module in vole-stress
+        let module_id = constraints[0].0;
+        let module = self.table.get_module(module_id)?;
+
+        // Collect the set of required interface SymbolIds
+        let required: std::collections::HashSet<SymbolId> =
+            constraints.iter().map(|&(_, sym_id)| sym_id).collect();
+
+        // Find a non-generic class that implements all required interfaces.
+        // Check both direct `class.implements` and standalone implement blocks.
+        //
+        // First, build a map from class SymbolId to set of implemented interfaces
+        // (from implement blocks).
+        let mut impl_block_map: std::collections::HashMap<
+            SymbolId,
+            std::collections::HashSet<SymbolId>,
+        > = std::collections::HashMap::new();
+        for sym in module.implement_blocks() {
+            if let SymbolKind::ImplementBlock(ref info) = sym.kind {
+                if let Some((iface_mod, iface_sym)) = info.interface {
+                    if iface_mod == module_id {
+                        let (_, class_sym) = info.target_type;
+                        impl_block_map
+                            .entry(class_sym)
+                            .or_default()
+                            .insert(iface_sym);
+                    }
+                }
+            }
+        }
+
+        for sym in module.classes() {
+            if let SymbolKind::Class(ref info) = sym.kind {
+                if !info.type_params.is_empty() {
+                    continue; // Skip generic classes
+                }
+
+                // Collect all interfaces this class implements (direct + implement blocks)
+                let mut implemented: std::collections::HashSet<SymbolId> =
+                    std::collections::HashSet::new();
+                for &(m, s) in &info.implements {
+                    if m == module_id {
+                        implemented.insert(s);
+                    }
+                }
+                if let Some(block_ifaces) = impl_block_map.get(&sym.id) {
+                    implemented.extend(block_ifaces);
+                }
+
+                // Check if this class satisfies all constraints
+                if required.iter().all(|r| implemented.contains(r)) {
+                    return Some(TypeInfo::Class(module_id, sym.id));
+                }
+            }
+        }
+
+        None
     }
 
     /// Emit an assertion for a function call based on its return type.
