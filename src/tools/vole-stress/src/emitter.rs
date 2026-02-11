@@ -1160,8 +1160,10 @@ impl<'a, R: Rng> EmitContext<'a, R> {
                 | TypeInfo::Primitive(PrimitiveType::String)
         );
 
+        let is_not_bool = !matches!(elem_type, TypeInfo::Primitive(PrimitiveType::Bool));
+
         // Choose a chain pattern
-        let pattern = self.rng.gen_range(0..18);
+        let pattern = self.rng.gen_range(0..22);
         match pattern {
             0..=3 => {
                 // Plain .collect()
@@ -1231,6 +1233,22 @@ impl<'a, R: Rng> EmitContext<'a, R> {
                     _ => "(e) => true",
                 };
                 format!(".enumerate().filter({}).count()", pred)
+            }
+            18 => {
+                // .reverse().collect() — always valid, any element type
+                ".reverse().collect()".to_string()
+            }
+            19 if is_numeric => {
+                // .reverse().sum() — numeric only
+                ".reverse().sum()".to_string()
+            }
+            20 if is_not_bool => {
+                // .unique().collect() — not valid for bool
+                ".unique().collect()".to_string()
+            }
+            21 if is_not_bool => {
+                // .unique().count() — not valid for bool
+                ".unique().count()".to_string()
             }
             _ => {
                 // Fallback to .collect()

@@ -424,7 +424,9 @@ impl<'a, R: Rng> EntrypointContext<'a, R> {
                 | TypeInfo::Primitive(PrimitiveType::String)
         );
 
-        let pattern = self.rng.gen_range(0..18);
+        let is_not_bool = !matches!(elem_type, TypeInfo::Primitive(PrimitiveType::Bool));
+
+        let pattern = self.rng.gen_range(0..22);
         match pattern {
             0..=3 => ".collect()".to_string(),
             4 => {
@@ -472,6 +474,22 @@ impl<'a, R: Rng> EntrypointContext<'a, R> {
                     _ => "(e) => true",
                 };
                 format!(".enumerate().filter({}).count()", pred)
+            }
+            18 => {
+                // .reverse().collect() — always valid, any element type
+                ".reverse().collect()".to_string()
+            }
+            19 if is_numeric => {
+                // .reverse().sum() — numeric only
+                ".reverse().sum()".to_string()
+            }
+            20 if is_not_bool => {
+                // .unique().collect() — not valid for bool
+                ".unique().collect()".to_string()
+            }
+            21 if is_not_bool => {
+                // .unique().count() — not valid for bool
+                ".unique().count()".to_string()
             }
             _ => ".collect()".to_string(),
         }
