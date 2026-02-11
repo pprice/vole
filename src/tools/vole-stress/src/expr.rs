@@ -145,6 +145,35 @@ impl<'a> ExprContext<'a> {
         vars
     }
 
+    /// Get all variables in scope that support `.to_string()`.
+    ///
+    /// Only i64, i32, f64, and bool have `.to_string()` registered in the runtime.
+    pub fn to_string_candidate_vars(&self) -> Vec<String> {
+        fn supports_to_string(ty: &TypeInfo) -> bool {
+            matches!(
+                ty,
+                TypeInfo::Primitive(
+                    PrimitiveType::I64
+                        | PrimitiveType::I32
+                        | PrimitiveType::F64
+                        | PrimitiveType::Bool
+                )
+            )
+        }
+        let mut vars = Vec::new();
+        for (name, ty) in self.locals {
+            if supports_to_string(ty) {
+                vars.push(name.clone());
+            }
+        }
+        for param in self.params {
+            if supports_to_string(&param.param_type) {
+                vars.push(param.name.clone());
+            }
+        }
+        vars
+    }
+
     /// Get all array-typed variables in scope, along with their element type.
     ///
     /// Returns `(name, element_type)` pairs for variables of type `[T]`.
@@ -1177,6 +1206,21 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         }
     }
 
+    /// Try to generate a `.to_string()` call on a numeric or boolean variable.
+    ///
+    /// Looks for numeric (i8..u64, f32, f64) and bool variables in scope and
+    /// returns `Some("var.to_string()")` on success. This produces a string-typed
+    /// expression that exercises primitive method dispatch.
+    fn try_generate_to_string_call(&mut self, ctx: &ExprContext) -> Option<String> {
+        let candidates = ctx.to_string_candidate_vars();
+        if candidates.is_empty() {
+            return None;
+        }
+        let idx = self.rng.gen_range(0..candidates.len());
+        let var = &candidates[idx];
+        Some(format!("{}.to_string()", var))
+    }
+
     /// Try to generate a `str.split(",").collect()` call for a `[string]` expression.
     ///
     /// Looks for string-typed variables in scope and returns
@@ -1199,14 +1243,22 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
     /// Generate a string concatenation expression using the `+` operator.
     ///
     /// Produces expressions like `"hello" + " world"`, `str_var + " suffix"`,
-    /// or `str_var + other_var`. Concatenates 2-3 operands, each of which is
-    /// either a string variable in scope or a string literal.
+    /// `str_var + num.to_string()`, or `str_var + other_var`. Concatenates 2-3
+    /// operands, each of which is a string variable, string literal, or a
+    /// `.to_string()` call on a numeric/bool variable.
     fn generate_string_concat(&mut self, ctx: &ExprContext, depth: usize) -> String {
         let str_ty = TypeInfo::Primitive(PrimitiveType::String);
         let operand_count = self.rng.gen_range(2..=3);
         let mut parts = Vec::new();
 
         for _ in 0..operand_count {
+            // ~30% chance: use .to_string() on a numeric/bool variable
+            if self.rng.gen_bool(0.3) {
+                if let Some(expr) = self.try_generate_to_string_call(ctx) {
+                    parts.push(expr);
+                    continue;
+                }
+            }
             // Use a simple string expression (variable or literal) to avoid
             // deep nesting of complex sub-expressions in concatenation.
             parts.push(self.generate_simple(&str_ty, ctx));
@@ -1579,6 +1631,12 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                 }
             }
             PrimitiveType::String => {
+                // ~15% chance: .to_string() on numeric/bool variable
+                if self.rng.gen_bool(0.15) {
+                    if let Some(expr) = self.try_generate_to_string_call(ctx) {
+                        return expr;
+                    }
+                }
                 match choice {
                     0..=1 => {
                         // Multi-arm when expression returning string
