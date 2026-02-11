@@ -1105,12 +1105,13 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         Some(format!("{}.length()", candidates[idx]))
     }
 
-    /// Try to generate a `str.contains(other)` call for a bool expression.
+    /// Try to generate a bool-returning string method call.
     ///
+    /// Randomly picks one of `contains`, `starts_with`, or `ends_with`.
     /// Looks for string-typed variables in scope and returns
-    /// `Some("strVar.contains(\"literal\")")` on success. The argument is
+    /// `Some("strVar.method(\"literal\")")` on success. The argument is
     /// always a short string literal to keep the expression simple.
-    fn try_generate_string_contains(&mut self, ctx: &ExprContext) -> Option<String> {
+    fn try_generate_string_bool_method(&mut self, ctx: &ExprContext) -> Option<String> {
         let candidates = ctx.string_vars();
         if candidates.is_empty() {
             return None;
@@ -1118,10 +1119,14 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         let idx = self.rng.gen_range(0..candidates.len());
         let var = &candidates[idx];
 
+        // Pick a bool-returning string method
+        let methods = ["contains", "starts_with", "ends_with"];
+        let method = methods[self.rng.gen_range(0..methods.len())];
+
         // Use a short literal substring as the argument
         let substrings = ["str", "hello", "a", "test", "x", ""];
         let sub_idx = self.rng.gen_range(0..substrings.len());
-        Some(format!("{}.contains(\"{}\")", var, substrings[sub_idx]))
+        Some(format!("{}.{}(\"{}\")", var, method, substrings[sub_idx]))
     }
 
     /// Try to generate an interface method call on a type-param-typed variable.
@@ -1232,9 +1237,10 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         // Otherwise generate a literal (or simple method call)
         match ty {
             TypeInfo::Primitive(PrimitiveType::Bool) => {
-                // ~20% chance to generate str.contains("...") if a string var is in scope
+                // ~20% chance to generate a bool-returning string method
+                // (contains/starts_with/ends_with) if a string var is in scope
                 if self.rng.gen_bool(0.20) {
-                    if let Some(expr) = self.try_generate_string_contains(ctx) {
+                    if let Some(expr) = self.try_generate_string_bool_method(ctx) {
                         return expr;
                     }
                 }
@@ -3209,20 +3215,24 @@ mod tests {
     }
 
     #[test]
-    fn test_string_contains_direct() {
+    fn test_string_bool_method_direct() {
         let config = ExprConfig::default();
         let table = SymbolTable::new();
         let locals = vec![("s".to_string(), TypeInfo::Primitive(PrimitiveType::String))];
 
+        let valid_methods = ["contains", "starts_with", "ends_with"];
         let mut found = false;
         for seed in 0..100 {
             let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
             let mut generator = ExprGenerator::new(&mut rng, &config);
             let ctx = ExprContext::new(&[], &locals, &table);
-            if let Some(expr) = generator.try_generate_string_contains(&ctx) {
+            if let Some(expr) = generator.try_generate_string_bool_method(&ctx) {
+                let has_valid_method = valid_methods
+                    .iter()
+                    .any(|m| expr.starts_with(&format!("s.{}(\"", m)));
                 assert!(
-                    expr.starts_with("s.contains(\""),
-                    "Expected 's.contains(\"...\")' , got: {}",
+                    has_valid_method,
+                    "Expected 's.<method>(\"...\")' where method is contains/starts_with/ends_with, got: {}",
                     expr,
                 );
                 assert!(
@@ -3236,12 +3246,12 @@ mod tests {
         }
         assert!(
             found,
-            "Expected try_generate_string_contains to succeed at least once"
+            "Expected try_generate_string_bool_method to succeed at least once"
         );
     }
 
     #[test]
-    fn test_string_contains_no_strings() {
+    fn test_string_bool_method_no_strings() {
         let mut rng = rand::rngs::StdRng::seed_from_u64(42);
         let config = ExprConfig::default();
         let mut generator = ExprGenerator::new(&mut rng, &config);
@@ -3249,11 +3259,11 @@ mod tests {
         let table = SymbolTable::new();
         let ctx = ExprContext::new(&[], &[], &table);
 
-        assert!(generator.try_generate_string_contains(&ctx).is_none());
+        assert!(generator.try_generate_string_bool_method(&ctx).is_none());
     }
 
     #[test]
-    fn test_string_contains_in_bool_generation() {
+    fn test_string_bool_method_in_bool_generation() {
         let config = ExprConfig::default();
         let table = SymbolTable::new();
         let locals = vec![(
@@ -3261,16 +3271,20 @@ mod tests {
             TypeInfo::Primitive(PrimitiveType::String),
         )];
 
+        let valid_methods = [".contains(", ".starts_with(", ".ends_with("];
         let mut found = false;
         for seed in 0..500 {
             let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
             let mut generator = ExprGenerator::new(&mut rng, &config);
             let ctx = ExprContext::new(&[], &locals, &table);
             let expr = generator.generate(&TypeInfo::Primitive(PrimitiveType::Bool), &ctx, 0);
-            if expr.contains(".contains(") {
+            if valid_methods.iter().any(|m| expr.contains(m)) {
+                let has_msg_prefix = valid_methods
+                    .iter()
+                    .any(|m| expr.contains(&format!("msg{}", m)));
                 assert!(
-                    expr.contains("msg.contains("),
-                    "Expected 'msg.contains(...)', got: {}",
+                    has_msg_prefix,
+                    "Expected 'msg.<method>(...)', got: {}",
                     expr,
                 );
                 found = true;
@@ -3279,7 +3293,50 @@ mod tests {
         }
         assert!(
             found,
-            "Expected at least one .contains() call in bool generation across 500 seeds",
+            "Expected at least one string bool method call in bool generation across 500 seeds",
+        );
+    }
+
+    #[test]
+    fn test_string_bool_method_variety() {
+        // Ensure all three methods (contains, starts_with, ends_with) can be generated
+        let config = ExprConfig::default();
+        let table = SymbolTable::new();
+        let locals = vec![("s".to_string(), TypeInfo::Primitive(PrimitiveType::String))];
+
+        let mut seen_contains = false;
+        let mut seen_starts_with = false;
+        let mut seen_ends_with = false;
+        for seed in 0..500 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let ctx = ExprContext::new(&[], &locals, &table);
+            if let Some(expr) = generator.try_generate_string_bool_method(&ctx) {
+                if expr.contains(".contains(") {
+                    seen_contains = true;
+                }
+                if expr.contains(".starts_with(") {
+                    seen_starts_with = true;
+                }
+                if expr.contains(".ends_with(") {
+                    seen_ends_with = true;
+                }
+            }
+            if seen_contains && seen_starts_with && seen_ends_with {
+                break;
+            }
+        }
+        assert!(
+            seen_contains,
+            "Expected .contains() to appear across 500 seeds"
+        );
+        assert!(
+            seen_starts_with,
+            "Expected .starts_with() to appear across 500 seeds"
+        );
+        assert!(
+            seen_ends_with,
+            "Expected .ends_with() to appear across 500 seeds"
         );
     }
 }
