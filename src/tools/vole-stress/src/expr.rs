@@ -1177,6 +1177,25 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         }
     }
 
+    /// Try to generate a `str.split(",").collect()` call for a `[string]` expression.
+    ///
+    /// Looks for string-typed variables in scope and returns
+    /// `Some("strVar.split(\"delim\").collect()")` on success.
+    fn try_generate_string_split(&mut self, ctx: &ExprContext) -> Option<String> {
+        let candidates = ctx.string_vars();
+        if candidates.is_empty() {
+            return None;
+        }
+        let idx = self.rng.gen_range(0..candidates.len());
+        let var = &candidates[idx];
+
+        // Use a short literal delimiter
+        let delimiters = [",", " ", ":", ";", "-", "::"];
+        let delim = delimiters[self.rng.gen_range(0..delimiters.len())];
+
+        Some(format!("{}.split(\"{}\").collect()", var, delim))
+    }
+
     /// Generate a string concatenation expression using the `+` operator.
     ///
     /// Produces expressions like `"hello" + " world"`, `str_var + " suffix"`,
@@ -1878,6 +1897,13 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
 
     /// Generate an array expression.
     fn generate_array(&mut self, elem: &TypeInfo, ctx: &ExprContext, depth: usize) -> String {
+        // ~15% chance to generate str.split(",").collect() for [string] arrays
+        if *elem == TypeInfo::Primitive(PrimitiveType::String) && self.rng.gen_bool(0.15) {
+            if let Some(expr) = self.try_generate_string_split(ctx) {
+                return expr;
+            }
+        }
+
         // Minimum 2 elements: array index generation uses 0..=1 hardcoded indices,
         // so arrays must always have at least 2 elements to prevent OOB panics.
         let len = self.rng.gen_range(2..=4);
@@ -3659,6 +3685,130 @@ mod tests {
         assert!(
             found_negated_binary_bool,
             "Expected at least one negated binary bool (e.g. !(a && b)) across 1000 seeds"
+        );
+    }
+
+    #[test]
+    fn test_string_split_direct() {
+        let config = ExprConfig::default();
+        let table = SymbolTable::new();
+        let locals = vec![("s".to_string(), TypeInfo::Primitive(PrimitiveType::String))];
+
+        let valid_delimiters = [",", " ", ":", ";", "-", "::"];
+        let mut found = false;
+        for seed in 0..100 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let ctx = ExprContext::new(&[], &locals, &table);
+            if let Some(expr) = generator.try_generate_string_split(&ctx) {
+                assert!(
+                    expr.starts_with("s.split(\""),
+                    "Expected 's.split(\"...\").collect()', got: {}",
+                    expr,
+                );
+                assert!(
+                    expr.ends_with("\").collect()"),
+                    "Expected ending with '\").collect()', got: {}",
+                    expr,
+                );
+                // Verify the delimiter is one of the valid ones
+                let delim_start = "s.split(\"".len();
+                let delim_end = expr.len() - "\").collect()".len();
+                let delim = &expr[delim_start..delim_end];
+                assert!(
+                    valid_delimiters.contains(&delim),
+                    "Unexpected delimiter '{}' in expr: {}",
+                    delim,
+                    expr,
+                );
+                found = true;
+                break;
+            }
+        }
+        assert!(
+            found,
+            "Expected try_generate_string_split to succeed at least once"
+        );
+    }
+
+    #[test]
+    fn test_string_split_no_strings() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let config = ExprConfig::default();
+        let mut generator = ExprGenerator::new(&mut rng, &config);
+
+        let table = SymbolTable::new();
+        let ctx = ExprContext::new(&[], &[], &table);
+
+        assert!(generator.try_generate_string_split(&ctx).is_none());
+    }
+
+    #[test]
+    fn test_string_split_in_array_generation() {
+        let config = ExprConfig::default();
+        let table = SymbolTable::new();
+        let locals = vec![(
+            "text".to_string(),
+            TypeInfo::Primitive(PrimitiveType::String),
+        )];
+
+        let mut found = false;
+        for seed in 0..500 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let ctx = ExprContext::new(&[], &locals, &table);
+            let expr = generator.generate(
+                &TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::String))),
+                &ctx,
+                0,
+            );
+            if expr.contains(".split(") {
+                assert!(
+                    expr.contains("text.split("),
+                    "Expected 'text.split(...)...', got: {}",
+                    expr,
+                );
+                assert!(
+                    expr.ends_with(".collect()"),
+                    "Expected ending with '.collect()', got: {}",
+                    expr,
+                );
+                found = true;
+                break;
+            }
+        }
+        assert!(
+            found,
+            "Expected at least one .split().collect() call in [string] generation across 500 seeds",
+        );
+    }
+
+    #[test]
+    fn test_string_split_delimiter_variety() {
+        // Ensure multiple delimiters can be generated
+        let config = ExprConfig::default();
+        let table = SymbolTable::new();
+        let locals = vec![("s".to_string(), TypeInfo::Primitive(PrimitiveType::String))];
+
+        let mut seen_delimiters = std::collections::HashSet::new();
+        for seed in 0..500 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let ctx = ExprContext::new(&[], &locals, &table);
+            if let Some(expr) = generator.try_generate_string_split(&ctx) {
+                let delim_start = "s.split(\"".len();
+                let delim_end = expr.len() - "\").collect()".len();
+                let delim = expr[delim_start..delim_end].to_string();
+                seen_delimiters.insert(delim);
+            }
+            if seen_delimiters.len() >= 3 {
+                break;
+            }
+        }
+        assert!(
+            seen_delimiters.len() >= 3,
+            "Expected at least 3 different delimiters across 500 seeds, got: {:?}",
+            seen_delimiters,
         );
     }
 }
