@@ -56,6 +56,11 @@ pub struct ExprConfig {
     /// `.starts_with()` / `.ends_with()` (returns bool), and `.trim()` /
     /// `.to_upper()` / `.to_lower()` (returns string).  Set to 0.0 to disable.
     pub string_method_probability: f64,
+    /// Probability of generating a multi-arm when expression (3-4 arms)
+    /// instead of a 2-arm when expression (1 condition + wildcard).
+    /// When this fires, generates 3-4 total arms (2-3 conditions + wildcard).
+    /// Set to 0.0 to always use 2-arm when expressions.
+    pub multi_arm_when_probability: f64,
 }
 
 impl Default for ExprConfig {
@@ -75,6 +80,7 @@ impl Default for ExprConfig {
             tuple_index_probability: 0.15,
             chained_coalesce_probability: 0.30,
             string_method_probability: 0.15,
+            multi_arm_when_probability: 0.30,
         }
     }
 }
@@ -2190,8 +2196,14 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         // Decide if we want to use unreachable in the default arm
         let use_unreachable = self.rng.gen_bool(self.config.unreachable_probability);
 
-        let max_arms = self.config.max_match_arms.max(2);
-        let arm_count = self.rng.gen_range(2..=max_arms);
+        // Decide arm count: either 2 (1 condition + wildcard) or 3-4 (multi-arm)
+        let arm_count = if self.rng.gen_bool(self.config.multi_arm_when_probability) {
+            // Multi-arm: 3-4 total arms (2-3 conditions + wildcard)
+            self.rng.gen_range(3..=4)
+        } else {
+            // Simple: 2 total arms (1 condition + wildcard)
+            2
+        };
         let mut arms = Vec::new();
 
         if use_unreachable {

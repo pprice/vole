@@ -932,8 +932,17 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             .rng
             .gen_bool(self.config.expr_config.unreachable_probability);
 
-        // Generate 2-3 boolean condition arms plus a wildcard
-        let arm_count = self.rng.gen_range(2..=3);
+        // Decide arm count: either 2 (simple) or 3-4 (multi-arm)
+        let arm_count = if self
+            .rng
+            .gen_bool(self.config.expr_config.multi_arm_when_probability)
+        {
+            // Multi-arm: 3-4 total arms (2-3 conditions + wildcard)
+            self.rng.gen_range(3..=4)
+        } else {
+            // Simple: 2 total arms (1 condition + wildcard)
+            2
+        };
         let indent = "    ".repeat(self.indent + 1);
 
         let expr_ctx = ctx.to_expr_context();

@@ -150,6 +150,8 @@ fn minimal_profile() -> Profile {
                 chained_coalesce_probability: 0.0,
                 // No string methods in minimal
                 string_method_probability: 0.0,
+                // No multi-arm when in minimal
+                multi_arm_when_probability: 0.0,
             },
             // Shallow statement depth
             max_depth: 1,
@@ -307,6 +309,8 @@ fn full_profile() -> Profile {
                 chained_coalesce_probability: 0.30,
                 // ~15% string method calls (length, contains, trim, etc.)
                 string_method_probability: 0.15,
+                // ~35% multi-arm when (3-4 arms instead of 2)
+                multi_arm_when_probability: 0.35,
             },
             // Moderate statement depth for nested control flow
             max_depth: 3,
@@ -460,6 +464,8 @@ fn deep_nesting_profile() -> Profile {
                 chained_coalesce_probability: 0.30,
                 // Some string method calls for variety
                 string_method_probability: 0.10,
+                // ~25% multi-arm when for nesting variety
+                multi_arm_when_probability: 0.25,
             },
             // Statement nesting for nested control flow. Combined with
             // expression depth 4, this keeps total output per function
@@ -622,6 +628,8 @@ fn wide_types_profile() -> Profile {
                 chained_coalesce_probability: 0.25,
                 // Some string method calls
                 string_method_probability: 0.10,
+                // ~25% multi-arm when
+                multi_arm_when_probability: 0.25,
             },
             // Moderate statement depth
             max_depth: 2,
@@ -772,6 +780,8 @@ fn many_modules_profile() -> Profile {
                 chained_coalesce_probability: 0.0,
                 // No string methods - focus on module loading
                 string_method_probability: 0.0,
+                // No multi-arm when - focus on module loading
+                multi_arm_when_probability: 0.0,
             },
             // Shallow statement depth
             max_depth: 1,
@@ -937,6 +947,8 @@ fn generics_heavy_profile() -> Profile {
                 chained_coalesce_probability: 0.25,
                 // Some string method calls
                 string_method_probability: 0.10,
+                // ~25% multi-arm when
+                multi_arm_when_probability: 0.25,
             },
             // Moderate statement depth
             max_depth: 2,
@@ -1099,6 +1111,8 @@ fn stdlib_heavy_profile() -> Profile {
                 chained_coalesce_probability: 0.30,
                 // Elevated string method calls for stdlib stress
                 string_method_probability: 0.25,
+                // ~30% multi-arm when
+                multi_arm_when_probability: 0.30,
             },
             // Moderate statement depth — not too deep structurally
             max_depth: 2,
@@ -1248,6 +1262,8 @@ fn closures_heavy_profile() -> Profile {
                 chained_coalesce_probability: 0.25,
                 // Some string method calls
                 string_method_probability: 0.10,
+                // ~25% multi-arm when
+                multi_arm_when_probability: 0.25,
             },
             max_depth: 3,
             statements_per_block: (2, 4),
@@ -1398,6 +1414,8 @@ fn fallible_heavy_profile() -> Profile {
                 chained_coalesce_probability: 0.25,
                 // Some string methods
                 string_method_probability: 0.10,
+                // ~25% multi-arm when
+                multi_arm_when_probability: 0.25,
             },
             // Moderate statement depth -- enough for if-raise guard patterns
             max_depth: 3,
