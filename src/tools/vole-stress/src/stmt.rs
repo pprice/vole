@@ -102,6 +102,11 @@ pub struct StmtConfig {
     /// `let x = arr.iter().filter((x) => x > 0).collect()`
     /// Set to 0.0 to disable.
     pub iter_map_filter_probability: f64,
+    /// Probability of generating a call to a free function that has an
+    /// interface-typed parameter. This exercises the codegen path where a
+    /// class instance is passed where an interface type is expected (implicit
+    /// upcast at the call site). Set to 0.0 to disable.
+    pub iface_function_call_probability: f64,
 }
 
 impl Default for StmtConfig {
@@ -138,6 +143,7 @@ impl Default for StmtConfig {
             nested_loop_probability: 0.06,
             union_match_probability: 0.08,
             iter_map_filter_probability: 0.08,
+            iface_function_call_probability: 0.08,
         }
     }
 }
@@ -489,6 +495,16 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             .gen_bool(self.config.interface_dispatch_probability)
         {
             if let Some(stmt) = self.try_generate_interface_method_call(ctx) {
+                return stmt;
+            }
+        }
+
+        // Occasionally call a free function that takes an interface-typed parameter
+        if self
+            .rng
+            .gen_bool(self.config.iface_function_call_probability)
+        {
+            if let Some(stmt) = self.try_generate_iface_function_call(ctx) {
                 return stmt;
             }
         }
@@ -2963,6 +2979,80 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 TypeInfo::Void => Some(call_expr),
                 _ => Some(format!("_ = {}", call_expr)),
             }
+        }
+    }
+
+    /// Try to generate a call to a free function that has an interface-typed parameter.
+    ///
+    /// Finds non-generic functions in the current module that have at least one
+    /// `TypeInfo::Interface` parameter, picks one, and generates a call with
+    /// all arguments (constructing a class instance for interface-typed params).
+    /// This exercises the codegen path where a concrete class is implicitly
+    /// upcast to an interface type at the call site.
+    ///
+    /// Generated output shapes:
+    /// - `let local7 = funcName(42_i64, ClassName { field1: 1_i64 })` (non-void return)
+    /// - `funcName(42_i64, ClassName { field1: 1_i64 })` (void return)
+    fn try_generate_iface_function_call(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let module_id = ctx.module_id?;
+        let module = ctx.table.get_module(module_id)?;
+
+        // Collect non-generic functions with at least one interface-typed param
+        let candidates: Vec<(String, Vec<ParamInfo>, TypeInfo)> = module
+            .functions()
+            .filter_map(|s| {
+                if let SymbolKind::Function(ref info) = s.kind {
+                    if info.type_params.is_empty()
+                        && !matches!(info.return_type, TypeInfo::Never)
+                        && info
+                            .params
+                            .iter()
+                            .any(|p| p.param_type.contains_interface())
+                        && Some(s.name.as_str()) != ctx.current_function_name.as_deref()
+                    {
+                        Some((
+                            s.name.clone(),
+                            info.params.clone(),
+                            info.return_type.clone(),
+                        ))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..candidates.len());
+        let (func_name, params, return_type) = &candidates[idx];
+
+        // Generate arguments for each parameter
+        let expr_ctx = ctx.to_expr_context();
+        let args: Vec<String> = params
+            .iter()
+            .map(|p| {
+                let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+                expr_gen.generate_arg_expr(&p.param_type, &expr_ctx)
+            })
+            .collect();
+
+        let call_expr = format!("{}({})", func_name, args.join(", "));
+
+        // Bind result to a local when the return type is non-void
+        match return_type {
+            TypeInfo::Void => Some(call_expr),
+            TypeInfo::Primitive(_) | TypeInfo::Optional(_) => {
+                let name = ctx.new_local_name();
+                let ty = return_type.clone();
+                ctx.add_local(name.clone(), ty, false);
+                Some(format!("let {} = {}", name, call_expr))
+            }
+            _ => Some(format!("_ = {}", call_expr)),
         }
     }
 

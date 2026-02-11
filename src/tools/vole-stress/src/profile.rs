@@ -194,6 +194,8 @@ fn minimal_profile() -> Profile {
             union_match_probability: 0.0,
             // No iterator map/filter in minimal
             iter_map_filter_probability: 0.0,
+            // No interface function calls in minimal (no interfaces)
+            iface_function_call_probability: 0.0,
         },
         // No destructured imports in minimal (no multi-layer modules)
         destructured_import_probability: 0.0,
@@ -343,6 +345,8 @@ fn full_profile() -> Profile {
             union_match_probability: 0.10,
             // Iterator map/filter on array variables (~10%)
             iter_map_filter_probability: 0.10,
+            // Calls to free functions with interface-typed params (~10%)
+            iface_function_call_probability: 0.10,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -491,6 +495,8 @@ fn deep_nesting_profile() -> Profile {
             union_match_probability: 0.06,
             // Some iterator map/filter for variety
             iter_map_filter_probability: 0.06,
+            // No interface function calls in deep-nesting (no interfaces)
+            iface_function_call_probability: 0.0,
         },
         // No destructured imports in deep-nesting (single module focus)
         destructured_import_probability: 0.0,
@@ -642,6 +648,8 @@ fn wide_types_profile() -> Profile {
             union_match_probability: 0.06,
             // Some iterator map/filter for variety
             iter_map_filter_probability: 0.06,
+            // Some interface function calls for vtable dispatch
+            iface_function_call_probability: 0.06,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -784,6 +792,8 @@ fn many_modules_profile() -> Profile {
             union_match_probability: 0.0,
             // No iterator map/filter in many-modules - focus on module loading
             iter_map_filter_probability: 0.0,
+            // No interface function calls in many-modules - focus on module loading
+            iface_function_call_probability: 0.0,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -942,6 +952,8 @@ fn generics_heavy_profile() -> Profile {
             union_match_probability: 0.06,
             // Some iterator map/filter for variety
             iter_map_filter_probability: 0.06,
+            // No interface function calls in generics-heavy (focus on generics)
+            iface_function_call_probability: 0.0,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -1097,6 +1109,8 @@ fn stdlib_heavy_profile() -> Profile {
             union_match_probability: 0.08,
             // High iterator map/filter — the core of this profile
             iter_map_filter_probability: 0.25,
+            // Some interface function calls for vtable dispatch on stdlib types
+            iface_function_call_probability: 0.08,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -1216,6 +1230,8 @@ fn closures_heavy_profile() -> Profile {
             union_match_probability: 0.08,
             // HIGH iterator map/filter — generates many closure-bearing chains
             iter_map_filter_probability: 0.25,
+            // Some interface function calls for vtable dispatch
+            iface_function_call_probability: 0.08,
         },
         destructured_import_probability: 0.0,
         // HIGH expression-body — exercises => lambda-like syntax on functions
