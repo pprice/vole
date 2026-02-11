@@ -74,6 +74,22 @@ impl TypeInfo {
             _ => false,
         }
     }
+
+    /// Collect all interface `(ModuleId, SymbolId)` pairs referenced by this type.
+    pub fn collect_interface_ids(&self, out: &mut Vec<(ModuleId, SymbolId)>) {
+        match self {
+            TypeInfo::Interface(mod_id, sym_id) => out.push((*mod_id, *sym_id)),
+            TypeInfo::Optional(inner) | TypeInfo::Array(inner) | TypeInfo::Iterator(inner) => {
+                inner.collect_interface_ids(out);
+            }
+            TypeInfo::Union(variants) => {
+                for v in variants {
+                    v.collect_interface_ids(out);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Primitive types in Vole.

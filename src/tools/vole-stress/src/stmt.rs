@@ -3154,6 +3154,25 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let module_id = ctx.module_id?;
         let module = ctx.table.get_module(module_id)?;
 
+        // When generating a method body for a class, collect the interfaces
+        // that the class implements.  We must avoid calling any free function
+        // that accepts one of these interfaces as a parameter, because the
+        // function's body may dispatch a method call on that interface back to
+        // the current class, creating mutual recursion at runtime.
+        // E.g. Class18.method81 -> func35(IFace12) -> ifaceParam.method81() -> ...
+        let current_class_ifaces: Vec<(ModuleId, SymbolId)> =
+            if let Some((cls_mod, cls_sym)) = ctx.current_class_sym_id {
+                ctx.table
+                    .get_symbol(cls_mod, cls_sym)
+                    .and_then(|s| match &s.kind {
+                        SymbolKind::Class(info) => Some(info.implements.clone()),
+                        _ => None,
+                    })
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+
         // Collect non-generic functions with at least one interface-typed param
         let candidates: Vec<(String, Vec<ParamInfo>, TypeInfo)> = module
             .functions()
@@ -3167,6 +3186,23 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                             .any(|p| p.param_type.contains_interface())
                         && Some(s.name.as_str()) != ctx.current_function_name.as_deref()
                     {
+                        // When inside a method body, skip functions whose
+                        // interface-typed params overlap with the current
+                        // class's implemented interfaces (prevents cross-
+                        // function/method mutual recursion).
+                        if !current_class_ifaces.is_empty() {
+                            let mut func_ifaces = Vec::new();
+                            for p in &info.params {
+                                p.param_type.collect_interface_ids(&mut func_ifaces);
+                            }
+                            if func_ifaces
+                                .iter()
+                                .any(|id| current_class_ifaces.contains(id))
+                            {
+                                return None;
+                            }
+                        }
+
                         Some((
                             s.name.clone(),
                             info.params.clone(),
