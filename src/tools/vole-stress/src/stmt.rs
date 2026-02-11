@@ -76,6 +76,9 @@ pub struct StmtConfig {
     /// Probability of generating a `let x = match var { ... }` statement
     /// when i64-typed variables are in scope. Set to 0.0 to disable.
     pub match_probability: f64,
+    /// Probability of generating a `let x = match str_var { "a" => ..., _ => ... }`
+    /// statement when string-typed variables are in scope. Set to 0.0 to disable.
+    pub string_match_probability: f64,
 }
 
 impl Default for StmtConfig {
@@ -106,6 +109,7 @@ impl Default for StmtConfig {
             method_call_probability: 0.12,
             interface_dispatch_probability: 0.10,
             match_probability: 0.08,
+            string_match_probability: 0.06,
         }
     }
 }
@@ -553,6 +557,13 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // String match expression let-binding: let x = match str { "a" => ..., _ => ... }
+        if self.rng.gen_bool(self.config.string_match_probability) {
+            if let Some(stmt) = self.try_generate_string_match_let(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -630,6 +641,85 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
             let arm_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
             arms.push(format!("{}{} => {}", indent, val, arm_expr));
+        }
+
+        // Wildcard arm
+        let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+        let wildcard_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
+        arms.push(format!("{}_ => {}", indent, wildcard_expr));
+
+        let close_indent = "    ".repeat(self.indent);
+        ctx.add_local(result_name.clone(), result_type, false);
+
+        Some(format!(
+            "let {} = match {} {{\n{}\n{}}}",
+            result_name,
+            scrutinee,
+            arms.join("\n"),
+            close_indent,
+        ))
+    }
+
+    /// Try to generate a match expression let-binding on a string variable.
+    ///
+    /// Finds a string-typed variable in scope and generates:
+    /// ```vole
+    /// let result = match str_var {
+    ///     "alpha" => <expr>
+    ///     "beta" => <expr>
+    ///     _ => <expr>
+    /// }
+    /// ```
+    ///
+    /// Returns `None` if no string-typed variable is in scope.
+    fn try_generate_string_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Find string-typed variables in scope (locals + params)
+        let mut candidates: Vec<String> = Vec::new();
+        for (name, ty, _) in &ctx.locals {
+            if matches!(ty, TypeInfo::Primitive(PrimitiveType::String)) {
+                candidates.push(name.clone());
+            }
+        }
+        for param in ctx.params.iter() {
+            if matches!(param.param_type, TypeInfo::Primitive(PrimitiveType::String)) {
+                candidates.push(param.name.clone());
+            }
+        }
+        if candidates.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..candidates.len());
+        let scrutinee = &candidates[idx];
+
+        // Pick a result type for all arms (same type to keep it simple)
+        let result_type = self.random_primitive_type();
+        let result_name = ctx.new_local_name();
+
+        // Generate 2-3 string literal arms plus a wildcard
+        let arm_count = self.rng.gen_range(2..=3);
+        let indent = "    ".repeat(self.indent + 1);
+
+        let expr_ctx = ctx.to_expr_context();
+        let mut arms = Vec::new();
+
+        // Pool of short distinct string patterns to pick from
+        let patterns = [
+            "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota", "kappa",
+        ];
+
+        // Pick distinct string patterns
+        let mut used_indices = std::collections::HashSet::new();
+        for _ in 0..arm_count {
+            let mut pi = self.rng.gen_range(0..patterns.len());
+            while used_indices.contains(&pi) {
+                pi = self.rng.gen_range(0..patterns.len());
+            }
+            used_indices.insert(pi);
+
+            let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+            let arm_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
+            arms.push(format!("{}\"{}\" => {}", indent, patterns[pi], arm_expr));
         }
 
         // Wildcard arm
@@ -3190,11 +3280,13 @@ mod tests {
     }
 
     #[test]
-    fn test_match_not_generated_when_no_i64_in_scope() {
+    fn test_i64_match_not_generated_when_no_i64_in_scope() {
         let table = SymbolTable::new();
 
+        // High i64 match probability, but string match disabled
         let config = StmtConfig {
             match_probability: 0.99,
+            string_match_probability: 0.0,
             if_probability: 0.0,
             while_probability: 0.0,
             for_probability: 0.0,
@@ -3207,9 +3299,8 @@ mod tests {
             param_type: TypeInfo::Primitive(PrimitiveType::String),
         }];
 
-        // The top-level let statement should never be a `let x = match text {`
-        // pattern since `text` is a string, not i64. (Note: `match` can still
-        // appear inside sub-expressions generated by ExprGenerator.)
+        // With string_match_probability=0.0 and no i64 in scope,
+        // the i64 match path should never trigger on a string variable.
         for seed in 0..50 {
             let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
             let mut generator = StmtGenerator::new(&mut rng, &config);
@@ -3220,9 +3311,67 @@ mod tests {
             let first_line = stmt.lines().next().unwrap_or("");
             assert!(
                 !(first_line.contains("= match text")),
-                "Should not generate match-let on string var: {}",
+                "Should not generate i64 match-let on string var: {}",
                 stmt
             );
         }
+    }
+
+    #[test]
+    fn test_string_match_let_generation() {
+        let table = SymbolTable::new();
+
+        let config = StmtConfig {
+            string_match_probability: 0.99,
+            match_probability: 0.0,
+            if_probability: 0.0,
+            while_probability: 0.0,
+            for_probability: 0.0,
+            break_continue_probability: 0.0,
+            compound_assign_probability: 0.0,
+            reassign_probability: 0.0,
+            ..StmtConfig::default()
+        };
+
+        // A string param in scope to match on
+        let params = vec![ParamInfo {
+            name: "msg".to_string(),
+            param_type: TypeInfo::Primitive(PrimitiveType::String),
+        }];
+
+        let mut found_match = false;
+        for seed in 0..200 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = StmtGenerator::new(&mut rng, &config);
+            let mut ctx = StmtContext::new(&params, &table);
+
+            let stmt = generator.generate_let_statement(&mut ctx);
+            if stmt.contains("= match msg {") {
+                found_match = true;
+                // Verify it has string literal arms
+                assert!(
+                    stmt.contains("\""),
+                    "String match should have string literal arms: {}",
+                    stmt
+                );
+                // Verify wildcard arm
+                assert!(
+                    stmt.contains("_ =>"),
+                    "String match should have wildcard arm: {}",
+                    stmt
+                );
+                // Must be a let binding
+                assert!(
+                    stmt.starts_with("let "),
+                    "String match must be a let binding: {}",
+                    stmt
+                );
+                break;
+            }
+        }
+        assert!(
+            found_match,
+            "Expected at least one string match let across 200 seeds"
+        );
     }
 }

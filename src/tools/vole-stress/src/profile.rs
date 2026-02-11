@@ -175,6 +175,8 @@ fn minimal_profile() -> Profile {
             interface_dispatch_probability: 0.0,
             // Some match expressions even in minimal
             match_probability: 0.06,
+            // Some string match expressions even in minimal
+            string_match_probability: 0.04,
         },
         // No destructured imports in minimal (no multi-layer modules)
         destructured_import_probability: 0.0,
@@ -309,6 +311,8 @@ fn full_profile() -> Profile {
             interface_dispatch_probability: 0.10,
             // Match expression let-bindings on i64 variables
             match_probability: 0.08,
+            // Match expression let-bindings on string variables
+            string_match_probability: 0.06,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -442,6 +446,8 @@ fn deep_nesting_profile() -> Profile {
             interface_dispatch_probability: 0.0,
             // Higher match probability for nesting-focused profile
             match_probability: 0.10,
+            // Some string match expressions for variety
+            string_match_probability: 0.06,
         },
         // No destructured imports in deep-nesting (single module focus)
         destructured_import_probability: 0.0,
@@ -578,6 +584,8 @@ fn wide_types_profile() -> Profile {
             interface_dispatch_probability: 0.08,
             // Match expression let-bindings on i64 variables
             match_probability: 0.08,
+            // Match expression let-bindings on string variables
+            string_match_probability: 0.06,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -705,6 +713,8 @@ fn many_modules_profile() -> Profile {
             interface_dispatch_probability: 0.0,
             // Some match expressions even in many-modules
             match_probability: 0.06,
+            // Some string match expressions even in many-modules
+            string_match_probability: 0.04,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -848,6 +858,8 @@ fn generics_heavy_profile() -> Profile {
             interface_dispatch_probability: 0.0,
             // Some match expressions in generics profile
             match_probability: 0.06,
+            // Some string match expressions in generics profile
+            string_match_probability: 0.04,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
