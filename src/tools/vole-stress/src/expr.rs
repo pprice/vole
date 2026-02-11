@@ -1817,6 +1817,7 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
     /// Generate an interpolation expression for a variable.
     ///
     /// For numeric types, sometimes wraps in arithmetic (e.g. `param0 + 1_i64`).
+    /// For array and string types, sometimes generates `.length()` calls.
     /// For other types, just references the variable directly.
     fn interp_expr_for_var(&mut self, name: &str, ty: &TypeInfo) -> String {
         match ty {
@@ -1827,6 +1828,14 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             TypeInfo::Primitive(PrimitiveType::I64) if self.rng.gen_bool(0.3) => {
                 let n = self.rng.gen_range(1..10);
                 format!("{} + {}_i64", name, n)
+            }
+            // ~30% chance to use .length() on arrays inside interpolation
+            TypeInfo::Array(_) if self.rng.gen_bool(0.3) => {
+                format!("{}.length()", name)
+            }
+            // ~30% chance to use .length() on strings inside interpolation
+            TypeInfo::Primitive(PrimitiveType::String) if self.rng.gen_bool(0.3) => {
+                format!("{}.length()", name)
             }
             _ => name.to_string(),
         }
@@ -2225,6 +2234,54 @@ mod tests {
         assert!(result.ends_with('"'));
         // Should NOT contain interpolation braces (it's a plain "strN" literal)
         assert!(!result.contains('{'));
+    }
+
+    #[test]
+    fn test_interpolated_string_length_calls() {
+        let config = ExprConfig::default();
+        let table = SymbolTable::new();
+
+        // Set up an array and a string variable in scope
+        let locals = vec![
+            (
+                "items".to_string(),
+                TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+            ),
+            (
+                "text".to_string(),
+                TypeInfo::Primitive(PrimitiveType::String),
+            ),
+        ];
+
+        let mut found_array_length = false;
+        let mut found_string_length = false;
+
+        // Run across many seeds to exercise the 30% probability branches
+        for seed in 0..500 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let ctx = ExprContext::new(&[], &locals, &table);
+            let result = generator.generate_interpolated_string(&ctx);
+
+            if result.contains("items.length()") {
+                found_array_length = true;
+            }
+            if result.contains("text.length()") {
+                found_string_length = true;
+            }
+            if found_array_length && found_string_length {
+                break;
+            }
+        }
+
+        assert!(
+            found_array_length,
+            "Expected at least one array .length() call in interpolation across 500 seeds"
+        );
+        assert!(
+            found_string_length,
+            "Expected at least one string .length() call in interpolation across 500 seeds"
+        );
     }
 
     #[test]
