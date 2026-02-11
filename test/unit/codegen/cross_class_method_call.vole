@@ -1,0 +1,70 @@
+// Regression test for cross-class mutual recursion (vol-yhll).
+//
+// When the stress generator emitted method calls from one class's method
+// body to another class's method, and that other class called back, it
+// created infinite mutual recursion:
+//   ClassA.methodX -> ClassB.methodY -> ClassA.methodZ -> ...
+//
+// This test verifies that legitimate cross-class method calls work
+// correctly (non-recursive patterns), and that the type system handles
+// cross-class references.
+
+class Alpha {
+    value: i32,
+
+    func get_value() -> i32 {
+        return self.value
+    }
+
+    // Calls a method on a Beta instance (no recursion)
+    func process(b_val: i32) -> i32 {
+        return self.value + b_val
+    }
+}
+
+class Beta {
+    name: string,
+    count: i64,
+
+    func get_count() -> i64 {
+        return self.count
+    }
+
+    // Calls a method on an Alpha instance (no recursion)
+    func combine(a: Alpha) -> i32 {
+        return a.get_value() + 10_i32
+    }
+}
+
+// Free function that creates both classes and calls methods across them
+func cross_class_call(x: i32) -> i32 {
+    let a = Alpha { value: x }
+    let b = Beta { name: "test", count: 42_i64 }
+    let result = b.combine(a)
+    return result
+}
+
+tests "cross_class_method_calls" {
+    test "Alpha methods work" {
+        let a = Alpha { value: 7 }
+        assert(a.get_value() == 7)
+        assert(a.process(3) == 10)
+    }
+
+    test "Beta methods work" {
+        let b = Beta { name: "hello", count: 99_i64 }
+        assert(b.get_count() == 99_i64)
+    }
+
+    test "cross-class method call from free function" {
+        let result = cross_class_call(5)
+        assert(result == 15)
+    }
+
+    test "direct cross-class method call" {
+        let a = Alpha { value: 20 }
+        let b = Beta { name: "world", count: 0_i64 }
+        let combined = b.combine(a)
+        assert(combined == 30)
+    }
+}

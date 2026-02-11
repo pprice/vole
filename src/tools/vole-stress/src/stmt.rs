@@ -2590,21 +2590,44 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         let call_expr = format!("{}.{}({})", instance_name, method.name, args.join(", "));
 
-        // Bind result to a local when the return type is primitive or optional
-        match &method.return_type {
-            TypeInfo::Primitive(_) | TypeInfo::Optional(_) => {
-                let name = ctx.new_local_name();
-                let ty = method.return_type.clone();
-                ctx.add_local(name.clone(), ty, false);
-                Some(format!("let {} = {}", name, call_expr))
-            }
-            TypeInfo::Void => {
-                // Void return (including self-returning placeholders) - bare call
-                Some(call_expr)
-            }
-            _ => {
-                // Other return types - use discard to avoid unused warnings
-                Some(format!("_ = {}", call_expr))
+        // When we're inside a method body (current_class_sym_id is set), calling
+        // methods on *other* classes risks cross-class mutual recursion:
+        //   ClassA.methodX -> ClassB.methodY -> ClassA.methodZ -> ...
+        // Guard such calls with `if false { }` so they're type-checked but never
+        // executed at runtime.  Outside of method bodies (free functions, tests),
+        // allow the call to run normally.
+        let in_method_body = current_class.is_some();
+
+        if in_method_body {
+            // Wrap in `if false { ... }` to prevent cross-class mutual recursion
+            let indent = "    ".repeat(self.indent + 1);
+            let stmt = match &method.return_type {
+                TypeInfo::Void => call_expr,
+                _ => format!("_ = {}", call_expr),
+            };
+            Some(format!(
+                "if false {{\n{}{}\n{}}}",
+                indent,
+                stmt,
+                "    ".repeat(self.indent)
+            ))
+        } else {
+            // Bind result to a local when the return type is primitive or optional
+            match &method.return_type {
+                TypeInfo::Primitive(_) | TypeInfo::Optional(_) => {
+                    let name = ctx.new_local_name();
+                    let ty = method.return_type.clone();
+                    ctx.add_local(name.clone(), ty, false);
+                    Some(format!("let {} = {}", name, call_expr))
+                }
+                TypeInfo::Void => {
+                    // Void return (including self-returning placeholders) - bare call
+                    Some(call_expr)
+                }
+                _ => {
+                    // Other return types - use discard to avoid unused warnings
+                    Some(format!("_ = {}", call_expr))
+                }
             }
         }
     }
@@ -2690,16 +2713,35 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         let call_expr = format!("{}.{}({})", var_name, method.name, args.join(", "));
 
-        // Bind result to a local when the return type is primitive or optional
-        match &method.return_type {
-            TypeInfo::Primitive(_) | TypeInfo::Optional(_) => {
-                let name = ctx.new_local_name();
-                let ty = method.return_type.clone();
-                ctx.add_local(name.clone(), ty, false);
-                Some(format!("let {} = {}", name, call_expr))
+        // When inside a method body, interface vtable dispatch can cause
+        // cross-class mutual recursion (the implementing class's method may
+        // call back into the current class).  Guard with `if false`.
+        let in_method_body = ctx.current_class_sym_id.is_some();
+
+        if in_method_body {
+            let indent = "    ".repeat(self.indent + 1);
+            let stmt = match &method.return_type {
+                TypeInfo::Void => call_expr,
+                _ => format!("_ = {}", call_expr),
+            };
+            Some(format!(
+                "if false {{\n{}{}\n{}}}",
+                indent,
+                stmt,
+                "    ".repeat(self.indent)
+            ))
+        } else {
+            // Bind result to a local when the return type is primitive or optional
+            match &method.return_type {
+                TypeInfo::Primitive(_) | TypeInfo::Optional(_) => {
+                    let name = ctx.new_local_name();
+                    let ty = method.return_type.clone();
+                    ctx.add_local(name.clone(), ty, false);
+                    Some(format!("let {} = {}", name, call_expr))
+                }
+                TypeInfo::Void => Some(call_expr),
+                _ => Some(format!("_ = {}", call_expr)),
             }
-            TypeInfo::Void => Some(call_expr),
-            _ => Some(format!("_ = {}", call_expr)),
         }
     }
 
