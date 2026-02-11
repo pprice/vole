@@ -420,6 +420,49 @@ impl Cg<'_, '_, '_> {
             // parameter (e.g. T from class<T: Disposable>). Apply substitutions to get the
             // concrete type before looking up the TypeDefId.
             let resolved_obj_type_id = self.substitute_type(obj.type_id);
+
+            // In monomorphized context, resolution is None so the interface dispatch
+            // paths above (lines 264-310) are skipped. Check here if the object is an
+            // interface type and dispatch via vtable.
+            let interface_type_def_id = {
+                let arena = self.arena();
+                if arena.is_interface(resolved_obj_type_id) {
+                    arena
+                        .unwrap_interface(resolved_obj_type_id)
+                        .map(|(id, _)| id)
+                } else {
+                    None
+                }
+            };
+            if let Some(interface_type_def_id) = interface_type_def_id {
+                let func_type_id = self
+                    .analyzed()
+                    .entity_registry()
+                    .find_method_on_type(interface_type_def_id, method_name_id)
+                    .map(|mid| {
+                        self.analyzed()
+                            .entity_registry()
+                            .get_method(mid)
+                            .signature_id
+                    })
+                    .ok_or_else(|| {
+                        CodegenError::not_found(
+                            "interface method",
+                            format!("{method_name_str} on interface"),
+                        )
+                    })?;
+                let result = self.interface_dispatch_call_args_by_type_def_id(
+                    &obj,
+                    &mc.args,
+                    interface_type_def_id,
+                    method_name_id,
+                    func_type_id,
+                )?;
+                let mut obj = obj;
+                self.consume_rc_value(&mut obj)?;
+                return Ok(result);
+            }
+
             let arena = self.arena();
             let type_def_id =
                 get_type_def_id_from_type_id(resolved_obj_type_id, arena, self.analyzed())

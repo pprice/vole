@@ -1,0 +1,68 @@
+// Regression: interface method calls inside generic function bodies
+// must dispatch via vtable even though sema resolution is skipped
+// in monomorphized contexts.
+
+interface Greeter {
+    func greet() -> string
+}
+
+class HelloGreeter implements Greeter {
+    name: string,
+
+    func greet() -> string {
+        return "hello " + self.name
+    }
+}
+
+class FormalGreeter implements Greeter {
+    title: string,
+
+    func greet() -> string {
+        return "good day " + self.title
+    }
+}
+
+interface Adder {
+    func add(a: i64, b: i64) -> i64
+}
+
+class SimpleAdder implements Adder {
+    func add(a: i64, b: i64) -> i64 {
+        return a + b
+    }
+}
+
+func call_in_generic<T>(param: T) -> string {
+    let g: Greeter = HelloGreeter { name: "world" }
+    return g.greet()
+}
+
+func multi_iface_in_generic<T>(param: T) -> i64 {
+    let a: Adder = SimpleAdder {}
+    return a.add(10, 20)
+}
+
+func two_iface_calls_in_generic<T>(param: T) -> string {
+    let g1: Greeter = HelloGreeter { name: "a" }
+    let g2: Greeter = FormalGreeter { title: "sir" }
+    return g1.greet() + " " + g2.greet()
+}
+
+tests "interface method in generic" {
+    test "basic interface call in generic body" {
+        assert(call_in_generic(42) == "hello world")
+    }
+
+    test "interface call with different type arg" {
+        assert(call_in_generic(true) == "hello world")
+        assert(call_in_generic("str") == "hello world")
+    }
+
+    test "different interface in generic body" {
+        assert(multi_iface_in_generic(0) == 30)
+    }
+
+    test "two interface calls in generic body" {
+        assert(two_iface_calls_in_generic(0) == "hello a good day sir")
+    }
+}
