@@ -1457,6 +1457,83 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         Some((format!("{}?.{}", var_name, field_name), result_type))
     }
 
+    /// Try to generate an iterator `.any()` or `.all()` expression.
+    ///
+    /// Looks for array-typed variables in scope with primitive element types
+    /// and generates `arrVar.iter().any((x) => PRED)` or
+    /// `arrVar.iter().all((x) => PRED)`. Returns a bool-typed expression.
+    ///
+    /// Predicates are type-appropriate:
+    /// - Numeric (i64, f64): comparisons like `x > 3`, `x < 10`, `x % 2 == 0`
+    /// - Bool: `x` or `!x`
+    /// - String: `x.length() > N`
+    fn try_generate_iter_any_all(&mut self, ctx: &ExprContext) -> Option<String> {
+        let array_vars = ctx.array_vars();
+
+        // Filter to arrays with primitive element types that support predicates
+        let candidates: Vec<_> = array_vars
+            .iter()
+            .filter(|(_, elem_ty)| {
+                matches!(
+                    elem_ty,
+                    TypeInfo::Primitive(
+                        PrimitiveType::I64
+                            | PrimitiveType::F64
+                            | PrimitiveType::Bool
+                            | PrimitiveType::String
+                    )
+                )
+            })
+            .collect();
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..candidates.len());
+        let (var_name, elem_ty) = candidates[idx];
+
+        // Pick any() or all()
+        let method = if self.rng.gen_bool(0.5) { "any" } else { "all" };
+
+        // Generate a type-appropriate predicate body
+        let pred = match elem_ty {
+            TypeInfo::Primitive(PrimitiveType::I64) => match self.rng.gen_range(0..4) {
+                0 => {
+                    let n = self.rng.gen_range(0..=5);
+                    format!("x > {}", n)
+                }
+                1 => {
+                    let n = self.rng.gen_range(0..=10);
+                    format!("x < {}", n)
+                }
+                2 => "x % 2 == 0".to_string(),
+                _ => {
+                    let n = self.rng.gen_range(0..=5);
+                    format!("x != {}", n)
+                }
+            },
+            TypeInfo::Primitive(PrimitiveType::F64) => {
+                let n = self.rng.gen_range(0..=50);
+                format!("x > {}.0", n)
+            }
+            TypeInfo::Primitive(PrimitiveType::Bool) => {
+                if self.rng.gen_bool(0.5) {
+                    "x".to_string()
+                } else {
+                    "!x".to_string()
+                }
+            }
+            TypeInfo::Primitive(PrimitiveType::String) => {
+                let n = self.rng.gen_range(0..=3);
+                format!("x.length() > {}", n)
+            }
+            _ => return None,
+        };
+
+        Some(format!("{}.iter().{}((x) => {})", var_name, method, pred))
+    }
+
     /// Generate arguments for a method call.
     ///
     /// With probability `inline_expr_arg_probability`, each argument may be a
@@ -1721,6 +1798,13 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                 }
             }
             PrimitiveType::Bool => {
+                // ~10% chance to generate arr.iter().any/all((x) => PRED)
+                // when an array with primitive elements is in scope
+                if self.rng.gen_bool(0.10) {
+                    if let Some(expr) = self.try_generate_iter_any_all(ctx) {
+                        return expr;
+                    }
+                }
                 match choice {
                     0..=2 => {
                         // Comparison expression
@@ -4240,6 +4324,123 @@ mod tests {
             seen_delimiters.len() >= 3,
             "Expected at least 3 different delimiters across 500 seeds, got: {:?}",
             seen_delimiters,
+        );
+    }
+
+    #[test]
+    fn test_iter_any_all_direct() {
+        let config = ExprConfig::default();
+        let table = SymbolTable::new();
+        let locals = vec![(
+            "arr".to_string(),
+            TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+        )];
+
+        let mut found_any = false;
+        let mut found_all = false;
+        for seed in 0..200 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let ctx = ExprContext::new(&[], &locals, &table);
+            if let Some(expr) = generator.try_generate_iter_any_all(&ctx) {
+                assert!(
+                    expr.starts_with("arr.iter()."),
+                    "Expected 'arr.iter().<method>(...)', got: {}",
+                    expr,
+                );
+                assert!(
+                    expr.contains(".any((x) => ") || expr.contains(".all((x) => "),
+                    "Expected .any() or .all() call, got: {}",
+                    expr,
+                );
+                if expr.contains(".any(") {
+                    found_any = true;
+                }
+                if expr.contains(".all(") {
+                    found_all = true;
+                }
+                if found_any && found_all {
+                    break;
+                }
+            }
+        }
+        assert!(
+            found_any && found_all,
+            "Expected both .any() and .all() across 200 seeds",
+        );
+    }
+
+    #[test]
+    fn test_iter_any_all_no_arrays() {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
+        let config = ExprConfig::default();
+        let mut generator = ExprGenerator::new(&mut rng, &config);
+
+        let table = SymbolTable::new();
+        let locals = vec![("n".to_string(), TypeInfo::Primitive(PrimitiveType::I64))];
+        let ctx = ExprContext::new(&[], &locals, &table);
+
+        assert!(generator.try_generate_iter_any_all(&ctx).is_none());
+    }
+
+    #[test]
+    fn test_iter_any_all_in_bool_generation() {
+        let config = ExprConfig::default();
+        let table = SymbolTable::new();
+        let locals = vec![(
+            "nums".to_string(),
+            TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+        )];
+
+        let mut found = false;
+        for seed in 0..500 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let ctx = ExprContext::new(&[], &locals, &table);
+            let expr = generator.generate(&TypeInfo::Primitive(PrimitiveType::Bool), &ctx, 0);
+            if expr.contains(".iter().any(") || expr.contains(".iter().all(") {
+                assert!(
+                    expr.contains("nums.iter()."),
+                    "Expected 'nums.iter().<method>(...)', got: {}",
+                    expr,
+                );
+                found = true;
+                break;
+            }
+        }
+        assert!(
+            found,
+            "Expected at least one .iter().any/all() call in bool generation across 500 seeds",
+        );
+    }
+
+    #[test]
+    fn test_iter_any_all_string_array() {
+        let config = ExprConfig::default();
+        let table = SymbolTable::new();
+        let locals = vec![(
+            "words".to_string(),
+            TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::String))),
+        )];
+
+        let mut found = false;
+        for seed in 0..200 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let ctx = ExprContext::new(&[], &locals, &table);
+            if let Some(expr) = generator.try_generate_iter_any_all(&ctx) {
+                assert!(
+                    expr.contains("x.length()"),
+                    "String array predicate should use x.length(), got: {}",
+                    expr,
+                );
+                found = true;
+                break;
+            }
+        }
+        assert!(
+            found,
+            "Expected at least one .any/all() on string array across 200 seeds",
         );
     }
 }
