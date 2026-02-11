@@ -129,6 +129,9 @@ pub struct StmtContext<'a> {
     pub local_counter: usize,
     /// Name of the function currently being generated (to prevent self-recursion).
     pub current_function_name: Option<String>,
+    /// The class whose method body is being generated (to prevent mutual recursion).
+    /// When set, method calls on instances of this class are suppressed.
+    pub current_class_sym_id: Option<(ModuleId, SymbolId)>,
     /// Variables that should not be modified by compound assignments.
     /// Used to protect while-loop counter and guard variables from modification.
     pub protected_vars: Vec<String>,
@@ -155,6 +158,7 @@ impl<'a> StmtContext<'a> {
             fallible_error_type: None,
             local_counter: 0,
             current_function_name: None,
+            current_class_sym_id: None,
             protected_vars: Vec::new(),
             return_type: None,
             type_params: Vec::new(),
@@ -178,6 +182,7 @@ impl<'a> StmtContext<'a> {
             fallible_error_type: None,
             local_counter: 0,
             current_function_name: None,
+            current_class_sym_id: None,
             protected_vars: Vec::new(),
             return_type: None,
             type_params: Vec::new(),
@@ -1701,10 +1706,13 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // Build the base expression (class construction)
         let mut expr = format!("{} {{ {} }}", class_name, fields);
 
-        // Try to chain Self-returning methods
-        let chain = self.try_generate_method_chain(ctx.table, module_id, *sym_id, ctx);
-        if !chain.is_empty() {
-            expr = format!("{}{}", expr, chain);
+        // Try to chain Self-returning methods (but not on the class whose method
+        // body we're currently generating — the chained methods could call back).
+        if ctx.current_class_sym_id != Some((module_id, *sym_id)) {
+            let chain = self.try_generate_method_chain(ctx.table, module_id, *sym_id, ctx);
+            if !chain.is_empty() {
+                expr = format!("{}{}", expr, chain);
+            }
         }
 
         // Add to scope AFTER generating all expressions to avoid self-references
@@ -1725,12 +1733,19 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     fn try_generate_method_call(&mut self, ctx: &mut StmtContext) -> Option<String> {
         let _ = ctx.module_id?;
 
-        // Find class-typed locals in scope (non-generic classes only)
+        // Find class-typed locals in scope (non-generic classes only).
+        // Exclude instances of the class whose method body we are currently
+        // generating — calling any method on the same class risks mutual recursion
+        // (e.g. method83 calls method84 on Class18, method84 calls method83).
+        let current_class = ctx.current_class_sym_id;
         let class_locals: Vec<_> = ctx
             .locals
             .iter()
             .filter_map(|(name, ty, _)| {
                 if let TypeInfo::Class(mod_id, sym_id) = ty {
+                    if current_class == Some((*mod_id, *sym_id)) {
+                        return None;
+                    }
                     let sym = ctx.table.get_symbol(*mod_id, *sym_id)?;
                     if let SymbolKind::Class(ref info) = sym.kind {
                         if info.type_params.is_empty() && !info.methods.is_empty() {

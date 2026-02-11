@@ -88,6 +88,9 @@ struct EmitContext<'a, R> {
     config: &'a EmitConfig,
     output: String,
     indent: usize,
+    /// The class whose methods are currently being emitted.
+    /// Set to prevent mutual recursion in generated method bodies.
+    current_class: Option<(ModuleId, SymbolId)>,
 }
 
 impl<'a, R: Rng> EmitContext<'a, R> {
@@ -104,6 +107,7 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             config,
             output: String::new(),
             indent: 0,
+            current_class: None,
         }
     }
 
@@ -763,10 +767,12 @@ impl<'a, R: Rng> EmitContext<'a, R> {
                 self.emit_field(field);
             }
 
-            // Emit methods
+            // Emit methods (track current class to prevent mutual recursion)
+            self.current_class = Some((self.module.id, symbol.id));
             for method in &info.methods {
                 self.emit_method(method);
             }
+            self.current_class = None;
 
             // Emit statics block inside the class body (not in a separate
             // implement block) — the codegen expects statics blocks to live
@@ -974,6 +980,9 @@ impl<'a, R: Rng> EmitContext<'a, R> {
         // Track the current function name to prevent self-recursion
         stmt_ctx.current_function_name = function_name.map(String::from);
 
+        // Track the current class to prevent mutual recursion between methods
+        stmt_ctx.current_class_sym_id = self.current_class;
+
         // Pass type parameters for generic functions (enables interface method calls)
         stmt_ctx.type_params = type_params.to_vec();
 
@@ -1179,6 +1188,9 @@ impl<'a, R: Rng> EmitContext<'a, R> {
 
         self.emit_line("");
 
+        // Track the target class to prevent mutual recursion in generated bodies
+        self.current_class = Some(info.target_type);
+
         if let Some((iface_mod_id, iface_sym_id)) = info.interface {
             // Interface implementation: implement Interface for Class
             let iface_name = self
@@ -1203,6 +1215,8 @@ impl<'a, R: Rng> EmitContext<'a, R> {
                 self.emit_self_method(method, &target_name, &target_fields);
             }
         }
+
+        self.current_class = None;
 
         self.indent -= 1;
         self.emit_line("}");
@@ -1308,6 +1322,8 @@ impl<'a, R: Rng> EmitContext<'a, R> {
         // exclude this method, preventing infinite recursion (e.g. selfMethod6
         // chaining back to selfMethod6).
         stmt_ctx.current_function_name = Some(method_name.to_string());
+        // Track the current class to prevent mutual recursion between methods
+        stmt_ctx.current_class_sym_id = self.current_class;
         let mut stmt_gen = StmtGenerator::new(self.rng, &self.config.stmt_config);
         stmt_gen.set_indent(self.indent);
 
