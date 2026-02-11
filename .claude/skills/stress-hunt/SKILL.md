@@ -71,8 +71,10 @@ Seed statuses: `pending` -> `pass` | `fail` -> `reducing` -> `reduced` -> `fixin
 Read `.claude/stress-hunt-state.json`. Based on seed statuses, perform the
 **first applicable action** from the list below, then update state and finish.
 
-### 1. Initialize (no state file)
+### 1. Initialize (no state file, or stale state from a previous run)
 
+- If `.claude/stress-hunt-state.json` exists from a previous session (i.e. we
+  did NOT create it this session), delete it and start fresh
 - Pick K random seeds (use `$RANDOM` or similar)
 - Distribute across profiles round-robin (seed 0 gets profile 0, seed 1 gets
   profile 1, etc., wrapping around)
