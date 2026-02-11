@@ -91,6 +91,12 @@ pub struct StmtConfig {
     /// statement when union-typed variables are in scope. Exercises the match-on-union
     /// codepath with type-pattern arms. Set to 0.0 to disable.
     pub union_match_probability: f64,
+    /// Probability of generating an iterator map/filter let-binding when
+    /// array-typed variables are in scope. Produces expressions like:
+    /// `let x = arr.iter().map((x) => x * 2).collect()`
+    /// `let x = arr.iter().filter((x) => x > 0).collect()`
+    /// Set to 0.0 to disable.
+    pub iter_map_filter_probability: f64,
 }
 
 impl Default for StmtConfig {
@@ -125,6 +131,7 @@ impl Default for StmtConfig {
             when_let_probability: 0.08,
             nested_loop_probability: 0.06,
             union_match_probability: 0.08,
+            iter_map_filter_probability: 0.08,
         }
     }
 }
@@ -542,6 +549,13 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // ~12% chance to generate an array-typed local for array indexing
         if self.rng.gen_bool(0.12) {
             return self.generate_array_let(ctx);
+        }
+
+        // Iterator map/filter on array variables in scope
+        if self.rng.gen_bool(self.config.iter_map_filter_probability) {
+            if let Some(stmt) = self.try_generate_iter_map_filter_let(ctx) {
+                return stmt;
+            }
         }
 
         // Tuple let-binding with destructuring
@@ -1714,6 +1728,161 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         };
 
         format!("{}[{}] {} {}", arr_name, index, op, value)
+    }
+
+    /// Try to generate an iterator map or filter let-binding on an array in scope.
+    ///
+    /// Finds an array-typed variable with a primitive element type and generates
+    /// one of:
+    /// ```vole
+    /// let result = arr.iter().map((x) => x * 2).collect()
+    /// let result = arr.iter().filter((x) => x > 0).collect()
+    /// ```
+    ///
+    /// Returns `None` if no suitable array variable is in scope.
+    fn try_generate_iter_map_filter_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Collect array-typed variables with element types safe for closure operations.
+        // Restrict to i64, f64, bool, and string since these are well-tested with
+        // iterator closures in the Vole test suite. Other numeric types may have
+        // type inference issues with bare integer literals inside closures.
+        let expr_ctx = ctx.to_expr_context();
+        let array_vars = expr_ctx.array_vars();
+        let prim_array_vars: Vec<(String, PrimitiveType)> = array_vars
+            .into_iter()
+            .filter_map(|(name, elem_ty)| {
+                if let TypeInfo::Primitive(prim) = elem_ty {
+                    match prim {
+                        PrimitiveType::I64
+                        | PrimitiveType::F64
+                        | PrimitiveType::Bool
+                        | PrimitiveType::String => Some((name, prim)),
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if prim_array_vars.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..prim_array_vars.len());
+        let (arr_name, elem_prim) = &prim_array_vars[idx];
+        let elem_prim = *elem_prim;
+        let arr_name = arr_name.clone();
+
+        let use_map = self.rng.gen_bool(0.5);
+        let name = ctx.new_local_name();
+
+        let stmt = if use_map {
+            // .map() - transform elements, keeping same element type for simplicity
+            let closure_body = self.generate_map_closure_body(elem_prim);
+            ctx.add_local(
+                name.clone(),
+                TypeInfo::Array(Box::new(TypeInfo::Primitive(elem_prim))),
+                false,
+            );
+            format!(
+                "let {} = {}.iter().map((x) => {}).collect()",
+                name, arr_name, closure_body
+            )
+        } else {
+            // .filter() - keep elements matching a predicate
+            let closure_body = self.generate_filter_closure_body(elem_prim);
+            ctx.add_local(
+                name.clone(),
+                TypeInfo::Array(Box::new(TypeInfo::Primitive(elem_prim))),
+                false,
+            );
+            format!(
+                "let {} = {}.iter().filter((x) => {}).collect()",
+                name, arr_name, closure_body
+            )
+        };
+
+        Some(stmt)
+    }
+
+    /// Generate a simple closure body for `.map()` that transforms a value.
+    ///
+    /// The closure parameter is always named `x`. Returns an expression string
+    /// that produces the same primitive type as the input.
+    /// Only handles i64, f64, bool, and string (the types we restrict to).
+    fn generate_map_closure_body(&mut self, elem_prim: PrimitiveType) -> String {
+        match elem_prim {
+            PrimitiveType::I64 => match self.rng.gen_range(0..3) {
+                0 => {
+                    let n = self.rng.gen_range(2..=5);
+                    format!("x * {}", n)
+                }
+                1 => {
+                    let n = self.rng.gen_range(1..=10);
+                    format!("x + {}", n)
+                }
+                _ => {
+                    let n = self.rng.gen_range(1..=3);
+                    format!("x - {}", n)
+                }
+            },
+            PrimitiveType::F64 => match self.rng.gen_range(0..2) {
+                0 => {
+                    let n = self.rng.gen_range(2..=5);
+                    format!("x * {}.0", n)
+                }
+                _ => {
+                    let n = self.rng.gen_range(1..=10);
+                    format!("x + {}.0", n)
+                }
+            },
+            PrimitiveType::Bool => "!x".to_string(),
+            PrimitiveType::String => match self.rng.gen_range(0..3) {
+                0 => "x.to_upper()".to_string(),
+                1 => "x.to_lower()".to_string(),
+                _ => "x.trim()".to_string(),
+            },
+            // Other types are filtered out by try_generate_iter_map_filter_let
+            _ => "x".to_string(),
+        }
+    }
+
+    /// Generate a simple closure body for `.filter()` that returns a boolean.
+    ///
+    /// The closure parameter is always named `x`. Returns a boolean expression
+    /// suitable for filtering.
+    /// Only handles i64, f64, bool, and string (the types we restrict to).
+    fn generate_filter_closure_body(&mut self, elem_prim: PrimitiveType) -> String {
+        match elem_prim {
+            PrimitiveType::I64 => match self.rng.gen_range(0..3) {
+                0 => {
+                    let n = self.rng.gen_range(0..=5);
+                    format!("x > {}", n)
+                }
+                1 => {
+                    let n = self.rng.gen_range(0..=10);
+                    format!("x < {}", n)
+                }
+                _ => "x % 2 == 0".to_string(),
+            },
+            PrimitiveType::F64 => {
+                let n = self.rng.gen_range(0..=50);
+                format!("x > {}.0", n)
+            }
+            PrimitiveType::Bool => {
+                if self.rng.gen_bool(0.5) {
+                    "x".to_string()
+                } else {
+                    "!x".to_string()
+                }
+            }
+            PrimitiveType::String => {
+                let n = self.rng.gen_range(0..=3);
+                format!("x.length() > {}", n)
+            }
+            // Other types are filtered out by try_generate_iter_map_filter_let
+            _ => "true".to_string(),
+        }
     }
 
     /// Try to generate a raise statement in a fallible function body.
