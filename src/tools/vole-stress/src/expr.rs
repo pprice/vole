@@ -50,6 +50,12 @@ pub struct ExprConfig {
     /// Produces patterns like `optA ?? optB ?? defaultExpr`. Set to 0.0 to
     /// always use single `opt ?? default` form.
     pub chained_coalesce_probability: f64,
+    /// Probability of generating a string method call when a string-typed
+    /// variable is in scope and the target type matches a string method's
+    /// return type.  Controls `.length()` (returns i64), `.contains()` /
+    /// `.starts_with()` / `.ends_with()` (returns bool), and `.trim()` /
+    /// `.to_upper()` / `.to_lower()` (returns string).  Set to 0.0 to disable.
+    pub string_method_probability: f64,
 }
 
 impl Default for ExprConfig {
@@ -68,6 +74,7 @@ impl Default for ExprConfig {
             inline_expr_arg_probability: 0.12,
             tuple_index_probability: 0.15,
             chained_coalesce_probability: 0.30,
+            string_method_probability: 0.15,
         }
     }
 }
@@ -1596,9 +1603,8 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         // Otherwise generate a literal (or simple method call)
         match ty {
             TypeInfo::Primitive(PrimitiveType::Bool) => {
-                // ~20% chance to generate a bool-returning string method
-                // (contains/starts_with/ends_with) if a string var is in scope
-                if self.rng.gen_bool(0.20) {
+                // String bool method: contains/starts_with/ends_with
+                if self.rng.gen_bool(self.config.string_method_probability) {
                     if let Some(expr) = self.try_generate_string_bool_method(ctx) {
                         return expr;
                     }
@@ -1755,9 +1761,9 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             }
         }
 
-        // ~12% chance to generate str.length() for i64 expressions.
+        // String method: str.length() for i64 expressions.
         // (No arguments, so vole-fmt never wraps the call across lines.)
-        if prim == PrimitiveType::I64 && self.rng.gen_bool(0.12) {
+        if prim == PrimitiveType::I64 && self.rng.gen_bool(self.config.string_method_probability) {
             if let Some(expr) = self.try_generate_string_length(ctx) {
                 return expr;
             }
@@ -1869,6 +1875,12 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                 // ~15% chance: .to_string() on numeric/bool variable
                 if self.rng.gen_bool(0.15) {
                     if let Some(expr) = self.try_generate_to_string_call(ctx) {
+                        return expr;
+                    }
+                }
+                // String method: to_upper/to_lower/trim/replace/replace_all/substring
+                if self.rng.gen_bool(self.config.string_method_probability) {
+                    if let Some(expr) = self.try_generate_string_transform_method(ctx) {
                         return expr;
                     }
                 }
