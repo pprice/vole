@@ -1816,18 +1816,44 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
 
     /// Generate an interpolation expression for a variable.
     ///
-    /// For numeric types, sometimes wraps in arithmetic (e.g. `param0 + 1_i64`).
+    /// For numeric types, sometimes wraps in arithmetic (e.g. `param0 + 1_i64`,
+    /// `param0 - 3_i32`, `param0 * 2_i64`).
+    /// For boolean types, sometimes wraps in negation (e.g. `!flag`).
     /// For array and string types, sometimes generates `.length()` calls.
     /// For other types, just references the variable directly.
     fn interp_expr_for_var(&mut self, name: &str, ty: &TypeInfo) -> String {
         match ty {
             TypeInfo::Primitive(PrimitiveType::I32) if self.rng.gen_bool(0.3) => {
                 let n = self.rng.gen_range(1..10);
-                format!("{} + {}_i32", name, n)
+                let op = match self.rng.gen_range(0..3) {
+                    0 => "+",
+                    1 => "-",
+                    _ => "*",
+                };
+                format!("{} {} {}_i32", name, op, n)
             }
             TypeInfo::Primitive(PrimitiveType::I64) if self.rng.gen_bool(0.3) => {
                 let n = self.rng.gen_range(1..10);
-                format!("{} + {}_i64", name, n)
+                let op = match self.rng.gen_range(0..3) {
+                    0 => "+",
+                    1 => "-",
+                    _ => "*",
+                };
+                format!("{} {} {}_i64", name, op, n)
+            }
+            // ~25% chance to use arithmetic on f64 inside interpolation
+            TypeInfo::Primitive(PrimitiveType::F64) if self.rng.gen_bool(0.25) => {
+                let n = self.rng.gen_range(1..10);
+                let op = match self.rng.gen_range(0..3) {
+                    0 => "+",
+                    1 => "-",
+                    _ => "*",
+                };
+                format!("{} {} {}.0_f64", name, op, n)
+            }
+            // ~25% chance to use negation on booleans inside interpolation
+            TypeInfo::Primitive(PrimitiveType::Bool) if self.rng.gen_bool(0.25) => {
+                format!("!{}", name)
             }
             // ~30% chance to use .length() on arrays inside interpolation
             TypeInfo::Array(_) if self.rng.gen_bool(0.3) => {
@@ -2281,6 +2307,65 @@ mod tests {
         assert!(
             found_string_length,
             "Expected at least one string .length() call in interpolation across 500 seeds"
+        );
+    }
+
+    #[test]
+    fn test_interpolated_string_arithmetic_ops() {
+        let config = ExprConfig::default();
+        let table = SymbolTable::new();
+
+        let locals = vec![
+            ("count".to_string(), TypeInfo::Primitive(PrimitiveType::I64)),
+            ("flag".to_string(), TypeInfo::Primitive(PrimitiveType::Bool)),
+            ("rate".to_string(), TypeInfo::Primitive(PrimitiveType::F64)),
+        ];
+
+        let mut found_sub = false;
+        let mut found_mul = false;
+        let mut found_bool_neg = false;
+        let mut found_f64_arith = false;
+
+        for seed in 0..500 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let ctx = ExprContext::new(&[], &locals, &table);
+            let result = generator.generate_interpolated_string(&ctx);
+
+            if result.contains("count -") || result.contains("count *") {
+                if result.contains("count -") {
+                    found_sub = true;
+                }
+                if result.contains("count *") {
+                    found_mul = true;
+                }
+            }
+            if result.contains("!flag") {
+                found_bool_neg = true;
+            }
+            if result.contains("rate +") || result.contains("rate -") || result.contains("rate *") {
+                found_f64_arith = true;
+            }
+            if found_sub && found_mul && found_bool_neg && found_f64_arith {
+                break;
+            }
+        }
+
+        assert!(
+            found_sub,
+            "Expected at least one subtraction in interpolation across 500 seeds"
+        );
+        assert!(
+            found_mul,
+            "Expected at least one multiplication in interpolation across 500 seeds"
+        );
+        assert!(
+            found_bool_neg,
+            "Expected at least one boolean negation in interpolation across 500 seeds"
+        );
+        assert!(
+            found_f64_arith,
+            "Expected at least one f64 arithmetic in interpolation across 500 seeds"
         );
     }
 
