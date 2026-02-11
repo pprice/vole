@@ -6,7 +6,7 @@
 use rand::Rng;
 
 use crate::symbols::{
-    InterfaceInfo, MethodInfo, ModuleId, ParamInfo, PrimitiveType, SymbolId, SymbolKind,
+    FieldInfo, InterfaceInfo, MethodInfo, ModuleId, ParamInfo, PrimitiveType, SymbolId, SymbolKind,
     SymbolTable, TypeInfo, TypeParam,
 };
 
@@ -638,6 +638,19 @@ fn is_integer_type(ty: &TypeInfo) -> bool {
             | TypeInfo::Primitive(PrimitiveType::U32)
             | TypeInfo::Primitive(PrimitiveType::U64)
     )
+}
+
+/// Check whether a type can be safely used inside string interpolation.
+///
+/// Primitives (i32, i64, f64, bool, string) and arrays of primitives are
+/// safe because the runtime knows how to stringify them.  Class/struct
+/// types are NOT safe (no automatic `.to_string()` conversion).
+fn is_printable_in_interpolation(ty: &TypeInfo) -> bool {
+    match ty {
+        TypeInfo::Primitive(_) => true,
+        TypeInfo::Array(elem) => matches!(elem.as_ref(), TypeInfo::Primitive(_)),
+        _ => false,
+    }
 }
 
 /// Expression generator.
@@ -2156,7 +2169,7 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             let var_idx = self.rng.gen_range(0..vars.len());
             let (name, ty) = vars[var_idx];
 
-            let interp_expr = self.interp_expr_for_var(name, ty);
+            let interp_expr = self.interp_expr_for_var(name, ty, ctx);
             parts.push(format!("{{{}}}", interp_expr));
 
             // Add separator text between interpolations
@@ -2186,8 +2199,9 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
     /// `param0 - 3_i32`, `param0 * 2_i64`).
     /// For boolean types, sometimes wraps in negation (e.g. `!flag`).
     /// For array and string types, sometimes generates `.length()` calls.
+    /// For class/struct types, sometimes generates field access (e.g. `obj.name`).
     /// For other types, just references the variable directly.
-    fn interp_expr_for_var(&mut self, name: &str, ty: &TypeInfo) -> String {
+    fn interp_expr_for_var(&mut self, name: &str, ty: &TypeInfo, ctx: &ExprContext) -> String {
         match ty {
             TypeInfo::Primitive(PrimitiveType::I32) if self.rng.gen_bool(0.3) => {
                 let n = self.rng.gen_range(1..10);
@@ -2245,8 +2259,53 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                     base
                 }
             }
+            // ~30% chance to use field access on class-typed variables inside interpolation
+            TypeInfo::Class(mod_id, sym_id) if self.rng.gen_bool(0.3) => {
+                if let Some(field_name) = self.pick_printable_field(ctx, *mod_id, *sym_id) {
+                    format!("{}.{}", name, field_name)
+                } else {
+                    name.to_string()
+                }
+            }
+            // ~30% chance to use field access on struct-typed variables inside interpolation
+            TypeInfo::Struct(mod_id, sym_id) if self.rng.gen_bool(0.3) => {
+                if let Some(field_name) = self.pick_printable_field(ctx, *mod_id, *sym_id) {
+                    format!("{}.{}", name, field_name)
+                } else {
+                    name.to_string()
+                }
+            }
             _ => name.to_string(),
         }
+    }
+
+    /// Pick a field from a class or struct that has a printable (interpolatable) type.
+    ///
+    /// Returns the field name if one exists with a type that can be stringified
+    /// in interpolation (primitives, arrays, optionals of primitives).
+    /// Returns `None` if no suitable field is found.
+    fn pick_printable_field(
+        &mut self,
+        ctx: &ExprContext,
+        mod_id: ModuleId,
+        sym_id: SymbolId,
+    ) -> Option<String> {
+        let sym = ctx.table.get_symbol(mod_id, sym_id)?;
+        let fields: &[FieldInfo] = match &sym.kind {
+            SymbolKind::Class(info) => &info.fields,
+            SymbolKind::Struct(info) => &info.fields,
+            _ => return None,
+        };
+        // Collect fields whose types are safe for interpolation (primitive or array)
+        let printable: Vec<&FieldInfo> = fields
+            .iter()
+            .filter(|f| is_printable_in_interpolation(&f.field_type))
+            .collect();
+        if printable.is_empty() {
+            return None;
+        }
+        let idx = self.rng.gen_range(0..printable.len());
+        Some(printable[idx].name.clone())
     }
 
     /// Generate a literal for a primitive type.
@@ -2907,6 +2966,91 @@ mod tests {
         assert!(
             found_f64_arith,
             "Expected at least one f64 arithmetic in interpolation across 500 seeds"
+        );
+    }
+
+    #[test]
+    fn test_interpolated_string_class_field_access() {
+        use crate::symbols::StructInfo;
+
+        let config = ExprConfig::default();
+        let mut table = SymbolTable::new();
+
+        // Create a module with a class and a struct that have printable fields
+        let mod_id = table.add_module("test_mod".to_string(), "test_mod.vole".to_string());
+        let module = table.get_module_mut(mod_id).unwrap();
+
+        let class_id = module.add_symbol(
+            "MyClass".to_string(),
+            SymbolKind::Class(ClassInfo {
+                type_params: vec![],
+                fields: vec![
+                    FieldInfo {
+                        name: "name".to_string(),
+                        field_type: TypeInfo::Primitive(PrimitiveType::String),
+                    },
+                    FieldInfo {
+                        name: "count".to_string(),
+                        field_type: TypeInfo::Primitive(PrimitiveType::I64),
+                    },
+                ],
+                methods: vec![],
+                implements: vec![],
+                static_methods: vec![],
+            }),
+        );
+
+        let struct_id = module.add_symbol(
+            "MyStruct".to_string(),
+            SymbolKind::Struct(StructInfo {
+                fields: vec![
+                    FieldInfo {
+                        name: "label".to_string(),
+                        field_type: TypeInfo::Primitive(PrimitiveType::String),
+                    },
+                    FieldInfo {
+                        name: "value".to_string(),
+                        field_type: TypeInfo::Primitive(PrimitiveType::I32),
+                    },
+                ],
+                static_methods: vec![],
+            }),
+        );
+
+        // Locals: one class instance and one struct instance
+        let locals = vec![
+            ("obj".to_string(), TypeInfo::Class(mod_id, class_id)),
+            ("rec".to_string(), TypeInfo::Struct(mod_id, struct_id)),
+        ];
+
+        let mut found_class_field = false;
+        let mut found_struct_field = false;
+
+        // Run across many seeds to exercise the 30% probability branch
+        for seed in 0..2000 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut generator = ExprGenerator::new(&mut rng, &config);
+            let ctx = ExprContext::new(&[], &locals, &table);
+            let result = generator.generate_interpolated_string(&ctx);
+
+            if result.contains("obj.name") || result.contains("obj.count") {
+                found_class_field = true;
+            }
+            if result.contains("rec.label") || result.contains("rec.value") {
+                found_struct_field = true;
+            }
+            if found_class_field && found_struct_field {
+                break;
+            }
+        }
+
+        assert!(
+            found_class_field,
+            "Expected at least one class field access in interpolation across 2000 seeds"
+        );
+        assert!(
+            found_struct_field,
+            "Expected at least one struct field access in interpolation across 2000 seeds"
         );
     }
 
