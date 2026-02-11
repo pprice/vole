@@ -490,10 +490,21 @@ impl<'a, R: Rng> EntrypointContext<'a, R> {
     fn generate_value_for_type(&mut self, ty: &TypeInfo) -> String {
         match ty {
             TypeInfo::Primitive(prim) => self.generate_primitive_value(*prim),
-            TypeInfo::Optional(_) => "nil".to_string(),
+            TypeInfo::Optional(inner) => {
+                // Generate a typed value rather than nil so the value carries
+                // type information when nested inside containers like [T?].
+                self.generate_value_for_type(inner)
+            }
             TypeInfo::Array(elem) => {
                 let elem_val = self.generate_value_for_type(elem);
                 format!("[{}]", elem_val)
+            }
+            TypeInfo::Tuple(elems) => {
+                let values: Vec<String> = elems
+                    .iter()
+                    .map(|t| self.generate_value_for_type(t))
+                    .collect();
+                format!("[{}]", values.join(", "))
             }
             TypeInfo::Void => "nil".to_string(),
             TypeInfo::Union(variants) => {

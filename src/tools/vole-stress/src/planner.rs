@@ -801,6 +801,11 @@ fn plan_param<R: Rng>(rng: &mut R, names: &mut NameGen) -> ParamInfo {
     let param_type = if rng.gen_bool(0.15) {
         // 15% chance to generate a union type parameter
         plan_union_type(rng)
+    } else if rng.gen_bool(0.10) {
+        // ~10% chance to generate a nested type parameter
+        // Uses param-safe subset (no arrays of optionals since [T?]
+        // requires type annotations at call sites for coercion)
+        plan_nested_type(rng)
     } else {
         TypeInfo::Primitive(PrimitiveType::random_expr_type(rng))
     };
@@ -849,14 +854,52 @@ fn plan_union_type<R: Rng>(rng: &mut R) -> TypeInfo {
     TypeInfo::Union(variants)
 }
 
+/// Generate a nested type expression from a base primitive type.
+///
+/// Produces one of:
+/// - Optional array: `[T]?`
+/// - Optional tuple: `(T, U)?`
+/// - Array of optionals: `[T?]`
+/// - Nested array: `[[T]]`
+///
+/// Uses `random_array_element_type` for inner types to avoid i128 in arrays.
+fn plan_nested_type<R: Rng>(rng: &mut R) -> TypeInfo {
+    // Only generate patterns the Vole compiler handles correctly:
+    // - Optional tuples `[T, U]?` trigger a compiler bug (union variant mismatch)
+    // - Arrays of optionals `[T?]` don't coerce from `[T]` in return/param positions
+    match rng.gen_range(0..2) {
+        0 => {
+            // Optional array: [T]?
+            let elem = PrimitiveType::random_array_element_type(rng);
+            TypeInfo::Optional(Box::new(TypeInfo::Array(Box::new(TypeInfo::Primitive(
+                elem,
+            )))))
+        }
+        _ => {
+            // Nested array: [[T]]
+            let elem = PrimitiveType::random_array_element_type(rng);
+            TypeInfo::Array(Box::new(TypeInfo::Array(Box::new(TypeInfo::Primitive(
+                elem,
+            )))))
+        }
+    }
+}
+
 /// Plan a return type for a function/method.
+///
+/// Distribution (out of 8):
+/// - 1/8 void
+/// - 4/8 primitive
+/// - 1/8 optional primitive
+/// - 2/8 nested type (optional array, optional tuple, array of optionals, nested array)
 fn plan_return_type<R: Rng>(rng: &mut R) -> TypeInfo {
-    match rng.gen_range(0..6) {
+    match rng.gen_range(0..8) {
         0 => TypeInfo::Void,
         1..=4 => TypeInfo::Primitive(PrimitiveType::random_expr_type(rng)),
-        _ => TypeInfo::Optional(Box::new(TypeInfo::Primitive(
+        5 => TypeInfo::Optional(Box::new(TypeInfo::Primitive(
             PrimitiveType::random_expr_type(rng),
         ))),
+        _ => plan_nested_type(rng),
     }
 }
 

@@ -490,7 +490,13 @@ impl<'a, R: Rng> EmitContext<'a, R> {
     fn generate_test_value(&mut self, ty: &TypeInfo) -> String {
         match ty {
             TypeInfo::Primitive(prim) => self.generate_primitive_test_value(*prim),
-            TypeInfo::Optional(_) => "nil".to_string(),
+            TypeInfo::Optional(inner) => {
+                // Generate a value of the inner type rather than nil,
+                // so the value carries type information. This is important
+                // when the optional is nested inside a container (e.g., [i64?])
+                // where [nil] would be ambiguous.
+                self.generate_test_value(inner)
+            }
             TypeInfo::Array(elem) => {
                 let elem_val = self.generate_test_value(elem);
                 format!("[{}]", elem_val)
@@ -1447,7 +1453,12 @@ impl<'a, R: Rng> EmitContext<'a, R> {
 
         match type_info {
             TypeInfo::Primitive(p) => expr_gen.literal_for_primitive(*p),
-            TypeInfo::Optional(_) => "nil".to_string(),
+            TypeInfo::Optional(inner) => {
+                // Generate a typed value rather than nil so the literal carries
+                // type information when nested inside containers like [T?].
+                drop(expr_gen);
+                self.literal_for_type(inner)
+            }
             TypeInfo::Void => "nil".to_string(),
             TypeInfo::Union(variants) => {
                 // For union types, generate a literal for the first variant
@@ -1486,7 +1497,12 @@ impl<'a, R: Rng> EmitContext<'a, R> {
 
         match type_info {
             TypeInfo::Primitive(p) => expr_gen.constant_literal_for_primitive(*p),
-            TypeInfo::Optional(_) => "nil".to_string(),
+            TypeInfo::Optional(inner) => {
+                // Generate a typed constant rather than nil so the literal carries
+                // type information when nested inside containers like [T?].
+                drop(expr_gen);
+                self.constant_literal_for_type(inner)
+            }
             TypeInfo::Void => "nil".to_string(),
             TypeInfo::Union(variants) => {
                 if let Some(first) = variants.first() {

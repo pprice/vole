@@ -1315,7 +1315,11 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                 self.literal_for_primitive(PrimitiveType::Bool)
             }
             TypeInfo::Primitive(p) => self.literal_for_primitive(*p),
-            TypeInfo::Optional(_) => "nil".to_string(),
+            TypeInfo::Optional(inner) => {
+                // Generate a typed inner value instead of nil so that
+                // containers like [T?] can infer the element type.
+                self.generate_simple(inner, ctx)
+            }
             TypeInfo::Void => "nil".to_string(),
             TypeInfo::Tuple(elem_types) => {
                 // Generate a simple tuple with literal elements
@@ -1329,6 +1333,12 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                 // Generate a simple repeat literal
                 let value = self.generate_simple(elem, ctx);
                 format!("[{}; {}]", value, size)
+            }
+            TypeInfo::Array(elem) => {
+                // Generate a simple array with 2 literal elements
+                let v1 = self.generate_simple(elem, ctx);
+                let v2 = self.generate_simple(elem, ctx);
+                format!("[{}, {}]", v1, v2)
             }
             TypeInfo::Union(variants) => {
                 // Generate a literal for a random variant
