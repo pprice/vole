@@ -1775,17 +1775,18 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         let name = ctx.new_local_name();
 
-        // Optionally prepend .sorted(), .reverse(), or .unique() (~25% of the time).
+        // Optionally prepend .sorted(), .reverse(), .unique(), or .skip(N) (~25%).
         // .sorted() and .unique() require comparable elements (skip for bool).
-        let prefix = if self.rng.gen_bool(0.25) {
-            match self.rng.gen_range(0..3) {
-                0 if elem_prim != PrimitiveType::Bool => ".sorted()",
-                1 => ".reverse()",
-                _ if elem_prim != PrimitiveType::Bool => ".unique()",
-                _ => ".reverse()",
+        let prefix: String = if self.rng.gen_bool(0.25) {
+            match self.rng.gen_range(0..4) {
+                0 if elem_prim != PrimitiveType::Bool => ".sorted()".to_string(),
+                1 => ".reverse()".to_string(),
+                2 if elem_prim != PrimitiveType::Bool => ".unique()".to_string(),
+                3 => format!(".skip({})", self.rng.gen_range(0..=1)),
+                _ => ".reverse()".to_string(),
             }
         } else {
-            ""
+            String::new()
         };
 
         // Build the iterator chain: .iter() followed by 1-2 operations, then a terminal.
