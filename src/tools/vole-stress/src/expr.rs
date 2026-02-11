@@ -1148,8 +1148,16 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         let var = &candidates[idx];
 
         // Pick a string-returning string method.
-        // replace/replace_all take (old, new) args; others take none.
-        let methods = ["to_upper", "to_lower", "trim", "replace", "replace_all"];
+        // replace/replace_all take (old, new) string args; substring takes (start, end) i64 args;
+        // others take no args.
+        let methods = [
+            "to_upper",
+            "to_lower",
+            "trim",
+            "replace",
+            "replace_all",
+            "substring",
+        ];
         let method = methods[self.rng.gen_range(0..methods.len())];
 
         match method {
@@ -1158,6 +1166,12 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                 // These patterns exercise search-and-replace without
                 // changing downstream RNG state.
                 Some(format!("{}.{}(\"str\", \"val\")", var, method))
+            }
+            "substring" => {
+                // substring(start, end) takes two i64 arguments.
+                // Use small non-negative literals to stay in bounds for typical strings.
+                // Using fixed values keeps RNG consumption constant.
+                Some(format!("{}.substring(0, 3)", var))
             }
             _ => Some(format!("{}.{}()", var, method)),
         }
@@ -1973,12 +1987,13 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             }
             // ~30% chance to use a string method inside interpolation
             TypeInfo::Primitive(PrimitiveType::String) if self.rng.gen_bool(0.3) => {
-                // Pick from .length(), .to_upper(), .to_lower(), .trim()
-                match self.rng.gen_range(0..4) {
+                // Pick from .length(), .to_upper(), .to_lower(), .trim(), .substring()
+                match self.rng.gen_range(0..5) {
                     0 => format!("{}.length()", name),
                     1 => format!("{}.to_upper()", name),
                     2 => format!("{}.to_lower()", name),
-                    _ => format!("{}.trim()", name),
+                    3 => format!("{}.trim()", name),
+                    _ => format!("{}.substring(0, 3)", name),
                 }
             }
             _ => name.to_string(),
