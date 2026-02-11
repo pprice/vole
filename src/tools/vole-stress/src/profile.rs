@@ -376,13 +376,12 @@ fn deep_nesting_profile() -> Profile {
     let emit = EmitConfig {
         stmt_config: StmtConfig {
             expr_config: ExprConfig {
-                // Expression nesting depth. Must stay moderate because
-                // multi-arm expressions (when/match) have a branching
-                // factor of 3-7 per level.  Combined with statement
-                // nesting (which multiplies branches), depth 4 keeps
-                // worst-case output bounded: ~7^4 ≈ 2.4K expression
-                // leaves per block, times stmt branching.
-                max_depth: 4,
+                // Expression nesting depth. Multi-arm expressions
+                // (when/match) branch 3-7x per level.  Depth 5 gives
+                // ~7^5 ≈ 17K worst-case leaves per expression tree.
+                // Combined with stmt depth 4 this stays within
+                // Cranelift's budget while producing meaningful depth.
+                max_depth: 5,
                 // High probability of binary expressions for deep a + (b + (c + ...))
                 binary_probability: 0.6,
                 // Multi-branch expressions at moderate probability
@@ -969,11 +968,10 @@ mod tests {
         // Verify deep nesting characteristics
         assert_eq!(profile.plan.layers, 1);
         assert_eq!(profile.plan.modules_per_layer, 1);
-        // Expression nesting depth (4+ balances depth vs output size
-        // when combined with statement nesting)
+        // Expression nesting depth (5+ for meaningful depth)
         assert!(
-            profile.emit.stmt_config.expr_config.max_depth >= 4,
-            "expression max_depth should be >= 4 for deep nesting"
+            profile.emit.stmt_config.expr_config.max_depth >= 5,
+            "expression max_depth should be >= 5 for deep nesting"
         );
         // Statement nesting depth
         assert!(

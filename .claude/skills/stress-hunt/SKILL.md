@@ -10,29 +10,32 @@ generation) and `vole-reduce` (test case minimization) in an iterative loop.
 
 ## Invocation
 
+Launch via ralph-loop:
+
 ```
-/stress-hunt 10                     # 10 seeds, round-robin across all profiles
-/stress-hunt 5 full,many-modules    # 5 seeds, specific profiles only
+/ralph-loop "/stress-hunt 10" --max-iterations 20
+/ralph-loop "/stress-hunt 5 full,many-modules" --max-iterations 10
 ```
 
-Parse `$ARGUMENTS`: first token is K (number of seeds), optional second token is
-comma-separated profile names. Default profiles if none specified:
+Or invoke directly (single iteration):
+
+```
+/stress-hunt 10                     # 10 seeds per round, all profiles
+/stress-hunt 5 full,many-modules    # 5 seeds per round, specific profiles
+```
+
+Parse `$ARGUMENTS`: first token is K (seeds per round), optional second token
+is comma-separated profile names. Default profiles if none specified:
 `full`, `many-modules`, `deep-nesting`, `wide-types`, `generics-heavy`.
 
-## Ralph Loop Setup
+## How It Works
 
-On first invocation (no `.claude/stress-hunt-state.json` exists), write
-`.claude/.ralph-loop.local.md` with:
+Each ralph-loop iteration processes one round of K seeds through the workflow.
+When all K seeds in a round pass or are verified, the round is **completed**:
+passing seed directories are cleaned up, and K fresh seeds are generated for the
+next round. This continues until `--max-iterations` is exhausted.
 
-```markdown
-prompt: /stress-hunt <K> [profiles]
-completion-promise: ALL_SEEDS_PASS
-```
-
-If `.claude/.ralph-loop.local.md` already exists, skip — we are already looping.
-
-Each iteration: read state, perform next action, update state, finish the turn.
-The stop hook feeds the same `/stress-hunt` prompt back for the next iteration.
+There is no completion promise — the loop runs until max iterations.
 
 ## State File: `.claude/stress-hunt-state.json`
 
@@ -52,7 +55,10 @@ The stop hook feeds the same `/stress-hunt` prompt back for the next iteration.
       "fix_commit": null
     }
   ],
-  "round": 1
+  "round": 1,
+  "history": [
+    { "round": 1, "passed": 3, "failed": 2, "bugs_fixed": 2 }
+  ]
 }
 ```
 
@@ -69,7 +75,7 @@ Read `.claude/stress-hunt-state.json`. Based on seed statuses, perform the
 - Distribute across profiles round-robin (seed 0 gets profile 0, seed 1 gets
   profile 1, etc., wrapping around)
 - Write initial state with all seeds as `pending`
-- Set round to 1
+- Set round to 1, history to `[]`
 
 ### 2. Generate + Test (`pending` seeds exist)
 
@@ -173,13 +179,22 @@ For each `fixing` seed:
 If passes: mark `verified`.
 If new failure: mark `fail` again with new error, clear `error_category`.
 
-### 7. Check Completion
+### 7. Round Complete (all seeds `pass` or `verified`)
 
-If ALL seeds are `pass` or `verified`:
-1. Run `just pre-commit` one final time
-2. If it passes, output: `<promise>ALL_SEEDS_PASS</promise>`
+When all K seeds in the current round are `pass` or `verified`:
 
-If some seeds still need work, increment `round` in state and continue.
+1. Record round summary in `history`:
+   ```json
+   { "round": N, "passed": X, "failed": Y, "bugs_fixed": Z }
+   ```
+2. Clean up: `rm -rf` the `/tmp/vole-stress/` directories for all `pass` and
+   `verified` seeds in this round (they served their purpose)
+3. Print a summary: `Round N complete: X/K passed, Y bugs fixed`
+4. Pick K fresh random seeds, distribute across profiles round-robin
+5. Replace `seeds` array with the new pending seeds
+6. Increment `round`
+
+The next ralph-loop iteration will generate and test the new batch.
 
 ## Timeout Handling
 
@@ -199,6 +214,5 @@ Timeout = potential infinite loop. Check the reduced code to determine:
 - NEVER assume "pre-existing failures" — you likely broke it
 - NEVER skip work or decide it's "too complex"
 - Always `just pre-commit` before any commit
-- Always `just pre-commit` before outputting the completion promise
 - Track shortcuts in tickets with `tk` if any are taken
 - Fix ONE bug per iteration to keep commits focused
