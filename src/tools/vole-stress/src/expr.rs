@@ -2398,7 +2398,7 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
 
         // Generate some literal or guarded arms
         for _ in 0..arm_count - 1 {
-            let pattern = self.generate_pattern(subject_type);
+            let pattern = self.generate_pattern(subject_type, Some(ctx), depth);
             let value = self.generate(result_type, ctx, depth + 1);
             arms.push(format!("{} => {}", pattern, value));
         }
@@ -2448,7 +2448,7 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
 
         // Generate additional non-matching arms (won't execute but valid syntax)
         for _ in 1..arm_count - 1 {
-            let other_pattern = self.generate_pattern(subject_type);
+            let other_pattern = self.generate_pattern(subject_type, Some(ctx), depth);
             let value = self.generate(result_type, ctx, depth + 1);
             arms.push(format!("{} => {}", other_pattern, value));
         }
@@ -2473,7 +2473,7 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         let mut arms = Vec::new();
 
         for _ in 0..arm_count - 1 {
-            let pattern = self.generate_pattern(subject_type);
+            let pattern = self.generate_pattern(subject_type, Some(ctx), depth);
             let value = self.generate(result_type, ctx, depth + 1);
             arms.push(format!("{} => {}", pattern, value));
         }
@@ -2485,24 +2485,125 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
     }
 
     /// Generate a match pattern.
-    fn generate_pattern(&mut self, ty: &TypeInfo) -> String {
+    ///
+    /// Accepts an optional `ExprContext` and `depth` to generate richer guard
+    /// expressions that reference variables in scope (comparisons, compound
+    /// booleans, `val` patterns). When `ctx` is `None`, falls back to simple
+    /// literal guards.
+    fn generate_pattern(
+        &mut self,
+        ty: &TypeInfo,
+        ctx: Option<&ExprContext>,
+        depth: usize,
+    ) -> String {
         match ty {
             TypeInfo::Primitive(prim) => {
-                match self.rng.gen_range(0..3) {
+                // With context available, we can generate richer patterns
+                let range = if ctx.is_some() { 5 } else { 3 };
+                match self.rng.gen_range(0..range) {
                     0 => "_".to_string(), // Wildcard
                     1 => {
                         // Literal pattern
                         self.literal_for_primitive(*prim)
                     }
+                    2 => {
+                        // Guarded wildcard with expression
+                        let cond = self.generate_guard_condition(ctx, depth);
+                        format!("_ if {}", cond)
+                    }
+                    3 => {
+                        // `val` pattern: compare against an existing variable
+                        // in scope of the same type (exercises the val-pattern codepath)
+                        if let Some(ctx) = ctx {
+                            if let Some(var) = ctx.find_matching_var(&TypeInfo::Primitive(*prim)) {
+                                return format!("val {}", var);
+                            }
+                        }
+                        // Fallback to literal
+                        self.literal_for_primitive(*prim)
+                    }
                     _ => {
-                        // Guarded wildcard
-                        let cond = self.literal_for_primitive(PrimitiveType::Bool);
+                        // `val` pattern with guard: `val x if cond => ...`
+                        if let Some(ctx) = ctx {
+                            if let Some(var) = ctx.find_matching_var(&TypeInfo::Primitive(*prim)) {
+                                let cond = self.generate_guard_condition(Some(ctx), depth);
+                                return format!("val {} if {}", var, cond);
+                            }
+                        }
+                        // Fallback to guarded wildcard
+                        let cond = self.generate_guard_condition(ctx, depth);
                         format!("_ if {}", cond)
                     }
                 }
             }
             _ => "_".to_string(),
         }
+    }
+
+    /// Generate a guard condition for a match arm.
+    ///
+    /// When an `ExprContext` is available, produces comparison-based conditions
+    /// referencing numeric variables in scope (e.g. `x > 42`, `x >= 10 && x < 100`).
+    /// Falls back to boolean literals when no variables are available.
+    fn generate_guard_condition(&mut self, ctx: Option<&ExprContext>, depth: usize) -> String {
+        if let Some(ctx) = ctx {
+            // Try to generate a comparison using numeric variables in scope
+            let numeric = ctx.numeric_vars();
+            if !numeric.is_empty() {
+                let var_idx = self.rng.gen_range(0..numeric.len());
+                let var = &numeric[var_idx];
+
+                match self.rng.gen_range(0..4) {
+                    0 => {
+                        // Simple comparison: x > literal
+                        let op = match self.rng.gen_range(0..4) {
+                            0 => ">",
+                            1 => "<",
+                            2 => ">=",
+                            _ => "<=",
+                        };
+                        let lit = self.rng.gen_range(0..100);
+                        return format!("{} {} {}", var, op, lit);
+                    }
+                    1 => {
+                        // Equality check: x == literal
+                        let lit = self.rng.gen_range(0..50);
+                        return format!("{} == {}", var, lit);
+                    }
+                    2 => {
+                        // Compound range check: x > low && x < high
+                        let low = self.rng.gen_range(0..50);
+                        let high = low + self.rng.gen_range(10..100);
+                        return format!("{} > {} && {} < {}", var, low, var, high);
+                    }
+                    _ => {
+                        // Inequality: x != literal
+                        let lit = self.rng.gen_range(0..50);
+                        return format!("{} != {}", var, lit);
+                    }
+                }
+            }
+
+            // Try boolean variables
+            let bools = ctx.bool_vars();
+            if !bools.is_empty() {
+                let var_idx = self.rng.gen_range(0..bools.len());
+                let var = &bools[var_idx];
+                if self.rng.gen_bool(0.5) {
+                    return var.clone();
+                } else {
+                    return format!("!{}", var);
+                }
+            }
+
+            // Fall back to a full bool expression generation if we have depth budget
+            if depth + 1 < 3 {
+                return self.generate(&TypeInfo::Primitive(PrimitiveType::Bool), ctx, depth + 1);
+            }
+        }
+
+        // Ultimate fallback: literal boolean
+        self.literal_for_primitive(PrimitiveType::Bool)
     }
 
     /// Generate a lambda expression.
