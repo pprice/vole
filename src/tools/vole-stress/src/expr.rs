@@ -133,6 +133,22 @@ impl<'a> ExprContext<'a> {
         vars
     }
 
+    /// Get all integer (non-float, non-bool) variables in scope.
+    pub fn integer_vars(&self) -> Vec<String> {
+        let mut vars = Vec::new();
+        for (name, ty) in self.locals {
+            if is_integer_type(ty) {
+                vars.push(name.clone());
+            }
+        }
+        for param in self.params {
+            if is_integer_type(&param.param_type) {
+                vars.push(param.name.clone());
+            }
+        }
+        vars
+    }
+
     /// Get all boolean variables in scope.
     pub fn bool_vars(&self) -> Vec<String> {
         let mut vars = Vec::new();
@@ -600,6 +616,21 @@ fn is_numeric_type(ty: &TypeInfo) -> bool {
             | TypeInfo::Primitive(PrimitiveType::U64)
             | TypeInfo::Primitive(PrimitiveType::F32)
             | TypeInfo::Primitive(PrimitiveType::F64)
+    )
+}
+
+fn is_integer_type(ty: &TypeInfo) -> bool {
+    matches!(
+        ty,
+        TypeInfo::Primitive(PrimitiveType::I8)
+            | TypeInfo::Primitive(PrimitiveType::I16)
+            | TypeInfo::Primitive(PrimitiveType::I32)
+            | TypeInfo::Primitive(PrimitiveType::I64)
+            | TypeInfo::Primitive(PrimitiveType::I128)
+            | TypeInfo::Primitive(PrimitiveType::U8)
+            | TypeInfo::Primitive(PrimitiveType::U16)
+            | TypeInfo::Primitive(PrimitiveType::U32)
+            | TypeInfo::Primitive(PrimitiveType::U64)
     )
 }
 
@@ -2547,8 +2578,8 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
     /// Falls back to boolean literals when no variables are available.
     fn generate_guard_condition(&mut self, ctx: Option<&ExprContext>, depth: usize) -> String {
         if let Some(ctx) = ctx {
-            // Try to generate a comparison using numeric variables in scope
-            let numeric = ctx.numeric_vars();
+            // Use integer-only vars for comparisons with integer literals
+            let numeric = ctx.integer_vars();
             if !numeric.is_empty() {
                 let var_idx = self.rng.gen_range(0..numeric.len());
                 let var = &numeric[var_idx];
