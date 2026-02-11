@@ -1775,13 +1775,14 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         let name = ctx.new_local_name();
 
-        // Optionally prepend .sorted() or .reverse() (~20% of the time).
-        // .sorted() requires comparable elements (skip for bool).
-        let prefix = if self.rng.gen_bool(0.2) {
-            if self.rng.gen_bool(0.5) && elem_prim != PrimitiveType::Bool {
-                ".sorted()"
-            } else {
-                ".reverse()"
+        // Optionally prepend .sorted(), .reverse(), or .unique() (~25% of the time).
+        // .sorted() and .unique() require comparable elements (skip for bool).
+        let prefix = if self.rng.gen_bool(0.25) {
+            match self.rng.gen_range(0..3) {
+                0 if elem_prim != PrimitiveType::Bool => ".sorted()",
+                1 => ".reverse()",
+                _ if elem_prim != PrimitiveType::Bool => ".unique()",
+                _ => ".reverse()",
             }
         } else {
             ""
