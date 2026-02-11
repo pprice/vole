@@ -1129,6 +1129,17 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         Some(format!("({} ?? {})", first_var, default_expr))
     }
 
+    /// Generate a simple string→string method call suffix for chaining.
+    ///
+    /// Returns a suffix like `.trim()`, `.to_upper()`, or `.to_lower()`.
+    /// These are safe to chain onto any string expression without arguments,
+    /// keeping the generated code simple and avoiding issues with nested
+    /// `replace`/`substring` calls.
+    fn random_simple_string_chain_suffix(&mut self) -> &'static str {
+        let methods = [".trim()", ".to_upper()", ".to_lower()"];
+        methods[self.rng.gen_range(0..methods.len())]
+    }
+
     /// Try to generate a `str.length()` call for an i64 expression.
     ///
     /// Looks for string-typed variables in scope and returns
@@ -1139,7 +1150,16 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             return None;
         }
         let idx = self.rng.gen_range(0..candidates.len());
-        Some(format!("{}.length()", candidates[idx]))
+        let var = &candidates[idx];
+
+        // ~25% chance to prepend a string→string transform before .length()
+        // e.g. str.trim().length()
+        if self.rng.gen_bool(self.config.method_chain_probability) {
+            let chain = self.random_simple_string_chain_suffix();
+            Some(format!("{}{}.length()", var, chain))
+        } else {
+            Some(format!("{}.length()", var))
+        }
     }
 
     /// Try to generate a bool-returning string method call.
@@ -1156,6 +1176,14 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         let idx = self.rng.gen_range(0..candidates.len());
         let var = &candidates[idx];
 
+        // ~25% chance to prepend a string→string transform before the bool method
+        // e.g. str.to_lower().contains("x")
+        let chain = if self.rng.gen_bool(self.config.method_chain_probability) {
+            self.random_simple_string_chain_suffix()
+        } else {
+            ""
+        };
+
         // Pick a bool-returning string method
         let methods = ["contains", "starts_with", "ends_with"];
         let method = methods[self.rng.gen_range(0..methods.len())];
@@ -1163,7 +1191,10 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         // Use a short literal substring as the argument
         let substrings = ["str", "hello", "a", "test", "x", ""];
         let sub_idx = self.rng.gen_range(0..substrings.len());
-        Some(format!("{}.{}(\"{}\")", var, method, substrings[sub_idx]))
+        Some(format!(
+            "{}{}.{}(\"{}\")",
+            var, chain, method, substrings[sub_idx]
+        ))
     }
 
     /// Try to generate a string-returning string method call.
@@ -1197,20 +1228,29 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         ];
         let method = methods[self.rng.gen_range(0..methods.len())];
 
-        match method {
+        let base = match method {
             "replace" | "replace_all" => {
                 // Use fixed literal arguments so no extra RNG is consumed.
                 // These patterns exercise search-and-replace without
                 // changing downstream RNG state.
-                Some(format!("{}.{}(\"str\", \"val\")", var, method))
+                format!("{}.{}(\"str\", \"val\")", var, method)
             }
             "substring" => {
                 // substring(start, end) takes two i64 arguments.
                 // Use small non-negative literals to stay in bounds for typical strings.
                 // Using fixed values keeps RNG consumption constant.
-                Some(format!("{}.substring(0, 3)", var))
+                format!("{}.substring(0, 3)", var)
             }
-            _ => Some(format!("{}.{}()", var, method)),
+            _ => format!("{}.{}()", var, method),
+        };
+
+        // ~25% chance to chain another simple string→string transform
+        // e.g. str.trim().to_upper()
+        if self.rng.gen_bool(self.config.method_chain_probability) {
+            let chain = self.random_simple_string_chain_suffix();
+            Some(format!("{}{}", base, chain))
+        } else {
+            Some(base)
         }
     }
 
@@ -2122,12 +2162,21 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             // ~30% chance to use a string method inside interpolation
             TypeInfo::Primitive(PrimitiveType::String) if self.rng.gen_bool(0.3) => {
                 // Pick from .length(), .to_upper(), .to_lower(), .trim(), .substring()
-                match self.rng.gen_range(0..5) {
+                let base = match self.rng.gen_range(0..5) {
                     0 => format!("{}.length()", name),
                     1 => format!("{}.to_upper()", name),
                     2 => format!("{}.to_lower()", name),
                     3 => format!("{}.trim()", name),
                     _ => format!("{}.substring(0, 3)", name),
+                };
+                // ~25% chance to chain when the base returns string (not .length())
+                if !base.ends_with(".length()")
+                    && self.rng.gen_bool(self.config.method_chain_probability)
+                {
+                    let chain = self.random_simple_string_chain_suffix();
+                    format!("{}{}", base, chain)
+                } else {
+                    base
                 }
             }
             _ => name.to_string(),
