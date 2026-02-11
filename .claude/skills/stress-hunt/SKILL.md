@@ -52,17 +52,19 @@ There is no completion promise — the loop runs until max iterations.
       "error_category": null,
       "error_summary": null,
       "reduced_dir": null,
-      "fix_commit": null
+      "fix_commit": null,
+      "ticket_id": null
     }
   ],
   "round": 1,
   "history": [
-    { "round": 1, "passed": 3, "failed": 2, "bugs_fixed": 2 }
+    { "round": 1, "passed": 3, "failed": 2, "bugs_fixed": 2, "skipped": 0 }
   ]
 }
 ```
 
 Seed statuses: `pending` -> `pass` | `fail` -> `reducing` -> `reduced` -> `fixing` -> `verified`
+                                                                                  `-> skipped`
 
 ## Workflow Per Iteration
 
@@ -151,15 +153,24 @@ After reduction completes, update `reduced_dir` and mark `reducing` -> `reduced`
 For each `reduced` seed:
 
 1. Read the minimized test case in `reduced_dir`
-2. Investigate the root cause based on `error_category`:
+2. Create a `tk` ticket for the bug (see Ticket Tracking below)
+3. Investigate the root cause based on `error_category`:
    - `generator`: fix in `src/tools/vole-stress/`
    - `sema`: fix in `src/crates/vole-sema/`
    - `codegen`: fix in `src/crates/vole-codegen/` or `src/crates/vole-runtime/`
-3. Run `just pre-commit` before committing
-4. Commit the fix
-5. Record `fix_commit` hash, mark `fixing`
+4. Add investigation notes to the ticket as you go with `tk add-note`
+5. **15-minute time limit**: if unable to fix within ~15 minutes, stop
+   attempting. Add a note to the ticket explaining what was tried, what
+   the blocker is, and any leads. Leave the ticket open. Mark the seed
+   `skipped` in state and move on.
+6. If fixed: run `just pre-commit`, commit, record `fix_commit` hash,
+   mark seed `fixing`, close the ticket with `tk close`
+7. Record the ticket ID in the seed's state as `ticket_id`
 
 Fix ONE seed per iteration to keep changes focused and reviewable.
+
+Generator bugs do NOT get tickets — they are straightforward vole-stress
+fixes. Only sema and codegen bugs get tracked in `tk`.
 
 ### 6. Verify (`fixing` seeds exist)
 
@@ -179,17 +190,17 @@ For each `fixing` seed:
 If passes: mark `verified`.
 If new failure: mark `fail` again with new error, clear `error_category`.
 
-### 7. Round Complete (all seeds `pass` or `verified`)
+### 7. Round Complete (all seeds `pass`, `verified`, or `skipped`)
 
-When all K seeds in the current round are `pass` or `verified`:
+When all K seeds in the current round are `pass`, `verified`, or `skipped`:
 
 1. Record round summary in `history`:
    ```json
-   { "round": N, "passed": X, "failed": Y, "bugs_fixed": Z }
+   { "round": N, "passed": X, "failed": Y, "bugs_fixed": Z, "skipped": S }
    ```
-2. Clean up: `rm -rf` the `/tmp/vole-stress/` directories for all `pass` and
-   `verified` seeds in this round (they served their purpose)
-3. Print a summary: `Round N complete: X/K passed, Y bugs fixed`
+2. Clean up: `rm -rf` the `/tmp/vole-stress/` directories for all `pass`,
+   `verified`, and `skipped` seeds in this round
+3. Print a summary: `Round N complete: X/K passed, Y bugs fixed, S skipped`
 4. Pick K fresh random seeds, distribute across profiles round-robin
 5. Replace `seeds` array with the new pending seeds
 6. Increment `round`
@@ -207,6 +218,51 @@ All commands use the `timeout` utility:
 Timeout = potential infinite loop. Check the reduced code to determine:
 - Generator error: bad loop generation -> fix vole-stress
 - Codegen error: bad loop compilation -> fix vole-codegen
+
+## Ticket Tracking (sema/codegen bugs only)
+
+When a sema or codegen bug is found (after reduction), create a `tk` ticket
+to track it. Generator bugs are simple vole-stress fixes and don't need tickets.
+
+### Creating the ticket
+
+```bash
+tk create "stress-hunt: <short description of bug>" -d "<detailed description>"
+```
+
+The description should include:
+- Seed number and profile
+- Error category (sema or codegen)
+- Error message or symptom (segfault, timeout, wrong result, etc.)
+- Path to the reduced test case
+- The reduced code itself (paste it in)
+
+Record the ticket ID in the seed's `ticket_id` field in state.
+
+### Updating during investigation
+
+As you investigate, add notes with findings:
+
+```bash
+tk add-note <id> "Root cause: <explanation>"
+tk add-note <id> "Attempted fix: <what you tried>"
+tk add-note <id> "Blocker: <why this is hard>"
+```
+
+### On fix
+
+```bash
+tk add-note <id> "Fixed in commit <hash>: <what was changed>"
+tk close <id>
+```
+
+### On skip (15-minute limit exceeded)
+
+```bash
+tk add-note <id> "Skipping after 15min. Tried: <approaches>. Blocker: <issue>. Leads: <suggestions>"
+```
+
+Leave the ticket open — it becomes a backlog item for manual investigation.
 
 ## Important Rules
 
