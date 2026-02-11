@@ -144,6 +144,8 @@ fn minimal_profile() -> Profile {
                 inline_expr_arg_probability: 0.0,
                 // No tuple indexing in minimal (no tuples)
                 tuple_index_probability: 0.0,
+                // No chained coalescing in minimal
+                chained_coalesce_probability: 0.0,
             },
             // Shallow statement depth
             max_depth: 1,
@@ -297,6 +299,8 @@ fn full_profile() -> Profile {
                 inline_expr_arg_probability: 0.12,
                 // ~15% tuple indexing on tuple-typed variables
                 tuple_index_probability: 0.15,
+                // ~30% chained coalescing when multiple optionals match
+                chained_coalesce_probability: 0.30,
             },
             // Moderate statement depth for nested control flow
             max_depth: 3,
@@ -446,6 +450,8 @@ fn deep_nesting_profile() -> Profile {
                 inline_expr_arg_probability: 0.15,
                 // Some tuple indexing for variety
                 tuple_index_probability: 0.10,
+                // ~30% chained coalescing for nesting variety
+                chained_coalesce_probability: 0.30,
             },
             // Statement nesting for nested control flow. Combined with
             // expression depth 4, this keeps total output per function
@@ -604,6 +610,8 @@ fn wide_types_profile() -> Profile {
                 inline_expr_arg_probability: 0.08,
                 // Some tuple indexing
                 tuple_index_probability: 0.12,
+                // ~25% chained coalescing
+                chained_coalesce_probability: 0.25,
             },
             // Moderate statement depth
             max_depth: 2,
@@ -750,6 +758,8 @@ fn many_modules_profile() -> Profile {
                 inline_expr_arg_probability: 0.0,
                 // No tuple indexing - focus on module loading
                 tuple_index_probability: 0.0,
+                // No chained coalescing - focus on module loading
+                chained_coalesce_probability: 0.0,
             },
             // Shallow statement depth
             max_depth: 1,
@@ -911,6 +921,8 @@ fn generics_heavy_profile() -> Profile {
                 inline_expr_arg_probability: 0.10,
                 // Some tuple indexing
                 tuple_index_probability: 0.12,
+                // ~25% chained coalescing
+                chained_coalesce_probability: 0.25,
             },
             // Moderate statement depth
             max_depth: 2,
@@ -1069,6 +1081,8 @@ fn stdlib_heavy_profile() -> Profile {
                 inline_expr_arg_probability: 0.12,
                 // Some tuple indexing
                 tuple_index_probability: 0.12,
+                // ~30% chained coalescing
+                chained_coalesce_probability: 0.30,
             },
             // Moderate statement depth — not too deep structurally
             max_depth: 2,
@@ -1214,6 +1228,8 @@ fn closures_heavy_profile() -> Profile {
                 inline_expr_arg_probability: 0.10,
                 // Some tuple indexing
                 tuple_index_probability: 0.12,
+                // ~25% chained coalescing
+                chained_coalesce_probability: 0.25,
             },
             max_depth: 3,
             statements_per_block: (2, 4),

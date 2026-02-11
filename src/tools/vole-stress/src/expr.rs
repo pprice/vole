@@ -45,6 +45,11 @@ pub struct ExprConfig {
     /// when a tuple-typed variable with a matching element type is in scope.
     /// Set to 0.0 to disable.
     pub tuple_index_probability: f64,
+    /// Probability of chaining multiple optional variables in a null coalescing
+    /// expression when 2+ optional variables of matching type are in scope.
+    /// Produces patterns like `optA ?? optB ?? defaultExpr`. Set to 0.0 to
+    /// always use single `opt ?? default` form.
+    pub chained_coalesce_probability: f64,
 }
 
 impl Default for ExprConfig {
@@ -62,6 +67,7 @@ impl Default for ExprConfig {
             max_match_arms: 4,
             inline_expr_arg_probability: 0.12,
             tuple_index_probability: 0.15,
+            chained_coalesce_probability: 0.30,
         }
     }
 }
@@ -1137,8 +1143,9 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
     /// The result type is the inner type T (not T?).
     ///
     /// When multiple optional variables of matching type are in scope,
-    /// ~30% of the time generates a chained coalescing expression like
-    /// `optA ?? optB ?? defaultExpr` (up to 3 optionals in the chain).
+    /// generates a chained coalescing expression like
+    /// `optA ?? optB ?? defaultExpr` (up to 3 optionals in the chain)
+    /// with probability controlled by `config.chained_coalesce_probability`.
     fn try_generate_null_coalesce(
         &mut self,
         target: &TypeInfo,
@@ -1154,7 +1161,10 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         let (first_var, _inner_ty) = &candidates[idx];
 
         // When 2+ optional vars match, sometimes chain them: a ?? b ?? default
-        if candidates.len() >= 2 && self.rng.gen_bool(0.30) {
+        if candidates.len() >= 2
+            && self.config.chained_coalesce_probability > 0.0
+            && self.rng.gen_bool(self.config.chained_coalesce_probability)
+        {
             // Pick 1-2 additional optional vars for the chain (up to 3 total)
             let max_extra = (candidates.len() - 1).min(2);
             let extra_count = self.rng.gen_range(1..=max_extra);
