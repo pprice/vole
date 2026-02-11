@@ -1773,34 +1773,67 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let elem_prim = *elem_prim;
         let arr_name = arr_name.clone();
 
-        let use_map = self.rng.gen_bool(0.5);
         let name = ctx.new_local_name();
 
-        let stmt = if use_map {
-            // .map() - transform elements, keeping same element type for simplicity
-            let closure_body = self.generate_map_closure_body(elem_prim);
-            ctx.add_local(
-                name.clone(),
-                TypeInfo::Array(Box::new(TypeInfo::Primitive(elem_prim))),
-                false,
-            );
-            format!(
-                "let {} = {}.iter().map((x) => {}).collect()",
-                name, arr_name, closure_body
-            )
+        // Build the iterator chain: .iter() followed by 1-2 operations, then a terminal.
+        // 40% single .map(), 30% single .filter(), 30% chained .map().filter() or .filter().map()
+        let chain_choice = self.rng.gen_range(0..10);
+
+        let chain = if chain_choice < 4 {
+            // Single .map()
+            let map_body = self.generate_map_closure_body(elem_prim);
+            format!(".map((x) => {})", map_body)
+        } else if chain_choice < 7 {
+            // Single .filter()
+            let filter_body = self.generate_filter_closure_body(elem_prim);
+            format!(".filter((x) => {})", filter_body)
+        } else if chain_choice < 9 {
+            // Chained .map().filter() — map uses 'x', filter uses 'y' to avoid shadowing
+            let map_body = self.generate_map_closure_body(elem_prim);
+            let filter_body = self.generate_filter_closure_body_param(elem_prim, "y");
+            format!(".map((x) => {}).filter((y) => {})", map_body, filter_body)
         } else {
-            // .filter() - keep elements matching a predicate
-            let closure_body = self.generate_filter_closure_body(elem_prim);
-            ctx.add_local(
-                name.clone(),
+            // Chained .filter().map() — filter uses 'x', map uses 'y'
+            let filter_body = self.generate_filter_closure_body(elem_prim);
+            let map_body = self.generate_map_closure_body_param(elem_prim, "y");
+            format!(".filter((x) => {}).map((y) => {})", filter_body, map_body)
+        };
+
+        // Pick a terminal operation:
+        // 50% .collect() -> [T], 20% .count() -> i64, 15% .sum() -> T (numeric only),
+        // 15% .take(N).collect() -> [T]
+        let terminal_choice = self.rng.gen_range(0..20);
+        let (terminal, result_type) = if terminal_choice < 10 {
+            (
+                ".collect()".to_string(),
                 TypeInfo::Array(Box::new(TypeInfo::Primitive(elem_prim))),
-                false,
-            );
-            format!(
-                "let {} = {}.iter().filter((x) => {}).collect()",
-                name, arr_name, closure_body
+            )
+        } else if terminal_choice < 14 {
+            (
+                ".count()".to_string(),
+                TypeInfo::Primitive(PrimitiveType::I64),
+            )
+        } else if terminal_choice < 17 {
+            // .sum() only valid for numeric types
+            match elem_prim {
+                PrimitiveType::I64 | PrimitiveType::F64 => {
+                    (".sum()".to_string(), TypeInfo::Primitive(elem_prim))
+                }
+                _ => (
+                    ".count()".to_string(),
+                    TypeInfo::Primitive(PrimitiveType::I64),
+                ),
+            }
+        } else {
+            let n = self.rng.gen_range(1..=3);
+            (
+                format!(".take({}).collect()", n),
+                TypeInfo::Array(Box::new(TypeInfo::Primitive(elem_prim))),
             )
         };
+
+        ctx.add_local(name.clone(), result_type, false);
+        let stmt = format!("let {} = {}.iter(){}{}", name, arr_name, chain, terminal);
 
         Some(stmt)
     }
@@ -1883,6 +1916,28 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             // Other types are filtered out by try_generate_iter_map_filter_let
             _ => "true".to_string(),
         }
+    }
+
+    /// Generate a closure body for `.map()` with a custom parameter name.
+    ///
+    /// Used for chained operations where the second closure needs a different
+    /// parameter name to avoid shadowing (e.g., `.map((x) => ...).filter((y) => ...)`).
+    fn generate_map_closure_body_param(&mut self, elem_prim: PrimitiveType, param: &str) -> String {
+        let body = self.generate_map_closure_body(elem_prim);
+        body.replace("x", param)
+    }
+
+    /// Generate a closure body for `.filter()` with a custom parameter name.
+    ///
+    /// Used for chained operations where the second closure needs a different
+    /// parameter name to avoid shadowing.
+    fn generate_filter_closure_body_param(
+        &mut self,
+        elem_prim: PrimitiveType,
+        param: &str,
+    ) -> String {
+        let body = self.generate_filter_closure_body(elem_prim);
+        body.replace("x", param)
     }
 
     /// Try to generate a raise statement in a fallible function body.
