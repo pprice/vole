@@ -1826,11 +1826,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         } else if terminal_choice < 17 {
             // .reduce(init, (acc, x) => expr) - two-param accumulator closure
-            let (init, body, result_ty) = self.generate_reduce_closure(elem_prim);
-            (
-                format!(".reduce({}, (acc, el) => {})", init, body),
-                result_ty,
-            )
+            // Bool elements can't use reduce (&&/|| has codegen bug, arithmetic
+            // has type mismatch). Fall back to .collect() for bool.
+            if elem_prim == PrimitiveType::Bool {
+                (
+                    ".collect()".to_string(),
+                    TypeInfo::Array(Box::new(TypeInfo::Primitive(elem_prim))),
+                )
+            } else {
+                let (init, body, result_ty) = self.generate_reduce_closure(elem_prim);
+                (
+                    format!(".reduce({}, (acc, el) => {})", init, body),
+                    result_ty,
+                )
+            }
         } else {
             let n = self.rng.gen_range(1..=3);
             (
@@ -1962,16 +1971,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                     TypeInfo::Primitive(PrimitiveType::String),
                 )
             }
-            PrimitiveType::Bool => {
-                // Boolean &&/|| in reduce closures triggers a Cranelift type
-                // mismatch bug (declared var type != value type). Fall back to
-                // counting as i64 until the codegen bug is fixed.
-                (
-                    "0".to_string(),
-                    "acc + 1".to_string(),
-                    TypeInfo::Primitive(PrimitiveType::I64),
-                )
-            }
+            // Bool is filtered out by the caller (reduce skipped for bool).
             // Fallback: count as i64
             _ => (
                 "0".to_string(),
