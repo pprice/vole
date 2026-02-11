@@ -766,6 +766,18 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 arms.push(format!("{}{} => {}", indent, val, arm_expr));
             }
 
+            // Sometimes generate a guarded wildcard arm before the bare wildcard
+            if self
+                .rng
+                .gen_bool(self.config.expr_config.match_guard_probability)
+            {
+                let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+                let guard_cond = expr_gen.generate_guard_condition(Some(&expr_ctx), 0);
+                let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+                let guarded_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
+                arms.push(format!("{}_ if {} => {}", indent, guard_cond, guarded_expr));
+            }
+
             // Wildcard arm
             let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
             let wildcard_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
@@ -888,6 +900,18 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
                 let arm_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
                 arms.push(format!("{}\"{}\" => {}", indent, patterns[pi], arm_expr));
+            }
+
+            // Sometimes generate a guarded wildcard arm before the bare wildcard
+            if self
+                .rng
+                .gen_bool(self.config.expr_config.match_guard_probability)
+            {
+                let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+                let guard_cond = expr_gen.generate_guard_condition(Some(&expr_ctx), 0);
+                let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+                let guarded_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
+                arms.push(format!("{}_ if {} => {}", indent, guard_cond, guarded_expr));
             }
 
             // Wildcard arm

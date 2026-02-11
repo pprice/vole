@@ -61,6 +61,11 @@ pub struct ExprConfig {
     /// When this fires, generates 3-4 total arms (2-3 conditions + wildcard).
     /// Set to 0.0 to always use 2-arm when expressions.
     pub multi_arm_when_probability: f64,
+    /// Probability of generating a match guard on the wildcard arm.
+    /// When this fires, the wildcard arm `_ => expr` is replaced by
+    /// `_ if <condition> => <guarded_result>, _ => <fallback_result>`.
+    /// Set to 0.0 to disable.
+    pub match_guard_probability: f64,
 }
 
 impl Default for ExprConfig {
@@ -81,6 +86,7 @@ impl Default for ExprConfig {
             chained_coalesce_probability: 0.30,
             string_method_probability: 0.15,
             multi_arm_when_probability: 0.30,
+            match_guard_probability: 0.10,
         }
     }
 }
@@ -2761,7 +2767,13 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             arms.push(format!("{} => {}", pattern, value));
         }
 
-        // Always end with wildcard for exhaustiveness
+        // Always end with wildcard for exhaustiveness.
+        // Sometimes generate a guarded wildcard arm before the bare wildcard.
+        if self.rng.gen_bool(self.config.match_guard_probability) {
+            let guard_cond = self.generate_guard_condition(Some(ctx), depth);
+            let guarded_value = self.generate(result_type, ctx, depth + 1);
+            arms.push(format!("_ if {} => {}", guard_cond, guarded_value));
+        }
         let default_value = self.generate(result_type, ctx, depth + 1);
         arms.push(format!("_ => {}", default_value));
 
@@ -2836,6 +2848,12 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             arms.push(format!("{} => {}", pattern, value));
         }
 
+        // Sometimes generate a guarded wildcard arm before the bare wildcard.
+        if self.rng.gen_bool(self.config.match_guard_probability) {
+            let guard_cond = self.generate_guard_condition(Some(ctx), depth);
+            let guarded_value = self.generate(result_type, ctx, depth + 1);
+            arms.push(format!("_ if {} => {}", guard_cond, guarded_value));
+        }
         let default_value = self.generate(result_type, ctx, depth + 1);
         arms.push(format!("_ => {}", default_value));
 
@@ -2903,7 +2921,7 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
     /// When an `ExprContext` is available, produces comparison-based conditions
     /// referencing numeric variables in scope (e.g. `x > 42`, `x >= 10 && x < 100`).
     /// Falls back to boolean literals when no variables are available.
-    fn generate_guard_condition(&mut self, ctx: Option<&ExprContext>, depth: usize) -> String {
+    pub fn generate_guard_condition(&mut self, ctx: Option<&ExprContext>, depth: usize) -> String {
         if let Some(ctx) = ctx {
             // Use integer-only vars for comparisons with integer literals
             let numeric = ctx.integer_vars();
