@@ -1142,6 +1142,7 @@ impl<'a, R: Rng> EmitContext<'a, R> {
     ///
     /// The element type determines which terminal methods are valid:
     /// - `.sum()` is only valid for numeric element types
+    /// - `.reduce()` is valid for numeric and string types (not bool)
     /// - `.count()` is always valid and returns i64
     /// - All other chains end with `.collect()`
     fn generate_iterator_chain(&mut self, elem_type: &TypeInfo) -> String {
@@ -1151,9 +1152,16 @@ impl<'a, R: Rng> EmitContext<'a, R> {
                 | TypeInfo::Primitive(PrimitiveType::I32)
                 | TypeInfo::Primitive(PrimitiveType::F64)
         );
+        let is_reducible = matches!(
+            elem_type,
+            TypeInfo::Primitive(PrimitiveType::I64)
+                | TypeInfo::Primitive(PrimitiveType::I32)
+                | TypeInfo::Primitive(PrimitiveType::F64)
+                | TypeInfo::Primitive(PrimitiveType::String)
+        );
 
         // Choose a chain pattern
-        let pattern = self.rng.gen_range(0..10);
+        let pattern = self.rng.gen_range(0..12);
         match pattern {
             0..=3 => {
                 // Plain .collect()
@@ -1187,6 +1195,11 @@ impl<'a, R: Rng> EmitContext<'a, R> {
                 let mapper = self.generate_map_lambda(elem_type);
                 format!(".map({}).collect()", mapper)
             }
+            10..=11 if is_reducible => {
+                // .reduce(init, (acc, el) => expr) - accumulator closure
+                let (init, body) = self.generate_reduce_lambda(elem_type);
+                format!(".reduce({}, (acc, el) => {})", init, body)
+            }
             _ => {
                 // Fallback to .collect()
                 ".collect()".to_string()
@@ -1215,6 +1228,20 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             TypeInfo::Primitive(PrimitiveType::Bool) => "(x) => !x".to_string(),
             TypeInfo::Primitive(PrimitiveType::String) => "(x) => x".to_string(),
             _ => "(x) => x".to_string(),
+        }
+    }
+
+    /// Generate a reduce initial value and accumulator body for a given element type.
+    ///
+    /// Returns `(init_expr, closure_body)`. The closure params are always `acc` and `el`.
+    /// Only valid for numeric and string types (not bool).
+    fn generate_reduce_lambda(&self, elem_type: &TypeInfo) -> (&'static str, &'static str) {
+        match elem_type {
+            TypeInfo::Primitive(PrimitiveType::I64) => ("0", "acc + el"),
+            TypeInfo::Primitive(PrimitiveType::I32) => ("0_i32", "acc + el"),
+            TypeInfo::Primitive(PrimitiveType::F64) => ("0.0", "acc + el"),
+            TypeInfo::Primitive(PrimitiveType::String) => ("\"\"", "acc + el + \" \""),
+            _ => ("0", "acc + el"),
         }
     }
 
