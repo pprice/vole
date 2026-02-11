@@ -1800,20 +1800,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         };
 
         // Pick a terminal operation:
-        // 50% .collect() -> [T], 20% .count() -> i64, 15% .sum() -> T (numeric only),
-        // 15% .take(N).collect() -> [T]
+        // 40% .collect() -> [T], 15% .count() -> i64, 15% .sum() -> T (numeric only),
+        // 15% .reduce() -> T (two-param closure), 15% .take(N).collect() -> [T]
         let terminal_choice = self.rng.gen_range(0..20);
-        let (terminal, result_type) = if terminal_choice < 10 {
+        let (terminal, result_type) = if terminal_choice < 8 {
             (
                 ".collect()".to_string(),
                 TypeInfo::Array(Box::new(TypeInfo::Primitive(elem_prim))),
             )
-        } else if terminal_choice < 14 {
+        } else if terminal_choice < 11 {
             (
                 ".count()".to_string(),
                 TypeInfo::Primitive(PrimitiveType::I64),
             )
-        } else if terminal_choice < 17 {
+        } else if terminal_choice < 14 {
             // .sum() only valid for numeric types
             match elem_prim {
                 PrimitiveType::I64 | PrimitiveType::F64 => {
@@ -1824,6 +1824,13 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                     TypeInfo::Primitive(PrimitiveType::I64),
                 ),
             }
+        } else if terminal_choice < 17 {
+            // .reduce(init, (acc, x) => expr) - two-param accumulator closure
+            let (init, body, result_ty) = self.generate_reduce_closure(elem_prim);
+            (
+                format!(".reduce({}, (acc, el) => {})", init, body),
+                result_ty,
+            )
         } else {
             let n = self.rng.gen_range(1..=3);
             (
@@ -1915,6 +1922,62 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
             // Other types are filtered out by try_generate_iter_map_filter_let
             _ => "true".to_string(),
+        }
+    }
+
+    /// Generate a `.reduce()` closure with initial value and accumulator body.
+    ///
+    /// Returns `(init_expr, closure_body, result_type)`. The closure params
+    /// are always `acc` and `el`. Produces type-safe reduce patterns.
+    fn generate_reduce_closure(&mut self, elem_prim: PrimitiveType) -> (String, String, TypeInfo) {
+        match elem_prim {
+            PrimitiveType::I64 => {
+                // Accumulate sum or product
+                if self.rng.gen_bool(0.5) {
+                    (
+                        "0".to_string(),
+                        "acc + el".to_string(),
+                        TypeInfo::Primitive(PrimitiveType::I64),
+                    )
+                } else {
+                    let n = self.rng.gen_range(1..=3);
+                    (
+                        format!("{}", n),
+                        "acc * el".to_string(),
+                        TypeInfo::Primitive(PrimitiveType::I64),
+                    )
+                }
+            }
+            PrimitiveType::F64 => (
+                "0.0".to_string(),
+                "acc + el".to_string(),
+                TypeInfo::Primitive(PrimitiveType::F64),
+            ),
+            PrimitiveType::String => {
+                // String concatenation with separator
+                let sep = if self.rng.gen_bool(0.5) { "," } else { " " };
+                (
+                    format!("\"\""),
+                    format!("acc + el + \"{}\"", sep),
+                    TypeInfo::Primitive(PrimitiveType::String),
+                )
+            }
+            PrimitiveType::Bool => {
+                // Boolean &&/|| in reduce closures triggers a Cranelift type
+                // mismatch bug (declared var type != value type). Fall back to
+                // counting as i64 until the codegen bug is fixed.
+                (
+                    "0".to_string(),
+                    "acc + 1".to_string(),
+                    TypeInfo::Primitive(PrimitiveType::I64),
+                )
+            }
+            // Fallback: count as i64
+            _ => (
+                "0".to_string(),
+                "acc + 1".to_string(),
+                TypeInfo::Primitive(PrimitiveType::I64),
+            ),
         }
     }
 
