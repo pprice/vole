@@ -41,6 +41,10 @@ pub struct ExprConfig {
     /// Exercises the compiler's handling of complex expressions in call arguments
     /// and struct/class field initializers. Set to 0.0 to disable.
     pub inline_expr_arg_probability: f64,
+    /// Probability of generating a tuple index expression (`tupleVar[index]`)
+    /// when a tuple-typed variable with a matching element type is in scope.
+    /// Set to 0.0 to disable.
+    pub tuple_index_probability: f64,
 }
 
 impl Default for ExprConfig {
@@ -57,6 +61,7 @@ impl Default for ExprConfig {
             unreachable_probability: 0.05,
             max_match_arms: 4,
             inline_expr_arg_probability: 0.12,
+            tuple_index_probability: 0.15,
         }
     }
 }
@@ -672,10 +677,12 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             return self.generate_simple(ty, ctx);
         }
 
-        // ~15% chance to generate tuple indexing for any type:
+        // Chance to generate tuple indexing for any type:
         // when a tuple-typed variable with a matching element is in scope,
         // emit `tupleVar[index]` instead of constructing a new value.
-        if self.rng.gen_bool(0.15) {
+        if self.config.tuple_index_probability > 0.0
+            && self.rng.gen_bool(self.config.tuple_index_probability)
+        {
             if let Some(expr) = self.try_generate_tuple_index_for_type(ty, ctx) {
                 return expr;
             }
@@ -1716,9 +1723,11 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             }
         }
 
-        // ~12% chance to generate tuple indexing: `tupleVar[index]`
+        // Chance to generate tuple indexing: `tupleVar[index]`
         // when a tuple-typed variable with a matching element type is in scope
-        if self.rng.gen_bool(0.12) {
+        if self.config.tuple_index_probability > 0.0
+            && self.rng.gen_bool(self.config.tuple_index_probability)
+        {
             if let Some(expr) =
                 self.try_generate_tuple_index_for_type(&TypeInfo::Primitive(prim), ctx)
             {
