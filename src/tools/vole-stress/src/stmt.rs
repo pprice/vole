@@ -5185,7 +5185,8 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
             1 => {
                 // numeric.to_string()
-                let num = self.rng.gen_range(-100..=100);
+                // Only use non-negative literals: -50.to_string() parses as -(50.to_string())
+                let num = self.rng.gen_range(0..=200);
                 ctx.add_local(
                     result_name.clone(),
                     TypeInfo::Primitive(PrimitiveType::String),
