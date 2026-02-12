@@ -1199,6 +1199,18 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: single-element array operations
+        if self.rng.gen_bool(0.02) {
+            return self.generate_single_elem_array_ops(ctx);
+        }
+
+        // ~2% chance: tautological comparison in when
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_tautological_when(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -5771,6 +5783,136 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             result_name,
             arms.join(",\n"),
             indent,
+        ))
+    }
+
+    /// Generate operations on a single-element array.
+    ///
+    /// Tests codegen for arrays with exactly 1 element, a boundary case for
+    /// iterator operations and array access:
+    /// ```vole
+    /// let arr = [42]
+    /// let s = arr.iter().sum()       // 42
+    /// let c = arr.iter().count()     // 1
+    /// let first = arr[0]             // 42
+    /// ```
+    fn generate_single_elem_array_ops(&mut self, ctx: &mut StmtContext) -> String {
+        let arr_name = ctx.new_local_name();
+        let result_name = ctx.new_local_name();
+        let indent = self.indent_str();
+
+        let (elem_type, elem_str, val) = match self.rng.gen_range(0..3u32) {
+            0 => (PrimitiveType::I64, "i64", format!("{}", self.rng.gen_range(-100..=100))),
+            1 => (PrimitiveType::I32, "i32", format!("{}_i32", self.rng.gen_range(-100..=100))),
+            _ => (
+                PrimitiveType::String,
+                "string",
+                format!("\"{}\"", ["hello", "world", "test", "a"][self.rng.gen_range(0..4)]),
+            ),
+        };
+
+        ctx.add_local(
+            arr_name.clone(),
+            TypeInfo::Array(Box::new(TypeInfo::Primitive(elem_type))),
+            false,
+        );
+
+        let op = match self.rng.gen_range(0..4u32) {
+            0 => {
+                // arr.iter().count()
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::I64),
+                    false,
+                );
+                format!("let {} = {}.iter().count()", result_name, arr_name)
+            }
+            1 if !matches!(elem_type, PrimitiveType::String) => {
+                // arr.iter().sum()
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Primitive(elem_type),
+                    false,
+                );
+                format!("let {} = {}.iter().sum()", result_name, arr_name)
+            }
+            2 => {
+                // arr[0]
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Primitive(elem_type),
+                    false,
+                );
+                format!("let {} = {}[0]", result_name, arr_name)
+            }
+            _ => {
+                // arr.iter().filter((x) => true).collect()
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Array(Box::new(TypeInfo::Primitive(elem_type))),
+                    false,
+                );
+                format!(
+                    "let {} = {}.iter().filter((x) => true).collect()",
+                    result_name, arr_name
+                )
+            }
+        };
+
+        // Use type annotation to disambiguate empty array types
+        let _ = elem_str;
+        format!("let {} = [{}]\n{}{}", arr_name, val, indent, op)
+    }
+
+    /// Generate a when expression with tautological or self-referential conditions.
+    ///
+    /// Tests codegen for always-true/always-false conditions:
+    /// ```vole
+    /// let r = when { x == x => "same", _ => "diff" }
+    /// let r = when { arr.length() >= 0 => a, _ => b }
+    /// ```
+    fn try_generate_tautological_when(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let i64_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::I64)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::I64)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        if i64_vars.is_empty() {
+            return None;
+        }
+
+        let result_name = ctx.new_local_name();
+        let var = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+        let indent = self.indent_str();
+
+        let val_true = self.rng.gen_range(-20..=20);
+        let val_false = self.rng.gen_range(-20..=20);
+
+        let cond = match self.rng.gen_range(0..4u32) {
+            0 => format!("{} == {}", var, var),           // always true
+            1 => format!("{} >= {}", var, var),           // always true
+            2 => format!("{} <= {}", var, var),           // always true
+            _ => format!("{} * 0 == 0", var),             // always true (wrapping)
+        };
+
+        ctx.add_local(
+            result_name.clone(),
+            TypeInfo::Primitive(PrimitiveType::I64),
+            false,
+        );
+
+        Some(format!(
+            "let {} = when {{\n{indent}    {} => {},\n{indent}    _ => {}\n{indent}}}",
+            result_name, cond, val_true, val_false,
+            indent = indent,
         ))
     }
 
