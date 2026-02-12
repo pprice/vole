@@ -2863,8 +2863,12 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     }
 
     /// Generate a short random string for string method arguments.
+    /// Includes empty string and escape sequences to stress edge cases.
     fn random_short_string<R2: Rng>(rng: &mut R2) -> String {
-        let words = ["hello", "world", "test", "foo", "bar", "abc", "xyz", "str"];
+        let words = [
+            "hello", "world", "test", "foo", "bar", "abc", "xyz", "str",
+            "", "\\n", "\\t", " ", "a",
+        ];
         words[rng.gen_range(0..words.len())].to_string()
     }
 
@@ -5190,10 +5194,14 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let elem_ty = TypeInfo::Primitive(elem_prim);
         let is_mutable = self.rng.gen_bool(self.config.mutable_array_probability);
 
-        // Usually 2-4 elements; ~15% chance of single-element array to stress
-        // boundary conditions in iterator operations (index 0 only is safe).
+        // Array size distribution:
+        //   ~15% single-element (boundary condition stress)
+        //   ~10% large 6-10 elements (stress iterator codegen with more data)
+        //   ~75% standard 2-4 elements
         let elem_count = if self.rng.gen_bool(0.15) {
             1
+        } else if self.rng.gen_bool(0.12) {
+            self.rng.gen_range(6..=10)
         } else {
             self.rng.gen_range(2..=4)
         };

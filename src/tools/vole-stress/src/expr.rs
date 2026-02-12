@@ -3769,8 +3769,13 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                 }
             }
             PrimitiveType::String => {
-                let id = self.rng.gen_range(0..100);
-                format!("\"str{}\"", id)
+                // ~20% chance to generate a string with escape sequences
+                if self.rng.gen_bool(0.20) {
+                    self.string_with_escapes()
+                } else {
+                    let id = self.rng.gen_range(0..100);
+                    format!("\"str{}\"", id)
+                }
             }
             PrimitiveType::Nil => "nil".to_string(),
         }
@@ -3834,6 +3839,30 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         }
     }
 
+    /// Generate a string literal containing escape sequences to stress the
+    /// parser and codegen string handling. Produces strings like:
+    /// `"hello\nworld"`, `"tab\there"`, `"back\\slash"`, `""` (empty).
+    ///
+    /// NOTE: We avoid `\{` and `\}` escapes because vole-fmt doesn't re-escape
+    /// them after roundtripping, causing `{` to be misinterpreted as
+    /// interpolation start.
+    fn string_with_escapes(&mut self) -> String {
+        let templates = [
+            "\"hello\\nworld\"",
+            "\"tab\\there\"",
+            "\"line1\\r\\nline2\"",
+            "\"back\\\\slash\"",
+            "\"quote\\\"inside\"",
+            "\"multi\\n\\t\\rescapes\"",
+            "\"\\n\"",
+            "\"\\t\"",
+            "\"\"",
+            "\"\\n\\n\\n\"",
+            "\"a\\tb\\tc\"",
+        ];
+        templates[self.rng.gen_range(0..templates.len())].to_string()
+    }
+
     /// Generate a literal value for a primitive type that is safe for use as a
     /// module-level constant (i.e. will be parsed as a single literal token, not
     /// a unary negation expression). Only produces non-negative values.
@@ -3892,8 +3921,13 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                 }
             }
             PrimitiveType::String => {
-                let id = self.rng.gen_range(0..100);
-                format!("\"str{}\"", id)
+                // ~20% chance to generate a string with escape sequences
+                if self.rng.gen_bool(0.20) {
+                    self.string_with_escapes()
+                } else {
+                    let id = self.rng.gen_range(0..100);
+                    format!("\"str{}\"", id)
+                }
             }
             PrimitiveType::Nil => "nil".to_string(),
         }
