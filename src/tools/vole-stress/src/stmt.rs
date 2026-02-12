@@ -115,6 +115,11 @@ pub struct StmtConfig {
     /// E.g.: `items.iter().map(transform).filter((n: i64) => n > criterion.threshold()).collect()`
     /// Set to 0.0 to disable.
     pub generic_closure_interface_probability: f64,
+    /// Probability of generating an empty-array-through-iterator-chain pattern.
+    /// Creates `let arr: [T] = []` then runs an iterator chain on it
+    /// (map/filter/collect/count/sum/first/last/reduce), stressing boundary
+    /// conditions around zero-length collections. Set to 0.0 to disable.
+    pub empty_array_iter_probability: f64,
 }
 
 impl Default for StmtConfig {
@@ -153,6 +158,7 @@ impl Default for StmtConfig {
             iter_map_filter_probability: 0.08,
             iface_function_call_probability: 0.08,
             generic_closure_interface_probability: 0.0,
+            empty_array_iter_probability: 0.0,
         }
     }
 }
@@ -593,6 +599,12 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             if let Some(stmt) = self.try_generate_iter_map_filter_let(ctx) {
                 return stmt;
             }
+        }
+
+        // Empty array through iterator chain — boundary condition stress test.
+        // Creates `let arr: [T] = []` then chains .iter().op().terminal().
+        if self.rng.gen_bool(self.config.empty_array_iter_probability) {
+            return self.generate_empty_array_iter_let(ctx);
         }
 
         // Generic closure + interface dispatch in iterator chains.
@@ -3103,6 +3115,145 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         let mutability = if is_mutable { "let mut" } else { "let" };
         format!("{} {} = [{}]", mutability, name, elements.join(", "))
+    }
+
+    /// Generate an empty array and run an iterator chain on it.
+    ///
+    /// Produces a two-statement sequence:
+    /// ```vole
+    /// let arrN: [i64] = []
+    /// let resN = arrN.iter().map((x) => x * 2_i64).collect()
+    /// ```
+    ///
+    /// This stresses boundary conditions around zero-length collections in the
+    /// iterator pipeline: empty .collect(), .count() == 0, .sum() == 0,
+    /// .first()/.last() returning none, .reduce() returning only the init value,
+    /// .sorted()/.reverse()/.unique() on empty sequences, etc.
+    fn generate_empty_array_iter_let(&mut self, ctx: &mut StmtContext) -> String {
+        // Restrict to well-tested element types for iterator closures
+        let elem_prim = match self.rng.gen_range(0..4) {
+            0 => PrimitiveType::I64,
+            1 => PrimitiveType::F64,
+            2 => PrimitiveType::Bool,
+            _ => PrimitiveType::String,
+        };
+        let elem_ty = TypeInfo::Primitive(elem_prim);
+        let array_ty = TypeInfo::Array(Box::new(elem_ty.clone()));
+        let type_annotation = array_ty.to_vole_syntax(ctx.table);
+
+        let arr_name = ctx.new_local_name();
+        ctx.add_local(arr_name.clone(), array_ty, false);
+
+        let result_name = ctx.new_local_name();
+
+        let is_numeric = matches!(elem_prim, PrimitiveType::I64 | PrimitiveType::F64);
+
+        // Optionally prepend a prefix chain stage (~25%).
+        let prefix: String = if self.rng.gen_bool(0.25) {
+            match self.rng.gen_range(0..4) {
+                0 if is_numeric => ".sorted()".to_string(),
+                1 => ".reverse()".to_string(),
+                2 if elem_prim != PrimitiveType::Bool => ".unique()".to_string(),
+                3 => format!(".skip({})", self.rng.gen_range(0..=1)),
+                _ => ".reverse()".to_string(),
+            }
+        } else {
+            String::new()
+        };
+
+        // Pick a chain + terminal combination.
+        // Weight distribution:
+        //   0..4  => .map().collect()           -> [T]
+        //   4..7  => .filter().collect()         -> [T]
+        //   7..9  => .count()                    -> i64
+        //   9..11 => .sum() (numeric only)       -> T
+        //  11..13 => .first() ?? default         -> T
+        //  13..15 => .last() ?? default           -> T
+        //  15..17 => .reduce(init, closure)       -> T
+        //  17..19 => .take(N).collect()           -> [T]
+        //  19..20 => .map().filter().collect()    -> [T]
+        //  20..21 => .enumerate().count()         -> i64
+        let choice = self.rng.gen_range(0..21);
+
+        let (chain, result_type) = if choice < 4 {
+            // .map().collect()
+            let map_body = self.generate_map_closure_body(elem_prim);
+            (
+                format!(".map((x) => {}).collect()", map_body),
+                TypeInfo::Array(Box::new(elem_ty.clone())),
+            )
+        } else if choice < 7 {
+            // .filter().collect()
+            let filter_body = self.generate_filter_closure_body(elem_prim);
+            (
+                format!(".filter((x) => {}).collect()", filter_body),
+                TypeInfo::Array(Box::new(elem_ty.clone())),
+            )
+        } else if choice < 9 {
+            // .count()
+            (
+                ".count()".to_string(),
+                TypeInfo::Primitive(PrimitiveType::I64),
+            )
+        } else if choice < 11 && is_numeric {
+            // .sum() — numeric only
+            (".sum()".to_string(), TypeInfo::Primitive(elem_prim))
+        } else if choice < 13 {
+            // .first() ?? default
+            let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+            let default_val = expr_gen.literal_for_primitive(elem_prim);
+            (
+                format!(".first() ?? {}", default_val),
+                TypeInfo::Primitive(elem_prim),
+            )
+        } else if choice < 15 {
+            // .last() ?? default
+            let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+            let default_val = expr_gen.literal_for_primitive(elem_prim);
+            (
+                format!(".last() ?? {}", default_val),
+                TypeInfo::Primitive(elem_prim),
+            )
+        } else if choice < 17 && elem_prim != PrimitiveType::Bool {
+            // .reduce(init, closure) — skip bool (codegen limitation)
+            let (init, body, result_ty) = self.generate_reduce_closure(elem_prim);
+            (
+                format!(".reduce({}, (acc, el) => {})", init, body),
+                result_ty,
+            )
+        } else if choice < 19 {
+            // .take(N).collect()
+            let n = self.rng.gen_range(1..=3);
+            (
+                format!(".take({}).collect()", n),
+                TypeInfo::Array(Box::new(elem_ty.clone())),
+            )
+        } else if choice < 20 {
+            // .map().filter().collect()
+            let map_body = self.generate_map_closure_body(elem_prim);
+            let filter_body = self.generate_filter_closure_body_param(elem_prim, "y");
+            (
+                format!(
+                    ".map((x) => {}).filter((y) => {}).collect()",
+                    map_body, filter_body
+                ),
+                TypeInfo::Array(Box::new(elem_ty.clone())),
+            )
+        } else {
+            // .enumerate().count()
+            (
+                ".enumerate().count()".to_string(),
+                TypeInfo::Primitive(PrimitiveType::I64),
+            )
+        };
+
+        ctx.add_local(result_name.clone(), result_type, false);
+
+        let indent = self.indent_str();
+        format!(
+            "let {}: {} = []\n{}let {} = {}.iter(){}{}",
+            arr_name, type_annotation, indent, result_name, arr_name, prefix, chain
+        )
     }
 
     /// Generate a tuple let-binding with destructuring.

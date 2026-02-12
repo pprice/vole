@@ -218,6 +218,8 @@ fn minimal_profile() -> Profile {
             iface_function_call_probability: 0.0,
             // No generic closure+interface chains in minimal (no generics)
             generic_closure_interface_probability: 0.0,
+            // No empty array iter in minimal
+            empty_array_iter_probability: 0.0,
         },
         // No destructured imports in minimal (no multi-layer modules)
         destructured_import_probability: 0.0,
@@ -388,6 +390,8 @@ fn full_profile() -> Profile {
             iface_function_call_probability: 0.10,
             // Generic closure + interface dispatch in iterator chains (~15%)
             generic_closure_interface_probability: 0.15,
+            // Empty array through iterator chain (~6%) — boundary edge case
+            empty_array_iter_probability: 0.06,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -557,6 +561,8 @@ fn deep_nesting_profile() -> Profile {
             iface_function_call_probability: 0.0,
             // No generic closure+interface chains in deep-nesting (no generics)
             generic_closure_interface_probability: 0.0,
+            // Some empty array iter for boundary condition variety
+            empty_array_iter_probability: 0.04,
         },
         // No destructured imports in deep-nesting (single module focus)
         destructured_import_probability: 0.0,
@@ -731,6 +737,8 @@ fn wide_types_profile() -> Profile {
             iface_function_call_probability: 0.06,
             // Some generic closure+interface chains
             generic_closure_interface_probability: 0.06,
+            // Some empty array iter for boundary condition variety
+            empty_array_iter_probability: 0.04,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -895,6 +903,8 @@ fn many_modules_profile() -> Profile {
             iface_function_call_probability: 0.0,
             // No generic closure+interface chains in many-modules - focus on module loading
             generic_closure_interface_probability: 0.0,
+            // No empty array iter in many-modules - focus on module loading
+            empty_array_iter_probability: 0.0,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -1076,6 +1086,8 @@ fn generics_heavy_profile() -> Profile {
             iface_function_call_probability: 0.0,
             // Elevated generic closure+interface chains (~20%) — core focus of this profile
             generic_closure_interface_probability: 0.20,
+            // Some empty array iter for boundary condition variety
+            empty_array_iter_probability: 0.04,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -1252,6 +1264,8 @@ fn stdlib_heavy_profile() -> Profile {
             iface_function_call_probability: 0.08,
             // Some generic closure+interface chains
             generic_closure_interface_probability: 0.08,
+            // Elevated empty array iter (~8%) — stdlib focus stresses iterator boundaries
+            empty_array_iter_probability: 0.08,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -1392,6 +1406,8 @@ fn closures_heavy_profile() -> Profile {
             iface_function_call_probability: 0.08,
             // Some generic closure+interface chains for closure + dispatch combo
             generic_closure_interface_probability: 0.10,
+            // Some empty array iter for boundary condition variety
+            empty_array_iter_probability: 0.06,
         },
         destructured_import_probability: 0.0,
         // HIGH expression-body — exercises => lambda-like syntax on functions
@@ -1576,6 +1592,8 @@ fn fallible_heavy_profile() -> Profile {
             iface_function_call_probability: 0.08,
             // No generic closure+interface chains in fallible-heavy (no generics)
             generic_closure_interface_probability: 0.0,
+            // Some empty array iter for boundary condition variety
+            empty_array_iter_probability: 0.04,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx)
         destructured_import_probability: 0.0,
