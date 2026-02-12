@@ -745,6 +745,19 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             return self.generate_empty_array_iter_let(ctx);
         }
 
+        // Empty string iteration — boundary condition stress test.
+        // Creates `let s = ""` then chains .iter().op().terminal().
+        if self.rng.gen_bool(self.config.empty_array_iter_probability) {
+            return self.generate_empty_string_iter_let(ctx);
+        }
+
+        // Wildcard-only match — degenerate match with only `_ => expr`.
+        if self.rng.gen_bool(0.03) {
+            if let Some(stmt) = self.generate_wildcard_only_match(ctx) {
+                return stmt;
+            }
+        }
+
         // Range-based iterator chain — exercises range iterators (different source
         // than array iterators). Generates `(start..end).iter().chain().terminal()`.
         if self.rng.gen_bool(self.config.range_iter_probability) {
@@ -6031,6 +6044,89 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         let mutability = if is_mutable { "let mut" } else { "let" };
         format!("{} {} = [{}]", mutability, name, elements.join(", "))
+    }
+
+    /// Generate an empty string and run an iterator chain on it.
+    ///
+    /// Produces a two-statement sequence:
+    /// ```vole
+    /// let s = ""
+    /// let result = s.iter().count()
+    /// ```
+    fn generate_empty_string_iter_let(&mut self, ctx: &mut StmtContext) -> String {
+        let str_name = ctx.new_local_name();
+        let result_name = ctx.new_local_name();
+
+        let (chain, result_type) = match self.rng.gen_range(0..5) {
+            0 => (
+                ".iter().collect()".to_string(),
+                TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::String))),
+            ),
+            1 => (
+                ".iter().count()".to_string(),
+                TypeInfo::Primitive(PrimitiveType::I64),
+            ),
+            2 => (
+                ".iter().any((c) => c == \"a\")".to_string(),
+                TypeInfo::Primitive(PrimitiveType::Bool),
+            ),
+            3 => (
+                ".iter().all((c) => c != \"x\")".to_string(),
+                TypeInfo::Primitive(PrimitiveType::Bool),
+            ),
+            _ => (
+                ".iter().map((c) => c + \"!\").collect()".to_string(),
+                TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::String))),
+            ),
+        };
+
+        ctx.add_local(
+            str_name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            false,
+        );
+        ctx.add_local(result_name.clone(), result_type, false);
+
+        format!(
+            "let {} = \"\"\nlet {} = {}{}",
+            str_name, result_name, str_name, chain
+        )
+    }
+
+    /// Generate a match expression with only a wildcard arm.
+    ///
+    /// Produces:
+    /// ```vole
+    /// let result = match var {
+    ///     _ => expr
+    /// }
+    /// ```
+    fn generate_wildcard_only_match(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Find any variable in scope to use as scrutinee
+        let scrutinee = if !ctx.locals.is_empty() && self.rng.gen_bool(0.7) {
+            let idx = self.rng.gen_range(0..ctx.locals.len());
+            ctx.locals[idx].0.clone()
+        } else if !ctx.params.is_empty() {
+            let idx = self.rng.gen_range(0..ctx.params.len());
+            ctx.params[idx].name.clone()
+        } else {
+            return None;
+        };
+
+        let result_type = self.random_primitive_type();
+        let result_name = ctx.new_local_name();
+        let expr_ctx = ctx.to_expr_context();
+        let value_expr = self.generate_match_arm_value(&result_type, &expr_ctx);
+
+        let indent = "    ".repeat(self.indent + 1);
+        let close_indent = "    ".repeat(self.indent);
+
+        ctx.add_local(result_name.clone(), result_type, false);
+
+        Some(format!(
+            "let {} = match {} {{\n{}_ => {}\n{}}}",
+            result_name, scrutinee, indent, value_expr, close_indent
+        ))
     }
 
     /// Generate an empty array and run an iterator chain on it.
