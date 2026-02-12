@@ -91,6 +91,13 @@ pub struct PlanConfig {
     /// Only applies to non-generic functions when non-generic interfaces with
     /// implementing classes are available in the module. Exercises vtable dispatch.
     pub interface_param_probability: f64,
+    /// Probability (0.0-1.0) that a function is a "generic closure interface" function.
+    /// These functions are specifically shaped to enable the `generic_closure_interface`
+    /// pattern in statement generation: they have a constrained type parameter, a
+    /// matching `(i64) -> i64` or `(i32) -> i32` closure parameter, and a matching
+    /// `[i64]` or `[i32]` array parameter. Without this dedicated planner path, the
+    /// triple-condition alignment is astronomically rare by random chance.
+    pub generic_closure_interface_fn_probability: f64,
 }
 
 impl Default for PlanConfig {
@@ -127,6 +134,7 @@ impl Default for PlanConfig {
             struct_param_probability: 0.10,
             struct_return_probability: 0.10,
             interface_param_probability: 0.10,
+            generic_closure_interface_fn_probability: 0.0,
         }
     }
 }
@@ -355,6 +363,10 @@ fn plan_module_declarations<R: Rng>(
             && rng.gen_bool(config.generator_probability)
         {
             plan_generator(rng, table, names, module_id);
+        } else if config.generic_closure_interface_fn_probability > 0.0
+            && rng.gen_bool(config.generic_closure_interface_fn_probability)
+        {
+            plan_generic_closure_interface_fn(rng, table, names, module_id);
         } else if config.never_probability > 0.0 && rng.gen_bool(config.never_probability) {
             plan_never_function(rng, table, names, module_id, config);
         } else {
@@ -576,8 +588,10 @@ fn plan_function<R: Rng>(
         }
     }
 
-    // ~10% chance to add a function-typed parameter (only for non-generic functions)
-    if type_params.is_empty() && rng.gen_bool(0.10) {
+    // ~10% chance to add a function-typed parameter.
+    // For generic functions, this enables the combination of closures + interface
+    // dispatch in iterator chains (generic_closure_interface feature).
+    if rng.gen_bool(0.10) {
         params.push(plan_function_typed_param(rng, names));
     }
 
@@ -601,6 +615,92 @@ fn plan_function<R: Rng>(
     } else {
         plan_return_type_with_type_params(rng, &type_params)
     };
+
+    let kind = SymbolKind::Function(FunctionInfo {
+        type_params,
+        params,
+        return_type,
+    });
+
+    table
+        .get_module_mut(module_id)
+        .map(|m| m.add_symbol(name, kind))
+        .unwrap_or(SymbolId(0))
+}
+
+/// Plan a "generic closure interface" function declaration.
+///
+/// These functions are specifically shaped to enable the
+/// `generic_closure_interface` iterator chain pattern in statement generation.
+/// They guarantee all three ingredients:
+/// 1. At least one type parameter (will get constrained in Phase 3.5)
+/// 2. A `(i64) -> i64` or `(i32) -> i32` closure parameter
+/// 3. A matching `[i64]` or `[i32]` array parameter
+/// 4. A type-param-typed parameter (the constrained instance)
+///
+/// The function returns the matching array type (e.g., `[i64]`) to enable
+/// the `.iter().map(transform).filter(...).collect()` pattern to type-check.
+fn plan_generic_closure_interface_fn<R: Rng>(
+    rng: &mut R,
+    table: &mut SymbolTable,
+    names: &mut NameGen,
+    module_id: ModuleId,
+) -> SymbolId {
+    let name = names.next("func");
+
+    // 1-3 type parameters; at least one will become constrained in Phase 3.5
+    let type_param_count = rng.gen_range(1..=3);
+    let type_params = plan_type_params(names, type_param_count);
+
+    // Pick the element type: i64 or i32
+    let elem_prim = match rng.gen_range(0..2) {
+        0 => PrimitiveType::I64,
+        _ => PrimitiveType::I32,
+    };
+    let elem_type = TypeInfo::Primitive(elem_prim);
+
+    // Build params in shuffled order to vary the signatures
+    let mut params = Vec::new();
+
+    // Required: array param ([i64] or [i32])
+    params.push(ParamInfo {
+        name: names.next("param"),
+        param_type: TypeInfo::Array(Box::new(elem_type.clone())),
+    });
+
+    // Required: type-param-typed param (the constrained instance)
+    // Pick a random type param for this
+    let tp_idx = rng.gen_range(0..type_params.len());
+    params.push(ParamInfo {
+        name: names.next("param"),
+        param_type: TypeInfo::TypeParam(type_params[tp_idx].name.clone()),
+    });
+
+    // Required: matching closure param
+    params.push(ParamInfo {
+        name: names.next("param"),
+        param_type: TypeInfo::Function {
+            param_types: vec![elem_type.clone()],
+            return_type: Box::new(elem_type.clone()),
+        },
+    });
+
+    // Optionally add 0-2 more random params for variety
+    let extra_params = rng.gen_range(0..=2);
+    for _ in 0..extra_params {
+        params.push(plan_param_with_type_params(rng, names, &type_params));
+    }
+
+    // Shuffle the params to avoid always having the same order
+    // (Fisher-Yates shuffle)
+    let n = params.len();
+    for i in (1..n).rev() {
+        let j = rng.gen_range(0..=i);
+        params.swap(i, j);
+    }
+
+    // Return the matching array type so `.iter().map().filter().collect()` works
+    let return_type = TypeInfo::Array(Box::new(elem_type));
 
     let kind = SymbolKind::Function(FunctionInfo {
         type_params,
@@ -967,6 +1067,15 @@ fn plan_param_with_type_params<R: Rng>(
         // 30% chance to use a type parameter if available
         let idx = rng.gen_range(0..type_params.len());
         TypeInfo::TypeParam(type_params[idx].name.clone())
+    } else if !type_params.is_empty() && rng.gen_bool(0.10) {
+        // 10% chance to generate an array param in generic functions.
+        // This enables generic-closure-interface iterator chains that
+        // operate on arrays while using constrained type params.
+        let elem = match rng.gen_range(0..2) {
+            0 => PrimitiveType::I64,
+            _ => PrimitiveType::I32,
+        };
+        TypeInfo::Array(Box::new(TypeInfo::Primitive(elem)))
     } else {
         TypeInfo::Primitive(PrimitiveType::random_expr_type(rng))
     };

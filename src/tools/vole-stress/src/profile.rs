@@ -114,6 +114,8 @@ fn minimal_profile() -> Profile {
         struct_param_probability: 0.0,
         struct_return_probability: 0.0,
         interface_param_probability: 0.0,
+        // No generics in minimal
+        generic_closure_interface_fn_probability: 0.0,
         // These won't be used since we have no classes or structs
         fields_per_struct: (0, 0),
         fields_per_class: (0, 0),
@@ -212,6 +214,8 @@ fn minimal_profile() -> Profile {
             iter_map_filter_probability: 0.0,
             // No interface function calls in minimal (no interfaces)
             iface_function_call_probability: 0.0,
+            // No generic closure+interface chains in minimal (no generics)
+            generic_closure_interface_probability: 0.0,
         },
         // No destructured imports in minimal (no multi-layer modules)
         destructured_import_probability: 0.0,
@@ -288,6 +292,8 @@ fn full_profile() -> Profile {
         struct_return_probability: 0.10,
         // ~12% of non-generic functions get an interface-typed param (vtable dispatch)
         interface_param_probability: 0.12,
+        // ~15% of planned functions get the "generic closure interface" shape
+        generic_closure_interface_fn_probability: 0.15,
     };
 
     let emit = EmitConfig {
@@ -376,6 +382,8 @@ fn full_profile() -> Profile {
             iter_map_filter_probability: 0.10,
             // Calls to free functions with interface-typed params (~10%)
             iface_function_call_probability: 0.10,
+            // Generic closure + interface dispatch in iterator chains (~15%)
+            generic_closure_interface_probability: 0.15,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -434,6 +442,8 @@ fn deep_nesting_profile() -> Profile {
         struct_param_probability: 0.10,
         struct_return_probability: 0.10,
         interface_param_probability: 0.0,
+        // No generics in deep-nesting
+        generic_closure_interface_fn_probability: 0.0,
         // Minimal class/struct structure
         fields_per_struct: (0, 0),
         fields_per_class: (1, 2),
@@ -539,6 +549,8 @@ fn deep_nesting_profile() -> Profile {
             iter_map_filter_probability: 0.06,
             // No interface function calls in deep-nesting (no interfaces)
             iface_function_call_probability: 0.0,
+            // No generic closure+interface chains in deep-nesting (no generics)
+            generic_closure_interface_probability: 0.0,
         },
         // No destructured imports in deep-nesting (single module focus)
         destructured_import_probability: 0.0,
@@ -593,7 +605,9 @@ fn wide_types_profile() -> Profile {
         params_per_function: (20, 50),
         // Many type parameters for generics: 5-10
         type_params_per_class: (5, 10),
-        type_params_per_interface: (3, 6),
+        // Range starts at 0 so some interfaces are non-generic —
+        // only non-generic interfaces can serve as type param constraints (T: IFace).
+        type_params_per_interface: (0, 6),
         type_params_per_function: (5, 10),
         // Multiple constraints per type param
         constraints_per_type_param: (1, 3),
@@ -616,6 +630,8 @@ fn wide_types_profile() -> Profile {
         struct_return_probability: 0.10,
         // Some interface-typed params for vtable dispatch coverage
         interface_param_probability: 0.08,
+        // Some GCI functions for closure+generic+iterator coverage
+        generic_closure_interface_fn_probability: 0.06,
     };
 
     let emit = EmitConfig {
@@ -705,6 +721,8 @@ fn wide_types_profile() -> Profile {
             iter_map_filter_probability: 0.06,
             // Some interface function calls for vtable dispatch
             iface_function_call_probability: 0.06,
+            // Some generic closure+interface chains
+            generic_closure_interface_probability: 0.06,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -773,6 +791,8 @@ fn many_modules_profile() -> Profile {
         struct_param_probability: 0.10,
         struct_return_probability: 0.10,
         interface_param_probability: 0.0,
+        // No GCI functions - focus on module loading
+        generic_closure_interface_fn_probability: 0.0,
     };
 
     let emit = EmitConfig {
@@ -863,6 +883,8 @@ fn many_modules_profile() -> Profile {
             iter_map_filter_probability: 0.0,
             // No interface function calls in many-modules - focus on module loading
             iface_function_call_probability: 0.0,
+            // No generic closure+interface chains in many-modules - focus on module loading
+            generic_closure_interface_probability: 0.0,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -920,7 +942,9 @@ fn generics_heavy_profile() -> Profile {
         params_per_function: (2, 4),
         // High type parameter counts for deep generics (2-4 type params)
         type_params_per_class: (2, 4),
-        type_params_per_interface: (1, 3),
+        // Range starts at 0 so some interfaces are non-generic —
+        // only non-generic interfaces can serve as type param constraints (T: IFace).
+        type_params_per_interface: (0, 3),
         type_params_per_function: (2, 4),
         // Multiple constraints per type param for T: A + B + C patterns
         constraints_per_type_param: (1, 3),
@@ -943,6 +967,8 @@ fn generics_heavy_profile() -> Profile {
         struct_param_probability: 0.0,
         struct_return_probability: 0.0,
         interface_param_probability: 0.0,
+        // Elevated probability for GCI functions - core generics focus
+        generic_closure_interface_fn_probability: 0.20,
     };
 
     let emit = EmitConfig {
@@ -1036,6 +1062,8 @@ fn generics_heavy_profile() -> Profile {
             iter_map_filter_probability: 0.06,
             // No interface function calls in generics-heavy (focus on generics)
             iface_function_call_probability: 0.0,
+            // Elevated generic closure+interface chains (~20%) — core focus of this profile
+            generic_closure_interface_probability: 0.20,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -1114,6 +1142,8 @@ fn stdlib_heavy_profile() -> Profile {
         struct_return_probability: 0.10,
         // Some interface-typed params for vtable dispatch on stdlib types
         interface_param_probability: 0.10,
+        // Some GCI functions for closure+generic+iterator coverage
+        generic_closure_interface_fn_probability: 0.08,
     };
 
     let emit = EmitConfig {
@@ -1206,6 +1236,8 @@ fn stdlib_heavy_profile() -> Profile {
             iter_map_filter_probability: 0.25,
             // Some interface function calls for vtable dispatch on stdlib types
             iface_function_call_probability: 0.08,
+            // Some generic closure+interface chains
+            generic_closure_interface_probability: 0.08,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -1273,6 +1305,8 @@ fn closures_heavy_profile() -> Profile {
         struct_param_probability: 0.05,
         struct_return_probability: 0.05,
         interface_param_probability: 0.10,
+        // Moderate GCI functions — closures are the focus here
+        generic_closure_interface_fn_probability: 0.10,
     };
 
     let emit = EmitConfig {
@@ -1340,6 +1374,8 @@ fn closures_heavy_profile() -> Profile {
             iter_map_filter_probability: 0.25,
             // Some interface function calls for vtable dispatch
             iface_function_call_probability: 0.08,
+            // Some generic closure+interface chains for closure + dispatch combo
+            generic_closure_interface_probability: 0.10,
         },
         destructured_import_probability: 0.0,
         // HIGH expression-body — exercises => lambda-like syntax on functions
@@ -1427,6 +1463,8 @@ fn fallible_heavy_profile() -> Profile {
         struct_return_probability: 0.08,
         // Some interface-typed params for variety
         interface_param_probability: 0.08,
+        // No GCI functions -- focus on fallible paths
+        generic_closure_interface_fn_probability: 0.0,
     };
 
     let emit = EmitConfig {
@@ -1518,6 +1556,8 @@ fn fallible_heavy_profile() -> Profile {
             iter_map_filter_probability: 0.08,
             // Some interface function calls
             iface_function_call_probability: 0.08,
+            // No generic closure+interface chains in fallible-heavy (no generics)
+            generic_closure_interface_probability: 0.0,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx)
         destructured_import_probability: 0.0,

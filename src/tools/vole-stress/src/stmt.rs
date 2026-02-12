@@ -107,6 +107,14 @@ pub struct StmtConfig {
     /// class instance is passed where an interface type is expected (implicit
     /// upcast at the call site). Set to 0.0 to disable.
     pub iface_function_call_probability: f64,
+    /// Probability of generating a generic-closure-interface iterator chain.
+    /// When inside a generic function with: (a) a type-param-typed parameter
+    /// with interface constraints, (b) a function-typed parameter, and (c) an
+    /// array parameter, generates an iterator chain that combines the closure
+    /// parameter AND interface method dispatch on the constrained type param.
+    /// E.g.: `items.iter().map(transform).filter((n: i64) => n > criterion.threshold()).collect()`
+    /// Set to 0.0 to disable.
+    pub generic_closure_interface_probability: f64,
 }
 
 impl Default for StmtConfig {
@@ -144,6 +152,7 @@ impl Default for StmtConfig {
             union_match_probability: 0.08,
             iter_map_filter_probability: 0.08,
             iface_function_call_probability: 0.08,
+            generic_closure_interface_probability: 0.0,
         }
     }
 }
@@ -582,6 +591,19 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // Iterator map/filter on array variables in scope
         if self.rng.gen_bool(self.config.iter_map_filter_probability) {
             if let Some(stmt) = self.try_generate_iter_map_filter_let(ctx) {
+                return stmt;
+            }
+        }
+
+        // Generic closure + interface dispatch in iterator chains.
+        // When inside a generic function with a constrained type param, a closure param,
+        // and an array in scope, generate a chain like:
+        // `items.iter().map(transform).filter((n: i64) => n > criterion.threshold()).collect()`
+        if self
+            .rng
+            .gen_bool(self.config.generic_closure_interface_probability)
+        {
+            if let Some(stmt) = self.try_generate_generic_closure_interface_chain(ctx) {
                 return stmt;
             }
         }
@@ -2475,6 +2497,254 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     ) -> String {
         let body = self.generate_filter_closure_body(elem_prim);
         body.replace("x", param)
+    }
+
+    /// Try to generate a generic-closure-interface iterator chain statement.
+    ///
+    /// Looks for the combination of:
+    /// 1. An array-typed variable in scope (with primitive element type)
+    /// 2. A function-typed parameter whose signature is `(ElemType) -> ElemType`
+    /// 3. A type-param-typed parameter with interface constraints (whose methods
+    ///    return a comparable primitive type)
+    ///
+    /// When all three are present, generates an iterator chain that uses the
+    /// closure parameter in `.map(transform)` and calls an interface method on
+    /// the constrained type param in `.filter((n: ElemType) => n > criterion.method())`.
+    ///
+    /// Example output:
+    /// ```vole
+    /// let local5 = items.iter().map(transform).filter((n: i64) => n > criterion.threshold()).collect()
+    /// ```
+    ///
+    /// Returns `None` if the required combination is not available in scope.
+    fn try_generate_generic_closure_interface_chain(
+        &mut self,
+        ctx: &mut StmtContext,
+    ) -> Option<String> {
+        let expr_ctx = ctx.to_expr_context();
+
+        // Step 1: Find array-typed variables with safe element types
+        let array_vars = expr_ctx.array_vars();
+        let prim_array_vars: Vec<(String, PrimitiveType)> = array_vars
+            .into_iter()
+            .filter_map(|(name, elem_ty)| {
+                if let TypeInfo::Primitive(prim) = elem_ty {
+                    match prim {
+                        PrimitiveType::I64 | PrimitiveType::I32 => Some((name, prim)),
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if prim_array_vars.is_empty() {
+            return None;
+        }
+
+        // Step 2: Find function-typed params that are (PrimType) -> PrimType
+        // (single-param closures whose input and output are the same numeric type)
+        let fn_params: Vec<(String, PrimitiveType)> = ctx
+            .params
+            .iter()
+            .filter_map(|p| {
+                if let TypeInfo::Function {
+                    param_types,
+                    return_type,
+                } = &p.param_type
+                {
+                    if param_types.len() == 1 {
+                        if let (TypeInfo::Primitive(pt), TypeInfo::Primitive(rt)) =
+                            (&param_types[0], return_type.as_ref())
+                        {
+                            if pt == rt && matches!(pt, PrimitiveType::I64 | PrimitiveType::I32) {
+                                return Some((p.name.clone(), *pt));
+                            }
+                        }
+                    }
+                }
+                None
+            })
+            .collect();
+
+        if fn_params.is_empty() {
+            return None;
+        }
+
+        // Step 3: Find constrained type param variables with interface methods
+        // that return a numeric type suitable for comparison
+        let constrained_vars = expr_ctx.constrained_type_param_vars();
+        if constrained_vars.is_empty() {
+            return None;
+        }
+
+        // Find a (var_name, method_name, params, return_type) tuple where the
+        // method is callable on the constrained type param instance.
+        // We accept any method (including void) — the filter expression adapts:
+        //   - Matching numeric (i64/i32): n > criterion.method()
+        //   - Bool: criterion.method() || n > 0
+        //   - Void/other: call method in a let _ discard, filter uses n > 0
+        let mut iface_candidates: Vec<(String, String, Vec<ParamInfo>, TypeInfo)> = Vec::new();
+        for (var_name, _tp_name, constraints) in &constrained_vars {
+            let methods = crate::expr::get_type_param_constraint_methods(ctx.table, constraints);
+            for (_iface_info, method) in methods {
+                iface_candidates.push((
+                    var_name.clone(),
+                    method.name.clone(),
+                    method.params.clone(),
+                    method.return_type.clone(),
+                ));
+            }
+        }
+
+        if iface_candidates.is_empty() {
+            return None;
+        }
+
+        // Pick an array variable
+        let arr_idx = self.rng.gen_range(0..prim_array_vars.len());
+        let (arr_name, elem_prim) = &prim_array_vars[arr_idx];
+        let elem_prim = *elem_prim;
+        let arr_name = arr_name.clone();
+
+        // Pick a matching function-typed param (must match element type)
+        let matching_fn_params: Vec<&(String, PrimitiveType)> = fn_params
+            .iter()
+            .filter(|(_, pt)| *pt == elem_prim)
+            .collect();
+
+        if matching_fn_params.is_empty() {
+            return None;
+        }
+        let fn_idx = self.rng.gen_range(0..matching_fn_params.len());
+        let (fn_name, _) = matching_fn_params[fn_idx];
+        let fn_name = fn_name.clone();
+
+        // Pick an interface method candidate
+        let iface_idx = self.rng.gen_range(0..iface_candidates.len());
+        let (iface_var, method_name, method_params, method_return_type) =
+            &iface_candidates[iface_idx];
+        let iface_var = iface_var.clone();
+        let method_name = method_name.clone();
+        let method_params = method_params.clone();
+        let method_return_type = method_return_type.clone();
+
+        // Generate method call arguments (for the interface method)
+        let method_args = if method_params.is_empty() {
+            String::new()
+        } else {
+            let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+            method_params
+                .iter()
+                .map(|p| expr_gen.generate_simple(&p.param_type, &expr_ctx))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+
+        let method_call = format!("{}.{}({})", iface_var, method_name, method_args);
+
+        // Determine how to incorporate the method call in filter predicates.
+        // When the method returns the same numeric type as the array element,
+        // use direct comparison: n > criterion.method().
+        // Otherwise, adapt the filter to still exercise the method call.
+        let method_returns_matching_numeric = matches!(
+            method_return_type,
+            TypeInfo::Primitive(p) if p == elem_prim
+        );
+        let method_returns_bool =
+            matches!(method_return_type, TypeInfo::Primitive(PrimitiveType::Bool));
+
+        // Choose the chain pattern: several variations combining closure + interface dispatch
+        let elem_type_name = match elem_prim {
+            PrimitiveType::I64 => "i64",
+            PrimitiveType::I32 => "i32",
+            _ => "i64",
+        };
+
+        // Build the filter predicate based on the method return type.
+        // When the return type matches the element type, compare directly.
+        // For bool returns, combine with a comparison on n.
+        // For other types, use a simple n > 0 and prepend a discard statement
+        // to exercise the interface dispatch.
+        let needs_discard_prefix = !method_returns_matching_numeric && !method_returns_bool;
+
+        let filter_pred = if method_returns_matching_numeric {
+            // Direct comparison: n > criterion.method()
+            format!("(n: {}) => n > {}", elem_type_name, method_call)
+        } else if method_returns_bool {
+            // Boolean dispatch: criterion.method() || n > 0
+            format!("(n: {}) => {} || n > 0", elem_type_name, method_call)
+        } else {
+            // Other/void return type: simple predicate (dispatch is in discard stmt)
+            format!("(n: {}) => n > 0", elem_type_name)
+        };
+
+        let name = ctx.new_local_name();
+        let pattern = self.rng.gen_range(0..6);
+        let (chain, result_type) = match pattern {
+            0 => {
+                // .map(transform).filter(pred).collect()
+                (
+                    format!(".map({}).filter({}).collect()", fn_name, filter_pred),
+                    TypeInfo::Array(Box::new(TypeInfo::Primitive(elem_prim))),
+                )
+            }
+            1 => {
+                // .filter(pred).map(transform).collect()
+                (
+                    format!(".filter({}).map({}).collect()", filter_pred, fn_name),
+                    TypeInfo::Array(Box::new(TypeInfo::Primitive(elem_prim))),
+                )
+            }
+            2 => {
+                // .map(transform).filter(pred).count()
+                (
+                    format!(".map({}).filter({}).count()", fn_name, filter_pred),
+                    TypeInfo::Primitive(PrimitiveType::I64),
+                )
+            }
+            3 => {
+                // .filter(pred).collect()
+                // (closure-only map omitted, just interface dispatch in filter)
+                (
+                    format!(".filter({}).collect()", filter_pred),
+                    TypeInfo::Array(Box::new(TypeInfo::Primitive(elem_prim))),
+                )
+            }
+            4 => {
+                // .map(transform).filter(pred).sum()
+                (
+                    format!(".map({}).filter({}).sum()", fn_name, filter_pred),
+                    TypeInfo::Primitive(elem_prim),
+                )
+            }
+            _ => {
+                // .map(transform).filter(pred).take(N).collect()
+                let take_n = self.rng.gen_range(1..=3);
+                (
+                    format!(
+                        ".map({}).filter({}).take({}).collect()",
+                        fn_name, filter_pred, take_n
+                    ),
+                    TypeInfo::Array(Box::new(TypeInfo::Primitive(elem_prim))),
+                )
+            }
+        };
+
+        ctx.add_local(name.clone(), result_type, false);
+
+        // When the method returns a non-matching/non-bool type, prepend a discard
+        // statement to exercise the interface dispatch before the chain.
+        let chain_stmt = format!("let {} = {}.iter(){}", name, arr_name, chain);
+        if needs_discard_prefix {
+            let discard_name = ctx.new_local_name();
+            ctx.add_local(discard_name.clone(), method_return_type, false);
+            let discard = format!("let {} = {}", discard_name, method_call);
+            Some(format!("{}\n    {}", discard, chain_stmt))
+        } else {
+            Some(chain_stmt)
+        }
     }
 
     /// Try to generate a raise statement in a fallible function body.
