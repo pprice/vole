@@ -20,7 +20,7 @@ use crate::alloc_track;
 use crate::array::RcArray;
 use crate::closure::Closure;
 use crate::string::RcString;
-use crate::value::{RcHeader, TYPE_ITERATOR, TYPE_STRING, rc_dec, rc_inc};
+use crate::value::{RcHeader, TYPE_ITERATOR, TYPE_STRING, rc_dec, rc_inc, tag_needs_rc};
 use std::alloc::{Layout, alloc, dealloc};
 use std::ptr;
 
@@ -72,7 +72,9 @@ macro_rules! for_all_iterator_kinds {
             Skip = 4, source: skip, next: vole_skip_iter_next, owned: [passthrough(skip.source)];
             // Dual source iterators
             Chain = 5, source: chain, next: vole_chain_iter_next, owned: [false];
-            // Flatten yields elements from inner arrays - these are borrowed
+            // Flatten yields borrowed elements from inner arrays. When the outer
+            // is chunks/windows, flatten_next rc_inc's RC elements because inner
+            // arrays are freed on exhaustion.
             Flatten = 6, source: flatten, next: vole_flatten_iter_next, owned: [false];
             FlatMap = 7, source: flat_map, next: vole_flat_map_iter_next, owned: [true];
             Unique = 8, source: unique, next: vole_unique_iter_next, owned: [passthrough(unique.source)];
@@ -2289,12 +2291,20 @@ pub extern "C" fn vole_flatten_iter_collect(iter: *mut RcIterator) -> *mut RcArr
         }
     };
 
+    let needs_rc = tag_needs_rc(elem_tag);
+
     loop {
         let mut value: i64 = 0;
         let has_value = vole_flatten_iter_next(iter, &mut value);
 
         if has_value == 0 {
             break;
+        }
+
+        // Flatten yields borrowed values (owned: false).  For RC types,
+        // rc_inc so the collected array owns its references.
+        if needs_rc && value != 0 {
+            rc_inc(value as *mut u8);
         }
 
         unsafe {
@@ -2603,12 +2613,19 @@ pub extern "C" fn vole_chunks_iter(source: *mut RcIterator, chunk_size: i64) -> 
         0
     };
 
+    let needs_rc = tag_needs_rc(source_elem_tag);
+
     if !source.is_null() && chunk_size > 0 {
         loop {
             let mut value: i64 = 0;
             let has_value = vole_array_iter_next(source, &mut value);
             if has_value == 0 {
                 break;
+            }
+            // The source iterator yields borrowed references.  The elements
+            // array will rc_dec on drop, so we must rc_inc to take ownership.
+            if needs_rc && value != 0 {
+                rc_inc(value as *mut u8);
             }
             unsafe {
                 RcArray::push(
@@ -2661,6 +2678,7 @@ iter_next_fn!(
 
         // Read the inner element type tag to preserve type info (e.g. f64) in sub-arrays.
         let elem_tag = src.inner_elem_tag;
+        let needs_rc = tag_needs_rc(elem_tag);
 
         // Create a new array for this chunk
         let chunk = RcArray::new();
@@ -2671,6 +2689,11 @@ iter_next_fn!(
                 let data = (*src.elements).data;
                 (*data.add(i as usize)).value
             };
+            // The sub-array will rc_dec on drop, so rc_inc to share
+            // ownership with the elements array.
+            if needs_rc && value != 0 {
+                rc_inc(value as *mut u8);
+            }
             unsafe {
                 RcArray::push(chunk, TaggedValue { tag: elem_tag, value });
             }
@@ -2746,12 +2769,19 @@ pub extern "C" fn vole_windows_iter(source: *mut RcIterator, window_size: i64) -
         0
     };
 
+    let needs_rc = tag_needs_rc(source_elem_tag);
+
     if !source.is_null() && window_size > 0 {
         loop {
             let mut value: i64 = 0;
             let has_value = vole_array_iter_next(source, &mut value);
             if has_value == 0 {
                 break;
+            }
+            // The source iterator yields borrowed references.  The elements
+            // array will rc_dec on drop, so we must rc_inc to take ownership.
+            if needs_rc && value != 0 {
+                rc_inc(value as *mut u8);
             }
             unsafe {
                 RcArray::push(
@@ -2805,6 +2835,7 @@ iter_next_fn!(
 
         // Read the inner element type tag to preserve type info (e.g. f64) in sub-arrays.
         let elem_tag = src.inner_elem_tag;
+        let needs_rc = tag_needs_rc(elem_tag);
 
         // Create a new array for this window
         let window = RcArray::new();
@@ -2813,6 +2844,11 @@ iter_next_fn!(
                 let data = (*src.elements).data;
                 (*data.add((src.position + i) as usize)).value
             };
+            // The sub-array will rc_dec on drop, so rc_inc to share
+            // ownership with the elements array.
+            if needs_rc && value != 0 {
+                rc_inc(value as *mut u8);
+            }
             unsafe {
                 RcArray::push(window, TaggedValue { tag: elem_tag, value });
             }
