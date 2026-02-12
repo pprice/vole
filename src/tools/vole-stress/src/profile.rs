@@ -232,6 +232,7 @@ fn minimal_profile() -> Profile {
             sentinel_union_probability: 0.0,
             // No optional destructure match in minimal (no classes/structs)
             optional_destructure_match_probability: 0.0,
+            sentinel_closure_capture_probability: 0.0,
         },
         // No destructured imports in minimal (no multi-layer modules)
         destructured_import_probability: 0.0,
@@ -415,6 +416,7 @@ fn full_profile() -> Profile {
             sentinel_union_probability: 0.15,
             // ~12% optional destructure match on class?/struct? variables
             optional_destructure_match_probability: 0.12,
+            sentinel_closure_capture_probability: 0.10,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -597,6 +599,7 @@ fn deep_nesting_profile() -> Profile {
             sentinel_union_probability: 0.10,
             // Some optional destructure match for nesting variety
             optional_destructure_match_probability: 0.08,
+            sentinel_closure_capture_probability: 0.08,
         },
         // No destructured imports in deep-nesting (single module focus)
         destructured_import_probability: 0.0,
@@ -784,6 +787,7 @@ fn wide_types_profile() -> Profile {
             sentinel_union_probability: 0.10,
             // Some optional destructure match for variety
             optional_destructure_match_probability: 0.10,
+            sentinel_closure_capture_probability: 0.08,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -962,6 +966,7 @@ fn many_modules_profile() -> Profile {
             sentinel_union_probability: 0.0,
             // No optional destructure match in many-modules - focus on module loading
             optional_destructure_match_probability: 0.0,
+            sentinel_closure_capture_probability: 0.0,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -1156,6 +1161,7 @@ fn generics_heavy_profile() -> Profile {
             sentinel_union_probability: 0.0,
             // No optional destructure match in generics-heavy (non-generic classes are rare)
             optional_destructure_match_probability: 0.0,
+            sentinel_closure_capture_probability: 0.0,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -1345,6 +1351,7 @@ fn stdlib_heavy_profile() -> Profile {
             sentinel_union_probability: 0.10,
             // No optional destructure match in stdlib-heavy (not stdlib focus)
             optional_destructure_match_probability: 0.0,
+            sentinel_closure_capture_probability: 0.0,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -1498,6 +1505,7 @@ fn closures_heavy_profile() -> Profile {
             sentinel_union_probability: 0.10,
             // Some optional destructure match for closure variety
             optional_destructure_match_probability: 0.10,
+            sentinel_closure_capture_probability: 0.12,
         },
         destructured_import_probability: 0.0,
         // HIGH expression-body — exercises => lambda-like syntax on functions
@@ -1695,6 +1703,7 @@ fn fallible_heavy_profile() -> Profile {
             sentinel_union_probability: 0.10,
             // No optional destructure match in fallible-heavy (focus on fallible paths)
             optional_destructure_match_probability: 0.0,
+            sentinel_closure_capture_probability: 0.0,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx)
         destructured_import_probability: 0.0,

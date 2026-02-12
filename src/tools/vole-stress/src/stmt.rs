@@ -157,6 +157,12 @@ pub struct StmtConfig {
     /// Exercises optional type + destructuring pattern match codegen paths.
     /// Set to 0.0 to disable.
     pub optional_destructure_match_probability: f64,
+    /// Probability of generating a closure that captures a sentinel union variable.
+    /// Creates a `PrimType | Sentinel` union, then a closure that captures it and
+    /// uses `when { var is Sentinel => ..., _ => ... }` internally. Exercises the
+    /// interaction between closure capture and sentinel union dispatch codegen.
+    /// Set to 0.0 to disable.
+    pub sentinel_closure_capture_probability: f64,
 }
 
 impl Default for StmtConfig {
@@ -201,6 +207,7 @@ impl Default for StmtConfig {
             field_closure_let_probability: 0.0,
             sentinel_union_probability: 0.0,
             optional_destructure_match_probability: 0.0,
+            sentinel_closure_capture_probability: 0.0,
         }
     }
 }
@@ -756,6 +763,16 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             .gen_bool(self.config.optional_destructure_match_probability)
         {
             if let Some(stmt) = self.try_generate_optional_destructure_match(ctx) {
+                return stmt;
+            }
+        }
+
+        // Sentinel closure capture: closure captures PrimType | Sentinel union variable
+        if self
+            .rng
+            .gen_bool(self.config.sentinel_closure_capture_probability)
+        {
+            if let Some(stmt) = self.try_generate_sentinel_closure_capture(ctx) {
                 return stmt;
             }
         }
@@ -2083,6 +2100,69 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         );
 
         Some(format!("{}\n{}", let_stmt, match_stmt))
+    }
+
+    /// Try to generate a closure that captures a sentinel union variable.
+    ///
+    /// Creates a `PrimType | Sentinel` union local, then a closure `(x: i64) -> i64`
+    /// that captures the union variable and uses `when { captured is Sentinel => ..., _ => ... }`
+    /// inside. The closure is immediately invoked with a literal argument.
+    ///
+    /// Example:
+    /// ```vole
+    /// let local0: i64 | Sent1 = Sent1
+    /// let local1 = ((x: i64) -> i64 => when { local0 is Sent1 => x + 1, _ => x })(10)
+    /// ```
+    fn try_generate_sentinel_closure_capture(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let module_id = ctx.module_id?;
+        let module = ctx.table.get_module(module_id)?;
+
+        let sentinels: Vec<_> = module.sentinels().collect();
+        if sentinels.is_empty() {
+            return None;
+        }
+
+        let sentinel_idx = self.rng.gen_range(0..sentinels.len());
+        let sentinel_name = sentinels[sentinel_idx].name.clone();
+        let sentinel_sym_id = sentinels[sentinel_idx].id;
+
+        // Create the union variable: i64 | Sentinel
+        let union_var = ctx.new_local_name();
+        let assign_sentinel = self.rng.gen_bool(0.5);
+        let init_value = if assign_sentinel {
+            sentinel_name.clone()
+        } else {
+            let n = self.rng.gen_range(-100..=100);
+            format!("{}_i64", n)
+        };
+        let union_stmt = format!("let {}: i64 | {} = {}", union_var, sentinel_name, init_value);
+        ctx.add_local(
+            union_var.clone(),
+            TypeInfo::Union(vec![
+                TypeInfo::Primitive(PrimitiveType::I64),
+                TypeInfo::Sentinel(module_id, sentinel_sym_id),
+            ]),
+            false,
+        );
+
+        // Create a closure that captures the union variable
+        let result_var = ctx.new_local_name();
+        let sentinel_val = self.rng.gen_range(1..=100);
+        let arg_val = self.rng.gen_range(1..=50);
+
+        let closure_expr = format!(
+            "((x: i64) -> i64 => when {{ {} is {} => x + {}_i64, _ => x }})({})",
+            union_var, sentinel_name, sentinel_val, arg_val
+        );
+
+        let result_stmt = format!("let {} = {}", result_var, closure_expr);
+        ctx.add_local(
+            result_var,
+            TypeInfo::Primitive(PrimitiveType::I64),
+            false,
+        );
+
+        Some(format!("{}\n{}", union_stmt, result_stmt))
     }
 
     /// Try to generate a widening let statement.
