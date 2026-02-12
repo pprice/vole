@@ -151,6 +151,12 @@ pub struct StmtConfig {
     /// paths (union with sentinel, match on sentinel arm, is-check narrowing).
     /// Set to 0.0 to disable.
     pub sentinel_union_probability: f64,
+    /// Probability of generating an optional destructure match let-binding.
+    /// Creates `let x: ClassName? = ClassName { ... }` (or nil), then generates
+    /// `let result = match x { ClassName { field1, field2 } => expr, nil => default }`.
+    /// Exercises optional type + destructuring pattern match codegen paths.
+    /// Set to 0.0 to disable.
+    pub optional_destructure_match_probability: f64,
 }
 
 impl Default for StmtConfig {
@@ -194,6 +200,7 @@ impl Default for StmtConfig {
             range_iter_probability: 0.0,
             field_closure_let_probability: 0.0,
             sentinel_union_probability: 0.0,
+            optional_destructure_match_probability: 0.0,
         }
     }
 }
@@ -739,6 +746,16 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // Sentinel union let-binding: let x: PrimType | Sentinel = ... then match/is-check
         if self.rng.gen_bool(self.config.sentinel_union_probability) {
             if let Some(stmt) = self.try_generate_sentinel_union_let(ctx) {
+                return stmt;
+            }
+        }
+
+        // Optional destructure match: let x: Type? = ... then match with destructuring
+        if self
+            .rng
+            .gen_bool(self.config.optional_destructure_match_probability)
+        {
+            if let Some(stmt) = self.try_generate_optional_destructure_match(ctx) {
                 return stmt;
             }
         }
@@ -1802,6 +1819,230 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
             Some(format!("{}\n{}", let_stmt, is_stmt))
         }
+    }
+
+    /// Try to generate an optional destructure match let-binding.
+    ///
+    /// Finds a non-generic class or struct with at least one primitive field,
+    /// creates an optional variable (`ClassName?` or `StructName?`), and generates
+    /// a match expression with destructuring:
+    /// ```vole
+    /// let varN: ClassName? = ClassName { field1: val1, field2: val2 }
+    /// let resultN = match varN {
+    ///     ClassName { field1: a, field2: b } => a + b
+    ///     nil => 0
+    /// }
+    /// ```
+    ///
+    /// Returns `None` if no suitable class or struct is available in the current module.
+    fn try_generate_optional_destructure_match(
+        &mut self,
+        ctx: &mut StmtContext,
+    ) -> Option<String> {
+        let module_id = ctx.module_id?;
+        let module = ctx.table.get_module(module_id)?;
+
+        // Collect non-generic classes with at least one primitive field
+        let class_candidates: Vec<_> = module
+            .classes()
+            .filter_map(|sym| {
+                if let SymbolKind::Class(ref info) = sym.kind {
+                    if info.type_params.is_empty() && has_primitive_field(info) {
+                        return Some((sym.id, sym.name.clone(), info.fields.clone(), true));
+                    }
+                }
+                None
+            })
+            .collect();
+
+        // Collect structs with at least one primitive field
+        let struct_candidates: Vec<_> = module
+            .structs()
+            .filter_map(|sym| {
+                if let SymbolKind::Struct(ref info) = sym.kind {
+                    if info.fields.iter().any(|f| f.field_type.is_primitive()) {
+                        return Some((sym.id, sym.name.clone(), info.fields.clone(), false));
+                    }
+                }
+                None
+            })
+            .collect();
+
+        let all_candidates: Vec<_> = class_candidates
+            .into_iter()
+            .chain(struct_candidates)
+            .collect();
+
+        if all_candidates.is_empty() {
+            return None;
+        }
+
+        // Pick a random candidate
+        let idx = self.rng.gen_range(0..all_candidates.len());
+        let (sym_id, type_name, fields, is_class) = &all_candidates[idx];
+        let sym_id = *sym_id;
+        let type_name = type_name.clone();
+        let fields = fields.clone();
+        let is_class = *is_class;
+
+        // Determine the base type and optional type
+        let base_type = if is_class {
+            TypeInfo::Class(module_id, sym_id)
+        } else {
+            TypeInfo::Struct(module_id, sym_id)
+        };
+        let optional_type = TypeInfo::Optional(Box::new(base_type));
+
+        // Create the optional variable name
+        let opt_var_name = ctx.new_local_name();
+
+        // Randomly (50%) assign nil or a constructed instance
+        let assign_nil = self.rng.gen_bool(0.5);
+
+        let init_value = if assign_nil {
+            "nil".to_string()
+        } else {
+            let field_values = self.generate_field_values(&fields, ctx);
+            format!("{} {{ {} }}", type_name, field_values)
+        };
+
+        let let_stmt = format!(
+            "let {}: {}? = {}",
+            opt_var_name, type_name, init_value
+        );
+
+        // Register the optional variable
+        ctx.add_local(opt_var_name.clone(), optional_type, false);
+
+        // Collect primitive fields for the destructure arm body
+        let primitive_fields: Vec<_> = fields
+            .iter()
+            .filter(|f| f.field_type.is_primitive())
+            .collect();
+
+        if primitive_fields.is_empty() {
+            return None;
+        }
+
+        // Generate renamed bindings for each field in the destructure pattern
+        let mut pattern_parts = Vec::new();
+        let mut binding_names = Vec::new();
+        let mut binding_types = Vec::new();
+
+        for field in &fields {
+            let binding = ctx.new_local_name();
+            pattern_parts.push(format!("{}: {}", field.name, binding));
+            binding_names.push(binding);
+            binding_types.push(field.field_type.clone());
+        }
+
+        // Build the destructure arm body expression.
+        // Find numeric fields for arithmetic, or fall back to string .length()
+        let numeric_bindings: Vec<(String, &TypeInfo)> = binding_names
+            .iter()
+            .zip(binding_types.iter())
+            .filter(|(_, ty)| {
+                matches!(
+                    ty,
+                    TypeInfo::Primitive(
+                        PrimitiveType::I64
+                            | PrimitiveType::I32
+                            | PrimitiveType::F64
+                            | PrimitiveType::I8
+                            | PrimitiveType::I16
+                            | PrimitiveType::I128
+                            | PrimitiveType::U8
+                            | PrimitiveType::U16
+                            | PrimitiveType::U32
+                            | PrimitiveType::U64
+                            | PrimitiveType::F32
+                    )
+                )
+            })
+            .map(|(name, ty)| (name.clone(), ty))
+            .collect();
+
+        let string_bindings: Vec<String> = binding_names
+            .iter()
+            .zip(binding_types.iter())
+            .filter(|(_, ty)| matches!(ty, TypeInfo::Primitive(PrimitiveType::String)))
+            .map(|(name, _)| name.clone())
+            .collect();
+
+        let bool_bindings: Vec<String> = binding_names
+            .iter()
+            .zip(binding_types.iter())
+            .filter(|(_, ty)| matches!(ty, TypeInfo::Primitive(PrimitiveType::Bool)))
+            .map(|(name, _)| name.clone())
+            .collect();
+
+        // Build the arm body expression (result type is i64)
+        // Filter numeric bindings to only i64/i32 (both widen to i64 implicitly)
+        let i64_compatible: Vec<&(String, &TypeInfo)> = numeric_bindings
+            .iter()
+            .filter(|(_, ty)| {
+                matches!(
+                    ty,
+                    TypeInfo::Primitive(PrimitiveType::I64)
+                        | TypeInfo::Primitive(PrimitiveType::I32)
+                )
+            })
+            .collect();
+
+        let arm_body = if !i64_compatible.is_empty() {
+            // Combine i64/i32 fields with arithmetic (i32 widens to i64 implicitly)
+            let ops = [" + ", " * ", " - "];
+            let op = ops[self.rng.gen_range(0..ops.len())];
+            let parts: Vec<&str> = i64_compatible
+                .iter()
+                .take(3)
+                .map(|(name, _)| name.as_str())
+                .collect();
+            parts.join(op)
+        } else if !string_bindings.is_empty() {
+            // Use .length() on the first string field
+            format!("{}.length()", string_bindings[0])
+        } else if !bool_bindings.is_empty() {
+            // Convert bool to i64 using when expression (if is not an expression in vole)
+            format!(
+                "when {{ {} => 1_i64, _ => 0_i64 }}",
+                bool_bindings[0]
+            )
+        } else {
+            // Fallback: just return 1
+            "1_i64".to_string()
+        };
+
+        // Generate the nil arm default value
+        let nil_values = ["-1_i64", "0_i64", "42_i64"];
+        let nil_value = nil_values[self.rng.gen_range(0..nil_values.len())];
+
+        // Build the match expression
+        let result_name = ctx.new_local_name();
+        let indent = "    ".repeat(self.indent + 1);
+        let close_indent = "    ".repeat(self.indent);
+
+        let match_stmt = format!(
+            "let {} = match {} {{\n{}{} {{ {} }} => {}\n{}nil => {}\n{}}}",
+            result_name,
+            opt_var_name,
+            indent,
+            type_name,
+            pattern_parts.join(", "),
+            arm_body,
+            indent,
+            nil_value,
+            close_indent,
+        );
+
+        // Register the result local as i64
+        ctx.add_local(
+            result_name,
+            TypeInfo::Primitive(PrimitiveType::I64),
+            false,
+        );
+
+        Some(format!("{}\n{}", let_stmt, match_stmt))
     }
 
     /// Try to generate a widening let statement.
