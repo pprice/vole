@@ -1159,6 +1159,18 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: method call on a literal value (string/numeric)
+        if self.rng.gen_bool(0.02) {
+            return self.generate_literal_method_call(ctx);
+        }
+
+        // ~2% chance: nested when-in-when expression
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_nested_when(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -5139,6 +5151,207 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
 
         Some(stmts.join(&format!("\n{}", indent)))
+    }
+
+    /// Generate a method call directly on a literal value.
+    ///
+    /// Tests the compiler's handling of method dispatch on temporaries/immediates:
+    /// ```vole
+    /// let n = "hello world".length()        // 11
+    /// let s = 42.to_string()                // "42"
+    /// let b = "hello".contains("ell")       // true
+    /// let c = "a,b,c".split(",").count()    // 3
+    /// let t = "  hello  ".trim()            // "hello"
+    /// ```
+    fn generate_literal_method_call(&mut self, ctx: &mut StmtContext) -> String {
+        let result_name = ctx.new_local_name();
+
+        let variant = self.rng.gen_range(0..7u32);
+        match variant {
+            0 => {
+                // "literal".length()
+                let lit = match self.rng.gen_range(0..4u32) {
+                    0 => "\"hello\"",
+                    1 => "\"\"",
+                    2 => "\"a\"",
+                    _ => "\"hello world\"",
+                };
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::I64),
+                    false,
+                );
+                format!("let {} = {}.length()", result_name, lit)
+            }
+            1 => {
+                // numeric.to_string()
+                let num = self.rng.gen_range(-100..=100);
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::String),
+                    false,
+                );
+                format!("let {} = {}.to_string()", result_name, num)
+            }
+            2 => {
+                // "literal".contains("sub")
+                let (lit, sub, _expected) = match self.rng.gen_range(0..3u32) {
+                    0 => ("\"hello world\"", "\"world\"", true),
+                    1 => ("\"abcdef\"", "\"xyz\"", false),
+                    _ => ("\"test\"", "\"es\"", true),
+                };
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::Bool),
+                    false,
+                );
+                format!("let {} = {}.contains({})", result_name, lit, sub)
+            }
+            3 => {
+                // "a,b,c".split(",").count()
+                let (lit, delim) = match self.rng.gen_range(0..3u32) {
+                    0 => ("\"a,b,c\"", "\",\""),
+                    1 => ("\"one-two-three\"", "\"-\""),
+                    _ => ("\"x\"", "\",\""),
+                };
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::I64),
+                    false,
+                );
+                format!("let {} = {}.split({}).count()", result_name, lit, delim)
+            }
+            4 => {
+                // "  hello  ".trim()
+                let lit = match self.rng.gen_range(0..3u32) {
+                    0 => "\"  hello  \"",
+                    1 => "\"  \"",
+                    _ => "\"no-spaces\"",
+                };
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::String),
+                    false,
+                );
+                format!("let {} = {}.trim()", result_name, lit)
+            }
+            5 => {
+                // "HELLO".to_lower()
+                let lit = match self.rng.gen_range(0..3u32) {
+                    0 => "\"HELLO\"",
+                    1 => "\"World\"",
+                    _ => "\"ABC\"",
+                };
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::String),
+                    false,
+                );
+                format!("let {} = {}.to_lower()", result_name, lit)
+            }
+            _ => {
+                // "hello".to_upper()
+                let lit = match self.rng.gen_range(0..3u32) {
+                    0 => "\"hello\"",
+                    1 => "\"world\"",
+                    _ => "\"abc\"",
+                };
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::String),
+                    false,
+                );
+                format!("let {} = {}.to_upper()", result_name, lit)
+            }
+        }
+    }
+
+    /// Generate a nested when-in-when expression.
+    ///
+    /// Tests the compiler's handling of nested conditional expressions:
+    /// ```vole
+    /// let x = when {
+    ///     cond1 => when { cond2 => a, _ => b },
+    ///     _ => c
+    /// }
+    /// ```
+    fn try_generate_nested_when(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Need at least 2 bool-producing expressions
+        let i64_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::I64)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::I64)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        if i64_vars.is_empty() {
+            return None;
+        }
+
+        let result_name = ctx.new_local_name();
+
+        // Pick comparison values for conditions
+        let cond1_var = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+        let cond1_thresh = self.rng.gen_range(-10..=10);
+        let cond1_op = match self.rng.gen_range(0..3u32) {
+            0 => ">",
+            1 => "<",
+            _ => ">=",
+        };
+
+        let cond2_var = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+        let cond2_thresh = self.rng.gen_range(-10..=10);
+        let cond2_op = match self.rng.gen_range(0..3u32) {
+            0 => ">",
+            1 => "<=",
+            _ => "==",
+        };
+
+        let indent = self.indent_str();
+
+        // Choose between i64 result and string result
+        if self.rng.gen_bool(0.5) {
+            // i64 result
+            let vals: Vec<i64> = (0..3).map(|_| self.rng.gen_range(-20..=20)).collect();
+            ctx.add_local(
+                result_name.clone(),
+                TypeInfo::Primitive(PrimitiveType::I64),
+                false,
+            );
+            Some(format!(
+                "let {} = when {{\n{indent}    {} {} {} => when {{ {} {} {} => {}, _ => {} }},\n{indent}    _ => {}\n{indent}}}",
+                result_name,
+                cond1_var, cond1_op, cond1_thresh,
+                cond2_var, cond2_op, cond2_thresh,
+                vals[0], vals[1], vals[2],
+                indent = indent,
+            ))
+        } else {
+            // string result
+            let strs = ["\"big\"", "\"medium\"", "\"small\"", "\"tiny\"", "\"zero\""];
+            let s0 = strs[self.rng.gen_range(0..strs.len())];
+            let s1 = strs[self.rng.gen_range(0..strs.len())];
+            let s2 = strs[self.rng.gen_range(0..strs.len())];
+            ctx.add_local(
+                result_name.clone(),
+                TypeInfo::Primitive(PrimitiveType::String),
+                false,
+            );
+            Some(format!(
+                "let {} = when {{\n{indent}    {} {} {} => when {{ {} {} {} => {}, _ => {} }},\n{indent}    _ => {}\n{indent}}}",
+                result_name,
+                cond1_var, cond1_op, cond1_thresh,
+                cond2_var, cond2_op, cond2_thresh,
+                s0, s1, s2,
+                indent = indent,
+            ))
+        }
     }
 
     fn try_generate_bool_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
