@@ -3407,7 +3407,9 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let type_annotation = array_ty.to_vole_syntax(ctx.table);
 
         let arr_name = ctx.new_local_name();
-        ctx.add_local(arr_name.clone(), array_ty, false);
+        // NOTE: intentionally NOT calling ctx.add_local() for the empty array.
+        // Registering it would make it available to try_generate_array_index(),
+        // which assumes arrays have 2-4 elements and would generate OOB accesses.
 
         let result_name = ctx.new_local_name();
 
