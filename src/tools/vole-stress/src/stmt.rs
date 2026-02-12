@@ -1990,7 +1990,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             .collect();
 
         let arm_body = if !i64_compatible.is_empty() {
-            // Combine i64/i32 fields with arithmetic (i32 widens to i64 implicitly)
+            // Combine i64/i32 fields with arithmetic
             let ops = [" + ", " * ", " - "];
             let op = ops[self.rng.gen_range(0..ops.len())];
             let parts: Vec<&str> = i64_compatible
@@ -1998,7 +1998,17 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 .take(3)
                 .map(|(name, _)| name.as_str())
                 .collect();
-            parts.join(op)
+            let expr = parts.join(op);
+            // If any field is i32, add `+ 0_i64` to force widening to i64
+            // (otherwise the nil arm type i64 won't match the i32 arm)
+            let has_i32 = i64_compatible
+                .iter()
+                .any(|(_, ty)| matches!(ty, TypeInfo::Primitive(PrimitiveType::I32)));
+            if has_i32 {
+                format!("{} + 0_i64", expr)
+            } else {
+                expr
+            }
         } else if !string_bindings.is_empty() {
             // Use .length() on the first string field
             format!("{}.length()", string_bindings[0])
