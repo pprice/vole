@@ -97,10 +97,12 @@ impl Analyzer {
                 let var_ty_id = self.scope.get(*name).map(|v| v.ty);
                 if let Some(var_ty_id) = var_ty_id {
                     // Record capture if inside a lambda and variable is from outer scope
-                    if self.in_lambda() && !self.is_lambda_local(*name)
-                        && let Some(var) = self.scope.get(*name) {
-                            self.record_capture(*name, var.mutable);
-                        }
+                    if self.in_lambda()
+                        && !self.is_lambda_local(*name)
+                        && let Some(var) = self.scope.get(*name)
+                    {
+                        self.record_capture(*name, var.mutable);
+                    }
                     // Check type compatibility using TypeId
                     if !self.types_compatible_id(var_ty_id, scrutinee_type_id, interner)
                         && !self.types_compatible_id(scrutinee_type_id, var_ty_id, interner)

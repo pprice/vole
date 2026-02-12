@@ -74,8 +74,17 @@ impl Cg<'_, '_, '_> {
         // Extract concrete_return_hint for builtin iterator methods (array.iter, string.iter, range.iter)
         let concrete_return_hint = resolution.and_then(|r| r.concrete_return_hint());
 
-        // Handle range.iter() specially since range expressions can't be compiled to values directly
-        if let ExprKind::Range(range) = &mc.object.kind {
+        // Handle range.iter() specially since range expressions can't be compiled to values directly.
+        // Unwrap Grouping nodes (parenthesization) so `(0..n).iter()` is handled here
+        // instead of falling through to builtin_method.
+        let unwrapped_object = {
+            let mut expr = &mc.object;
+            while let ExprKind::Grouping(inner) = &expr.kind {
+                expr = inner;
+            }
+            expr
+        };
+        if let ExprKind::Range(range) = &unwrapped_object.kind {
             let method_name = self.interner().resolve(mc.method);
             if method_name == "iter" {
                 return self.range_iter(range, concrete_return_hint);
@@ -882,9 +891,14 @@ impl Cg<'_, '_, '_> {
         // Call vole_range_iter(start, end) -> RuntimeIterator<i64>
         let result = self.call_runtime(RuntimeFn::RangeIter, &[start.value, end_value])?;
 
-        // Use sema's pre-computed RuntimeIterator type
-        let iter_type_id = iter_type_hint
-            .expect("INTERNAL: range iterator: missing concrete_return_hint from sema");
+        // Use sema's pre-computed RuntimeIterator type, or look it up from the
+        // element type (needed for monomorphized generic functions where sema
+        // resolution is skipped).
+        let iter_type_id = iter_type_hint.unwrap_or_else(|| {
+            self.arena()
+                .lookup_runtime_iterator(TypeId::I64)
+                .expect("INTERNAL: range iterator: RuntimeIterator<i64> type not pre-created")
+        });
         Ok(CompiledValue::owned(result, self.ptr_type(), iter_type_id))
     }
 
@@ -941,10 +955,16 @@ impl Cg<'_, '_, '_> {
                 }
                 "iter" => {
                     let result = self.call_runtime(RuntimeFn::StringCharsIter, &[obj.value])?;
-                    // Use sema's pre-computed RuntimeIterator type
-                    let iter_type_id = iter_type_hint.expect(
-                        "INTERNAL: string iterator: missing concrete_return_hint from sema",
-                    );
+                    // Use sema's pre-computed RuntimeIterator type, or look it up
+                    // (needed for monomorphized generic functions where sema
+                    // resolution is skipped).
+                    let iter_type_id = iter_type_hint.unwrap_or_else(|| {
+                        self.arena()
+                            .lookup_runtime_iterator(TypeId::STRING)
+                            .expect(
+                                "INTERNAL: string iterator: RuntimeIterator<string> type not pre-created",
+                            )
+                    });
                     // Set elem_tag to TYPE_STRING so terminal methods can properly
                     // free owned char strings produced by the string chars iterator.
                     let string_tag = crate::types::unknown_type_tag(TypeId::STRING, self.arena());
@@ -978,9 +998,14 @@ impl Cg<'_, '_, '_> {
                     .ins()
                     .load(types::I64, MemFlags::new(), obj.value, 8);
                 let result = self.call_runtime(RuntimeFn::RangeIter, &[start, end])?;
-                // Use sema's pre-computed RuntimeIterator type
-                let iter_type_id = iter_type_hint
-                    .expect("INTERNAL: range.iter(): missing concrete_return_hint from sema");
+                // Use sema's pre-computed RuntimeIterator type, or look it up from
+                // the element type (needed for monomorphized generic functions where
+                // sema resolution is skipped).
+                let iter_type_id = iter_type_hint.unwrap_or_else(|| {
+                    self.arena()
+                        .lookup_runtime_iterator(TypeId::I64)
+                        .expect("INTERNAL: range.iter(): RuntimeIterator<i64> type not pre-created")
+                });
                 return Ok(Some(CompiledValue::owned(
                     result,
                     self.ptr_type(),
