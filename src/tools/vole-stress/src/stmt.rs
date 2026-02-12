@@ -1265,6 +1265,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: identity arithmetic edge case (x + 0, x * 1, etc.)
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_identity_arithmetic(ctx) {
+                return stmt;
+            }
+        }
+
+        // ~2% chance: string equality edge case (s == s, "" == "", etc.)
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_string_equality_let(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -6404,6 +6418,101 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             "{} = when {{ {} {} {} => {}, _ => {} }}",
             target, cond_var, op, thresh, val_true, val_false
         ))
+    }
+
+    /// Generate identity arithmetic edge cases: x + 0, x * 1, x - 0, 0 + x, 1 * x, x - x.
+    /// These test that the compiler handles trivial arithmetic correctly.
+    fn try_generate_identity_arithmetic(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let i64_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::I64)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::I64)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        if i64_vars.is_empty() {
+            return None;
+        }
+
+        let var = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+        let name = ctx.new_local_name();
+
+        let expr = match self.rng.gen_range(0..6u32) {
+            0 => format!("{} + 0", var),      // x + 0 == x
+            1 => format!("{} * 1", var),      // x * 1 == x
+            2 => format!("{} - 0", var),      // x - 0 == x
+            3 => format!("0 + {}", var),      // 0 + x == x
+            4 => format!("1 * {}", var),      // 1 * x == x
+            _ => {
+                // x - x == 0
+                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::I64), false);
+                return Some(format!("let {} = {} - {}", name, var, var));
+            }
+        };
+
+        ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::I64), false);
+        Some(format!("let {} = {}", name, expr))
+    }
+
+    /// Generate string equality edge cases: s == s, "" == "", s.length() == s.length().
+    /// These test string comparison and method-call-in-comparison codegen.
+    fn try_generate_string_equality_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let string_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::String)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| {
+                        matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::String))
+                    })
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        let name = ctx.new_local_name();
+
+        let expr = match self.rng.gen_range(0..5u32) {
+            0 if !string_vars.is_empty() => {
+                // s == s (always true)
+                let var = &string_vars[self.rng.gen_range(0..string_vars.len())];
+                format!("{} == {}", var, var)
+            }
+            1 => {
+                // "" == "" (always true)
+                "\"\" == \"\"".to_string()
+            }
+            2 if !string_vars.is_empty() => {
+                // s.length() == s.length() (always true)
+                let var = &string_vars[self.rng.gen_range(0..string_vars.len())];
+                format!("{}.length() == {}.length()", var, var)
+            }
+            3 if !string_vars.is_empty() => {
+                // s + "" == s (always true)
+                let var = &string_vars[self.rng.gen_range(0..string_vars.len())];
+                format!("{} + \"\" == {}", var, var)
+            }
+            _ => {
+                // "hello" == "hello" (always true)
+                let s = match self.rng.gen_range(0..3u32) {
+                    0 => "hello",
+                    1 => "test",
+                    _ => "abc",
+                };
+                format!("\"{}\" == \"{}\"", s, s)
+            }
+        };
+
+        ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::Bool), false);
+        Some(format!("let {} = {}", name, expr))
     }
 
     fn try_generate_bool_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
