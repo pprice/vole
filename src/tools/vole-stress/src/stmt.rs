@@ -1098,6 +1098,13 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: map-to-string-then-reduce (join pattern)
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_map_tostring_reduce(ctx) {
+                return stmt;
+            }
+        }
+
         // ~2% chance: numeric .to_string() in string expression
         if self.rng.gen_bool(0.02) {
             if let Some(stmt) = self.try_generate_to_string_let(ctx) {
@@ -2953,6 +2960,15 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                     // "text {when { flag => 1, _ => 0 }}"
                     format!("when {{ {} => 1, _ => 0 }}", name)
                 }
+                5 if matches!(
+                    prim,
+                    PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::F64
+                ) =>
+                {
+                    // .to_string() inside interpolation (feature interaction):
+                    // "text {num.to_string()}"
+                    format!("{}.to_string()", name)
+                }
                 _ => {
                     // Simple variable reference (fallback)
                     name.clone()
@@ -4643,6 +4659,47 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         );
 
         Some(format!("let {} = {}", name, expr))
+    }
+
+    /// Generate `arr.iter().map((el) => el.to_string()).reduce("", (acc, el) => acc + el + sep)`.
+    /// Converts a numeric array to a joined string via map+reduce.
+    fn try_generate_map_tostring_reduce(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let expr_ctx = ctx.to_expr_context();
+        let array_vars = expr_ctx.array_vars();
+        let i64_arrays: Vec<String> = array_vars
+            .into_iter()
+            .filter_map(|(name, elem_ty)| {
+                if matches!(elem_ty, TypeInfo::Primitive(PrimitiveType::I64)) {
+                    Some(name)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if i64_arrays.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..i64_arrays.len());
+        let arr_name = i64_arrays[idx].clone();
+        let name = ctx.new_local_name();
+        let sep = match self.rng.gen_range(0..3u32) {
+            0 => ",",
+            1 => "-",
+            _ => " ",
+        };
+
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            false,
+        );
+
+        Some(format!(
+            "let {} = {}.iter().map((el) => el.to_string()).reduce(\"\", (acc, el) => acc + el + \"{}\")",
+            name, arr_name, sep
+        ))
     }
 
     fn try_generate_bool_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
