@@ -120,6 +120,14 @@ pub struct StmtConfig {
     /// (map/filter/collect/count/sum/first/last/reduce), stressing boundary
     /// conditions around zero-length collections. Set to 0.0 to disable.
     pub empty_array_iter_probability: f64,
+    /// Probability of generating a match expression whose arms produce closures
+    /// that capture surrounding variables. The resulting closure is then either
+    /// immediately invoked or passed to an iterator chain (.map). This exercises:
+    /// - Closure creation inside match arms (multiple codegen paths per arm)
+    /// - Variable capture scope interaction with match arm expressions
+    /// - Function-typed match results used in higher-order contexts
+    /// Set to 0.0 to disable.
+    pub match_closure_arm_probability: f64,
 }
 
 impl Default for StmtConfig {
@@ -159,6 +167,7 @@ impl Default for StmtConfig {
             iface_function_call_probability: 0.08,
             generic_closure_interface_probability: 0.0,
             empty_array_iter_probability: 0.0,
+            match_closure_arm_probability: 0.0,
         }
     }
 }
@@ -620,6 +629,15 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // Match expression whose arms produce closures capturing surrounding scope.
+        // Generates `let f = match var { N => (x) => x + captured, ... }` then
+        // either invokes the closure or passes it to an iterator chain.
+        if self.rng.gen_bool(self.config.match_closure_arm_probability) {
+            if let Some(stmt) = self.try_generate_match_closure_arms(ctx) {
+                return stmt;
+            }
+        }
+
         // Tuple let-binding with destructuring
         if self.rng.gen_bool(self.config.tuple_probability) {
             return self.generate_tuple_let(ctx);
@@ -832,6 +850,253 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 scrutinee,
                 arms.join("\n"),
                 close_indent,
+            ))
+        }
+    }
+
+    /// Try to generate a match expression whose arms produce closures that
+    /// capture surrounding variables.
+    ///
+    /// Finds an i64-typed variable to match on, plus a capturable numeric
+    /// variable from the surrounding scope, and generates one of two patterns:
+    ///
+    /// **Pattern A — immediate invocation:**
+    /// ```vole
+    /// let f = match var {
+    ///     1 => (n: i64) => n + captured
+    ///     2 => (n: i64) => n * captured
+    ///     _ => (n: i64) => n - captured
+    /// }
+    /// let result = f(some_arg)
+    /// ```
+    ///
+    /// **Pattern B — iterator chain:**
+    /// ```vole
+    /// let f = match var {
+    ///     1 => (n: i64) => n + captured
+    ///     2 => (n: i64) => n * captured
+    ///     _ => (n: i64) => n - captured
+    /// }
+    /// let result = arr.iter().map(f).collect()
+    /// ```
+    ///
+    /// This exercises closure creation inside match arms, variable capture
+    /// scope interaction, and function-typed match results in higher-order
+    /// contexts.
+    ///
+    /// Returns `None` if preconditions are not met (need an i64 scrutinee
+    /// and a capturable numeric variable).
+    fn try_generate_match_closure_arms(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Guard: closures that capture variables inside generic class methods hit a
+        // compiler bug ("Captured variable not found"). Skip this pattern entirely
+        // when we're generating a method body for a generic class.
+        if let Some((cls_mod, cls_sym)) = ctx.current_class_sym_id {
+            if let Some(symbol) = ctx.table.get_symbol(cls_mod, cls_sym) {
+                if let SymbolKind::Class(info) = &symbol.kind {
+                    if !info.type_params.is_empty() {
+                        return None;
+                    }
+                }
+            }
+        }
+
+        // Step 1: Find an i64-typed variable to use as the match scrutinee
+        let mut scrutinee_candidates: Vec<String> = Vec::new();
+        for (name, ty, _) in &ctx.locals {
+            if matches!(ty, TypeInfo::Primitive(PrimitiveType::I64)) {
+                scrutinee_candidates.push(name.clone());
+            }
+        }
+        for param in ctx.params.iter() {
+            if matches!(param.param_type, TypeInfo::Primitive(PrimitiveType::I64)) {
+                scrutinee_candidates.push(param.name.clone());
+            }
+        }
+        if scrutinee_candidates.is_empty() {
+            return None;
+        }
+
+        // Step 2: Find a capturable numeric variable (i64 or i32) that is
+        // different from the scrutinee, to use inside the closure arms.
+        let mut capture_candidates: Vec<(String, PrimitiveType)> = Vec::new();
+        for (name, ty, _) in &ctx.locals {
+            match ty {
+                TypeInfo::Primitive(p @ (PrimitiveType::I64 | PrimitiveType::I32)) => {
+                    capture_candidates.push((name.clone(), *p));
+                }
+                _ => {}
+            }
+        }
+        for param in ctx.params.iter() {
+            match &param.param_type {
+                TypeInfo::Primitive(p @ (PrimitiveType::I64 | PrimitiveType::I32)) => {
+                    capture_candidates.push((param.name.clone(), *p));
+                }
+                _ => {}
+            }
+        }
+        if capture_candidates.is_empty() {
+            return None;
+        }
+
+        // Pick the scrutinee
+        let scr_idx = self.rng.gen_range(0..scrutinee_candidates.len());
+        let scrutinee = scrutinee_candidates[scr_idx].clone();
+
+        // Pick a capture variable (prefer one different from the scrutinee)
+        let non_scrutinee_captures: Vec<&(String, PrimitiveType)> = capture_candidates
+            .iter()
+            .filter(|(name, _)| *name != scrutinee)
+            .collect();
+        let (capture_var, capture_prim) = if !non_scrutinee_captures.is_empty() {
+            let idx = self.rng.gen_range(0..non_scrutinee_captures.len());
+            non_scrutinee_captures[idx].clone()
+        } else {
+            // Fall back to using the same variable (still valid, just less interesting)
+            let idx = self.rng.gen_range(0..capture_candidates.len());
+            capture_candidates[idx].clone()
+        };
+
+        // The closure parameter type and return type match the capture type.
+        // We use i64 for the closure param type since all scrutinees are i64;
+        // the closure body uses the capture variable which may be i64 or i32.
+        // To keep type consistency, we make the closure always i64 -> i64 or
+        // i32 -> i32 based on the capture variable type.
+        let closure_prim = capture_prim;
+        let closure_type_name = match closure_prim {
+            PrimitiveType::I64 => "i64",
+            PrimitiveType::I32 => "i32",
+            _ => "i64",
+        };
+
+        // Generate 2-3 literal arms plus a wildcard, each producing a closure
+        let arm_count = self.rng.gen_range(2..=3);
+        let indent = "    ".repeat(self.indent + 1);
+        let close_indent = "    ".repeat(self.indent);
+
+        let mut arms = Vec::new();
+        let mut used_values = std::collections::HashSet::new();
+
+        // Closure operations pool: each arm captures the same variable but
+        // applies a different operation.
+        let operations = [
+            ("n + {}", "add"),
+            ("n * {}", "mul"),
+            ("n - {}", "sub"),
+            ("{} - n", "rsub"),
+            ("{} + n", "radd"),
+        ];
+
+        for _ in 0..arm_count {
+            let mut lit_val: i64 = self.rng.gen_range(0..10);
+            while used_values.contains(&lit_val) {
+                lit_val = self.rng.gen_range(0..10);
+            }
+            used_values.insert(lit_val);
+
+            // Pick a random operation for this arm
+            let op_idx = self.rng.gen_range(0..operations.len());
+            let (op_template, _) = operations[op_idx];
+            let body = op_template.replace("{}", &capture_var);
+
+            arms.push(format!(
+                "{}{} => (n: {}) => {}",
+                indent, lit_val, closure_type_name, body
+            ));
+        }
+
+        // Wildcard arm — always present, with a default operation
+        let wildcard_op_idx = self.rng.gen_range(0..operations.len());
+        let (wildcard_template, _) = operations[wildcard_op_idx];
+        let wildcard_body = wildcard_template.replace("{}", &capture_var);
+        arms.push(format!(
+            "{}_ => (n: {}) => {}",
+            indent, closure_type_name, wildcard_body
+        ));
+
+        let fn_name = ctx.new_local_name();
+        let closure_type = TypeInfo::Function {
+            param_types: vec![TypeInfo::Primitive(closure_prim)],
+            return_type: Box::new(TypeInfo::Primitive(closure_prim)),
+        };
+
+        let match_stmt = format!(
+            "let {} = match {} {{\n{}\n{}}}",
+            fn_name,
+            scrutinee,
+            arms.join("\n"),
+            close_indent,
+        );
+
+        // Now decide how to use the closure: Pattern A (invoke) or Pattern B (iterator chain)
+        let expr_ctx = ctx.to_expr_context();
+        let array_vars = expr_ctx.array_vars();
+
+        // Filter to arrays whose element type matches the closure type
+        let matching_arrays: Vec<&(String, TypeInfo)> = array_vars
+            .iter()
+            .filter(|(_, elem_ty)| matches!(elem_ty, TypeInfo::Primitive(p) if *p == closure_prim))
+            .collect();
+
+        // 40% chance to use iterator chain if matching arrays are available
+        let use_iter = !matching_arrays.is_empty() && self.rng.gen_bool(0.4);
+
+        if use_iter {
+            // Pattern B: arr.iter().map(f).collect()
+            let arr_idx = self.rng.gen_range(0..matching_arrays.len());
+            let (arr_name, _) = matching_arrays[arr_idx];
+
+            let result_name = ctx.new_local_name();
+            let result_type = TypeInfo::Array(Box::new(TypeInfo::Primitive(closure_prim)));
+
+            ctx.add_local(fn_name.clone(), closure_type, false);
+            ctx.add_local(result_name.clone(), result_type, false);
+
+            // Optionally add a .filter() after the .map() (~30%)
+            let chain_suffix = if self.rng.gen_bool(0.3) {
+                let pred = self.generate_filter_closure_body_param(closure_prim, "y");
+                format!(".filter((y: {}) => {})", closure_type_name, pred)
+            } else {
+                String::new()
+            };
+
+            let iter_stmt = format!(
+                "let {} = {}.iter().map({}){}.collect()",
+                result_name, arr_name, fn_name, chain_suffix
+            );
+            Some(format!(
+                "{}\n{}{}",
+                match_stmt,
+                "    ".repeat(self.indent),
+                iter_stmt
+            ))
+        } else {
+            // Pattern A: immediate invocation f(arg)
+            let result_name = ctx.new_local_name();
+            let result_type = TypeInfo::Primitive(closure_prim);
+
+            // Generate a simple argument for the closure call
+            let arg = match closure_prim {
+                PrimitiveType::I64 => {
+                    let n = self.rng.gen_range(1..=20);
+                    format!("{}", n)
+                }
+                PrimitiveType::I32 => {
+                    let n = self.rng.gen_range(1..=20);
+                    format!("{}_i32", n)
+                }
+                _ => "0".to_string(),
+            };
+
+            ctx.add_local(fn_name.clone(), closure_type, false);
+            ctx.add_local(result_name.clone(), result_type, false);
+
+            let call_stmt = format!("let {} = {}({})", result_name, fn_name, arg);
+            Some(format!(
+                "{}\n{}{}",
+                match_stmt,
+                "    ".repeat(self.indent),
+                call_stmt
             ))
         }
     }

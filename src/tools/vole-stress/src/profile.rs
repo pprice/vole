@@ -220,6 +220,8 @@ fn minimal_profile() -> Profile {
             generic_closure_interface_probability: 0.0,
             // No empty array iter in minimal
             empty_array_iter_probability: 0.0,
+            // No match-closure-arm in minimal (no lambdas)
+            match_closure_arm_probability: 0.0,
         },
         // No destructured imports in minimal (no multi-layer modules)
         destructured_import_probability: 0.0,
@@ -392,6 +394,8 @@ fn full_profile() -> Profile {
             generic_closure_interface_probability: 0.15,
             // Empty array through iterator chain (~6%) — boundary edge case
             empty_array_iter_probability: 0.06,
+            // ~10% match arms produce closures capturing surrounding scope
+            match_closure_arm_probability: 0.10,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -563,6 +567,8 @@ fn deep_nesting_profile() -> Profile {
             generic_closure_interface_probability: 0.0,
             // Some empty array iter for boundary condition variety
             empty_array_iter_probability: 0.04,
+            // Some match-closure-arm for nesting variety
+            match_closure_arm_probability: 0.06,
         },
         // No destructured imports in deep-nesting (single module focus)
         destructured_import_probability: 0.0,
@@ -739,6 +745,8 @@ fn wide_types_profile() -> Profile {
             generic_closure_interface_probability: 0.06,
             // Some empty array iter for boundary condition variety
             empty_array_iter_probability: 0.04,
+            // Some match-closure-arm for variety
+            match_closure_arm_probability: 0.06,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -905,6 +913,8 @@ fn many_modules_profile() -> Profile {
             generic_closure_interface_probability: 0.0,
             // No empty array iter in many-modules - focus on module loading
             empty_array_iter_probability: 0.0,
+            // No match-closure-arm in many-modules - focus on module loading
+            match_closure_arm_probability: 0.0,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -1088,6 +1098,8 @@ fn generics_heavy_profile() -> Profile {
             generic_closure_interface_probability: 0.20,
             // Some empty array iter for boundary condition variety
             empty_array_iter_probability: 0.04,
+            // Some match-closure-arm for variety
+            match_closure_arm_probability: 0.06,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -1266,6 +1278,8 @@ fn stdlib_heavy_profile() -> Profile {
             generic_closure_interface_probability: 0.08,
             // Elevated empty array iter (~8%) — stdlib focus stresses iterator boundaries
             empty_array_iter_probability: 0.08,
+            // Some match-closure-arm for variety
+            match_closure_arm_probability: 0.08,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -1408,6 +1422,8 @@ fn closures_heavy_profile() -> Profile {
             generic_closure_interface_probability: 0.10,
             // Some empty array iter for boundary condition variety
             empty_array_iter_probability: 0.06,
+            // HIGH match-closure-arm — closures from match arms are core to this profile
+            match_closure_arm_probability: 0.15,
         },
         destructured_import_probability: 0.0,
         // HIGH expression-body — exercises => lambda-like syntax on functions
@@ -1594,6 +1610,8 @@ fn fallible_heavy_profile() -> Profile {
             generic_closure_interface_probability: 0.0,
             // Some empty array iter for boundary condition variety
             empty_array_iter_probability: 0.04,
+            // Some match-closure-arm for variety
+            match_closure_arm_probability: 0.06,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx)
         destructured_import_probability: 0.0,
