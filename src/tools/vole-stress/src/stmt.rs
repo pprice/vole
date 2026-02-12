@@ -1050,6 +1050,13 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~3% chance: match on boolean value
+        if self.rng.gen_bool(0.03) {
+            if let Some(stmt) = self.try_generate_bool_match_let(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -1066,10 +1073,16 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
         let value = expr_gen.generate(&ty, &expr_ctx, 0);
 
-        ctx.add_local(name.clone(), ty, is_mutable);
+        ctx.add_local(name.clone(), ty.clone(), is_mutable);
 
         let mutability = if is_mutable { "let mut" } else { "let" };
-        format!("{} {} = {}", mutability, name, value)
+        // ~15% chance: add explicit type annotation
+        if self.rng.gen_bool(0.15) {
+            let type_str = ty.to_vole_syntax(ctx.table);
+            format!("{} {}: {} = {}", mutability, name, type_str, value)
+        } else {
+            format!("{} {} = {}", mutability, name, value)
+        }
     }
 
     /// Try to generate a match expression let-binding.
@@ -4111,6 +4124,58 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     /// ```
     ///
     /// Exercises the compiler's variable shadowing and scope resolution.
+    /// Generate a match on a boolean variable.
+    ///
+    /// ```vole
+    /// let result = match flag {
+    ///     true => expr1
+    ///     false => expr2
+    /// }
+    /// ```
+    fn try_generate_bool_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Find a bool-typed variable
+        let bool_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::Bool)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::Bool)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        if bool_vars.is_empty() {
+            return None;
+        }
+
+        let scrutinee = &bool_vars[self.rng.gen_range(0..bool_vars.len())];
+        let result_type = self.random_primitive_type();
+        let result_name = ctx.new_local_name();
+
+        let expr_ctx = ctx.to_expr_context();
+        let true_val = {
+            let mut eg = ExprGenerator::new(self.rng, &self.config.expr_config);
+            eg.generate(&result_type, &expr_ctx, 0)
+        };
+        let false_val = {
+            let mut eg = ExprGenerator::new(self.rng, &self.config.expr_config);
+            eg.generate(&result_type, &expr_ctx, 0)
+        };
+
+        let indent = "    ".repeat(self.indent + 1);
+        let close_indent = "    ".repeat(self.indent);
+
+        ctx.add_local(result_name.clone(), result_type, false);
+
+        Some(format!(
+            "let {} = match {} {{\n{}true => {}\n{}false => {}\n{}}}",
+            result_name, scrutinee, indent, true_val, indent, false_val, close_indent,
+        ))
+    }
+
     fn try_generate_variable_shadow(&mut self, ctx: &mut StmtContext) -> Option<String> {
         // Collect primitive locals that can be shadowed (preserve mutability).
         // Skip protected variables (while-loop counters/guards).
