@@ -4223,22 +4223,18 @@ mod tests {
             let mut ctx = StmtContext::new(&[], &table);
 
             let stmt = generator.generate_let_statement(&mut ctx);
-            if stmt.contains("[") && stmt.contains("]") && stmt.starts_with("let ") {
+            let last_local = match ctx.locals.last() {
+                Some(l) => l,
+                None => continue,
+            };
+            if matches!(last_local.1, TypeInfo::Array(_)) {
                 // Verify it looks like an array literal: let localN = [elem1, elem2, ...]
                 assert!(
-                    stmt.contains("= ["),
+                    stmt.starts_with("let ") && stmt.contains("= ["),
                     "Array let should contain '= [', got: {}",
                     stmt,
                 );
                 found_array_let = true;
-
-                // Verify the local was added with an Array type
-                let last_local = ctx.locals.last().unwrap();
-                assert!(
-                    matches!(last_local.1, TypeInfo::Array(_)),
-                    "Local should have Array type, got: {:?}",
-                    last_local.1,
-                );
                 break;
             }
         }

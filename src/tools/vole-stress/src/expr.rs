@@ -71,12 +71,6 @@ pub struct ExprConfig {
     /// and parameters from the outer context are made visible inside
     /// the closure body so the expression generator can reference them.
     /// Set to 0.0 to disable.
-    ///
-    /// **Note:** Currently disabled (0.0) in all profiles due to a
-    /// compiler bug where closure captures in imported modules cause
-    /// "variable not found" errors during cross-module compilation.
-    /// Re-enable when the compiler resolves local-variable capture
-    /// across module boundaries.
     pub closure_capture_probability: f64,
     /// Probability of constructing a concrete class instance when an
     /// interface type is expected, instead of reusing an existing
@@ -105,7 +99,7 @@ impl Default for ExprConfig {
             string_method_probability: 0.15,
             multi_arm_when_probability: 0.30,
             match_guard_probability: 0.10,
-            // Disabled: cross-module closure capture compiler bug
+            // Default 0.0; profiles override (cross-module bug fixed in 3573bef5)
             closure_capture_probability: 0.0,
             interface_upcast_probability: 0.25,
         }
@@ -1670,6 +1664,202 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         Some(format!("{}.iter().{}((x) => {})", var_name, method, pred))
     }
 
+    /// Try to generate an iterator `.map().collect()` expression for array generation.
+    ///
+    /// Looks for array-typed variables in scope with primitive element types and
+    /// generates `arrVar.iter().map((x) => body).collect()` where the mapping
+    /// closure transforms the source element type into the target element type.
+    ///
+    /// Supported same-type mappings:
+    /// - `i64 -> i64`: `x * 2`, `x + 1`, `x % 10`, `-x`
+    /// - `f64 -> f64`: `x * 2.0`, `x + 1.0`, `-x`
+    /// - `i32 -> i32`: `x * 2`, `x + 1`
+    /// - `string -> string`: `x.trim()`, `x.to_upper()`, `x.to_lower()`
+    /// - `bool -> bool`: `!x`
+    ///
+    /// Supported cross-type mappings:
+    /// - `i64 -> bool`: `x > 0`, `x % 2 == 0`
+    /// - `string -> i64`: `x.length()`
+    fn try_generate_iter_map_collect(
+        &mut self,
+        target_elem: &TypeInfo,
+        ctx: &ExprContext,
+    ) -> Option<String> {
+        let array_vars = ctx.array_vars();
+
+        // Build candidates: (var_name, source_elem_ty) where we can map source -> target
+        let candidates: Vec<_> = array_vars
+            .iter()
+            .filter(|(_, src_elem)| self.can_map_types(src_elem, target_elem))
+            .collect();
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..candidates.len());
+        let (var_name, src_elem) = candidates[idx];
+
+        let body = self.generate_map_body(src_elem, target_elem)?;
+
+        Some(format!(
+            "{}.iter().map((x) => {}).collect()",
+            var_name, body
+        ))
+    }
+
+    /// Check whether we can generate a map closure from `src` to `target`.
+    fn can_map_types(&self, src: &TypeInfo, target: &TypeInfo) -> bool {
+        use PrimitiveType::*;
+        match (src, target) {
+            // Same-type mappings
+            (TypeInfo::Primitive(I64), TypeInfo::Primitive(I64)) => true,
+            (TypeInfo::Primitive(F64), TypeInfo::Primitive(F64)) => true,
+            (TypeInfo::Primitive(I32), TypeInfo::Primitive(I32)) => true,
+            (TypeInfo::Primitive(String), TypeInfo::Primitive(String)) => true,
+            (TypeInfo::Primitive(Bool), TypeInfo::Primitive(Bool)) => true,
+            // Cross-type mappings
+            (TypeInfo::Primitive(I64), TypeInfo::Primitive(Bool)) => true,
+            (TypeInfo::Primitive(String), TypeInfo::Primitive(I64)) => true,
+            _ => false,
+        }
+    }
+
+    /// Generate the body of a map closure that transforms `src` type to `target` type.
+    fn generate_map_body(&mut self, src: &TypeInfo, target: &TypeInfo) -> Option<String> {
+        use PrimitiveType::*;
+        match (src, target) {
+            (TypeInfo::Primitive(I64), TypeInfo::Primitive(I64)) => {
+                Some(match self.rng.gen_range(0..4) {
+                    0 => "x * 2".to_string(),
+                    1 => "x + 1".to_string(),
+                    2 => "x % 10".to_string(),
+                    _ => "-x".to_string(),
+                })
+            }
+            (TypeInfo::Primitive(F64), TypeInfo::Primitive(F64)) => {
+                Some(match self.rng.gen_range(0..3) {
+                    0 => "x * 2.0".to_string(),
+                    1 => "x + 1.0".to_string(),
+                    _ => "-x".to_string(),
+                })
+            }
+            (TypeInfo::Primitive(I32), TypeInfo::Primitive(I32)) => {
+                Some(match self.rng.gen_range(0..2) {
+                    0 => "x * 2".to_string(),
+                    _ => "x + 1".to_string(),
+                })
+            }
+            (TypeInfo::Primitive(String), TypeInfo::Primitive(String)) => {
+                Some(match self.rng.gen_range(0..3) {
+                    0 => "x.trim()".to_string(),
+                    1 => "x.to_upper()".to_string(),
+                    _ => "x.to_lower()".to_string(),
+                })
+            }
+            (TypeInfo::Primitive(Bool), TypeInfo::Primitive(Bool)) => Some("!x".to_string()),
+            (TypeInfo::Primitive(I64), TypeInfo::Primitive(Bool)) => {
+                Some(match self.rng.gen_range(0..2) {
+                    0 => "x > 0".to_string(),
+                    _ => "x % 2 == 0".to_string(),
+                })
+            }
+            (TypeInfo::Primitive(String), TypeInfo::Primitive(I64)) => {
+                Some("x.length()".to_string())
+            }
+            _ => None,
+        }
+    }
+
+    /// Try to generate an iterator `.filter().collect()` expression for array generation.
+    ///
+    /// Looks for array-typed variables in scope whose element type matches the
+    /// target element type and generates `arrVar.iter().filter((x) => pred).collect()`.
+    /// The predicate is type-appropriate, reusing the same patterns as `try_generate_iter_any_all`.
+    fn try_generate_iter_filter_collect(
+        &mut self,
+        target_elem: &TypeInfo,
+        ctx: &ExprContext,
+    ) -> Option<String> {
+        let array_vars = ctx.array_vars();
+
+        // Filter to arrays whose element type matches and is a supported primitive
+        let candidates: Vec<_> = array_vars
+            .iter()
+            .filter(|(_, elem_ty)| {
+                elem_ty == target_elem
+                    && matches!(
+                        elem_ty,
+                        TypeInfo::Primitive(
+                            PrimitiveType::I64
+                                | PrimitiveType::F64
+                                | PrimitiveType::I32
+                                | PrimitiveType::Bool
+                                | PrimitiveType::String
+                        )
+                    )
+            })
+            .collect();
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..candidates.len());
+        let (var_name, elem_ty) = candidates[idx];
+
+        // Generate a type-appropriate predicate (same patterns as any/all)
+        let pred = match elem_ty {
+            TypeInfo::Primitive(PrimitiveType::I64) => match self.rng.gen_range(0..4) {
+                0 => {
+                    let n = self.rng.gen_range(0..=5);
+                    format!("x > {}", n)
+                }
+                1 => {
+                    let n = self.rng.gen_range(0..=10);
+                    format!("x < {}", n)
+                }
+                2 => "x % 2 == 0".to_string(),
+                _ => {
+                    let n = self.rng.gen_range(0..=5);
+                    format!("x != {}", n)
+                }
+            },
+            TypeInfo::Primitive(PrimitiveType::F64) => {
+                let n = self.rng.gen_range(0..=50);
+                format!("x > {}.0", n)
+            }
+            TypeInfo::Primitive(PrimitiveType::I32) => match self.rng.gen_range(0..3) {
+                0 => {
+                    let n = self.rng.gen_range(0..=5);
+                    format!("x > {}", n)
+                }
+                1 => {
+                    let n = self.rng.gen_range(0..=10);
+                    format!("x < {}", n)
+                }
+                _ => "x % 2 == 0".to_string(),
+            },
+            TypeInfo::Primitive(PrimitiveType::Bool) => {
+                if self.rng.gen_bool(0.5) {
+                    "x".to_string()
+                } else {
+                    "!x".to_string()
+                }
+            }
+            TypeInfo::Primitive(PrimitiveType::String) => {
+                let n = self.rng.gen_range(0..=3);
+                format!("x.length() > {}", n)
+            }
+            _ => return None,
+        };
+
+        Some(format!(
+            "{}.iter().filter((x) => {}).collect()",
+            var_name, pred
+        ))
+    }
+
     /// Generate arguments for a method call.
     ///
     /// With probability `inline_expr_arg_probability`, each argument may be a
@@ -2400,6 +2590,20 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         // (.chars() returns character codepoints as i32)
         if *elem == TypeInfo::Primitive(PrimitiveType::I32) && self.rng.gen_bool(0.15) {
             if let Some(expr) = self.try_generate_string_chars_collect(ctx) {
+                return expr;
+            }
+        }
+
+        // ~15% chance to generate arr.iter().map((x) => expr).collect()
+        if self.rng.gen_bool(0.15) {
+            if let Some(expr) = self.try_generate_iter_map_collect(elem, ctx) {
+                return expr;
+            }
+        }
+
+        // ~10% chance to generate arr.iter().filter((x) => pred).collect()
+        if self.rng.gen_bool(0.10) {
+            if let Some(expr) = self.try_generate_iter_filter_collect(elem, ctx) {
                 return expr;
             }
         }
@@ -4271,9 +4475,11 @@ mod tests {
             let ctx = ExprContext::new(&[], &locals, &table);
             let expr = generator.generate(&TypeInfo::Primitive(PrimitiveType::I64), &ctx, 0);
             if expr.contains(".length()") {
+                // The .length() call should ultimately be on the "text" variable,
+                // possibly via a chained method (e.g. text.to_upper().length()).
                 assert!(
-                    expr.contains("text.length()"),
-                    "Expected 'text.length()', got: {}",
+                    expr.contains("text"),
+                    "Expected .length() to reference 'text', got: {}",
                     expr,
                 );
                 found = true;
@@ -4418,7 +4624,14 @@ mod tests {
         let table = SymbolTable::new();
         let locals = vec![("s".to_string(), TypeInfo::Primitive(PrimitiveType::String))];
 
-        let valid_methods = [".to_upper()", ".to_lower()", ".trim()"];
+        let valid_methods = [
+            ".to_upper()",
+            ".to_lower()",
+            ".trim()",
+            ".replace(",
+            ".replace_all(",
+            ".substring(",
+        ];
         let mut found = false;
         for seed in 0..100 {
             let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
@@ -4428,7 +4641,7 @@ mod tests {
                 let has_valid_method = valid_methods.iter().any(|m| expr.contains(m));
                 assert!(
                     has_valid_method,
-                    "Expected 's.<method>()' where method is to_upper/to_lower/trim, got: {}",
+                    "Expected string transform method, got: {}",
                     expr,
                 );
                 assert!(
