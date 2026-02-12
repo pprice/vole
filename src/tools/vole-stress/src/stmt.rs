@@ -889,18 +889,26 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     /// }
     /// ```
     ///
-    /// Returns `None` if no i64-typed variable is in scope.
+    /// Returns `None` if no i64/i32-typed variable is in scope.
     fn try_generate_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
-        // Find i64-typed variables in scope (locals + params)
-        let mut candidates: Vec<String> = Vec::new();
+        // Find i64 or i32-typed variables in scope (locals + params)
+        let mut candidates: Vec<(String, PrimitiveType)> = Vec::new();
         for (name, ty, _) in &ctx.locals {
-            if matches!(ty, TypeInfo::Primitive(PrimitiveType::I64)) {
-                candidates.push(name.clone());
+            match ty {
+                TypeInfo::Primitive(p @ PrimitiveType::I64)
+                | TypeInfo::Primitive(p @ PrimitiveType::I32) => {
+                    candidates.push((name.clone(), *p));
+                }
+                _ => {}
             }
         }
         for param in ctx.params.iter() {
-            if matches!(param.param_type, TypeInfo::Primitive(PrimitiveType::I64)) {
-                candidates.push(param.name.clone());
+            match &param.param_type {
+                TypeInfo::Primitive(p @ PrimitiveType::I64)
+                | TypeInfo::Primitive(p @ PrimitiveType::I32) => {
+                    candidates.push((param.name.clone(), *p));
+                }
+                _ => {}
             }
         }
         if candidates.is_empty() {
@@ -908,7 +916,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
 
         let idx = self.rng.gen_range(0..candidates.len());
-        let scrutinee = &candidates[idx];
+        let (scrutinee, scrutinee_prim) = candidates[idx].clone();
+        let is_i32 = matches!(scrutinee_prim, PrimitiveType::I32);
+        // For i32 matches, use i32 literal suffix; for i64, no suffix needed
+        let suffix = if is_i32 { "_i32" } else { "" };
 
         // Decide if we want to use unreachable in the default arm
         let use_unreachable = self
@@ -928,26 +939,26 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         if use_unreachable {
             // Match on a known literal so the wildcard is provably dead code
-            let known_val: i64 = self.rng.gen_range(0..20);
+            let known_val: i64 = self.rng.gen_range(-10..20);
 
             // First arm matches the known literal
             let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
             let arm_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
-            arms.push(format!("{}{} => {}", indent, known_val, arm_expr));
+            arms.push(format!("{}{}{} => {}", indent, known_val, suffix, arm_expr));
 
             // Additional non-matching arms (dead code but syntactically valid)
             let mut used_values = std::collections::HashSet::new();
             used_values.insert(known_val);
             for _ in 1..arm_count {
-                let mut val: i64 = self.rng.gen_range(0..20);
+                let mut val: i64 = self.rng.gen_range(-10..20);
                 while used_values.contains(&val) {
-                    val = self.rng.gen_range(0..20);
+                    val = self.rng.gen_range(-10..20);
                 }
                 used_values.insert(val);
 
                 let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
                 let arm_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
-                arms.push(format!("{}{} => {}", indent, val, arm_expr));
+                arms.push(format!("{}{}{} => {}", indent, val, suffix, arm_expr));
             }
 
             // Wildcard arm with unreachable
@@ -957,9 +968,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             ctx.add_local(result_name.clone(), result_type, false);
 
             Some(format!(
-                "let {} = match {} {{\n{}\n{}}}",
+                "let {} = match {}{} {{\n{}\n{}}}",
                 result_name,
                 known_val,
+                suffix,
                 arms.join("\n"),
                 close_indent,
             ))
@@ -967,15 +979,15 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             // Generate distinct integer literal patterns
             let mut used_values = std::collections::HashSet::new();
             for _ in 0..arm_count {
-                let mut val: i64 = self.rng.gen_range(0..20);
+                let mut val: i64 = self.rng.gen_range(-10..20);
                 while used_values.contains(&val) {
-                    val = self.rng.gen_range(0..20);
+                    val = self.rng.gen_range(-10..20);
                 }
                 used_values.insert(val);
 
                 let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
                 let arm_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
-                arms.push(format!("{}{} => {}", indent, val, arm_expr));
+                arms.push(format!("{}{}{} => {}", indent, val, suffix, arm_expr));
             }
 
             // Sometimes generate a guarded wildcard arm before the bare wildcard
