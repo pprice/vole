@@ -908,6 +908,35 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     /// ```
     ///
     /// Returns `None` if no i64/i32-typed variable is in scope.
+    /// Generate an expression for a match arm value: either a simple expression
+    /// or (25% of the time) a nested `when` expression to stress-test the
+    /// match-arm + when-expression interaction.
+    fn generate_match_arm_value(
+        &mut self,
+        result_type: &TypeInfo,
+        expr_ctx: &ExprContext,
+    ) -> String {
+        if self.rng.gen_bool(0.25) {
+            // Nested when expression
+            let inner_indent = "    ".repeat(self.indent + 2);
+            let inner_close = "    ".repeat(self.indent + 1);
+            let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+            let cond =
+                expr_gen.generate_simple(&TypeInfo::Primitive(PrimitiveType::Bool), expr_ctx);
+            let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+            let true_val = expr_gen.generate_simple(result_type, expr_ctx);
+            let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+            let false_val = expr_gen.generate_simple(result_type, expr_ctx);
+            format!(
+                "when {{\n{}{} => {}\n{}_ => {}\n{}}}",
+                inner_indent, cond, true_val, inner_indent, false_val, inner_close
+            )
+        } else {
+            let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+            expr_gen.generate_simple(result_type, expr_ctx)
+        }
+    }
+
     fn try_generate_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
         // Find i64 or i32-typed variables in scope (locals + params)
         let mut candidates: Vec<(String, PrimitiveType)> = Vec::new();
@@ -978,8 +1007,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             let known_val: i64 = self.rng.gen_range(-10..20);
 
             // First arm matches the known literal
-            let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
-            let arm_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
+            let arm_expr = self.generate_match_arm_value(&result_type, &expr_ctx);
             arms.push(format!("{}{}{} => {}", indent, known_val, suffix, arm_expr));
 
             // Additional non-matching arms (dead code but syntactically valid)
@@ -992,8 +1020,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 }
                 used_values.insert(val);
 
-                let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
-                let arm_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
+                let arm_expr = self.generate_match_arm_value(&result_type, &expr_ctx);
                 arms.push(format!("{}{}{} => {}", indent, val, suffix, arm_expr));
             }
 
@@ -1021,8 +1048,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 }
                 used_values.insert(val);
 
-                let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
-                let arm_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
+                let arm_expr = self.generate_match_arm_value(&result_type, &expr_ctx);
                 arms.push(format!("{}{}{} => {}", indent, val, suffix, arm_expr));
             }
 
@@ -1033,14 +1059,12 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             {
                 let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
                 let guard_cond = expr_gen.generate_guard_condition(Some(&expr_ctx), 0);
-                let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
-                let guarded_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
+                let guarded_expr = self.generate_match_arm_value(&result_type, &expr_ctx);
                 arms.push(format!("{}_ if {} => {}", indent, guard_cond, guarded_expr));
             }
 
             // Wildcard arm
-            let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
-            let wildcard_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
+            let wildcard_expr = self.generate_match_arm_value(&result_type, &expr_ctx);
             arms.push(format!("{}_ => {}", indent, wildcard_expr));
 
             let close_indent = "    ".repeat(self.indent);
