@@ -224,6 +224,8 @@ fn minimal_profile() -> Profile {
             match_closure_arm_probability: 0.0,
             // No range-based iterators in minimal
             range_iter_probability: 0.0,
+            // No field-closure-let in minimal (no classes)
+            field_closure_let_probability: 0.0,
         },
         // No destructured imports in minimal (no multi-layer modules)
         destructured_import_probability: 0.0,
@@ -399,6 +401,8 @@ fn full_profile() -> Profile {
             // ~10% match arms produce closures capturing surrounding scope
             match_closure_arm_probability: 0.10,
             range_iter_probability: 0.08,
+            // ~8% field-closure-let: extract field, capture in closure, invoke/map
+            field_closure_let_probability: 0.08,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -573,6 +577,8 @@ fn deep_nesting_profile() -> Profile {
             // Some match-closure-arm for nesting variety
             match_closure_arm_probability: 0.06,
             range_iter_probability: 0.04,
+            // Some field-closure-let for nesting variety
+            field_closure_let_probability: 0.04,
         },
         // No destructured imports in deep-nesting (single module focus)
         destructured_import_probability: 0.0,
@@ -752,6 +758,8 @@ fn wide_types_profile() -> Profile {
             // Some match-closure-arm for variety
             match_closure_arm_probability: 0.06,
             range_iter_probability: 0.04,
+            // Some field-closure-let for variety
+            field_closure_let_probability: 0.04,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -922,6 +930,8 @@ fn many_modules_profile() -> Profile {
             match_closure_arm_probability: 0.0,
             // No range-based iterators in many-modules - focus on module loading
             range_iter_probability: 0.0,
+            // No field-closure-let in many-modules - focus on module loading
+            field_closure_let_probability: 0.0,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -1108,6 +1118,8 @@ fn generics_heavy_profile() -> Profile {
             // Some match-closure-arm for variety
             match_closure_arm_probability: 0.06,
             range_iter_probability: 0.04,
+            // Some field-closure-let for variety
+            field_closure_let_probability: 0.04,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -1289,6 +1301,8 @@ fn stdlib_heavy_profile() -> Profile {
             // Some match-closure-arm for variety
             match_closure_arm_probability: 0.08,
             range_iter_probability: 0.10,
+            // Some field-closure-let for stdlib variety
+            field_closure_let_probability: 0.06,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -1434,6 +1448,8 @@ fn closures_heavy_profile() -> Profile {
             // HIGH match-closure-arm — closures from match arms are core to this profile
             match_closure_arm_probability: 0.15,
             range_iter_probability: 0.06,
+            // HIGH field-closure-let — closure capturing struct/class fields is core
+            field_closure_let_probability: 0.12,
         },
         destructured_import_probability: 0.0,
         // HIGH expression-body — exercises => lambda-like syntax on functions
@@ -1623,6 +1639,8 @@ fn fallible_heavy_profile() -> Profile {
             // Some match-closure-arm for variety
             match_closure_arm_probability: 0.06,
             range_iter_probability: 0.04,
+            // Some field-closure-let for variety
+            field_closure_let_probability: 0.04,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx)
         destructured_import_probability: 0.0,

@@ -135,6 +135,16 @@ pub struct StmtConfig {
     /// Range elements are always i64, so all numeric iterator operations apply.
     /// Set to 0.0 to disable.
     pub range_iter_probability: f64,
+    /// Probability of generating a closure that captures a field value extracted
+    /// from a class or struct instance in scope. The closure is then either
+    /// immediately invoked or passed to an iterator `.map()` chain. This
+    /// exercises the interaction between:
+    /// - Field access on class/struct instances
+    /// - Closure capture of the extracted field value
+    /// - Higher-order usage (direct invocation or iterator chain)
+    /// Requires a class/struct-typed local with at least one primitive field.
+    /// Set to 0.0 to disable.
+    pub field_closure_let_probability: f64,
 }
 
 impl Default for StmtConfig {
@@ -176,6 +186,7 @@ impl Default for StmtConfig {
             empty_array_iter_probability: 0.0,
             match_closure_arm_probability: 0.0,
             range_iter_probability: 0.0,
+            field_closure_let_probability: 0.0,
         }
     }
 }
@@ -652,6 +663,15 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // Field-closure-let: extract a primitive field from a class/struct instance,
+        // capture it in a closure, and either invoke the closure or pass it to
+        // an iterator .map() chain.
+        if self.rng.gen_bool(self.config.field_closure_let_probability) {
+            if let Some(stmt) = self.try_generate_field_closure_let(ctx) {
+                return stmt;
+            }
+        }
+
         // Tuple let-binding with destructuring
         if self.rng.gen_bool(self.config.tuple_probability) {
             return self.generate_tuple_let(ctx);
@@ -1111,6 +1131,218 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 match_stmt,
                 "    ".repeat(self.indent),
                 call_stmt
+            ))
+        }
+    }
+
+    /// Try to generate a closure that captures a field value from a class/struct
+    /// instance in scope.
+    ///
+    /// Finds a class-typed or struct-typed local variable, extracts a primitive
+    /// field value from it, then creates a closure that captures the field value.
+    /// The closure is either immediately invoked or passed to an iterator `.map()`
+    /// chain on a small literal array.
+    ///
+    /// This exercises the interaction between:
+    /// - Field access on class/struct instances (`instance.field`)
+    /// - Closure capture of the extracted field value
+    /// - Higher-order usage (direct invocation or `.map()` on array)
+    ///
+    /// Generated output shapes (Pattern A - direct invocation):
+    /// ```vole
+    /// let field_val = instance.field1
+    /// let closure = (x: i64) -> i64 => x + field_val
+    /// let result = closure(5)
+    /// ```
+    ///
+    /// Generated output shapes (Pattern B - iterator chain):
+    /// ```vole
+    /// let field_val = instance.field1
+    /// let result = [1, 2, 3].iter().map((x: i64) -> i64 => x + field_val).collect()
+    /// ```
+    ///
+    /// Returns `None` if no class/struct-typed local with primitive fields is in scope.
+    fn try_generate_field_closure_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Guard: closures that capture variables inside generic class methods hit a
+        // compiler bug ("Captured variable not found"). Skip this pattern entirely
+        // when we're generating a method body for a generic class.
+        if let Some((cls_mod, cls_sym)) = ctx.current_class_sym_id {
+            if let Some(symbol) = ctx.table.get_symbol(cls_mod, cls_sym) {
+                if let SymbolKind::Class(info) = &symbol.kind {
+                    if !info.type_params.is_empty() {
+                        return None;
+                    }
+                }
+            }
+        }
+
+        let _module_id = ctx.module_id?;
+
+        // Collect class/struct-typed locals that have at least one primitive field.
+        // For each candidate, store (local_name, field_name, field_prim_type).
+        let mut candidates: Vec<(String, String, PrimitiveType)> = Vec::new();
+
+        for (name, ty, _) in &ctx.locals {
+            match ty {
+                TypeInfo::Class(mod_id, sym_id) => {
+                    if let Some(sym) = ctx.table.get_symbol(*mod_id, *sym_id) {
+                        if let SymbolKind::Class(ref info) = sym.kind {
+                            // Only non-generic classes (generic field types are unresolved)
+                            if info.type_params.is_empty() {
+                                for field in &info.fields {
+                                    if let TypeInfo::Primitive(p) = &field.field_type {
+                                        candidates.push((name.clone(), field.name.clone(), *p));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                TypeInfo::Struct(mod_id, sym_id) => {
+                    if let Some(sym) = ctx.table.get_symbol(*mod_id, *sym_id) {
+                        if let SymbolKind::Struct(ref info) = sym.kind {
+                            for field in &info.fields {
+                                if let TypeInfo::Primitive(p) = &field.field_type {
+                                    candidates.push((name.clone(), field.name.clone(), *p));
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        // Pick a random candidate field
+        let idx = self.rng.gen_range(0..candidates.len());
+        let (instance_name, field_name, field_prim) = candidates[idx].clone();
+
+        // Step 1: Extract the field value into a local
+        let field_local = ctx.new_local_name();
+        ctx.add_local(field_local.clone(), TypeInfo::Primitive(field_prim), false);
+        let field_stmt = format!("let {} = {}.{}", field_local, instance_name, field_name);
+
+        // Step 2: Determine the closure's numeric type.
+        // For numeric fields (i64, i32, f64), the closure operates on that type.
+        // For non-numeric fields (string, bool), fall back to i64.
+        let (closure_prim, closure_type_name) = match field_prim {
+            PrimitiveType::I64 => (PrimitiveType::I64, "i64"),
+            PrimitiveType::I32 => (PrimitiveType::I32, "i32"),
+            PrimitiveType::F64 => (PrimitiveType::F64, "f64"),
+            _ => (PrimitiveType::I64, "i64"),
+        };
+
+        // Operations that combine the closure parameter with the captured field value.
+        // For numeric types, use arithmetic. For string fields captured as i64 proxy,
+        // only use addition (safe default).
+        let is_numeric_field = matches!(
+            field_prim,
+            PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::F64
+        );
+
+        let op = if is_numeric_field {
+            // Direct arithmetic with the captured field value
+            match self.rng.gen_range(0..4) {
+                0 => format!("x + {}", field_local),
+                1 => format!("x * {}", field_local),
+                2 => format!("x - {}", field_local),
+                _ => format!("{} + x", field_local),
+            }
+        } else if matches!(field_prim, PrimitiveType::String) {
+            // String field: closure returns the string length plus x
+            // We can't directly use the string in an i64 closure, so
+            // use a simple captured literal derived from scope.
+            // Actually, let's just produce an i64 closure that ignores
+            // the string but still captures it to exercise the capture path.
+            format!("x + {}.length()", field_local)
+        } else {
+            // Bool field: convert to i64 via when expression
+            format!("x + when {{ {} => 1, _ => 0 }}", field_local)
+        };
+
+        let indent = "    ".repeat(self.indent);
+
+        // Decide usage pattern: Pattern A (direct invocation) or Pattern B (iterator chain)
+        let use_iter = self.rng.gen_bool(0.5);
+
+        if use_iter {
+            // Pattern B: build a small literal array, map with inline closure
+            let arr_size = self.rng.gen_range(2..=4);
+            let arr_elems: Vec<String> = (0..arr_size)
+                .map(|_| match closure_prim {
+                    PrimitiveType::I32 => {
+                        let n = self.rng.gen_range(1..=10);
+                        format!("{}_i32", n)
+                    }
+                    PrimitiveType::F64 => {
+                        let n: f64 = self.rng.gen_range(1.0..=10.0);
+                        format!("{:.1}", n)
+                    }
+                    _ => {
+                        let n = self.rng.gen_range(1..=10);
+                        format!("{}", n)
+                    }
+                })
+                .collect();
+
+            let result_name = ctx.new_local_name();
+            let result_type = TypeInfo::Array(Box::new(TypeInfo::Primitive(closure_prim)));
+            ctx.add_local(result_name.clone(), result_type, false);
+
+            let iter_stmt = format!(
+                "let {} = [{}].iter().map((x: {}) -> {} => {}).collect()",
+                result_name,
+                arr_elems.join(", "),
+                closure_type_name,
+                closure_type_name,
+                op,
+            );
+
+            Some(format!("{}\n{}{}", field_stmt, indent, iter_stmt))
+        } else {
+            // Pattern A: bind closure to a local, then invoke it
+            let fn_name = ctx.new_local_name();
+            let closure_type = TypeInfo::Function {
+                param_types: vec![TypeInfo::Primitive(closure_prim)],
+                return_type: Box::new(TypeInfo::Primitive(closure_prim)),
+            };
+
+            let closure_stmt = format!(
+                "let {} = (x: {}) -> {} => {}",
+                fn_name, closure_type_name, closure_type_name, op,
+            );
+
+            let result_name = ctx.new_local_name();
+            let result_type = TypeInfo::Primitive(closure_prim);
+
+            // Generate a simple argument
+            let arg = match closure_prim {
+                PrimitiveType::I64 => {
+                    let n = self.rng.gen_range(1..=20);
+                    format!("{}", n)
+                }
+                PrimitiveType::I32 => {
+                    let n = self.rng.gen_range(1..=20);
+                    format!("{}_i32", n)
+                }
+                PrimitiveType::F64 => {
+                    let n: f64 = self.rng.gen_range(1.0..=20.0);
+                    format!("{:.1}", n)
+                }
+                _ => "0".to_string(),
+            };
+
+            ctx.add_local(fn_name.clone(), closure_type, false);
+            ctx.add_local(result_name.clone(), result_type, false);
+
+            let call_stmt = format!("let {} = {}({})", result_name, fn_name, arg);
+            Some(format!(
+                "{}\n{}{}\n{}{}",
+                field_stmt, indent, closure_stmt, indent, call_stmt
             ))
         }
     }
