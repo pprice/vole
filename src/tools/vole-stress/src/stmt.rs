@@ -1024,9 +1024,31 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // For i32 matches, use i32 literal suffix; for i64, no suffix needed
         let suffix = if is_i32 { "_i32" } else { "" };
 
-        // ~30% of the time, generate a complex scrutinee expression (var + lit, var * lit)
-        // instead of a plain variable. This exercises expression-as-scrutinee codegen.
-        let scrutinee = if self.rng.gen_bool(0.30) {
+        // ~15% chance to use an iterator chain as the scrutinee (feature interaction):
+        // match arr.iter().count() { ... } or match arr.iter().filter(...).count() { ... }
+        // This stresses iterator evaluation as match subject. Only for i64 matches.
+        let i64_arrays: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter_map(|(name, ty, _)| match ty {
+                TypeInfo::Array(inner)
+                    if matches!(inner.as_ref(), TypeInfo::Primitive(PrimitiveType::I64)) =>
+                {
+                    Some(name.clone())
+                }
+                _ => None,
+            })
+            .collect();
+        let scrutinee = if !is_i32 && !i64_arrays.is_empty() && self.rng.gen_bool(0.15) {
+            let arr = &i64_arrays[self.rng.gen_range(0..i64_arrays.len())];
+            match self.rng.gen_range(0..3) {
+                0 => format!("{}.iter().count()", arr),
+                1 => format!("{}.iter().filter((x) => x > 0).count()", arr),
+                _ => format!("{}.iter().sum()", arr),
+            }
+        } else if self.rng.gen_bool(0.30) {
+            // ~30% of the time, generate a complex scrutinee expression (var + lit, var * lit)
+            // instead of a plain variable. This exercises expression-as-scrutinee codegen.
             let op = match self.rng.gen_range(0..4) {
                 0 => "+",
                 1 => "-",
