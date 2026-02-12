@@ -222,6 +222,12 @@ pub struct StmtConfig {
     /// Set to 0.0 to disable.
     pub iter_predicate_probability: f64,
 
+    /// Probability of generating an iterator chunks/windows let-binding.
+    /// Produces `.chunks(N).count()`, `.windows(N).count()`, or
+    /// `.chunks(N).flatten().collect()` patterns.
+    /// Set to 0.0 to disable.
+    pub iter_chunks_windows_probability: f64,
+
     /// Probability of generating a checked/wrapping/saturating arithmetic call.
     /// Requires that the module has imported `std:lowlevel` (controlled by
     /// `has_lowlevel_import` on StmtContext). Generates patterns like:
@@ -284,6 +290,7 @@ impl Default for StmtConfig {
             string_split_probability: 0.0,
             string_method_probability: 0.0,
             iter_predicate_probability: 0.0,
+            iter_chunks_windows_probability: 0.0,
             checked_arithmetic_probability: 0.0,
         }
     }
@@ -940,6 +947,13 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // Iterator predicate: let b = arr.iter().any((x) => x > 0)
         if self.rng.gen_bool(self.config.iter_predicate_probability) {
             if let Some(stmt) = self.try_generate_iter_predicate_let(ctx) {
+                return stmt;
+            }
+        }
+
+        // Iterator chunks/windows: let c = arr.iter().chunks(2).count()
+        if self.rng.gen_bool(self.config.iter_chunks_windows_probability) {
+            if let Some(stmt) = self.try_generate_iter_chunks_windows_let(ctx) {
                 return stmt;
             }
         }
@@ -2882,6 +2896,86 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         Some(format!("let {} = {}", result_name, call_expr))
     }
 
+    /// Try to generate an iterator chunks/windows let-binding.
+    ///
+    /// Finds a primitive array in scope and generates one of:
+    /// - `.chunks(N).count()` → i64
+    /// - `.windows(N).count()` → i64
+    /// - `.chunks(N).flatten().collect()` → [T] (original element type array)
+    /// - `.windows(N).flatten().collect()` → [T]
+    fn try_generate_iter_chunks_windows_let(
+        &mut self,
+        ctx: &mut StmtContext,
+    ) -> Option<String> {
+        // Find arrays with primitive element types
+        let mut array_vars: Vec<(String, PrimitiveType)> = Vec::new();
+        for (name, ty, _) in &ctx.locals {
+            if let TypeInfo::Array(inner) = ty {
+                if let TypeInfo::Primitive(p) = inner.as_ref() {
+                    match p {
+                        PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::F64
+                        | PrimitiveType::Bool | PrimitiveType::String => {
+                            array_vars.push((name.clone(), *p));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        if array_vars.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..array_vars.len());
+        let (arr_name, elem_prim) = &array_vars[idx];
+        let elem_prim = *elem_prim;
+        let arr_name = arr_name.clone();
+        let result_name = ctx.new_local_name();
+
+        // Pick chunks or windows
+        let method = if self.rng.gen_bool(0.5) {
+            "chunks"
+        } else {
+            "windows"
+        };
+
+        // Chunk/window size: 1, 2, or 3
+        let size = self.rng.gen_range(1..=3);
+
+        // Optional prefix: ~20% chance to add .filter() or .sorted() before chunks/windows
+        let is_numeric = matches!(elem_prim, PrimitiveType::I64 | PrimitiveType::F64);
+        let prefix = if self.rng.gen_bool(0.20) && is_numeric {
+            match self.rng.gen_range(0..2) {
+                0 => ".sorted()".to_string(),
+                _ => {
+                    let pred = self.generate_filter_closure_body(elem_prim);
+                    format!(".filter((x) => {})", pred)
+                }
+            }
+        } else {
+            String::new()
+        };
+
+        // Pick terminal: count() (50%), flatten().collect() (50%)
+        let (terminal, result_type) = if self.rng.gen_bool(0.5) {
+            (
+                ".count()".to_string(),
+                TypeInfo::Primitive(PrimitiveType::I64),
+            )
+        } else {
+            (
+                ".flatten().collect()".to_string(),
+                TypeInfo::Array(Box::new(TypeInfo::Primitive(elem_prim))),
+            )
+        };
+
+        ctx.add_local(result_name.clone(), result_type, false);
+        Some(format!(
+            "let {} = {}.iter(){}.{}({}){}",
+            result_name, arr_name, prefix, method, size, terminal
+        ))
+    }
+
     /// Try to generate a string method call let-binding.
     ///
     /// Finds a string-typed variable in scope and calls a random method on it:
@@ -3648,29 +3742,51 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let expr_ctx = ctx.to_expr_context();
         let array_vars = expr_ctx.array_vars();
 
-        // Check if we can iterate over an iterator chain (~20% when primitive arrays available)
-        if !array_vars.is_empty() && self.rng.gen_bool(0.2) {
-            // Filter to arrays with primitive element types suitable for closures
-            let prim_array_vars: Vec<(String, PrimitiveType)> = array_vars
-                .iter()
-                .filter_map(|(name, elem_ty)| {
-                    if let TypeInfo::Primitive(prim) = elem_ty {
-                        match prim {
-                            PrimitiveType::I64
-                            | PrimitiveType::F64
-                            | PrimitiveType::Bool
-                            | PrimitiveType::String => Some((name.clone(), *prim)),
-                            _ => None,
-                        }
-                    } else {
-                        None
+        // Filter to arrays with primitive element types suitable for closures
+        let prim_array_vars: Vec<(String, PrimitiveType)> = array_vars
+            .iter()
+            .filter_map(|(name, elem_ty)| {
+                if let TypeInfo::Primitive(prim) = elem_ty {
+                    match prim {
+                        PrimitiveType::I64
+                        | PrimitiveType::F64
+                        | PrimitiveType::Bool
+                        | PrimitiveType::String => Some((name.clone(), *prim)),
+                        _ => None,
                     }
-                })
-                .collect();
+                } else {
+                    None
+                }
+            })
+            .collect();
 
-            if !prim_array_vars.is_empty() {
-                return self.generate_for_in_iterator(ctx, depth, &prim_array_vars);
+        // ~8% chance for enumerate for-in loop (needs i64 arrays for pair arithmetic)
+        if !prim_array_vars.is_empty() && self.rng.gen_bool(0.08) {
+            let i64_arrays: Vec<_> = prim_array_vars
+                .iter()
+                .filter(|(_, p)| matches!(p, PrimitiveType::I64))
+                .cloned()
+                .collect();
+            if !i64_arrays.is_empty() {
+                return self.generate_for_in_enumerate(ctx, depth, &i64_arrays);
             }
+        }
+
+        // ~6% chance for zip for-in loop (needs 2+ i64 arrays)
+        if prim_array_vars.len() >= 2 && self.rng.gen_bool(0.06) {
+            let i64_arrays: Vec<_> = prim_array_vars
+                .iter()
+                .filter(|(_, p)| matches!(p, PrimitiveType::I64))
+                .cloned()
+                .collect();
+            if i64_arrays.len() >= 2 {
+                return self.generate_for_in_zip(ctx, depth, &i64_arrays);
+            }
+        }
+
+        // Check if we can iterate over an iterator chain (~20% when primitive arrays available)
+        if !prim_array_vars.is_empty() && self.rng.gen_bool(0.2) {
+            return self.generate_for_in_iterator(ctx, depth, &prim_array_vars);
         }
 
         // Check if we can iterate over an array variable (~40% when available)
@@ -3886,6 +4002,127 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         format!(
             "for {} in {}.iter(){} {}",
             iter_name, arr_name, chain_expr, body_block
+        )
+    }
+
+    /// Generate a for-in-enumerate loop: `for pair in arr.iter().enumerate() { ... }`.
+    ///
+    /// The loop body uses `pair[0]` (index, i64) and `pair[1]` (element value, i64).
+    /// Generates an accumulator pattern: `let mut acc = 0` before, then `acc = acc + pair[0] + pair[1]` inside.
+    fn generate_for_in_enumerate(
+        &mut self,
+        ctx: &mut StmtContext,
+        _depth: usize,
+        i64_arrays: &[(String, PrimitiveType)],
+    ) -> String {
+        let pair_name = ctx.new_local_name();
+        let acc_name = ctx.new_local_name();
+
+        let idx = self.rng.gen_range(0..i64_arrays.len());
+        let (arr_name, _) = &i64_arrays[idx];
+        let arr_name = arr_name.clone();
+
+        // Optional prefix chain: ~20% chance to add .filter() or .take() before enumerate
+        let prefix = if self.rng.gen_bool(0.20) {
+            match self.rng.gen_range(0..2) {
+                0 => {
+                    let n = self.rng.gen_range(1..=3);
+                    format!(".take({})", n)
+                }
+                _ => {
+                    let pred = self.generate_filter_closure_body(PrimitiveType::I64);
+                    format!(".filter((x) => {})", pred)
+                }
+            }
+        } else {
+            String::new()
+        };
+
+        // Pick accumulation body: add indices, add values, or multiply-accumulate
+        let body_expr = match self.rng.gen_range(0..3) {
+            0 => format!(
+                "{} = {} + {}[0] + {}[1]",
+                acc_name, acc_name, pair_name, pair_name
+            ),
+            1 => format!("{} = {} + {}[0]", acc_name, acc_name, pair_name),
+            _ => format!("{} = {} + {}[1]", acc_name, acc_name, pair_name),
+        };
+
+        ctx.protected_vars.push(arr_name.clone());
+        // acc is mutable i64 declared before the loop
+        ctx.add_local(acc_name.clone(), TypeInfo::Primitive(PrimitiveType::I64), true);
+
+        let indent = self.indent_str();
+        let inner_indent = format!("{}    ", indent);
+        format!(
+            "let mut {} = 0\n{}for {} in {}.iter(){}.enumerate() {{\n{}{}\n{}}}",
+            acc_name,
+            indent,
+            pair_name,
+            arr_name,
+            prefix,
+            inner_indent,
+            body_expr,
+            indent
+        )
+    }
+
+    /// Generate a for-in-zip loop: `for pair in a.iter().zip(b.iter()) { ... }`.
+    ///
+    /// Combines two i64 arrays. The loop body uses `pair[0]` and `pair[1]`,
+    /// each being i64 elements from the respective arrays.
+    fn generate_for_in_zip(
+        &mut self,
+        ctx: &mut StmtContext,
+        _depth: usize,
+        i64_arrays: &[(String, PrimitiveType)],
+    ) -> String {
+        let pair_name = ctx.new_local_name();
+        let acc_name = ctx.new_local_name();
+
+        // Pick two distinct arrays
+        let idx_a = self.rng.gen_range(0..i64_arrays.len());
+        let mut idx_b = self.rng.gen_range(0..i64_arrays.len());
+        if idx_b == idx_a {
+            idx_b = (idx_a + 1) % i64_arrays.len();
+        }
+        let (arr_a, _) = &i64_arrays[idx_a];
+        let (arr_b, _) = &i64_arrays[idx_b];
+        let arr_a = arr_a.clone();
+        let arr_b = arr_b.clone();
+
+        // Pick accumulation body
+        let body_expr = match self.rng.gen_range(0..3) {
+            0 => format!(
+                "{} = {} + {}[0] + {}[1]",
+                acc_name, acc_name, pair_name, pair_name
+            ),
+            1 => format!(
+                "{} = {} + ({}[0] * {}[1])",
+                acc_name, acc_name, pair_name, pair_name
+            ),
+            _ => format!(
+                "{} = {} + {}[0] - {}[1]",
+                acc_name, acc_name, pair_name, pair_name
+            ),
+        };
+
+        ctx.protected_vars.push(arr_a.clone());
+        ctx.protected_vars.push(arr_b.clone());
+        ctx.add_local(acc_name.clone(), TypeInfo::Primitive(PrimitiveType::I64), true);
+
+        let indent = self.indent_str();
+        let inner_indent = format!("{}    ", indent);
+        format!(
+            "let mut {} = 0\n{}for {} in {}.iter().zip({}.iter()) {{\n{}{}\n{}}}",
+            acc_name,
+            indent,
+            pair_name,
+            arr_a,
+            arr_b,
+            inner_indent,
+            body_expr,
+            indent,
         )
     }
 
