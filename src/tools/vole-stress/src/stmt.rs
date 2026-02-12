@@ -1611,8 +1611,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             let known_pattern = patterns[known_idx];
 
             // First arm matches the known literal
-            let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
-            let arm_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
+            let arm_expr = self.generate_match_arm_value(&result_type, &expr_ctx);
             arms.push(format!("{}\"{}\" => {}", indent, known_pattern, arm_expr));
 
             // Additional non-matching arms (dead code but syntactically valid)
@@ -1625,8 +1624,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 }
                 used_indices.insert(pi);
 
-                let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
-                let arm_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
+                let arm_expr = self.generate_match_arm_value(&result_type, &expr_ctx);
                 arms.push(format!("{}\"{}\" => {}", indent, patterns[pi], arm_expr));
             }
 
@@ -1653,8 +1651,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 }
                 used_indices.insert(pi);
 
-                let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
-                let arm_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
+                let arm_expr = self.generate_match_arm_value(&result_type, &expr_ctx);
                 arms.push(format!("{}\"{}\" => {}", indent, patterns[pi], arm_expr));
             }
 
@@ -1665,14 +1662,12 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             {
                 let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
                 let guard_cond = expr_gen.generate_guard_condition(Some(&expr_ctx), 0);
-                let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
-                let guarded_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
+                let guarded_expr = self.generate_match_arm_value(&result_type, &expr_ctx);
                 arms.push(format!("{}_ if {} => {}", indent, guard_cond, guarded_expr));
             }
 
             // Wildcard arm
-            let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
-            let wildcard_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
+            let wildcard_expr = self.generate_match_arm_value(&result_type, &expr_ctx);
             arms.push(format!("{}_ => {}", indent, wildcard_expr));
 
             let close_indent = "    ".repeat(self.indent);
@@ -2732,6 +2727,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let indent = "    ".repeat(self.indent + 1);
         let close_indent = "    ".repeat(self.indent);
 
+        let result_type = TypeInfo::Primitive(PrimitiveType::I64);
         let mut arms = Vec::new();
         let mut used_values = std::collections::HashSet::new();
         for _ in 0..num_arms {
@@ -2741,12 +2737,12 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                     break v;
                 }
             };
-            let result_val = self.rng.gen_range(-100..=100);
-            arms.push(format!("{}{} => {}_i64", indent, val, result_val));
+            let arm_expr = self.generate_match_arm_value(&result_type, &expr_ctx);
+            arms.push(format!("{}{} => {}", indent, val, arm_expr));
         }
         // Wildcard arm
-        let default_val = self.rng.gen_range(-100..=100);
-        arms.push(format!("{}_ => {}_i64", indent, default_val));
+        let wildcard_expr = self.generate_match_arm_value(&result_type, &expr_ctx);
+        arms.push(format!("{}_ => {}", indent, wildcard_expr));
 
         let result_name = ctx.new_local_name();
         ctx.add_local(
