@@ -3606,6 +3606,16 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
     }
 
     pub fn literal_for_primitive(&mut self, prim: PrimitiveType) -> String {
+        // ~8% chance to generate a boundary value for integer types.
+        // This stresses overflow handling, edge cases in arithmetic,
+        // and codegen for extreme constant values.
+        if matches!(
+            prim,
+            PrimitiveType::I32 | PrimitiveType::I64 | PrimitiveType::I16 | PrimitiveType::I8
+        ) && self.rng.gen_bool(0.08)
+        {
+            return self.boundary_literal(prim);
+        }
         match prim {
             PrimitiveType::I8 => {
                 let val: i8 = self.rng.gen_range(-128..=127);
@@ -3663,6 +3673,39 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                 format!("\"str{}\"", id)
             }
             PrimitiveType::Nil => "nil".to_string(),
+        }
+    }
+
+    /// Generate a boundary literal for a signed integer type.
+    ///
+    /// Returns extreme values (MIN+1, MAX, 0, 1, -1) that stress overflow
+    /// handling and edge cases in arithmetic codegen.
+    ///
+    /// Note: We use MIN+1 instead of MIN because Vole parses `-N` as unary
+    /// negation of `N`, and `N = abs(MIN)` overflows the positive range.
+    fn boundary_literal(&mut self, prim: PrimitiveType) -> String {
+        match prim {
+            PrimitiveType::I8 => {
+                let vals: &[i8] = &[i8::MIN + 1, i8::MAX, 0, 1, -1];
+                let val = vals[self.rng.gen_range(0..vals.len())];
+                format!("{}_i8", val)
+            }
+            PrimitiveType::I16 => {
+                let vals: &[i16] = &[i16::MIN + 1, i16::MAX, 0, 1, -1];
+                let val = vals[self.rng.gen_range(0..vals.len())];
+                format!("{}_i16", val)
+            }
+            PrimitiveType::I32 => {
+                let vals: &[i32] = &[i32::MIN + 1, i32::MAX, 0, 1, -1];
+                let val = vals[self.rng.gen_range(0..vals.len())];
+                format!("{}_i32", val)
+            }
+            PrimitiveType::I64 => {
+                let vals: &[i64] = &[i64::MIN + 1, i64::MAX, 0, 1, -1];
+                let val = vals[self.rng.gen_range(0..vals.len())];
+                format!("{}_i64", val)
+            }
+            _ => self.literal_for_primitive(prim),
         }
     }
 
