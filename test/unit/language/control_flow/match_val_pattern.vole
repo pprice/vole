@@ -218,3 +218,51 @@ tests "val edge cases" {
         assert(result == "matched expected")
     }
 }
+
+tests "val pattern in lambda (capture)" {
+    test "val captures outer variable in lambda" {
+        let threshold = 42
+        let classify = (x: i64) -> string => match x {
+            val threshold => "at threshold"
+            _ => "other"
+        }
+        assert(classify(42) == "at threshold")
+        assert(classify(10) == "other")
+    }
+
+    test "val with guard captures outer variable in lambda" {
+        let target = 50.0
+        let check = (x: f64) -> string => match x {
+            val target if target > 0.0 => "positive target match"
+            val target => "target match"
+            _ => "no match"
+        }
+        assert(check(50.0) == "positive target match")
+        assert(check(99.0) == "no match")
+    }
+
+    test "val in returned lambda captures function param" {
+        let make_matcher = (threshold: i64) -> (i64) -> bool => {
+            return (x: i64) -> bool => match x {
+                val threshold => true
+                _ => false
+            }
+        }
+        let is_ten = make_matcher(10)
+        assert(is_ten(10) == true)
+        assert(is_ten(20) == false)
+    }
+
+    test "val in lambda with multiple captured vars" {
+        let lo = 10
+        let hi = 20
+        let classify = (x: i64) -> string => match x {
+            val lo => "low bound"
+            val hi => "high bound"
+            _ => "other"
+        }
+        assert(classify(10) == "low bound")
+        assert(classify(20) == "high bound")
+        assert(classify(15) == "other")
+    }
+}

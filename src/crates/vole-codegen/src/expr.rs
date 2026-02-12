@@ -1559,11 +1559,18 @@ impl Cg<'_, '_, '_> {
                     Some(cmp)
                 }
                 PatternKind::Val { name } => {
-                    // Val pattern - compare against existing variable's value
-                    let (var, var_type_id) = *arm_variables
-                        .get(name)
-                        .ok_or_else(|| "undefined variable in val pattern".to_string())?;
-                    let var_val = self.builder.use_var(var);
+                    // Val pattern - compare against existing variable's value.
+                    // Check local variables first, then fall back to captures
+                    // (for lambdas referencing outer scope variables).
+                    let (var_val, var_type_id) =
+                        if let Some(&(var, var_type_id)) = arm_variables.get(name) {
+                            (self.builder.use_var(var), var_type_id)
+                        } else if let Some(binding) = self.get_capture(name).copied() {
+                            let captured = self.load_capture(&binding)?;
+                            (captured.value, captured.type_id)
+                        } else {
+                            return Err("undefined variable in val pattern".to_string().into());
+                        };
 
                     let cmp = self.compile_equality_check(var_type_id, scrutinee.value, var_val)?;
                     Some(cmp)
