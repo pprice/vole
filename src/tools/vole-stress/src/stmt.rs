@@ -1077,6 +1077,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             return self.generate_edge_case_split(ctx);
         }
 
+        // ~2% chance: iterator terminal inside while-loop accumulator
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_iter_while_accum(ctx) {
+                return stmt;
+            }
+        }
+
+        // ~2% chance: for-in loop with match on iteration variable
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_for_in_match_accum(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -4320,6 +4334,186 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         };
 
         terminal
+    }
+
+    /// Generate a while-loop that runs an iterator terminal each iteration and
+    /// accumulates the result.  Stresses iterator alloc/dealloc across loop
+    /// iterations — the same pattern that exposed the chunks/windows RC bug.
+    fn try_generate_iter_while_accum(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let expr_ctx = ctx.to_expr_context();
+        let array_vars = expr_ctx.array_vars();
+        let prim_arrays: Vec<(String, PrimitiveType)> = array_vars
+            .into_iter()
+            .filter_map(|(name, elem_ty)| {
+                if let TypeInfo::Primitive(prim) = elem_ty {
+                    if matches!(prim, PrimitiveType::I64 | PrimitiveType::I32) {
+                        return Some((name, prim));
+                    }
+                }
+                None
+            })
+            .collect();
+
+        if prim_arrays.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..prim_arrays.len());
+        let (arr_name, elem_prim) = &prim_arrays[idx];
+        let arr_name = arr_name.clone();
+        let elem_prim = *elem_prim;
+
+        let acc_name = ctx.new_local_name();
+        let counter_name = ctx.new_local_name();
+        let guard_name = ctx.new_local_name();
+        let limit = self.rng.gen_range(2..=4);
+        let guard_limit = limit * 10;
+
+        // Pick the iterator chain + terminal.
+        // Variant 0: .filter((x) => x > counter).count()
+        // Variant 1: .map((x) => x * 2).sum()  (ignores counter but still allocs per iter)
+        // Variant 2: .filter((x) => x > 0).collect().length()
+        let (iter_expr, uses_counter) = match self.rng.gen_range(0..3u32) {
+            0 => {
+                let filter_body = self.generate_filter_closure_body(elem_prim);
+                (format!("{}.iter().filter((x) => {}).count()", arr_name, filter_body), false)
+            }
+            1 => {
+                let map_body = self.generate_map_closure_body(elem_prim);
+                (format!("{}.iter().map((x) => {}).sum()", arr_name, map_body), false)
+            }
+            _ => {
+                // Use counter as threshold — tests that loop variable is correctly
+                // captured in the filter closure across iterations.
+                (format!(
+                    "{}.iter().filter((x) => x > {}).count()",
+                    arr_name, counter_name
+                ), true)
+            }
+        };
+        let _ = uses_counter;
+
+        ctx.add_local(acc_name.clone(), TypeInfo::Primitive(PrimitiveType::I64), true);
+        ctx.add_local(counter_name.clone(), TypeInfo::Primitive(PrimitiveType::I64), true);
+        ctx.add_local(guard_name.clone(), TypeInfo::Primitive(PrimitiveType::I64), true);
+
+        ctx.protected_vars.push(counter_name.clone());
+        ctx.protected_vars.push(guard_name.clone());
+        ctx.protected_vars.push(acc_name.clone());
+        ctx.protected_vars.push(arr_name.clone());
+
+        let indent = self.indent_str();
+        let inner = format!("{}    ", indent);
+
+        let result = format!(
+            "let mut {} = 0\n\
+             {}let mut {} = 0\n\
+             {}let mut {} = 0\n\
+             {}while {} < {} {{\n\
+             {}{} = {} + 1\n\
+             {}if {} > {} {{ break }}\n\
+             {}{} = {} + {}\n\
+             {}{} = {} + 1\n\
+             {}}}",
+            acc_name,
+            indent, counter_name,
+            indent, guard_name,
+            indent, counter_name, limit,
+            inner, guard_name, guard_name,
+            inner, guard_name, guard_limit,
+            inner, acc_name, acc_name, iter_expr,
+            inner, counter_name, counter_name,
+            indent,
+        );
+
+        Some(result)
+    }
+
+    /// Generate a for-in loop with match on the iteration variable.
+    /// Combines iterator chain + for loop + match expression on loop variable.
+    fn try_generate_for_in_match_accum(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let expr_ctx = ctx.to_expr_context();
+        let array_vars = expr_ctx.array_vars();
+        let i64_arrays: Vec<String> = array_vars
+            .into_iter()
+            .filter_map(|(name, elem_ty)| {
+                if matches!(elem_ty, TypeInfo::Primitive(PrimitiveType::I64)) {
+                    Some(name)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if i64_arrays.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..i64_arrays.len());
+        let arr_name = i64_arrays[idx].clone();
+
+        let iter_name = ctx.new_local_name();
+        let acc_name = ctx.new_local_name();
+
+        // Optional filter prefix: ~40% chance
+        let chain = if self.rng.gen_bool(0.40) {
+            let pred = self.generate_filter_closure_body(PrimitiveType::I64);
+            format!(".filter((x) => {})", pred)
+        } else {
+            String::new()
+        };
+
+        // Generate match arms: 2-3 literal arms + wildcard
+        let num_arms = self.rng.gen_range(2..=3);
+        let mut arm_values: Vec<i64> = Vec::new();
+        for _ in 0..num_arms {
+            let v = self.rng.gen_range(0..=10);
+            if !arm_values.contains(&v) {
+                arm_values.push(v);
+            }
+        }
+
+        // Build match arms with different result expressions
+        let mut arms = Vec::new();
+        for v in &arm_values {
+            let result = self.rng.gen_range(0..=20);
+            arms.push(format!("{} => {}", v, result));
+        }
+        // Wildcard arm uses the iteration variable itself
+        arms.push(format!("_ => {}", iter_name));
+        let arms_str = arms.join(", ");
+
+        ctx.add_local(acc_name.clone(), TypeInfo::Primitive(PrimitiveType::I64), true);
+        ctx.protected_vars.push(arr_name.clone());
+        ctx.protected_vars.push(acc_name.clone());
+
+        let match_name = ctx.new_local_name();
+        let indent = self.indent_str();
+        let inner = format!("{}    ", indent);
+        let inner2 = format!("{}        ", indent);
+
+        let result = format!(
+            "let mut {} = 0\n\
+             {}for {} in {}.iter(){} {{\n\
+             {}let {} = match {} {{\n\
+             {}{}\n\
+             {}}}\n\
+             {}{} = {} + {}\n\
+             {}}}",
+            acc_name,
+            indent, iter_name, arr_name, chain,
+            inner, match_name, iter_name,
+            inner2, arms_str,
+            inner,
+            inner, acc_name, acc_name, match_name,
+            indent,
+        );
+
+        // Clean up protected vars
+        ctx.protected_vars.pop();
+        ctx.protected_vars.pop();
+
+        Some(result)
     }
 
     fn try_generate_bool_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
