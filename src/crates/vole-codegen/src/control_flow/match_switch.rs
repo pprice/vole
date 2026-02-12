@@ -3,6 +3,8 @@
 // Switch-based optimization for match expressions with dense integer literal arms.
 // Uses Cranelift's `Switch` to emit O(1) jump table dispatch instead of O(n) brif chains.
 
+use std::collections::HashSet;
+
 use vole_frontend::{ExprKind, MatchExpr, PatternKind, UnaryOp};
 use vole_sema::type_arena::TypeId;
 
@@ -53,6 +55,7 @@ pub(crate) fn analyze_switch(
     }
 
     let mut arm_values = Vec::new();
+    let mut seen_values = HashSet::new();
     let mut wildcard_idx = None;
 
     for (i, arm) in match_expr.arms.iter().enumerate() {
@@ -70,7 +73,10 @@ pub(crate) fn analyze_switch(
             }
             PatternKind::Literal(lit_expr) => {
                 let value = extract_int_literal(lit_expr)?;
-                arm_values.push((i, value));
+                // Deduplicate: first-match-wins semantics — skip duplicate values
+                if seen_values.insert(value) {
+                    arm_values.push((i, value));
+                }
             }
             _ => return None, // non-literal, non-wildcard pattern
         }

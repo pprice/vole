@@ -1,0 +1,44 @@
+// Regression test: duplicate match arm values must not panic in codegen.
+// Previously, duplicate literal values in a match caused Cranelift's
+// Switch::set_entry to panic when the same entry was set twice.
+
+tests "duplicate match arm values" {
+    test "first-match-wins with duplicate arm" {
+        let x = 4
+        let result = match x {
+            1 => 10
+            2 => 20
+            3 => 30
+            4 => 40
+            4 => 50
+            _ => 0
+        }
+        assert(result == 40)
+    }
+
+    test "duplicate arm not reached uses wildcard" {
+        let x = 5
+        let result = match x {
+            1 => 10
+            2 => 20
+            3 => 30
+            4 => 40
+            4 => 50
+            _ => 0
+        }
+        assert(result == 0)
+    }
+
+    test "multiple duplicates" {
+        let x = 2
+        let result = match x {
+            1 => 10
+            2 => 20
+            3 => 30
+            1 => 11
+            2 => 21
+            _ => 0
+        }
+        assert(result == 20)
+    }
+}
