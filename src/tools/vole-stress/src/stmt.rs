@@ -4183,20 +4183,22 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     /// suitable for filtering.
     /// Only handles i64, f64, bool, and string (the types we restrict to).
     fn generate_filter_closure_body(&mut self, elem_prim: PrimitiveType) -> String {
+        // Use permissive thresholds to avoid producing empty arrays.
+        // Source arrays typically have elements in 0..10 or small ranges.
         match elem_prim {
             PrimitiveType::I64 => match self.rng.gen_range(0..3) {
                 0 => {
-                    let n = self.rng.gen_range(0..=5);
+                    let n = self.rng.gen_range(-5..=2);
                     format!("x > {}", n)
                 }
                 1 => {
-                    let n = self.rng.gen_range(0..=10);
+                    let n = self.rng.gen_range(5..=20);
                     format!("x < {}", n)
                 }
                 _ => "x % 2 == 0".to_string(),
             },
             PrimitiveType::F64 => {
-                let n = self.rng.gen_range(0..=50);
+                let n = self.rng.gen_range(0..=20);
                 format!("x > {}.0", n)
             }
             PrimitiveType::Bool => {
@@ -4207,7 +4209,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 }
             }
             PrimitiveType::String => {
-                let n = self.rng.gen_range(0..=3);
+                let n = self.rng.gen_range(0..=1);
                 format!("x.length() > {}", n)
             }
             // Other types are filtered out by try_generate_iter_map_filter_let
