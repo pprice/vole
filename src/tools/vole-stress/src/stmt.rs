@@ -1225,6 +1225,18 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: for-loop indexed by array length
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_for_length_indexed(ctx) {
+                return stmt;
+            }
+        }
+
+        // ~2% chance: while-loop string building
+        if self.rng.gen_bool(0.02) {
+            return self.generate_while_string_build(ctx);
+        }
+
         // ~3% chance: compound boolean from numeric comparisons
         if self.rng.gen_bool(0.03) {
             if let Some(stmt) = self.try_generate_compound_bool_let(ctx) {
@@ -6032,6 +6044,105 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         ctx.add_local(result_name.clone(), elem_type, false);
 
         Some(format!("let {} = {}", result_name, expr))
+    }
+
+    /// Generate a for-loop that iterates 0..arr.length() and accesses arr[i].
+    ///
+    /// Tests codegen for dynamic range bound + index access:
+    /// ```vole
+    /// let mut acc = 0
+    /// for i in 0..arr.length() {
+    ///     acc = acc + arr[i]
+    /// }
+    /// ```
+    fn try_generate_for_length_indexed(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Find parameter arrays (guaranteed non-empty)
+        let param_arrays: Vec<(String, PrimitiveType)> = ctx
+            .params
+            .iter()
+            .filter_map(|p| {
+                if let TypeInfo::Array(elem) = &p.param_type {
+                    if let TypeInfo::Primitive(prim) = elem.as_ref() {
+                        if matches!(prim, PrimitiveType::I64 | PrimitiveType::I32) {
+                            return Some((p.name.clone(), *prim));
+                        }
+                    }
+                }
+                None
+            })
+            .collect();
+
+        if param_arrays.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..param_arrays.len());
+        let (arr_name, _prim) = &param_arrays[idx];
+        let acc_name = ctx.new_local_name();
+        let iter_name = ctx.new_local_name();
+        let indent = self.indent_str();
+
+        // Protect the accumulator
+        ctx.protected_vars.push(acc_name.clone());
+        ctx.add_local(
+            acc_name.clone(),
+            TypeInfo::Primitive(PrimitiveType::I64),
+            true,
+        );
+
+        let body_op = match self.rng.gen_range(0..3u32) {
+            0 => format!("{} = {} + {}[{}]", acc_name, acc_name, arr_name, iter_name),
+            1 => format!(
+                "{} = {} + when {{ {}[{}] > 0 => 1, _ => 0 }}",
+                acc_name, acc_name, arr_name, iter_name
+            ),
+            _ => format!(
+                "if {}[{}] > 0 {{ {} = {} + 1 }}",
+                arr_name, iter_name, acc_name, acc_name
+            ),
+        };
+
+        Some(format!(
+            "let mut {} = 0\n{indent}for {} in 0..{}.length() {{\n{indent}    {}\n{indent}}}",
+            acc_name, iter_name, arr_name, body_op,
+            indent = indent,
+        ))
+    }
+
+    /// Generate a while-loop that builds a string up to a length limit.
+    ///
+    /// Tests codegen for string building in loops with method condition:
+    /// ```vole
+    /// let mut s = "x"
+    /// while s.length() < 10 {
+    ///     s = s + "x"
+    /// }
+    /// ```
+    fn generate_while_string_build(&mut self, ctx: &mut StmtContext) -> String {
+        let str_name = ctx.new_local_name();
+        let indent = self.indent_str();
+
+        let (init, append) = match self.rng.gen_range(0..3u32) {
+            0 => ("\"x\"", "\"x\""),
+            1 => ("\"ab\"", "\"cd\""),
+            _ => ("\"!\"", "\"!\""),
+        };
+        let limit = self.rng.gen_range(5..=15);
+
+        ctx.protected_vars.push(str_name.clone());
+        ctx.add_local(
+            str_name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            true,
+        );
+
+        format!(
+            "let mut {} = {}\n{indent}while {}.length() < {} {{\n{indent}    {} = {} + {}\n{indent}}}",
+            str_name, init,
+            str_name, limit,
+            str_name, str_name, append,
+            indent = indent,
+        )
     }
 
     /// Generate a compound boolean expression from numeric comparisons.
