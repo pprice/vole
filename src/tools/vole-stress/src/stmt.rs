@@ -3514,7 +3514,11 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             )
         };
 
-        ctx.add_local(result_name.clone(), result_type, false);
+        // Only register non-array results (count, sum, first, last, reduce).
+        // Array results (.collect()) are also empty and must not be indexed.
+        if !matches!(result_type, TypeInfo::Array(_)) {
+            ctx.add_local(result_name.clone(), result_type, false);
+        }
 
         let indent = self.indent_str();
         format!(
