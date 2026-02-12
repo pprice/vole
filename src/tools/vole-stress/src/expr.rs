@@ -1454,6 +1454,30 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         Some(format!("{}.split(\"{}\").collect()", var, delim))
     }
 
+    /// Try to generate a `str.chars().collect()` call for a `[i32]` expression.
+    ///
+    /// `.chars()` returns character codepoints as i32 values, so
+    /// `.chars().collect()` produces `[i32]`. Looks for string-typed
+    /// variables in scope and returns `Some("strVar.chars().collect()")`
+    /// on success. Optionally chains a simple string transform before `.chars()`.
+    fn try_generate_string_chars_collect(&mut self, ctx: &ExprContext) -> Option<String> {
+        let candidates = ctx.string_vars();
+        if candidates.is_empty() {
+            return None;
+        }
+        let idx = self.rng.gen_range(0..candidates.len());
+        let var = &candidates[idx];
+
+        // ~25% chance to prepend a string→string transform before .chars()
+        // e.g. str.trim().chars().collect()
+        if self.rng.gen_bool(self.config.method_chain_probability) {
+            let chain = self.random_simple_string_chain_suffix();
+            Some(format!("{}{}.chars().collect()", var, chain))
+        } else {
+            Some(format!("{}.chars().collect()", var))
+        }
+    }
+
     /// Generate a string concatenation expression using the `+` operator.
     ///
     /// Produces expressions like `"hello" + " world"`, `str_var + " suffix"`,
@@ -2368,6 +2392,14 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         // ~15% chance to generate str.split(",").collect() for [string] arrays
         if *elem == TypeInfo::Primitive(PrimitiveType::String) && self.rng.gen_bool(0.15) {
             if let Some(expr) = self.try_generate_string_split(ctx) {
+                return expr;
+            }
+        }
+
+        // ~15% chance to generate str.chars().collect() for [i32] arrays
+        // (.chars() returns character codepoints as i32)
+        if *elem == TypeInfo::Primitive(PrimitiveType::I32) && self.rng.gen_bool(0.15) {
+            if let Some(expr) = self.try_generate_string_chars_collect(ctx) {
                 return expr;
             }
         }
