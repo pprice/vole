@@ -1545,6 +1545,40 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         };
 
+        // ~25% chance to append a second chain operation for multi-chain iterators
+        // e.g. .filter(...).sorted(), .map(...).filter(...), .sorted().take(N)
+        let chain_expr = if self.rng.gen_bool(0.25) {
+            let second = if is_numeric {
+                match self.rng.gen_range(0..4) {
+                    0 => {
+                        let pred = self.generate_filter_closure_body(elem_prim);
+                        format!(".filter((x) => {})", pred)
+                    }
+                    1 => ".sorted()".to_string(),
+                    2 => ".reverse()".to_string(),
+                    _ => {
+                        let n = self.rng.gen_range(1..=3);
+                        format!(".take({})", n)
+                    }
+                }
+            } else {
+                match self.rng.gen_range(0..3) {
+                    0 => {
+                        let pred = self.generate_filter_closure_body(elem_prim);
+                        format!(".filter((x) => {})", pred)
+                    }
+                    1 => ".reverse()".to_string(),
+                    _ => {
+                        let n = self.rng.gen_range(1..=3);
+                        format!(".take({})", n)
+                    }
+                }
+            };
+            format!("{}{}", chain_expr, second)
+        } else {
+            chain_expr
+        };
+
         // The element type is always preserved (filter/sorted/take don't change it,
         // and we only use same-type map expressions).
         let elem_type = TypeInfo::Primitive(elem_prim);
