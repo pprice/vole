@@ -158,3 +158,43 @@ tests "i16 match patterns" {
         assert(result == 30_i16)
     }
 }
+
+tests "extreme value match patterns" {
+    test "match with i64::MAX" {
+        // Regression test for overflow bug in switch analysis
+        // Computing range size for extreme values used to panic
+        let x = 9223372036854775807_i64  // i64::MAX
+        let result = match x {
+            -1000_i64 => 2_i64
+            0_i64 => 3_i64
+            1000_i64 => 4_i64
+            9223372036854775807_i64 => 5_i64  // i64::MAX
+            _ => 0_i64
+        }
+        assert(result == 5_i64)
+    }
+
+    test "match with large negative values" {
+        let min_i64 = 0_i64 - 9223372036854775807_i64 - 1_i64  // i64::MIN
+        let x = min_i64
+        let result = match x {
+            0_i64 => 2_i64
+            9223372036854775807_i64 => 3_i64
+            _ => 1_i64
+        }
+        assert(result == 1_i64)
+    }
+
+    test "match with large value spread" {
+        // Range too large for switch table, should fall back to if-chain
+        let x = 100_i64
+        let result = match x {
+            -9000000000000000000_i64 => 1_i64
+            100_i64 => 2_i64
+            200_i64 => 3_i64
+            9000000000000000000_i64 => 4_i64
+            _ => 0_i64
+        }
+        assert(result == 2_i64)
+    }
+}

@@ -97,7 +97,13 @@ pub(crate) fn analyze_switch(
         .map(|(_, v)| *v)
         .max()
         .expect("INTERNAL: match switch: arm_values empty after check");
-    let range_size = (max_val - min_val + 1) as f64;
+
+    // Use i128 to avoid overflow when computing range size for extreme values
+    let range_size = (max_val as i128) - (min_val as i128) + 1;
+    if range_size > i64::MAX as i128 {
+        return None; // Range too large for switch table
+    }
+    let range_size = range_size as f64;
     let arm_count = arm_values.len() as f64;
 
     if range_size / arm_count > MAX_DENSITY_RATIO {
