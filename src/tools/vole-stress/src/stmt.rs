@@ -958,6 +958,15 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~8% chance to re-iterate: take an existing array local and chain
+        // a new iterator operation on it. Exercises iterating over dynamically-
+        // created arrays (e.g. results of collect()).
+        if self.rng.gen_bool(0.08) {
+            if let Some(stmt) = self.try_generate_reiterate_let(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -1847,9 +1856,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             arms.push(format!("{}_ => unreachable", indent));
         } else {
             for _ in 0..arm_count {
-                let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
-                let cond =
-                    expr_gen.generate_simple(&TypeInfo::Primitive(PrimitiveType::Bool), &expr_ctx);
+                // ~20% chance to use a method-based bool condition (string contains/starts_with
+                // or iterator any/all) when such variables are in scope.
+                let cond = if self.rng.gen_bool(0.20) {
+                    let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+                    if let Some(method_cond) = expr_gen.try_generate_method_bool_atom(&expr_ctx) {
+                        method_cond
+                    } else {
+                        expr_gen
+                            .generate_simple(&TypeInfo::Primitive(PrimitiveType::Bool), &expr_ctx)
+                    }
+                } else {
+                    let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+                    expr_gen.generate_simple(&TypeInfo::Primitive(PrimitiveType::Bool), &expr_ctx)
+                };
                 let arm_expr = self.generate_match_arm_value(&result_type, &expr_ctx);
                 arms.push(format!("{}{} => {}", indent, cond, arm_expr));
             }
@@ -2981,6 +3001,73 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     /// Finds a string-typed variable in scope and calls a random method on it:
     /// - `.length()` → i64
     /// - `.contains("literal")` → bool
+    /// Try to generate a re-iteration let-binding.
+    ///
+    /// Finds an existing array-typed local variable and chains a new iterator
+    /// operation on it. This exercises the codegen path of iterating over
+    /// dynamically-created arrays (results of prior .collect() calls).
+    fn try_generate_reiterate_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Find i64 array locals in scope
+        let mut i64_array_vars: Vec<String> = Vec::new();
+        for (name, ty, _) in &ctx.locals {
+            if let TypeInfo::Array(inner) = ty {
+                if matches!(inner.as_ref(), TypeInfo::Primitive(PrimitiveType::I64)) {
+                    i64_array_vars.push(name.clone());
+                }
+            }
+        }
+        if i64_array_vars.is_empty() {
+            return None;
+        }
+
+        let arr_name = &i64_array_vars[self.rng.gen_range(0..i64_array_vars.len())];
+        let result_name = ctx.new_local_name();
+
+        // Pick a chain + terminal combination
+        let (chain, result_type) = match self.rng.gen_range(0..5) {
+            0 => {
+                // .iter().map((x) => x * 2).collect()
+                let body = self.generate_map_closure_body(PrimitiveType::I64);
+                (
+                    format!(".iter().map((x) => {}).collect()", body),
+                    TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+                )
+            }
+            1 => {
+                // .iter().filter((x) => PRED).count()
+                let pred = self.generate_filter_closure_body(PrimitiveType::I64);
+                (
+                    format!(".iter().filter((x) => {}).count()", pred),
+                    TypeInfo::Primitive(PrimitiveType::I64),
+                )
+            }
+            2 => {
+                // .iter().sorted().collect()
+                (
+                    ".iter().sorted().collect()".to_string(),
+                    TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+                )
+            }
+            3 => {
+                // .iter().enumerate().count()
+                (
+                    ".iter().enumerate().count()".to_string(),
+                    TypeInfo::Primitive(PrimitiveType::I64),
+                )
+            }
+            _ => {
+                // .iter().sum()
+                (
+                    ".iter().sum()".to_string(),
+                    TypeInfo::Primitive(PrimitiveType::I64),
+                )
+            }
+        };
+
+        ctx.add_local(result_name.clone(), result_type, false);
+        Some(format!("let {} = {}{}", result_name, arr_name, chain))
+    }
+
     /// - `.starts_with("literal")` → bool
     /// - `.ends_with("literal")` → bool
     /// - `.trim()` → string

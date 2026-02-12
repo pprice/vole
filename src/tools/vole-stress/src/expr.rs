@@ -3243,7 +3243,7 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
     /// Try to generate a bool-producing method call for use as a bool atom.
     /// Returns string method calls (contains, starts_with) or iterator predicates
     /// (any, all) when suitable variables are in scope.
-    fn try_generate_method_bool_atom(&mut self, ctx: &ExprContext) -> Option<String> {
+    pub fn try_generate_method_bool_atom(&mut self, ctx: &ExprContext) -> Option<String> {
         let string_vars = ctx.string_vars();
         let array_vars = ctx.array_vars();
 
