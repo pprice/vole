@@ -1860,6 +1860,53 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         ))
     }
 
+    /// Try to generate an `.iter().count()` expression for i64 generation.
+    ///
+    /// Looks for array-typed variables in scope and generates `arrVar.iter().count()`.
+    /// Optionally chains a `.filter()` before `.count()` for more interesting expressions.
+    /// Returns an i64-typed expression.
+    fn try_generate_iter_count(&mut self, ctx: &ExprContext) -> Option<String> {
+        let array_vars = ctx.array_vars();
+        if array_vars.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..array_vars.len());
+        let (var_name, elem_ty) = &array_vars[idx];
+
+        // ~40% chance to chain a .filter() before .count()
+        if self.rng.gen_bool(0.4) {
+            let pred = match elem_ty {
+                TypeInfo::Primitive(PrimitiveType::I64) => {
+                    let n = self.rng.gen_range(0..=5);
+                    Some(format!("x > {}", n))
+                }
+                TypeInfo::Primitive(PrimitiveType::F64) => {
+                    let n = self.rng.gen_range(0..=50);
+                    Some(format!("x > {}.0", n))
+                }
+                TypeInfo::Primitive(PrimitiveType::I32) => {
+                    let n = self.rng.gen_range(0..=5);
+                    Some(format!("x > {}", n))
+                }
+                TypeInfo::Primitive(PrimitiveType::Bool) => Some("x".to_string()),
+                TypeInfo::Primitive(PrimitiveType::String) => {
+                    let n = self.rng.gen_range(0..=3);
+                    Some(format!("x.length() > {}", n))
+                }
+                _ => None,
+            };
+            if let Some(pred) = pred {
+                return Some(format!(
+                    "{}.iter().filter((x) => {}).count()",
+                    var_name, pred
+                ));
+            }
+        }
+
+        Some(format!("{}.iter().count()", var_name))
+    }
+
     /// Generate arguments for a method call.
     ///
     /// With probability `inline_expr_arg_probability`, each argument may be a
@@ -2074,6 +2121,13 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         // (No arguments, so vole-fmt never wraps the call across lines.)
         if prim == PrimitiveType::I64 && self.rng.gen_bool(self.config.string_method_probability) {
             if let Some(expr) = self.try_generate_string_length(ctx) {
+                return expr;
+            }
+        }
+
+        // ~10% chance to generate arr.iter().count() for i64 expressions
+        if prim == PrimitiveType::I64 && self.rng.gen_bool(0.10) {
+            if let Some(expr) = self.try_generate_iter_count(ctx) {
                 return expr;
             }
         }
