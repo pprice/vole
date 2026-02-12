@@ -2858,6 +2858,50 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         };
 
+        // ~30% chance to chain an additional method when current result is string.
+        // This produces patterns like str.trim().to_upper() or
+        // str.to_lower().contains("x") which stress multi-step method dispatch.
+        let (call_expr, result_type) =
+            if matches!(result_type, TypeInfo::Primitive(PrimitiveType::String))
+                && self.rng.gen_bool(0.30)
+            {
+                let chain = self.rng.gen_range(0..6);
+                match chain {
+                    0 => (
+                        format!("{}.length()", call_expr),
+                        TypeInfo::Primitive(PrimitiveType::I64),
+                    ),
+                    1 => {
+                        let needle = Self::random_short_string(&mut self.rng);
+                        (
+                            format!("{}.contains(\"{}\")", call_expr, needle),
+                            TypeInfo::Primitive(PrimitiveType::Bool),
+                        )
+                    }
+                    2 => (
+                        format!("{}.trim()", call_expr),
+                        TypeInfo::Primitive(PrimitiveType::String),
+                    ),
+                    3 => (
+                        format!("{}.to_upper()", call_expr),
+                        TypeInfo::Primitive(PrimitiveType::String),
+                    ),
+                    4 => (
+                        format!("{}.to_lower()", call_expr),
+                        TypeInfo::Primitive(PrimitiveType::String),
+                    ),
+                    _ => {
+                        let needle = Self::random_short_string(&mut self.rng);
+                        (
+                            format!("{}.starts_with(\"{}\")", call_expr, needle),
+                            TypeInfo::Primitive(PrimitiveType::Bool),
+                        )
+                    }
+                }
+            } else {
+                (call_expr, result_type)
+            };
+
         ctx.add_local(result_name.clone(), result_type, false);
         Some(format!("let {} = {}", result_name, call_expr))
     }
