@@ -3704,8 +3704,15 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         // and codegen for extreme constant values.
         if matches!(
             prim,
-            PrimitiveType::I32 | PrimitiveType::I64 | PrimitiveType::I16 | PrimitiveType::I8
-        ) && self.rng.gen_bool(0.08)
+            PrimitiveType::I32
+                | PrimitiveType::I64
+                | PrimitiveType::I16
+                | PrimitiveType::I8
+                | PrimitiveType::U8
+                | PrimitiveType::U16
+                | PrimitiveType::U32
+                | PrimitiveType::U64
+        ) && self.rng.gen_bool(0.10)
         {
             return self.boundary_literal(prim);
         }
@@ -3779,24 +3786,49 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
     fn boundary_literal(&mut self, prim: PrimitiveType) -> String {
         match prim {
             PrimitiveType::I8 => {
-                let vals: &[i8] = &[i8::MIN + 1, i8::MAX, 0, 1, -1];
+                // i8::MIN (-128) can't be a literal (parser sees unary minus + 128 which overflows i8)
+                let vals: &[i8] = &[i8::MIN + 1, i8::MAX, 0, 1, -1, -2];
                 let val = vals[self.rng.gen_range(0..vals.len())];
                 format!("{}_i8", val)
             }
             PrimitiveType::I16 => {
-                let vals: &[i16] = &[i16::MIN + 1, i16::MAX, 0, 1, -1];
+                let vals: &[i16] = &[i16::MIN + 1, i16::MAX, 0, 1, -1, -2];
                 let val = vals[self.rng.gen_range(0..vals.len())];
                 format!("{}_i16", val)
             }
             PrimitiveType::I32 => {
-                let vals: &[i32] = &[i32::MIN + 1, i32::MAX, 0, 1, -1];
+                let vals: &[i32] = &[i32::MIN + 1, i32::MAX, 0, 1, -1, -2];
                 let val = vals[self.rng.gen_range(0..vals.len())];
                 format!("{}_i32", val)
             }
             PrimitiveType::I64 => {
-                let vals: &[i64] = &[i64::MIN + 1, i64::MAX, 0, 1, -1];
+                // i64::MIN can't be a literal (parser sees unary minus + 9223372036854775808 which overflows)
+                let vals: &[i64] = &[i64::MIN + 1, i64::MAX, 0, 1, -1, -2];
                 let val = vals[self.rng.gen_range(0..vals.len())];
                 format!("{}_i64", val)
+            }
+            PrimitiveType::U8 => {
+                let vals: &[u8] = &[0, 1, u8::MAX, u8::MAX - 1];
+                let val = vals[self.rng.gen_range(0..vals.len())];
+                format!("{}_u8", val)
+            }
+            PrimitiveType::U16 => {
+                let vals: &[u16] = &[0, 1, u16::MAX, u16::MAX - 1];
+                let val = vals[self.rng.gen_range(0..vals.len())];
+                format!("{}_u16", val)
+            }
+            PrimitiveType::U32 => {
+                // u32::MAX fits in i64 so the parser should handle it
+                let vals: &[u32] = &[0, 1, u32::MAX, u32::MAX - 1];
+                let val = vals[self.rng.gen_range(0..vals.len())];
+                format!("{}_u32", val)
+            }
+            PrimitiveType::U64 => {
+                // u64::MAX overflows i64 so the parser rejects it;
+                // use i64::MAX as the safe upper bound for u64 boundary
+                let vals: &[u64] = &[0, 1, i64::MAX as u64, 1000];
+                let val = vals[self.rng.gen_range(0..vals.len())];
+                format!("{}_u64", val)
             }
             _ => self.literal_for_primitive(prim),
         }
