@@ -1171,6 +1171,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: match on method call result
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_match_on_method(ctx) {
+                return stmt;
+            }
+        }
+
+        // ~2% chance: struct construction with iterator field values
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_struct_with_iter_fields(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -5353,6 +5367,231 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 indent = indent,
             ))
         }
+    }
+
+    /// Generate a match expression on a method call result.
+    ///
+    /// Tests codegen for method call temporaries used as match scrutinees:
+    /// ```vole
+    /// let r = match str_var.length() { 0 => "empty", _ => "non-empty" }
+    /// let r = match str_var.to_upper() { "HELLO" => 1, _ => 0 }
+    /// let r = match num_var.to_string() { "0" => true, _ => false }
+    /// ```
+    fn try_generate_match_on_method(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let result_name = ctx.new_local_name();
+
+        // Collect string vars for .length() / .to_upper() match
+        let string_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::String)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::String)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        // Collect i64 vars for .to_string() match
+        let i64_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::I64)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::I64)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        if string_vars.is_empty() && i64_vars.is_empty() {
+            return None;
+        }
+
+        let variant = self.rng.gen_range(0..3u32);
+        match variant {
+            0 if !string_vars.is_empty() => {
+                // match str.length() { 0 => ..., 5 => ..., _ => ... }
+                let var = &string_vars[self.rng.gen_range(0..string_vars.len())];
+                let val0 = self.rng.gen_range(-5..=5);
+                let val1 = self.rng.gen_range(-5..=5);
+                let val_default = self.rng.gen_range(-5..=5);
+                let arm_len = self.rng.gen_range(0..=10);
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::I64),
+                    false,
+                );
+                Some(format!(
+                    "let {} = match {}.length() {{ {} => {}, _ => {} }}",
+                    result_name, var, arm_len, val0,
+                    if self.rng.gen_bool(0.5) {
+                        format!("{}", val_default)
+                    } else {
+                        format!("{}", val1)
+                    }
+                ))
+            }
+            1 if !i64_vars.is_empty() => {
+                // match num.to_string() { "0" => ..., "1" => ..., _ => ... }
+                let var = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+                let strs = ["\"0\"", "\"1\"", "\"-1\"", "\"42\""];
+                let arm_str = strs[self.rng.gen_range(0..strs.len())];
+                let val_true = self.rng.gen_range(-10..=10);
+                let val_false = self.rng.gen_range(-10..=10);
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::I64),
+                    false,
+                );
+                Some(format!(
+                    "let {} = match {}.to_string() {{ {} => {}, _ => {} }}",
+                    result_name, var, arm_str, val_true, val_false
+                ))
+            }
+            _ if !string_vars.is_empty() => {
+                // match str.trim() { "" => ..., _ => ... }
+                let var = &string_vars[self.rng.gen_range(0..string_vars.len())];
+                let method = match self.rng.gen_range(0..3u32) {
+                    0 => "trim",
+                    1 => "to_lower",
+                    _ => "to_upper",
+                };
+                let match_str = match self.rng.gen_range(0..3u32) {
+                    0 => "\"\"",
+                    1 => "\"hello\"",
+                    _ => "\"test\"",
+                };
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::Bool),
+                    false,
+                );
+                Some(format!(
+                    "let {} = match {}.{}() {{ {} => true, _ => false }}",
+                    result_name, var, method, match_str
+                ))
+            }
+            _ => None,
+        }
+    }
+
+    /// Generate a struct construction using iterator terminal results as field values.
+    ///
+    /// Tests codegen for iterator chains inside struct literal fields:
+    /// ```vole
+    /// let s = MyStruct { count_field: arr.iter().count(), sum_field: arr.iter().sum() }
+    /// ```
+    fn try_generate_struct_with_iter_fields(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let module_id = ctx.module_id?;
+        let module = ctx.table.get_module(module_id)?;
+
+        // Find arrays of numeric type in scope
+        let numeric_arrays: Vec<(String, PrimitiveType)> = ctx
+            .locals
+            .iter()
+            .filter_map(|(name, ty, _)| {
+                if let TypeInfo::Array(elem) = ty {
+                    if let TypeInfo::Primitive(prim) = elem.as_ref() {
+                        if matches!(prim, PrimitiveType::I64 | PrimitiveType::I32) {
+                            return Some((name.clone(), *prim));
+                        }
+                    }
+                }
+                None
+            })
+            .chain(ctx.params.iter().filter_map(|p| {
+                if let TypeInfo::Array(elem) = &p.param_type {
+                    if let TypeInfo::Primitive(prim) = elem.as_ref() {
+                        if matches!(prim, PrimitiveType::I64 | PrimitiveType::I32) {
+                            return Some((p.name.clone(), *prim));
+                        }
+                    }
+                }
+                None
+            }))
+            .collect();
+
+        if numeric_arrays.is_empty() {
+            return None;
+        }
+
+        // Find structs with numeric fields (i64 specifically)
+        let struct_candidates: Vec<_> = module
+            .structs()
+            .filter_map(|sym| {
+                if let SymbolKind::Struct(ref info) = sym.kind {
+                    // Need at least one i64 field
+                    let i64_fields: Vec<_> = info
+                        .fields
+                        .iter()
+                        .filter(|f| matches!(f.field_type, TypeInfo::Primitive(PrimitiveType::I64)))
+                        .collect();
+                    if !i64_fields.is_empty() {
+                        Some((sym.id, sym.name.clone(), info.clone()))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if struct_candidates.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..struct_candidates.len());
+        let (sym_id, struct_name, struct_info) = &struct_candidates[idx];
+        let arr_idx = self.rng.gen_range(0..numeric_arrays.len());
+        let (arr_name, _) = &numeric_arrays[arr_idx];
+
+        let result_name = ctx.new_local_name();
+
+        // Generate field values — for i64 fields, use iterator terminals; for others, use regular expr gen
+        let expr_ctx = ctx.to_expr_context();
+        let field_strs: Vec<String> = struct_info
+            .fields
+            .iter()
+            .map(|f| {
+                if matches!(f.field_type, TypeInfo::Primitive(PrimitiveType::I64)) {
+                    // Use an iterator terminal for this field
+                    let terminal = match self.rng.gen_range(0..3u32) {
+                        0 => format!("{}.iter().count()", arr_name),
+                        1 => format!("{}.iter().sum()", arr_name),
+                        _ => format!(
+                            "{}.iter().filter((x) => x > {}).count()",
+                            arr_name,
+                            self.rng.gen_range(-10..=10)
+                        ),
+                    };
+                    format!("{}: {}", f.name, terminal)
+                } else {
+                    // Regular expression generation for non-i64 fields
+                    let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+                    let value = expr_gen.generate(&f.field_type, &expr_ctx, 0);
+                    format!("{}: {}", f.name, value)
+                }
+            })
+            .collect();
+
+        ctx.add_local(
+            result_name.clone(),
+            TypeInfo::Struct(module_id, *sym_id),
+            false,
+        );
+
+        Some(format!(
+            "let {} = {} {{ {} }}",
+            result_name,
+            struct_name,
+            field_strs.join(", ")
+        ))
     }
 
     fn try_generate_bool_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
