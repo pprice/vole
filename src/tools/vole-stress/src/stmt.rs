@@ -1191,7 +1191,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                             if info.type_params.is_empty() {
                                 for field in &info.fields {
                                     if let TypeInfo::Primitive(p) = &field.field_type {
-                                        candidates.push((name.clone(), field.name.clone(), *p));
+                                        // Only types the closure body can handle
+                                        if matches!(p, PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::F64 | PrimitiveType::String | PrimitiveType::Bool) {
+                                            candidates.push((name.clone(), field.name.clone(), *p));
+                                        }
                                     }
                                 }
                             }
@@ -1203,7 +1206,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                         if let SymbolKind::Struct(ref info) = sym.kind {
                             for field in &info.fields {
                                 if let TypeInfo::Primitive(p) = &field.field_type {
-                                    candidates.push((name.clone(), field.name.clone(), *p));
+                                    // Only types the closure body can handle
+                                    if matches!(p, PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::F64 | PrimitiveType::String | PrimitiveType::Bool) {
+                                        candidates.push((name.clone(), field.name.clone(), *p));
+                                    }
                                 }
                             }
                         }
@@ -1259,9 +1265,16 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             // Actually, let's just produce an i64 closure that ignores
             // the string but still captures it to exercise the capture path.
             format!("x + {}.length()", field_local)
-        } else {
+        } else if matches!(field_prim, PrimitiveType::Bool) {
             // Bool field: convert to i64 via when expression
-            format!("x + when {{ {} => 1, _ => 0 }}", field_local)
+            format!(
+                "x + when {{\n{indent}    {} => 1\n{indent}    _ => 0\n{indent}    }}",
+                field_local,
+                indent = "    ".repeat(self.indent)
+            )
+        } else {
+            // Candidate filtering above ensures only i64/i32/f64/string/bool reach here
+            unreachable!("unexpected field type in field-closure-let: {:?}", field_prim)
         };
 
         let indent = "    ".repeat(self.indent);
