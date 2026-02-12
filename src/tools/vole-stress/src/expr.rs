@@ -687,11 +687,15 @@ fn is_integer_type(ty: &TypeInfo) -> bool {
 
 /// Check whether a type is safe to capture in a closure.
 ///
-/// Only primitive types are capturable to avoid complex reference-counting
-/// interactions and type inference issues with class/struct/interface captures
-/// in generated code.
+/// Primitive types and non-generic class/struct instances are capturable.
+/// This allows closures to capture class/struct variables and access their
+/// fields or call methods, exercising the closure-capture + method-call
+/// codegen interaction.
 fn is_capturable_type(ty: &TypeInfo) -> bool {
-    matches!(ty, TypeInfo::Primitive(_))
+    matches!(
+        ty,
+        TypeInfo::Primitive(_) | TypeInfo::Class(_, _) | TypeInfo::Struct(_, _)
+    )
 }
 
 /// Check whether a type can be safely used inside string interpolation.
