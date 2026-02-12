@@ -198,6 +198,12 @@ pub struct StmtConfig {
     /// Pattern: `let r = arr.iter().map((x: i64) -> i64 => inst.method(x)).collect()`
     /// Set to 0.0 to disable.
     pub iter_method_map_probability: f64,
+
+    /// Probability of generating a `"a,b,c".split(",").collect()` let-binding.
+    /// Creates a `[string]` array from splitting a string literal. Exercises
+    /// string method codegen, iterator-to-array collect, and string arrays.
+    /// Set to 0.0 to disable.
+    pub string_split_probability: f64,
 }
 
 impl Default for StmtConfig {
@@ -248,6 +254,7 @@ impl Default for StmtConfig {
             string_interpolation_probability: 0.0,
             match_on_method_result_probability: 0.0,
             iter_method_map_probability: 0.0,
+            string_split_probability: 0.0,
         }
     }
 }
@@ -731,6 +738,11 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             if let Some(stmt) = self.try_generate_field_closure_let(ctx) {
                 return stmt;
             }
+        }
+
+        // String split to array: "a,b,c".split(",").collect()
+        if self.rng.gen_bool(self.config.string_split_probability) {
+            return self.generate_string_split_let(ctx);
         }
 
         // Tuple let-binding with destructuring
@@ -2658,6 +2670,66 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         );
 
         Some(format!("let {} = \"{}\"", result_name, interpolated_string))
+    }
+
+    /// Generate a `let parts = "a,b,c".split(",").collect()` statement.
+    ///
+    /// Creates a string literal with known delimiters, splits it, and collects
+    /// into a `[string]` array. Optionally chains an iterator operation on the
+    /// result (e.g., `.count()`, `.first()`).
+    fn generate_string_split_let(&mut self, ctx: &mut StmtContext) -> String {
+        let words: Vec<&str> = vec![
+            "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta",
+        ];
+        let delimiters = [",", ";", "::", "-", "_"];
+        let delim = delimiters[self.rng.gen_range(0..delimiters.len())];
+
+        // Pick 2-4 words
+        let word_count = self.rng.gen_range(2..=4);
+        let mut selected: Vec<&str> = Vec::new();
+        for _ in 0..word_count {
+            selected.push(words[self.rng.gen_range(0..words.len())]);
+        }
+        let joined = selected.join(delim);
+
+        let name = ctx.new_local_name();
+
+        // 70% collect to [string], 15% count (i64), 15% first (string?)
+        let choice = self.rng.gen_range(0..20);
+        if choice < 14 {
+            // Collect to [string]
+            ctx.add_local(
+                name.clone(),
+                TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::String))),
+                false,
+            );
+            format!(
+                "let {} = \"{}\".split(\"{}\").collect()",
+                name, joined, delim
+            )
+        } else if choice < 17 {
+            // Count → i64
+            ctx.add_local(
+                name.clone(),
+                TypeInfo::Primitive(PrimitiveType::I64),
+                false,
+            );
+            format!(
+                "let {} = \"{}\".split(\"{}\").count()",
+                name, joined, delim
+            )
+        } else {
+            // First → string? (use ?? to unwrap to string)
+            ctx.add_local(
+                name.clone(),
+                TypeInfo::Primitive(PrimitiveType::String),
+                false,
+            );
+            format!(
+                "let {} = \"{}\".split(\"{}\").first() ?? \"\"",
+                name, joined, delim
+            )
+        }
     }
 
     /// Try to generate a match expression on the result of a method call.
