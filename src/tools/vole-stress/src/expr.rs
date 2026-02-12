@@ -2440,6 +2440,65 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         }
     }
 
+    /// Try to generate an `arr.iter().unique().collect()` expression for array generation.
+    ///
+    /// Only works for i64 and i32 element types (unique requires hashable elements,
+    /// and bool unique has a runtime bug).
+    fn try_generate_iter_unique_collect(
+        &mut self,
+        target_elem: &TypeInfo,
+        ctx: &ExprContext,
+    ) -> Option<String> {
+        // Only i64 and i32 — unique() requires hashable elements
+        let prim = match target_elem {
+            TypeInfo::Primitive(PrimitiveType::I64) => PrimitiveType::I64,
+            TypeInfo::Primitive(PrimitiveType::I32) => PrimitiveType::I32,
+            _ => return None,
+        };
+
+        let array_vars = ctx.array_vars();
+        let candidates: Vec<_> = array_vars
+            .iter()
+            .filter(|(_, elem_ty)| *elem_ty == *target_elem)
+            .collect();
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..candidates.len());
+        let (var_name, _) = candidates[idx];
+
+        // ~30% chance: chain a .filter() before .unique()
+        if self.rng.gen_bool(0.3) {
+            let pred = match prim {
+                PrimitiveType::I64 => {
+                    let n = self.rng.gen_range(0..=5);
+                    format!("x > {}", n)
+                }
+                PrimitiveType::I32 => {
+                    let n = self.rng.gen_range(0..=5);
+                    format!("x > {}_i32", n)
+                }
+                _ => unreachable!(),
+            };
+            return Some(format!(
+                "{}.iter().filter((x) => {}).unique().collect()",
+                var_name, pred
+            ));
+        }
+
+        // ~20% chance: chain .sorted() after .unique() (sort the unique values)
+        if self.rng.gen_bool(0.2) {
+            return Some(format!(
+                "{}.iter().unique().sorted().collect()",
+                var_name
+            ));
+        }
+
+        Some(format!("{}.iter().unique().collect()", var_name))
+    }
+
     /// Generate arguments for a method call.
     ///
     /// With probability `inline_expr_arg_probability`, each argument may be a
@@ -3250,6 +3309,13 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         // ~8% chance to generate arr1.iter().chain(arr2.iter()).collect() (i64/i32 only)
         if self.rng.gen_bool(0.08) {
             if let Some(expr) = self.try_generate_iter_chain_collect(elem, ctx) {
+                return expr;
+            }
+        }
+
+        // ~6% chance to generate arr.iter().unique().collect() (i64/i32 only)
+        if self.rng.gen_bool(0.06) {
+            if let Some(expr) = self.try_generate_iter_unique_collect(elem, ctx) {
                 return expr;
             }
         }
