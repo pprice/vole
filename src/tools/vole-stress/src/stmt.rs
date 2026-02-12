@@ -1185,6 +1185,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: iterator terminal + method chain (e.g., arr.iter().count().to_string())
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_iter_terminal_chain(ctx) {
+                return stmt;
+            }
+        }
+
+        // ~2% chance: when with string method conditions
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_when_string_method_conds(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -5591,6 +5605,172 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             result_name,
             struct_name,
             field_strs.join(", ")
+        ))
+    }
+
+    /// Generate an iterator terminal result chained with a further method call.
+    ///
+    /// Tests codegen for method dispatch on temporary values from iterator terminals:
+    /// ```vole
+    /// let s = arr.iter().count().to_string()   // "5"
+    /// let s = arr.iter().sum().to_string()      // "15"
+    /// ```
+    fn try_generate_iter_terminal_chain(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let expr_ctx = ctx.to_expr_context();
+        let array_vars = expr_ctx.array_vars();
+        let prim_arrays: Vec<(String, PrimitiveType)> = array_vars
+            .into_iter()
+            .filter_map(|(name, elem_ty)| {
+                if let TypeInfo::Primitive(prim) = elem_ty {
+                    if matches!(prim, PrimitiveType::I64 | PrimitiveType::I32) {
+                        return Some((name, prim));
+                    }
+                }
+                None
+            })
+            .collect();
+
+        if prim_arrays.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..prim_arrays.len());
+        let (arr_name, _) = &prim_arrays[idx];
+        let result_name = ctx.new_local_name();
+
+        let variant = self.rng.gen_range(0..4u32);
+        match variant {
+            0 => {
+                // arr.iter().count().to_string()
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::String),
+                    false,
+                );
+                Some(format!(
+                    "let {} = {}.iter().count().to_string()",
+                    result_name, arr_name
+                ))
+            }
+            1 => {
+                // arr.iter().sum().to_string()
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::String),
+                    false,
+                );
+                Some(format!(
+                    "let {} = {}.iter().sum().to_string()",
+                    result_name, arr_name
+                ))
+            }
+            2 => {
+                // arr.iter().filter(...).count().to_string()
+                let thresh = self.rng.gen_range(-10..=10);
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::String),
+                    false,
+                );
+                Some(format!(
+                    "let {} = {}.iter().filter((x) => x > {}).count().to_string()",
+                    result_name, arr_name, thresh
+                ))
+            }
+            _ => {
+                // "count=" + arr.iter().count().to_string()
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::String),
+                    false,
+                );
+                Some(format!(
+                    "let {} = \"count=\" + {}.iter().count().to_string()",
+                    result_name, arr_name
+                ))
+            }
+        }
+    }
+
+    /// Generate a when expression where conditions use string method calls.
+    ///
+    /// Tests codegen for method calls in when arm conditions:
+    /// ```vole
+    /// let r = when {
+    ///     str.contains("x") => "has x",
+    ///     str.length() > 5 => "long",
+    ///     _ => "other"
+    /// }
+    /// ```
+    fn try_generate_when_string_method_conds(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let string_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::String)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::String)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        if string_vars.is_empty() {
+            return None;
+        }
+
+        let var = &string_vars[self.rng.gen_range(0..string_vars.len())];
+        let result_name = ctx.new_local_name();
+        let indent = self.indent_str();
+
+        // Generate 2-3 string method conditions
+        let num_arms = self.rng.gen_range(2..=3);
+        let mut arms = Vec::new();
+
+        let method_conds = [
+            |var: &str, rng: &mut dyn FnMut() -> i64| {
+                let subs = ["\"a\"", "\"e\"", "\"hello\"", "\"test\"", "\" \""];
+                let sub = subs[rng() as usize % subs.len()];
+                format!("{}.contains({})", var, sub)
+            },
+            |var: &str, rng: &mut dyn FnMut() -> i64| {
+                let thresh = (rng() % 15).abs();
+                format!("{}.length() > {}", var, thresh)
+            },
+            |var: &str, _rng: &mut dyn FnMut() -> i64| {
+                format!("{}.length() == 0", var)
+            },
+            |var: &str, rng: &mut dyn FnMut() -> i64| {
+                let prefixes = ["\"a\"", "\"test\"", "\"h\""];
+                let prefix = prefixes[rng() as usize % prefixes.len()];
+                format!("{}.starts_with({})", var, prefix)
+            },
+        ];
+
+        // Result is i64
+        for i in 0..num_arms {
+            let cond_idx = (i as usize) % method_conds.len();
+            let mut rng_fn = || self.rng.gen_range(0..1000i64);
+            let cond = method_conds[cond_idx](var, &mut rng_fn);
+            let val = self.rng.gen_range(-20..=20);
+            arms.push(format!("{}    {} => {}", indent, cond, val));
+        }
+
+        let default_val = self.rng.gen_range(-20..=20);
+        arms.push(format!("{}    _ => {}", indent, default_val));
+
+        ctx.add_local(
+            result_name.clone(),
+            TypeInfo::Primitive(PrimitiveType::I64),
+            false,
+        );
+
+        Some(format!(
+            "let {} = when {{\n{}\n{}}}",
+            result_name,
+            arms.join(",\n"),
+            indent,
         ))
     }
 
