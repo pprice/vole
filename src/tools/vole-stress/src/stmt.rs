@@ -3997,8 +3997,8 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     /// assert(true)
     /// ```
     fn try_generate_assert_stmt(&mut self, ctx: &mut StmtContext) -> Option<String> {
-        // Collect candidates — any primitive-typed variable
-        let candidates: Vec<(String, TypeInfo)> = ctx
+        // Collect primitive candidates
+        let prim_candidates: Vec<(String, TypeInfo)> = ctx
             .locals
             .iter()
             .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(_)))
@@ -4011,41 +4011,92 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             )
             .collect();
 
-        if candidates.is_empty() {
-            return Some("assert(true)".to_string());
-        }
+        // Collect array candidates for iterator-based assertions
+        let array_candidates: Vec<(String, TypeInfo)> = ctx
+            .params
+            .iter()
+            .filter(|p| matches!(p.param_type, TypeInfo::Array(_)))
+            .map(|p| (p.name.clone(), p.param_type.clone()))
+            .collect();
 
-        let (name, ty) = &candidates[self.rng.gen_range(0..candidates.len())];
-        let variant = self.rng.gen_range(0..4u32);
+        // Collect string candidates
+        let string_candidates: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::String)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::String)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        let variant = self.rng.gen_range(0..7u32);
 
         let condition = match variant {
-            0 => {
-                // x == x (reflexive equality, always true)
+            0 if !prim_candidates.is_empty() => {
+                // x == x (reflexive equality)
+                let (name, _) = &prim_candidates[self.rng.gen_range(0..prim_candidates.len())];
                 format!("{} == {}", name, name)
             }
-            1 => match ty {
-                TypeInfo::Primitive(PrimitiveType::I64) => {
-                    format!("{} >= 0 || {} < 0", name, name)
+            1 if !prim_candidates.is_empty() => {
+                let (name, ty) = &prim_candidates[self.rng.gen_range(0..prim_candidates.len())];
+                match ty {
+                    TypeInfo::Primitive(PrimitiveType::I64) => {
+                        format!("{} >= 0 || {} < 0", name, name)
+                    }
+                    TypeInfo::Primitive(PrimitiveType::I32) => {
+                        format!("{} >= 0_i32 || {} < 0_i32", name, name)
+                    }
+                    TypeInfo::Primitive(PrimitiveType::Bool) => {
+                        format!("{} || !{}", name, name)
+                    }
+                    TypeInfo::Primitive(PrimitiveType::String) => {
+                        format!("{}.length() >= 0", name)
+                    }
+                    _ => "true".to_string(),
                 }
-                TypeInfo::Primitive(PrimitiveType::I32) => {
-                    format!("{} >= 0_i32 || {} < 0_i32", name, name)
+            }
+            2 => "true".to_string(),
+            3 if !array_candidates.is_empty() => {
+                // assert(arr.iter().count() >= 0)
+                let (name, _) = &array_candidates[self.rng.gen_range(0..array_candidates.len())];
+                format!("{}.iter().count() >= 0", name)
+            }
+            4 if !string_candidates.is_empty() => {
+                // assert(str.trim().length() >= 0)
+                let name = &string_candidates[self.rng.gen_range(0..string_candidates.len())];
+                let chain = match self.rng.gen_range(0..3u32) {
+                    0 => format!("{}.trim().length() >= 0", name),
+                    1 => format!("{}.to_upper().length() == {}.length()", name, name),
+                    _ => format!("{}.length() >= 0", name),
+                };
+                chain
+            }
+            5 if !array_candidates.is_empty() => {
+                // assert(arr.iter().all((x) => x == x))
+                let (name, elem_ty) =
+                    &array_candidates[self.rng.gen_range(0..array_candidates.len())];
+                if let TypeInfo::Array(inner) = elem_ty {
+                    if matches!(inner.as_ref(), TypeInfo::Primitive(_)) {
+                        format!("{}.iter().all((x) => x == x)", name)
+                    } else {
+                        "true".to_string()
+                    }
+                } else {
+                    "true".to_string()
                 }
-                TypeInfo::Primitive(PrimitiveType::Bool) => {
-                    format!("{} || !{}", name, name)
-                }
-                TypeInfo::Primitive(PrimitiveType::String) => {
-                    format!("{}.length() >= 0", name)
-                }
-                TypeInfo::Primitive(PrimitiveType::F64) => "true".to_string(),
-                _ => "true".to_string(),
-            },
-            2 => {
-                // assert(true) - simplest
-                "true".to_string()
             }
             _ => {
-                // x == x via when: when { true => x, _ => x } == x
-                format!("{} == {}", name, name)
+                if !prim_candidates.is_empty() {
+                    let (name, _) =
+                        &prim_candidates[self.rng.gen_range(0..prim_candidates.len())];
+                    format!("{} == {}", name, name)
+                } else {
+                    "true".to_string()
+                }
             }
         };
 
