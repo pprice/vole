@@ -1138,6 +1138,13 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             return self.generate_split_for_loop(ctx);
         }
 
+        // ~2% chance: for-in loop pushing derived values to mutable array
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_for_push_collect(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -4955,6 +4962,86 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         ctx.protected_vars.pop();
 
         result
+    }
+
+    /// Iterate over an array, push transformed values into a mutable result array.
+    /// ```vole
+    /// let source = [1, 2, 3]
+    /// let mut result: [i64] = []
+    /// for item in source.iter() {
+    ///     result.push(item * 2 + 1)
+    /// }
+    /// ```
+    fn try_generate_for_push_collect(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let expr_ctx = ctx.to_expr_context();
+        let array_vars = expr_ctx.array_vars();
+        let i64_arrays: Vec<String> = array_vars
+            .into_iter()
+            .filter_map(|(name, elem_ty)| {
+                if matches!(elem_ty, TypeInfo::Primitive(PrimitiveType::I64)) {
+                    Some(name)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if i64_arrays.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..i64_arrays.len());
+        let source_name = i64_arrays[idx].clone();
+
+        let result_name = ctx.new_local_name();
+        let iter_name = ctx.new_local_name();
+
+        // Generate transformation: item * N + M, item + N, or abs-like when
+        let transform = match self.rng.gen_range(0..3u32) {
+            0 => {
+                let mult = self.rng.gen_range(2..=5);
+                let add = self.rng.gen_range(0..=10);
+                format!("{} * {} + {}", iter_name, mult, add)
+            }
+            1 => {
+                let add = self.rng.gen_range(1..=20);
+                format!("{} + {}", iter_name, add)
+            }
+            _ => {
+                // when { item > 0 => item, _ => 0 - item }
+                format!(
+                    "when {{ {} > 0 => {}, _ => 0 - {} }}",
+                    iter_name, iter_name, iter_name
+                )
+            }
+        };
+
+        ctx.add_local(
+            result_name.clone(),
+            TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+            true,
+        );
+        ctx.protected_vars.push(source_name.clone());
+        ctx.protected_vars.push(result_name.clone());
+
+        let indent = self.indent_str();
+        let inner = format!("{}    ", indent);
+
+        let result = format!(
+            "let mut {}: [i64] = []\n\
+             {}for {} in {}.iter() {{\n\
+             {}{}.push({})\n\
+             {}}}",
+            result_name,
+            indent, iter_name, source_name,
+            inner, result_name, transform,
+            indent,
+        );
+
+        ctx.protected_vars.pop();
+        ctx.protected_vars.pop();
+
+        Some(result)
     }
 
     fn try_generate_bool_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
