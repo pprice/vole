@@ -1907,6 +1907,71 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         Some(format!("{}.iter().count()", var_name))
     }
 
+    /// Try to generate an `.iter().reduce()` expression.
+    ///
+    /// Looks for array-typed variables in scope and generates reduce expressions
+    /// based on the target type:
+    /// - `i64` target from `[i64]`: `arr.iter().reduce(0, (acc, x) => acc + x)` (sum)
+    /// - `string` target from `[string]`: `arr.iter().reduce("", (acc, x) => acc + x + " ")` (join)
+    /// - `string` target from `[i64]`: `arr.iter().map((x) => "" + x).reduce("", (acc, s) => acc + s + ",")` (stringify+join)
+    fn try_generate_iter_reduce(&mut self, target: &TypeInfo, ctx: &ExprContext) -> Option<String> {
+        let array_vars = ctx.array_vars();
+        if array_vars.is_empty() {
+            return None;
+        }
+
+        // Collect candidates: (var_name, elem_type) pairs that can produce target
+        let candidates: Vec<_> = array_vars
+            .iter()
+            .filter(|(_, elem_ty)| match target {
+                TypeInfo::Primitive(PrimitiveType::I64) => {
+                    matches!(elem_ty, TypeInfo::Primitive(PrimitiveType::I64))
+                }
+                TypeInfo::Primitive(PrimitiveType::String) => {
+                    matches!(
+                        elem_ty,
+                        TypeInfo::Primitive(PrimitiveType::String | PrimitiveType::I64)
+                    )
+                }
+                _ => false,
+            })
+            .collect();
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..candidates.len());
+        let (var_name, elem_ty) = candidates[idx];
+
+        match (target, elem_ty) {
+            // i64 from [i64]: sum via reduce
+            (TypeInfo::Primitive(PrimitiveType::I64), TypeInfo::Primitive(PrimitiveType::I64)) => {
+                Some(format!(
+                    "{}.iter().reduce(0, (acc, x) => acc + x)",
+                    var_name
+                ))
+            }
+            // string from [string]: join with space
+            (
+                TypeInfo::Primitive(PrimitiveType::String),
+                TypeInfo::Primitive(PrimitiveType::String),
+            ) => Some(format!(
+                "{}.iter().reduce(\"\", (acc, x) => acc + x + \" \")",
+                var_name
+            )),
+            // string from [i64]: map to string then join with comma
+            (
+                TypeInfo::Primitive(PrimitiveType::String),
+                TypeInfo::Primitive(PrimitiveType::I64),
+            ) => Some(format!(
+                "{}.iter().map((x) => \"\" + x).reduce(\"\", (acc, s) => acc + s + \",\")",
+                var_name
+            )),
+            _ => None,
+        }
+    }
+
     /// Generate arguments for a method call.
     ///
     /// With probability `inline_expr_arg_probability`, each argument may be a
@@ -2132,6 +2197,15 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             }
         }
 
+        // ~8% chance to generate arr.iter().reduce(0, (acc, x) => acc + x) for i64 expressions
+        if prim == PrimitiveType::I64 && self.rng.gen_bool(0.08) {
+            if let Some(expr) =
+                self.try_generate_iter_reduce(&TypeInfo::Primitive(PrimitiveType::I64), ctx)
+            {
+                return expr;
+            }
+        }
+
         // ~15% chance to call an interface method on a type-param-typed variable
         // when the method's return type matches our target primitive type.
         if self.rng.gen_bool(0.15) {
@@ -2250,6 +2324,14 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                 // ~12% chance: interpolated string with a method call
                 if self.rng.gen_bool(0.12) {
                     if let Some(expr) = self.try_generate_method_call_interpolation(ctx) {
+                        return expr;
+                    }
+                }
+                // ~10% chance: arr.iter().reduce("", ...) for string expressions
+                if self.rng.gen_bool(0.10) {
+                    if let Some(expr) = self
+                        .try_generate_iter_reduce(&TypeInfo::Primitive(PrimitiveType::String), ctx)
+                    {
                         return expr;
                     }
                 }
