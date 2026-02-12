@@ -2240,13 +2240,25 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         let (var_name, _) = candidates[idx];
 
         // Use small values to keep results non-empty (arrays have min 2 elements)
-        let skip = self.rng.gen_range(0..=1);
-        let take = self.rng.gen_range(1..=2);
-
-        Some(format!(
-            "{}.iter().skip({}).take({}).collect()",
-            var_name, skip, take
-        ))
+        // ~40% skip+take, ~30% take only, ~30% skip only
+        match self.rng.gen_range(0..10) {
+            0..4 => {
+                let skip = self.rng.gen_range(0..=1);
+                let take = self.rng.gen_range(1..=2);
+                Some(format!(
+                    "{}.iter().skip({}).take({}).collect()",
+                    var_name, skip, take
+                ))
+            }
+            4..7 => {
+                let take = self.rng.gen_range(1..=3);
+                Some(format!("{}.iter().take({}).collect()", var_name, take))
+            }
+            _ => {
+                let skip = self.rng.gen_range(0..=1);
+                Some(format!("{}.iter().skip({}).collect()", var_name, skip))
+            }
+        }
     }
 
     /// Try to generate an `.iter().sorted().collect()` expression for array generation.
