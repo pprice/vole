@@ -535,6 +535,8 @@ pub struct ChunksSource {
     pub chunk_size: i64,
     /// Current position in the elements array
     pub position: i64,
+    /// Element type tag for inner elements (e.g. TYPE_F64 for [f64] chunks)
+    pub inner_elem_tag: u64,
 }
 
 /// Source data for windows iteration (yields overlapping windows as arrays)
@@ -547,6 +549,8 @@ pub struct WindowsSource {
     pub window_size: i64,
     /// Current position in the elements array
     pub position: i64,
+    /// Element type tag for inner elements (e.g. TYPE_F64 for [f64] windows)
+    pub inner_elem_tag: u64,
 }
 
 /// Source data for repeat iteration (infinite iterator yielding the same value)
@@ -1007,11 +1011,21 @@ for_all_iterator_kinds!(generate_produces_owned);
 /// Frees the iterator after collecting.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_iter_collect(iter: *mut RcIterator) -> *mut RcArray {
-    let tag = if iter.is_null() {
-        0
-    } else {
-        unsafe { (*iter).elem_tag }
-    };
+    if iter.is_null() {
+        return vole_iter_collect_tagged(iter, 0);
+    }
+
+    let kind = unsafe { (*iter).iter.kind };
+    let tag = unsafe { (*iter).elem_tag };
+
+    // For Flatten iterators, use vole_flatten_iter_collect which reads
+    // the correct inner element tag. The codegen-set elem_tag may incorrectly
+    // be TYPE_ARRAY (the pre-flatten outer element type) rather than the
+    // flattened inner element type (e.g. TYPE_F64).
+    if kind == IteratorKind::Flatten {
+        return vole_flatten_iter_collect(iter);
+    }
+
     vole_iter_collect_tagged(iter, tag)
 }
 
@@ -2157,7 +2171,27 @@ pub extern "C" fn vole_chain_iter_collect(iter: *mut RcIterator) -> *mut RcArray
 /// Returns pointer to heap-allocated iterator
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_flatten_iter(source: *mut RcIterator) -> *mut RcIterator {
-    RcIterator::new(
+    // Determine the inner element tag for the flattened output.
+    // When the source is a Chunks or Windows iterator, use inner_elem_tag
+    // (the element type of the sub-arrays, e.g. TYPE_F64 for [f64] chunks).
+    // This is critical because codegen may set elem_tag to TYPE_ARRAY
+    // (the outer element type) on the flatten iterator, but flatten actually
+    // yields individual elements from the inner arrays.
+    let inner_tag = if !source.is_null() {
+        let kind = unsafe { (*source).iter.kind };
+        match kind {
+            IteratorKind::Chunks => {
+                unsafe { (*source).iter.source.chunks.inner_elem_tag }
+            }
+            IteratorKind::Windows => {
+                unsafe { (*source).iter.source.windows.inner_elem_tag }
+            }
+            _ => 0, // For other sources, let codegen set it
+        }
+    } else {
+        0
+    };
+    RcIterator::new_with_tag(
         IteratorKind::Flatten,
         IteratorSource {
             flatten: FlattenSource {
@@ -2165,6 +2199,7 @@ pub extern "C" fn vole_flatten_iter(source: *mut RcIterator) -> *mut RcIterator 
                 inner: ptr::null_mut(),
             },
         },
+        inner_tag,
     )
 }
 
@@ -2227,6 +2262,33 @@ pub extern "C" fn vole_flatten_iter_collect(iter: *mut RcIterator) -> *mut RcArr
         return result;
     }
 
+    // Determine the inner element type tag. The flatten iterator's elem_tag
+    // may be TYPE_ARRAY (incorrectly set by codegen for the pre-flatten type).
+    // When the outer source is Chunks or Windows, use inner_elem_tag.
+    // Otherwise, fall back to the iterator's stored elem_tag.
+    let elem_tag = unsafe {
+        let outer = (*iter).iter.source.flatten.outer;
+        if !outer.is_null() {
+            let outer_kind = (*outer).iter.kind;
+            match outer_kind {
+                IteratorKind::Chunks => (*outer).iter.source.chunks.inner_elem_tag,
+                IteratorKind::Windows => (*outer).iter.source.windows.inner_elem_tag,
+                _ => {
+                    let tag = (*iter).elem_tag;
+                    // If the codegen-set tag is TYPE_ARRAY but we're flattening,
+                    // the actual elements aren't arrays - use 0 (i64) as fallback
+                    if tag == crate::value::TYPE_ARRAY as u64 {
+                        0
+                    } else {
+                        tag
+                    }
+                }
+            }
+        } else {
+            (*iter).elem_tag
+        }
+    };
+
     loop {
         let mut value: i64 = 0;
         let has_value = vole_flatten_iter_next(iter, &mut value);
@@ -2239,7 +2301,7 @@ pub extern "C" fn vole_flatten_iter_collect(iter: *mut RcIterator) -> *mut RcArr
             RcArray::push(
                 result,
                 TaggedValue {
-                    tag: 0,
+                    tag: elem_tag,
                     value: value as u64,
                 },
             );
@@ -2533,6 +2595,14 @@ pub extern "C" fn vole_chunks_iter(source: *mut RcIterator, chunk_size: i64) -> 
     // First, collect all elements from the source iterator
     let elements = RcArray::new();
 
+    // Read the source's elem_tag before consuming it, so sub-arrays
+    // preserve the correct element type (critical for f64, string, etc.)
+    let source_elem_tag = if !source.is_null() {
+        unsafe { (*source).elem_tag }
+    } else {
+        0
+    };
+
     if !source.is_null() && chunk_size > 0 {
         loop {
             let mut value: i64 = 0;
@@ -2544,7 +2614,7 @@ pub extern "C" fn vole_chunks_iter(source: *mut RcIterator, chunk_size: i64) -> 
                 RcArray::push(
                     elements,
                     TaggedValue {
-                        tag: 0,
+                        tag: source_elem_tag,
                         value: value as u64,
                     },
                 );
@@ -2557,16 +2627,22 @@ pub extern "C" fn vole_chunks_iter(source: *mut RcIterator, chunk_size: i64) -> 
         RcIterator::dec_ref(source);
     }
 
-    RcIterator::new(
+    // The chunks iterator yields sub-arrays, so its elem_tag should be
+    // TYPE_ARRAY (not the inner element type). The inner_elem_tag is stored
+    // on ChunksSource so sub-arrays can preserve the correct inner type.
+    let iter = RcIterator::new_with_tag(
         IteratorKind::Chunks,
         IteratorSource {
             chunks: ChunksSource {
                 elements,
                 chunk_size: if chunk_size > 0 { chunk_size } else { 1 },
                 position: 0,
+                inner_elem_tag: source_elem_tag,
             },
         },
-    )
+        crate::value::TYPE_ARRAY as u64,
+    );
+    iter
 }
 
 iter_next_fn!(
@@ -2583,6 +2659,9 @@ iter_next_fn!(
             return 0;
         }
 
+        // Read the inner element type tag to preserve type info (e.g. f64) in sub-arrays.
+        let elem_tag = src.inner_elem_tag;
+
         // Create a new array for this chunk
         let chunk = RcArray::new();
         let end_pos = std::cmp::min(src.position + src.chunk_size, elements_len);
@@ -2593,7 +2672,7 @@ iter_next_fn!(
                 (*data.add(i as usize)).value
             };
             unsafe {
-                RcArray::push(chunk, TaggedValue { tag: 0, value });
+                RcArray::push(chunk, TaggedValue { tag: elem_tag, value });
             }
         }
 
@@ -2625,12 +2704,13 @@ pub extern "C" fn vole_chunks_iter_collect(iter: *mut RcIterator) -> *mut RcArra
             break;
         }
 
-        // Push chunk array to result
+        // Push chunk array to result with TYPE_ARRAY tag so cleanup
+        // properly dec_ref's sub-arrays
         unsafe {
             RcArray::push(
                 result,
                 TaggedValue {
-                    tag: 0, // Arrays are stored as pointers
+                    tag: crate::value::TYPE_ARRAY as u64,
                     value: value as u64,
                 },
             );
@@ -2658,6 +2738,14 @@ pub extern "C" fn vole_windows_iter(source: *mut RcIterator, window_size: i64) -
     // First, collect all elements from the source iterator
     let elements = RcArray::new();
 
+    // Read the source's elem_tag before consuming it, so sub-arrays
+    // preserve the correct element type (critical for f64, string, etc.)
+    let source_elem_tag = if !source.is_null() {
+        unsafe { (*source).elem_tag }
+    } else {
+        0
+    };
+
     if !source.is_null() && window_size > 0 {
         loop {
             let mut value: i64 = 0;
@@ -2669,7 +2757,7 @@ pub extern "C" fn vole_windows_iter(source: *mut RcIterator, window_size: i64) -
                 RcArray::push(
                     elements,
                     TaggedValue {
-                        tag: 0,
+                        tag: source_elem_tag,
                         value: value as u64,
                     },
                 );
@@ -2682,16 +2770,22 @@ pub extern "C" fn vole_windows_iter(source: *mut RcIterator, window_size: i64) -
         RcIterator::dec_ref(source);
     }
 
-    RcIterator::new(
+    // The windows iterator yields sub-arrays, so its elem_tag should be
+    // TYPE_ARRAY (not the inner element type). The inner_elem_tag is stored
+    // on WindowsSource so sub-arrays can preserve the correct inner type.
+    let iter = RcIterator::new_with_tag(
         IteratorKind::Windows,
         IteratorSource {
             windows: WindowsSource {
                 elements,
                 window_size: if window_size > 0 { window_size } else { 1 },
                 position: 0,
+                inner_elem_tag: source_elem_tag,
             },
         },
-    )
+        crate::value::TYPE_ARRAY as u64,
+    );
+    iter
 }
 
 iter_next_fn!(
@@ -2709,6 +2803,9 @@ iter_next_fn!(
             return 0;
         }
 
+        // Read the inner element type tag to preserve type info (e.g. f64) in sub-arrays.
+        let elem_tag = src.inner_elem_tag;
+
         // Create a new array for this window
         let window = RcArray::new();
         for i in 0..src.window_size {
@@ -2717,7 +2814,7 @@ iter_next_fn!(
                 (*data.add((src.position + i) as usize)).value
             };
             unsafe {
-                RcArray::push(window, TaggedValue { tag: 0, value });
+                RcArray::push(window, TaggedValue { tag: elem_tag, value });
             }
         }
 
@@ -2750,12 +2847,13 @@ pub extern "C" fn vole_windows_iter_collect(iter: *mut RcIterator) -> *mut RcArr
             break;
         }
 
-        // Push window array to result
+        // Push window array to result with TYPE_ARRAY tag so cleanup
+        // properly dec_ref's sub-arrays
         unsafe {
             RcArray::push(
                 result,
                 TaggedValue {
-                    tag: 0, // Arrays are stored as pointers
+                    tag: crate::value::TYPE_ARRAY as u64,
                     value: value as u64,
                 },
             );
