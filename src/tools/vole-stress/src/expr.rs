@@ -2033,6 +2033,162 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         Some(format!("{}.iter().sum()", var_name))
     }
 
+    /// Try to generate an `.iter().first()`, `.iter().last()`, or `.iter().nth(N)` expression.
+    ///
+    /// Looks for array-typed variables in scope whose element type matches the
+    /// target `inner` type (the inner type of an optional) and generates an
+    /// iterator terminal that returns `T?`:
+    /// - `arrVar.iter().first()`
+    /// - `arrVar.iter().last()`
+    /// - `arrVar.iter().nth(N)` (N in 0..=3)
+    ///
+    /// Optionally chains a `.filter()` (~20% chance) or `.map()` (~20% chance,
+    /// same-type only) before the terminal method for more interesting expressions.
+    fn try_generate_iter_first_last_nth(
+        &mut self,
+        inner: &TypeInfo,
+        ctx: &ExprContext,
+    ) -> Option<String> {
+        let array_vars = ctx.array_vars();
+
+        // Filter to arrays whose element type matches inner and is a supported primitive
+        let candidates: Vec<_> = array_vars
+            .iter()
+            .filter(|(_, elem_ty)| {
+                elem_ty == inner
+                    && matches!(
+                        elem_ty,
+                        TypeInfo::Primitive(
+                            PrimitiveType::I64
+                                | PrimitiveType::I32
+                                | PrimitiveType::I128
+                                | PrimitiveType::F64
+                                | PrimitiveType::Bool
+                                | PrimitiveType::String
+                        )
+                    )
+            })
+            .collect();
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..candidates.len());
+        let (var_name, elem_ty) = candidates[idx];
+
+        // Pick the terminal method: first(), last(), or nth(N)
+        let terminal = match self.rng.gen_range(0..3) {
+            0 => ".first()".to_string(),
+            1 => ".last()".to_string(),
+            _ => {
+                let n = self.rng.gen_range(0..=3);
+                format!(".nth({})", n)
+            }
+        };
+
+        // ~20% chance: chain a .filter() before the terminal
+        if self.rng.gen_bool(0.2) {
+            let pred = match elem_ty {
+                TypeInfo::Primitive(PrimitiveType::I64) => match self.rng.gen_range(0..3) {
+                    0 => {
+                        let n = self.rng.gen_range(0..=5);
+                        format!("x > {}", n)
+                    }
+                    1 => "x % 2 == 0".to_string(),
+                    _ => {
+                        let n = self.rng.gen_range(0..=10);
+                        format!("x < {}", n)
+                    }
+                },
+                TypeInfo::Primitive(PrimitiveType::I32) => match self.rng.gen_range(0..3) {
+                    0 => {
+                        let n = self.rng.gen_range(0..=5);
+                        format!("x > {}", n)
+                    }
+                    1 => "x % 2 == 0".to_string(),
+                    _ => {
+                        let n = self.rng.gen_range(0..=10);
+                        format!("x < {}", n)
+                    }
+                },
+                TypeInfo::Primitive(PrimitiveType::I128) => match self.rng.gen_range(0..3) {
+                    0 => {
+                        let n = self.rng.gen_range(0..=5);
+                        format!("x > {}", n)
+                    }
+                    1 => "x % 2 == 0".to_string(),
+                    _ => {
+                        let n = self.rng.gen_range(0..=10);
+                        format!("x < {}", n)
+                    }
+                },
+                TypeInfo::Primitive(PrimitiveType::F64) => {
+                    let n = self.rng.gen_range(0..=50);
+                    format!("x > {}.0", n)
+                }
+                TypeInfo::Primitive(PrimitiveType::Bool) => {
+                    if self.rng.gen_bool(0.5) {
+                        "x".to_string()
+                    } else {
+                        "!x".to_string()
+                    }
+                }
+                TypeInfo::Primitive(PrimitiveType::String) => {
+                    let n = self.rng.gen_range(0..=3);
+                    format!("x.length() > {}", n)
+                }
+                _ => {
+                    return Some(format!("{}.iter(){}", var_name, terminal));
+                }
+            };
+            return Some(format!(
+                "{}.iter().filter((x) => {}){}",
+                var_name, pred, terminal
+            ));
+        }
+
+        // ~20% chance: chain a .map() before the terminal (same-type only)
+        if self.rng.gen_bool(0.2) {
+            let body = match elem_ty {
+                TypeInfo::Primitive(PrimitiveType::I64) => match self.rng.gen_range(0..4) {
+                    0 => Some("x * 2"),
+                    1 => Some("x + 1"),
+                    2 => Some("x % 10"),
+                    _ => Some("-x"),
+                },
+                TypeInfo::Primitive(PrimitiveType::I32) => match self.rng.gen_range(0..2) {
+                    0 => Some("x * 2_i32"),
+                    _ => Some("x + 1_i32"),
+                },
+                TypeInfo::Primitive(PrimitiveType::I128) => match self.rng.gen_range(0..2) {
+                    0 => Some("x * 2_i128"),
+                    _ => Some("x + 1_i128"),
+                },
+                TypeInfo::Primitive(PrimitiveType::F64) => match self.rng.gen_range(0..3) {
+                    0 => Some("x * 2.0"),
+                    1 => Some("x + 1.0"),
+                    _ => Some("-x"),
+                },
+                TypeInfo::Primitive(PrimitiveType::Bool) => Some("!x"),
+                TypeInfo::Primitive(PrimitiveType::String) => match self.rng.gen_range(0..3) {
+                    0 => Some("x.trim()"),
+                    1 => Some("x.to_upper()"),
+                    _ => Some("x.to_lower()"),
+                },
+                _ => None,
+            };
+            if let Some(body) = body {
+                return Some(format!(
+                    "{}.iter().map((x) => {}){}",
+                    var_name, body, terminal
+                ));
+            }
+        }
+
+        Some(format!("{}.iter(){}", var_name, terminal))
+    }
+
     /// Try to generate an `.iter().skip(N).take(M).collect()` expression for array generation.
     ///
     /// Looks for array-typed variables in scope whose element type matches the
@@ -2786,6 +2942,13 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
 
     /// Generate an optional expression.
     fn generate_optional(&mut self, inner: &TypeInfo, ctx: &ExprContext, depth: usize) -> String {
+        // ~15% chance to generate arr.iter().first()/last()/nth() for optional expressions
+        if self.rng.gen_bool(0.15) {
+            if let Some(expr) = self.try_generate_iter_first_last_nth(inner, ctx) {
+                return expr;
+            }
+        }
+
         // ~20% chance to generate optional chaining (optVar?.field) when
         // an optional class-typed variable with a field matching inner is in scope.
         // The result of ?. is Optional(field_type).
