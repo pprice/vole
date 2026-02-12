@@ -1254,6 +1254,20 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         methods[self.rng.gen_range(0..methods.len())]
     }
 
+    /// Try to generate an `arr.length()` call for an i64 expression.
+    ///
+    /// Looks for any array-typed variable in scope and returns
+    /// `Some("arrVar.length()")` on success.
+    fn try_generate_array_length(&mut self, ctx: &ExprContext) -> Option<String> {
+        let candidates = ctx.array_vars();
+        if candidates.is_empty() {
+            return None;
+        }
+        let idx = self.rng.gen_range(0..candidates.len());
+        let (var_name, _) = &candidates[idx];
+        Some(format!("{}.length()", var_name))
+    }
+
     /// Try to generate a `str.length()` call for an i64 expression.
     ///
     /// Looks for string-typed variables in scope and returns
@@ -2621,6 +2635,13 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             if let Some(expr) =
                 self.try_generate_null_coalesce(&TypeInfo::Primitive(prim), ctx, depth)
             {
+                return expr;
+            }
+        }
+
+        // ~10% chance to generate arr.length() for i64 expressions
+        if prim == PrimitiveType::I64 && self.rng.gen_bool(0.10) {
+            if let Some(expr) = self.try_generate_array_length(ctx) {
                 return expr;
             }
         }
