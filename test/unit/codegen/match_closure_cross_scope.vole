@@ -1,0 +1,39 @@
+// Regression test: lambda_variables must not leak across function scopes.
+// When two functions both define a local named `local0`, and one assigns it
+// via a match expression producing closures, the type checker must not use
+// the other function's lambda type.
+
+func other(p: i64) {
+    let local0 = (a: i32, b: i32) -> string => "x"
+}
+
+func target_fn(x: i64) -> i64 {
+    let local0 = match x {
+        1 => (n: i64) => n + x
+        _ => (n: i64) => x + n
+    }
+    let result = local0(20)
+    return result
+}
+
+func three_params() {
+    let local0 = (a: i64, b: i64, c: i64) -> i64 => a + b + c
+}
+
+func target_fn2(x: i64) -> i64 {
+    let local0 = match x {
+        _ => (n: i64) => n * 2
+    }
+    return local0(5)
+}
+
+tests "match closure cross scope" {
+    test "local0 from match works after 2-param closure in other function" {
+        assert(target_fn(1) == 21)
+        assert(target_fn(3) == 23)
+    }
+
+    test "local0 from match works after 3-param closure in other function" {
+        assert(target_fn2(0) == 10)
+    }
+}

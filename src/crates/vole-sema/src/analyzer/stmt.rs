@@ -237,6 +237,10 @@ impl Analyzer {
                             let required_params = Self::lambda_required_params(lambda);
                             self.lambda_variables
                                 .insert(let_stmt.name, (init_expr.id, required_params));
+                        } else {
+                            // Remove stale entry if this variable shadows a lambda
+                            // from a different scope (e.g. same-named local in another function)
+                            self.lambda_variables.remove(&let_stmt.name);
                         }
                     }
                     LetInit::TypeAlias(type_expr) => {
