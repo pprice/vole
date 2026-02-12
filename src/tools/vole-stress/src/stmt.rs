@@ -758,6 +758,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // Nested when expressions — when inside when arms.
+        if self.rng.gen_bool(0.03) {
+            if let Some(stmt) = self.try_generate_nested_when_let(ctx) {
+                return stmt;
+            }
+        }
+
+        // Zero-take / max-skip — iterator chains that produce empty results.
+        if self.rng.gen_bool(0.03) {
+            if let Some(stmt) = self.try_generate_empty_iter_edge(ctx) {
+                return stmt;
+            }
+        }
+
         // Range-based iterator chain — exercises range iterators (different source
         // than array iterators). Generates `(start..end).iter().chain().terminal()`.
         if self.rng.gen_bool(self.config.range_iter_probability) {
@@ -6127,6 +6141,160 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             "let {} = match {} {{\n{}_ => {}\n{}}}",
             result_name, scrutinee, indent, value_expr, close_indent
         ))
+    }
+
+    /// Generate a nested when expression.
+    ///
+    /// Produces:
+    /// ```vole
+    /// let result = when {
+    ///     cond1 => when {
+    ///         cond2 => val1
+    ///         _ => val2
+    ///     }
+    ///     _ => val3
+    /// }
+    /// ```
+    fn try_generate_nested_when_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let result_type = self.random_primitive_type();
+        let result_name = ctx.new_local_name();
+
+        let expr_ctx = ctx.to_expr_context();
+
+        // Generate outer condition
+        let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+        let outer_cond = expr_gen.generate_simple(
+            &TypeInfo::Primitive(PrimitiveType::Bool),
+            &expr_ctx,
+        );
+
+        // Generate inner condition
+        let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+        let inner_cond = expr_gen.generate_simple(
+            &TypeInfo::Primitive(PrimitiveType::Bool),
+            &expr_ctx,
+        );
+
+        // Generate three values for the three branches
+        let val1 = self.generate_match_arm_value(&result_type, &expr_ctx);
+        let val2 = self.generate_match_arm_value(&result_type, &expr_ctx);
+        let val3 = self.generate_match_arm_value(&result_type, &expr_ctx);
+
+        let indent = "    ".repeat(self.indent + 1);
+        let inner_indent = "    ".repeat(self.indent + 2);
+        let close_indent = "    ".repeat(self.indent);
+        let inner_close = "    ".repeat(self.indent + 1);
+
+        ctx.add_local(result_name.clone(), result_type, false);
+
+        Some(format!(
+            "let {} = when {{\n\
+             {}{} => when {{\n\
+             {}{} => {}\n\
+             {}_ => {}\n\
+             {}}}\n\
+             {}_ => {}\n\
+             {}}}",
+            result_name,
+            indent, outer_cond,
+            inner_indent, inner_cond, val1,
+            inner_indent, val2,
+            inner_close,
+            indent, val3,
+            close_indent,
+        ))
+    }
+
+    /// Generate iterator chains that produce empty results from non-empty arrays.
+    ///
+    /// Uses `.take(0)` or `.skip(large)` to force zero-length iteration.
+    fn try_generate_empty_iter_edge(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Find arrays with primitive element types
+        let mut array_vars: Vec<(String, PrimitiveType)> = Vec::new();
+        for (name, ty, _) in &ctx.locals {
+            if let TypeInfo::Array(inner) = ty {
+                if let TypeInfo::Primitive(p) = inner.as_ref() {
+                    match p {
+                        PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::String => {
+                            array_vars.push((name.clone(), *p));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        for param in ctx.params.iter() {
+            if let TypeInfo::Array(inner) = &param.param_type {
+                if let TypeInfo::Primitive(p) = inner.as_ref() {
+                    match p {
+                        PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::String => {
+                            array_vars.push((param.name.clone(), *p));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        if array_vars.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..array_vars.len());
+        let (arr_name, elem_prim) = &array_vars[idx];
+        let arr_name = arr_name.clone();
+        let elem_prim = *elem_prim;
+        let result_name = ctx.new_local_name();
+
+        match self.rng.gen_range(0..4) {
+            0 => {
+                // .take(0).collect() → empty array
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Array(Box::new(TypeInfo::Primitive(elem_prim))),
+                    false,
+                );
+                Some(format!(
+                    "let {} = {}.iter().take(0).collect()",
+                    result_name, arr_name
+                ))
+            }
+            1 => {
+                // .take(0).count() → 0
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::I64),
+                    false,
+                );
+                Some(format!(
+                    "let {} = {}.iter().take(0).count()",
+                    result_name, arr_name
+                ))
+            }
+            2 => {
+                // .skip(999).collect() → empty array
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Array(Box::new(TypeInfo::Primitive(elem_prim))),
+                    false,
+                );
+                Some(format!(
+                    "let {} = {}.iter().skip(999).collect()",
+                    result_name, arr_name
+                ))
+            }
+            _ => {
+                // .skip(999).count() → 0
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::I64),
+                    false,
+                );
+                Some(format!(
+                    "let {} = {}.iter().skip(999).count()",
+                    result_name, arr_name
+                ))
+            }
+        }
     }
 
     /// Generate an empty array and run an iterator chain on it.
