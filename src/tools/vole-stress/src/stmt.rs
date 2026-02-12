@@ -128,6 +128,13 @@ pub struct StmtConfig {
     /// - Function-typed match results used in higher-order contexts
     /// Set to 0.0 to disable.
     pub match_closure_arm_probability: f64,
+    /// Probability of generating a range-based iterator chain let-binding.
+    /// Produces expressions like `(0..10).iter().map((x) => x * 2).collect()`
+    /// or `(1..=5).iter().filter((x) => x > 2).sum()`. This exercises a
+    /// different iterator source codegen path (range iterators vs array iterators).
+    /// Range elements are always i64, so all numeric iterator operations apply.
+    /// Set to 0.0 to disable.
+    pub range_iter_probability: f64,
 }
 
 impl Default for StmtConfig {
@@ -168,6 +175,7 @@ impl Default for StmtConfig {
             generic_closure_interface_probability: 0.0,
             empty_array_iter_probability: 0.0,
             match_closure_arm_probability: 0.0,
+            range_iter_probability: 0.0,
         }
     }
 }
@@ -614,6 +622,12 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // Creates `let arr: [T] = []` then chains .iter().op().terminal().
         if self.rng.gen_bool(self.config.empty_array_iter_probability) {
             return self.generate_empty_array_iter_let(ctx);
+        }
+
+        // Range-based iterator chain — exercises range iterators (different source
+        // than array iterators). Generates `(start..end).iter().chain().terminal()`.
+        if self.rng.gen_bool(self.config.range_iter_probability) {
+            return self.generate_range_iter_let(ctx);
         }
 
         // Generic closure + interface dispatch in iterator chains.
@@ -3524,6 +3538,154 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         format!(
             "let {}: {} = []\n{}let {} = {}.iter(){}{}",
             arr_name, type_annotation, indent, result_name, arr_name, prefix, chain
+        )
+    }
+
+    /// Generate a range-based iterator chain let-binding.
+    ///
+    /// Produces expressions like:
+    /// ```vole
+    /// let localN = (0..10).iter().map((x) => x * 2).collect()
+    /// let localN = (1..=5).iter().filter((x) => x > 2).sum()
+    /// let localN = (0..8).iter().sorted().take(3).collect()
+    /// ```
+    ///
+    /// Range iterators always produce i64 elements, so all numeric iterator
+    /// operations (.sum(), .sorted(), numeric map/filter closures) apply.
+    /// This exercises a different iterator source codegen path compared to
+    /// array-based iterators (range source vs array source).
+    fn generate_range_iter_let(&mut self, ctx: &mut StmtContext) -> String {
+        let name = ctx.new_local_name();
+
+        // Generate a small, bounded range. Use only literal bounds to avoid
+        // accidentally iterating over huge ranges from computed values.
+        let use_inclusive = self.rng.gen_bool(0.3);
+        let start = self.rng.gen_range(0..3_i64);
+        let end = if use_inclusive {
+            self.rng.gen_range(start..start + 8)
+        } else {
+            self.rng.gen_range(start + 1..start + 10)
+        };
+        let range_expr = if use_inclusive {
+            format!("({}..={})", start, end)
+        } else {
+            format!("({}..{})", start, end)
+        };
+
+        // Range elements are always i64.
+        let elem_prim = PrimitiveType::I64;
+
+        // Optionally prepend .sorted(), .reverse(), or .skip(N) (~20%).
+        let prefix: String = if self.rng.gen_bool(0.20) {
+            match self.rng.gen_range(0..3) {
+                0 => ".sorted()".to_string(),
+                1 => ".reverse()".to_string(),
+                _ => format!(".skip({})", self.rng.gen_range(0..=1)),
+            }
+        } else {
+            String::new()
+        };
+
+        // Build the iterator chain: .iter() followed by 1-2 operations, then a terminal.
+        // Weight distribution:
+        //   0..5  => single .map()
+        //   5..9  => single .filter()
+        //   9..12 => .map().filter()
+        //  12..14 => .filter().map()
+        //  14..16 => .sorted().map()
+        //  16..18 => .filter().sorted()
+        let chain_choice = self.rng.gen_range(0..18);
+
+        let chain = if chain_choice < 5 {
+            // Single .map()
+            let map_body = self.generate_map_closure_body(elem_prim);
+            format!(".map((x) => {})", map_body)
+        } else if chain_choice < 9 {
+            // Single .filter()
+            let filter_body = self.generate_filter_closure_body(elem_prim);
+            format!(".filter((x) => {})", filter_body)
+        } else if chain_choice < 12 {
+            // .map().filter()
+            let map_body = self.generate_map_closure_body(elem_prim);
+            let filter_body = self.generate_filter_closure_body_param(elem_prim, "y");
+            format!(".map((x) => {}).filter((y) => {})", map_body, filter_body)
+        } else if chain_choice < 14 {
+            // .filter().map()
+            let filter_body = self.generate_filter_closure_body(elem_prim);
+            let map_body = self.generate_map_closure_body_param(elem_prim, "y");
+            format!(".filter((x) => {}).map((y) => {})", filter_body, map_body)
+        } else if chain_choice < 16 {
+            // .sorted().map()
+            let map_body = self.generate_map_closure_body(elem_prim);
+            format!(".sorted().map((x) => {})", map_body)
+        } else {
+            // .filter().sorted()
+            let filter_body = self.generate_filter_closure_body(elem_prim);
+            format!(".filter((x) => {}).sorted()", filter_body)
+        };
+
+        // Pick a terminal operation:
+        // 30% .collect() -> [i64], 15% .count() -> i64, 15% .sum() -> i64,
+        // 12% .reduce() -> i64, 12% .take(N).collect() -> [i64],
+        // 8% .first() -> i64? or i64 (with ??), 8% .last() -> i64? or i64 (with ??)
+        let terminal_choice = self.rng.gen_range(0..20);
+        let (terminal, result_type) = if terminal_choice < 6 {
+            (
+                ".collect()".to_string(),
+                TypeInfo::Array(Box::new(TypeInfo::Primitive(elem_prim))),
+            )
+        } else if terminal_choice < 9 {
+            (
+                ".count()".to_string(),
+                TypeInfo::Primitive(PrimitiveType::I64),
+            )
+        } else if terminal_choice < 12 {
+            (
+                ".sum()".to_string(),
+                TypeInfo::Primitive(PrimitiveType::I64),
+            )
+        } else if terminal_choice < 14 {
+            // .reduce(init, (acc, el) => expr)
+            let (init, body, result_ty) = self.generate_reduce_closure(elem_prim);
+            (
+                format!(".reduce({}, (acc, el) => {})", init, body),
+                result_ty,
+            )
+        } else if terminal_choice < 17 {
+            let n = self.rng.gen_range(1..=3);
+            (
+                format!(".take({}).collect()", n),
+                TypeInfo::Array(Box::new(TypeInfo::Primitive(elem_prim))),
+            )
+        } else {
+            // .first() or .last() -> i64? (optional)
+            // ~50% immediately unwrap with ?? to produce i64
+            let method = if self.rng.gen_bool(0.5) {
+                ".first()"
+            } else {
+                ".last()"
+            };
+            if self.rng.gen_bool(0.5) {
+                // Produce i64? — the optional local becomes a candidate for ?? elsewhere
+                (
+                    method.to_string(),
+                    TypeInfo::Optional(Box::new(TypeInfo::Primitive(elem_prim))),
+                )
+            } else {
+                // Immediately unwrap with ?? default — produces i64 directly
+                let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+                let default_val = expr_gen.literal_for_primitive(elem_prim);
+                (
+                    format!("{} ?? {}", method, default_val),
+                    TypeInfo::Primitive(elem_prim),
+                )
+            }
+        };
+
+        ctx.add_local(name.clone(), result_type, false);
+        format!(
+            "let {} = {}.iter(){}{}{}",
+            name, range_expr, prefix, chain, terminal
         )
     }
 
