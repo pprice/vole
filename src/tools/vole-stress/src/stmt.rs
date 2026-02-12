@@ -967,6 +967,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~5% chance: for_each as a standalone statement
+        if self.rng.gen_bool(0.05) {
+            if let Some(stmt) = self.try_generate_for_each_stmt(ctx) {
+                return stmt;
+            }
+        }
+
+        // ~5% chance: nth with match on optional result
+        if self.rng.gen_bool(0.05) {
+            if let Some(stmt) = self.try_generate_nth_let(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -3028,6 +3042,179 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         Some(format!(
             "let {} = {}.iter(){}.{}({}){}",
             result_name, arr_name, prefix, method, size, terminal
+        ))
+    }
+
+    /// Try to generate a `for_each` iterator statement.
+    ///
+    /// Produces: `arr.iter()[.chain].for_each((x) => { let y = expr })`
+    fn try_generate_for_each_stmt(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let mut array_vars: Vec<(String, PrimitiveType)> = Vec::new();
+        for (name, ty, _) in &ctx.locals {
+            if let TypeInfo::Array(inner) = ty {
+                if let TypeInfo::Primitive(p) = inner.as_ref() {
+                    match p {
+                        PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::String => {
+                            array_vars.push((name.clone(), *p));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        for param in ctx.params.iter() {
+            if let TypeInfo::Array(inner) = &param.param_type {
+                if let TypeInfo::Primitive(p) = inner.as_ref() {
+                    match p {
+                        PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::String => {
+                            array_vars.push((param.name.clone(), *p));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        if array_vars.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..array_vars.len());
+        let (arr_name, elem_prim) = &array_vars[idx];
+        let arr_name = arr_name.clone();
+        let elem_prim = *elem_prim;
+
+        // Optional prefix chain (~30% chance)
+        let prefix = if self.rng.gen_bool(0.30)
+            && matches!(elem_prim, PrimitiveType::I64 | PrimitiveType::I32)
+        {
+            let pred = self.generate_filter_closure_body(elem_prim);
+            format!(".filter((x) => {})", pred)
+        } else {
+            String::new()
+        };
+
+        // Body: a simple let binding inside the closure
+        let body = match elem_prim {
+            PrimitiveType::I64 | PrimitiveType::I32 => {
+                match self.rng.gen_range(0..3) {
+                    0 => "let y = x * 2".to_string(),
+                    1 => "let y = x + 1".to_string(),
+                    _ => "let y = x".to_string(),
+                }
+            }
+            PrimitiveType::String => "let y = x".to_string(),
+            _ => "let y = x".to_string(),
+        };
+
+        Some(format!(
+            "{}.iter(){}.for_each((x) => {{ {} }})",
+            arr_name, prefix, body
+        ))
+    }
+
+    /// Try to generate an `nth` iterator call with match on the optional result.
+    ///
+    /// Produces:
+    /// ```vole
+    /// let r = arr.iter()[.chain].nth(0)
+    /// let v = match r {
+    ///     T => expr
+    ///     nil => default
+    /// }
+    /// ```
+    fn try_generate_nth_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let mut array_vars: Vec<(String, PrimitiveType)> = Vec::new();
+        for (name, ty, _) in &ctx.locals {
+            if let TypeInfo::Array(inner) = ty {
+                if let TypeInfo::Primitive(p) = inner.as_ref() {
+                    match p {
+                        PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::String
+                        | PrimitiveType::Bool => {
+                            array_vars.push((name.clone(), *p));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        for param in ctx.params.iter() {
+            if let TypeInfo::Array(inner) = &param.param_type {
+                if let TypeInfo::Primitive(p) = inner.as_ref() {
+                    match p {
+                        PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::String
+                        | PrimitiveType::Bool => {
+                            array_vars.push((param.name.clone(), *p));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        if array_vars.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..array_vars.len());
+        let (arr_name, elem_prim) = &array_vars[idx];
+        let arr_name = arr_name.clone();
+        let elem_prim = *elem_prim;
+
+        let nth_name = ctx.new_local_name();
+        let result_name = ctx.new_local_name();
+
+        // Use index 0 (safe - arrays always have at least 1 element)
+        let nth_idx = 0;
+
+        // Optional prefix chain
+        let prefix = if self.rng.gen_bool(0.25)
+            && matches!(elem_prim, PrimitiveType::I64 | PrimitiveType::I32)
+        {
+            match self.rng.gen_range(0..2) {
+                0 => {
+                    let pred = self.generate_filter_closure_body(elem_prim);
+                    format!(".filter((x) => {})", pred)
+                }
+                _ => ".sorted()".to_string(),
+            }
+        } else {
+            String::new()
+        };
+
+        // The result of nth is optional (T | nil), we match on it
+        let indent = "    ".repeat(self.indent + 1);
+        let close_indent = "    ".repeat(self.indent);
+
+        // Default value for nil case
+        let default_expr = match elem_prim {
+            PrimitiveType::I64 => "0".to_string(),
+            PrimitiveType::I32 => "0_i32".to_string(),
+            PrimitiveType::String => "\"\"".to_string(),
+            PrimitiveType::Bool => "false".to_string(),
+            _ => "0".to_string(),
+        };
+
+        // Register the result variable as the element type
+        let result_type = TypeInfo::Primitive(elem_prim);
+        ctx.add_local(result_name.clone(), result_type, false);
+
+        Some(format!(
+            "let {} = {}.iter(){}.nth({})\n\
+             let {} = match {} {{\n\
+             {}{} => {}\n\
+             {}nil => {}\n\
+             {}}}",
+            nth_name,
+            arr_name,
+            prefix,
+            nth_idx,
+            result_name,
+            nth_name,
+            indent,
+            elem_prim.as_str(),
+            nth_name,
+            indent,
+            default_expr,
+            close_indent,
         ))
     }
 
