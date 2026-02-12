@@ -3291,16 +3291,38 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         let call_expr = format!("{}({})", func_name, args.join(", "));
 
-        // Bind result to a local when the return type is non-void
-        match return_type {
-            TypeInfo::Void => Some(call_expr),
-            TypeInfo::Primitive(_) | TypeInfo::Optional(_) => {
-                let name = ctx.new_local_name();
-                let ty = return_type.clone();
-                ctx.add_local(name.clone(), ty, false);
-                Some(format!("let {} = {}", name, call_expr))
+        // When inside a method body, the called free function's body may
+        // construct an instance of the current class and call methods on it,
+        // creating mutual recursion:
+        //   ClassA.methodX -> func20(IFace) -> ClassA.methodY -> func20(IFace) -> ...
+        // Guard such calls with `if false { }` so they're type-checked but
+        // never executed at runtime.
+        let in_method_body = ctx.current_class_sym_id.is_some();
+
+        if in_method_body {
+            let indent = "    ".repeat(self.indent + 1);
+            let stmt = match return_type {
+                TypeInfo::Void => call_expr,
+                _ => format!("_ = {}", call_expr),
+            };
+            Some(format!(
+                "if false {{\n{}{}\n{}}}",
+                indent,
+                stmt,
+                "    ".repeat(self.indent)
+            ))
+        } else {
+            // Outside method bodies, allow the call to run normally
+            match return_type {
+                TypeInfo::Void => Some(call_expr),
+                TypeInfo::Primitive(_) | TypeInfo::Optional(_) => {
+                    let name = ctx.new_local_name();
+                    let ty = return_type.clone();
+                    ctx.add_local(name.clone(), ty, false);
+                    Some(format!("let {} = {}", name, call_expr))
+                }
+                _ => Some(format!("_ = {}", call_expr)),
             }
-            _ => Some(format!("_ = {}", call_expr)),
         }
     }
 
