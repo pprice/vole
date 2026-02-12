@@ -4170,8 +4170,10 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         ctx.add_local(result_name.clone(), result_type, false);
 
+        // Use true + wildcard pattern since Vole doesn't recognize
+        // true/false as exhaustive coverage for booleans.
         Some(format!(
-            "let {} = match {} {{\n{}true => {}\n{}false => {}\n{}}}",
+            "let {} = match {} {{\n{}true => {}\n{}_ => {}\n{}}}",
             result_name, scrutinee, indent, true_val, indent, false_val, close_indent,
         ))
     }
