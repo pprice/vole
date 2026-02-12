@@ -1126,6 +1126,18 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: closure result in string concat
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_closure_result_concat(ctx) {
+                return stmt;
+            }
+        }
+
+        // ~2% chance: split result in for-in loop
+        if self.rng.gen_bool(0.02) {
+            return self.generate_split_for_loop(ctx);
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -4836,6 +4848,113 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             "let {} = when {{ {}.iter().{}((x) => {}) => {}, _ => {} }}",
             result_name, arr_name, predicate, filter_body, true_val, false_val
         ))
+    }
+
+    /// Generate a closure that returns a numeric value, then use the result
+    /// in a string concatenation: `let s = "result=" + f(x).to_string()`.
+    fn try_generate_closure_result_concat(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Find i64 variables in scope for the lambda argument
+        let i64_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::I64)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::I64)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        if i64_vars.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..i64_vars.len());
+        let arg_var = i64_vars[idx].clone();
+
+        let fn_name = ctx.new_local_name();
+        let result_name = ctx.new_local_name();
+
+        // Generate a simple lambda: (a: i64) -> i64 => a * N + M
+        let mult = self.rng.gen_range(1..=5);
+        let add = self.rng.gen_range(0..=10);
+
+        let lambda_expr = format!("(a: i64) -> i64 => a * {} + {}", mult, add);
+        let call_expr = format!("{}({})", fn_name, arg_var);
+
+        // Pick variant: .to_string() concat or string interpolation
+        let str_expr = if self.rng.gen_bool(0.5) {
+            // "result=" + f(x).to_string()
+            format!("\"result=\" + {}.to_string()", call_expr)
+        } else {
+            // "result={f(x)}" via interpolation
+            format!("\"result={{{}}}\"", call_expr)
+        };
+
+        ctx.add_local(
+            result_name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            false,
+        );
+
+        let indent = self.indent_str();
+        Some(format!(
+            "let {} = {}\n{}let {} = {}",
+            fn_name, lambda_expr, indent, result_name, str_expr
+        ))
+    }
+
+    /// Generate a for-in loop over a split string result.
+    /// `let parts = "a,b,c".split(",").collect()`
+    /// `for word in parts.iter() { ... }`
+    fn generate_split_for_loop(&mut self, ctx: &mut StmtContext) -> String {
+        let parts_name = ctx.new_local_name();
+        let iter_name = ctx.new_local_name();
+        let acc_name = ctx.new_local_name();
+
+        // Generate a known string to split
+        let words: Vec<&str> = vec!["alpha", "beta", "gamma", "delta"];
+        let num_words = self.rng.gen_range(2..=4);
+        let selected: Vec<&str> = words[..num_words].to_vec();
+        let input = selected.join(",");
+
+        // Accumulate string lengths
+        ctx.add_local(
+            parts_name.clone(),
+            TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::String))),
+            false,
+        );
+        ctx.add_local(
+            acc_name.clone(),
+            TypeInfo::Primitive(PrimitiveType::I64),
+            true,
+        );
+
+        ctx.protected_vars.push(parts_name.clone());
+        ctx.protected_vars.push(acc_name.clone());
+
+        let indent = self.indent_str();
+        let inner = format!("{}    ", indent);
+
+        let result = format!(
+            "let {} = \"{}\".split(\",\").collect()\n\
+             {}let mut {} = 0\n\
+             {}for {} in {}.iter() {{\n\
+             {}{} = {} + {}.length()\n\
+             {}}}",
+            parts_name, input,
+            indent, acc_name,
+            indent, iter_name, parts_name,
+            inner, acc_name, acc_name, iter_name,
+            indent,
+        );
+
+        ctx.protected_vars.pop();
+        ctx.protected_vars.pop();
+
+        result
     }
 
     fn try_generate_bool_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
