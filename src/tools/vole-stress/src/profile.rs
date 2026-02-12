@@ -234,6 +234,7 @@ fn minimal_profile() -> Profile {
             optional_destructure_match_probability: 0.0,
             sentinel_closure_capture_probability: 0.0,
             closure_struct_capture_probability: 0.0,
+            nested_closure_capture_probability: 0.0,
         },
         // No destructured imports in minimal (no multi-layer modules)
         destructured_import_probability: 0.0,
@@ -419,6 +420,7 @@ fn full_profile() -> Profile {
             optional_destructure_match_probability: 0.12,
             sentinel_closure_capture_probability: 0.10,
             closure_struct_capture_probability: 0.12,
+            nested_closure_capture_probability: 0.10,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -603,6 +605,7 @@ fn deep_nesting_profile() -> Profile {
             optional_destructure_match_probability: 0.08,
             sentinel_closure_capture_probability: 0.08,
             closure_struct_capture_probability: 0.08,
+            nested_closure_capture_probability: 0.08,
         },
         // No destructured imports in deep-nesting (single module focus)
         destructured_import_probability: 0.0,
@@ -792,6 +795,7 @@ fn wide_types_profile() -> Profile {
             optional_destructure_match_probability: 0.10,
             sentinel_closure_capture_probability: 0.08,
             closure_struct_capture_probability: 0.10,
+            nested_closure_capture_probability: 0.08,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -972,6 +976,7 @@ fn many_modules_profile() -> Profile {
             optional_destructure_match_probability: 0.0,
             sentinel_closure_capture_probability: 0.0,
             closure_struct_capture_probability: 0.0,
+            nested_closure_capture_probability: 0.0,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -1168,6 +1173,7 @@ fn generics_heavy_profile() -> Profile {
             optional_destructure_match_probability: 0.0,
             sentinel_closure_capture_probability: 0.0,
             closure_struct_capture_probability: 0.0,
+            nested_closure_capture_probability: 0.0,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -1359,6 +1365,7 @@ fn stdlib_heavy_profile() -> Profile {
             optional_destructure_match_probability: 0.0,
             sentinel_closure_capture_probability: 0.0,
             closure_struct_capture_probability: 0.0,
+            nested_closure_capture_probability: 0.0,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -1515,6 +1522,8 @@ fn closures_heavy_profile() -> Profile {
             sentinel_closure_capture_probability: 0.12,
             // HIGH closure-struct-capture — whole struct captured in closure is core
             closure_struct_capture_probability: 0.15,
+            // HIGH nested closure capture — closure capturing closure is core
+            nested_closure_capture_probability: 0.15,
         },
         destructured_import_probability: 0.0,
         // HIGH expression-body — exercises => lambda-like syntax on functions
@@ -1714,6 +1723,7 @@ fn fallible_heavy_profile() -> Profile {
             optional_destructure_match_probability: 0.0,
             sentinel_closure_capture_probability: 0.0,
             closure_struct_capture_probability: 0.0,
+            nested_closure_capture_probability: 0.0,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx)
         destructured_import_probability: 0.0,

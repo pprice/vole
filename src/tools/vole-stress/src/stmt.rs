@@ -170,6 +170,13 @@ pub struct StmtConfig {
     /// access through captured aggregates.
     /// Set to 0.0 to disable.
     pub closure_struct_capture_probability: f64,
+
+    /// Probability of generating a nested closure pattern where one closure
+    /// captures and invokes another closure. This exercises the interaction
+    /// between closure capture of function-typed values and indirect invocation
+    /// through captured closure pointers.
+    /// Set to 0.0 to disable.
+    pub nested_closure_capture_probability: f64,
 }
 
 impl Default for StmtConfig {
@@ -216,6 +223,7 @@ impl Default for StmtConfig {
             optional_destructure_match_probability: 0.0,
             sentinel_closure_capture_probability: 0.0,
             closure_struct_capture_probability: 0.0,
+            nested_closure_capture_probability: 0.0,
         }
     }
 }
@@ -791,6 +799,16 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             .gen_bool(self.config.closure_struct_capture_probability)
         {
             if let Some(stmt) = self.try_generate_closure_struct_capture(ctx) {
+                return stmt;
+            }
+        }
+
+        // Nested closure capture: closure captures and invokes another closure
+        if self
+            .rng
+            .gen_bool(self.config.nested_closure_capture_probability)
+        {
+            if let Some(stmt) = self.try_generate_nested_closure_capture(ctx) {
                 return stmt;
             }
         }
@@ -2336,6 +2354,102 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 result_name, body_expr, arg_val,
             ))
         }
+    }
+
+    /// Try to generate a nested closure capture pattern where one closure captures
+    /// and invokes another closure that's already in scope.
+    ///
+    /// Pattern:
+    /// ```vole
+    /// let f = (x: i64) -> i64 => x + 1
+    /// let g = (y: i64) -> i64 => f(y) + 2
+    /// let result = g(5)
+    /// ```
+    ///
+    /// Returns `None` if no suitable closure-typed local is in scope.
+    fn try_generate_nested_closure_capture(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Guard: skip in generic class method contexts (capture bug)
+        if let Some((cls_mod, cls_sym)) = ctx.current_class_sym_id {
+            if let Some(symbol) = ctx.table.get_symbol(cls_mod, cls_sym) {
+                if let SymbolKind::Class(info) = &symbol.kind {
+                    if !info.type_params.is_empty() {
+                        return None;
+                    }
+                }
+            }
+        }
+
+        // Find closure-typed locals that take one i64 param and return i64
+        let mut candidates: Vec<String> = Vec::new();
+        for (name, ty, _) in &ctx.locals {
+            if let TypeInfo::Function {
+                param_types,
+                return_type,
+            } = ty
+            {
+                if param_types.len() == 1
+                    && matches!(param_types[0], TypeInfo::Primitive(PrimitiveType::I64))
+                    && matches!(return_type.as_ref(), TypeInfo::Primitive(PrimitiveType::I64))
+                {
+                    candidates.push(name.clone());
+                }
+            }
+        }
+
+        // Also check params
+        for p in ctx.params {
+            if let TypeInfo::Function {
+                param_types,
+                return_type,
+            } = &p.param_type
+            {
+                if param_types.len() == 1
+                    && matches!(param_types[0], TypeInfo::Primitive(PrimitiveType::I64))
+                    && matches!(return_type.as_ref(), TypeInfo::Primitive(PrimitiveType::I64))
+                {
+                    candidates.push(p.name.clone());
+                }
+            }
+        }
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..candidates.len());
+        let inner_fn = candidates[idx].clone();
+
+        // Create the outer closure that captures the inner closure
+        let outer_fn = ctx.new_local_name();
+        let offset_val = self.rng.gen_range(1..=20);
+        let op = match self.rng.gen_range(0..3) {
+            0 => format!("{}(y) + {}", inner_fn, offset_val),
+            1 => format!("{}(y) * {}", inner_fn, offset_val),
+            _ => format!("{}(y + {})", inner_fn, offset_val),
+        };
+
+        let outer_closure = format!("let {} = (y: i64) -> i64 => {}", outer_fn, op);
+        ctx.add_local(
+            outer_fn.clone(),
+            TypeInfo::Function {
+                param_types: vec![TypeInfo::Primitive(PrimitiveType::I64)],
+                return_type: Box::new(TypeInfo::Primitive(PrimitiveType::I64)),
+            },
+            false,
+        );
+
+        // Invoke the outer closure
+        let result_name = ctx.new_local_name();
+        let arg_val = self.rng.gen_range(1..=50);
+        let call_stmt = format!("let {} = {}({})", result_name, outer_fn, arg_val);
+        ctx.add_local(
+            result_name,
+            TypeInfo::Primitive(PrimitiveType::I64),
+            false,
+        );
+
+        let indent = "    ".repeat(self.indent);
+        Some(format!("{}\n{}{}", outer_closure, indent, call_stmt))
     }
 
     /// Try to generate a widening let statement.
