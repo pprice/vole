@@ -62,7 +62,7 @@ interface Iterator<T> {
     func for_each(f: (T) -> void) -> void
     func reduce(init: T, f: (T, T) -> T) -> T
     func count() -> i64
-    func sum() -> i64
+    func sum() -> T
     func first() -> T?
     func last() -> T?
     func nth(n: i64) -> T?
@@ -90,7 +90,7 @@ interface Iterator<T> {
         func "iter_for_each" as for_each(f: (T) -> void) -> void
         func "iter_reduce" as reduce(init: T, f: (T, T) -> T) -> T
         func "iter_count" as count() -> i64
-        func "iter_sum" as sum() -> i64
+        func "iter_sum" as sum() -> T
         func "iter_first" as first() -> T?
         func "iter_last" as last() -> T?
         func "iter_nth" as nth(n: i64) -> T?

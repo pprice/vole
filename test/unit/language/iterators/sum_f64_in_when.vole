@@ -1,0 +1,49 @@
+// Regression test for vol-qfpn: .sum() on [f64] returned i64 in codegen
+// instead of f64, causing a Cranelift verifier error (select.i64 with f64 arg)
+// when the sum result was used in when/match expressions alongside f64 literals.
+
+tests "sum f64 in when/match" {
+    test "sum on f64 array used in when expression" {
+        let arr = [74.22_f64, 75.42_f64, 92.36_f64]
+        let total = arr.iter().sum()
+        let x = when {
+            true => total
+            _ => 90.61_f64
+        }
+        // Verify the sum is correct (74.22 + 75.42 + 92.36 = 242.0)
+        assert(x == 242.0_f64)
+    }
+
+    test "sum on f64 array used in match expression" {
+        let arr = [10.5_f64, 20.5_f64, 30.0_f64]
+        let total = arr.iter().sum()
+        let label = match total {
+            61.0_f64 => "correct"
+            _ => "wrong"
+        }
+        assert(label == "correct")
+    }
+
+    test "sum on i64 array still works" {
+        let arr = [1, 2, 3, 4, 5]
+        let total = arr.iter().sum()
+        assert(total == 15)
+    }
+
+    test "sum on i64 array used in when expression" {
+        let arr = [10, 20, 30]
+        let total = arr.iter().sum()
+        let x = when {
+            true => total
+            _ => 99
+        }
+        assert(x == 60)
+    }
+
+    test "sum on f64 array result used in arithmetic" {
+        let arr = [1.5_f64, 2.5_f64, 3.0_f64]
+        let total = arr.iter().sum()
+        let doubled = total + total
+        assert(doubled == 14.0_f64)
+    }
+}

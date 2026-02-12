@@ -1381,30 +1381,58 @@ pub extern "C" fn vole_iter_count(iter: *mut RcIterator) -> i64 {
     count
 }
 
-/// Sum all elements in any iterator (assumes i64 elements)
-/// Returns the sum as i64
+/// Sum all elements in any iterator.
+/// Reads the iterator's stored `elem_tag` to determine whether to perform
+/// integer or floating-point addition.
+/// When `elem_tag` == TYPE_F64, interprets raw bits as f64 and returns f64 bits as i64.
+/// Otherwise performs integer (i64) addition.
+/// Returns the sum as i64 (raw bits).
 /// Frees the iterator after summing.
 #[unsafe(no_mangle)]
 pub extern "C" fn vole_iter_sum(iter: *mut RcIterator) -> i64 {
+    use crate::value::TYPE_F64;
+
     if iter.is_null() {
         return 0;
     }
 
-    let mut sum: i64 = 0;
-    loop {
-        let mut value: i64 = 0;
-        let has_value = vole_array_iter_next(iter, &mut value);
+    let elem_tag = unsafe { (*iter).elem_tag };
 
-        if has_value == 0 {
-            break;
+    if elem_tag == TYPE_F64 as u64 {
+        // Float summation: interpret raw bits as f64
+        let mut sum: f64 = 0.0;
+        loop {
+            let mut value: i64 = 0;
+            let has_value = vole_array_iter_next(iter, &mut value);
+
+            if has_value == 0 {
+                break;
+            }
+            sum += f64::from_bits(value as u64);
         }
-        sum += value;
+
+        // Free the iterator chain
+        RcIterator::dec_ref(iter);
+
+        sum.to_bits() as i64
+    } else {
+        // Integer summation
+        let mut sum: i64 = 0;
+        loop {
+            let mut value: i64 = 0;
+            let has_value = vole_array_iter_next(iter, &mut value);
+
+            if has_value == 0 {
+                break;
+            }
+            sum += value;
+        }
+
+        // Free the iterator chain
+        RcIterator::dec_ref(iter);
+
+        sum
     }
-
-    // Free the iterator chain
-    RcIterator::dec_ref(iter);
-
-    sum
 }
 
 /// Call a function for each element in any iterator

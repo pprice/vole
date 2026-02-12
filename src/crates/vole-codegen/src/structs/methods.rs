@@ -1135,9 +1135,9 @@ impl Cg<'_, '_, '_> {
         // interface_iter_tagged in vtable wrappers), so no extra argument
         // is needed here.
 
-        // Call the external function directly. For reduce, use the tagged
-        // variant (IterReduceTagged) which accepts explicit acc/elem type
-        // tags for proper RC cleanup of accumulators and consumed elements.
+        // Call the external function directly. For reduce and sum, use
+        // tagged variants that accept explicit elem type tags so the runtime
+        // can dispatch between integer and floating-point operations.
         let mut result = if method_name == "reduce" {
             let tag = crate::types::unknown_type_tag(elem_type_id, self.arena());
             let tag_val = self.builder.ins().iconst(types::I64, tag as i64);
@@ -1165,6 +1165,39 @@ impl Cg<'_, '_, '_> {
                 result_val
             };
             CompiledValue::new(converted, expected_cty, return_type_id)
+        } else if method_name == "sum" {
+            // sum() -> T: the runtime always returns i64 (raw word). When the
+            // element type is a float, the runtime does float addition and returns
+            // f64 bits packed as i64. We bitcast the raw result to the proper
+            // Cranelift type so downstream IR (select in when/match) is correct.
+            //
+            // For non-numeric T (e.g. Iterator<[i64]> after flatten()), the type
+            // system says T=[i64] but the runtime actually sums i64 values. We
+            // fall back to i64 in that case to avoid RC cleanup on a raw integer.
+            let result_val = self.call_runtime(RuntimeFn::IterSum, &args)?;
+            let effective_return_type = if return_type_id.is_numeric() {
+                return_type_id
+            } else {
+                TypeId::I64
+            };
+            let expected_cty = self.cranelift_type(effective_return_type);
+            let actual_cty = self.builder.func.dfg.value_type(result_val);
+            let converted = if actual_cty != expected_cty {
+                let ptr_type = self.ptr_type();
+                let registry = self.registry();
+                let arena = self.env.analyzed.type_arena();
+                word_to_value_type_id(
+                    self.builder,
+                    result_val,
+                    effective_return_type,
+                    ptr_type,
+                    registry,
+                    arena,
+                )
+            } else {
+                result_val
+            };
+            CompiledValue::new(converted, expected_cty, effective_return_type)
         } else {
             self.call_external_id(&external_info, &args, return_type_id)?
         };
