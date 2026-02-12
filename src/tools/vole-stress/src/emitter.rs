@@ -396,6 +396,21 @@ impl<'a, R: Rng> EmitContext<'a, R> {
                 self.emit_line(&format!("let result = {}", call));
                 self.emit_line("assert(result != nil || result == nil)");
             }
+            TypeInfo::Function {
+                param_types,
+                return_type,
+            } => {
+                // Function-returning function: bind the closure, call it, verify result
+                self.emit_line(&format!("let _closure = {}", call));
+                // Generate arguments matching the closure's parameter types
+                let closure_args: Vec<String> = param_types
+                    .iter()
+                    .map(|t| self.generate_test_value(t))
+                    .collect();
+                let closure_call = format!("_closure({})", closure_args.join(", "));
+                // Exercise the returned closure by calling it
+                self.emit_call_assertion(&closure_call, return_type);
+            }
             _ => {
                 // Non-void, non-optional return - just verify call succeeds
                 // (non-optional types can't be compared to nil in Vole)

@@ -98,6 +98,12 @@ pub struct PlanConfig {
     /// `[i64]` or `[i32]` array parameter. Without this dedicated planner path, the
     /// triple-condition alignment is astronomically rare by random chance.
     pub generic_closure_interface_fn_probability: f64,
+    /// Probability (0.0-1.0) that a function returns a closure (function type).
+    /// These functions take 1-3 primitive parameters and return a
+    /// `(param_types) -> return_type` closure, exercising higher-order function
+    /// codegen paths (closure allocation, capture, RC of captured values).
+    /// Only applies to non-generic functions.
+    pub closure_return_probability: f64,
 }
 
 impl Default for PlanConfig {
@@ -135,6 +141,7 @@ impl Default for PlanConfig {
             struct_return_probability: 0.10,
             interface_param_probability: 0.10,
             generic_closure_interface_fn_probability: 0.0,
+            closure_return_probability: 0.0,
         }
     }
 }
@@ -367,6 +374,10 @@ fn plan_module_declarations<R: Rng>(
             && rng.gen_bool(config.generic_closure_interface_fn_probability)
         {
             plan_generic_closure_interface_fn(rng, table, names, module_id);
+        } else if config.closure_return_probability > 0.0
+            && rng.gen_bool(config.closure_return_probability)
+        {
+            plan_closure_returning_fn(rng, table, names, module_id);
         } else if config.never_probability > 0.0 && rng.gen_bool(config.never_probability) {
             plan_never_function(rng, table, names, module_id, config);
         } else {
@@ -704,6 +715,61 @@ fn plan_generic_closure_interface_fn<R: Rng>(
 
     let kind = SymbolKind::Function(FunctionInfo {
         type_params,
+        params,
+        return_type,
+    });
+
+    table
+        .get_module_mut(module_id)
+        .map(|m| m.add_symbol(name, kind))
+        .unwrap_or(SymbolId(0))
+}
+
+/// Plan a closure-returning function declaration.
+///
+/// These functions take 1-3 primitive parameters and return a closure type
+/// `(param_types) -> return_type`. The closure's return type is always a
+/// primitive, and its parameter types are primitives too. This exercises:
+/// - Higher-order function codegen (returning closures)
+/// - Closure allocation and RC of captured values
+/// - Function-type return type handling in sema and codegen
+///
+/// Example generated signature:
+/// ```vole
+/// func make_fn1(param1: i64, param2: string) -> (i64) -> string
+/// ```
+fn plan_closure_returning_fn<R: Rng>(
+    rng: &mut R,
+    table: &mut SymbolTable,
+    names: &mut NameGen,
+    module_id: ModuleId,
+) -> SymbolId {
+    let name = names.next("func");
+
+    // 1-3 primitive parameters for the outer function
+    let param_count = rng.gen_range(1..=3);
+    let mut params = Vec::new();
+    for _ in 0..param_count {
+        params.push(ParamInfo {
+            name: names.next("param"),
+            param_type: TypeInfo::Primitive(PrimitiveType::random_expr_type(rng)),
+        });
+    }
+
+    // Build the closure return type: 0-2 primitive params -> primitive return
+    let closure_param_count = rng.gen_range(0..=2);
+    let closure_param_types: Vec<TypeInfo> = (0..closure_param_count)
+        .map(|_| TypeInfo::Primitive(PrimitiveType::random_expr_type(rng)))
+        .collect();
+    let closure_return_type = TypeInfo::Primitive(PrimitiveType::random_expr_type(rng));
+
+    let return_type = TypeInfo::Function {
+        param_types: closure_param_types,
+        return_type: Box::new(closure_return_type),
+    };
+
+    let kind = SymbolKind::Function(FunctionInfo {
+        type_params: vec![],
         params,
         return_type,
     });

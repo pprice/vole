@@ -116,6 +116,8 @@ fn minimal_profile() -> Profile {
         interface_param_probability: 0.0,
         // No generics in minimal
         generic_closure_interface_fn_probability: 0.0,
+        // No closure-returning functions in minimal
+        closure_return_probability: 0.0,
         // These won't be used since we have no classes or structs
         fields_per_struct: (0, 0),
         fields_per_class: (0, 0),
@@ -294,6 +296,8 @@ fn full_profile() -> Profile {
         interface_param_probability: 0.12,
         // ~15% of planned functions get the "generic closure interface" shape
         generic_closure_interface_fn_probability: 0.15,
+        // ~12% of non-generic functions return a closure
+        closure_return_probability: 0.12,
     };
 
     let emit = EmitConfig {
@@ -444,6 +448,8 @@ fn deep_nesting_profile() -> Profile {
         interface_param_probability: 0.0,
         // No generics in deep-nesting
         generic_closure_interface_fn_probability: 0.0,
+        // No closure-returning functions in deep-nesting (focus is on nesting)
+        closure_return_probability: 0.0,
         // Minimal class/struct structure
         fields_per_struct: (0, 0),
         fields_per_class: (1, 2),
@@ -632,6 +638,8 @@ fn wide_types_profile() -> Profile {
         interface_param_probability: 0.08,
         // Some GCI functions for closure+generic+iterator coverage
         generic_closure_interface_fn_probability: 0.06,
+        // Some closure-returning functions for variety
+        closure_return_probability: 0.06,
     };
 
     let emit = EmitConfig {
@@ -793,6 +801,8 @@ fn many_modules_profile() -> Profile {
         interface_param_probability: 0.0,
         // No GCI functions - focus on module loading
         generic_closure_interface_fn_probability: 0.0,
+        // No closure-returning functions - focus on module loading
+        closure_return_probability: 0.0,
     };
 
     let emit = EmitConfig {
@@ -969,6 +979,8 @@ fn generics_heavy_profile() -> Profile {
         interface_param_probability: 0.0,
         // Elevated probability for GCI functions - core generics focus
         generic_closure_interface_fn_probability: 0.20,
+        // Some closure-returning functions for higher-order variety
+        closure_return_probability: 0.08,
     };
 
     let emit = EmitConfig {
@@ -1144,6 +1156,8 @@ fn stdlib_heavy_profile() -> Profile {
         interface_param_probability: 0.10,
         // Some GCI functions for closure+generic+iterator coverage
         generic_closure_interface_fn_probability: 0.08,
+        // Some closure-returning functions for higher-order variety
+        closure_return_probability: 0.08,
     };
 
     let emit = EmitConfig {
@@ -1307,6 +1321,8 @@ fn closures_heavy_profile() -> Profile {
         interface_param_probability: 0.10,
         // Moderate GCI functions — closures are the focus here
         generic_closure_interface_fn_probability: 0.10,
+        // HIGH closure-returning functions — core focus of this profile
+        closure_return_probability: 0.20,
     };
 
     let emit = EmitConfig {
@@ -1465,6 +1481,8 @@ fn fallible_heavy_profile() -> Profile {
         interface_param_probability: 0.08,
         // No GCI functions -- focus on fallible paths
         generic_closure_interface_fn_probability: 0.0,
+        // No closure-returning functions -- focus on fallible paths
+        closure_return_probability: 0.0,
     };
 
     let emit = EmitConfig {
