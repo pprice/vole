@@ -78,6 +78,12 @@ pub struct ExprConfig {
     /// Re-enable when the compiler resolves local-variable capture
     /// across module boundaries.
     pub closure_capture_probability: f64,
+    /// Probability of constructing a concrete class instance when an
+    /// interface type is expected, instead of reusing an existing
+    /// interface-typed variable in scope.  This exercises the implicit
+    /// upcast codegen path (class -> interface coercion at the call
+    /// site).  Set to 0.0 to always prefer existing interface variables.
+    pub interface_upcast_probability: f64,
 }
 
 impl Default for ExprConfig {
@@ -101,6 +107,7 @@ impl Default for ExprConfig {
             match_guard_probability: 0.10,
             // Disabled: cross-module closure capture compiler bug
             closure_capture_probability: 0.0,
+            interface_upcast_probability: 0.25,
         }
     }
 }
@@ -1674,8 +1681,15 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
 
     /// Generate a simple expression (literal or variable reference).
     pub fn generate_simple(&mut self, ty: &TypeInfo, ctx: &ExprContext) -> String {
-        // Try to find a matching variable first
-        if let Some(var) = ctx.find_matching_var(ty)
+        // For interface types, sometimes construct a concrete class instance
+        // (upcast) instead of reusing an existing interface-typed variable.
+        // This exercises the implicit class -> interface coercion codegen path.
+        let force_upcast = matches!(ty, TypeInfo::Interface(..))
+            && self.rng.gen_bool(self.config.interface_upcast_probability);
+
+        // Try to find a matching variable first (skip if forcing upcast)
+        if !force_upcast
+            && let Some(var) = ctx.find_matching_var(ty)
             && self.rng.gen_bool(0.6)
         {
             return var;
