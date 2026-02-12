@@ -1112,6 +1112,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: struct field in string interpolation
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_struct_field_interpolation(ctx) {
+                return stmt;
+            }
+        }
+
+        // ~2% chance: when with iterator predicate condition
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_when_iter_predicate(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -4699,6 +4713,128 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         Some(format!(
             "let {} = {}.iter().map((el) => el.to_string()).reduce(\"\", (acc, el) => acc + el + \"{}\")",
             name, arr_name, sep
+        ))
+    }
+
+    /// Generate string interpolation using a struct field access.
+    /// E.g., `let s = "value: {instance.field_name}"`
+    fn try_generate_struct_field_interpolation(
+        &mut self,
+        ctx: &mut StmtContext,
+    ) -> Option<String> {
+        // Find struct-typed locals with numeric or string fields
+        let mut candidates: Vec<(String, String, PrimitiveType)> = Vec::new();
+
+        for (name, ty, _) in &ctx.locals {
+            if let TypeInfo::Struct(mod_id, sym_id) = ty {
+                if let Some(sym) = ctx.table.get_symbol(*mod_id, *sym_id) {
+                    if let SymbolKind::Struct(ref info) = sym.kind {
+                        for f in &info.fields {
+                            if let TypeInfo::Primitive(p) = &f.field_type {
+                                if matches!(
+                                    p,
+                                    PrimitiveType::I64
+                                        | PrimitiveType::I32
+                                        | PrimitiveType::F64
+                                        | PrimitiveType::String
+                                        | PrimitiveType::Bool
+                                ) {
+                                    candidates.push((
+                                        name.clone(),
+                                        f.name.clone(),
+                                        *p,
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..candidates.len());
+        let (var_name, field_name, _prim) = &candidates[idx];
+
+        let result_name = ctx.new_local_name();
+        let prefix = match self.rng.gen_range(0..3u32) {
+            0 => "val=",
+            1 => "",
+            _ => "f:",
+        };
+
+        ctx.add_local(
+            result_name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            false,
+        );
+
+        Some(format!(
+            "let {} = \"{}{{{}.{}}}\"",
+            result_name, prefix, var_name, field_name
+        ))
+    }
+
+    /// Generate a when expression with an iterator predicate as condition.
+    /// E.g., `let x = when { arr.iter().any((el) => el > 0) => "yes", _ => "no" }`
+    fn try_generate_when_iter_predicate(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let expr_ctx = ctx.to_expr_context();
+        let array_vars = expr_ctx.array_vars();
+        let prim_arrays: Vec<(String, PrimitiveType)> = array_vars
+            .into_iter()
+            .filter_map(|(name, elem_ty)| {
+                if let TypeInfo::Primitive(prim) = elem_ty {
+                    if matches!(
+                        prim,
+                        PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::F64
+                    ) {
+                        return Some((name, prim));
+                    }
+                }
+                None
+            })
+            .collect();
+
+        if prim_arrays.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..prim_arrays.len());
+        let (arr_name, elem_prim) = &prim_arrays[idx];
+        let arr_name = arr_name.clone();
+        let elem_prim = *elem_prim;
+
+        let result_name = ctx.new_local_name();
+
+        // Pick predicate: .any() or .all()
+        let predicate = if self.rng.gen_bool(0.5) { "any" } else { "all" };
+        let filter_body = self.generate_filter_closure_body(elem_prim);
+
+        // Pick result type: i64 or string
+        let (true_val, false_val, result_ty) = if self.rng.gen_bool(0.5) {
+            let t = self.rng.gen_range(1..=100);
+            let f = self.rng.gen_range(1..=100);
+            (
+                format!("{}", t),
+                format!("{}", f),
+                TypeInfo::Primitive(PrimitiveType::I64),
+            )
+        } else {
+            (
+                "\"yes\"".to_string(),
+                "\"no\"".to_string(),
+                TypeInfo::Primitive(PrimitiveType::String),
+            )
+        };
+
+        ctx.add_local(result_name.clone(), result_ty, false);
+
+        Some(format!(
+            "let {} = when {{ {}.iter().{}((x) => {}) => {}, _ => {} }}",
+            result_name, arr_name, predicate, filter_body, true_val, false_val
         ))
     }
 
