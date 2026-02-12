@@ -1972,6 +1972,67 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         }
     }
 
+    /// Try to generate an `.iter().sum()` expression for numeric types.
+    ///
+    /// Looks for array-typed variables in scope with numeric element types (i64, f64)
+    /// and generates `arrVar.iter().sum()`. Optionally chains a `.filter()` or `.map()`
+    /// before `.sum()` for more interesting expressions.
+    fn try_generate_iter_sum(
+        &mut self,
+        target_prim: PrimitiveType,
+        ctx: &ExprContext,
+    ) -> Option<String> {
+        let array_vars = ctx.array_vars();
+
+        // Filter to arrays whose element type matches target numeric type
+        let candidates: Vec<_> = array_vars
+            .iter()
+            .filter(|(_, elem_ty)| *elem_ty == TypeInfo::Primitive(target_prim))
+            .collect();
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..candidates.len());
+        let (var_name, _) = candidates[idx];
+
+        // ~30% chance: chain a .filter() before .sum()
+        if self.rng.gen_bool(0.3) {
+            let pred = match target_prim {
+                PrimitiveType::I64 => {
+                    let n = self.rng.gen_range(0..=5);
+                    format!("x > {}", n)
+                }
+                PrimitiveType::F64 => {
+                    let n = self.rng.gen_range(0..=10);
+                    format!("x > {}.0", n)
+                }
+                _ => return Some(format!("{}.iter().sum()", var_name)),
+            };
+            return Some(format!("{}.iter().filter((x) => {}).sum()", var_name, pred));
+        }
+
+        // ~20% chance: chain a .map() before .sum() (same type)
+        if self.rng.gen_bool(0.2) {
+            let body = match target_prim {
+                PrimitiveType::I64 => match self.rng.gen_range(0..3) {
+                    0 => "x * 2",
+                    1 => "x + 1",
+                    _ => "-x",
+                },
+                PrimitiveType::F64 => match self.rng.gen_range(0..2) {
+                    0 => "x * 2.0",
+                    _ => "x + 1.0",
+                },
+                _ => return Some(format!("{}.iter().sum()", var_name)),
+            };
+            return Some(format!("{}.iter().map((x) => {}).sum()", var_name, body));
+        }
+
+        Some(format!("{}.iter().sum()", var_name))
+    }
+
     /// Try to generate an `.iter().skip(N).take(M).collect()` expression for array generation.
     ///
     /// Looks for array-typed variables in scope whose element type matches the
@@ -2237,6 +2298,13 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             if let Some(expr) =
                 self.try_generate_iter_reduce(&TypeInfo::Primitive(PrimitiveType::I64), ctx)
             {
+                return expr;
+            }
+        }
+
+        // ~10% chance to generate arr.iter().sum() for i64/f64 expressions
+        if (prim == PrimitiveType::I64 || prim == PrimitiveType::F64) && self.rng.gen_bool(0.10) {
+            if let Some(expr) = self.try_generate_iter_sum(prim, ctx) {
                 return expr;
             }
         }
