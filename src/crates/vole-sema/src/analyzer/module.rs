@@ -454,13 +454,6 @@ impl Analyzer {
             }
         }
 
-        // Store the program and interner for compiling pure Vole functions
-        // Use module_key for consistent lookup with module_id
-        self.ctx.module_programs.borrow_mut().insert(
-            module_key.clone(),
-            (program.clone(), module_interner.clone()),
-        );
-
         // Run semantic analysis on the module to populate expr_types for function bodies.
         // This is needed for codegen to resolve return types of calls to external functions
         // inside the module (e.g., min(max(x, lo), hi) in math.clamp).
@@ -476,6 +469,17 @@ impl Analyzer {
                 }
             }
         }
+
+        // Store the program and interner for compiling pure Vole functions.
+        // IMPORTANT: This must happen AFTER sub_analyzer.analyze() because analysis
+        // populates lambda capture lists (stored in RefCell<Vec<Capture>> on AST nodes).
+        // Cloning the program before analysis would store empty capture lists, causing
+        // "variable not found" errors during codegen for closures in imported modules.
+        self.ctx.module_programs.borrow_mut().insert(
+            module_key.clone(),
+            (program.clone(), module_interner.clone()),
+        );
+
         // Store module-specific expr_types (NodeIds are per-program)
         // Nested module entries are already in the shared ctx from the sub-analyzer.
         self.ctx

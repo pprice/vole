@@ -1,0 +1,60 @@
+// Tests for cross-module closure capture
+// Verifies that closures in imported modules correctly capture
+// outer variables (parameters and locals).
+
+let lib = import "./closure_capture/lib"
+
+tests "cross-module closure capture" {
+    test "capture function parameter" {
+        let add5 = lib.make_adder(5)
+        assert(add5(3) == 8)
+        assert(add5(0) == 5)
+        assert(add5(10) == 15)
+    }
+
+    test "capture local variable" {
+        let add10 = lib.captured_local()
+        assert(add10(3) == 13)
+        assert(add10(0) == 10)
+        assert(add10(7) == 17)
+    }
+
+    test "capture both parameter and local" {
+        // scale=3, offset=100: f(x) = x * 3 + 100
+        let f = lib.make_scaled_adder(3)
+        assert(f(1) == 103)
+        assert(f(10) == 130)
+        assert(f(0) == 100)
+    }
+
+    test "closure with block body" {
+        let counter = lib.make_counter_from(42)
+        assert(counter(1) == 43)
+        assert(counter(8) == 50)
+        assert(counter(0) == 42)
+    }
+
+    test "capture derived local" {
+        // factor=5, double_factor=10: f(x) = x * 10
+        let mult = lib.make_multiplier(5)
+        assert(mult(3) == 30)
+        assert(mult(0) == 0)
+        assert(mult(7) == 70)
+    }
+
+    test "multiple closures from same function" {
+        let add1 = lib.make_adder(1)
+        let add2 = lib.make_adder(2)
+        let add100 = lib.make_adder(100)
+        assert(add1(10) == 11)
+        assert(add2(10) == 12)
+        assert(add100(10) == 110)
+    }
+
+    test "mutable captured variable" {
+        let acc = lib.make_accumulator()
+        assert(acc(5) == 5)
+        assert(acc(3) == 8)
+        assert(acc(2) == 10)
+    }
+}

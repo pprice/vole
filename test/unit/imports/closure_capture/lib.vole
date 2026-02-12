@@ -1,0 +1,46 @@
+// Library module for testing cross-module closure capture
+
+// Closure captures a function parameter
+func make_adder(base: i64) -> (i64) -> i64 {
+    let f = (y: i64) -> i64 => base + y
+    return f
+}
+
+// Closure captures a local variable
+func captured_local() -> (i64) -> i64 {
+    let captured = 10
+    let f = (y: i64) -> i64 => captured + y
+    return f
+}
+
+// Closure captures both a parameter and a local
+func make_scaled_adder(scale: i64) -> (i64) -> i64 {
+    let offset = 100
+    let f = (x: i64) -> i64 => x * scale + offset
+    return f
+}
+
+// Closure with block body capturing outer variable
+func make_counter_from(start: i64) -> (i64) -> i64 {
+    let f = (step: i64) -> i64 => {
+        return start + step
+    }
+    return f
+}
+
+// Nested closure: outer function returns a closure that itself captures
+func make_multiplier(factor: i64) -> (i64) -> i64 {
+    let double_factor = factor * 2
+    let f = (x: i64) -> i64 => x * double_factor
+    return f
+}
+
+// Mutable captured variable
+func make_accumulator() -> (i64) -> i64 {
+    let mut total = 0
+    let f = (n: i64) -> i64 => {
+        total = total + n
+        return total
+    }
+    return f
+}
