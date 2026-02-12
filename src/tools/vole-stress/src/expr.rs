@@ -4337,7 +4337,7 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                 _ => tmp_name.clone(),
             };
             format!(
-                "({}){} => {{\n    let {} = {}\n    {}\n}}",
+                "({}){} => {{\n    let {} = {}\n    return {}\n}}",
                 params.join(", "),
                 return_annotation,
                 tmp_name,

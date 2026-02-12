@@ -720,6 +720,11 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         if cv.is_owned() {
             self.emit_rc_dec_for_type(cv.value, cv.type_id)?;
             cv.mark_consumed();
+        } else if cv.is_borrowed() {
+            // Borrowed values don't need RC decrement — they reference an
+            // existing binding whose scope handles cleanup.  Just mark
+            // consumed so the lifecycle assertion passes.
+            cv.mark_consumed();
         }
         Ok(())
     }
