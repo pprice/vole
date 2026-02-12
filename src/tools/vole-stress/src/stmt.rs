@@ -1067,6 +1067,16 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             return self.generate_edge_case_for_loop(ctx, 2);
         }
 
+        // ~2% chance: empty array iterator operation
+        if self.rng.gen_bool(0.02) {
+            return self.generate_empty_array_iter(ctx);
+        }
+
+        // ~2% chance: edge-case string split
+        if self.rng.gen_bool(0.02) {
+            return self.generate_edge_case_split(ctx);
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -4190,6 +4200,126 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         let body_block = self.format_block(&body_stmts);
         format!("for {} in {} {}", iter_name, range, body_block)
+    }
+
+    /// Generate an empty array iterator operation.
+    ///
+    /// Tests the compiler's handling of zero-length arrays with iterators:
+    /// ```vole
+    /// let arr: [i64] = []
+    /// let n = arr.iter().count()           // 0
+    /// let s = arr.iter().sum()             // 0
+    /// ```
+    fn generate_empty_array_iter(&mut self, ctx: &mut StmtContext) -> String {
+        let arr_name = ctx.new_local_name();
+        let result_name = ctx.new_local_name();
+
+        let (elem_type, type_str) = match self.rng.gen_range(0..3u32) {
+            0 => (PrimitiveType::I64, "i64"),
+            1 => (PrimitiveType::I32, "i32"),
+            _ => (PrimitiveType::String, "string"),
+        };
+
+        ctx.add_local(
+            arr_name.clone(),
+            TypeInfo::Array(Box::new(TypeInfo::Primitive(elem_type))),
+            false,
+        );
+
+        let terminal = match self.rng.gen_range(0..3u32) {
+            0 => {
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::I64),
+                    false,
+                );
+                format!("let {} = {}.iter().count()", result_name, arr_name)
+            }
+            1 if !matches!(elem_type, PrimitiveType::String) => {
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Primitive(elem_type),
+                    false,
+                );
+                format!("let {} = {}.iter().sum()", result_name, arr_name)
+            }
+            _ => {
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Array(Box::new(TypeInfo::Primitive(elem_type))),
+                    false,
+                );
+                format!(
+                    "let {} = {}.iter().filter((x) => x == x).collect()",
+                    result_name, arr_name
+                )
+            }
+        };
+
+        format!(
+            "let {}: [{}] = []\n{}{}",
+            arr_name,
+            type_str,
+            "    ".repeat(self.indent),
+            terminal
+        )
+    }
+
+    /// Generate an edge-case string split operation.
+    ///
+    /// Tests the compiler with degenerate split results:
+    /// ```vole
+    /// let parts = "".split(",").collect()           // [""]
+    /// let parts = "a".split("a").collect()          // ["", ""]
+    /// let n = ",,".split(",").collect().iter().count()  // 3
+    /// ```
+    fn generate_edge_case_split(&mut self, ctx: &mut StmtContext) -> String {
+        let result_name = ctx.new_local_name();
+
+        let (input, delim) = match self.rng.gen_range(0..4u32) {
+            0 => ("\"\"", "\",\""),        // empty string
+            1 => ("\"a\"", "\"a\""),       // delimiter == entire string
+            2 => ("\",,\"", "\",\""),      // consecutive delimiters
+            _ => ("\"a,b,c\"", "\",\""),   // normal case for safety
+        };
+
+        let terminal = match self.rng.gen_range(0..3u32) {
+            0 => {
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::I64),
+                    false,
+                );
+                format!(
+                    "let {} = {}.split({}).collect().iter().count()",
+                    result_name, input, delim
+                )
+            }
+            1 => {
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::String))),
+                    false,
+                );
+                format!(
+                    "let {} = {}.split({}).collect()",
+                    result_name, input, delim
+                )
+            }
+            _ => {
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::I64),
+                    false,
+                );
+                format!(
+                    "let {} = {}.split({}).count()",
+                    result_name, input, delim
+                )
+            }
+        };
+
+        terminal
     }
 
     fn try_generate_bool_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
