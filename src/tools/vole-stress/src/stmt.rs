@@ -3888,8 +3888,8 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let idx = self.rng.gen_range(0..candidates.len());
         let (arr_name, elem_type) = &candidates[idx];
 
-        // Use index 0 or 1 to stay in bounds (arrays have at least 2 elements)
-        let index = self.rng.gen_range(0..=1);
+        // Use index 0 — arrays may be single-element after the 15% chance change.
+        let index = 0;
 
         let expr_ctx = ctx.to_expr_context();
         let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
@@ -3960,8 +3960,8 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let idx = self.rng.gen_range(0..candidates.len());
         let (arr_name, elem_type) = &candidates[idx];
 
-        // Use index 0 or 1 to stay in bounds (arrays have at least 2 elements)
-        let index = self.rng.gen_range(0..=1);
+        // Use index 0 — arrays may be single-element.
+        let index = 0;
 
         // Pick a random compound operator (avoid /= to prevent division by zero;
         // %= uses a non-zero literal to stay safe)
