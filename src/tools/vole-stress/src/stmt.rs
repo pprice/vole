@@ -772,6 +772,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // Chained string method calls — str.to_upper().trim().length() etc.
+        if self.rng.gen_bool(0.04) {
+            if let Some(stmt) = self.try_generate_chained_string_methods(ctx) {
+                return stmt;
+            }
+        }
+
+        // Match on array element — match arr[0] { ... }
+        if self.rng.gen_bool(0.03) {
+            if let Some(stmt) = self.try_generate_match_array_elem(ctx) {
+                return stmt;
+            }
+        }
+
         // Range-based iterator chain — exercises range iterators (different source
         // than array iterators). Generates `(start..end).iter().chain().terminal()`.
         if self.rng.gen_bool(self.config.range_iter_probability) {
@@ -6295,6 +6309,135 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 ))
             }
         }
+    }
+
+    /// Generate chained string method calls.
+    ///
+    /// Produces patterns like:
+    /// - `let r = str.to_upper().to_lower().length()`
+    /// - `let r = str.trim().to_upper().contains("x")`
+    fn try_generate_chained_string_methods(
+        &mut self,
+        ctx: &mut StmtContext,
+    ) -> Option<String> {
+        // Find string variables in scope
+        let mut string_vars: Vec<String> = Vec::new();
+        for (name, ty, _) in &ctx.locals {
+            if matches!(ty, TypeInfo::Primitive(PrimitiveType::String)) {
+                string_vars.push(name.clone());
+            }
+        }
+        for param in ctx.params.iter() {
+            if matches!(&param.param_type, TypeInfo::Primitive(PrimitiveType::String)) {
+                string_vars.push(param.name.clone());
+            }
+        }
+        if string_vars.is_empty() {
+            return None;
+        }
+
+        let str_name = &string_vars[self.rng.gen_range(0..string_vars.len())];
+        let str_name = str_name.clone();
+        let result_name = ctx.new_local_name();
+
+        // Build a chain of 2-3 string transforms ending with a terminal
+        let transforms = [".to_upper()", ".to_lower()", ".trim()"];
+        let chain_len = self.rng.gen_range(2..=3);
+        let mut chain = String::new();
+        for _ in 0..chain_len {
+            chain.push_str(transforms[self.rng.gen_range(0..transforms.len())]);
+        }
+
+        // Pick terminal
+        let (terminal, result_type) = match self.rng.gen_range(0..3) {
+            0 => (
+                ".length()".to_string(),
+                TypeInfo::Primitive(PrimitiveType::I64),
+            ),
+            1 => (
+                ".contains(\"a\")".to_string(),
+                TypeInfo::Primitive(PrimitiveType::Bool),
+            ),
+            _ => (
+                String::new(),
+                TypeInfo::Primitive(PrimitiveType::String),
+            ),
+        };
+
+        ctx.add_local(result_name.clone(), result_type, false);
+        Some(format!(
+            "let {} = {}{}{}",
+            result_name, str_name, chain, terminal
+        ))
+    }
+
+    /// Generate a match expression on an array element.
+    ///
+    /// Produces:
+    /// ```vole
+    /// let result = match arr[0] {
+    ///     val1 => expr1
+    ///     val2 => expr2
+    ///     _ => expr3
+    /// }
+    /// ```
+    fn try_generate_match_array_elem(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Only use parameter arrays (guaranteed non-empty by generator).
+        // Local arrays could be from .collect() which may produce empty arrays.
+        let mut array_vars: Vec<(String, PrimitiveType)> = Vec::new();
+        for param in ctx.params.iter() {
+            if let TypeInfo::Array(inner) = &param.param_type {
+                if let TypeInfo::Primitive(p) = inner.as_ref() {
+                    if matches!(p, PrimitiveType::I64 | PrimitiveType::I32) {
+                        array_vars.push((param.name.clone(), *p));
+                    }
+                }
+            }
+        }
+        if array_vars.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..array_vars.len());
+        let (arr_name, elem_prim) = &array_vars[idx];
+        let arr_name = arr_name.clone();
+        let elem_prim = *elem_prim;
+
+        let result_type = self.random_primitive_type();
+        let result_name = ctx.new_local_name();
+        let expr_ctx = ctx.to_expr_context();
+        let indent = "    ".repeat(self.indent + 1);
+        let close_indent = "    ".repeat(self.indent);
+
+        // Generate 2 specific arms + wildcard
+        // Pre-generate literals to avoid borrow conflict
+        let lit1 = {
+            let mut eg = ExprGenerator::new(self.rng, &self.config.expr_config);
+            eg.literal_for_primitive(elem_prim)
+        };
+        let lit2 = {
+            let mut eg = ExprGenerator::new(self.rng, &self.config.expr_config);
+            eg.literal_for_primitive(elem_prim)
+        };
+        let arm_val1 = self.generate_match_arm_value(&result_type, &expr_ctx);
+        let arm_val2 = self.generate_match_arm_value(&result_type, &expr_ctx);
+        let wildcard_val = self.generate_match_arm_value(&result_type, &expr_ctx);
+
+        let arms = vec![
+            format!("{}{} => {}", indent, lit1, arm_val1),
+            format!("{}{} => {}", indent, lit2, arm_val2),
+            format!("{}_ => {}", indent, wildcard_val),
+        ];
+
+        ctx.add_local(result_name.clone(), result_type, false);
+
+        Some(format!(
+            "let {} = match {}[0] {{\n{}\n{}}}",
+            result_name,
+            arr_name,
+            arms.join("\n"),
+            close_indent,
+        ))
     }
 
     /// Generate an empty array and run an iterator chain on it.
