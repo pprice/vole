@@ -1251,6 +1251,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: string interpolation with iterator terminal
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_interpolation_with_iter(ctx) {
+                return stmt;
+            }
+        }
+
+        // ~2% chance: reassign from when expression
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_reassign_from_when(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -6273,6 +6287,123 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         );
 
         Some(format!("let {} = {}", result_name, expr))
+    }
+
+    /// Generate a string interpolation containing an iterator terminal.
+    ///
+    /// Tests codegen for iterator chains inside string interpolation braces:
+    /// ```vole
+    /// let s = "count: {arr.iter().count()}"
+    /// let s = "sum={arr.iter().sum()}"
+    /// let s = "filtered: {arr.iter().filter((x) => x > 0).count()}"
+    /// ```
+    fn try_generate_interpolation_with_iter(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let expr_ctx = ctx.to_expr_context();
+        let array_vars = expr_ctx.array_vars();
+        let prim_arrays: Vec<(String, PrimitiveType)> = array_vars
+            .into_iter()
+            .filter_map(|(name, elem_ty)| {
+                if let TypeInfo::Primitive(prim) = elem_ty {
+                    if matches!(prim, PrimitiveType::I64 | PrimitiveType::I32) {
+                        return Some((name, prim));
+                    }
+                }
+                None
+            })
+            .collect();
+
+        if prim_arrays.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..prim_arrays.len());
+        let (arr_name, _) = &prim_arrays[idx];
+        let result_name = ctx.new_local_name();
+
+        let prefix = match self.rng.gen_range(0..4u32) {
+            0 => "count:",
+            1 => "sum=",
+            2 => "n=",
+            _ => "result:",
+        };
+
+        let iter_expr = match self.rng.gen_range(0..3u32) {
+            0 => format!("{}.iter().count()", arr_name),
+            1 => format!("{}.iter().sum()", arr_name),
+            _ => {
+                let thresh = self.rng.gen_range(-5..=5);
+                format!("{}.iter().filter((x) => x > {}).count()", arr_name, thresh)
+            }
+        };
+
+        ctx.add_local(
+            result_name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            false,
+        );
+
+        Some(format!(
+            "let {} = \"{} {{{}}}\"",
+            result_name, prefix, iter_expr
+        ))
+    }
+
+    /// Generate a reassignment to a mutable variable from a when expression.
+    ///
+    /// Tests codegen for when expressions as assignment sources:
+    /// ```vole
+    /// r = when { x > 3 => x * 2, _ => x }
+    /// ```
+    fn try_generate_reassign_from_when(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Find mutable i64 variables (not protected)
+        let mut_i64_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(name, ty, is_mut)| {
+                *is_mut
+                    && !ctx.protected_vars.contains(name)
+                    && matches!(ty, TypeInfo::Primitive(PrimitiveType::I64))
+            })
+            .map(|(name, _, _)| name.clone())
+            .collect();
+
+        if mut_i64_vars.is_empty() {
+            return None;
+        }
+
+        // Find i64 variables for conditions
+        let i64_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::I64)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::I64)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        if i64_vars.is_empty() {
+            return None;
+        }
+
+        let target = &mut_i64_vars[self.rng.gen_range(0..mut_i64_vars.len())];
+        let cond_var = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+        let thresh = self.rng.gen_range(-10..=10);
+        let op = match self.rng.gen_range(0..3u32) {
+            0 => ">",
+            1 => "<",
+            _ => ">=",
+        };
+        let val_true = self.rng.gen_range(-20..=20);
+        let val_false = self.rng.gen_range(-20..=20);
+
+        Some(format!(
+            "{} = when {{ {} {} {} => {}, _ => {} }}",
+            target, cond_var, op, thresh, val_true, val_false
+        ))
     }
 
     fn try_generate_bool_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
