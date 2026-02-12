@@ -3216,6 +3216,13 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
     /// or a negated simple bool. Avoids recursive compound generation to keep
     /// the output bounded.
     fn generate_bool_atom(&mut self, ctx: &ExprContext, depth: usize) -> String {
+        // ~12% chance to use a string method or iterator predicate as a bool atom.
+        // This creates feature interactions between compound bools and method dispatch.
+        if self.rng.gen_bool(0.12) {
+            if let Some(expr) = self.try_generate_method_bool_atom(ctx) {
+                return expr;
+            }
+        }
         match self.rng.gen_range(0..4_u32) {
             0..=1 => {
                 // Comparison: (a > b), (x == y), etc.
@@ -3231,6 +3238,47 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                 format!("(!{})", inner)
             }
         }
+    }
+
+    /// Try to generate a bool-producing method call for use as a bool atom.
+    /// Returns string method calls (contains, starts_with) or iterator predicates
+    /// (any, all) when suitable variables are in scope.
+    fn try_generate_method_bool_atom(&mut self, ctx: &ExprContext) -> Option<String> {
+        let string_vars = ctx.string_vars();
+        let array_vars = ctx.array_vars();
+
+        // Collect options
+        let mut options: Vec<String> = Vec::new();
+        for name in &string_vars {
+            let words = ["hello", "world", "test", "foo", "bar", ""];
+            let word = words[self.rng.gen_range(0..words.len())];
+            match self.rng.gen_range(0..3) {
+                0 => options.push(format!("{}.contains(\"{}\")", name, word)),
+                1 => options.push(format!("{}.starts_with(\"{}\")", name, word)),
+                _ => options.push(format!("{}.ends_with(\"{}\")", name, word)),
+            }
+        }
+        for (name, elem_ty) in &array_vars {
+            if matches!(
+                elem_ty,
+                TypeInfo::Primitive(PrimitiveType::I64 | PrimitiveType::I32)
+            ) {
+                let suffix = if matches!(elem_ty, TypeInfo::Primitive(PrimitiveType::I32)) {
+                    "_i32"
+                } else {
+                    ""
+                };
+                let threshold = self.rng.gen_range(0..=5);
+                let method = if self.rng.gen_bool(0.5) { "any" } else { "all" };
+                options
+                    .push(format!("{}.iter().{}((x) => x > {}{})", name, method, threshold, suffix));
+            }
+        }
+
+        if options.is_empty() {
+            return None;
+        }
+        Some(options.remove(self.rng.gen_range(0..options.len())))
     }
 
     /// Generate a type test (`is`) expression on a union-typed variable.
