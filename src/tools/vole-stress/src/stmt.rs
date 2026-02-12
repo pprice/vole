@@ -1737,8 +1737,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         if use_unreachable {
             // First arm uses `true` so the wildcard is provably dead code
-            let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
-            let arm_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
+            let arm_expr = self.generate_match_arm_value(&result_type, &expr_ctx);
             arms.push(format!("{}true => {}", indent, arm_expr));
 
             // Additional arms (dead code but syntactically valid)
@@ -1746,8 +1745,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
                 let cond =
                     expr_gen.generate_simple(&TypeInfo::Primitive(PrimitiveType::Bool), &expr_ctx);
-                let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
-                let arm_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
+                let arm_expr = self.generate_match_arm_value(&result_type, &expr_ctx);
                 arms.push(format!("{}{} => {}", indent, cond, arm_expr));
             }
 
@@ -1758,14 +1756,12 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
                 let cond =
                     expr_gen.generate_simple(&TypeInfo::Primitive(PrimitiveType::Bool), &expr_ctx);
-                let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
-                let arm_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
+                let arm_expr = self.generate_match_arm_value(&result_type, &expr_ctx);
                 arms.push(format!("{}{} => {}", indent, cond, arm_expr));
             }
 
             // Wildcard arm
-            let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
-            let wildcard_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
+            let wildcard_expr = self.generate_match_arm_value(&result_type, &expr_ctx);
             arms.push(format!("{}_ => {}", indent, wildcard_expr));
         }
 
@@ -1833,8 +1829,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // Generate one arm per variant type
         for variant in &variants {
             if let TypeInfo::Primitive(prim) = variant {
-                let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
-                let arm_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
+                let arm_expr = self.generate_match_arm_value(&result_type, &expr_ctx);
                 arms.push(format!("{}{} => {}", indent, prim.as_str(), arm_expr));
             }
         }
