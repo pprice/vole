@@ -177,6 +177,13 @@ pub struct StmtConfig {
     /// through captured closure pointers.
     /// Set to 0.0 to disable.
     pub nested_closure_capture_probability: f64,
+
+    /// Probability of generating a string interpolation let-binding.
+    /// Creates strings with `{expr}` interpolations using variables in scope.
+    /// Exercises the parser's handling of nested expressions inside strings
+    /// and the codegen for string formatting/concatenation.
+    /// Set to 0.0 to disable.
+    pub string_interpolation_probability: f64,
 }
 
 impl Default for StmtConfig {
@@ -224,6 +231,7 @@ impl Default for StmtConfig {
             sentinel_closure_capture_probability: 0.0,
             closure_struct_capture_probability: 0.0,
             nested_closure_capture_probability: 0.0,
+            string_interpolation_probability: 0.0,
         }
     }
 }
@@ -809,6 +817,16 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             .gen_bool(self.config.nested_closure_capture_probability)
         {
             if let Some(stmt) = self.try_generate_nested_closure_capture(ctx) {
+                return stmt;
+            }
+        }
+
+        // String interpolation let-binding: let s = "prefix {var} suffix"
+        if self
+            .rng
+            .gen_bool(self.config.string_interpolation_probability)
+        {
+            if let Some(stmt) = self.try_generate_string_interpolation_let(ctx) {
                 return stmt;
             }
         }
@@ -2450,6 +2468,111 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         let indent = "    ".repeat(self.indent);
         Some(format!("{}\n{}{}", outer_closure, indent, call_stmt))
+    }
+
+    /// Try to generate a string interpolation let-binding.
+    ///
+    /// Creates strings with `{expr}` interpolations using variables in scope.
+    /// Exercises the parser's handling of nested expressions inside strings
+    /// and the codegen for string formatting/concatenation.
+    ///
+    /// Patterns:
+    /// ```vole
+    /// let s = "value: {x}"
+    /// let s = "{x} + {y} = {x + y}"
+    /// let s = "length: {arr.length()}"
+    /// ```
+    fn try_generate_string_interpolation_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Collect variables suitable for interpolation (numeric, string, bool)
+        let mut candidates: Vec<(String, PrimitiveType)> = Vec::new();
+        for (name, ty, _) in &ctx.locals {
+            if let TypeInfo::Primitive(p) = ty {
+                if matches!(
+                    p,
+                    PrimitiveType::I64
+                        | PrimitiveType::I32
+                        | PrimitiveType::F64
+                        | PrimitiveType::String
+                        | PrimitiveType::Bool
+                ) {
+                    candidates.push((name.clone(), *p));
+                }
+            }
+        }
+        for p in ctx.params {
+            if let TypeInfo::Primitive(pt) = &p.param_type {
+                if matches!(
+                    pt,
+                    PrimitiveType::I64
+                        | PrimitiveType::I32
+                        | PrimitiveType::F64
+                        | PrimitiveType::String
+                        | PrimitiveType::Bool
+                ) {
+                    candidates.push((p.name.clone(), *pt));
+                }
+            }
+        }
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        // Pick 1-3 interpolation segments
+        let num_segments = std::cmp::min(candidates.len(), self.rng.gen_range(1..=3));
+
+        // Shuffle candidates for variety
+        for i in (1..candidates.len()).rev() {
+            let j = self.rng.gen_range(0..=i);
+            candidates.swap(i, j);
+        }
+
+        let prefixes = ["val: ", "result: ", "x=", "", "data: ", "v="];
+        let separators = [", ", " | ", " + ", " and ", " / "];
+
+        let mut parts: Vec<String> = Vec::new();
+        for i in 0..num_segments {
+            let (name, prim) = &candidates[i];
+
+            // Decide what expression to interpolate
+            let expr = match self.rng.gen_range(0..4) {
+                0 => {
+                    // Simple variable reference
+                    name.clone()
+                }
+                1 if matches!(prim, PrimitiveType::I64 | PrimitiveType::I32) => {
+                    // Arithmetic expression
+                    let n = self.rng.gen_range(1..=10);
+                    format!("{} + {}", name, n)
+                }
+                2 if matches!(prim, PrimitiveType::String) => {
+                    // String length method
+                    format!("{}.length()", name)
+                }
+                _ => {
+                    // Simple variable reference (fallback)
+                    name.clone()
+                }
+            };
+
+            if i == 0 {
+                let prefix_idx = self.rng.gen_range(0..prefixes.len());
+                parts.push(format!("{}{{{}}}", prefixes[prefix_idx], expr));
+            } else {
+                let sep_idx = self.rng.gen_range(0..separators.len());
+                parts.push(format!("{}{{{}}}", separators[sep_idx], expr));
+            }
+        }
+
+        let interpolated_string = parts.join("");
+        let result_name = ctx.new_local_name();
+        ctx.add_local(
+            result_name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            false,
+        );
+
+        Some(format!("let {} = \"{}\"", result_name, interpolated_string))
     }
 
     /// Try to generate a widening let statement.
