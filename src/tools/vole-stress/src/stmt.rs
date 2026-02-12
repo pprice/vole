@@ -1091,6 +1091,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~3% chance: string concatenation with + operator
+        if self.rng.gen_bool(0.03) {
+            if let Some(stmt) = self.try_generate_string_concat_let(ctx) {
+                return stmt;
+            }
+        }
+
+        // ~2% chance: numeric .to_string() in string expression
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_to_string_let(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -4514,6 +4528,121 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         ctx.protected_vars.pop();
 
         Some(result)
+    }
+
+    /// Generate a string concatenation let-binding using the `+` operator.
+    /// Combines in-scope string variables and/or literals.
+    fn try_generate_string_concat_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Find string-typed variables in scope
+        let string_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::String)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::String)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        if string_vars.is_empty() {
+            return None;
+        }
+
+        let name = ctx.new_local_name();
+
+        // Pick 2-3 parts to concatenate
+        let num_parts = self.rng.gen_range(2..=3);
+        let mut parts: Vec<String> = Vec::new();
+        for _ in 0..num_parts {
+            if !string_vars.is_empty() && self.rng.gen_bool(0.6) {
+                let idx = self.rng.gen_range(0..string_vars.len());
+                parts.push(string_vars[idx].clone());
+            } else {
+                // String literal
+                let lit = match self.rng.gen_range(0..4u32) {
+                    0 => "\" \"".to_string(),
+                    1 => "\",\"".to_string(),
+                    2 => "\"-\"".to_string(),
+                    _ => "\"_\"".to_string(),
+                };
+                parts.push(lit);
+            }
+        }
+
+        let expr = parts.join(" + ");
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            false,
+        );
+
+        Some(format!("let {} = {}", name, expr))
+    }
+
+    /// Generate a let-binding using `.to_string()` on a numeric variable,
+    /// optionally concatenated with a string prefix/suffix.
+    fn try_generate_to_string_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Find numeric variables in scope
+        let numeric_vars: Vec<(String, PrimitiveType)> = ctx
+            .locals
+            .iter()
+            .filter_map(|(name, ty, _)| {
+                if let TypeInfo::Primitive(p) = ty {
+                    if matches!(p, PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::F64) {
+                        return Some((name.clone(), *p));
+                    }
+                }
+                None
+            })
+            .chain(ctx.params.iter().filter_map(|p| {
+                if let TypeInfo::Primitive(pt) = &p.param_type {
+                    if matches!(pt, PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::F64) {
+                        return Some((p.name.clone(), *pt));
+                    }
+                }
+                None
+            }))
+            .collect();
+
+        if numeric_vars.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..numeric_vars.len());
+        let (var_name, _) = &numeric_vars[idx];
+        let name = ctx.new_local_name();
+
+        // Variant: plain .to_string(), or with prefix/suffix
+        let expr = match self.rng.gen_range(0..3u32) {
+            0 => {
+                // Plain: num.to_string()
+                format!("{}.to_string()", var_name)
+            }
+            1 => {
+                // With prefix: "val=" + num.to_string()
+                let prefix = match self.rng.gen_range(0..3u32) {
+                    0 => "\"n=\"",
+                    1 => "\"val:\"",
+                    _ => "\"x=\"",
+                };
+                format!("{} + {}.to_string()", prefix, var_name)
+            }
+            _ => {
+                // With suffix: num.to_string() + "!"
+                format!("{}.to_string() + \"!\"", var_name)
+            }
+        };
+
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            false,
+        );
+
+        Some(format!("let {} = {}", name, expr))
     }
 
     fn try_generate_bool_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
