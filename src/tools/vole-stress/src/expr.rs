@@ -4319,31 +4319,64 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             && self.rng.gen_bool(0.20);
 
         if use_block_body {
-            // Block body: (params) -> T => { let tmp = expr; tmp op expr }
-            let inner_expr = self.generate(return_type, &lambda_ctx, depth + 1);
-            let tmp_name = format!("_t{}", self.rng.gen_range(0..100));
-            let final_expr = match return_type {
-                TypeInfo::Primitive(PrimitiveType::I64) => {
-                    format!("{} + 0", tmp_name)
-                }
-                TypeInfo::Primitive(PrimitiveType::I32) => {
-                    format!("{} + 0_i32", tmp_name)
-                }
-                TypeInfo::Primitive(PrimitiveType::Bool) => tmp_name.clone(),
-                TypeInfo::Primitive(PrimitiveType::String) => tmp_name.clone(),
-                TypeInfo::Primitive(PrimitiveType::F64) => {
-                    format!("{} + 0.0", tmp_name)
-                }
-                _ => tmp_name.clone(),
-            };
-            format!(
-                "({}){} => {{\n    let {} = {}\n    return {}\n}}",
-                params.join(", "),
-                return_annotation,
-                tmp_name,
-                inner_expr,
-                final_expr
-            )
+            let use_early_return = self.rng.gen_bool(0.4);
+
+            if use_early_return {
+                // Block body with early return:
+                // (params) -> T => { if cond { return val1 }; return val2 }
+                let early_val = self.generate(return_type, &lambda_ctx, depth + 1);
+                let fallback_val = self.generate(return_type, &lambda_ctx, depth + 1);
+                // Generate a simple boolean condition using a parameter if available
+                let cond = if !lambda_params.is_empty() {
+                    let p = &lambda_params[0];
+                    match &p.param_type {
+                        TypeInfo::Primitive(PrimitiveType::I64) => format!("{} > 0", p.name),
+                        TypeInfo::Primitive(PrimitiveType::I32) => format!("{} > 0_i32", p.name),
+                        TypeInfo::Primitive(PrimitiveType::Bool) => p.name.clone(),
+                        TypeInfo::Primitive(PrimitiveType::F64) => format!("{} > 0.0", p.name),
+                        TypeInfo::Primitive(PrimitiveType::String) => {
+                            format!("{}.length() > 0", p.name)
+                        }
+                        _ => "true".to_string(),
+                    }
+                } else {
+                    "true".to_string()
+                };
+                format!(
+                    "({}){} => {{\n    if {} {{\n        return {}\n    }}\n    return {}\n}}",
+                    params.join(", "),
+                    return_annotation,
+                    cond,
+                    early_val,
+                    fallback_val
+                )
+            } else {
+                // Block body: (params) -> T => { let tmp = expr; return tmp op expr }
+                let inner_expr = self.generate(return_type, &lambda_ctx, depth + 1);
+                let tmp_name = format!("_t{}", self.rng.gen_range(0..100));
+                let final_expr = match return_type {
+                    TypeInfo::Primitive(PrimitiveType::I64) => {
+                        format!("{} + 0", tmp_name)
+                    }
+                    TypeInfo::Primitive(PrimitiveType::I32) => {
+                        format!("{} + 0_i32", tmp_name)
+                    }
+                    TypeInfo::Primitive(PrimitiveType::Bool) => tmp_name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::String) => tmp_name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::F64) => {
+                        format!("{} + 0.0", tmp_name)
+                    }
+                    _ => tmp_name.clone(),
+                };
+                format!(
+                    "({}){} => {{\n    let {} = {}\n    return {}\n}}",
+                    params.join(", "),
+                    return_annotation,
+                    tmp_name,
+                    inner_expr,
+                    final_expr
+                )
+            }
         } else {
             // Expression body: (params) -> T => expr
             let body = self.generate(return_type, &lambda_ctx, depth + 1);

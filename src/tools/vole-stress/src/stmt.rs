@@ -1043,6 +1043,13 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~3% chance: assert statement with a tautological condition
+        if self.rng.gen_bool(0.03) {
+            if let Some(stmt) = self.try_generate_assert_stmt(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -3981,6 +3988,70 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     /// Example: If `narrow_var: i32` is in scope, generates `let wide: i64 = narrow_var`.
     ///
     /// Returns `None` if no suitable widening source is in scope.
+    /// Generate an assert statement with a tautological condition.
+    ///
+    /// Picks a variable in scope and generates conditions like:
+    /// ```vole
+    /// assert(x == x)
+    /// assert(x >= 0 || x < 0)  // always true for integers
+    /// assert(true)
+    /// ```
+    fn try_generate_assert_stmt(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Collect candidates — any primitive-typed variable
+        let candidates: Vec<(String, TypeInfo)> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(_)))
+            .map(|(name, ty, _)| (name.clone(), ty.clone()))
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(_)))
+                    .map(|p| (p.name.clone(), p.param_type.clone())),
+            )
+            .collect();
+
+        if candidates.is_empty() {
+            return Some("assert(true)".to_string());
+        }
+
+        let (name, ty) = &candidates[self.rng.gen_range(0..candidates.len())];
+        let variant = self.rng.gen_range(0..4u32);
+
+        let condition = match variant {
+            0 => {
+                // x == x (reflexive equality, always true)
+                format!("{} == {}", name, name)
+            }
+            1 => match ty {
+                TypeInfo::Primitive(PrimitiveType::I64) => {
+                    format!("{} >= 0 || {} < 0", name, name)
+                }
+                TypeInfo::Primitive(PrimitiveType::I32) => {
+                    format!("{} >= 0_i32 || {} < 0_i32", name, name)
+                }
+                TypeInfo::Primitive(PrimitiveType::Bool) => {
+                    format!("{} || !{}", name, name)
+                }
+                TypeInfo::Primitive(PrimitiveType::String) => {
+                    format!("{}.length() >= 0", name)
+                }
+                TypeInfo::Primitive(PrimitiveType::F64) => "true".to_string(),
+                _ => "true".to_string(),
+            },
+            2 => {
+                // assert(true) - simplest
+                "true".to_string()
+            }
+            _ => {
+                // x == x via when: when { true => x, _ => x } == x
+                format!("{} == {}", name, name)
+            }
+        };
+
+        Some(format!("assert({})", condition))
+    }
+
     /// Generate a variable shadow — re-declare an existing variable with a new value.
     ///
     /// Picks a primitive-typed local and generates:
