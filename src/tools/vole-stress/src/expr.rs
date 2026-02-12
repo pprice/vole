@@ -1746,8 +1746,8 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             }
             (TypeInfo::Primitive(I32), TypeInfo::Primitive(I32)) => {
                 Some(match self.rng.gen_range(0..2) {
-                    0 => "x * 2".to_string(),
-                    _ => "x + 1".to_string(),
+                    0 => "x * 2_i32".to_string(),
+                    _ => "x + 1_i32".to_string(),
                 })
             }
             (TypeInfo::Primitive(String), TypeInfo::Primitive(String)) => {
