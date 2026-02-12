@@ -1773,7 +1773,8 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
             Some(format!("{}\n{}", let_stmt, match_stmt))
         } else {
-            // Generate an is-check: let result = if x is Sentinel { ... } else { ... }
+            // Generate an is-check using when expression (if is not an expression in vole):
+            // let result = when { x is Sentinel => expr, _ => expr }
             let result_type = self.random_primitive_type();
             let result_name = ctx.new_local_name();
 
@@ -1783,13 +1784,18 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
             let else_branch_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
 
+            let indent = "    ".repeat(self.indent + 1);
+            let close_indent = "    ".repeat(self.indent);
             let is_stmt = format!(
-                "let {} = if {} is {} {{ {} }} else {{ {} }}",
+                "let {} = when {{\n{}{} is {} => {}\n{}_ => {}\n{}}}",
                 result_name,
+                indent,
                 union_var_name,
                 sentinel_name,
                 sentinel_branch_expr,
+                indent,
                 else_branch_expr,
+                close_indent,
             );
 
             ctx.add_local(result_name, result_type, false);
