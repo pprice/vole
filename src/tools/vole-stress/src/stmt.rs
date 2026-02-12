@@ -4949,8 +4949,13 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let elem_ty = TypeInfo::Primitive(elem_prim);
         let is_mutable = self.rng.gen_bool(self.config.mutable_array_probability);
 
-        // Generate 2-4 elements so indexing with 0..=2 is safe
-        let elem_count = self.rng.gen_range(2..=4);
+        // Usually 2-4 elements; ~15% chance of single-element array to stress
+        // boundary conditions in iterator operations (index 0 only is safe).
+        let elem_count = if self.rng.gen_bool(0.15) {
+            1
+        } else {
+            self.rng.gen_range(2..=4)
+        };
         let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
 
         let elements: Vec<String> = (0..elem_count)
