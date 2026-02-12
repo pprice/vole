@@ -1,6 +1,7 @@
 // src/runtime/instance.rs
 
 use crate::alloc_track;
+use crate::closure::vole_heap_free;
 use crate::type_registry::{FieldTypeTag, get_instance_type_info};
 use crate::value::{RcHeader, TYPE_INSTANCE, rc_dec, rc_inc, union_heap_cleanup};
 use std::alloc::{Layout, alloc, dealloc};
@@ -146,6 +147,17 @@ unsafe extern "C" fn instance_drop(ptr: *mut u8) {
                         // Union heap buffer: conditionally rc_dec the payload,
                         // then free the buffer.
                         union_heap_cleanup(field_value as *mut u8);
+                    }
+                    FieldTypeTag::Interface => {
+                        // Interface fat pointer: heap-allocated [data_word, vtable_ptr].
+                        // The RC-managed object is the data_word at offset 0.
+                        let fat_ptr = field_value as *const u64;
+                        let data_word = *fat_ptr;
+                        if data_word != 0 {
+                            rc_dec(data_word as *mut u8);
+                        }
+                        // Free the 16-byte fat pointer allocation (2 * size_of::<u64>()).
+                        vole_heap_free(field_value as *mut u8, 16);
                     }
                     FieldTypeTag::Value => {}
                 }

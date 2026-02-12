@@ -25,12 +25,18 @@ pub enum FieldTypeTag {
     Rc,
     /// Union heap buffer field (e.g. `Person?` in a class) - needs union_heap_cleanup
     UnionHeap,
+    /// Interface fat pointer field - heap-allocated [data_word, vtable_ptr].
+    /// Cleanup must: rc_dec(data_word at offset 0), then free the 16-byte allocation.
+    Interface,
 }
 
 impl FieldTypeTag {
     /// Check if this field type needs reference count cleanup
     pub fn needs_cleanup(&self) -> bool {
-        matches!(self, FieldTypeTag::Rc | FieldTypeTag::UnionHeap)
+        matches!(
+            self,
+            FieldTypeTag::Rc | FieldTypeTag::UnionHeap | FieldTypeTag::Interface
+        )
     }
 }
 
@@ -201,6 +207,7 @@ pub extern "C" fn vole_register_instance_type(
                 .map(|i| match *field_types.add(i) {
                     1 => FieldTypeTag::Rc,
                     2 => FieldTypeTag::UnionHeap,
+                    3 => FieldTypeTag::Interface,
                     _ => FieldTypeTag::Value,
                 })
                 .collect()

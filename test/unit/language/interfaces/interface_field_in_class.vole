@@ -1,0 +1,110 @@
+// Regression test: interface-typed fields stored in class instances must use
+// independent fat pointer copies. Without this, instance_drop frees the shared
+// fat pointer, causing use-after-free when the original interface local is
+// cleaned up at scope exit.
+//
+// The bug manifests as a misaligned pointer dereference in rc_dec when:
+// 1. A method creates an interface local
+// 2. Passes it to a generator function (which captures it in a class field)
+// 3. The generator result is discarded (triggering instance_drop)
+// 4. The method's scope cleanup tries to rc_dec the now-freed interface local
+
+interface Animal {
+    func speak() -> string
+    func greet() -> string
+}
+
+class Dog {
+    name: string,
+}
+
+class Cat {
+    name: string,
+}
+
+implement Animal for Dog {
+    func speak() -> string {
+        return "woof"
+    }
+
+    func greet() -> string {
+        let friend: Animal = Cat { name: "whiskers" }
+        // This discards the iterator, triggering instance_drop on the generator
+        // class which captured `friend`. The fat pointer for `friend` must not
+        // be freed here because scope cleanup still needs it.
+        _ = make_sounds(friend)
+        return "hello from " + self.name
+    }
+}
+
+implement Animal for Cat {
+    func speak() -> string {
+        return "meow"
+    }
+
+    func greet() -> string {
+        return "hi from " + self.name
+    }
+}
+
+// Generator that captures an interface-typed parameter
+func make_sounds(animal: Animal) -> Iterator<string> {
+    let i = 0
+    while i < 3 {
+        yield animal.speak()
+        i = i + 1
+    }
+}
+
+class AnimalHolder {
+    pet: Animal,
+}
+
+// Generic function with interface constraint that calls methods
+func exercise<T: Animal>(a: T) -> string {
+    return a.speak()
+}
+
+func exercise_greet<T: Animal>(a: T) -> string {
+    return a.greet()
+}
+
+tests "interface field in class" {
+    // Basic: interface field stored in class
+    test "class with interface field" {
+        let dog: Animal = Dog { name: "rex" }
+        let holder = AnimalHolder { pet: dog }
+        assert(holder.pet.speak() == "woof")
+    }
+
+    // The core crash scenario: interface local + generator discard in method
+    test "method creates interface local and discards generator" {
+        let dog = Dog { name: "buddy" }
+        let result = dog.greet()
+        assert(result == "hello from buddy")
+    }
+
+    // Through generic function with interface constraint
+    test "generic function with interface constraint" {
+        let dog = Dog { name: "fido" }
+        let result = exercise(dog)
+        assert(result == "woof")
+    }
+
+    // Generic calling method that triggers the bug pattern
+    test "generic calls method with interface local and generator" {
+        let dog = Dog { name: "spot" }
+        let result = exercise_greet(dog)
+        assert(result == "hello from spot")
+    }
+
+    // Multiple interface locals in same scope
+    test "multiple interface locals with generator" {
+        let a: Animal = Dog { name: "a" }
+        let b: Animal = Cat { name: "b" }
+        _ = make_sounds(a)
+        _ = make_sounds(b)
+        assert(a.speak() == "woof")
+        assert(b.speak() == "meow")
+    }
+}

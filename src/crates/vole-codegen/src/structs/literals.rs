@@ -283,6 +283,10 @@ impl Cg<'_, '_, '_> {
                     // The value may be stack-allocated (from construct_union_id),
                     // so copy the 16-byte buffer to the heap.
                     self.copy_union_to_heap(value)?
+                } else if field_is_interface && arena.is_interface(value.type_id) {
+                    // Value is already an interface fat pointer. Copy it into a new
+                    // heap allocation so instance_drop can free it independently.
+                    self.copy_interface_fat_ptr(value)?
                 } else if field_is_interface {
                     self.box_interface_value(value, field_type_id)?
                 } else {
@@ -334,6 +338,10 @@ impl Cg<'_, '_, '_> {
                     self.construct_union_heap_id(value, field_type_id)?
                 } else if field_is_union && value_is_union {
                     self.copy_union_to_heap(value)?
+                } else if field_is_interface && arena.is_interface(value.type_id) {
+                    // Value is already an interface fat pointer. Copy it into a new
+                    // heap allocation so instance_drop can free it independently.
+                    self.copy_interface_fat_ptr(value)?
                 } else if field_is_interface {
                     self.box_interface_value(value, field_type_id)?
                 } else {
@@ -551,6 +559,50 @@ impl Cg<'_, '_, '_> {
 
         self.builder.switch_to_block(merge_block);
         self.builder.seal_block(merge_block);
+
+        Ok(CompiledValue::new(heap_ptr, ptr_type, value.type_id))
+    }
+
+    /// Copy an interface fat pointer into a new heap allocation.
+    ///
+    /// Interface fat pointers are 16-byte heap allocations: `[data_word, vtable_ptr]`.
+    /// They have no RcHeader, so they cannot be shared between multiple owners.
+    /// When storing an interface value into a class field, we must create an
+    /// independent copy so that `instance_drop` can free it without invalidating
+    /// the original pointer.
+    ///
+    /// Note: The caller is responsible for rc_inc'ing the data_word if the value
+    /// is borrowed (the standard rc_inc at class literal field init handles this).
+    pub(crate) fn copy_interface_fat_ptr(
+        &mut self,
+        value: CompiledValue,
+    ) -> CodegenResult<CompiledValue> {
+        let heap_alloc_ref = self.runtime_func_ref(RuntimeFn::HeapAlloc)?;
+        let ptr_type = self.ptr_type();
+        let word_bytes = ptr_type.bytes() as i64;
+
+        // Allocate 16 bytes for [data_word, vtable_ptr]
+        let size_val = self.builder.ins().iconst(ptr_type, word_bytes * 2);
+        let alloc_call = self.builder.ins().call(heap_alloc_ref, &[size_val]);
+        let heap_ptr = self.builder.inst_results(alloc_call)[0];
+
+        // Copy data_word (offset 0)
+        let data_word = self
+            .builder
+            .ins()
+            .load(types::I64, MemFlags::new(), value.value, 0);
+        self.builder
+            .ins()
+            .store(MemFlags::new(), data_word, heap_ptr, 0);
+
+        // Copy vtable_ptr (offset 8)
+        let vtable_ptr =
+            self.builder
+                .ins()
+                .load(types::I64, MemFlags::new(), value.value, word_bytes as i32);
+        self.builder
+            .ins()
+            .store(MemFlags::new(), vtable_ptr, heap_ptr, word_bytes as i32);
 
         Ok(CompiledValue::new(heap_ptr, ptr_type, value.type_id))
     }
