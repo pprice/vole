@@ -184,6 +184,13 @@ pub struct StmtConfig {
     /// and the codegen for string formatting/concatenation.
     /// Set to 0.0 to disable.
     pub string_interpolation_probability: f64,
+
+    /// Probability of generating a method call result used in a match expression.
+    /// Calls a class/interface method that returns i64, then uses the result
+    /// in a match with multiple arms. Exercises the interaction between method
+    /// dispatch and match codegen.
+    /// Set to 0.0 to disable.
+    pub match_on_method_result_probability: f64,
 }
 
 impl Default for StmtConfig {
@@ -232,6 +239,7 @@ impl Default for StmtConfig {
             closure_struct_capture_probability: 0.0,
             nested_closure_capture_probability: 0.0,
             string_interpolation_probability: 0.0,
+            match_on_method_result_probability: 0.0,
         }
     }
 }
@@ -827,6 +835,16 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             .gen_bool(self.config.string_interpolation_probability)
         {
             if let Some(stmt) = self.try_generate_string_interpolation_let(ctx) {
+                return stmt;
+            }
+        }
+
+        // Match on method call result
+        if self
+            .rng
+            .gen_bool(self.config.match_on_method_result_probability)
+        {
+            if let Some(stmt) = self.try_generate_match_on_method_result(ctx) {
                 return stmt;
             }
         }
@@ -2573,6 +2591,105 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         );
 
         Some(format!("let {} = \"{}\"", result_name, interpolated_string))
+    }
+
+    /// Try to generate a match expression on the result of a method call.
+    ///
+    /// Finds a class instance in scope with a method returning i64, calls it,
+    /// and matches on the result with 2-3 literal arms + wildcard.
+    ///
+    /// ```vole
+    /// let result = match instance.method(args) {
+    ///     0 => 100
+    ///     1 => 200
+    ///     _ => 300
+    /// }
+    /// ```
+    fn try_generate_match_on_method_result(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let _ = ctx.module_id?;
+
+        // Skip in method bodies to avoid mutual recursion
+        if ctx.current_class_sym_id.is_some() {
+            return None;
+        }
+
+        // Find class-typed locals with methods that return i64
+        let mut candidates: Vec<(String, String, Vec<ParamInfo>)> = Vec::new();
+        for (name, ty, _) in &ctx.locals {
+            if let TypeInfo::Class(mod_id, sym_id) = ty {
+                if let Some(sym) = ctx.table.get_symbol(*mod_id, *sym_id) {
+                    if let SymbolKind::Class(ref info) = sym.kind {
+                        if info.type_params.is_empty() {
+                            for method in &info.methods {
+                                if matches!(method.return_type, TypeInfo::Primitive(PrimitiveType::I64))
+                                {
+                                    candidates.push((
+                                        name.clone(),
+                                        method.name.clone(),
+                                        method.params.clone(),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..candidates.len());
+        let (instance_name, method_name, params) = candidates[idx].clone();
+
+        // Generate arguments
+        let expr_ctx = ctx.to_expr_context();
+        let args: Vec<String> = params
+            .iter()
+            .map(|p| {
+                let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+                expr_gen.generate_arg_expr(&p.param_type, &expr_ctx)
+            })
+            .collect();
+
+        let call_expr = format!("{}.{}({})", instance_name, method_name, args.join(", "));
+
+        // Generate 2-3 match arms + wildcard
+        let num_arms = self.rng.gen_range(2..=3);
+        let indent = "    ".repeat(self.indent + 1);
+        let close_indent = "    ".repeat(self.indent);
+
+        let mut arms = Vec::new();
+        let mut used_values = std::collections::HashSet::new();
+        for _ in 0..num_arms {
+            let val = loop {
+                let v = self.rng.gen_range(-5..=20);
+                if used_values.insert(v) {
+                    break v;
+                }
+            };
+            let result_val = self.rng.gen_range(-100..=100);
+            arms.push(format!("{}{} => {}_i64", indent, val, result_val));
+        }
+        // Wildcard arm
+        let default_val = self.rng.gen_range(-100..=100);
+        arms.push(format!("{}_ => {}_i64", indent, default_val));
+
+        let result_name = ctx.new_local_name();
+        ctx.add_local(
+            result_name.clone(),
+            TypeInfo::Primitive(PrimitiveType::I64),
+            false,
+        );
+
+        Some(format!(
+            "let {} = match {} {{\n{}\n{}}}",
+            result_name,
+            call_expr,
+            arms.join("\n"),
+            close_indent,
+        ))
     }
 
     /// Try to generate a widening let statement.

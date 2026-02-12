@@ -236,6 +236,7 @@ fn minimal_profile() -> Profile {
             closure_struct_capture_probability: 0.0,
             nested_closure_capture_probability: 0.0,
             string_interpolation_probability: 0.0,
+            match_on_method_result_probability: 0.0,
         },
         // No destructured imports in minimal (no multi-layer modules)
         destructured_import_probability: 0.0,
@@ -423,6 +424,7 @@ fn full_profile() -> Profile {
             closure_struct_capture_probability: 0.12,
             nested_closure_capture_probability: 0.10,
             string_interpolation_probability: 0.12,
+            match_on_method_result_probability: 0.10,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -609,6 +611,7 @@ fn deep_nesting_profile() -> Profile {
             closure_struct_capture_probability: 0.08,
             nested_closure_capture_probability: 0.08,
             string_interpolation_probability: 0.10,
+            match_on_method_result_probability: 0.06,
         },
         // No destructured imports in deep-nesting (single module focus)
         destructured_import_probability: 0.0,
@@ -800,6 +803,7 @@ fn wide_types_profile() -> Profile {
             closure_struct_capture_probability: 0.10,
             nested_closure_capture_probability: 0.08,
             string_interpolation_probability: 0.10,
+            match_on_method_result_probability: 0.08,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -983,6 +987,7 @@ fn many_modules_profile() -> Profile {
             nested_closure_capture_probability: 0.0,
             // String interpolation works fine even in many-modules
             string_interpolation_probability: 0.08,
+            match_on_method_result_probability: 0.0,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -1181,6 +1186,7 @@ fn generics_heavy_profile() -> Profile {
             closure_struct_capture_probability: 0.0,
             nested_closure_capture_probability: 0.0,
             string_interpolation_probability: 0.08,
+            match_on_method_result_probability: 0.0,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -1374,6 +1380,7 @@ fn stdlib_heavy_profile() -> Profile {
             closure_struct_capture_probability: 0.0,
             nested_closure_capture_probability: 0.0,
             string_interpolation_probability: 0.10,
+            match_on_method_result_probability: 0.06,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -1533,6 +1540,7 @@ fn closures_heavy_profile() -> Profile {
             // HIGH nested closure capture — closure capturing closure is core
             nested_closure_capture_probability: 0.15,
             string_interpolation_probability: 0.08,
+            match_on_method_result_probability: 0.06,
         },
         destructured_import_probability: 0.0,
         // HIGH expression-body — exercises => lambda-like syntax on functions
@@ -1734,6 +1742,7 @@ fn fallible_heavy_profile() -> Profile {
             closure_struct_capture_probability: 0.0,
             nested_closure_capture_probability: 0.0,
             string_interpolation_probability: 0.08,
+            match_on_method_result_probability: 0.0,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx)
         destructured_import_probability: 0.0,
