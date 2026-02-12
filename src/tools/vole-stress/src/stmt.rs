@@ -191,6 +191,13 @@ pub struct StmtConfig {
     /// dispatch and match codegen.
     /// Set to 0.0 to disable.
     pub match_on_method_result_probability: f64,
+
+    /// Probability of generating an iterator-map that calls a class method
+    /// inside the closure. Requires both an i64 array and a class instance
+    /// with an i64-returning method in scope.
+    /// Pattern: `let r = arr.iter().map((x: i64) -> i64 => inst.method(x)).collect()`
+    /// Set to 0.0 to disable.
+    pub iter_method_map_probability: f64,
 }
 
 impl Default for StmtConfig {
@@ -240,6 +247,7 @@ impl Default for StmtConfig {
             nested_closure_capture_probability: 0.0,
             string_interpolation_probability: 0.0,
             match_on_method_result_probability: 0.0,
+            iter_method_map_probability: 0.0,
         }
     }
 }
@@ -845,6 +853,16 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             .gen_bool(self.config.match_on_method_result_probability)
         {
             if let Some(stmt) = self.try_generate_match_on_method_result(ctx) {
+                return stmt;
+            }
+        }
+
+        // Iterator map using method call on class instance
+        if self
+            .rng
+            .gen_bool(self.config.iter_method_map_probability)
+        {
+            if let Some(stmt) = self.try_generate_iter_method_map(ctx) {
                 return stmt;
             }
         }
@@ -2702,6 +2720,151 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             arms.join("\n"),
             close_indent,
         ))
+    }
+
+    /// Try to generate an iterator map that calls a class method inside the closure.
+    ///
+    /// Requires both an i64 array variable and a non-generic class instance with
+    /// a method that takes a single i64 param and returns i64.
+    ///
+    /// Pattern A (collect):
+    /// ```vole
+    /// let result = arr.iter().map((x: i64) -> i64 => instance.method(x)).collect()
+    /// ```
+    ///
+    /// Pattern B (sum):
+    /// ```vole
+    /// let result = arr.iter().map((x: i64) -> i64 => instance.method(x)).sum()
+    /// ```
+    ///
+    /// Skipped in method bodies to avoid mutual recursion.
+    /// Returns `None` if no suitable array + class instance combination is in scope.
+    fn try_generate_iter_method_map(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Skip in method bodies to avoid mutual recursion
+        if ctx.current_class_sym_id.is_some() {
+            return None;
+        }
+
+        // Find i64 array variables in scope (locals + params)
+        let mut array_candidates: Vec<String> = Vec::new();
+        for (name, ty, _) in &ctx.locals {
+            if let TypeInfo::Array(elem) = ty {
+                if matches!(elem.as_ref(), TypeInfo::Primitive(PrimitiveType::I64)) {
+                    array_candidates.push(name.clone());
+                }
+            }
+        }
+        for param in ctx.params.iter() {
+            if let TypeInfo::Array(elem) = &param.param_type {
+                if matches!(elem.as_ref(), TypeInfo::Primitive(PrimitiveType::I64)) {
+                    array_candidates.push(param.name.clone());
+                }
+            }
+        }
+        if array_candidates.is_empty() {
+            return None;
+        }
+
+        // Find class instances with methods returning i64 that take 0 or 1 numeric params.
+        // Find class instances (from locals AND params) with methods returning i64,
+        // all-primitive params, and at least one i64 param (to pass `x` into).
+        // Tracks (instance_name, method_name, params_vec).
+        let mut method_candidates: Vec<(String, String, Vec<ParamInfo>)> = Vec::new();
+
+        // Helper: scan a class type for suitable methods
+        let mut scan_class = |name: &str, mod_id: ModuleId, sym_id: SymbolId| {
+            if let Some(sym) = ctx.table.get_symbol(mod_id, sym_id) {
+                if let SymbolKind::Class(ref info) = sym.kind {
+                    if info.type_params.is_empty() {
+                        for method in &info.methods {
+                            if !matches!(
+                                method.return_type,
+                                TypeInfo::Primitive(PrimitiveType::I64)
+                            ) {
+                                continue;
+                            }
+                            let has_i64 = method.params.iter().any(|p| {
+                                matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::I64))
+                            });
+                            if has_i64 && !method.params.is_empty() {
+                                method_candidates.push((
+                                    name.to_string(),
+                                    method.name.clone(),
+                                    method.params.clone(),
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        for (name, ty, _) in &ctx.locals {
+            if let TypeInfo::Class(mod_id, sym_id) = ty {
+                scan_class(name, *mod_id, *sym_id);
+            }
+        }
+        for param in ctx.params.iter() {
+            if let TypeInfo::Class(mod_id, sym_id) = &param.param_type {
+                scan_class(&param.name, *mod_id, *sym_id);
+            }
+        }
+        if method_candidates.is_empty() {
+            return None;
+        }
+
+        let arr_idx = self.rng.gen_range(0..array_candidates.len());
+        let arr_name = &array_candidates[arr_idx];
+
+        let meth_idx = self.rng.gen_range(0..method_candidates.len());
+        let (instance_name, method_name, params) = &method_candidates[meth_idx];
+
+        // Build argument list: pick the first i64 param to receive `x`,
+        // generate simple literals for all other params.
+        let mut x_used = false;
+        let args: Vec<String> = params
+            .iter()
+            .map(|p| {
+                if !x_used
+                    && matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::I64))
+                {
+                    x_used = true;
+                    "x".to_string()
+                } else {
+                    let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+                    let expr_ctx = ctx.to_expr_context();
+                    expr_gen.generate_simple(&p.param_type, &expr_ctx)
+                }
+            })
+            .collect();
+        let closure_body = format!("{}.{}({})", instance_name, method_name, args.join(", "));
+
+        let result_name = ctx.new_local_name();
+        let use_sum = self.rng.gen_bool(0.4);
+
+        let stmt = if use_sum {
+            ctx.add_local(
+                result_name.clone(),
+                TypeInfo::Primitive(PrimitiveType::I64),
+                false,
+            );
+            format!(
+                "let {} = {}.iter().map((x: i64) -> i64 => {}).sum()",
+                result_name, arr_name, closure_body
+            )
+        } else {
+            ctx.add_local(
+                result_name.clone(),
+                TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+                false,
+            );
+            format!(
+                "let {} = {}.iter().map((x: i64) -> i64 => {}).collect()",
+                result_name, arr_name, closure_body
+            )
+        };
+
+        Some(stmt)
     }
 
     /// Try to generate a widening let statement.
