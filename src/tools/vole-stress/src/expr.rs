@@ -2511,6 +2511,92 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         Some(format!("{}.iter().unique().collect()", var_name))
     }
 
+    /// Try to generate an `.iter().flat_map((x) => [...]).collect()` expression for array generation.
+    ///
+    /// Only works for i64 and i32 element types. Looks for array-typed variables
+    /// in scope whose element type matches the target, then generates one of:
+    /// - `arr.iter().flat_map((x) => [x, x * 2]).collect()` (~40%)
+    /// - `arr.iter().flat_map((x) => [x, -x]).collect()` (~20%)
+    /// - `arr.iter().flat_map((x) => [x]).collect()` (~20%) — identity-ish
+    /// - `arr.iter().flat_map((x) => [x, x * 2]).filter((y) => pred).collect()` (~20%)
+    fn try_generate_iter_flat_map_collect(
+        &mut self,
+        target_elem: &TypeInfo,
+        ctx: &ExprContext,
+    ) -> Option<String> {
+        let is_i64 = matches!(target_elem, TypeInfo::Primitive(PrimitiveType::I64));
+        let is_i32 = matches!(target_elem, TypeInfo::Primitive(PrimitiveType::I32));
+        if !is_i64 && !is_i32 {
+            return None;
+        }
+
+        let array_vars = ctx.array_vars();
+        let candidates: Vec<_> = array_vars
+            .iter()
+            .filter(|(_, elem_ty)| *elem_ty == *target_elem)
+            .collect();
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..candidates.len());
+        let (var_name, _) = candidates[idx];
+
+        // Build the lambda body: [x, <expr>] where <expr> varies
+        let (body_elems, suffix) = if is_i32 {
+            let variant = self.rng.gen_range(0..10);
+            match variant {
+                0..4 => {
+                    // [x, x * 2_i32]
+                    ("x, x * 2_i32".to_string(), String::new())
+                }
+                4..6 => {
+                    // [x, -x]
+                    ("x, -x".to_string(), String::new())
+                }
+                6..8 => {
+                    // [x] — identity pass-through
+                    ("x".to_string(), String::new())
+                }
+                _ => {
+                    // [x, x * 2_i32] with a .filter() after
+                    let n = self.rng.gen_range(0..=5);
+                    (
+                        "x, x * 2_i32".to_string(),
+                        format!(".filter((y) => y > {}_i32)", n),
+                    )
+                }
+            }
+        } else {
+            let variant = self.rng.gen_range(0..10);
+            match variant {
+                0..4 => {
+                    // [x, x * 2]
+                    ("x, x * 2".to_string(), String::new())
+                }
+                4..6 => {
+                    // [x, -x]
+                    ("x, -x".to_string(), String::new())
+                }
+                6..8 => {
+                    // [x] — identity pass-through
+                    ("x".to_string(), String::new())
+                }
+                _ => {
+                    // [x, x * 2] with a .filter() after
+                    let n = self.rng.gen_range(0..=5);
+                    ("x, x * 2".to_string(), format!(".filter((y) => y > {})", n))
+                }
+            }
+        };
+
+        Some(format!(
+            "{}.iter().flat_map((x) => [{}]){}.collect()",
+            var_name, body_elems, suffix
+        ))
+    }
+
     /// Generate arguments for a method call.
     ///
     /// With probability `inline_expr_arg_probability`, each argument may be a
@@ -3328,6 +3414,13 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         // ~6% chance to generate arr.iter().unique().collect() (i64/i32 only)
         if self.rng.gen_bool(0.06) {
             if let Some(expr) = self.try_generate_iter_unique_collect(elem, ctx) {
+                return expr;
+            }
+        }
+
+        // ~8% chance to generate arr.iter().flat_map((x) => [...]).collect() (i64/i32 only)
+        if self.rng.gen_bool(0.08) {
+            if let Some(expr) = self.try_generate_iter_flat_map_collect(elem, ctx) {
                 return expr;
             }
         }
