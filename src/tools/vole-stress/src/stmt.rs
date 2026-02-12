@@ -3784,6 +3784,17 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     /// syntax. The bounds may reference existing local i64 variables or
     /// simple arithmetic expressions (~30% chance when variables are available).
     fn generate_range(&mut self, ctx: &StmtContext, inclusive: bool) -> String {
+        // ~10% chance to generate an edge-case range (empty or single-iteration)
+        // to stress loop codegen boundary conditions.
+        if self.rng.gen_bool(0.10) {
+            let start = self.rng.gen_range(0..3);
+            return match self.rng.gen_range(0..3) {
+                0 => format!("{}..{}", start, start),         // empty exclusive range
+                1 => format!("{}..={}", start, start),        // single-iteration inclusive
+                _ => format!("{}..{}", start, start + 1),     // single-iteration exclusive
+            };
+        }
+
         // Collect i64 locals that could serve as variable bounds.
         // Only use protected_vars (while-loop counters/guards) which are
         // guaranteed to hold small values. Arbitrary i64 locals can hold
