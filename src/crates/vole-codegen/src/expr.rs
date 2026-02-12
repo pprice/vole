@@ -1389,6 +1389,15 @@ impl Cg<'_, '_, '_> {
         let heap_ptr =
             self.call_runtime(RuntimeFn::ClosureGetCapture, &[closure_ptr, index_val])?;
 
+        // Structs are captured by value — the heap slot contains the full struct
+        // data (not a pointer to a pointer). Return heap_ptr directly as the
+        // struct pointer.
+        if self.arena().is_struct(binding.vole_type) {
+            let ptr_type = self.ptr_type();
+            let cv = CompiledValue::new(heap_ptr, ptr_type, binding.vole_type);
+            return Ok(cv);
+        }
+
         let cranelift_ty = self.cranelift_type(binding.vole_type);
         let value = self
             .builder
@@ -1417,6 +1426,24 @@ impl Cg<'_, '_, '_> {
         let index_val = self.builder.ins().iconst(types::I64, binding.index as i64);
         let heap_ptr =
             self.call_runtime(RuntimeFn::ClosureGetCapture, &[closure_ptr, index_val])?;
+
+        // Structs: copy all flat slots from value (stack ptr) to heap slot
+        if let Some(flat_count) = self.struct_flat_slot_count(binding.vole_type) {
+            for slot in 0..flat_count {
+                let offset = (slot as i32) * 8;
+                let val = self
+                    .builder
+                    .ins()
+                    .load(types::I64, MemFlags::new(), value.value, offset);
+                self.builder
+                    .ins()
+                    .store(MemFlags::new(), val, heap_ptr, offset);
+            }
+            value.mark_consumed();
+            value.debug_assert_rc_handled("closure capture assign");
+            let ptr_type = self.ptr_type();
+            return Ok(CompiledValue::new(heap_ptr, ptr_type, binding.vole_type));
+        }
 
         let cranelift_ty = self.cranelift_type(binding.vole_type);
         self.builder

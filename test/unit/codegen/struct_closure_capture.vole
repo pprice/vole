@@ -1,0 +1,51 @@
+// Regression test: struct capture in closures must copy the full struct data
+// to the heap, not just store the stack pointer (which dangles after return).
+
+struct Point {
+    x: i64,
+    y: i64,
+}
+
+struct Named {
+    name: string,
+    value: f64,
+}
+
+func capture_point() -> () -> i64 {
+    let p = Point { x: 10, y: 20 }
+    return () => p.x + p.y
+}
+
+func capture_named_string() -> () -> string {
+    let n = Named { name: "hello", value: 3.14 }
+    return () => n.name
+}
+
+func capture_with_param() -> (i64) -> i64 {
+    let p = Point { x: 5, y: 10 }
+    return (z: i64) => p.x + p.y + z
+}
+
+tests "struct closure capture" {
+    test "capture point and access fields" {
+        let f = capture_point()
+        assert(f() == 30)
+    }
+
+    test "capture struct with string field" {
+        let f = capture_named_string()
+        assert(f() == "hello")
+    }
+
+    test "capture struct and pass additional param" {
+        let f = capture_with_param()
+        assert(f(100) == 115)
+    }
+
+    test "call captured closure multiple times" {
+        let f = capture_point()
+        assert(f() == 30)
+        assert(f() == 30)
+        assert(f() == 30)
+    }
+}

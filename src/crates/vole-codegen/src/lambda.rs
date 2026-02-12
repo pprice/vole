@@ -342,9 +342,25 @@ impl Cg<'_, '_, '_> {
             let alloc_call = self.builder.ins().call(heap_alloc_ref, &[size_val]);
             let heap_ptr = self.builder.inst_results(alloc_call)[0];
 
-            self.builder
-                .ins()
-                .store(MemFlags::new(), current_value, heap_ptr, 0);
+            // Structs are stack-allocated pointers — we must copy the full struct
+            // data into the heap allocation (not just store the stack pointer,
+            // which would dangle after the creating function returns).
+            if let Some(flat_count) = self.struct_flat_slot_count(vole_type_id) {
+                for slot in 0..flat_count {
+                    let offset = (slot as i32) * 8;
+                    let val =
+                        self.builder
+                            .ins()
+                            .load(types::I64, MemFlags::new(), current_value, offset);
+                    self.builder
+                        .ins()
+                        .store(MemFlags::new(), val, heap_ptr, offset);
+                }
+            } else {
+                self.builder
+                    .ins()
+                    .store(MemFlags::new(), current_value, heap_ptr, 0);
+            }
 
             let index_val = self.builder.ins().iconst(types::I64, i as i64);
             self.builder
