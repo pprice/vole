@@ -216,6 +216,12 @@ pub struct StmtConfig {
     /// Set to 0.0 to disable.
     pub string_method_probability: f64,
 
+    /// Probability of generating an iterator predicate let-binding.
+    /// Produces `let b = arr.iter().any((x) => x > 0)` or `.all(...)` patterns
+    /// that return bool. Exercises iterator predicate codegen paths.
+    /// Set to 0.0 to disable.
+    pub iter_predicate_probability: f64,
+
     /// Probability of generating a checked/wrapping/saturating arithmetic call.
     /// Requires that the module has imported `std:lowlevel` (controlled by
     /// `has_lowlevel_import` on StmtContext). Generates patterns like:
@@ -277,6 +283,7 @@ impl Default for StmtConfig {
             iter_method_map_probability: 0.0,
             string_split_probability: 0.0,
             string_method_probability: 0.0,
+            iter_predicate_probability: 0.0,
             checked_arithmetic_probability: 0.0,
         }
     }
@@ -926,6 +933,13 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // When expression let-binding: let x = when { cond => val, _ => val }
         if self.rng.gen_bool(self.config.when_let_probability) {
             if let Some(stmt) = self.try_generate_when_let(ctx) {
+                return stmt;
+            }
+        }
+
+        // Iterator predicate: let b = arr.iter().any((x) => x > 0)
+        if self.rng.gen_bool(self.config.iter_predicate_probability) {
+            if let Some(stmt) = self.try_generate_iter_predicate_let(ctx) {
                 return stmt;
             }
         }
@@ -2810,6 +2824,62 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 name, joined, delim
             )
         }
+    }
+
+    /// Try to generate an iterator predicate let-binding.
+    ///
+    /// Finds a numeric array in scope and generates:
+    /// - `let b = arr.iter().any((x) => x > 0)` → bool
+    /// - `let b = arr.iter().all((x) => x > 0)` → bool
+    fn try_generate_iter_predicate_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Find numeric arrays in scope (i64, i32, f64)
+        let mut array_vars: Vec<(String, PrimitiveType)> = Vec::new();
+        for (name, ty, _) in &ctx.locals {
+            if let TypeInfo::Array(inner) = ty {
+                if let TypeInfo::Primitive(
+                    p @ (PrimitiveType::I64 | PrimitiveType::I32 | PrimitiveType::F64),
+                ) = inner.as_ref()
+                {
+                    array_vars.push((name.clone(), *p));
+                }
+            }
+        }
+        if array_vars.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..array_vars.len());
+        let (arr_name, elem_prim) = &array_vars[idx];
+        let result_name = ctx.new_local_name();
+
+        let suffix = match elem_prim {
+            PrimitiveType::I32 => "_i32",
+            PrimitiveType::F64 => "_f64",
+            _ => "",
+        };
+
+        // Pick any() or all()
+        let method = if self.rng.gen_bool(0.5) { "any" } else { "all" };
+
+        // Generate a simple predicate closure
+        let threshold = self.rng.gen_range(0..=5);
+        let op = match self.rng.gen_range(0..3) {
+            0 => ">",
+            1 => "<",
+            _ => ">=",
+        };
+
+        let call_expr = format!(
+            "{}.iter().{}((x) => x {} {}{})",
+            arr_name, method, op, threshold, suffix
+        );
+
+        ctx.add_local(
+            result_name.clone(),
+            TypeInfo::Primitive(PrimitiveType::Bool),
+            false,
+        );
+        Some(format!("let {} = {}", result_name, call_expr))
     }
 
     /// Try to generate a string method call let-binding.

@@ -240,6 +240,7 @@ fn minimal_profile() -> Profile {
             iter_method_map_probability: 0.0,
             string_split_probability: 0.0,
             string_method_probability: 0.0,
+            iter_predicate_probability: 0.0,
             checked_arithmetic_probability: 0.0,
         },
         // No destructured imports in minimal (no multi-layer modules)
@@ -433,6 +434,7 @@ fn full_profile() -> Profile {
             iter_method_map_probability: 0.10,
             string_split_probability: 0.08,
             string_method_probability: 0.10,
+            iter_predicate_probability: 0.08,
             checked_arithmetic_probability: 0.0,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
@@ -627,6 +629,7 @@ fn deep_nesting_profile() -> Profile {
             iter_method_map_probability: 0.06,
             string_split_probability: 0.06,
             string_method_probability: 0.08,
+            iter_predicate_probability: 0.06,
             checked_arithmetic_probability: 0.0,
         },
         // No destructured imports in deep-nesting (single module focus)
@@ -825,6 +828,7 @@ fn wide_types_profile() -> Profile {
             iter_method_map_probability: 0.08,
             string_split_probability: 0.08,
             string_method_probability: 0.10,
+            iter_predicate_probability: 0.08,
             checked_arithmetic_probability: 0.0,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
@@ -1015,6 +1019,7 @@ fn many_modules_profile() -> Profile {
             iter_method_map_probability: 0.0,
             string_split_probability: 0.0,
             string_method_probability: 0.0,
+            iter_predicate_probability: 0.0,
             checked_arithmetic_probability: 0.0,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
@@ -1219,6 +1224,7 @@ fn generics_heavy_profile() -> Profile {
             iter_method_map_probability: 0.0,
             string_split_probability: 0.0,
             string_method_probability: 0.0,
+            iter_predicate_probability: 0.0,
             checked_arithmetic_probability: 0.0,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
@@ -1418,6 +1424,7 @@ fn stdlib_heavy_profile() -> Profile {
             iter_method_map_probability: 0.08,
             string_split_probability: 0.10,
             string_method_probability: 0.12,
+            iter_predicate_probability: 0.08,
             checked_arithmetic_probability: 0.0,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
@@ -1584,6 +1591,7 @@ fn closures_heavy_profile() -> Profile {
             iter_method_map_probability: 0.10,
             string_split_probability: 0.06,
             string_method_probability: 0.08,
+            iter_predicate_probability: 0.06,
             checked_arithmetic_probability: 0.0,
         },
         destructured_import_probability: 0.0,
@@ -1792,6 +1800,7 @@ fn fallible_heavy_profile() -> Profile {
             iter_method_map_probability: 0.0,
             string_split_probability: 0.0,
             string_method_probability: 0.0,
+            iter_predicate_probability: 0.0,
             checked_arithmetic_probability: 0.0,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx)
