@@ -204,6 +204,27 @@ pub struct StmtConfig {
     /// string method codegen, iterator-to-array collect, and string arrays.
     /// Set to 0.0 to disable.
     pub string_split_probability: f64,
+
+    /// Probability of generating a string method call let-binding when string
+    /// variables are in scope. Produces patterns like:
+    /// - `let n = str.length()` (→ i64)
+    /// - `let b = str.contains("x")` (→ bool)
+    /// - `let b = str.starts_with("x")` (→ bool)
+    /// - `let s = str.trim()` (→ string)
+    /// - `let s = str.to_upper()` (→ string)
+    /// Exercises string method dispatch codegen paths.
+    /// Set to 0.0 to disable.
+    pub string_method_probability: f64,
+
+    /// Probability of generating a checked/wrapping/saturating arithmetic call.
+    /// Requires that the module has imported `std:lowlevel` (controlled by
+    /// `has_lowlevel_import` on StmtContext). Generates patterns like:
+    /// - `let x = wrapping_add(a, b)` (wrapping on overflow)
+    /// - `let x = saturating_add(a, b)` (clamp on overflow)
+    /// - `let x = checked_add(a, b) ?? 0` (nil on overflow, unwrap with default)
+    /// Exercises intrinsic function codegen paths across integer types.
+    /// Set to 0.0 to disable.
+    pub checked_arithmetic_probability: f64,
 }
 
 impl Default for StmtConfig {
@@ -255,6 +276,8 @@ impl Default for StmtConfig {
             match_on_method_result_probability: 0.0,
             iter_method_map_probability: 0.0,
             string_split_probability: 0.0,
+            string_method_probability: 0.0,
+            checked_arithmetic_probability: 0.0,
         }
     }
 }
@@ -298,6 +321,9 @@ pub struct StmtContext<'a> {
     /// Type parameters of the current function (for generic functions).
     /// Used to pass constraints to expression generation for interface method calls.
     pub type_params: Vec<TypeParam>,
+    /// Whether `std:lowlevel` functions (wrapping_add, checked_add, etc.) are
+    /// available in this module. Set by the emitter when the module imports lowlevel.
+    pub has_lowlevel_import: bool,
 }
 
 impl<'a> StmtContext<'a> {
@@ -320,6 +346,7 @@ impl<'a> StmtContext<'a> {
             protected_vars: Vec::new(),
             return_type: None,
             type_params: Vec::new(),
+            has_lowlevel_import: false,
         }
     }
 
@@ -344,6 +371,7 @@ impl<'a> StmtContext<'a> {
             current_class_sym_id: None,
             protected_vars: Vec::new(),
             return_type: None,
+            has_lowlevel_import: false,
             type_params: Vec::new(),
         }
     }
@@ -743,6 +771,22 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // String split to array: "a,b,c".split(",").collect()
         if self.rng.gen_bool(self.config.string_split_probability) {
             return self.generate_string_split_let(ctx);
+        }
+
+        // String method call: str.length(), str.contains("x"), str.trim(), etc.
+        if self.rng.gen_bool(self.config.string_method_probability) {
+            if let Some(stmt) = self.try_generate_string_method_let(ctx) {
+                return stmt;
+            }
+        }
+
+        // Checked/wrapping/saturating arithmetic (requires lowlevel import)
+        if ctx.has_lowlevel_import
+            && self
+                .rng
+                .gen_bool(self.config.checked_arithmetic_probability)
+        {
+            return self.generate_checked_arithmetic_let(ctx);
         }
 
         // Tuple let-binding with destructuring
@@ -2724,6 +2768,208 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 "let {} = \"{}\".split(\"{}\").first() ?? \"\"",
                 name, joined, delim
             )
+        }
+    }
+
+    /// Try to generate a string method call let-binding.
+    ///
+    /// Finds a string-typed variable in scope and calls a random method on it:
+    /// - `.length()` → i64
+    /// - `.contains("literal")` → bool
+    /// - `.starts_with("literal")` → bool
+    /// - `.ends_with("literal")` → bool
+    /// - `.trim()` → string
+    /// - `.to_upper()` → string
+    /// - `.to_lower()` → string
+    fn try_generate_string_method_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Find a string-typed variable in scope
+        let mut string_vars: Vec<String> = Vec::new();
+        for (name, ty, _) in &ctx.locals {
+            if matches!(ty, TypeInfo::Primitive(PrimitiveType::String)) {
+                string_vars.push(name.clone());
+            }
+        }
+        for param in ctx.params {
+            if matches!(param.param_type, TypeInfo::Primitive(PrimitiveType::String)) {
+                string_vars.push(param.name.clone());
+            }
+        }
+        if string_vars.is_empty() {
+            return None;
+        }
+
+        let var_name = &string_vars[self.rng.gen_range(0..string_vars.len())];
+        let result_name = ctx.new_local_name();
+
+        // Pick a random method
+        let method = self.rng.gen_range(0..7);
+        let (call_expr, result_type) = match method {
+            0 => {
+                // .length() → i64
+                (
+                    format!("{}.length()", var_name),
+                    TypeInfo::Primitive(PrimitiveType::I64),
+                )
+            }
+            1 => {
+                // .contains("literal") → bool
+                let needle = Self::random_short_string(&mut self.rng);
+                (
+                    format!("{}.contains(\"{}\")", var_name, needle),
+                    TypeInfo::Primitive(PrimitiveType::Bool),
+                )
+            }
+            2 => {
+                // .starts_with("literal") → bool
+                let needle = Self::random_short_string(&mut self.rng);
+                (
+                    format!("{}.starts_with(\"{}\")", var_name, needle),
+                    TypeInfo::Primitive(PrimitiveType::Bool),
+                )
+            }
+            3 => {
+                // .ends_with("literal") → bool
+                let needle = Self::random_short_string(&mut self.rng);
+                (
+                    format!("{}.ends_with(\"{}\")", var_name, needle),
+                    TypeInfo::Primitive(PrimitiveType::Bool),
+                )
+            }
+            4 => {
+                // .trim() → string
+                (
+                    format!("{}.trim()", var_name),
+                    TypeInfo::Primitive(PrimitiveType::String),
+                )
+            }
+            5 => {
+                // .to_upper() → string
+                (
+                    format!("{}.to_upper()", var_name),
+                    TypeInfo::Primitive(PrimitiveType::String),
+                )
+            }
+            _ => {
+                // .to_lower() → string
+                (
+                    format!("{}.to_lower()", var_name),
+                    TypeInfo::Primitive(PrimitiveType::String),
+                )
+            }
+        };
+
+        ctx.add_local(result_name.clone(), result_type, false);
+        Some(format!("let {} = {}", result_name, call_expr))
+    }
+
+    /// Generate a short random string for string method arguments.
+    fn random_short_string<R2: Rng>(rng: &mut R2) -> String {
+        let words = ["hello", "world", "test", "foo", "bar", "abc", "xyz", "str"];
+        words[rng.gen_range(0..words.len())].to_string()
+    }
+
+    /// Generate a checked/wrapping/saturating arithmetic call using `std:lowlevel` intrinsics.
+    ///
+    /// Picks two numeric values of the same type and applies a random operation:
+    /// - wrapping_add/sub/mul: returns T (wraps on overflow)
+    /// - saturating_add/sub/mul: returns T (clamps on overflow)
+    /// - checked_add/sub/mul/div: returns T? (nil on overflow), unwrapped with ??
+    ///
+    /// Requires `ctx.has_lowlevel_import` to be true.
+    fn generate_checked_arithmetic_let(&mut self, ctx: &mut StmtContext) -> String {
+        // Pick a random integer type to work with
+        let int_types = [
+            PrimitiveType::I32,
+            PrimitiveType::I64,
+            PrimitiveType::I8,
+            PrimitiveType::I16,
+        ];
+        let prim_type = int_types[self.rng.gen_range(0..int_types.len())];
+        let type_info = TypeInfo::Primitive(prim_type);
+        let type_suffix = match prim_type {
+            PrimitiveType::I8 => "_i8",
+            PrimitiveType::I16 => "_i16",
+            PrimitiveType::I32 => "_i32",
+            PrimitiveType::I64 => "_i64",
+            _ => "_i64",
+        };
+
+        // Find existing locals/params of the matching type
+        let mut operand_names: Vec<String> = Vec::new();
+        for (name, ty, _) in &ctx.locals {
+            if *ty == type_info {
+                operand_names.push(name.clone());
+            }
+        }
+        for param in ctx.params {
+            if param.param_type == type_info {
+                operand_names.push(param.name.clone());
+            }
+        }
+
+        // Generate operand expressions: use existing vars or fresh literals
+        let (a_expr, b_expr) = if operand_names.len() >= 2 {
+            let idx_a = self.rng.gen_range(0..operand_names.len());
+            let mut idx_b = self.rng.gen_range(0..operand_names.len());
+            // Allow same var for both operands (wrapping_add(x, x) is valid)
+            if operand_names.len() > 2 {
+                while idx_b == idx_a {
+                    idx_b = self.rng.gen_range(0..operand_names.len());
+                }
+            }
+            (operand_names[idx_a].clone(), operand_names[idx_b].clone())
+        } else if operand_names.len() == 1 {
+            // Use the one var + a literal
+            let lit = self.rng.gen_range(1..=50);
+            (
+                operand_names[0].clone(),
+                format!("{}{}", lit, type_suffix),
+            )
+        } else {
+            // Generate two fresh literals
+            let a = self.rng.gen_range(-50..=50);
+            let b = self.rng.gen_range(1..=50);
+            (
+                format!("{}{}", a, type_suffix),
+                format!("{}{}", b, type_suffix),
+            )
+        };
+
+        // Pick operation category: 40% wrapping, 30% saturating, 30% checked
+        let category = self.rng.gen_range(0..10);
+        let (func_name, is_checked) = if category < 4 {
+            // Wrapping
+            let ops = ["wrapping_add", "wrapping_sub", "wrapping_mul"];
+            (ops[self.rng.gen_range(0..ops.len())], false)
+        } else if category < 7 {
+            // Saturating
+            let ops = ["saturating_add", "saturating_sub", "saturating_mul"];
+            (ops[self.rng.gen_range(0..ops.len())], false)
+        } else {
+            // Checked (returns T?)
+            let ops = [
+                "checked_add",
+                "checked_sub",
+                "checked_mul",
+                "checked_div",
+            ];
+            (ops[self.rng.gen_range(0..ops.len())], true)
+        };
+
+        let name = ctx.new_local_name();
+
+        if is_checked {
+            // checked_* returns T?, use ?? to unwrap
+            let default_val = format!("0{}", type_suffix);
+            ctx.add_local(name.clone(), type_info, false);
+            format!(
+                "let {} = {}({}, {}) ?? {}",
+                name, func_name, a_expr, b_expr, default_val
+            )
+        } else {
+            // wrapping_*/saturating_* returns T directly
+            ctx.add_local(name.clone(), type_info, false);
+            format!("let {} = {}({}, {})", name, func_name, a_expr, b_expr)
         }
     }
 

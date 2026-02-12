@@ -30,6 +30,9 @@ pub struct EmitConfig {
     /// E.g., `func double(x: i64) -> i64 => x * 2`
     /// Only applies to non-void, non-generator, non-never functions.
     pub expr_body_probability: f64,
+    /// Probability (0.0-1.0) that a module imports `std:lowlevel` for
+    /// checked/wrapping/saturating arithmetic intrinsics.
+    pub lowlevel_import_probability: f64,
 }
 
 impl Default for EmitConfig {
@@ -38,6 +41,7 @@ impl Default for EmitConfig {
             stmt_config: StmtConfig::default(),
             destructured_import_probability: 0.0,
             expr_body_probability: 0.0,
+            lowlevel_import_probability: 0.0,
         }
     }
 }
@@ -91,6 +95,8 @@ struct EmitContext<'a, R> {
     /// The class whose methods are currently being emitted.
     /// Set to prevent mutual recursion in generated method bodies.
     current_class: Option<(ModuleId, SymbolId)>,
+    /// Whether this module imported `std:lowlevel` for arithmetic intrinsics.
+    has_lowlevel_import: bool,
 }
 
 impl<'a, R: Rng> EmitContext<'a, R> {
@@ -100,6 +106,9 @@ impl<'a, R: Rng> EmitContext<'a, R> {
         module: &'a ModuleSymbols,
         config: &'a EmitConfig,
     ) -> Self {
+        // Decide whether this module imports std:lowlevel
+        let has_lowlevel_import = config.lowlevel_import_probability > 0.0
+            && rng.gen_bool(config.lowlevel_import_probability.min(1.0));
         Self {
             rng,
             table,
@@ -108,6 +117,7 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             output: String::new(),
             indent: 0,
             current_class: None,
+            has_lowlevel_import,
         }
     }
 
@@ -724,6 +734,14 @@ impl<'a, R: Rng> EmitContext<'a, R> {
         if !self.module.imports.is_empty() {
             self.emit_line("");
         }
+
+        // Emit std:lowlevel import for checked/wrapping/saturating arithmetic.
+        // NOTE: Disabled until vol-vzjx is fixed — transitive imports of std:lowlevel
+        // fail when the module is imported by main.vole/tests.vole.
+        if self.has_lowlevel_import {
+            self.emit_line("let { wrapping_add, wrapping_sub, wrapping_mul, saturating_add, saturating_sub, saturating_mul, checked_add, checked_sub, checked_mul, checked_div } = import \"std:lowlevel\"");
+            self.emit_line("");
+        }
     }
 
     /// Collect names of symbols that can be imported via destructuring.
@@ -1101,6 +1119,7 @@ impl<'a, R: Rng> EmitContext<'a, R> {
         }
 
         let mut stmt_ctx = StmtContext::with_module(params, self.table, self.module.id);
+        stmt_ctx.has_lowlevel_import = self.has_lowlevel_import;
 
         // Track the current function name to prevent self-recursion
         stmt_ctx.current_function_name = function_name.map(String::from);
@@ -1146,7 +1165,8 @@ impl<'a, R: Rng> EmitContext<'a, R> {
         let mut stmt_gen = StmtGenerator::new(self.rng, &self.config.stmt_config);
         stmt_gen.set_indent(self.indent);
 
-        let stmt_ctx = StmtContext::with_module(params, self.table, self.module.id);
+        let mut stmt_ctx = StmtContext::with_module(params, self.table, self.module.id);
+        stmt_ctx.has_lowlevel_import = self.has_lowlevel_import;
         let lines = stmt_gen.generate_generator_body(elem_type, &stmt_ctx);
 
         for line in lines {
@@ -1532,6 +1552,7 @@ impl<'a, R: Rng> EmitContext<'a, R> {
 
         // Now generate the statements using StmtGenerator
         let mut stmt_ctx = StmtContext::with_module(params, self.table, self.module.id);
+        stmt_ctx.has_lowlevel_import = self.has_lowlevel_import;
         // Set the current method name so that method chain generation can
         // exclude this method, preventing infinite recursion (e.g. selfMethod6
         // chaining back to selfMethod6).
