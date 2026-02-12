@@ -1416,7 +1416,8 @@ pub extern "C" fn vole_iter_sum(iter: *mut RcIterator) -> i64 {
 
         sum.to_bits() as i64
     } else {
-        // Integer summation
+        // Integer summation — use wrapping_add to match JIT arithmetic semantics
+        // (Cranelift iadd wraps by default)
         let mut sum: i64 = 0;
         loop {
             let mut value: i64 = 0;
@@ -1425,7 +1426,7 @@ pub extern "C" fn vole_iter_sum(iter: *mut RcIterator) -> i64 {
             if has_value == 0 {
                 break;
             }
-            sum += value;
+            sum = sum.wrapping_add(value);
         }
 
         // Free the iterator chain
