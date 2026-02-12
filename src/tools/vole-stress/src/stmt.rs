@@ -981,6 +981,13 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~5% chance: string iteration (str.iter().chain.terminal)
+        if self.rng.gen_bool(0.05) {
+            if let Some(stmt) = self.try_generate_string_iter_let(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -3216,6 +3223,102 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             default_expr,
             close_indent,
         ))
+    }
+
+    /// Try to generate a string iteration let-binding.
+    ///
+    /// Finds a string variable and chains an iterator operation on it:
+    /// - `str.iter().count()` → i64
+    /// - `str.iter().collect()` → [string]
+    /// - `str.iter().filter((c) => c != " ").count()` → i64
+    /// - `str.iter().any((c) => c == "a")` → bool
+    fn try_generate_string_iter_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Find string variables in scope
+        let mut string_vars: Vec<String> = Vec::new();
+        for (name, ty, _) in &ctx.locals {
+            if matches!(ty, TypeInfo::Primitive(PrimitiveType::String)) {
+                string_vars.push(name.clone());
+            }
+        }
+        for param in ctx.params.iter() {
+            if matches!(&param.param_type, TypeInfo::Primitive(PrimitiveType::String)) {
+                string_vars.push(param.name.clone());
+            }
+        }
+        if string_vars.is_empty() {
+            return None;
+        }
+
+        let str_name = &string_vars[self.rng.gen_range(0..string_vars.len())];
+        let str_name = str_name.clone();
+        let result_name = ctx.new_local_name();
+
+        match self.rng.gen_range(0..5) {
+            0 => {
+                // str.iter().count() → i64
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::I64),
+                    false,
+                );
+                Some(format!("let {} = {}.iter().count()", result_name, str_name))
+            }
+            1 => {
+                // str.iter().collect() → [string]
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::String))),
+                    false,
+                );
+                Some(format!(
+                    "let {} = {}.iter().collect()",
+                    result_name, str_name
+                ))
+            }
+            2 => {
+                // str.iter().filter((c) => c != " ").count() → i64
+                let filter_chars = [" ", "a", "e", "o"];
+                let fc = filter_chars[self.rng.gen_range(0..filter_chars.len())];
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::I64),
+                    false,
+                );
+                Some(format!(
+                    "let {} = {}.iter().filter((c) => c != \"{}\").count()",
+                    result_name, str_name, fc
+                ))
+            }
+            3 => {
+                // str.iter().any((c) => c == "x") → bool
+                let check_chars = ["a", "e", " ", "x", "1"];
+                let cc = check_chars[self.rng.gen_range(0..check_chars.len())];
+                let method = if self.rng.gen_bool(0.5) { "any" } else { "all" };
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::Bool),
+                    false,
+                );
+                Some(format!(
+                    "let {} = {}.iter().{}((c) => c == \"{}\")",
+                    result_name, str_name, method, cc
+                ))
+            }
+            _ => {
+                // str.iter().map((c) => c + "!").collect() → [string]
+                let suffixes = ["!", "?", "_", "+"];
+                let sf = suffixes[self.rng.gen_range(0..suffixes.len())];
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::String))),
+                    false,
+                );
+                Some(format!(
+                    "let {} = {}.iter().map((c) => c + \"{}\").collect()",
+                    result_name, str_name, sf
+                ))
+            }
+        }
     }
 
     /// Try to generate a string method call let-binding.
