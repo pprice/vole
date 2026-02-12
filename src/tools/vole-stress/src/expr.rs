@@ -1362,12 +1362,7 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             "replace" | "replace_all" => {
                 // Use varied literal arguments; pick from a fixed set so
                 // RNG consumption stays constant (one gen_range call).
-                let pairs = [
-                    ("str", "val"),
-                    ("a", "b"),
-                    ("hello", "world"),
-                    (" ", "_"),
-                ];
+                let pairs = [("str", "val"), ("a", "b"), ("hello", "world"), (" ", "_")];
                 let pair_idx = self.rng.gen_range(0..pairs.len());
                 let (old, new) = pairs[pair_idx];
                 format!("{}.{}(\"{}\", \"{}\")", var, method, old, new)
@@ -2502,10 +2497,7 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
 
         // ~20% chance: chain .sorted() after .unique() (sort the unique values)
         if self.rng.gen_bool(0.2) {
-            return Some(format!(
-                "{}.iter().unique().sorted().collect()",
-                var_name
-            ));
+            return Some(format!("{}.iter().unique().sorted().collect()", var_name));
         }
 
         Some(format!("{}.iter().unique().collect()", var_name))
@@ -3616,11 +3608,11 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                 format!("{}_i16", val)
             }
             PrimitiveType::I32 => {
-                let val: i32 = self.rng.gen_range(0..100);
+                let val: i32 = self.rng.gen_range(-100..100);
                 format!("{}_i32", val)
             }
             PrimitiveType::I64 => {
-                let val: i64 = self.rng.gen_range(0..1000);
+                let val: i64 = self.rng.gen_range(-1000..1000);
                 format!("{}_i64", val)
             }
             PrimitiveType::I128 => {
