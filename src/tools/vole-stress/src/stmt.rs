@@ -1145,6 +1145,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~3% chance: array literal with variable elements
+        if self.rng.gen_bool(0.03) {
+            if let Some(stmt) = self.try_generate_array_from_vars(ctx) {
+                return stmt;
+            }
+        }
+
+        // ~2% chance: multiple pushes onto a mutable array
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_multi_push(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -5042,6 +5056,89 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         ctx.protected_vars.pop();
 
         Some(result)
+    }
+
+    /// Generate an array literal whose elements are in-scope variables.
+    /// E.g., `let arr = [x, y, x + y]` where x, y are i64 locals.
+    fn try_generate_array_from_vars(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Find i64-typed variables
+        let i64_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::I64)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::I64)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        if i64_vars.len() < 2 {
+            return None;
+        }
+
+        let name = ctx.new_local_name();
+        let num_elems = self.rng.gen_range(2..=4);
+
+        let mut elems: Vec<String> = Vec::new();
+        for _ in 0..num_elems {
+            let var_idx = self.rng.gen_range(0..i64_vars.len());
+            let var = &i64_vars[var_idx];
+            // 50% chance: use variable directly, 50%: small arithmetic
+            if self.rng.gen_bool(0.5) {
+                elems.push(var.clone());
+            } else {
+                let op = if self.rng.gen_bool(0.5) { "+" } else { "*" };
+                let n = self.rng.gen_range(1..=5);
+                elems.push(format!("{} {} {}", var, op, n));
+            }
+        }
+
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+            false,
+        );
+
+        Some(format!("let {} = [{}]", name, elems.join(", ")))
+    }
+
+    /// Generate multiple .push() calls on a mutable array in sequence.
+    fn try_generate_multi_push(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let mut_arrays: Vec<(String, PrimitiveType)> = ctx
+            .locals
+            .iter()
+            .filter(|(name, ty, is_mut)| {
+                *is_mut
+                    && !ctx.protected_vars.contains(name)
+                    && matches!(
+                        ty,
+                        TypeInfo::Array(elem) if matches!(elem.as_ref(), TypeInfo::Primitive(PrimitiveType::I64))
+                    )
+            })
+            .map(|(name, _, _)| (name.clone(), PrimitiveType::I64))
+            .collect();
+
+        if mut_arrays.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..mut_arrays.len());
+        let (arr_name, _) = &mut_arrays[idx];
+        let arr_name = arr_name.clone();
+
+        let num_pushes = self.rng.gen_range(2..=4);
+        let indent = self.indent_str();
+        let mut stmts = Vec::new();
+
+        for _ in 0..num_pushes {
+            let val = self.rng.gen_range(-50..=50);
+            stmts.push(format!("{}.push({})", arr_name, val));
+        }
+
+        Some(stmts.join(&format!("\n{}", indent)))
     }
 
     fn try_generate_bool_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
