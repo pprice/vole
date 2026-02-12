@@ -1360,16 +1360,25 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
 
         let base = match method {
             "replace" | "replace_all" => {
-                // Use fixed literal arguments so no extra RNG is consumed.
-                // These patterns exercise search-and-replace without
-                // changing downstream RNG state.
-                format!("{}.{}(\"str\", \"val\")", var, method)
+                // Use varied literal arguments; pick from a fixed set so
+                // RNG consumption stays constant (one gen_range call).
+                let pairs = [
+                    ("str", "val"),
+                    ("a", "b"),
+                    ("hello", "world"),
+                    (" ", "_"),
+                ];
+                let pair_idx = self.rng.gen_range(0..pairs.len());
+                let (old, new) = pairs[pair_idx];
+                format!("{}.{}(\"{}\", \"{}\")", var, method, old, new)
             }
             "substring" => {
-                // substring(start, end) takes two i64 arguments.
-                // Use small non-negative literals to stay in bounds for typical strings.
-                // Using fixed values keeps RNG consumption constant.
-                format!("{}.substring(0, 3)", var)
+                // substring(start, end) takes two i32 arguments.
+                // Pick from a few fixed ranges to add variety.
+                let ranges = [(0, 3), (0, 5), (1, 4), (0, 1)];
+                let range_idx = self.rng.gen_range(0..ranges.len());
+                let (start, end) = ranges[range_idx];
+                format!("{}.substring({}, {})", var, start, end)
             }
             _ => format!("{}.{}()", var, method),
         };
