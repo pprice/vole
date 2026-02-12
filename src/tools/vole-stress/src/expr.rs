@@ -3817,9 +3817,13 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                 }
             }
             PrimitiveType::String => {
-                // ~20% chance to generate a string with escape sequences
-                if self.rng.gen_bool(0.20) {
+                let roll = self.rng.gen_range(0..10);
+                if roll < 2 {
+                    // ~20% chance: string with escape sequences
                     self.string_with_escapes()
+                } else if roll < 3 {
+                    // ~10% chance: raw string literal @"..."
+                    self.raw_string_literal()
                 } else {
                     let id = self.rng.gen_range(0..100);
                     format!("\"str{}\"", id)
@@ -3911,6 +3915,22 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         templates[self.rng.gen_range(0..templates.len())].to_string()
     }
 
+    /// Generate a raw string literal using `@"..."` syntax.
+    /// Raw strings treat backslashes as literal characters.
+    fn raw_string_literal(&mut self) -> String {
+        let templates = [
+            r#"@"C:\Users\name""#,
+            r#"@"path\to\file""#,
+            r#"@"line1\nline2""#,
+            r#"@"hello""#,
+            r#"@"raw\tstring""#,
+            r#"@"back\\slash""#,
+            r#"@"test\r\n""#,
+            r#"@"""#,
+        ];
+        templates[self.rng.gen_range(0..templates.len())].to_string()
+    }
+
     /// Generate a literal value for a primitive type that is safe for use as a
     /// module-level constant (i.e. will be parsed as a single literal token, not
     /// a unary negation expression). Only produces non-negative values.
@@ -3969,9 +3989,13 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
                 }
             }
             PrimitiveType::String => {
-                // ~20% chance to generate a string with escape sequences
-                if self.rng.gen_bool(0.20) {
+                let roll = self.rng.gen_range(0..10);
+                if roll < 2 {
+                    // ~20% chance: string with escape sequences
                     self.string_with_escapes()
+                } else if roll < 3 {
+                    // ~10% chance: raw string literal @"..."
+                    self.raw_string_literal()
                 } else {
                     let id = self.rng.gen_range(0..100);
                     format!("\"str{}\"", id)

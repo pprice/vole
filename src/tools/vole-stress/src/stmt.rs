@@ -1937,7 +1937,43 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let result_name = ctx.new_local_name();
 
         let indent = "    ".repeat(self.indent + 1);
+        let close_indent = "    ".repeat(self.indent);
         let expr_ctx = ctx.to_expr_context();
+
+        // ~35% chance: generate `when { x is Type => ... }` instead of match
+        if self.rng.gen_bool(0.35) {
+            // Pick one variant to check with `is`
+            let prim_variants: Vec<_> = variants
+                .iter()
+                .filter_map(|v| {
+                    if let TypeInfo::Primitive(p) = v {
+                        Some(*p)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            if !prim_variants.is_empty() {
+                let check_type = prim_variants[self.rng.gen_range(0..prim_variants.len())];
+                let is_branch_expr = self.generate_match_arm_value(&result_type, &expr_ctx);
+                let else_branch_expr = self.generate_match_arm_value(&result_type, &expr_ctx);
+
+                ctx.add_local(result_name.clone(), result_type, false);
+
+                return Some(format!(
+                    "let {} = when {{\n{}{} is {} => {}\n{}_ => {}\n{}}}",
+                    result_name,
+                    indent,
+                    scrutinee,
+                    check_type.as_str(),
+                    is_branch_expr,
+                    indent,
+                    else_branch_expr,
+                    close_indent,
+                ));
+            }
+        }
+
         let mut arms = Vec::new();
 
         // Generate one arm per variant type
@@ -1952,7 +1988,6 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             return None;
         }
 
-        let close_indent = "    ".repeat(self.indent);
         ctx.add_local(result_name.clone(), result_type, false);
 
         Some(format!(
