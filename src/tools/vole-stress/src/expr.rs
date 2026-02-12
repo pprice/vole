@@ -1350,6 +1350,8 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
             "to_upper",
             "to_lower",
             "trim",
+            "trim_start",
+            "trim_end",
             "replace",
             "replace_all",
             "substring",
