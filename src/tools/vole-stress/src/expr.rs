@@ -1972,6 +1972,41 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         }
     }
 
+    /// Try to generate an `.iter().skip(N).take(M).collect()` expression for array generation.
+    ///
+    /// Looks for array-typed variables in scope whose element type matches the
+    /// target element type and generates `arrVar.iter().skip(N).take(M).collect()`.
+    /// Uses small skip/take values to avoid producing empty arrays.
+    fn try_generate_iter_skip_take_collect(
+        &mut self,
+        target_elem: &TypeInfo,
+        ctx: &ExprContext,
+    ) -> Option<String> {
+        let array_vars = ctx.array_vars();
+
+        // Filter to arrays whose element type matches
+        let candidates: Vec<_> = array_vars
+            .iter()
+            .filter(|(_, elem_ty)| elem_ty == target_elem)
+            .collect();
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..candidates.len());
+        let (var_name, _) = candidates[idx];
+
+        // Use small values to keep results non-empty (arrays have min 2 elements)
+        let skip = self.rng.gen_range(0..=1);
+        let take = self.rng.gen_range(1..=2);
+
+        Some(format!(
+            "{}.iter().skip({}).take({}).collect()",
+            var_name, skip, take
+        ))
+    }
+
     /// Generate arguments for a method call.
     ///
     /// With probability `inline_expr_arg_probability`, each argument may be a
@@ -2740,6 +2775,13 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         // ~10% chance to generate arr.iter().filter((x) => pred).collect()
         if self.rng.gen_bool(0.10) {
             if let Some(expr) = self.try_generate_iter_filter_collect(elem, ctx) {
+                return expr;
+            }
+        }
+
+        // ~8% chance to generate arr.iter().skip(N).take(M).collect()
+        if self.rng.gen_bool(0.08) {
+            if let Some(expr) = self.try_generate_iter_skip_take_collect(elem, ctx) {
                 return expr;
             }
         }
