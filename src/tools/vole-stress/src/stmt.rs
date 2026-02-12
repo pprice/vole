@@ -1719,33 +1719,59 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             return None;
         }
 
-        // Pick a random sentinel
+        // Pick sentinel(s) — 30% chance of multi-sentinel union when 2+ available
+        let use_multi = sentinels.len() >= 2 && self.rng.gen_bool(0.3);
+
         let sentinel_idx = self.rng.gen_range(0..sentinels.len());
         let sentinel_sym = &sentinels[sentinel_idx];
         let sentinel_name = sentinel_sym.name.clone();
         let sentinel_sym_id = sentinel_sym.id;
 
+        let second_sentinel = if use_multi {
+            // Pick a different sentinel for the second variant
+            let mut idx2 = self.rng.gen_range(0..sentinels.len());
+            while idx2 == sentinel_idx {
+                idx2 = self.rng.gen_range(0..sentinels.len());
+            }
+            Some((sentinels[idx2].name.clone(), sentinels[idx2].id))
+        } else {
+            None
+        };
+
         // Pick a primitive type for the other union variant
         let prim_type = PrimitiveType::random_expr_type(self.rng);
         let prim_type_info = TypeInfo::Primitive(prim_type);
 
-        // Build the union type: PrimType | Sentinel
+        // Build the union type: PrimType | Sentinel [| Sentinel2]
         let sentinel_type_info = TypeInfo::Sentinel(module_id, sentinel_sym_id);
-        let union_type = TypeInfo::Union(vec![prim_type_info.clone(), sentinel_type_info.clone()]);
+        let mut union_members = vec![prim_type_info.clone(), sentinel_type_info.clone()];
+        let mut union_type_parts = vec![prim_type.as_str().to_string(), sentinel_name.clone()];
+
+        if let Some((ref name2, sym_id2)) = second_sentinel {
+            union_members.push(TypeInfo::Sentinel(module_id, sym_id2));
+            union_type_parts.push(name2.clone());
+        }
+        let union_type = TypeInfo::Union(union_members);
+        let union_type_syntax = union_type_parts.join(" | ");
 
         // Union variable name
         let union_var_name = ctx.new_local_name();
 
-        // Randomly choose whether to assign the sentinel or a primitive value
-        let assign_sentinel = self.rng.gen_bool(0.5);
-        let union_type_syntax = format!("{} | {}", prim_type.as_str(), sentinel_name);
-
-        let init_value = if assign_sentinel {
-            sentinel_name.clone()
+        // Randomly choose initial value
+        let init_choice = if second_sentinel.is_some() {
+            self.rng.gen_range(0..3) // 0=prim, 1=sent1, 2=sent2
         } else {
-            let expr_ctx = ctx.to_expr_context();
-            let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
-            expr_gen.generate_simple(&prim_type_info, &expr_ctx)
+            self.rng.gen_range(0..2) // 0=prim, 1=sent1
+        };
+
+        let init_value = match init_choice {
+            0 => {
+                let expr_ctx = ctx.to_expr_context();
+                let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+                expr_gen.generate_simple(&prim_type_info, &expr_ctx)
+            }
+            1 => sentinel_name.clone(),
+            _ => second_sentinel.as_ref().unwrap().0.clone(),
         };
 
         let let_stmt = format!(
@@ -1773,17 +1799,21 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
             let sentinel_arm_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
 
+            let mut match_arms = format!(
+                "{}{} => {}\n{}{} => {}",
+                indent, prim_type.as_str(), prim_arm_expr,
+                indent, sentinel_name, sentinel_arm_expr,
+            );
+
+            if let Some((ref name2, _)) = second_sentinel {
+                let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+                let sent2_arm_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
+                match_arms.push_str(&format!("\n{}{} => {}", indent, name2, sent2_arm_expr));
+            }
+
             let match_stmt = format!(
-                "let {} = match {} {{\n{}{} => {}\n{}{} => {}\n{}}}",
-                result_name,
-                union_var_name,
-                indent,
-                prim_type.as_str(),
-                prim_arm_expr,
-                indent,
-                sentinel_name,
-                sentinel_arm_expr,
-                close_indent,
+                "let {} = match {} {{\n{}\n{}}}",
+                result_name, union_var_name, match_arms, close_indent,
             );
 
             ctx.add_local(result_name, result_type, false);
