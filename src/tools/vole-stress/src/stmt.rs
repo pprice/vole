@@ -786,6 +786,13 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // Match on iterator terminal — match arr.iter().count() { ... }
+        if self.rng.gen_bool(0.03) {
+            if let Some(stmt) = self.try_generate_match_iter_terminal(ctx) {
+                return stmt;
+            }
+        }
+
         // Range-based iterator chain — exercises range iterators (different source
         // than array iterators). Generates `(start..end).iter().chain().terminal()`.
         if self.rng.gen_bool(self.config.range_iter_probability) {
@@ -6346,6 +6353,73 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     }
 
     /// Generate chained string method calls.
+    /// Generate a match expression on an iterator terminal result.
+    ///
+    /// Produces:
+    /// ```vole
+    /// let result = match arr.iter().count() {
+    ///     0 => expr1
+    ///     1 => expr2
+    ///     _ => expr3
+    /// }
+    /// ```
+    fn try_generate_match_iter_terminal(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Find i64 array params (guaranteed non-empty)
+        let mut array_vars: Vec<String> = Vec::new();
+        for param in ctx.params.iter() {
+            if let TypeInfo::Array(inner) = &param.param_type {
+                if let TypeInfo::Primitive(p) = inner.as_ref() {
+                    if matches!(p, PrimitiveType::I64 | PrimitiveType::I32) {
+                        array_vars.push(param.name.clone());
+                    }
+                }
+            }
+        }
+        if array_vars.is_empty() {
+            return None;
+        }
+
+        let arr_name = &array_vars[self.rng.gen_range(0..array_vars.len())];
+        let arr_name = arr_name.clone();
+        let result_name = ctx.new_local_name();
+
+        // Iterator terminal that produces i64
+        let terminal = match self.rng.gen_range(0..3) {
+            0 => ".iter().count()".to_string(),
+            1 => ".iter().sum()".to_string(),
+            _ => {
+                let pred = self.generate_filter_closure_body(PrimitiveType::I64);
+                format!(".iter().filter((x) => {}).count()", pred)
+            }
+        };
+
+        let result_type = self.random_primitive_type();
+        let expr_ctx = ctx.to_expr_context();
+        let indent = "    ".repeat(self.indent + 1);
+        let close_indent = "    ".repeat(self.indent);
+
+        let arm_val1 = self.generate_match_arm_value(&result_type, &expr_ctx);
+        let arm_val2 = self.generate_match_arm_value(&result_type, &expr_ctx);
+        let wildcard_val = self.generate_match_arm_value(&result_type, &expr_ctx);
+
+        ctx.add_local(result_name.clone(), result_type, false);
+
+        Some(format!(
+            "let {} = match {}{} {{\n\
+             {}0 => {}\n\
+             {}1 => {}\n\
+             {}_ => {}\n\
+             {}}}",
+            result_name,
+            arr_name,
+            terminal,
+            indent, arm_val1,
+            indent, arm_val2,
+            indent, wildcard_val,
+            close_indent,
+        ))
+    }
+
     ///
     /// Produces patterns like:
     /// - `let r = str.to_upper().to_lower().length()`
