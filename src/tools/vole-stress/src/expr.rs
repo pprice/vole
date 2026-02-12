@@ -4308,15 +4308,47 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
 
         let lambda_ctx = ExprContext::new(&lambda_params, &captured_locals, ctx.table);
 
-        // Generate the body expression
-        let body = self.generate(return_type, &lambda_ctx, depth + 1);
-
         let return_annotation = match return_type {
             TypeInfo::Void => String::new(),
             _ => format!(" -> {}", return_type.to_vole_syntax(ctx.table)),
         };
 
-        format!("({}){} => {}", params.join(", "), return_annotation, body)
+        // ~20% chance: multiline block body (only for non-void, primitive return types)
+        let use_block_body = matches!(return_type, TypeInfo::Primitive(_))
+            && depth < 2
+            && self.rng.gen_bool(0.20);
+
+        if use_block_body {
+            // Block body: (params) -> T => { let tmp = expr; tmp op expr }
+            let inner_expr = self.generate(return_type, &lambda_ctx, depth + 1);
+            let tmp_name = format!("_t{}", self.rng.gen_range(0..100));
+            let final_expr = match return_type {
+                TypeInfo::Primitive(PrimitiveType::I64) => {
+                    format!("{} + 0", tmp_name)
+                }
+                TypeInfo::Primitive(PrimitiveType::I32) => {
+                    format!("{} + 0_i32", tmp_name)
+                }
+                TypeInfo::Primitive(PrimitiveType::Bool) => tmp_name.clone(),
+                TypeInfo::Primitive(PrimitiveType::String) => tmp_name.clone(),
+                TypeInfo::Primitive(PrimitiveType::F64) => {
+                    format!("{} + 0.0", tmp_name)
+                }
+                _ => tmp_name.clone(),
+            };
+            format!(
+                "({}){} => {{\n    let {} = {}\n    {}\n}}",
+                params.join(", "),
+                return_annotation,
+                tmp_name,
+                inner_expr,
+                final_expr
+            )
+        } else {
+            // Expression body: (params) -> T => expr
+            let body = self.generate(return_type, &lambda_ctx, depth + 1);
+            format!("({}){} => {}", params.join(", "), return_annotation, body)
+        }
     }
 }
 

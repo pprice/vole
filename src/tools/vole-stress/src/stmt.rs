@@ -1036,6 +1036,13 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~4% chance: variable shadowing — re-declare existing variable with new value
+        if self.rng.gen_bool(0.04) {
+            if let Some(stmt) = self.try_generate_variable_shadow(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -3974,6 +3981,91 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     /// Example: If `narrow_var: i32` is in scope, generates `let wide: i64 = narrow_var`.
     ///
     /// Returns `None` if no suitable widening source is in scope.
+    /// Generate a variable shadow — re-declare an existing variable with a new value.
+    ///
+    /// Picks a primitive-typed local and generates:
+    /// ```vole
+    /// let x = x + 1   // shadows previous x
+    /// ```
+    ///
+    /// Exercises the compiler's variable shadowing and scope resolution.
+    fn try_generate_variable_shadow(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Collect primitive locals that can be shadowed
+        let candidates: Vec<(String, TypeInfo)> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(_)))
+            .map(|(name, ty, _)| (name.clone(), ty.clone()))
+            .collect();
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..candidates.len());
+        let (name, ty) = candidates[idx].clone();
+
+        // Pre-roll all random decisions before creating ExprGenerator
+        let use_self_ref = self.rng.gen_bool(0.7);
+        let offset_i64 = self.rng.gen_range(1..=10i64);
+        let offset_i32 = self.rng.gen_range(1..=10i32);
+
+        let new_value = match &ty {
+            TypeInfo::Primitive(PrimitiveType::I64) => {
+                if use_self_ref {
+                    format!("{} + {}", name, offset_i64)
+                } else {
+                    let expr_ctx = ctx.to_expr_context();
+                    let mut eg = ExprGenerator::new(self.rng, &self.config.expr_config);
+                    eg.generate(&ty, &expr_ctx, 0)
+                }
+            }
+            TypeInfo::Primitive(PrimitiveType::I32) => {
+                if use_self_ref {
+                    format!("{} + {}_i32", name, offset_i32)
+                } else {
+                    let expr_ctx = ctx.to_expr_context();
+                    let mut eg = ExprGenerator::new(self.rng, &self.config.expr_config);
+                    eg.generate(&ty, &expr_ctx, 0)
+                }
+            }
+            TypeInfo::Primitive(PrimitiveType::Bool) => {
+                if use_self_ref {
+                    format!("!{}", name)
+                } else {
+                    let expr_ctx = ctx.to_expr_context();
+                    let mut eg = ExprGenerator::new(self.rng, &self.config.expr_config);
+                    eg.generate(&ty, &expr_ctx, 0)
+                }
+            }
+            TypeInfo::Primitive(PrimitiveType::String) => {
+                if use_self_ref {
+                    format!("{} + \"_s\"", name)
+                } else {
+                    let expr_ctx = ctx.to_expr_context();
+                    let mut eg = ExprGenerator::new(self.rng, &self.config.expr_config);
+                    eg.generate(&ty, &expr_ctx, 0)
+                }
+            }
+            TypeInfo::Primitive(PrimitiveType::F64) => {
+                if use_self_ref {
+                    format!("{} + 1.0", name)
+                } else {
+                    let expr_ctx = ctx.to_expr_context();
+                    let mut eg = ExprGenerator::new(self.rng, &self.config.expr_config);
+                    eg.generate(&ty, &expr_ctx, 0)
+                }
+            }
+            _ => return None,
+        };
+
+        // Update the local in context (same name, same type, not mutable)
+        // The shadowed variable replaces the previous one in scope
+        ctx.add_local(name.clone(), ty.clone(), false);
+
+        Some(format!("let {} = {}", name, new_value))
+    }
+
     fn try_generate_widening_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
         // Find all widenable (source_name, source_type, target_type) candidates
         let mut candidates: Vec<(String, PrimitiveType, PrimitiveType)> = Vec::new();
