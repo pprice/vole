@@ -3245,25 +3245,48 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let result_type = TypeInfo::Primitive(elem_prim);
         ctx.add_local(result_name.clone(), result_type, false);
 
-        Some(format!(
-            "let {} = {}.iter(){}.nth({})\n\
-             let {} = match {} {{\n\
-             {}{} => {}\n\
-             {}nil => {}\n\
-             {}}}",
-            nth_name,
-            arr_name,
-            prefix,
-            nth_idx,
-            result_name,
-            nth_name,
-            indent,
-            elem_prim.as_str(),
-            nth_name,
-            indent,
-            default_expr,
-            close_indent,
-        ))
+        // ~40% chance: use `when { r is Type => ... }` instead of match
+        if self.rng.gen_bool(0.40) {
+            Some(format!(
+                "let {} = {}.iter(){}.nth({})\n\
+                 let {} = when {{\n\
+                 {}{} is {} => {}\n\
+                 {}_ => {}\n\
+                 {}}}",
+                nth_name,
+                arr_name,
+                prefix,
+                nth_idx,
+                result_name,
+                indent,
+                nth_name,
+                elem_prim.as_str(),
+                nth_name,
+                indent,
+                default_expr,
+                close_indent,
+            ))
+        } else {
+            Some(format!(
+                "let {} = {}.iter(){}.nth({})\n\
+                 let {} = match {} {{\n\
+                 {}{} => {}\n\
+                 {}nil => {}\n\
+                 {}}}",
+                nth_name,
+                arr_name,
+                prefix,
+                nth_idx,
+                result_name,
+                nth_name,
+                indent,
+                elem_prim.as_str(),
+                nth_name,
+                indent,
+                default_expr,
+                close_indent,
+            ))
+        }
     }
 
     /// Try to generate a string iteration let-binding.
@@ -3294,30 +3317,41 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         let str_name = str_name.clone();
         let result_name = ctx.new_local_name();
 
+        // ~30% chance: chain a string method before iteration
+        let method_prefix = if self.rng.gen_bool(0.30) {
+            let methods = [".to_upper()", ".to_lower()", ".trim()"];
+            methods[self.rng.gen_range(0..methods.len())].to_string()
+        } else {
+            String::new()
+        };
+
         match self.rng.gen_range(0..5) {
             0 => {
-                // str.iter().count() → i64
+                // str[.method()].iter().count() → i64
                 ctx.add_local(
                     result_name.clone(),
                     TypeInfo::Primitive(PrimitiveType::I64),
                     false,
                 );
-                Some(format!("let {} = {}.iter().count()", result_name, str_name))
+                Some(format!(
+                    "let {} = {}{}.iter().count()",
+                    result_name, str_name, method_prefix
+                ))
             }
             1 => {
-                // str.iter().collect() → [string]
+                // str[.method()].iter().collect() → [string]
                 ctx.add_local(
                     result_name.clone(),
                     TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::String))),
                     false,
                 );
                 Some(format!(
-                    "let {} = {}.iter().collect()",
-                    result_name, str_name
+                    "let {} = {}{}.iter().collect()",
+                    result_name, str_name, method_prefix
                 ))
             }
             2 => {
-                // str.iter().filter((c) => c != " ").count() → i64
+                // str[.method()].iter().filter((c) => c != " ").count() → i64
                 let filter_chars = [" ", "a", "e", "o"];
                 let fc = filter_chars[self.rng.gen_range(0..filter_chars.len())];
                 ctx.add_local(
@@ -3326,12 +3360,12 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                     false,
                 );
                 Some(format!(
-                    "let {} = {}.iter().filter((c) => c != \"{}\").count()",
-                    result_name, str_name, fc
+                    "let {} = {}{}.iter().filter((c) => c != \"{}\").count()",
+                    result_name, str_name, method_prefix, fc
                 ))
             }
             3 => {
-                // str.iter().any((c) => c == "x") → bool
+                // str[.method()].iter().any/all((c) => c == "x") → bool
                 let check_chars = ["a", "e", " ", "x", "1"];
                 let cc = check_chars[self.rng.gen_range(0..check_chars.len())];
                 let method = if self.rng.gen_bool(0.5) { "any" } else { "all" };
@@ -3341,12 +3375,12 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                     false,
                 );
                 Some(format!(
-                    "let {} = {}.iter().{}((c) => c == \"{}\")",
-                    result_name, str_name, method, cc
+                    "let {} = {}{}.iter().{}((c) => c == \"{}\")",
+                    result_name, str_name, method_prefix, method, cc
                 ))
             }
             _ => {
-                // str.iter().map((c) => c + "!").collect() → [string]
+                // str[.method()].iter().map((c) => c + "!").collect() → [string]
                 let suffixes = ["!", "?", "_", "+"];
                 let sf = suffixes[self.rng.gen_range(0..suffixes.len())];
                 ctx.add_local(
@@ -3355,8 +3389,8 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                     false,
                 );
                 Some(format!(
-                    "let {} = {}.iter().map((c) => c + \"{}\").collect()",
-                    result_name, str_name, sf
+                    "let {} = {}{}.iter().map((c) => c + \"{}\").collect()",
+                    result_name, str_name, method_prefix, sf
                 ))
             }
         }
