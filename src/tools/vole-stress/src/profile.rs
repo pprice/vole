@@ -319,9 +319,7 @@ fn full_profile() -> Profile {
                 multi_arm_when_probability: 0.35,
                 // ~15% match guards on wildcard arms
                 match_guard_probability: 0.15,
-                // Disabled: cross-module closure capture compiler bug.
-                // Re-enable at ~0.30 once the bug is fixed.
-                closure_capture_probability: 0.0,
+                closure_capture_probability: 0.30,
                 // ~30% chance to construct a class instance for interface args
                 interface_upcast_probability: 0.30,
             },
@@ -481,9 +479,7 @@ fn deep_nesting_profile() -> Profile {
                 multi_arm_when_probability: 0.25,
                 // ~10% match guards for nesting variety
                 match_guard_probability: 0.10,
-                // Disabled: cross-module closure capture compiler bug.
-                // Re-enable at ~0.20 once the bug is fixed.
-                closure_capture_probability: 0.0,
+                closure_capture_probability: 0.20,
                 // No interface upcast in deep-nesting (no interfaces)
                 interface_upcast_probability: 0.0,
             },
@@ -652,9 +648,7 @@ fn wide_types_profile() -> Profile {
                 multi_arm_when_probability: 0.25,
                 // ~10% match guards
                 match_guard_probability: 0.10,
-                // Disabled: cross-module closure capture compiler bug.
-                // Re-enable at ~0.20 once the bug is fixed.
-                closure_capture_probability: 0.0,
+                closure_capture_probability: 0.20,
                 // ~25% chance to construct a class instance for interface args
                 interface_upcast_probability: 0.25,
             },
@@ -984,9 +978,7 @@ fn generics_heavy_profile() -> Profile {
                 multi_arm_when_probability: 0.25,
                 // ~10% match guards
                 match_guard_probability: 0.10,
-                // Disabled: cross-module closure capture compiler bug.
-                // Re-enable at ~0.25 once the bug is fixed.
-                closure_capture_probability: 0.0,
+                closure_capture_probability: 0.25,
                 // ~30% chance to construct a class instance for interface args
                 interface_upcast_probability: 0.30,
             },
@@ -1155,9 +1147,7 @@ fn stdlib_heavy_profile() -> Profile {
                 multi_arm_when_probability: 0.30,
                 // ~10% match guards
                 match_guard_probability: 0.10,
-                // Disabled: cross-module closure capture compiler bug.
-                // Re-enable at ~0.30 once the bug is fixed.
-                closure_capture_probability: 0.0,
+                closure_capture_probability: 0.30,
                 // ~25% chance to construct a class instance for interface args
                 interface_upcast_probability: 0.25,
             },
@@ -1313,10 +1303,7 @@ fn closures_heavy_profile() -> Profile {
                 multi_arm_when_probability: 0.25,
                 // ~8% match guards
                 match_guard_probability: 0.08,
-                // Disabled: cross-module closure capture compiler bug.
-                // Re-enable at ~0.50 once the bug is fixed (core focus
-                // of this profile).
-                closure_capture_probability: 0.0,
+                closure_capture_probability: 0.50,
                 // ~25% chance to construct a class instance for interface args
                 interface_upcast_probability: 0.25,
             },
@@ -1473,9 +1460,7 @@ fn fallible_heavy_profile() -> Profile {
                 multi_arm_when_probability: 0.25,
                 // ~10% match guards
                 match_guard_probability: 0.10,
-                // Disabled: cross-module closure capture compiler bug.
-                // Re-enable at ~0.20 once the bug is fixed.
-                closure_capture_probability: 0.0,
+                closure_capture_probability: 0.20,
                 // ~25% chance to construct a class instance for interface args
                 interface_upcast_probability: 0.25,
             },
