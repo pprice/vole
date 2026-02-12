@@ -874,17 +874,24 @@ impl Analyzer {
 
         let (method_name_id, full_method_name_id) =
             self.build_method_names(type_name, method.name, interner);
+        // Filter out explicit `self` parameter — instance methods have self added
+        // implicitly by codegen. Including it in the signature would double-count it.
+        let non_self_params: Vec<_> = method
+            .params
+            .iter()
+            .filter(|p| interner.resolve(p.name) != "self")
+            .cloned()
+            .collect();
         let signature_id = self.build_method_signature(
-            &method.params,
+            &non_self_params,
             &method.return_type,
             interner,
             type_param_scope,
             self_type,
         );
 
-        let required_params = self.validate_param_defaults(&method.params, interner);
-        let param_defaults: Vec<Option<Box<Expr>>> = method
-            .params
+        let required_params = self.validate_param_defaults(&non_self_params, interner);
+        let param_defaults: Vec<Option<Box<Expr>>> = non_self_params
             .iter()
             .map(|p| p.default_value.clone())
             .collect();
@@ -2362,9 +2369,13 @@ impl Analyzer {
 
                 // Use target_type_id as Self when resolving method signatures
                 // This ensures `Self` in method params/return types resolves to the implementing type
+                // Skip explicit `self` parameter — implement block methods have self added
+                // implicitly by codegen (via SelfParam). Including it in the signature
+                // would double-count it, causing argument count mismatches.
                 let params_id: Vec<ArenaTypeId> = method
                     .params
                     .iter()
+                    .filter(|p| interner.resolve(p.name) != "self")
                     .map(|p| self.resolve_type_id_with_self(&p.ty, interner, Some(target_type_id)))
                     .collect();
                 let return_type_id = method

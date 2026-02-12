@@ -1,0 +1,61 @@
+// Regression test: methods with explicit `self: T` parameter in implement blocks
+// and class bodies must not double-count the self parameter.
+// Bug: codegen added self via SelfParam AND included it from the signature params,
+// producing a Cranelift function with 2 params but callers only passing 1.
+
+class Counter {
+    value: i64
+}
+
+implement Counter {
+    func get(self: Counter) -> i64 => self.value
+    func increment(self: Counter, amount: i64) -> i64 => self.value + amount
+}
+
+class Point {
+    x: i64,
+    y: i64,
+
+    func sum(self: Point) -> i64 => self.x + self.y
+    func offset(self: Point, dx: i64, dy: i64) -> i64 => self.x + dx + self.y + dy
+}
+
+tests "explicit self parameter" {
+    test "implement block method with self param, no other args" {
+        let c = Counter { value: 42 }
+        assert(c.get() == 42)
+    }
+
+    test "implement block method with self param and other args" {
+        let c = Counter { value: 10 }
+        assert(c.increment(5) == 15)
+    }
+
+    test "class body method with self param, no other args" {
+        let p = Point { x: 3, y: 4 }
+        assert(p.sum() == 7)
+    }
+
+    test "class body method with self param and other args" {
+        let p = Point { x: 1, y: 2 }
+        assert(p.offset(10, 20) == 33)
+    }
+
+    test "closure capturing class and calling method with self param" {
+        let c = Counter { value: 42 }
+        let get_val = () => c.get()
+        assert(get_val() == 42)
+    }
+
+    test "closure capturing class and calling method with self param and args" {
+        let c = Counter { value: 10 }
+        let inc = (n: i64) => c.increment(n)
+        assert(inc(5) == 15)
+    }
+
+    test "multiple method calls on same captured instance" {
+        let c = Counter { value: 7 }
+        let f = () => c.get() + c.increment(3)
+        assert(f() == 17)
+    }
+}

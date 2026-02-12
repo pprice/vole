@@ -457,8 +457,13 @@ impl Analyzer {
             },
         );
 
-        // Add parameters
-        for (param, &ty_id) in method.params.iter().zip(params_id.iter()) {
+        // Add parameters (filter out explicit `self` — it was already added above)
+        let non_self_params: Vec<_> = method
+            .params
+            .iter()
+            .filter(|p| interner.resolve(p.name) != "self")
+            .collect();
+        for (param, &ty_id) in non_self_params.iter().zip(params_id.iter()) {
             self.scope.define(
                 param.name,
                 Variable {
@@ -470,7 +475,11 @@ impl Analyzer {
         }
 
         // Type-check parameter default expressions
-        self.check_param_defaults(&method.params, &params_id, interner)?;
+        self.check_param_defaults(
+            &non_self_params.into_iter().cloned().collect::<Vec<_>>(),
+            &params_id,
+            interner,
+        )?;
 
         // Check body
         let body_info = self.check_func_body(&method.body, interner)?;
@@ -765,8 +774,13 @@ impl Analyzer {
             },
         );
 
-        // Add parameters
-        for (param, &ty_id) in method.params.iter().zip(params_id.iter()) {
+        // Add parameters (filter out explicit `self` — it was already added above)
+        let non_self_params: Vec<_> = method
+            .params
+            .iter()
+            .filter(|p| interner.resolve(p.name) != "self")
+            .collect();
+        for (param, &ty_id) in non_self_params.iter().zip(params_id.iter()) {
             self.scope.define(
                 param.name,
                 Variable {
@@ -778,7 +792,11 @@ impl Analyzer {
         }
 
         // Type-check parameter default expressions
-        self.check_param_defaults(&method.params, &params_id, interner)?;
+        self.check_param_defaults(
+            &non_self_params.into_iter().cloned().collect::<Vec<_>>(),
+            &params_id,
+            interner,
+        )?;
 
         // Check body
         let _body_info = self.check_func_body(&method.body, interner)?;

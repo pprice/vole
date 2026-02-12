@@ -948,6 +948,13 @@ impl Compiler<'_> {
         let self_cranelift_type =
             type_id_to_cranelift(self_type_id, self.arena(), self.pointer_type);
 
+        let source_file_ptr = self.source_file_ptr();
+        // Use module interner to look up "self" since param names come from the module AST
+        let self_sym = interner
+            .lookup("self")
+            .expect("INTERNAL: 'self' keyword not interned in module interner");
+
+        // Build params: skip explicit `self` params — they are handled via the separate self_binding.
         let params: Vec<(Symbol, TypeId, types::Type)> = {
             let method_def = self.query().get_method(semantic_method_id);
             let arena = self.arena();
@@ -957,6 +964,7 @@ impl Compiler<'_> {
             method
                 .params
                 .iter()
+                .filter(|p| p.name != self_sym)
                 .zip(param_type_ids.iter())
                 .map(|(param, &type_id)| {
                     let cranelift_type = type_id_to_cranelift(type_id, arena, self.pointer_type);
@@ -964,9 +972,6 @@ impl Compiler<'_> {
                 })
                 .collect()
         };
-
-        let source_file_ptr = self.source_file_ptr();
-        let self_sym = self.self_symbol();
 
         let method_return_type_id = {
             let method_def = self.query().get_method(semantic_method_id);
@@ -1165,8 +1170,13 @@ impl Compiler<'_> {
         let self_cranelift_type =
             type_id_to_cranelift(self_type_id, self.arena(), self.pointer_type);
 
+        // Get source file pointer and self symbol before borrowing ctx.func
+        let source_file_ptr = self.source_file_ptr();
+        let self_sym = self.self_symbol();
+
         // Build params: Vec<(Symbol, TypeId, Type)>
-        // Get param TypeIds from the method signature and pair with AST param names
+        // Get param TypeIds from the method signature and pair with AST param names.
+        // Skip explicit `self` params — they are handled via the separate self_binding.
         let params: Vec<(Symbol, TypeId, types::Type)> = {
             let method_def = self.query().get_method(semantic_method_id);
             let arena = self.arena();
@@ -1176,6 +1186,7 @@ impl Compiler<'_> {
             method
                 .params
                 .iter()
+                .filter(|p| p.name != self_sym)
                 .zip(param_type_ids.iter())
                 .map(|(param, &type_id)| {
                     let cranelift_type = type_id_to_cranelift(type_id, arena, self.pointer_type);
@@ -1183,10 +1194,6 @@ impl Compiler<'_> {
                 })
                 .collect()
         };
-
-        // Get source file pointer and self symbol before borrowing ctx.func
-        let source_file_ptr = self.source_file_ptr();
-        let self_sym = self.self_symbol();
 
         // Get the method's return type from the pre-resolved signature
         let method_return_type_id = {
@@ -1282,12 +1289,18 @@ impl Compiler<'_> {
             (params.to_vec(), Some(ret))
         };
 
+        // Get source file pointer and self symbol before borrowing ctx.func
+        let source_file_ptr = self.source_file_ptr();
+        let self_sym = self.self_symbol();
+
         // Build params: Vec<(Symbol, TypeId, Type)>
+        // Skip explicit `self` params — they are handled via the separate self_binding.
         let params: Vec<(Symbol, TypeId, types::Type)> = {
             let arena_ref = self.arena();
             method
                 .params
                 .iter()
+                .filter(|p| p.name != self_sym)
                 .zip(param_type_ids.iter())
                 .map(|(param, &type_id)| {
                     let cranelift_type =
@@ -1296,10 +1309,6 @@ impl Compiler<'_> {
                 })
                 .collect()
         };
-
-        // Get source file pointer and self symbol before borrowing ctx.func
-        let source_file_ptr = self.source_file_ptr();
-        let self_sym = self.self_symbol();
 
         // Create function builder and compile
         let mut builder_ctx = FunctionBuilderContext::new();
@@ -1678,17 +1687,19 @@ impl Compiler<'_> {
                 (params.to_vec(), Some(ret))
             };
 
+            let self_sym = module_interner
+                .lookup("self")
+                .expect("INTERNAL: method compilation: 'self' not interned");
+            // Skip explicit `self` params — they are handled via the separate self_binding.
             let param_types = self.type_ids_to_cranelift(&param_type_ids);
             let params: Vec<_> = method
                 .params
                 .iter()
+                .filter(|p| p.name != self_sym)
                 .zip(param_type_ids.iter())
                 .zip(param_types.iter())
                 .map(|((p, &type_id), &cranelift_type)| (p.name, type_id, cranelift_type))
                 .collect();
-            let self_sym = module_interner
-                .lookup("self")
-                .expect("INTERNAL: method compilation: 'self' not interned");
             let self_binding = (self_sym, metadata.vole_type, self.pointer_type);
 
             // Create function builder and compile
