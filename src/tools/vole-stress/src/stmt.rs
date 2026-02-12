@@ -3990,12 +3990,15 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     ///
     /// Exercises the compiler's variable shadowing and scope resolution.
     fn try_generate_variable_shadow(&mut self, ctx: &mut StmtContext) -> Option<String> {
-        // Collect primitive locals that can be shadowed
-        let candidates: Vec<(String, TypeInfo)> = ctx
+        // Collect primitive locals that can be shadowed (preserve mutability).
+        // Skip protected variables (while-loop counters/guards).
+        let candidates: Vec<(String, TypeInfo, bool)> = ctx
             .locals
             .iter()
-            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(_)))
-            .map(|(name, ty, _)| (name.clone(), ty.clone()))
+            .filter(|(name, ty, _)| {
+                matches!(ty, TypeInfo::Primitive(_)) && !ctx.protected_vars.contains(name)
+            })
+            .map(|(name, ty, is_mut)| (name.clone(), ty.clone(), *is_mut))
             .collect();
 
         if candidates.is_empty() {
@@ -4003,7 +4006,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
 
         let idx = self.rng.gen_range(0..candidates.len());
-        let (name, ty) = candidates[idx].clone();
+        let (name, ty, was_mutable) = candidates[idx].clone();
 
         // Pre-roll all random decisions before creating ExprGenerator
         let use_self_ref = self.rng.gen_bool(0.7);
@@ -4059,11 +4062,12 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             _ => return None,
         };
 
-        // Update the local in context (same name, same type, not mutable)
-        // The shadowed variable replaces the previous one in scope
-        ctx.add_local(name.clone(), ty.clone(), false);
+        // Preserve mutability — if the original was mutable, the shadow
+        // must also be mutable so later reassignment code doesn't break.
+        ctx.add_local(name.clone(), ty.clone(), was_mutable);
 
-        Some(format!("let {} = {}", name, new_value))
+        let decl = if was_mutable { "let mut" } else { "let" };
+        Some(format!("{} {} = {}", decl, name, new_value))
     }
 
     fn try_generate_widening_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
