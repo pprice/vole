@@ -1211,6 +1211,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: empty string concatenation edge case
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_empty_string_concat(ctx) {
+                return stmt;
+            }
+        }
+
+        // ~2% chance: last element access via computed index
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_last_elem_access(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -5914,6 +5928,96 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             result_name, cond, val_true, val_false,
             indent = indent,
         ))
+    }
+
+    /// Generate empty string concatenation edge cases.
+    ///
+    /// Tests codegen for string concat with empty strings:
+    /// ```vole
+    /// let s = "" + str_var        // prepend empty
+    /// let s = str_var + ""        // append empty
+    /// let s = "" + "" + str_var   // double empty prepend
+    /// ```
+    fn try_generate_empty_string_concat(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let string_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::String)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::String)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        if string_vars.is_empty() {
+            return None;
+        }
+
+        let var = &string_vars[self.rng.gen_range(0..string_vars.len())];
+        let result_name = ctx.new_local_name();
+
+        let expr = match self.rng.gen_range(0..4u32) {
+            0 => format!("\"\" + {}", var),
+            1 => format!("{} + \"\"", var),
+            2 => format!("\"\" + \"\" + {}", var),
+            _ => format!("\"\" + {} + \"\"", var),
+        };
+
+        ctx.add_local(
+            result_name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            false,
+        );
+
+        Some(format!("let {} = {}", result_name, expr))
+    }
+
+    /// Generate last-element array access via computed index.
+    ///
+    /// Tests codegen for runtime-computed index expressions:
+    /// ```vole
+    /// let last = arr[arr.length() - 1]
+    /// ```
+    fn try_generate_last_elem_access(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Find non-empty parameter arrays (params are always non-empty by contract)
+        let param_arrays: Vec<(String, TypeInfo)> = ctx
+            .params
+            .iter()
+            .filter(|p| matches!(p.param_type, TypeInfo::Array(_)))
+            .map(|p| (p.name.clone(), p.param_type.clone()))
+            .collect();
+
+        if param_arrays.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..param_arrays.len());
+        let (arr_name, arr_type) = &param_arrays[idx];
+        let elem_type = if let TypeInfo::Array(elem) = arr_type {
+            elem.as_ref().clone()
+        } else {
+            return None;
+        };
+
+        let result_name = ctx.new_local_name();
+
+        let expr = match self.rng.gen_range(0..2u32) {
+            0 => {
+                // arr[arr.length() - 1] — last element
+                format!("{}[{}.length() - 1]", arr_name, arr_name)
+            }
+            _ => {
+                // arr[arr.length() - arr.length()] — first element (index 0)
+                format!("{}[{}.length() - {}.length()]", arr_name, arr_name, arr_name)
+            }
+        };
+
+        ctx.add_local(result_name.clone(), elem_type, false);
+
+        Some(format!("let {} = {}", result_name, expr))
     }
 
     fn try_generate_bool_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
