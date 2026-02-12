@@ -2671,7 +2671,7 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             let (name, prim) = &candidates[i];
 
             // Decide what expression to interpolate
-            let expr = match self.rng.gen_range(0..4) {
+            let expr = match self.rng.gen_range(0..6) {
                 0 => {
                     // Simple variable reference
                     name.clone()
@@ -2684,6 +2684,25 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 2 if matches!(prim, PrimitiveType::String) => {
                     // String length method
                     format!("{}.length()", name)
+                }
+                3 if matches!(prim, PrimitiveType::I64 | PrimitiveType::I32) => {
+                    // When expression inside interpolation (feature interaction):
+                    // "text {when { var > 5 => var * 2, _ => 0 }}"
+                    let threshold = self.rng.gen_range(0..=10);
+                    let suffix = if matches!(prim, PrimitiveType::I32) {
+                        "_i32"
+                    } else {
+                        ""
+                    };
+                    format!(
+                        "when {{ {} > {}{} => {} * 2{}, _ => 0{} }}",
+                        name, threshold, suffix, name, suffix, suffix
+                    )
+                }
+                4 if matches!(prim, PrimitiveType::Bool) => {
+                    // When expression on bool inside interpolation:
+                    // "text {when { flag => 1, _ => 0 }}"
+                    format!("when {{ {} => 1, _ => 0 }}", name)
                 }
                 _ => {
                     // Simple variable reference (fallback)
