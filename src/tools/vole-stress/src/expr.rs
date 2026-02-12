@@ -987,9 +987,9 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         let idx = self.rng.gen_range(0..candidates.len());
         let (var_name, _) = &candidates[idx];
 
-        // Use a small constant index to stay within bounds of small arrays.
-        // Arrays generated in stmt.rs have 2-4 elements, so use 0..=1 to be safe.
-        let index = self.rng.gen_range(0..=1);
+        // Use index 0 to stay within bounds.  Arrays may have been reduced to
+        // a single element by .skip()/.filter()/.unique() so index 1 is not safe.
+        let index = 0;
         let suffix = match prim {
             PrimitiveType::I32 => "_i32",
             PrimitiveType::I64 => "_i64",
