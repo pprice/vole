@@ -934,15 +934,33 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         }
 
         let idx = self.rng.gen_range(0..candidates.len());
-        let (scrutinee, scrutinee_prim) = candidates[idx].clone();
+        let (var_name, scrutinee_prim) = candidates[idx].clone();
         let is_i32 = matches!(scrutinee_prim, PrimitiveType::I32);
         // For i32 matches, use i32 literal suffix; for i64, no suffix needed
         let suffix = if is_i32 { "_i32" } else { "" };
 
+        // ~30% of the time, generate a complex scrutinee expression (var + lit, var * lit)
+        // instead of a plain variable. This exercises expression-as-scrutinee codegen.
+        let scrutinee = if self.rng.gen_bool(0.30) {
+            let op = match self.rng.gen_range(0..4) {
+                0 => "+",
+                1 => "-",
+                2 => "*",
+                _ => "%",
+            };
+            let lit = self.rng.gen_range(1..10);
+            format!("({} {} {}{})", var_name, op, lit, suffix)
+        } else {
+            var_name
+        };
+
         // Decide if we want to use unreachable in the default arm
-        let use_unreachable = self
-            .rng
-            .gen_bool(self.config.expr_config.unreachable_probability);
+        // Complex scrutinee expressions can't prove value, so skip unreachable for them
+        let has_complex_scrutinee = scrutinee.starts_with('(');
+        let use_unreachable = !has_complex_scrutinee
+            && self
+                .rng
+                .gen_bool(self.config.expr_config.unreachable_probability);
 
         // Pick a result type for all arms (same type to keep it simple)
         let result_type = self.random_primitive_type();
