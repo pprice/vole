@@ -5438,20 +5438,40 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     fn generate_reduce_closure(&mut self, elem_prim: PrimitiveType) -> (String, String, TypeInfo) {
         match elem_prim {
             PrimitiveType::I64 => {
-                // Accumulate sum or product
-                if self.rng.gen_bool(0.5) {
-                    (
+                match self.rng.gen_range(0..4) {
+                    0 => (
                         "0".to_string(),
                         "acc + el".to_string(),
                         TypeInfo::Primitive(PrimitiveType::I64),
-                    )
-                } else {
-                    let n = self.rng.gen_range(1..=3);
-                    (
-                        format!("{}", n),
-                        "acc * el".to_string(),
-                        TypeInfo::Primitive(PrimitiveType::I64),
-                    )
+                    ),
+                    1 => {
+                        let n = self.rng.gen_range(1..=3);
+                        (
+                            format!("{}", n),
+                            "acc * el".to_string(),
+                            TypeInfo::Primitive(PrimitiveType::I64),
+                        )
+                    }
+                    2 => {
+                        // Conditional accumulation: when { el > 0 => acc + el, _ => acc }
+                        let threshold = self.rng.gen_range(0..=5);
+                        (
+                            "0".to_string(),
+                            format!(
+                                "when {{ el > {} => acc + el, _ => acc }}",
+                                threshold
+                            ),
+                            TypeInfo::Primitive(PrimitiveType::I64),
+                        )
+                    }
+                    _ => {
+                        // Max-like: when { el > acc => el, _ => acc }
+                        (
+                            "0".to_string(),
+                            "when { el > acc => el, _ => acc }".to_string(),
+                            TypeInfo::Primitive(PrimitiveType::I64),
+                        )
+                    }
                 }
             }
             PrimitiveType::F64 => (
