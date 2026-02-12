@@ -104,6 +104,8 @@ pub struct PlanConfig {
     /// codegen paths (closure allocation, capture, RC of captured values).
     /// Only applies to non-generic functions.
     pub closure_return_probability: f64,
+    /// Number of sentinel types per module (range).
+    pub sentinels_per_module: (usize, usize),
 }
 
 impl Default for PlanConfig {
@@ -142,6 +144,7 @@ impl Default for PlanConfig {
             interface_param_probability: 0.10,
             generic_closure_interface_fn_probability: 0.0,
             closure_return_probability: 0.0,
+            sentinels_per_module: (0, 2),
         }
     }
 }
@@ -336,6 +339,16 @@ fn plan_module_declarations<R: Rng>(
     config: &PlanConfig,
     allow_generators: bool,
 ) {
+    // Generate sentinels (zero-field marker types) before interfaces since they are leaf types
+    let sentinel_count =
+        rng.gen_range(config.sentinels_per_module.0..=config.sentinels_per_module.1);
+    for _ in 0..sentinel_count {
+        let name = names.next("Sent");
+        table
+            .get_module_mut(module_id)
+            .map(|m| m.add_symbol(name, SymbolKind::Sentinel));
+    }
+
     // Generate interfaces first (so classes can implement them)
     let interface_count =
         rng.gen_range(config.interfaces_per_module.0..=config.interfaces_per_module.1);

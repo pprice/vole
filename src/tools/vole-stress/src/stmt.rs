@@ -145,6 +145,12 @@ pub struct StmtConfig {
     /// Requires a class/struct-typed local with at least one primitive field.
     /// Set to 0.0 to disable.
     pub field_closure_let_probability: f64,
+    /// Probability of generating a sentinel union let-binding with match or is-check.
+    /// Creates `let x: PrimType | Sentinel = ...` then matches on the union or
+    /// uses `x is Sentinel` in an if-expression. Exercises sentinel type codegen
+    /// paths (union with sentinel, match on sentinel arm, is-check narrowing).
+    /// Set to 0.0 to disable.
+    pub sentinel_union_probability: f64,
 }
 
 impl Default for StmtConfig {
@@ -187,6 +193,7 @@ impl Default for StmtConfig {
             match_closure_arm_probability: 0.0,
             range_iter_probability: 0.0,
             field_closure_let_probability: 0.0,
+            sentinel_union_probability: 0.0,
         }
     }
 }
@@ -725,6 +732,13 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         // Union match expression let-binding: let x = match union_var { Type1 => ..., ... }
         if self.rng.gen_bool(self.config.union_match_probability) {
             if let Some(stmt) = self.try_generate_union_match_let(ctx) {
+                return stmt;
+            }
+        }
+
+        // Sentinel union let-binding: let x: PrimType | Sentinel = ... then match/is-check
+        if self.rng.gen_bool(self.config.sentinel_union_probability) {
+            if let Some(stmt) = self.try_generate_sentinel_union_let(ctx) {
                 return stmt;
             }
         }
@@ -1654,6 +1668,134 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             arms.join("\n"),
             close_indent,
         ))
+    }
+
+    /// Try to generate a sentinel union let-binding.
+    ///
+    /// Creates a union type combining a primitive type with a sentinel type,
+    /// assigns either a primitive value or the sentinel, then follows up with
+    /// either a match expression or an `is`-check on the union.
+    ///
+    /// Pattern 1 (match):
+    /// ```vole
+    /// let x: i64 | Sent1 = Sent1
+    /// let result = match x {
+    ///     i64 => "value"
+    ///     Sent1 => "sentinel"
+    /// }
+    /// ```
+    ///
+    /// Pattern 2 (is-check):
+    /// ```vole
+    /// let x: i64 | Sent1 = 42
+    /// let result = if x is Sent1 { "sentinel" } else { "value" }
+    /// ```
+    ///
+    /// Returns `None` if no sentinel types are available in the current module.
+    fn try_generate_sentinel_union_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let module_id = ctx.module_id?;
+        let module = ctx.table.get_module(module_id)?;
+
+        // Collect sentinel symbols from the current module
+        let sentinels: Vec<_> = module.sentinels().collect();
+        if sentinels.is_empty() {
+            return None;
+        }
+
+        // Pick a random sentinel
+        let sentinel_idx = self.rng.gen_range(0..sentinels.len());
+        let sentinel_sym = &sentinels[sentinel_idx];
+        let sentinel_name = sentinel_sym.name.clone();
+        let sentinel_sym_id = sentinel_sym.id;
+
+        // Pick a primitive type for the other union variant
+        let prim_type = PrimitiveType::random_expr_type(self.rng);
+        let prim_type_info = TypeInfo::Primitive(prim_type);
+
+        // Build the union type: PrimType | Sentinel
+        let sentinel_type_info = TypeInfo::Sentinel(module_id, sentinel_sym_id);
+        let union_type = TypeInfo::Union(vec![prim_type_info.clone(), sentinel_type_info.clone()]);
+
+        // Union variable name
+        let union_var_name = ctx.new_local_name();
+
+        // Randomly choose whether to assign the sentinel or a primitive value
+        let assign_sentinel = self.rng.gen_bool(0.5);
+        let union_type_syntax = format!("{} | {}", prim_type.as_str(), sentinel_name);
+
+        let init_value = if assign_sentinel {
+            sentinel_name.clone()
+        } else {
+            let expr_ctx = ctx.to_expr_context();
+            let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+            expr_gen.generate_simple(&prim_type_info, &expr_ctx)
+        };
+
+        let let_stmt = format!(
+            "let {}: {} = {}",
+            union_var_name, union_type_syntax, init_value
+        );
+
+        // Register the union variable
+        ctx.add_local(union_var_name.clone(), union_type, false);
+
+        // Choose follow-up: match (60%) or is-check (40%)
+        let use_match = self.rng.gen_bool(0.6);
+
+        if use_match {
+            // Generate a match expression on the union
+            let result_type = self.random_primitive_type();
+            let result_name = ctx.new_local_name();
+
+            let indent = "    ".repeat(self.indent + 1);
+            let close_indent = "    ".repeat(self.indent);
+            let expr_ctx = ctx.to_expr_context();
+
+            let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+            let prim_arm_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
+            let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+            let sentinel_arm_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
+
+            let match_stmt = format!(
+                "let {} = match {} {{\n{}{} => {}\n{}{} => {}\n{}}}",
+                result_name,
+                union_var_name,
+                indent,
+                prim_type.as_str(),
+                prim_arm_expr,
+                indent,
+                sentinel_name,
+                sentinel_arm_expr,
+                close_indent,
+            );
+
+            ctx.add_local(result_name, result_type, false);
+
+            Some(format!("{}\n{}", let_stmt, match_stmt))
+        } else {
+            // Generate an is-check: let result = if x is Sentinel { ... } else { ... }
+            let result_type = self.random_primitive_type();
+            let result_name = ctx.new_local_name();
+
+            let expr_ctx = ctx.to_expr_context();
+            let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+            let sentinel_branch_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
+            let mut expr_gen = ExprGenerator::new(self.rng, &self.config.expr_config);
+            let else_branch_expr = expr_gen.generate_simple(&result_type, &expr_ctx);
+
+            let is_stmt = format!(
+                "let {} = if {} is {} {{ {} }} else {{ {} }}",
+                result_name,
+                union_var_name,
+                sentinel_name,
+                sentinel_branch_expr,
+                else_branch_expr,
+            );
+
+            ctx.add_local(result_name, result_type, false);
+
+            Some(format!("{}\n{}", let_stmt, is_stmt))
+        }
     }
 
     /// Try to generate a widening let statement.

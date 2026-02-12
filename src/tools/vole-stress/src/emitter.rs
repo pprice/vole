@@ -125,6 +125,12 @@ impl<'a, R: Rng> EmitContext<'a, R> {
             self.emit_global(symbol);
         }
 
+        // Emit sentinels
+        for symbol in self.module.sentinels() {
+            self.emit_line(&format!("sentinel {}", symbol.name));
+            self.emit_line("");
+        }
+
         // Emit interfaces
         for symbol in self.module.interfaces() {
             self.emit_interface(symbol);

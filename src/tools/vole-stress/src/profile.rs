@@ -118,6 +118,8 @@ fn minimal_profile() -> Profile {
         generic_closure_interface_fn_probability: 0.0,
         // No closure-returning functions in minimal
         closure_return_probability: 0.0,
+        // No sentinels in minimal
+        sentinels_per_module: (0, 0),
         // These won't be used since we have no classes or structs
         fields_per_struct: (0, 0),
         fields_per_class: (0, 0),
@@ -226,6 +228,8 @@ fn minimal_profile() -> Profile {
             range_iter_probability: 0.0,
             // No field-closure-let in minimal (no classes)
             field_closure_let_probability: 0.0,
+            // No sentinel unions in minimal
+            sentinel_union_probability: 0.0,
         },
         // No destructured imports in minimal (no multi-layer modules)
         destructured_import_probability: 0.0,
@@ -306,6 +310,8 @@ fn full_profile() -> Profile {
         generic_closure_interface_fn_probability: 0.15,
         // ~12% of non-generic functions return a closure
         closure_return_probability: 0.12,
+        // 1-3 sentinel types per module for sentinel union coverage
+        sentinels_per_module: (1, 3),
     };
 
     let emit = EmitConfig {
@@ -403,6 +409,8 @@ fn full_profile() -> Profile {
             range_iter_probability: 0.08,
             // ~8% field-closure-let: extract field, capture in closure, invoke/map
             field_closure_let_probability: 0.08,
+            // ~15% sentinel union let-bindings with match or is-check
+            sentinel_union_probability: 0.15,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -465,6 +473,8 @@ fn deep_nesting_profile() -> Profile {
         generic_closure_interface_fn_probability: 0.0,
         // No closure-returning functions in deep-nesting (focus is on nesting)
         closure_return_probability: 0.0,
+        // Some sentinels for variety
+        sentinels_per_module: (0, 2),
         // Minimal class/struct structure
         fields_per_struct: (0, 0),
         fields_per_class: (1, 2),
@@ -579,6 +589,8 @@ fn deep_nesting_profile() -> Profile {
             range_iter_probability: 0.04,
             // Some field-closure-let for nesting variety
             field_closure_let_probability: 0.04,
+            // Some sentinel union for nesting variety
+            sentinel_union_probability: 0.10,
         },
         // No destructured imports in deep-nesting (single module focus)
         destructured_import_probability: 0.0,
@@ -662,6 +674,8 @@ fn wide_types_profile() -> Profile {
         generic_closure_interface_fn_probability: 0.06,
         // Some closure-returning functions for variety
         closure_return_probability: 0.06,
+        // Some sentinels for variety
+        sentinels_per_module: (0, 2),
     };
 
     let emit = EmitConfig {
@@ -760,6 +774,8 @@ fn wide_types_profile() -> Profile {
             range_iter_probability: 0.04,
             // Some field-closure-let for variety
             field_closure_let_probability: 0.04,
+            // Some sentinel union for variety
+            sentinel_union_probability: 0.10,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -832,6 +848,8 @@ fn many_modules_profile() -> Profile {
         generic_closure_interface_fn_probability: 0.0,
         // No closure-returning functions - focus on module loading
         closure_return_probability: 0.0,
+        // Some sentinels for variety
+        sentinels_per_module: (0, 2),
     };
 
     let emit = EmitConfig {
@@ -932,6 +950,8 @@ fn many_modules_profile() -> Profile {
             range_iter_probability: 0.0,
             // No field-closure-let in many-modules - focus on module loading
             field_closure_let_probability: 0.0,
+            // No sentinel union in many-modules - focus on module loading
+            sentinel_union_probability: 0.0,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -1018,6 +1038,8 @@ fn generics_heavy_profile() -> Profile {
         generic_closure_interface_fn_probability: 0.20,
         // Some closure-returning functions for higher-order variety
         closure_return_probability: 0.08,
+        // No sentinels in generics-heavy (sentinels aren't generic)
+        sentinels_per_module: (0, 0),
     };
 
     let emit = EmitConfig {
@@ -1120,6 +1142,8 @@ fn generics_heavy_profile() -> Profile {
             range_iter_probability: 0.04,
             // Some field-closure-let for variety
             field_closure_let_probability: 0.04,
+            // No sentinel union in generics-heavy (sentinels aren't generic)
+            sentinel_union_probability: 0.0,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -1202,6 +1226,8 @@ fn stdlib_heavy_profile() -> Profile {
         generic_closure_interface_fn_probability: 0.08,
         // Some closure-returning functions for higher-order variety
         closure_return_probability: 0.08,
+        // Some sentinels for variety
+        sentinels_per_module: (0, 2),
     };
 
     let emit = EmitConfig {
@@ -1303,6 +1329,8 @@ fn stdlib_heavy_profile() -> Profile {
             range_iter_probability: 0.10,
             // Some field-closure-let for stdlib variety
             field_closure_let_probability: 0.06,
+            // Some sentinel union for variety
+            sentinel_union_probability: 0.10,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx):
         // Module-level destructured imports fail when the module is transitively imported.
@@ -1374,6 +1402,8 @@ fn closures_heavy_profile() -> Profile {
         generic_closure_interface_fn_probability: 0.10,
         // HIGH closure-returning functions — core focus of this profile
         closure_return_probability: 0.20,
+        // Some sentinels for variety
+        sentinels_per_module: (0, 2),
     };
 
     let emit = EmitConfig {
@@ -1450,6 +1480,8 @@ fn closures_heavy_profile() -> Profile {
             range_iter_probability: 0.06,
             // HIGH field-closure-let — closure capturing struct/class fields is core
             field_closure_let_probability: 0.12,
+            // Some sentinel union for variety
+            sentinel_union_probability: 0.10,
         },
         destructured_import_probability: 0.0,
         // HIGH expression-body — exercises => lambda-like syntax on functions
@@ -1541,6 +1573,8 @@ fn fallible_heavy_profile() -> Profile {
         generic_closure_interface_fn_probability: 0.0,
         // No closure-returning functions -- focus on fallible paths
         closure_return_probability: 0.0,
+        // Some sentinels for variety
+        sentinels_per_module: (0, 2),
     };
 
     let emit = EmitConfig {
@@ -1641,6 +1675,8 @@ fn fallible_heavy_profile() -> Profile {
             range_iter_probability: 0.04,
             // Some field-closure-let for variety
             field_closure_let_probability: 0.04,
+            // Some sentinel union for variety
+            sentinel_union_probability: 0.10,
         },
         // Destructured imports are disabled due to a compiler bug (vol-vzjx)
         destructured_import_probability: 0.0,

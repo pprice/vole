@@ -32,6 +32,8 @@ pub enum TypeInfo {
     Interface(ModuleId, SymbolId),
     /// A user-defined error type
     Error(ModuleId, SymbolId),
+    /// A sentinel type (zero-field marker type)
+    Sentinel(ModuleId, SymbolId),
     /// Optional type T?
     Optional(Box<TypeInfo>),
     /// Union type A | B
@@ -305,6 +307,11 @@ impl TypeInfo {
         matches!(self, TypeInfo::Iterator(_))
     }
 
+    /// Check if this type is a sentinel type.
+    pub fn is_sentinel(&self) -> bool {
+        matches!(self, TypeInfo::Sentinel(_, _))
+    }
+
     /// Check if this type is a tuple type.
     pub fn is_tuple(&self) -> bool {
         matches!(self, TypeInfo::Tuple(_))
@@ -439,6 +446,9 @@ impl TypeInfo {
             TypeInfo::Error(mod_id, sym_id) => table
                 .get_symbol(*mod_id, *sym_id)
                 .map_or_else(|| "UnknownError".to_string(), |s| s.name.clone()),
+            TypeInfo::Sentinel(mod_id, sym_id) => table
+                .get_symbol(*mod_id, *sym_id)
+                .map_or_else(|| "UnknownSentinel".to_string(), |s| s.name.clone()),
             TypeInfo::Optional(inner) => format!("{}?", inner.to_vole_syntax(table)),
             TypeInfo::Union(types) => types
                 .iter()
@@ -506,6 +516,8 @@ pub enum SymbolKind {
     Global(GlobalInfo),
     /// A standalone implement block (implements interface for existing type).
     ImplementBlock(ImplementBlockInfo),
+    /// A sentinel type declaration (zero-field marker type).
+    Sentinel,
 }
 
 /// Information about a static method in a class.
@@ -703,6 +715,13 @@ impl ModuleSymbols {
         self.symbols
             .iter()
             .filter(|s| matches!(s.kind, SymbolKind::Interface(_)))
+    }
+
+    /// Get all sentinels in this module.
+    pub fn sentinels(&self) -> impl Iterator<Item = &Symbol> {
+        self.symbols
+            .iter()
+            .filter(|s| matches!(s.kind, SymbolKind::Sentinel))
     }
 
     /// Get all errors in this module.
