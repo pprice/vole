@@ -1057,6 +1057,16 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: dead-code assertion (if false { assert(false) })
+        if self.rng.gen_bool(0.02) {
+            return self.generate_dead_code_assert();
+        }
+
+        // ~2% chance: zero/single-iteration for loop
+        if self.rng.gen_bool(0.02) {
+            return self.generate_edge_case_for_loop(ctx, 2);
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -4132,6 +4142,56 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
     ///     false => expr2
     /// }
     /// ```
+    /// Generate a dead-code assertion: `if false { assert(false) }`.
+    ///
+    /// Tests the compiler's handling of unreachable code with assertions.
+    fn generate_dead_code_assert(&mut self) -> String {
+        let variant = self.rng.gen_range(0..3u32);
+        match variant {
+            0 => "if false {\n    assert(false)\n}".to_string(),
+            1 => "if true { } else {\n    assert(false)\n}".to_string(),
+            _ => {
+                // if false { panic("unreachable") } — but use assert for safety
+                "if false {\n    assert(false)\n}".to_string()
+            }
+        }
+    }
+
+    /// Generate a zero-range or single-iteration for loop.
+    ///
+    /// ```vole
+    /// for i in 0..0 { let x = 0 }    // zero iterations
+    /// for i in 0..1 { let x = i }    // single iteration
+    /// ```
+    fn generate_edge_case_for_loop(&mut self, ctx: &mut StmtContext, depth: usize) -> String {
+        let iter_name = ctx.new_local_name();
+        let range = if self.rng.gen_bool(0.5) {
+            "0..0".to_string() // zero iterations
+        } else {
+            "0..1".to_string() // single iteration
+        };
+
+        let was_in_loop = ctx.in_loop;
+        let was_in_while_loop = ctx.in_while_loop;
+        ctx.in_loop = true;
+        ctx.in_while_loop = false;
+
+        let locals_before = ctx.locals.len();
+        ctx.add_local(
+            iter_name.clone(),
+            TypeInfo::Primitive(PrimitiveType::I64),
+            false,
+        );
+
+        let body_stmts = self.generate_block(ctx, depth + 1);
+        ctx.locals.truncate(locals_before);
+        ctx.in_loop = was_in_loop;
+        ctx.in_while_loop = was_in_while_loop;
+
+        let body_block = self.format_block(&body_stmts);
+        format!("for {} in {} {}", iter_name, range, body_block)
+    }
+
     fn try_generate_bool_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
         // Find a bool-typed variable
         let bool_vars: Vec<String> = ctx
