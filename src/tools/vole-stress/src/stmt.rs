@@ -4207,11 +4207,48 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             )
             .collect();
 
-        if bool_vars.is_empty() {
+        // Collect array params for computed bool scrutinee
+        let array_params: Vec<(String, TypeInfo)> = ctx
+            .params
+            .iter()
+            .filter(|p| matches!(p.param_type, TypeInfo::Array(_)))
+            .map(|p| (p.name.clone(), p.param_type.clone()))
+            .collect();
+
+        // Collect string candidates for computed bool scrutinee
+        let string_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::String)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::String)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        // ~35% chance: use a computed bool expression as scrutinee
+        // (iterator predicate or string method) instead of a plain bool variable
+        let use_computed = self.rng.gen_bool(0.35);
+        let scrutinee: String;
+
+        if use_computed {
+            let computed = self.try_computed_bool_scrutinee(&array_params, &string_vars);
+            if let Some(expr) = computed {
+                scrutinee = expr;
+            } else if !bool_vars.is_empty() {
+                scrutinee = bool_vars[self.rng.gen_range(0..bool_vars.len())].clone();
+            } else {
+                return None;
+            }
+        } else if !bool_vars.is_empty() {
+            scrutinee = bool_vars[self.rng.gen_range(0..bool_vars.len())].clone();
+        } else {
             return None;
         }
 
-        let scrutinee = &bool_vars[self.rng.gen_range(0..bool_vars.len())];
         let result_type = self.random_primitive_type();
         let result_name = ctx.new_local_name();
 
@@ -4236,6 +4273,44 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             "let {} = match {} {{\n{}true => {}\n{}_ => {}\n{}}}",
             result_name, scrutinee, indent, true_val, indent, false_val, close_indent,
         ))
+    }
+
+    /// Generate a computed bool expression for use as a match scrutinee.
+    /// Returns expressions like `arr.iter().any((x) => x > 0)` or `str.contains("a")`.
+    fn try_computed_bool_scrutinee(
+        &mut self,
+        array_params: &[(String, TypeInfo)],
+        string_vars: &[String],
+    ) -> Option<String> {
+        // Build a list of possible computed expressions
+        let mut options: Vec<String> = Vec::new();
+
+        for (name, elem_ty) in array_params {
+            if let TypeInfo::Array(inner) = elem_ty {
+                if matches!(inner.as_ref(), TypeInfo::Primitive(PrimitiveType::I64)) {
+                    options.push(format!("{}.iter().any((x) => x > 0)", name));
+                    options.push(format!("{}.iter().all((x) => x == x)", name));
+                } else if matches!(inner.as_ref(), TypeInfo::Primitive(PrimitiveType::I32)) {
+                    options.push(format!("{}.iter().any((x) => x > 0_i32)", name));
+                    options.push(format!("{}.iter().all((x) => x == x)", name));
+                } else if matches!(inner.as_ref(), TypeInfo::Primitive(PrimitiveType::Bool)) {
+                    options.push(format!("{}.iter().any((x) => x)", name));
+                }
+            }
+        }
+
+        for name in string_vars {
+            options.push(format!("{}.contains(\"a\")", name));
+            options.push(format!("{}.starts_with(\"\")", name));
+            options.push(format!("{}.length() > 0", name));
+        }
+
+        if options.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..options.len());
+        Some(options.swap_remove(idx))
     }
 
     fn try_generate_variable_shadow(&mut self, ctx: &mut StmtContext) -> Option<String> {
@@ -4316,7 +4391,15 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         ctx.add_local(name.clone(), ty.clone(), was_mutable);
 
         let decl = if was_mutable { "let mut" } else { "let" };
-        Some(format!("{} {} = {}", decl, name, new_value))
+
+        // ~30% chance: add explicit type annotation on the shadow
+        let use_annotation = self.rng.gen_bool(0.30);
+        if use_annotation {
+            let type_str = ty.to_vole_syntax(ctx.table);
+            Some(format!("{} {}: {} = {}", decl, name, type_str, new_value))
+        } else {
+            Some(format!("{} {} = {}", decl, name, new_value))
+        }
     }
 
     fn try_generate_widening_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
