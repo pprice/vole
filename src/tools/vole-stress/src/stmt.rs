@@ -1225,6 +1225,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~3% chance: compound boolean from numeric comparisons
+        if self.rng.gen_bool(0.03) {
+            if let Some(stmt) = self.try_generate_compound_bool_let(ctx) {
+                return stmt;
+            }
+        }
+
+        // ~2% chance: boolean from length comparisons
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_length_comparison_let(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -6016,6 +6030,136 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         };
 
         ctx.add_local(result_name.clone(), elem_type, false);
+
+        Some(format!("let {} = {}", result_name, expr))
+    }
+
+    /// Generate a compound boolean expression from numeric comparisons.
+    ///
+    /// Tests codegen for chained && / || with comparison operators:
+    /// ```vole
+    /// let b = x > y && y > z
+    /// let b = x >= 0 || y < 10
+    /// let b = !(x < 0) && y > 0
+    /// ```
+    fn try_generate_compound_bool_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let i64_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::I64)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::I64)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        if i64_vars.len() < 2 {
+            return None;
+        }
+
+        let result_name = ctx.new_local_name();
+        let ops = [">", "<", ">=", "<=", "==", "!="];
+        let logic = ["&&", "||"];
+
+        let var1 = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+        let var2 = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+        let op1 = ops[self.rng.gen_range(0..ops.len())];
+        let op2 = ops[self.rng.gen_range(0..ops.len())];
+        let logic_op = logic[self.rng.gen_range(0..logic.len())];
+        let thresh1 = self.rng.gen_range(-20..=20);
+        let thresh2 = self.rng.gen_range(-20..=20);
+
+        let expr = if self.rng.gen_bool(0.3) {
+            // Three-way chain: var1 op var2 && var2 op thresh
+            format!(
+                "{} {} {} {} {} {} {}",
+                var1, op1, var2, logic_op, var2, op2, thresh2
+            )
+        } else {
+            // Two comparisons: var1 op thresh1 && var2 op thresh2
+            format!(
+                "{} {} {} {} {} {} {}",
+                var1, op1, thresh1, logic_op, var2, op2, thresh2
+            )
+        };
+
+        ctx.add_local(
+            result_name.clone(),
+            TypeInfo::Primitive(PrimitiveType::Bool),
+            false,
+        );
+
+        Some(format!("let {} = {}", result_name, expr))
+    }
+
+    /// Generate a boolean from length comparisons on arrays/strings.
+    ///
+    /// Tests codegen for method-call results in boolean expressions:
+    /// ```vole
+    /// let b = arr.length() > 3
+    /// let b = str.length() > 0 && arr.length() < 10
+    /// ```
+    fn try_generate_length_comparison_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Collect arrays and strings for .length() calls
+        let length_sources: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| {
+                matches!(ty, TypeInfo::Array(_) | TypeInfo::Primitive(PrimitiveType::String))
+            })
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| {
+                        matches!(
+                            p.param_type,
+                            TypeInfo::Array(_) | TypeInfo::Primitive(PrimitiveType::String)
+                        )
+                    })
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        if length_sources.is_empty() {
+            return None;
+        }
+
+        let result_name = ctx.new_local_name();
+        let var1 = &length_sources[self.rng.gen_range(0..length_sources.len())];
+        let thresh1 = self.rng.gen_range(0..=10);
+        let op = match self.rng.gen_range(0..4u32) {
+            0 => ">",
+            1 => ">=",
+            2 => "<",
+            _ => "==",
+        };
+
+        let expr = if length_sources.len() >= 2 && self.rng.gen_bool(0.4) {
+            let var2 = &length_sources[self.rng.gen_range(0..length_sources.len())];
+            let thresh2 = self.rng.gen_range(0..=10);
+            let op2 = match self.rng.gen_range(0..3u32) {
+                0 => ">",
+                1 => ">=",
+                _ => "<",
+            };
+            let logic = if self.rng.gen_bool(0.5) { "&&" } else { "||" };
+            format!(
+                "{}.length() {} {} {} {}.length() {} {}",
+                var1, op, thresh1, logic, var2, op2, thresh2
+            )
+        } else {
+            format!("{}.length() {} {}", var1, op, thresh1)
+        };
+
+        ctx.add_local(
+            result_name.clone(),
+            TypeInfo::Primitive(PrimitiveType::Bool),
+            false,
+        );
 
         Some(format!("let {} = {}", result_name, expr))
     }
