@@ -1279,6 +1279,16 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: modulo edge cases (N % 1 == 0, N % N == 0)
+        if self.rng.gen_bool(0.02) {
+            return self.generate_modulo_edge_case(ctx);
+        }
+
+        // ~2% chance: uniform array operations
+        if self.rng.gen_bool(0.02) {
+            return self.generate_array_uniform_ops(ctx);
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -6513,6 +6523,105 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::Bool), false);
         Some(format!("let {} = {}", name, expr))
+    }
+
+    /// Generate modulo edge cases: N % 1 (always 0), N % N (always 0 for non-zero),
+    /// x % large_prime, etc. Tests division/modulo codegen paths.
+    fn generate_modulo_edge_case(&mut self, ctx: &mut StmtContext) -> String {
+        let name = ctx.new_local_name();
+
+        let expr = match self.rng.gen_range(0..4u32) {
+            0 => {
+                // literal % 1 == 0
+                let val = self.rng.gen_range(1..=100);
+                format!("{} % 1", val)
+            }
+            1 => {
+                // literal % itself == 0
+                let val = self.rng.gen_range(1..=100);
+                format!("{} % {}", val, val)
+            }
+            2 => {
+                // 0 % literal == 0
+                let val = self.rng.gen_range(1..=100);
+                format!("0 % {}", val)
+            }
+            _ => {
+                // known modulo: a % b where a and b are known
+                let b = self.rng.gen_range(2..=10);
+                let a = b * self.rng.gen_range(1..=5) + self.rng.gen_range(0..b);
+                format!("{} % {}", a, b)
+            }
+        };
+
+        ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::I64), false);
+        format!("let {} = {}", name, expr)
+    }
+
+    /// Generate uniform array operations: arrays where all elements are the same value,
+    /// then perform iterator operations on them. Tests iter sum/count on uniform data.
+    fn generate_array_uniform_ops(&mut self, ctx: &mut StmtContext) -> String {
+        let val = self.rng.gen_range(0..=20);
+        let count = self.rng.gen_range(1..=5);
+        let elems = vec![val.to_string(); count];
+        let arr_literal = format!("[{}]", elems.join(", "));
+
+        let arr_name = ctx.new_local_name();
+        let result_name = ctx.new_local_name();
+
+        match self.rng.gen_range(0..3u32) {
+            0 => {
+                // [v, v, v].iter().sum()
+                ctx.add_local(
+                    arr_name.clone(),
+                    TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+                    false,
+                );
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::I64),
+                    false,
+                );
+                format!(
+                    "let {} = {}\nlet {} = {}.iter().sum()",
+                    arr_name, arr_literal, result_name, arr_name
+                )
+            }
+            1 => {
+                // [v, v, v].iter().count()
+                ctx.add_local(
+                    arr_name.clone(),
+                    TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+                    false,
+                );
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::I64),
+                    false,
+                );
+                format!(
+                    "let {} = {}\nlet {} = {}.iter().count()",
+                    arr_name, arr_literal, result_name, arr_name
+                )
+            }
+            _ => {
+                // [v, v, v].length()
+                ctx.add_local(
+                    arr_name.clone(),
+                    TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+                    false,
+                );
+                ctx.add_local(
+                    result_name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::I64),
+                    false,
+                );
+                format!(
+                    "let {} = {}\nlet {} = {}.length()",
+                    arr_name, arr_literal, result_name, arr_name
+                )
+            }
+        }
     }
 
     fn try_generate_bool_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
