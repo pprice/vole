@@ -163,6 +163,13 @@ pub struct StmtConfig {
     /// interaction between closure capture and sentinel union dispatch codegen.
     /// Set to 0.0 to disable.
     pub sentinel_closure_capture_probability: f64,
+
+    /// Probability of generating a closure that captures a whole struct variable
+    /// and accesses multiple fields inside the closure body. This exercises the
+    /// interaction between struct value capture in closure environments and field
+    /// access through captured aggregates.
+    /// Set to 0.0 to disable.
+    pub closure_struct_capture_probability: f64,
 }
 
 impl Default for StmtConfig {
@@ -208,6 +215,7 @@ impl Default for StmtConfig {
             sentinel_union_probability: 0.0,
             optional_destructure_match_probability: 0.0,
             sentinel_closure_capture_probability: 0.0,
+            closure_struct_capture_probability: 0.0,
         }
     }
 }
@@ -773,6 +781,16 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             .gen_bool(self.config.sentinel_closure_capture_probability)
         {
             if let Some(stmt) = self.try_generate_sentinel_closure_capture(ctx) {
+                return stmt;
+            }
+        }
+
+        // Closure capturing whole struct and accessing fields inside
+        if self
+            .rng
+            .gen_bool(self.config.closure_struct_capture_probability)
+        {
+            if let Some(stmt) = self.try_generate_closure_struct_capture(ctx) {
                 return stmt;
             }
         }
@@ -2163,6 +2181,161 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         );
 
         Some(format!("{}\n{}", union_stmt, result_stmt))
+    }
+
+    /// Try to generate a closure that captures a whole struct variable and accesses
+    /// multiple fields inside the closure body. This exercises the interaction between
+    /// struct value capture in closure environments and field access through captured
+    /// aggregate types.
+    ///
+    /// Pattern A (direct invocation):
+    /// ```vole
+    /// let result = ((x: i64) -> i64 => x + my_struct.fieldA + my_struct.fieldB)(5)
+    /// ```
+    ///
+    /// Pattern B (iterator chain):
+    /// ```vole
+    /// let result = [1, 2, 3].iter().map((x: i64) -> i64 => x + my_struct.fieldA).collect()
+    /// ```
+    fn try_generate_closure_struct_capture(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Guard: skip in generic class method contexts (same issue as field_closure_let)
+        if let Some((cls_mod, cls_sym)) = ctx.current_class_sym_id {
+            if let Some(symbol) = ctx.table.get_symbol(cls_mod, cls_sym) {
+                if let SymbolKind::Class(info) = &symbol.kind {
+                    if !info.type_params.is_empty() {
+                        return None;
+                    }
+                }
+            }
+        }
+
+        let _module_id = ctx.module_id?;
+
+        // Find struct-typed locals with at least 2 numeric fields (i64 or i32)
+        // so we can access multiple fields inside the closure
+        let mut candidates: Vec<(String, Vec<(String, PrimitiveType)>)> = Vec::new();
+
+        for (name, ty, _) in &ctx.locals {
+            if let TypeInfo::Struct(mod_id, sym_id) = ty {
+                if let Some(sym) = ctx.table.get_symbol(*mod_id, *sym_id) {
+                    if let SymbolKind::Struct(ref info) = sym.kind {
+                        let numeric_fields: Vec<(String, PrimitiveType)> = info
+                            .fields
+                            .iter()
+                            .filter_map(|f| {
+                                if let TypeInfo::Primitive(p) = &f.field_type {
+                                    if matches!(p, PrimitiveType::I64 | PrimitiveType::I32) {
+                                        return Some((f.name.clone(), *p));
+                                    }
+                                }
+                                None
+                            })
+                            .collect();
+                        if numeric_fields.len() >= 2 {
+                            candidates.push((name.clone(), numeric_fields));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Also check params
+        for p in ctx.params {
+            if let TypeInfo::Struct(mod_id, sym_id) = &p.param_type {
+                if let Some(sym) = ctx.table.get_symbol(*mod_id, *sym_id) {
+                    if let SymbolKind::Struct(ref info) = sym.kind {
+                        let numeric_fields: Vec<(String, PrimitiveType)> = info
+                            .fields
+                            .iter()
+                            .filter_map(|f| {
+                                if let TypeInfo::Primitive(pt) = &f.field_type {
+                                    if matches!(pt, PrimitiveType::I64 | PrimitiveType::I32) {
+                                        return Some((f.name.clone(), *pt));
+                                    }
+                                }
+                                None
+                            })
+                            .collect();
+                        if numeric_fields.len() >= 2 {
+                            candidates.push((p.name.clone(), numeric_fields));
+                        }
+                    }
+                }
+            }
+        }
+
+        if candidates.is_empty() {
+            return None;
+        }
+
+        let idx = self.rng.gen_range(0..candidates.len());
+        let (struct_name, numeric_fields) = candidates[idx].clone();
+
+        // Pick 2-3 fields to use inside the closure
+        let num_fields = std::cmp::min(
+            numeric_fields.len(),
+            self.rng.gen_range(2..=3),
+        );
+        let mut chosen_fields = numeric_fields;
+        // Shuffle and take first num_fields
+        for i in (1..chosen_fields.len()).rev() {
+            let j = self.rng.gen_range(0..=i);
+            chosen_fields.swap(i, j);
+        }
+        chosen_fields.truncate(num_fields);
+
+        // Check if any chosen field is i32 - if so we need to widen to i64
+        let has_i32 = chosen_fields.iter().any(|(_, p)| matches!(p, PrimitiveType::I32));
+
+        // Build the closure body expression: x + struct.field1 + struct.field2 [+ 0_i64]
+        let mut body_parts: Vec<String> = vec!["x".to_string()];
+        for (field_name, _) in &chosen_fields {
+            body_parts.push(format!("{}.{}", struct_name, field_name));
+        }
+        let mut body_expr = body_parts.join(" + ");
+        if has_i32 {
+            body_expr = format!("{} + 0_i64", body_expr);
+        }
+
+        let use_iter = self.rng.gen_bool(0.4);
+        if use_iter {
+            // Pattern B: iterator chain with closure capturing struct
+            let arr_size = self.rng.gen_range(2..=4);
+            let arr_elems: Vec<String> = (0..arr_size)
+                .map(|_| {
+                    let n = self.rng.gen_range(1..=20);
+                    format!("{}", n)
+                })
+                .collect();
+
+            let result_name = ctx.new_local_name();
+            ctx.add_local(
+                result_name.clone(),
+                TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+                false,
+            );
+
+            Some(format!(
+                "let {} = [{}].iter().map((x: i64) -> i64 => {}).collect()",
+                result_name,
+                arr_elems.join(", "),
+                body_expr,
+            ))
+        } else {
+            // Pattern A: direct invocation of closure
+            let arg_val = self.rng.gen_range(1..=50);
+            let result_name = ctx.new_local_name();
+            ctx.add_local(
+                result_name.clone(),
+                TypeInfo::Primitive(PrimitiveType::I64),
+                false,
+            );
+
+            Some(format!(
+                "let {} = ((x: i64) -> i64 => {})({})",
+                result_name, body_expr, arg_val,
+            ))
+        }
     }
 
     /// Try to generate a widening let statement.
