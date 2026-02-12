@@ -1120,11 +1120,27 @@ impl Cg<'_, '_, '_> {
         }
 
         // Build args: self (iterator ptr) + method args
+        //
+        // Pipeline methods (map, filter, flat_map) store closure arguments in the
+        // iterator and free them on drop (Closure::free). If the closure arg is
+        // borrowed (e.g. a function parameter variable), we must rc_inc it so the
+        // iterator owns its own reference. Without this, the iterator's drop and
+        // the variable's scope-exit cleanup would both free the same closure,
+        // causing a double-free / heap corruption.
+        let stores_closure = matches!(method_name, "map" | "filter" | "flat_map");
         let mut args: ArgVec = smallvec![obj.value];
         let mut rc_temps: Vec<CompiledValue> = Vec::new();
         for arg in &mc.args {
             let compiled = self.expr(arg)?;
-            if compiled.is_owned() {
+            if stores_closure
+                && compiled.is_borrowed()
+                && self.rc_state(compiled.type_id).needs_cleanup()
+            {
+                // The iterator will take ownership of this closure — bump
+                // its refcount so both the iterator drop and the variable's
+                // scope cleanup can safely dec_ref independently.
+                self.emit_rc_inc(compiled.value)?;
+            } else if compiled.is_owned() {
                 rc_temps.push(compiled);
             }
             args.push(compiled.value);

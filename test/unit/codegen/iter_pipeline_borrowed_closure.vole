@@ -1,0 +1,92 @@
+// Regression test for vol-rowf: heap corruption when a borrowed closure
+// (function parameter) is passed to an iterator pipeline method (.map,
+// .filter, .flat_map).
+//
+// The iterator stores the closure and frees it on drop (Closure::free).
+// If the closure comes from a function parameter (borrowed), both the
+// iterator drop AND the variable's scope-exit cleanup would free it,
+// causing a double-free / malloc heap corruption.
+//
+// Fix: rc_inc borrowed closure arguments before passing them to pipeline
+// methods so the iterator owns its own reference.
+
+interface Scorer {
+    func score() -> i64
+}
+
+class Player {
+    points: i64
+}
+
+implement Scorer for Player {
+    func score() -> i64 => self.points
+}
+
+// Helper: pass a closure parameter to .map()
+func map_with_param(items: [i64], transform: (i64) -> i64) -> [i64] {
+    return items.iter().map(transform).collect()
+}
+
+// Helper: pass a closure parameter to .filter()
+func filter_with_param(items: [i64], predicate: (i64) -> bool) -> [i64] {
+    return items.iter().filter(predicate).collect()
+}
+
+// Helper: pass closure parameters to chained .map().filter()
+func map_then_filter(items: [i64], transform: (i64) -> i64, predicate: (i64) -> bool) -> [i64] {
+    return items.iter().map(transform).filter(predicate).collect()
+}
+
+// Helper: generic function with interface constraint + chained pipeline
+func transform_and_filter<T: Scorer>(items: [i64], scorer: T, transform: (i64) -> i64) -> [i64] {
+    return items.iter().map(transform).filter((n: i64) => n > scorer.score()).collect()
+}
+
+tests "iterator pipeline with borrowed closures" {
+    test "map with function parameter closure" {
+        let result = map_with_param([1, 2, 3, 4, 5], (n: i64) => n * 2)
+        assert(result.length() == 5)
+        assert(result[0] == 2)
+        assert(result[1] == 4)
+        assert(result[2] == 6)
+        assert(result[3] == 8)
+        assert(result[4] == 10)
+    }
+
+    test "filter with function parameter closure" {
+        let result = filter_with_param([1, 2, 3, 4, 5], (n: i64) => n > 3)
+        assert(result.length() == 2)
+        assert(result[0] == 4)
+        assert(result[1] == 5)
+    }
+
+    test "map then filter with parameter closures" {
+        let result = map_then_filter(
+            [1, 2, 3, 4, 5],
+            (n: i64) => n * 2,
+            (n: i64) => n > 5
+        )
+        assert(result.length() == 3)
+        assert(result[0] == 6)
+        assert(result[1] == 8)
+        assert(result[2] == 10)
+    }
+
+    test "generic map+filter with interface dispatch in closure" {
+        let p = Player { points: 5 }
+        let result = transform_and_filter([1, 2, 3, 4, 5], p, (n: i64) => n * 2)
+        assert(result.length() == 3)
+        assert(result[0] == 6)
+        assert(result[1] == 8)
+        assert(result[2] == 10)
+    }
+
+    test "map with inline closure still works" {
+        let items = [1, 2, 3]
+        let result = items.iter().map((n: i64) => n + 10).collect()
+        assert(result.length() == 3)
+        assert(result[0] == 11)
+        assert(result[1] == 12)
+        assert(result[2] == 13)
+    }
+}
