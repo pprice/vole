@@ -2307,6 +2307,114 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         }
     }
 
+    /// Try to generate an `.iter().chain(other.iter()).collect()` expression for array generation.
+    ///
+    /// Looks for TWO DIFFERENT array-typed variables in scope whose element type matches
+    /// the target element type. Only supports i64 and i32 element types.
+    /// Generates one of:
+    /// - `arr1.iter().chain(arr2.iter()).collect()` (~60%)
+    /// - `arr1.iter().chain(arr2.iter()).filter((x) => pred).collect()` (~20%)
+    /// - `arr1.iter().chain(arr2.iter()).map((x) => body).collect()` (~20%)
+    fn try_generate_iter_chain_collect(
+        &mut self,
+        target_elem: &TypeInfo,
+        ctx: &ExprContext,
+    ) -> Option<String> {
+        // Only works for i64 and i32 element types
+        let is_i64 = matches!(target_elem, TypeInfo::Primitive(PrimitiveType::I64));
+        let is_i32 = matches!(target_elem, TypeInfo::Primitive(PrimitiveType::I32));
+        if !is_i64 && !is_i32 {
+            return None;
+        }
+
+        let array_vars = ctx.array_vars();
+
+        // Filter to arrays whose element type matches
+        let candidates: Vec<_> = array_vars
+            .iter()
+            .filter(|(_, elem_ty)| elem_ty == target_elem)
+            .collect();
+
+        // Need at least 2 different array variables
+        if candidates.len() < 2 {
+            return None;
+        }
+
+        // Pick two different candidates
+        let idx1 = self.rng.gen_range(0..candidates.len());
+        let mut idx2 = self.rng.gen_range(0..candidates.len() - 1);
+        if idx2 >= idx1 {
+            idx2 += 1;
+        }
+        let (var1, _) = candidates[idx1];
+        let (var2, _) = candidates[idx2];
+
+        // Pick a variant: plain chain (60%), filter (20%), map (20%)
+        let variant = self.rng.gen_range(0..10);
+        match variant {
+            0..6 => {
+                // arr1.iter().chain(arr2.iter()).collect()
+                Some(format!("{}.iter().chain({}.iter()).collect()", var1, var2))
+            }
+            6..8 => {
+                // arr1.iter().chain(arr2.iter()).filter((x) => pred).collect()
+                let pred = if is_i32 {
+                    match self.rng.gen_range(0..3) {
+                        0 => {
+                            let n = self.rng.gen_range(0..=5);
+                            format!("x > {}", n)
+                        }
+                        1 => {
+                            let n = self.rng.gen_range(0..=10);
+                            format!("x < {}", n)
+                        }
+                        _ => "x % 2 == 0".to_string(),
+                    }
+                } else {
+                    match self.rng.gen_range(0..4) {
+                        0 => {
+                            let n = self.rng.gen_range(0..=5);
+                            format!("x > {}", n)
+                        }
+                        1 => {
+                            let n = self.rng.gen_range(0..=10);
+                            format!("x < {}", n)
+                        }
+                        2 => "x % 2 == 0".to_string(),
+                        _ => {
+                            let n = self.rng.gen_range(0..=5);
+                            format!("x != {}", n)
+                        }
+                    }
+                };
+                Some(format!(
+                    "{}.iter().chain({}.iter()).filter((x) => {}).collect()",
+                    var1, var2, pred
+                ))
+            }
+            _ => {
+                // arr1.iter().chain(arr2.iter()).map((x) => body).collect()
+                let body = if is_i32 {
+                    match self.rng.gen_range(0..3) {
+                        0 => "x * 2_i32".to_string(),
+                        1 => "x + 1_i32".to_string(),
+                        _ => "-x".to_string(),
+                    }
+                } else {
+                    match self.rng.gen_range(0..3) {
+                        0 => "x * 2".to_string(),
+                        1 => "x + 1".to_string(),
+                        _ => "-x".to_string(),
+                    }
+                };
+                Some(format!(
+                    "{}.iter().chain({}.iter()).map((x) => {}).collect()",
+                    var1, var2, body
+                ))
+            }
+        }
+    }
+
     /// Generate arguments for a method call.
     ///
     /// With probability `inline_expr_arg_probability`, each argument may be a
@@ -3103,6 +3211,13 @@ impl<'a, R: Rng> ExprGenerator<'a, R> {
         // ~8% chance to generate arr.iter().sorted().collect() (i64/i32 only)
         if self.rng.gen_bool(0.08) {
             if let Some(expr) = self.try_generate_iter_sorted_collect(elem, ctx) {
+                return expr;
+            }
+        }
+
+        // ~8% chance to generate arr1.iter().chain(arr2.iter()).collect() (i64/i32 only)
+        if self.rng.gen_bool(0.08) {
+            if let Some(expr) = self.try_generate_iter_chain_collect(elem, ctx) {
                 return expr;
             }
         }
