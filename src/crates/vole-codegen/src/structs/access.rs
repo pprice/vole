@@ -2,6 +2,7 @@
 
 use super::helpers::{convert_to_i64_for_storage, get_field_slot_and_type_id_cg};
 use crate::RuntimeFn;
+use crate::union_layout;
 use crate::context::Cg;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CompiledValue, RcLifecycle, module_name_id};
@@ -221,7 +222,7 @@ impl Cg<'_, '_, '_> {
             crate::types::type_id_to_cranelift(inner_type_id, arena, self.ptr_type())
         };
         let union_size = self.type_size(obj.type_id);
-        let inner_obj = if union_size > 8 {
+        let inner_obj = if union_size > union_layout::TAG_ONLY_SIZE {
             self.builder
                 .ins()
                 .load(inner_cranelift_type, MemFlags::new(), obj.value, 8)

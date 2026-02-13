@@ -11,6 +11,7 @@ use vole_frontend::{ExprKind, FuncBody, Symbol};
 use vole_sema::type_arena::TypeId;
 
 use crate::context::{Captures, Cg};
+use crate::union_layout;
 use crate::errors::CodegenResult;
 use crate::lambda::CaptureBinding;
 use crate::types::{CodegenCtx, CompileEnv};
@@ -287,7 +288,7 @@ pub fn compile_function_body_with_cg(
             if is_wide {
                 // Wide fallible (i128 success): load low/high from offset 8/16
                 let union_size = cg.type_size(value.type_id);
-                let (low, high) = if union_size > 8 {
+                let (low, high) = if union_size > union_layout::TAG_ONLY_SIZE {
                     let low = cg
                         .builder
                         .ins()
@@ -306,7 +307,7 @@ pub fn compile_function_body_with_cg(
                 // Only load payload if union has payload data.
                 // Sentinel-only unions have union_size == 8 (tag only), no payload to read.
                 let union_size = cg.type_size(value.type_id);
-                let payload = if union_size > 8 {
+                let payload = if union_size > union_layout::TAG_ONLY_SIZE {
                     cg.builder
                         .ins()
                         .load(types::I64, MemFlags::new(), value.value, 8)

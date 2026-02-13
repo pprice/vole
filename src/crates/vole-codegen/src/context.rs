@@ -15,6 +15,7 @@ use cranelift_module::{FuncId, Module};
 use rustc_hash::FxHashMap;
 
 use crate::errors::{CodegenError, CodegenResult};
+use crate::union_layout;
 use crate::{FunctionKey, RuntimeFn};
 use smallvec::SmallVec;
 use vole_frontend::{Expr, Symbol};
@@ -1634,7 +1635,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             // Copy payload at offset 8 (8 bytes) if the union has payload data.
             // Sentinel-only unions (e.g. A | B where both are zero-sized) have
             // union_size == 8 (tag only), so there's no payload to copy.
-            if union_size > 8 {
+            if union_size > union_layout::TAG_ONLY_SIZE {
                 let payload = self
                     .builder
                     .ins()

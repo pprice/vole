@@ -8,6 +8,7 @@ use cranelift_module::Module;
 
 use crate::RuntimeFn;
 use crate::errors::{CodegenError, CodegenResult};
+use crate::union_layout;
 use rustc_hash::FxHashMap;
 
 use vole_frontend::{
@@ -166,7 +167,7 @@ impl Cg<'_, '_, '_> {
                 // Only load payload if union has payload data.
                 // Sentinel-only unions have union_size == 8 (tag only), no payload to read.
                 let union_size = self.type_size(*type_id);
-                let payload = if union_size > 8 {
+                let payload = if union_size > union_layout::TAG_ONLY_SIZE {
                     self.builder.ins().load(payload_ty, MemFlags::new(), val, 8)
                 } else {
                     self.builder.ins().iconst(payload_ty, 0)
@@ -1349,7 +1350,7 @@ impl Cg<'_, '_, '_> {
         // Only load payload if union has payload data.
         // Sentinel-only unions have union_size == 8 (tag only), no payload to read.
         let union_size = self.type_size(value.type_id);
-        let payload = if union_size > 8 {
+        let payload = if union_size > union_layout::TAG_ONLY_SIZE {
             let loaded = self
                 .builder
                 .ins()

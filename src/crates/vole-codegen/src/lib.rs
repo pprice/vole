@@ -48,6 +48,13 @@ pub mod loop_param_opt {
     pub use super::control_flow::loop_param_opt::*;
 }
 
+/// Union memory layout constants used across the compiler.
+pub(crate) mod union_layout {
+    /// Byte size of a tag-only (sentinel) union — no payload.
+    /// Unions with `type_size > TAG_ONLY_SIZE` have payload data at offset 8.
+    pub const TAG_ONLY_SIZE: u32 = 8;
+}
+
 /// Named trap codes for Cranelift traps used across the compiler.
 pub(crate) mod trap_codes {
     use cranelift::prelude::TrapCode;

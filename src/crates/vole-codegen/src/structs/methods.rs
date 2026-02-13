@@ -5,6 +5,7 @@ use cranelift_module::Module;
 use smallvec::{SmallVec, smallvec};
 
 use crate::RuntimeFn;
+use crate::union_layout;
 
 /// SmallVec for call arguments - most calls have <= 8 args
 type ArgVec = SmallVec<[Value; 8]>;
@@ -635,7 +636,7 @@ impl Cg<'_, '_, '_> {
                     .load(types::I8, MemFlags::new(), src_ptr, 0);
                 self.builder.ins().stack_store(tag, local_slot, 0);
 
-                if union_size > 8 {
+                if union_size > union_layout::TAG_ONLY_SIZE {
                     let payload = self
                         .builder
                         .ins()
@@ -726,7 +727,7 @@ impl Cg<'_, '_, '_> {
 
                 // Copy payload (8 bytes at offset 8) only if union has payload data.
                 // Sentinel-only unions have union_size == 8 (tag only), no payload.
-                if union_size > 8 {
+                if union_size > union_layout::TAG_ONLY_SIZE {
                     let payload =
                         self.builder
                             .ins()

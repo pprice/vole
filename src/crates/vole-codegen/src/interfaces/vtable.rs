@@ -7,6 +7,7 @@ use cranelift_module::{DataDescription, DataId, Linkage, Module};
 
 use super::vtable_ctx::{VtableCtx, VtableCtxView};
 use crate::RuntimeFn;
+use crate::union_layout;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{CodegenCtx, CompileEnv};
 use crate::types::{
@@ -456,7 +457,7 @@ impl InterfaceVtableRegistry {
                     };
 
                     builder.ins().stack_store(remapped_tag, slot, 0);
-                    if union_size > 8 {
+                    if union_size > union_layout::TAG_ONLY_SIZE {
                         let payload = builder.ins().load(types::I64, MemFlags::new(), result, 8);
                         builder.ins().stack_store(payload, slot, 8);
                     }
@@ -469,7 +470,7 @@ impl InterfaceVtableRegistry {
 
                     let local_tag = builder.ins().stack_load(types::I8, slot, 0);
                     builder.ins().store(MemFlags::new(), local_tag, heap_ptr, 0);
-                    if union_size > 8 {
+                    if union_size > union_layout::TAG_ONLY_SIZE {
                         let local_payload = builder.ins().stack_load(types::I64, slot, 8);
                         builder
                             .ins()
