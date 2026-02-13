@@ -95,7 +95,7 @@ impl RcState {
             RcState::Composite {
                 shallow_offsets, ..
             } => Some(shallow_offsets),
-            _ => None,
+            RcState::None | RcState::Simple { .. } | RcState::Union { .. } => None,
         }
     }
 
@@ -108,7 +108,7 @@ impl RcState {
     pub fn deep_offsets(&self) -> Option<&[i32]> {
         match self {
             RcState::Composite { deep_offsets, .. } => Some(deep_offsets),
-            _ => None,
+            RcState::None | RcState::Simple { .. } | RcState::Union { .. } => None,
         }
     }
 
@@ -123,7 +123,7 @@ impl RcState {
     pub fn union_variants(&self) -> Option<&[(u8, bool)]> {
         match self {
             RcState::Union { rc_variants } => Some(rc_variants),
-            _ => None,
+            RcState::None | RcState::Simple { .. } | RcState::Composite { .. } => None,
         }
     }
 }
