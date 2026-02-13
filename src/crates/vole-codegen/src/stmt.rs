@@ -1358,11 +1358,52 @@ impl Cg<'_, '_, '_> {
             CodegenError::not_found("error type", self.interner().resolve(raise_stmt.error_name))
         })?;
 
-        // Get the error type_def_id to look up field order from EntityRegistry
-        let raise_error_name = self.interner().resolve(raise_stmt.error_name);
+        // Resolve the error TypeDefId and get its fields
+        let error_type_def_id =
+            self.resolve_raise_error_type_def(error_type_id, raise_stmt.error_name)?;
+
+        let error_fields: Vec<_> = self
+            .query()
+            .fields_on_type(error_type_def_id)
+            .map(|field_id| self.query().get_field(field_id).clone())
+            .collect();
+
+        // Create the tag value
+        let tag_val = self.builder.ins().iconst(types::I64, error_tag);
+
+        // Build the error payload from field definitions and initializers
+        let payload_val = self.build_raise_payload(&error_fields, &raise_stmt.fields)?;
+
+        // RC cleanup: like return, clean up all RC locals before exiting.
+        self.emit_rc_cleanup_all_scopes(None)?;
+
+        // Return from the function with (tag, payload) or (tag, payload, 0) for wide fallible
+        if is_wide_fallible(return_type_id, self.arena()) {
+            // Wide fallible: return 3 values (tag, payload, 0) for consistency
+            // with the 3-register convention for i128 success values
+            let zero = self.builder.ins().iconst(types::I64, 0);
+            self.builder.ins().return_(&[tag_val, payload_val, zero]);
+        } else {
+            self.builder.ins().return_(&[tag_val, payload_val]);
+        }
+
+        // Raise always terminates the current block
+        Ok(true)
+    }
+
+    /// Resolve the TypeDefId for the named error type from a fallible error type.
+    ///
+    /// Handles both single error types and unions of error types by matching
+    /// the error name against the type definitions.
+    fn resolve_raise_error_type_def(
+        &self,
+        error_type_id: TypeId,
+        error_name_sym: Symbol,
+    ) -> CodegenResult<vole_identity::TypeDefId> {
+        let raise_error_name = self.interner().resolve(error_name_sym);
         let arena = self.arena();
         let name_table = self.name_table();
-        let error_type_def_id = if let Some(type_def_id) = arena.unwrap_error(error_type_id) {
+        let result = if let Some(type_def_id) = arena.unwrap_error(error_type_id) {
             // Single error type
             let name = name_table.last_segment_str(self.query().type_name_id(type_def_id));
             if name.as_deref() == Some(raise_error_name) {
@@ -1383,31 +1424,30 @@ impl Cg<'_, '_, '_> {
             })
         } else {
             None
-        }
-        .ok_or_else(|| {
-            CodegenError::not_found("error type info", self.interner().resolve(raise_stmt.error_name))
-        })?;
+        };
+        result.ok_or_else(|| {
+            CodegenError::not_found("error type info", self.interner().resolve(error_name_sym))
+        })
+    }
 
-        // Get fields from EntityRegistry
-        let error_fields: Vec<_> = self
-            .query()
-            .fields_on_type(error_type_def_id)
-            .map(|field_id| self.query().get_field(field_id).clone())
-            .collect();
-
-        // Create the tag value
-        let tag_val = self.builder.ins().iconst(types::I64, error_tag);
-
-        // Determine payload based on number of fields
-        // This matches the layout used by external functions in runtime:
-        // - 0 fields: payload is 0
-        // - 1 field (non-wide): payload is the field value directly (inline)
-        // - 1 field (i128): payload is a pointer to stack-allocated i128 data
-        // - 2+ fields: payload is a pointer to field data (i128 fields use 16 bytes)
-        let payload_val = if error_fields.is_empty() {
+    /// Build the error payload value for a raise statement.
+    ///
+    /// Layout matches the runtime convention:
+    /// - 0 fields: payload is 0
+    /// - 1 field (non-wide): payload is the field value directly (inline)
+    /// - 1 field (i128): payload is a pointer to stack-allocated i128 data
+    /// - 2+ fields: payload is a pointer to field data (i128 fields use 16 bytes)
+    fn build_raise_payload(
+        &mut self,
+        error_fields: &[vole_sema::entity_defs::FieldDef],
+        raise_fields: &[vole_frontend::StructFieldInit],
+    ) -> CodegenResult<Value> {
+        if error_fields.is_empty() {
             // No fields - payload is 0
-            self.builder.ins().iconst(types::I64, 0)
-        } else if error_fields.len() == 1
+            return Ok(self.builder.ins().iconst(types::I64, 0));
+        }
+
+        if error_fields.len() == 1
             && !crate::types::is_wide_type(error_fields[0].ty, self.arena())
         {
             // Single non-wide field - store inline as payload value
@@ -1416,8 +1456,7 @@ impl Cg<'_, '_, '_> {
                 .name_table()
                 .last_segment_str(field_def.name_id)
                 .unwrap_or_default();
-            let field_init = raise_stmt
-                .fields
+            let field_init = raise_fields
                 .iter()
                 .find(|f| self.interner().resolve(f.name) == field_name)
                 .ok_or_else(|| CodegenError::not_found("raise field", &field_name))?;
@@ -1431,66 +1470,49 @@ impl Cg<'_, '_, '_> {
             // The field value is consumed into the error payload.
             field_value.mark_consumed();
             field_value.debug_assert_rc_handled("Stmt::Raise (single field)");
-            convert_to_i64_for_storage(self.builder, &field_value)
-        } else {
-            // Multiple fields (or single i128 field) - allocate on stack and store field values.
-            // i128 fields use 16 bytes (2 slots), all others use 8 bytes (1 slot).
-            let error_payload_size: u32 = error_fields
-                .iter()
-                .map(|f| {
-                    if crate::types::is_wide_type(f.ty, self.arena()) {
-                        16u32
-                    } else {
-                        8u32
-                    }
-                })
-                .sum();
-            let slot = self.alloc_stack(error_payload_size);
-
-            // Store each field value at the appropriate offset
-            let mut field_offset: i32 = 0;
-            for field_def in &error_fields {
-                let field_name = self
-                    .name_table()
-                    .last_segment_str(field_def.name_id)
-                    .unwrap_or_default();
-                let field_init = raise_stmt
-                    .fields
-                    .iter()
-                    .find(|f| self.interner().resolve(f.name) == field_name)
-                    .ok_or_else(|| CodegenError::not_found("raise field", &field_name))?;
-
-                let mut field_value = self.expr(&field_init.value)?;
-                // RC: inc borrowed field values for the error payload
-                if self.rc_state(field_value.type_id).needs_cleanup() && field_value.is_borrowed() {
-                    self.emit_rc_inc_for_type(field_value.value, field_value.type_id)?;
-                }
-                // The field value is consumed into the error payload.
-                field_value.mark_consumed();
-                field_value.debug_assert_rc_handled("Stmt::Raise (multi field)");
-                let bytes_stored =
-                    store_value_to_stack(self.builder, &field_value, slot, field_offset);
-                field_offset += bytes_stored;
-            }
-
-            let ptr_type = self.ptr_type();
-            self.builder.ins().stack_addr(ptr_type, slot, 0)
-        };
-
-        // RC cleanup: like return, clean up all RC locals before exiting.
-        self.emit_rc_cleanup_all_scopes(None)?;
-
-        // Return from the function with (tag, payload) or (tag, payload, 0) for wide fallible
-        if is_wide_fallible(return_type_id, self.arena()) {
-            // Wide fallible: return 3 values (tag, payload, 0) for consistency
-            // with the 3-register convention for i128 success values
-            let zero = self.builder.ins().iconst(types::I64, 0);
-            self.builder.ins().return_(&[tag_val, payload_val, zero]);
-        } else {
-            self.builder.ins().return_(&[tag_val, payload_val]);
+            return Ok(convert_to_i64_for_storage(self.builder, &field_value));
         }
 
-        // Raise always terminates the current block
-        Ok(true)
+        // Multiple fields (or single i128 field) - allocate on stack and store field values.
+        // i128 fields use 16 bytes (2 slots), all others use 8 bytes (1 slot).
+        let error_payload_size: u32 = error_fields
+            .iter()
+            .map(|f| {
+                if crate::types::is_wide_type(f.ty, self.arena()) {
+                    16u32
+                } else {
+                    8u32
+                }
+            })
+            .sum();
+        let slot = self.alloc_stack(error_payload_size);
+
+        // Store each field value at the appropriate offset
+        let mut field_offset: i32 = 0;
+        for field_def in error_fields {
+            let field_name = self
+                .name_table()
+                .last_segment_str(field_def.name_id)
+                .unwrap_or_default();
+            let field_init = raise_fields
+                .iter()
+                .find(|f| self.interner().resolve(f.name) == field_name)
+                .ok_or_else(|| CodegenError::not_found("raise field", &field_name))?;
+
+            let mut field_value = self.expr(&field_init.value)?;
+            // RC: inc borrowed field values for the error payload
+            if self.rc_state(field_value.type_id).needs_cleanup() && field_value.is_borrowed() {
+                self.emit_rc_inc_for_type(field_value.value, field_value.type_id)?;
+            }
+            // The field value is consumed into the error payload.
+            field_value.mark_consumed();
+            field_value.debug_assert_rc_handled("Stmt::Raise (multi field)");
+            let bytes_stored =
+                store_value_to_stack(self.builder, &field_value, slot, field_offset);
+            field_offset += bytes_stored;
+        }
+
+        let ptr_type = self.ptr_type();
+        Ok(self.builder.ins().stack_addr(ptr_type, slot, 0))
     }
 }
