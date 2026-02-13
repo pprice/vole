@@ -1669,6 +1669,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: manual min/max via when
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_manual_minmax_let(ctx) {
+                return stmt;
+            }
+        }
+
+        // ~2% chance: nested .to_string().length().to_string() chain
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_nested_tostring_let(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -9786,6 +9800,93 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::I64), false);
         Some(format!("let {} = {}.to_string().length()", name, var))
+    }
+
+    /// Generate manual min/max via when expression.
+    /// E.g.: `let m = when { a > b => a, _ => b }` (max)
+    /// or:   `let m = when { a < b => a, _ => b }` (min)
+    fn try_generate_manual_minmax_let(
+        &mut self,
+        ctx: &mut StmtContext,
+    ) -> Option<String> {
+        let i64_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::I64)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::I64)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        if i64_vars.len() < 2 {
+            return None;
+        }
+
+        let a = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+        let mut b = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+        while b == a && i64_vars.len() > 1 {
+            b = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+        }
+
+        let name = ctx.new_local_name();
+        let op = if self.rng.gen_bool(0.5) { ">" } else { "<" };
+
+        ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::I64), false);
+        Some(format!(
+            "let {} = when {{ {} {} {} => {}, _ => {} }}",
+            name, a, op, b, a, b
+        ))
+    }
+
+    /// Generate nested .to_string().length().to_string() chain.
+    /// E.g.: `let s = x.to_string().length().to_string()`
+    fn try_generate_nested_tostring_let(
+        &mut self,
+        ctx: &mut StmtContext,
+    ) -> Option<String> {
+        let i64_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::I64)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::I64)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        if i64_vars.is_empty() {
+            return None;
+        }
+
+        let var = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+        let name = ctx.new_local_name();
+
+        let variant = self.rng.gen_range(0..3);
+        match variant {
+            0 => {
+                // x.to_string().length().to_string() -> string
+                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::String), false);
+                Some(format!("let {} = {}.to_string().length().to_string()", name, var))
+            }
+            1 => {
+                // x.to_string().contains("0") -> bool
+                let digit = self.rng.gen_range(0..10);
+                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::Bool), false);
+                Some(format!("let {} = {}.to_string().contains(\"{}\")", name, var, digit))
+            }
+            _ => {
+                // x.to_string().replace("-", "").length() -> i64
+                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::I64), false);
+                Some(format!("let {} = {}.to_string().replace(\"-\", \"\").length()", name, var))
+            }
+        }
     }
 
     fn try_generate_bool_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
