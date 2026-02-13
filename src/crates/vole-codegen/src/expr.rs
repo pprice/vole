@@ -475,109 +475,7 @@ impl Cg<'_, '_, '_> {
                     TypeId::VOID,
                 ))
             }
-            AssignTarget::Variable(sym) => {
-                // Read the old value BEFORE evaluating the new expression,
-                // so we can rc_dec it after the assignment.
-                let rc_old = if self.rc_scopes.has_active_scope() {
-                    if let Some(&(var, type_id)) = self.vars.get(sym) {
-                        if self.rc_state(type_id).needs_cleanup() {
-                            Some(self.builder.use_var(var))
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-
-                // For composite types (structs with RC fields), snapshot the old
-                // struct pointer so we can rc_dec its RC fields after overwrite.
-                let composite_rc_old = if self.rc_scopes.has_active_scope() {
-                    if let Some(&(var, type_id)) = self.vars.get(sym) {
-                        if let Some(offsets) = self.deep_rc_field_offsets(type_id) {
-                            Some((self.builder.use_var(var), offsets))
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-
-                // For union types with RC variants, snapshot the old union pointer
-                // so we can rc_dec its payload after overwrite.
-                let union_rc_old = if self.rc_scopes.has_active_scope() {
-                    if let Some(&(var, type_id)) = self.vars.get(sym) {
-                        if let Some(rc_tags) = self.union_rc_variant_tags(type_id) {
-                            Some((self.builder.use_var(var), rc_tags))
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-
-                let mut value = self.expr(&assign.value)?;
-
-                // Check for captured variable assignment
-                if let Some(binding) = self.get_capture(sym).copied() {
-                    return self.store_capture(&binding, value);
-                }
-
-                let (var, var_type_id) = self.vars.get(sym).ok_or_else(|| {
-                    CodegenError::not_found("variable", self.interner().resolve(*sym))
-                })?;
-                let var = *var;
-                let var_type_id = *var_type_id;
-
-                value = self.coerce_to_type(value, var_type_id)?;
-
-                // RC bookkeeping for reassignment:
-                // 1. rc_inc new value if it's a borrow (variable copy)
-                // 2. Store the new value
-                // 3. rc_dec old value (after store, in case old == new)
-                if rc_old.is_some() && value.is_borrowed() {
-                    self.emit_rc_inc_for_type(value.value, var_type_id)?;
-                }
-                self.builder.def_var(var, value.value);
-                if let Some(old_val) = rc_old {
-                    self.emit_rc_dec_for_type(old_val, var_type_id)?;
-                }
-
-                // Composite RC reassignment: rc_dec each RC field of the OLD struct.
-                // The new struct's fields are already alive (fresh from the literal).
-                if let Some((old_ptr, offsets)) = composite_rc_old {
-                    for off in &offsets {
-                        let field_ptr =
-                            self.builder
-                                .ins()
-                                .load(types::I64, MemFlags::new(), old_ptr, *off);
-                        self.emit_rc_dec(field_ptr)?;
-                    }
-                    // Update the composite RC local's offsets so scope-exit cleanup
-                    // covers nested RC fields in the new value too.
-                    self.rc_scopes.update_composite_offsets(var, offsets);
-                }
-
-                // Union RC reassignment: rc_dec the RC payload of the OLD union value.
-                // The new value's payload is already alive (fresh from the expression).
-                if let Some((old_ptr, rc_tags)) = union_rc_old {
-                    self.emit_union_rc_dec(old_ptr, &rc_tags)?;
-                }
-
-                // The assignment consumed the temp — ownership transfers
-                // to the variable binding; scope cleanup handles the dec.
-                value.mark_consumed();
-                value.debug_assert_rc_handled("assign to variable");
-                Ok(value)
-            }
+            AssignTarget::Variable(sym) => self.assign_variable(*sym, &assign.value),
             AssignTarget::Field { object, field, .. } => {
                 self.field_assign(object, *field, &assign.value)
             }
@@ -585,6 +483,108 @@ impl Cg<'_, '_, '_> {
                 self.index_assign(object, index, &assign.value)
             }
         }
+    }
+
+    /// Compile assignment to a variable, handling RC snapshots and cleanup.
+    fn assign_variable(
+        &mut self,
+        sym: Symbol,
+        value_expr: &Expr,
+    ) -> CodegenResult<CompiledValue> {
+        // Read the old value BEFORE evaluating the new expression,
+        // so we can rc_dec it after the assignment.
+        let (rc_old, composite_rc_old, union_rc_old) =
+            self.snapshot_rc_for_reassignment(&sym);
+
+        let mut value = self.expr(value_expr)?;
+
+        // Check for captured variable assignment
+        if let Some(binding) = self.get_capture(&sym).copied() {
+            return self.store_capture(&binding, value);
+        }
+
+        let (var, var_type_id) = self.vars.get(&sym).ok_or_else(|| {
+            CodegenError::not_found("variable", self.interner().resolve(sym))
+        })?;
+        let var = *var;
+        let var_type_id = *var_type_id;
+
+        value = self.coerce_to_type(value, var_type_id)?;
+
+        // RC bookkeeping for reassignment:
+        // 1. rc_inc new value if it's a borrow (variable copy)
+        // 2. Store the new value
+        // 3. rc_dec old value (after store, in case old == new)
+        if rc_old.is_some() && value.is_borrowed() {
+            self.emit_rc_inc_for_type(value.value, var_type_id)?;
+        }
+        self.builder.def_var(var, value.value);
+        if let Some(old_val) = rc_old {
+            self.emit_rc_dec_for_type(old_val, var_type_id)?;
+        }
+
+        // Composite RC reassignment: rc_dec each RC field of the OLD struct.
+        // The new struct's fields are already alive (fresh from the literal).
+        if let Some((old_ptr, offsets)) = composite_rc_old {
+            for off in &offsets {
+                let field_ptr =
+                    self.builder
+                        .ins()
+                        .load(types::I64, MemFlags::new(), old_ptr, *off);
+                self.emit_rc_dec(field_ptr)?;
+            }
+            // Update the composite RC local's offsets so scope-exit cleanup
+            // covers nested RC fields in the new value too.
+            self.rc_scopes.update_composite_offsets(var, offsets);
+        }
+
+        // Union RC reassignment: rc_dec the RC payload of the OLD union value.
+        // The new value's payload is already alive (fresh from the expression).
+        if let Some((old_ptr, rc_tags)) = union_rc_old {
+            self.emit_union_rc_dec(old_ptr, &rc_tags)?;
+        }
+
+        // The assignment consumed the temp — ownership transfers
+        // to the variable binding; scope cleanup handles the dec.
+        value.mark_consumed();
+        value.debug_assert_rc_handled("assign to variable");
+        Ok(value)
+    }
+
+    /// Snapshot RC state for a variable before reassignment.
+    ///
+    /// Returns (rc_old, composite_rc_old, union_rc_old) — each `Some` if the
+    /// variable's old value needs RC cleanup after the new value is stored.
+    fn snapshot_rc_for_reassignment(
+        &mut self,
+        sym: &Symbol,
+    ) -> (
+        Option<Value>,
+        Option<(Value, Vec<i32>)>,
+        Option<(Value, Vec<(u8, bool)>)>,
+    ) {
+        if !self.rc_scopes.has_active_scope() {
+            return (None, None, None);
+        }
+        let Some(&(var, type_id)) = self.vars.get(sym) else {
+            return (None, None, None);
+        };
+
+        let rc_old = if self.rc_state(type_id).needs_cleanup() {
+            Some(self.builder.use_var(var))
+        } else {
+            None
+        };
+
+        let composite_rc_old = self
+            .deep_rc_field_offsets(type_id)
+            .map(|offsets| (self.builder.use_var(var), offsets));
+
+        let union_rc_old = self
+            .union_rc_variant_tags(type_id)
+            .map(|rc_tags| (self.builder.use_var(var), rc_tags));
+
+        (rc_old, composite_rc_old, union_rc_old)
     }
 
     /// Compile an unreachable expression (never type / bottom type)
