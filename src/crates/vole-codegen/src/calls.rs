@@ -384,68 +384,8 @@ impl Cg<'_, '_, '_> {
         }
 
         // Check if it's a global lambda or global functional interface
-        if let Some(init_expr) = self.global_init(callee_sym).cloned() {
-            // Compile the global's initializer to get its value
-            let lambda_val = self.expr(&init_expr)?;
-
-            // Get declared type from GlobalDef (uses sema-resolved type, not TypeExpr)
-            // Scope the name_table borrow to avoid conflicts with later mutable borrows
-            let global_type_id = {
-                let name_table = self.name_table();
-                let module_id = self.current_module().unwrap_or(self.env.analyzed.module_id);
-                name_table
-                    .name_id(module_id, &[callee_sym], self.interner())
-                    .and_then(|name_id| self.query().global(name_id))
-                    .map(|global_def| global_def.type_id)
-            };
-
-            if let Some(declared_type_id) = global_type_id {
-                // If declared as functional interface, call via vtable dispatch
-                let iface_info = self.interface_type_def_id(declared_type_id);
-                if let Some(type_def_id) = iface_info
-                    && let Some(method_id) = self.query().is_functional_interface(type_def_id)
-                {
-                    let method = self.query().get_method(method_id);
-                    let func_type_id = method.signature_id;
-                    let method_name_id = method.name_id;
-                    // Box the lambda value to create the interface representation
-                    let boxed = self.box_interface_value(lambda_val, declared_type_id)?;
-                    let result = self.interface_dispatch_call_args_by_type_def_id(
-                        &boxed,
-                        &call.args,
-                        type_def_id,
-                        method_name_id,
-                        func_type_id,
-                    )?;
-                    // Dec the boxed interface instance (which transitively frees
-                    // the closure via instance_drop).
-                    self.emit_rc_dec_for_type(boxed.value, boxed.type_id)?;
-                    return Ok(result);
-                }
-            }
-
-            // If it's a function type, call as closure
-            // Note: Global lambdas don't support default params lookup (use call.callee.id as placeholder)
-            if self.arena().is_function(lambda_val.type_id) {
-                let result = self.call_closure_value(
-                    lambda_val.value,
-                    lambda_val.type_id,
-                    call,
-                    call.callee.id,
-                )?;
-                // The global init re-compiles the lambda each call, creating a
-                // fresh closure allocation. Dec it now that the call has finished.
-                let mut tmp = lambda_val;
-                self.consume_rc_value(&mut tmp)?;
-                return Ok(result);
-            }
-
-            // If it's an interface type (functional interface), call via vtable
-            if let Some(result) = self.try_call_functional_interface(&lambda_val, &call.args)? {
-                // Dec the interface instance created by the global init.
-                self.emit_rc_dec_for_type(lambda_val.value, lambda_val.type_id)?;
-                return Ok(result);
-            }
+        if let Some(result) = self.try_call_global(callee_sym, call)? {
+            return Ok(result);
         }
 
         // Check if this is a call to a generic function (via monomorphization)
@@ -562,6 +502,85 @@ impl Cg<'_, '_, '_> {
         }
 
         Err(CodegenError::not_found("function", callee_name))
+    }
+
+    /// Try to call a global lambda or global functional interface.
+    ///
+    /// Returns `Some(result)` if the callee is a global with a lambda or interface
+    /// initializer, `None` otherwise.
+    fn try_call_global(
+        &mut self,
+        callee_sym: Symbol,
+        call: &CallExpr,
+    ) -> CodegenResult<Option<CompiledValue>> {
+        let init_expr = match self.global_init(callee_sym).cloned() {
+            Some(expr) => expr,
+            None => return Ok(None),
+        };
+
+        // Compile the global's initializer to get its value
+        let lambda_val = self.expr(&init_expr)?;
+
+        // Get declared type from GlobalDef (uses sema-resolved type, not TypeExpr)
+        // Scope the name_table borrow to avoid conflicts with later mutable borrows
+        let global_type_id = {
+            let name_table = self.name_table();
+            let module_id = self.current_module().unwrap_or(self.env.analyzed.module_id);
+            name_table
+                .name_id(module_id, &[callee_sym], self.interner())
+                .and_then(|name_id| self.query().global(name_id))
+                .map(|global_def| global_def.type_id)
+        };
+
+        if let Some(declared_type_id) = global_type_id {
+            // If declared as functional interface, call via vtable dispatch
+            let iface_info = self.interface_type_def_id(declared_type_id);
+            if let Some(type_def_id) = iface_info
+                && let Some(method_id) = self.query().is_functional_interface(type_def_id)
+            {
+                let method = self.query().get_method(method_id);
+                let func_type_id = method.signature_id;
+                let method_name_id = method.name_id;
+                // Box the lambda value to create the interface representation
+                let boxed = self.box_interface_value(lambda_val, declared_type_id)?;
+                let result = self.interface_dispatch_call_args_by_type_def_id(
+                    &boxed,
+                    &call.args,
+                    type_def_id,
+                    method_name_id,
+                    func_type_id,
+                )?;
+                // Dec the boxed interface instance (which transitively frees
+                // the closure via instance_drop).
+                self.emit_rc_dec_for_type(boxed.value, boxed.type_id)?;
+                return Ok(Some(result));
+            }
+        }
+
+        // If it's a function type, call as closure
+        // Note: Global lambdas don't support default params lookup (use call.callee.id as placeholder)
+        if self.arena().is_function(lambda_val.type_id) {
+            let result = self.call_closure_value(
+                lambda_val.value,
+                lambda_val.type_id,
+                call,
+                call.callee.id,
+            )?;
+            // The global init re-compiles the lambda each call, creating a
+            // fresh closure allocation. Dec it now that the call has finished.
+            let mut tmp = lambda_val;
+            self.consume_rc_value(&mut tmp)?;
+            return Ok(Some(result));
+        }
+
+        // If it's an interface type (functional interface), call via vtable
+        if let Some(result) = self.try_call_functional_interface(&lambda_val, &call.args)? {
+            // Dec the interface instance created by the global init.
+            self.emit_rc_dec_for_type(lambda_val.value, lambda_val.type_id)?;
+            return Ok(Some(result));
+        }
+
+        Ok(None)
     }
 
     /// Compile and execute a native (FFI) function call.
