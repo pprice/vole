@@ -98,7 +98,7 @@ impl Compiler<'_> {
         if let Some(ret_type_id) = return_type_id
             && let Some(field_count) = self.struct_field_count(ret_type_id)
         {
-            if field_count <= 2 {
+            if field_count <= crate::MAX_SMALL_STRUCT_FIELDS {
                 // Small struct: return in two i64 registers
                 let mut returns: SmallVec<[CraneliftType; 2]> = SmallVec::new();
                 for _ in 0..field_count {

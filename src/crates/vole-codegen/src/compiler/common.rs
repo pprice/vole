@@ -400,7 +400,7 @@ pub fn compile_function_inner_with_params<'ctx>(
         if let Some(flat_count) =
             crate::structs::struct_flat_slot_count(ret_type_id, arena, entities)
         {
-            if flat_count > 2 {
+            if flat_count > crate::MAX_SMALL_STRUCT_FIELDS {
                 config.with_sret()
             } else {
                 config

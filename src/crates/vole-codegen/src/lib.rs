@@ -48,6 +48,10 @@ pub mod loop_param_opt {
     pub use super::control_flow::loop_param_opt::*;
 }
 
+/// Maximum number of flat struct fields that can be returned in registers.
+/// Structs with more fields use the sret (struct return pointer) convention.
+pub(crate) const MAX_SMALL_STRUCT_FIELDS: usize = 2;
+
 /// Union memory layout constants used across the compiler.
 pub(crate) mod union_layout {
     /// Byte size of a tag-only (sentinel) union — no payload.

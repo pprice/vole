@@ -1934,13 +1934,13 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Check if a struct type uses small return convention (1-2 flat slots).
     pub fn is_small_struct_return(&self, type_id: TypeId) -> bool {
         self.struct_flat_slot_count(type_id)
-            .is_some_and(|count| count <= 2)
+            .is_some_and(|count| count <= crate::MAX_SMALL_STRUCT_FIELDS)
     }
 
     /// Check if a struct type uses sret convention (3+ flat slots).
     pub fn is_sret_struct_return(&self, type_id: TypeId) -> bool {
         self.struct_flat_slot_count(type_id)
-            .is_some_and(|count| count > 2)
+            .is_some_and(|count| count > crate::MAX_SMALL_STRUCT_FIELDS)
     }
 
     /// Emit a return for a small struct (1-2 flat slots) via register passing.

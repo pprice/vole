@@ -1346,7 +1346,7 @@ impl Cg<'_, '_, '_> {
         let ptr_type = self.ptr_type();
         let mut sig = self.jit_module().make_signature();
 
-        if field_count <= 2 {
+        if field_count <= crate::MAX_SMALL_STRUCT_FIELDS {
             // Small struct: C returns in registers (RAX, RDX)
             for param_type in &native_func.signature.params {
                 sig.params.push(AbiParam::new(native_type_to_cranelift(
@@ -1419,7 +1419,7 @@ impl Cg<'_, '_, '_> {
 
         // Handle struct return types
         if let NativeType::Struct { field_count } = &native_func.signature.return_type {
-            if *field_count <= 2 {
+            if *field_count <= crate::MAX_SMALL_STRUCT_FIELDS {
                 // Small struct: reconstruct from register values
                 let results_vec: Vec<Value> = results.to_vec();
                 return self.reconstruct_struct_from_regs(&results_vec, type_id);
