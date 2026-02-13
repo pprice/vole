@@ -40,7 +40,8 @@ impl EntityRegistry {
         self.methods_by_type.insert(id, FxHashMap::default());
         self.fields_by_type.insert(id, FxHashMap::default());
         self.static_methods_by_type.insert(id, FxHashMap::default());
-        *self.short_name_cache.borrow_mut() = None; // Invalidate short name cache
+        // No cache invalidation needed: ensure_short_name_cache tracks indexed_count
+        // and will pick up this new type_def on the next lookup.
         id
     }
 
@@ -87,22 +88,25 @@ impl EntityRegistry {
         self.type_by_name.get(&name_id).copied()
     }
 
-    /// Ensure the short name cache is populated. Called lazily on first lookup.
+    /// Ensure the short name cache covers all registered type_defs.
+    /// Only indexes type_defs added since the last call (incremental).
     fn ensure_short_name_cache(&self, name_table: &vole_identity::NameTable) {
-        let mut cache_ref = self.short_name_cache.borrow_mut();
-        if cache_ref.is_some() {
+        let mut cache = self.short_name_cache.borrow_mut();
+        let start = cache.indexed_count;
+        let end = self.type_defs.len();
+        if start >= end {
             return;
         }
-        let mut cache = FxHashMap::default();
-        for type_def in &self.type_defs {
+        for type_def in &self.type_defs[start..end] {
             if let Some(last_segment) = name_table.last_segment_str(type_def.name_id) {
                 cache
-                    .entry(last_segment.to_string())
-                    .or_insert_with(Vec::new)
+                    .map
+                    .entry(last_segment)
+                    .or_default()
                     .push(type_def.id);
             }
         }
-        *cache_ref = Some(cache);
+        cache.indexed_count = end;
     }
 
     /// Look up the first TypeDefId matching a short name and kind filter from the cache.
@@ -113,9 +117,8 @@ impl EntityRegistry {
         kind_filter: Option<TypeDefKind>,
     ) -> Option<TypeDefId> {
         self.ensure_short_name_cache(name_table);
-        let cache_ref = self.short_name_cache.borrow();
-        let cache = cache_ref.as_ref()?;
-        let ids = cache.get(short_name)?;
+        let cache = self.short_name_cache.borrow();
+        let ids = cache.map.get(short_name)?;
         match kind_filter {
             Some(kind) => ids
                 .iter()
