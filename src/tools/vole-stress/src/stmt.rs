@@ -1355,6 +1355,18 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: boolean negation edge cases
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_bool_negation_let(ctx) {
+                return stmt;
+            }
+        }
+
+        // ~2% chance: chained methods on literal strings
+        if self.rng.gen_bool(0.02) {
+            return self.generate_chained_literal_method(ctx);
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -7238,6 +7250,143 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             "let {} = when {{ {} > {} => {} + \"{}\", _ => {} + \"{}\" }}",
             name, cond_var, thresh, str_var, suffix_true, str_var, suffix_false
         ))
+    }
+
+    /// Generate boolean negation: `!true`, `!false`, `!(x > 0)`, `!b`.
+    /// Tests the `!` operator codegen on various boolean expressions.
+    fn try_generate_bool_negation_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let name = ctx.new_local_name();
+
+        let expr = match self.rng.gen_range(0..5u32) {
+            0 => "!true".to_string(),
+            1 => "!false".to_string(),
+            2 => {
+                // !(x > 0)
+                let i64_vars: Vec<String> = ctx
+                    .locals
+                    .iter()
+                    .filter(|(_, ty, _)| {
+                        matches!(ty, TypeInfo::Primitive(PrimitiveType::I64))
+                    })
+                    .map(|(name, _, _)| name.clone())
+                    .chain(
+                        ctx.params
+                            .iter()
+                            .filter(|p| {
+                                matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::I64))
+                            })
+                            .map(|p| p.name.clone()),
+                    )
+                    .collect();
+                if i64_vars.is_empty() {
+                    return None;
+                }
+                let var = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+                let thresh = self.rng.gen_range(-5..=10);
+                format!("!({} > {})", var, thresh)
+            }
+            3 => {
+                // !b where b is a bool variable
+                let bool_vars: Vec<String> = ctx
+                    .locals
+                    .iter()
+                    .filter(|(_, ty, _)| {
+                        matches!(ty, TypeInfo::Primitive(PrimitiveType::Bool))
+                    })
+                    .map(|(name, _, _)| name.clone())
+                    .chain(
+                        ctx.params
+                            .iter()
+                            .filter(|p| {
+                                matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::Bool))
+                            })
+                            .map(|p| p.name.clone()),
+                    )
+                    .collect();
+                if bool_vars.is_empty() {
+                    return None;
+                }
+                let var = &bool_vars[self.rng.gen_range(0..bool_vars.len())];
+                format!("!{}", var)
+            }
+            _ => {
+                // !(x == y)
+                let i64_vars: Vec<String> = ctx
+                    .locals
+                    .iter()
+                    .filter(|(_, ty, _)| {
+                        matches!(ty, TypeInfo::Primitive(PrimitiveType::I64))
+                    })
+                    .map(|(name, _, _)| name.clone())
+                    .chain(
+                        ctx.params
+                            .iter()
+                            .filter(|p| {
+                                matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::I64))
+                            })
+                            .map(|p| p.name.clone()),
+                    )
+                    .collect();
+                if i64_vars.len() < 2 {
+                    return None;
+                }
+                let v1 = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+                let v2 = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+                format!("!({} == {})", v1, v2)
+            }
+        };
+
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::Bool),
+            false,
+        );
+        Some(format!("let {} = {}", name, expr))
+    }
+
+    /// Generate chained method calls on literal strings.
+    /// E.g., `"hello world".split(" ").count()`, `"abc".length().to_string()`
+    fn generate_chained_literal_method(&mut self, ctx: &mut StmtContext) -> String {
+        let name = ctx.new_local_name();
+
+        match self.rng.gen_range(0..4u32) {
+            0 => {
+                // "hello world".split(" ").count() -> i64
+                ctx.add_local(
+                    name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::I64),
+                    false,
+                );
+                format!("let {} = \"hello world\".split(\" \").count()", name)
+            }
+            1 => {
+                // "abc".length().to_string() -> string
+                ctx.add_local(
+                    name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::String),
+                    false,
+                );
+                format!("let {} = \"abc\".length().to_string()", name)
+            }
+            2 => {
+                // "a,b,c".split(",").count() -> i64
+                ctx.add_local(
+                    name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::I64),
+                    false,
+                );
+                format!("let {} = \"a,b,c\".split(\",\").count()", name)
+            }
+            _ => {
+                // "HELLO".to_lower().length() -> i64
+                ctx.add_local(
+                    name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::I64),
+                    false,
+                );
+                format!("let {} = \"HELLO\".to_lower().length()", name)
+            }
+        }
     }
 
     fn try_generate_bool_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
