@@ -271,10 +271,7 @@ impl Analyzer {
                 expr,
                 type_def_id,
                 &type_name_str,
-                method_call.method,
-                &method_call.type_args,
-                &method_call.args,
-                method_call.method_span,
+                method_call,
                 interner,
             );
         }
@@ -302,10 +299,7 @@ impl Analyzer {
                         expr,
                         type_def_id,
                         &type_name_str,
-                        method_call.method,
-                        &method_call.type_args,
-                        &method_call.args,
-                        method_call.method_span,
+                        method_call,
                         interner,
                     );
                 }
@@ -997,20 +991,16 @@ impl Analyzer {
     }
 
     /// Check a static method call: TypeName.method(args) or TypeName.method<T, U>(args)
-    #[allow(clippy::too_many_arguments)]
     fn check_static_method_call(
         &mut self,
         expr: &Expr,
         type_def_id: TypeDefId,
         type_name_str: &str,
-        method_sym: Symbol,
-        explicit_type_args: &[TypeExpr],
-        args: &[Expr],
-        method_span: Span,
+        method_call: &MethodCallExpr,
         interner: &Interner,
     ) -> Result<ArenaTypeId, Vec<TypeError>> {
-        let method_name_str = interner.resolve(method_sym);
-        let method_name_id = self.method_name_id(method_sym, interner);
+        let method_name_str = interner.resolve(method_call.method);
+        let method_name_id = self.method_name_id(method_call.method, interner);
 
         // Look up the static method on this type
         let maybe_method_id = self
@@ -1041,11 +1031,11 @@ impl Analyzer {
 
             // Check argument count with defaults support
             let total_params = param_type_ids.len();
-            if args.len() < required_params || args.len() > total_params {
+            if method_call.args.len() < required_params || method_call.args.len() > total_params {
                 self.add_wrong_arg_count_range(
                     required_params,
                     total_params,
-                    args.len(),
+                    method_call.args.len(),
                     expr.span,
                 );
             }
@@ -1055,7 +1045,7 @@ impl Analyzer {
 
             // First pass: type-check arguments to get their types (as TypeId)
             let mut arg_type_ids = Vec::new();
-            for arg in args {
+            for arg in &method_call.args {
                 let arg_ty_id = self.check_expr(arg, interner)?;
                 arg_type_ids.push(arg_ty_id);
             }
@@ -1073,21 +1063,21 @@ impl Analyzer {
             let (final_param_ids, final_return_id, maybe_inferred) = if !all_type_params.is_empty()
             {
                 // Build substitution map from explicit type args if provided (TypeId version)
-                let inferred: FxHashMap<NameId, ArenaTypeId> = if !explicit_type_args.is_empty() {
+                let inferred: FxHashMap<NameId, ArenaTypeId> = if !method_call.type_args.is_empty() {
                     // Resolve explicit type args and map to class type params
-                    if explicit_type_args.len() != class_type_params.len() {
+                    if method_call.type_args.len() != class_type_params.len() {
                         self.add_error(
                             SemanticError::WrongArgumentCount {
                                 expected: class_type_params.len(),
-                                found: explicit_type_args.len(),
-                                span: method_span.into(),
+                                found: method_call.type_args.len(),
+                                span: method_call.method_span.into(),
                             },
-                            method_span,
+                            method_call.method_span,
                         );
                     }
                     let mut explicit_map = FxHashMap::default();
                     for (param, type_expr) in
-                        class_type_params.iter().zip(explicit_type_args.iter())
+                        class_type_params.iter().zip(method_call.type_args.iter())
                     {
                         let resolved_id = self.resolve_type_id(type_expr, interner);
                         explicit_map.insert(param.name_id, resolved_id);
@@ -1138,7 +1128,8 @@ impl Analyzer {
             };
 
             // Second pass: check argument types against (potentially substituted) param types
-            for (arg, (&arg_ty_id, &param_ty_id)) in args
+            for (arg, (&arg_ty_id, &param_ty_id)) in method_call
+                .args
                 .iter()
                 .zip(arg_type_ids.iter().zip(final_param_ids.iter()))
             {
@@ -1180,7 +1171,7 @@ impl Analyzer {
                 self.record_static_method_monomorph(
                     expr,
                     type_def_id,
-                    method_sym,
+                    method_call.method,
                     &func_type,
                     &class_type_params,
                     &method_type_params,
@@ -1197,13 +1188,13 @@ impl Analyzer {
             SemanticError::UnknownMethod {
                 ty: type_name_str.to_string(),
                 method: method_name_str.to_string(),
-                span: method_span.into(),
+                span: method_call.method_span.into(),
             },
-            method_span,
+            method_call.method_span,
         );
 
         // Still check args for more errors
-        for arg in args {
+        for arg in &method_call.args {
             self.check_expr(arg, interner)?;
         }
 
