@@ -116,7 +116,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Try to optimize multiply/divide/mod by power of 2 to shifts
-        if let Some(result) = self.try_emit_power_of_two(bin, line)? {
+        if let Some(result) = self.try_emit_power_of_two(bin)? {
             return Ok(result);
         }
 
@@ -236,7 +236,6 @@ impl Cg<'_, '_, '_> {
     fn try_emit_power_of_two(
         &mut self,
         bin: &BinaryExpr,
-        _line: u32,
     ) -> CodegenResult<Option<CompiledValue>> {
         // Only handle Mul, Div, Mod for power-of-2 optimization
         if !matches!(bin.op, BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod) {

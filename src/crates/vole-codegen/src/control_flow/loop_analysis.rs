@@ -145,13 +145,9 @@ impl FunctionLoopInfo {
         // Collect all blocks in this loop
         let blocks = self.collect_loop_blocks(func, lp);
 
-        // Analyze block parameters
-        let header_params: FxHashSet<Value> =
-            func.dfg.block_params(header).iter().copied().collect();
-
         // Find which header params are actually modified in the loop
         let (modified_params, invariant_params) =
-            self.classify_block_params(func, header, &blocks, &header_params);
+            self.classify_block_params(func, header, &blocks);
 
         LoopInfo {
             loop_id: lp,
@@ -180,13 +176,9 @@ impl FunctionLoopInfo {
         let invariant_values: FxHashSet<Value> =
             used_in_loop.difference(&defined_in_loop).copied().collect();
 
-        // Analyze block parameters
-        let header_params: FxHashSet<Value> =
-            func.dfg.block_params(header).iter().copied().collect();
-
         // Find which header params are actually modified in the loop
         let (modified_params, invariant_params) =
-            self.classify_block_params(func, header, &blocks, &header_params);
+            self.classify_block_params(func, header, &blocks);
 
         // Find induction variables
         let induction_vars = self.find_induction_vars(func, header, &blocks, &modified_params);
@@ -280,7 +272,6 @@ impl FunctionLoopInfo {
         func: &Function,
         header: Block,
         loop_blocks: &FxHashSet<Block>,
-        _header_params: &FxHashSet<Value>,
     ) -> (FxHashSet<Value>, FxHashSet<Value>) {
         let mut modified = FxHashSet::default();
         let mut invariant = FxHashSet::default();

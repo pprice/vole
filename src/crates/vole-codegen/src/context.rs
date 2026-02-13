@@ -2662,9 +2662,9 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &mut self,
         intrinsic_key: &str,
         args: &[Value],
-        _return_type_id: TypeId,
+        return_type_id: TypeId,
     ) -> CodegenResult<CompiledValue> {
-        self.call_compiler_intrinsic_with_line(intrinsic_key, args, _return_type_id, 0)
+        self.call_compiler_intrinsic_with_line(intrinsic_key, args, return_type_id, 0)
     }
 
     /// Call a compiler intrinsic with an optional source line number.
@@ -2672,7 +2672,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &mut self,
         intrinsic_key: &str,
         args: &[Value],
-        _return_type_id: TypeId,
+        return_type_id: TypeId,
         call_line: u32,
     ) -> CodegenResult<CompiledValue> {
         use crate::intrinsics::{FloatConstant, IntrinsicHandler, IntrinsicKey, UnaryFloatOp};
@@ -2860,7 +2860,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
                 // Build optional result: if overflow -> nil (tag=0), else -> Some(result) (tag=1, value)
                 // Stack layout: [tag: i8] + padding + [value: T] = 16 bytes for alignment
-                self.checked_int_op_impl(*op, arg1, arg2, _return_type_id)
+                self.checked_int_op_impl(*op, arg1, arg2, return_type_id)
             }
             IntrinsicHandler::BuiltinPanic => {
                 if args.is_empty() {
