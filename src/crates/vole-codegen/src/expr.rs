@@ -1382,7 +1382,7 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<CompiledValue> {
         let closure_var = self
             .closure_var()
-            .ok_or_else(|| "Closure variable not available for capture access".to_string())?;
+            .ok_or_else(|| CodegenError::internal("closure variable not available for capture access"))?;
         let closure_ptr = self.builder.use_var(closure_var);
 
         let index_val = self.builder.ins().iconst(types::I64, binding.index as i64);
@@ -1420,7 +1420,7 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<CompiledValue> {
         let closure_var = self
             .closure_var()
-            .ok_or_else(|| "Closure variable not available for capture access".to_string())?;
+            .ok_or_else(|| CodegenError::internal("closure variable not available for capture access"))?;
         let closure_ptr = self.builder.use_var(closure_var);
 
         let index_val = self.builder.ins().iconst(types::I64, binding.index as i64);

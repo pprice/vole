@@ -422,7 +422,7 @@ impl Cg<'_, '_, '_> {
         let func_key = *self
             .method_func_keys()
             .get(&(type_name_id, method_id))
-            .ok_or_else(|| "to_string method info not found in method_func_keys".to_string())?;
+            .ok_or_else(|| CodegenError::not_found("method info", "to_string in method_func_keys"))?;
 
         let func_ref = self.func_ref(func_key)?;
 

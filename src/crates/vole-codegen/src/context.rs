@@ -3485,9 +3485,9 @@ pub(crate) fn resolve_external_names(
 ) -> CodegenResult<(String, String)> {
     let module_path = name_table
         .last_segment_str(external_info.module_path)
-        .ok_or_else(|| "module_path NameId has no segment".to_string())?;
+        .ok_or_else(|| CodegenError::internal("module_path NameId has no segment"))?;
     let native_name = name_table
         .last_segment_str(external_info.native_name)
-        .ok_or_else(|| "native_name NameId has no segment".to_string())?;
+        .ok_or_else(|| CodegenError::internal("native_name NameId has no segment"))?;
     Ok((module_path, native_name))
 }

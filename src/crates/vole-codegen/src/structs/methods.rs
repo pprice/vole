@@ -1114,7 +1114,7 @@ impl Cg<'_, '_, '_> {
         // Look up the Iterator interface
         let iter_type_id = self
             .resolve_type_str_or_interface("Iterator")
-            .ok_or_else(|| "Iterator interface not found in entity registry".to_string())?;
+            .ok_or_else(|| CodegenError::not_found("interface", "Iterator"))?;
 
         let iter_def = self.query().get_type(iter_type_id);
 
@@ -1571,7 +1571,7 @@ impl Cg<'_, '_, '_> {
         let word = results
             .first()
             .copied()
-            .ok_or_else(|| "interface call missing return value".to_string())?;
+            .ok_or_else(|| CodegenError::internal("interface call missing return value"))?;
         let registry = self.registry();
         let arena = self.env.analyzed.type_arena();
         let value = word_to_value_type_id(
@@ -2028,7 +2028,7 @@ impl Cg<'_, '_, '_> {
         // Get the return type [T] from sema to determine element type T
         let return_type_id = self
             .get_expr_type_substituted(&expr_id)
-            .ok_or_else(|| "Array.filled: missing return type from sema".to_string())?;
+            .ok_or_else(|| CodegenError::missing_resource("Array.filled return type from sema"))?;
         let elem_type_id = self
             .arena()
             .unwrap_array(return_type_id)
