@@ -733,32 +733,38 @@ pub(crate) fn word_to_value_type_id(
 /// so that `tag_needs_rc` correctly identifies RC-managed elements for cleanup
 /// in `array_drop`.
 pub(crate) fn array_element_tag_id(ty: TypeId, arena: &TypeArena) -> i64 {
+    use vole_runtime::value::{
+        TYPE_ARRAY, TYPE_BOOL, TYPE_CLOSURE, TYPE_F64, TYPE_I64, TYPE_INSTANCE, TYPE_RNG,
+        TYPE_STRING, TYPE_UNION_HEAP,
+    };
     use vole_sema::type_arena::SemaType as ArenaType;
     // Handle type uses a special TypeId sentinel, check before SemaType match
     if arena.is_handle(ty) {
-        return 8; // TYPE_RNG / generic handle
+        return TYPE_RNG as i64;
     }
     // Sentinel types (nil, Done, user-defined) are non-RC stack values
     if arena.is_sentinel(ty) {
-        return 2; // TYPE_I64 - sentinels are small non-RC values
+        return TYPE_I64 as i64;
     }
     match arena.get(ty) {
-        ArenaType::Primitive(PrimitiveType::String) => 1, // TYPE_STRING
+        ArenaType::Primitive(PrimitiveType::String) => TYPE_STRING as i64,
         ArenaType::Primitive(PrimitiveType::I64)
         | ArenaType::Primitive(PrimitiveType::I32)
         | ArenaType::Primitive(PrimitiveType::I16)
-        | ArenaType::Primitive(PrimitiveType::I8) => 2, // TYPE_I64
-        ArenaType::Primitive(PrimitiveType::F64) | ArenaType::Primitive(PrimitiveType::F32) => 3, // TYPE_F64
-        ArenaType::Primitive(PrimitiveType::Bool) => 4, // TYPE_BOOL
-        ArenaType::Array(_) => 5,                       // TYPE_ARRAY
-        ArenaType::Function { .. } => 6,                // TYPE_CLOSURE
-        ArenaType::Class { .. } => 7,                   // TYPE_INSTANCE
+        | ArenaType::Primitive(PrimitiveType::I8) => TYPE_I64 as i64,
+        ArenaType::Primitive(PrimitiveType::F64) | ArenaType::Primitive(PrimitiveType::F32) => {
+            TYPE_F64 as i64
+        }
+        ArenaType::Primitive(PrimitiveType::Bool) => TYPE_BOOL as i64,
+        ArenaType::Array(_) => TYPE_ARRAY as i64,
+        ArenaType::Function { .. } => TYPE_CLOSURE as i64,
+        ArenaType::Class { .. } => TYPE_INSTANCE as i64,
         // Union values boxed by codegen use raw heap buffers (tag+payload), not
         // RcHeader-prefixed allocations. Tagged as TYPE_UNION_HEAP so array_drop
         // calls union_heap_cleanup (which frees the buffer and conditionally
         // rc_dec's the RC payload inside).
-        ArenaType::Union(_) => 12, // TYPE_UNION_HEAP
-        _ => 2,                    // default to integer for non-RC types
+        ArenaType::Union(_) => TYPE_UNION_HEAP as i64,
+        _ => TYPE_I64 as i64,
     }
 }
 
