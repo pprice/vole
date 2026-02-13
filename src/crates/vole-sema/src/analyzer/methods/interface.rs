@@ -498,7 +498,12 @@ impl Analyzer {
                     self.type_arena_mut()
                         .class(type_id, crate::type_arena::TypeIdVec::new()),
                 ),
-                _ => None,
+                TypeDefKind::Interface
+                | TypeDefKind::Struct
+                | TypeDefKind::ErrorType
+                | TypeDefKind::Primitive
+                | TypeDefKind::Alias
+                | TypeDefKind::Sentinel => None,
             }
         } else {
             None

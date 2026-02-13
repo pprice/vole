@@ -626,7 +626,7 @@ impl Analyzer {
                     method_id: Some(method_id),
                 })
             }
-            _ => None,
+            TypeDefKind::ErrorType | TypeDefKind::Primitive | TypeDefKind::Alias => None,
         }
     }
 
