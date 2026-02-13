@@ -102,11 +102,6 @@ impl OptimizerConfig {
             constant_folding: true,
         }
     }
-
-    /// Create a new config with no optimizations
-    pub fn none() -> Self {
-        Self::default()
-    }
 }
 
 /// Statistics from optimization passes.
