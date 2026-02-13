@@ -1115,12 +1115,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         &self.env.state.native_registry
     }
 
-    /// Alias for native_registry (backward compat)
-    #[inline]
-    pub fn native_funcs(&self) -> &'ctx vole_runtime::NativeRegistry {
-        &self.env.state.native_registry
-    }
-
     /// Get compiler intrinsics registry
     #[inline]
     pub fn intrinsics_registry(&self) -> &'ctx crate::intrinsics::IntrinsicsRegistry {

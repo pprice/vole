@@ -485,7 +485,7 @@ impl Cg<'_, '_, '_> {
             }
 
             // Try FFI call for external module functions
-            if let Some(native_func) = self.native_funcs().lookup(&module_path, callee_name) {
+            if let Some(native_func) = self.native_registry().lookup(&module_path, callee_name) {
                 return self.call_native_external(
                     native_func,
                     callee_sym,
@@ -536,7 +536,7 @@ impl Cg<'_, '_, '_> {
             let name_table = self.name_table();
             let module_path = name_table.last_segment_str(info.module_path)?;
             let native_name = name_table.last_segment_str(info.native_name)?;
-            let func = self.native_funcs().lookup(&module_path, &native_name)?;
+            let func = self.native_registry().lookup(&module_path, &native_name)?;
             Some((module_path.to_string(), native_name.to_string(), func))
         });
         if let Some((_module_path, _native_name, native_func)) = native_lookup {
@@ -616,7 +616,7 @@ impl Cg<'_, '_, '_> {
         }
 
         // Try FFI call for external module functions
-        if let Some(native_func) = self.native_funcs().lookup(&module_path, export_name_str) {
+        if let Some(native_func) = self.native_registry().lookup(&module_path, export_name_str) {
             return self.call_native_external(native_func, export_name, call, &call_expr_id);
         }
 
@@ -1686,7 +1686,7 @@ impl Cg<'_, '_, '_> {
             let module_path = name_table.last_segment_str(ext_info.module_path);
             let native_name = name_table.last_segment_str(ext_info.native_name);
             if let (Some(module_path), Some(native_name)) = (module_path, native_name)
-                && let Some(native_func) = self.native_funcs().lookup(&module_path, &native_name)
+                && let Some(native_func) = self.native_registry().lookup(&module_path, &native_name)
             {
                 let return_type_id = self.substitute_type(return_type_id);
                 return self
