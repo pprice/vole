@@ -355,239 +355,11 @@ impl Analyzer {
             return Ok(self.ty_invalid_traced_id("method_on_union"));
         }
 
-        // Handle module method calls (e.g., math.sqrt(16.0)) using TypeId-based lookup
-        let module_info = {
-            let arena = self.type_arena();
-            arena.unwrap_module(object_type_id).map(|m| {
-                let method_name_str = interner.resolve(method_call.method);
-                let name_id = self.module_name_id(m.module_id, method_name_str);
-                // Find export type if name matches
-                let export_type_id = name_id.and_then(|nid| {
-                    m.exports
-                        .iter()
-                        .find(|(n, _)| *n == nid)
-                        .map(|&(_, type_id)| type_id)
-                });
-                (
-                    m.module_id,
-                    method_name_str.to_string(),
-                    name_id,
-                    export_type_id,
-                )
-            })
-        };
-        if let Some((module_id, method_name_str, name_id, export_type_id)) = module_info {
-            let module_path = self.name_table().module_path(module_id).to_string();
-            let Some(name_id) = name_id else {
-                self.add_error(
-                    SemanticError::ModuleNoExport {
-                        module: module_path,
-                        name: method_name_str,
-                        span: method_call.method_span.into(),
-                    },
-                    method_call.method_span,
-                );
-                return Ok(ArenaTypeId::INVALID);
-            };
-            let Some(export_type_id) = export_type_id else {
-                self.add_error(
-                    SemanticError::ModuleNoExport {
-                        module: module_path,
-                        name: method_name_str,
-                        span: method_call.method_span.into(),
-                    },
-                    method_call.method_span,
-                );
-                return Ok(ArenaTypeId::INVALID);
-            };
-
-            // Check if export is a function using arena
-            let func_info = {
-                let arena = self.type_arena();
-                arena
-                    .unwrap_function(export_type_id)
-                    .map(|(params, ret, is_closure)| (params.clone(), ret, is_closure))
-            };
-            let Some((param_ids, return_id, _is_closure)) = func_info else {
-                self.type_error_id("function", export_type_id, method_call.method_span);
-                return Ok(ArenaTypeId::INVALID);
-            };
-
-            // Check if this is a generic function (has TypeParams in signature)
-            let has_type_params = {
-                let arena = self.type_arena();
-                param_ids
-                    .iter()
-                    .any(|&p| arena.unwrap_type_param(p).is_some())
-                    || arena.unwrap_type_param(return_id).is_some()
-            };
-
-            // For generic functions, infer type params and check arguments against concrete types
-            let (concrete_param_ids, concrete_return_id) = if has_type_params {
-                // Look up GenericFuncInfo from EntityRegistry
-                let generic_info =
-                    self.entity_registry()
-                        .function_by_name(name_id)
-                        .and_then(|fid| {
-                            self.entity_registry()
-                                .get_function(fid)
-                                .generic_info
-                                .clone()
-                        });
-
-                if let Some(generic_def) = generic_info {
-                    // Type-check arguments to get their types
-                    let arg_type_ids: Vec<ArenaTypeId> = method_call
-                        .args
-                        .iter()
-                        .map(|arg| self.check_expr(arg, interner))
-                        .collect::<Result<Vec<_>, _>>()?;
-
-                    // Infer type parameters
-                    let inferred_id = self.infer_type_params_id(
-                        &generic_def.type_params,
-                        &generic_def.param_types,
-                        &arg_type_ids,
-                    );
-                    self.check_type_param_constraints_id(
-                        &generic_def.type_params,
-                        &inferred_id,
-                        expr.span,
-                        interner,
-                    );
-
-                    // Create concrete types by substitution
-                    let subs: FxHashMap<_, _> = inferred_id.iter().map(|(&k, &v)| (k, v)).collect();
-                    let (concrete_params, concrete_ret) = {
-                        let mut arena = self.type_arena_mut();
-                        let params: Vec<_> = generic_def
-                            .param_types
-                            .iter()
-                            .map(|&t| arena.substitute(t, &subs))
-                            .collect();
-                        let ret = arena.substitute(generic_def.return_type, &subs);
-                        (params, ret)
-                    };
-
-                    // Check arguments against concrete params
-                    for (i, (arg, &expected_id)) in method_call
-                        .args
-                        .iter()
-                        .zip(concrete_params.iter())
-                        .enumerate()
-                    {
-                        let arg_ty_id = arg_type_ids[i];
-                        if !self.types_compatible_id(arg_ty_id, expected_id, interner) {
-                            self.add_type_mismatch_id(expected_id, arg_ty_id, arg.span);
-                        }
-                    }
-
-                    // Create monomorph instance for codegen
-                    let type_args_id: Vec<ArenaTypeId> = generic_def
-                        .type_params
-                        .iter()
-                        .filter_map(|tp| inferred_id.get(&tp.name_id).copied())
-                        .collect();
-                    let type_keys: Vec<_> = type_args_id.to_vec();
-                    let key = MonomorphKey::new(name_id, type_keys);
-
-                    if !self.entity_registry_mut().monomorph_cache.contains(&key) {
-                        let id = self.entity_registry_mut().monomorph_cache.next_unique_id();
-                        let base_str = self
-                            .name_table()
-                            .last_segment_str(name_id)
-                            .unwrap_or_else(|| method_name_str.clone());
-                        let mangled_name = {
-                            let mut table = self.name_table_mut();
-                            let mut namer = Namer::new(&mut table, interner);
-                            namer.monomorph_str(module_id, &base_str, id)
-                        };
-                        let substitutions: FxHashMap<NameId, ArenaTypeId> = inferred_id.clone();
-                        let func_type =
-                            FunctionType::from_ids(&concrete_params, concrete_ret, false);
-                        self.entity_registry_mut().monomorph_cache.insert(
-                            key.clone(),
-                            MonomorphInstance {
-                                original_name: name_id,
-                                mangled_name,
-                                instance_id: id,
-                                func_type,
-                                substitutions,
-                            },
-                        );
-                    }
-
-                    // Record the call -> monomorph key mapping for codegen
-                    self.generic_calls.insert(expr.id, key);
-
-                    (concrete_params, concrete_ret)
-                } else {
-                    // No generic info found - fall back to non-generic path
-                    self.check_call_args_id(
-                        &method_call.args,
-                        &param_ids,
-                        return_id,
-                        expr.span,
-                        interner,
-                    )?;
-                    (param_ids.to_vec(), return_id)
-                }
-            } else {
-                // Non-generic function - check arguments directly
-                self.check_call_args_id(
-                    &method_call.args,
-                    &param_ids,
-                    return_id,
-                    expr.span,
-                    interner,
-                )?;
-                (param_ids.to_vec(), return_id)
-            };
-
-            // Build FunctionType for resolution storage (still needed for codegen)
-            let func_type = FunctionType::from_ids(&concrete_param_ids, concrete_return_id, false);
-            let func_type_id = func_type.intern(&mut self.type_arena_mut());
-
-            // Get external_funcs from module metadata
-            let is_external = self
-                .type_arena()
-                .module_metadata(module_id)
-                .is_some_and(|meta| meta.external_funcs.contains(&name_id));
-
-            let external_info = if is_external {
-                // Extract values before struct construction to avoid RefMut lifetime overlap
-                let builtin_module = self.name_table_mut().builtin_module();
-                let module_path_str = self.name_table().module_path(module_id).to_string();
-                let module_path_id = self
-                    .name_table_mut()
-                    .intern_raw(builtin_module, &[&module_path_str]);
-                let native_name_id = self
-                    .name_table_mut()
-                    .intern_raw(builtin_module, &[&method_name_str]);
-                Some(ExternalMethodInfo {
-                    module_path: module_path_id,
-                    native_name: native_name_id,
-                })
-            } else {
-                None
-            };
-
-            // For module method calls, use name_id as method_name_id
-            self.method_resolutions.insert(
-                expr.id,
-                ResolvedMethod::Implemented {
-                    type_def_id: None, // Module methods don't have a TypeDefId
-                    method_name_id: name_id,
-                    trait_name: None,
-                    func_type_id,
-                    return_type_id: concrete_return_id,
-                    is_builtin: false,
-                    external_info,
-                    concrete_return_hint: None,
-                },
-            );
-
-            return Ok(concrete_return_id);
+        // Handle module method calls (e.g., math.sqrt(16.0))
+        if let Some(result) =
+            self.check_module_method_call(expr, method_call, interner, object_type_id)?
+        {
+            return Ok(result);
         }
 
         // Handle structural type method calls (duck typing)
@@ -1475,5 +1247,239 @@ impl Analyzer {
         // Record the call site → key mapping
         tracing::debug!(expr_id = ?expr.id, key = ?key, "recording static method call site");
         self.static_method_calls.insert(expr.id, key);
+    }
+
+    /// Handle module method calls (e.g., `math.sqrt(16.0)`).
+    /// Returns `Some(return_type_id)` if the object is a module, `None` otherwise.
+    fn check_module_method_call(
+        &mut self,
+        expr: &Expr,
+        method_call: &MethodCallExpr,
+        interner: &Interner,
+        object_type_id: ArenaTypeId,
+    ) -> Result<Option<ArenaTypeId>, Vec<TypeError>> {
+        let module_info = {
+            let arena = self.type_arena();
+            arena.unwrap_module(object_type_id).map(|m| {
+                let method_name_str = interner.resolve(method_call.method);
+                let name_id = self.module_name_id(m.module_id, method_name_str);
+                let export_type_id = name_id.and_then(|nid| {
+                    m.exports
+                        .iter()
+                        .find(|(n, _)| *n == nid)
+                        .map(|&(_, type_id)| type_id)
+                });
+                (
+                    m.module_id,
+                    method_name_str.to_string(),
+                    name_id,
+                    export_type_id,
+                )
+            })
+        };
+        let Some((module_id, method_name_str, name_id, export_type_id)) = module_info else {
+            return Ok(None);
+        };
+
+        let module_path = self.name_table().module_path(module_id).to_string();
+        let Some(name_id) = name_id else {
+            self.add_error(
+                SemanticError::ModuleNoExport {
+                    module: module_path,
+                    name: method_name_str,
+                    span: method_call.method_span.into(),
+                },
+                method_call.method_span,
+            );
+            return Ok(Some(ArenaTypeId::INVALID));
+        };
+        let Some(export_type_id) = export_type_id else {
+            self.add_error(
+                SemanticError::ModuleNoExport {
+                    module: module_path,
+                    name: method_name_str,
+                    span: method_call.method_span.into(),
+                },
+                method_call.method_span,
+            );
+            return Ok(Some(ArenaTypeId::INVALID));
+        };
+
+        // Check if export is a function using arena
+        let func_info = {
+            let arena = self.type_arena();
+            arena
+                .unwrap_function(export_type_id)
+                .map(|(params, ret, is_closure)| (params.clone(), ret, is_closure))
+        };
+        let Some((param_ids, return_id, _is_closure)) = func_info else {
+            self.type_error_id("function", export_type_id, method_call.method_span);
+            return Ok(Some(ArenaTypeId::INVALID));
+        };
+
+        // Check if this is a generic function (has TypeParams in signature)
+        let has_type_params = {
+            let arena = self.type_arena();
+            param_ids
+                .iter()
+                .any(|&p| arena.unwrap_type_param(p).is_some())
+                || arena.unwrap_type_param(return_id).is_some()
+        };
+
+        // For generic functions, infer type params and check arguments against concrete types
+        let (concrete_param_ids, concrete_return_id) = if has_type_params {
+            let generic_info =
+                self.entity_registry()
+                    .function_by_name(name_id)
+                    .and_then(|fid| {
+                        self.entity_registry()
+                            .get_function(fid)
+                            .generic_info
+                            .clone()
+                    });
+
+            if let Some(generic_def) = generic_info {
+                let arg_type_ids: Vec<ArenaTypeId> = method_call
+                    .args
+                    .iter()
+                    .map(|arg| self.check_expr(arg, interner))
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                let inferred_id = self.infer_type_params_id(
+                    &generic_def.type_params,
+                    &generic_def.param_types,
+                    &arg_type_ids,
+                );
+                self.check_type_param_constraints_id(
+                    &generic_def.type_params,
+                    &inferred_id,
+                    expr.span,
+                    interner,
+                );
+
+                let subs: FxHashMap<_, _> = inferred_id.iter().map(|(&k, &v)| (k, v)).collect();
+                let (concrete_params, concrete_ret) = {
+                    let mut arena = self.type_arena_mut();
+                    let params: Vec<_> = generic_def
+                        .param_types
+                        .iter()
+                        .map(|&t| arena.substitute(t, &subs))
+                        .collect();
+                    let ret = arena.substitute(generic_def.return_type, &subs);
+                    (params, ret)
+                };
+
+                for (i, (arg, &expected_id)) in method_call
+                    .args
+                    .iter()
+                    .zip(concrete_params.iter())
+                    .enumerate()
+                {
+                    let arg_ty_id = arg_type_ids[i];
+                    if !self.types_compatible_id(arg_ty_id, expected_id, interner) {
+                        self.add_type_mismatch_id(expected_id, arg_ty_id, arg.span);
+                    }
+                }
+
+                // Create monomorph instance for codegen
+                let type_args_id: Vec<ArenaTypeId> = generic_def
+                    .type_params
+                    .iter()
+                    .filter_map(|tp| inferred_id.get(&tp.name_id).copied())
+                    .collect();
+                let type_keys: Vec<_> = type_args_id.to_vec();
+                let key = MonomorphKey::new(name_id, type_keys);
+
+                if !self.entity_registry_mut().monomorph_cache.contains(&key) {
+                    let id = self.entity_registry_mut().monomorph_cache.next_unique_id();
+                    let base_str = self
+                        .name_table()
+                        .last_segment_str(name_id)
+                        .unwrap_or_else(|| method_name_str.clone());
+                    let mangled_name = {
+                        let mut table = self.name_table_mut();
+                        let mut namer = Namer::new(&mut table, interner);
+                        namer.monomorph_str(module_id, &base_str, id)
+                    };
+                    let substitutions: FxHashMap<NameId, ArenaTypeId> = inferred_id.clone();
+                    let func_type =
+                        FunctionType::from_ids(&concrete_params, concrete_ret, false);
+                    self.entity_registry_mut().monomorph_cache.insert(
+                        key.clone(),
+                        MonomorphInstance {
+                            original_name: name_id,
+                            mangled_name,
+                            instance_id: id,
+                            func_type,
+                            substitutions,
+                        },
+                    );
+                }
+
+                self.generic_calls.insert(expr.id, key);
+
+                (concrete_params, concrete_ret)
+            } else {
+                self.check_call_args_id(
+                    &method_call.args,
+                    &param_ids,
+                    return_id,
+                    expr.span,
+                    interner,
+                )?;
+                (param_ids.to_vec(), return_id)
+            }
+        } else {
+            self.check_call_args_id(
+                &method_call.args,
+                &param_ids,
+                return_id,
+                expr.span,
+                interner,
+            )?;
+            (param_ids.to_vec(), return_id)
+        };
+
+        // Build FunctionType for resolution storage
+        let func_type = FunctionType::from_ids(&concrete_param_ids, concrete_return_id, false);
+        let func_type_id = func_type.intern(&mut self.type_arena_mut());
+
+        let is_external = self
+            .type_arena()
+            .module_metadata(module_id)
+            .is_some_and(|meta| meta.external_funcs.contains(&name_id));
+
+        let external_info = if is_external {
+            let builtin_module = self.name_table_mut().builtin_module();
+            let module_path_str = self.name_table().module_path(module_id).to_string();
+            let module_path_id = self
+                .name_table_mut()
+                .intern_raw(builtin_module, &[&module_path_str]);
+            let native_name_id = self
+                .name_table_mut()
+                .intern_raw(builtin_module, &[&method_name_str]);
+            Some(ExternalMethodInfo {
+                module_path: module_path_id,
+                native_name: native_name_id,
+            })
+        } else {
+            None
+        };
+
+        self.method_resolutions.insert(
+            expr.id,
+            ResolvedMethod::Implemented {
+                type_def_id: None,
+                method_name_id: name_id,
+                trait_name: None,
+                func_type_id,
+                return_type_id: concrete_return_id,
+                is_builtin: false,
+                external_info,
+                concrete_return_hint: None,
+            },
+        );
+
+        Ok(Some(concrete_return_id))
     }
 }
