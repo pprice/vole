@@ -31,7 +31,8 @@ impl RcArray {
             }
 
             let data = if capacity > 0 {
-                let data_layout = Layout::array::<TaggedValue>(capacity).unwrap();
+                let data_layout = Layout::array::<TaggedValue>(capacity)
+                    .expect("array capacity exceeds maximum allocation size");
                 alloc(data_layout) as *mut TaggedValue
             } else {
                 ptr::null_mut()
@@ -78,16 +79,20 @@ impl RcArray {
             let new_cap = if old_cap == 0 { 4 } else { old_cap * 2 };
 
             let new_data = if old_cap == 0 {
-                let layout = Layout::array::<TaggedValue>(new_cap).unwrap();
+                let layout = Layout::array::<TaggedValue>(new_cap)
+                    .expect("array capacity exceeds maximum allocation size");
                 alloc(layout) as *mut TaggedValue
             } else {
-                let old_layout = Layout::array::<TaggedValue>(old_cap).unwrap();
-                let new_layout = Layout::array::<TaggedValue>(new_cap).unwrap();
+                let old_layout = Layout::array::<TaggedValue>(old_cap)
+                    .expect("array capacity exceeds maximum allocation size");
+                let new_layout = Layout::array::<TaggedValue>(new_cap)
+                    .expect("array capacity exceeds maximum allocation size");
                 realloc((*arr).data as *mut u8, old_layout, new_layout.size()) as *mut TaggedValue
             };
 
             if new_data.is_null() {
-                let layout = Layout::array::<TaggedValue>(new_cap).unwrap();
+                let layout = Layout::array::<TaggedValue>(new_cap)
+                    .expect("array capacity exceeds maximum allocation size");
                 std::alloc::handle_alloc_error(layout);
             }
 
@@ -175,7 +180,8 @@ unsafe extern "C" fn array_drop(ptr: *mut u8) {
         }
 
         if cap > 0 && !(*arr).data.is_null() {
-            let data_layout = Layout::array::<TaggedValue>(cap).unwrap();
+            let data_layout = Layout::array::<TaggedValue>(cap)
+                .expect("array capacity exceeds maximum allocation size");
             dealloc((*arr).data as *mut u8, data_layout);
         }
 
