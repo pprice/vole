@@ -2219,7 +2219,9 @@ impl Cg<'_, '_, '_> {
                         Ok(self.void_value())
                     };
                 }
-                _ => {} // Runtime check needed, fall through
+                IsCheckResult::CheckTag(_) | IsCheckResult::CheckUnknown(_) => {
+                    // Runtime check needed, fall through
+                }
             }
         }
 
