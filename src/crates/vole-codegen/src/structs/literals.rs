@@ -267,31 +267,9 @@ impl Cg<'_, '_, '_> {
             // The field value is consumed into the instance.
             value.mark_consumed();
 
-            // If field type is optional (union) and value type is not a union, wrap it
-            // Use heap allocation for unions stored in class fields since stack slots
-            // don't persist beyond the current function's stack frame
+            // Coerce value to match the field's type (union wrapping, interface boxing)
             let final_value = if let Some(&field_type_id) = field_types.get(init_name) {
-                let arena = self.arena();
-                let field_is_union = arena.is_union(field_type_id);
-                let field_is_interface = arena.is_interface(field_type_id);
-                let value_is_union = arena.is_union(value.type_id);
-
-                if field_is_union && !value_is_union {
-                    self.construct_union_heap_id(value, field_type_id)?
-                } else if field_is_union && value_is_union {
-                    // Union value stored in class field must be heap-allocated.
-                    // The value may be stack-allocated (from construct_union_id),
-                    // so copy the 16-byte buffer to the heap.
-                    self.copy_union_to_heap(value)?
-                } else if field_is_interface && arena.is_interface(value.type_id) {
-                    // Value is already an interface fat pointer. Copy it into a new
-                    // heap allocation so instance_drop can free it independently.
-                    self.copy_interface_fat_ptr(value)?
-                } else if field_is_interface {
-                    self.box_interface_value(value, field_type_id)?
-                } else {
-                    value
-                }
+                self.coerce_field_value(value, field_type_id)?
             } else {
                 value
             };
@@ -327,26 +305,9 @@ impl Cg<'_, '_, '_> {
             // Compile the default expression
             let value = self.expr(default_expr)?;
 
-            // If field type is optional (union) and value type is not a union, wrap it
+            // Coerce value to match the field's type (union wrapping, interface boxing)
             let final_value = if let Some(&field_type_id) = field_types.get(&field_name) {
-                let arena = self.arena();
-                let field_is_union = arena.is_union(field_type_id);
-                let field_is_interface = arena.is_interface(field_type_id);
-                let value_is_union = arena.is_union(value.type_id);
-
-                if field_is_union && !value_is_union {
-                    self.construct_union_heap_id(value, field_type_id)?
-                } else if field_is_union && value_is_union {
-                    self.copy_union_to_heap(value)?
-                } else if field_is_interface && arena.is_interface(value.type_id) {
-                    // Value is already an interface fat pointer. Copy it into a new
-                    // heap allocation so instance_drop can free it independently.
-                    self.copy_interface_fat_ptr(value)?
-                } else if field_is_interface {
-                    self.box_interface_value(value, field_type_id)?
-                } else {
-                    value
-                }
+                self.coerce_field_value(value, field_type_id)?
             } else {
                 value
             };
@@ -359,6 +320,38 @@ impl Cg<'_, '_, '_> {
             self.ptr_type(),
             result_type_id,
         ))
+    }
+
+    /// Coerce a value to match a field's declared type.
+    ///
+    /// Handles union wrapping (non-union → union, union → heap copy),
+    /// interface boxing, and interface fat pointer copying for class fields.
+    fn coerce_field_value(
+        &mut self,
+        value: CompiledValue,
+        field_type_id: TypeId,
+    ) -> CodegenResult<CompiledValue> {
+        let arena = self.arena();
+        let field_is_union = arena.is_union(field_type_id);
+        let field_is_interface = arena.is_interface(field_type_id);
+        let value_is_union = arena.is_union(value.type_id);
+
+        if field_is_union && !value_is_union {
+            self.construct_union_heap_id(value, field_type_id)
+        } else if field_is_union && value_is_union {
+            // Union value stored in class field must be heap-allocated.
+            // The value may be stack-allocated (from construct_union_id),
+            // so copy the 16-byte buffer to the heap.
+            self.copy_union_to_heap(value)
+        } else if field_is_interface && arena.is_interface(value.type_id) {
+            // Value is already an interface fat pointer. Copy it into a new
+            // heap allocation so instance_drop can free it independently.
+            self.copy_interface_fat_ptr(value)
+        } else if field_is_interface {
+            self.box_interface_value(value, field_type_id)
+        } else {
+            Ok(value)
+        }
     }
 
     /// Collect raw pointers to default expressions for omitted fields in a struct literal.
