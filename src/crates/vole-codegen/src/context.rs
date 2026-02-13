@@ -1942,6 +1942,53 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .is_some_and(|count| count > 2)
     }
 
+    /// Emit a return for a small struct (1-2 flat slots) via register passing.
+    /// Loads flat slots into registers, pads to 2, and emits the return instruction.
+    pub fn emit_small_struct_return(&mut self, struct_ptr: Value, ret_type_id: TypeId) {
+        let flat_count = self
+            .struct_flat_slot_count(ret_type_id)
+            .expect("INTERNAL: struct return: missing flat slot count");
+        let mut return_vals = Vec::with_capacity(2);
+        for i in 0..flat_count {
+            let offset = (i as i32) * 8;
+            let val = self
+                .builder
+                .ins()
+                .load(types::I64, MemFlags::new(), struct_ptr, offset);
+            return_vals.push(val);
+        }
+        while return_vals.len() < 2 {
+            return_vals.push(self.builder.ins().iconst(types::I64, 0));
+        }
+        self.builder.ins().return_(&return_vals);
+    }
+
+    /// Emit a return for a large struct (3+ flat slots) via sret convention.
+    /// Copies flat slots into the sret buffer (first parameter) and returns the pointer.
+    pub fn emit_sret_struct_return(&mut self, struct_ptr: Value, ret_type_id: TypeId) {
+        let entry_block = self
+            .builder
+            .func
+            .layout
+            .entry_block()
+            .expect("INTERNAL: sret return: function has no entry block");
+        let sret_ptr = self.builder.block_params(entry_block)[0];
+        let flat_count = self
+            .struct_flat_slot_count(ret_type_id)
+            .expect("INTERNAL: sret return: missing flat slot count");
+        for i in 0..flat_count {
+            let offset = (i as i32) * 8;
+            let val = self
+                .builder
+                .ins()
+                .load(types::I64, MemFlags::new(), struct_ptr, offset);
+            self.builder
+                .ins()
+                .store(MemFlags::new(), val, sret_ptr, offset);
+        }
+        self.builder.ins().return_(&[sret_ptr]);
+    }
+
     /// Reconstruct a struct from a multi-value return (two i64 registers).
     /// Allocates a stack slot and stores the register values as fields.
     pub fn reconstruct_struct_from_regs(

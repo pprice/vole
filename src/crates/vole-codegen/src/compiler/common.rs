@@ -318,50 +318,11 @@ pub fn compile_function_body_with_cg(
         } else if let Some(ret_type_id) = cg.return_type
             && cg.is_small_struct_return(ret_type_id)
         {
-            // Small struct (1-2 flat slots): return field values in registers
-            let flat_count = cg
-                .struct_flat_slot_count(ret_type_id)
-                .expect("INTERNAL: struct return: missing flat slot count");
-            let struct_ptr = value.value;
-            let mut return_vals = Vec::with_capacity(2);
-            for i in 0..flat_count {
-                let offset = (i as i32) * 8;
-                let val = cg
-                    .builder
-                    .ins()
-                    .load(types::I64, MemFlags::new(), struct_ptr, offset);
-                return_vals.push(val);
-            }
-            while return_vals.len() < 2 {
-                return_vals.push(cg.builder.ins().iconst(types::I64, 0));
-            }
-            cg.builder.ins().return_(&return_vals);
+            cg.emit_small_struct_return(value.value, ret_type_id);
         } else if let Some(ret_type_id) = cg.return_type
             && cg.is_sret_struct_return(ret_type_id)
         {
-            // Large struct (3+ flat slots): copy all flat slots into sret buffer
-            let entry_block = cg
-                .builder
-                .func
-                .layout
-                .entry_block()
-                .expect("INTERNAL: sret return: function has no entry block");
-            let sret_ptr = cg.builder.block_params(entry_block)[0];
-            let flat_count = cg
-                .struct_flat_slot_count(ret_type_id)
-                .expect("INTERNAL: sret return: missing flat slot count");
-            let struct_ptr = value.value;
-            for i in 0..flat_count {
-                let offset = (i as i32) * 8;
-                let val = cg
-                    .builder
-                    .ins()
-                    .load(types::I64, MemFlags::new(), struct_ptr, offset);
-                cg.builder
-                    .ins()
-                    .store(MemFlags::new(), val, sret_ptr, offset);
-            }
-            cg.builder.ins().return_(&[sret_ptr]);
+            cg.emit_sret_struct_return(value.value, ret_type_id);
         } else if let Some(ret_type_id) = cg.return_type
             && cg.arena().is_union(ret_type_id)
         {

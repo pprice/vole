@@ -595,51 +595,11 @@ impl Cg<'_, '_, '_> {
             } else if let Some(ret_type_id) = return_type_id
                 && self.is_small_struct_return(ret_type_id)
             {
-                // Small struct (1-2 flat slots): return values in registers
-                let flat_count = self
-                    .struct_flat_slot_count(ret_type_id)
-                    .expect("INTERNAL: struct return: missing flat slot count");
-                let struct_ptr = compiled.value;
-                let mut return_vals = Vec::with_capacity(2);
-                for i in 0..flat_count {
-                    let offset = (i as i32) * 8;
-                    let val =
-                        self.builder
-                            .ins()
-                            .load(types::I64, MemFlags::new(), struct_ptr, offset);
-                    return_vals.push(val);
-                }
-                // Pad to 2 registers for consistent convention
-                while return_vals.len() < 2 {
-                    return_vals.push(self.builder.ins().iconst(types::I64, 0));
-                }
-                self.builder.ins().return_(&return_vals);
+                self.emit_small_struct_return(compiled.value, ret_type_id);
             } else if let Some(ret_type_id) = return_type_id
                 && self.is_sret_struct_return(ret_type_id)
             {
-                // Large struct (3+ flat slots): copy all flat slots into sret buffer
-                let entry_block = self
-                    .builder
-                    .func
-                    .layout
-                    .entry_block()
-                    .expect("INTERNAL: sret return: function has no entry block");
-                let sret_ptr = self.builder.block_params(entry_block)[0];
-                let flat_count = self
-                    .struct_flat_slot_count(ret_type_id)
-                    .expect("INTERNAL: sret return: missing flat slot count");
-                let struct_ptr = compiled.value;
-                for i in 0..flat_count {
-                    let offset = (i as i32) * 8;
-                    let val =
-                        self.builder
-                            .ins()
-                            .load(types::I64, MemFlags::new(), struct_ptr, offset);
-                    self.builder
-                        .ins()
-                        .store(MemFlags::new(), val, sret_ptr, offset);
-                }
-                self.builder.ins().return_(&[sret_ptr]);
+                self.emit_sret_struct_return(compiled.value, ret_type_id);
             } else if let Some(ret_type_id) = return_type_id
                 && self.arena().is_union(ret_type_id)
             {
