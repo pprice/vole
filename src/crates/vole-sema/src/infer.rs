@@ -240,11 +240,6 @@ impl InferCtx {
         }
     }
 
-    /// Check if all variables are resolved.
-    pub fn is_complete(&self) -> bool {
-        self.bindings.iter().all(|b| b.is_some())
-    }
-
     /// Get the number of inference variables.
     pub fn var_count(&self) -> usize {
         self.bindings.len()

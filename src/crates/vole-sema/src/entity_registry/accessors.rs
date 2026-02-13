@@ -73,12 +73,6 @@ impl EntityRegistry {
         self.get_type(id).generic_info.clone()
     }
 
-    /// Check if type is an interface.
-    #[inline]
-    pub fn type_is_interface(&self, id: TypeDefId) -> bool {
-        self.get_type(id).kind == TypeDefKind::Interface
-    }
-
     /// Get interface info: is_interface, fields, methods, extends (all cloned).
     ///
     /// Common pattern: checking interface satisfaction.

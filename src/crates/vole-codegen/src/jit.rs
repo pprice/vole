@@ -123,12 +123,6 @@ impl JitOptions {
             loop_param_opt: true, // Enable loop optimization for IR inspection
         }
     }
-
-    /// Enable loop parameter optimization
-    pub fn with_loop_param_opt(mut self) -> Self {
-        self.loop_param_opt = true;
-        self
-    }
 }
 
 /// JIT compiler context

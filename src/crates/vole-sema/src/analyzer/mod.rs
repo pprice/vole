@@ -490,22 +490,6 @@ impl Analyzer {
     }
 
     /// Get a resolver configured for the current module context.
-    /// Uses the resolution chain: primitives -> current module -> builtin module.
-    /// Note: Returns a Resolver that borrows the db's name_table.
-    /// The caller must ensure the returned Resolver doesn't outlive the borrow.
-    pub fn resolver_with_db<'a>(
-        &'a self,
-        interner: &'a Interner,
-        db: &'a CompilationDb,
-    ) -> Resolver<'a> {
-        Resolver::new(
-            interner,
-            &db.names,
-            self.current_module,
-            &self.parent_modules,
-        )
-    }
-
     /// Create a resolver for name resolution.
     /// Note: The returned resolver holds a borrow of the db's name_table.
     /// Parent modules are included in the search chain for virtual test modules.
