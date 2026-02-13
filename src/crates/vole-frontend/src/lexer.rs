@@ -3,6 +3,9 @@
 use crate::errors::LexerError;
 use crate::{Span, Token, TokenType};
 
+/// Smallest byte value that starts a multi-byte UTF-8 sequence (non-ASCII).
+const UTF8_MULTIBYTE: u8 = 0x80;
+
 #[derive(Clone)]
 pub struct Lexer<'src> {
     source: &'src str,
@@ -283,7 +286,7 @@ impl<'src> Lexer<'src> {
             return None;
         }
         let b = self.bytes[self.current];
-        if b < 0x80 {
+        if b < UTF8_MULTIBYTE {
             // ASCII fast path: single byte, no UTF-8 decoding
             self.current += 1;
             self.column += 1;
@@ -310,14 +313,14 @@ impl<'src> Lexer<'src> {
             return None;
         }
         let b = self.bytes[self.current];
-        if b < 0x80 {
+        if b < UTF8_MULTIBYTE {
             // Current char is ASCII (1 byte), look at next position
             let next_pos = self.current + 1;
             if next_pos >= self.bytes.len() {
                 return None;
             }
             let b2 = self.bytes[next_pos];
-            if b2 < 0x80 {
+            if b2 < UTF8_MULTIBYTE {
                 Some(b2 as char)
             } else {
                 let remaining = &self.source[next_pos..];
@@ -336,7 +339,7 @@ impl<'src> Lexer<'src> {
     /// All callers use ASCII characters, so we compare bytes directly.
     #[inline]
     fn match_byte(&mut self, expected: u8) -> bool {
-        debug_assert!(expected < 0x80, "match_byte only works for ASCII");
+        debug_assert!(expected < UTF8_MULTIBYTE, "match_byte only works for ASCII");
         if self.current < self.bytes.len() && self.bytes[self.current] == expected {
             self.current += 1;
             self.column += 1;
@@ -434,7 +437,7 @@ impl<'src> Lexer<'src> {
             if b.is_ascii_alphanumeric() || b == b'_' {
                 self.current += 1;
                 self.column += 1;
-            } else if b >= 0x80 {
+            } else if b >= UTF8_MULTIBYTE {
                 // Non-ASCII: decode and check Unicode XID
                 let remaining = &self.source[self.current..];
                 let c = remaining.chars().next().unwrap();
