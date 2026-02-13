@@ -7,6 +7,7 @@ use rustc_hash::FxHashMap;
 use super::helpers::{convert_to_i64_for_storage, store_field_value};
 use crate::RuntimeFn;
 use crate::context::Cg;
+use crate::union_layout;
 use crate::errors::{CodegenError, CodegenResult};
 use crate::types::CompiledValue;
 use cranelift::prelude::*;
@@ -484,7 +485,7 @@ impl Cg<'_, '_, '_> {
         if !self.arena().is_sentinel(value.type_id) {
             self.builder
                 .ins()
-                .store(MemFlags::new(), value.value, heap_ptr, 8);
+                .store(MemFlags::new(), value.value, heap_ptr, union_layout::PAYLOAD_OFFSET);
         }
 
         Ok(CompiledValue::new(heap_ptr, self.ptr_type(), union_type_id))
@@ -519,10 +520,10 @@ impl Cg<'_, '_, '_> {
         let payload = self
             .builder
             .ins()
-            .load(types::I64, MemFlags::new(), value.value, 8);
+            .load(types::I64, MemFlags::new(), value.value, union_layout::PAYLOAD_OFFSET);
         self.builder
             .ins()
-            .store(MemFlags::new(), payload, heap_ptr, 8);
+            .store(MemFlags::new(), payload, heap_ptr, union_layout::PAYLOAD_OFFSET);
 
         // If the payload is RC-managed, increment its refcount since both the
         // original and the copy will need independent cleanup

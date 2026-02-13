@@ -245,7 +245,7 @@ impl Cg<'_, '_, '_> {
         let inner_val = if inner_size > 0 {
             self.builder
                 .ins()
-                .load(inner_cr_type, MemFlags::new(), ptr, 8)
+                .load(inner_cr_type, MemFlags::new(), ptr, union_layout::PAYLOAD_OFFSET)
         } else {
             self.builder.ins().iconst(inner_cr_type, 0)
         };
@@ -301,7 +301,7 @@ impl Cg<'_, '_, '_> {
             let inner_val = if inner_size > 0 {
                 self.builder
                     .ins()
-                    .load(inner_cr_type, MemFlags::new(), ptr, 8)
+                    .load(inner_cr_type, MemFlags::new(), ptr, union_layout::PAYLOAD_OFFSET)
             } else {
                 self.builder.ins().iconst(inner_cr_type, 0)
             };
@@ -792,8 +792,8 @@ impl Cg<'_, '_, '_> {
                 let payload = self
                     .builder
                     .ins()
-                    .load(types::I64, MemFlags::new(), src_ptr, 8);
-                self.builder.ins().stack_store(payload, slot, 8);
+                    .load(types::I64, MemFlags::new(), src_ptr, union_layout::PAYLOAD_OFFSET);
+                self.builder.ins().stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
             }
 
             let ptr_type = self.ptr_type();
@@ -1222,7 +1222,7 @@ impl Cg<'_, '_, '_> {
             let slot = self.alloc_stack(slot_size);
 
             self.builder.ins().stack_store(tag, slot, 0);
-            self.builder.ins().stack_store(payload, slot, 8);
+            self.builder.ins().stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
 
             let ptr_type = self.ptr_type();
             let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
@@ -1252,8 +1252,8 @@ impl Cg<'_, '_, '_> {
                     let payload = self
                         .builder
                         .ins()
-                        .load(types::I64, MemFlags::new(), src_ptr, 8);
-                    self.builder.ins().stack_store(payload, slot, 8);
+                        .load(types::I64, MemFlags::new(), src_ptr, union_layout::PAYLOAD_OFFSET);
+                    self.builder.ins().stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
                 }
 
                 let ptr_type = self.ptr_type();

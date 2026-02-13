@@ -458,8 +458,8 @@ impl InterfaceVtableRegistry {
 
                     builder.ins().stack_store(remapped_tag, slot, 0);
                     if union_size > union_layout::TAG_ONLY_SIZE {
-                        let payload = builder.ins().load(types::I64, MemFlags::new(), result, 8);
-                        builder.ins().stack_store(payload, slot, 8);
+                        let payload = builder.ins().load(types::I64, MemFlags::new(), result, union_layout::PAYLOAD_OFFSET);
+                        builder.ins().stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
                     }
 
                     // Heap-allocate and copy from local stack to heap.
@@ -471,10 +471,10 @@ impl InterfaceVtableRegistry {
                     let local_tag = builder.ins().stack_load(types::I8, slot, 0);
                     builder.ins().store(MemFlags::new(), local_tag, heap_ptr, 0);
                     if union_size > union_layout::TAG_ONLY_SIZE {
-                        let local_payload = builder.ins().stack_load(types::I64, slot, 8);
+                        let local_payload = builder.ins().stack_load(types::I64, slot, union_layout::PAYLOAD_OFFSET);
                         builder
                             .ins()
-                            .store(MemFlags::new(), local_payload, heap_ptr, 8);
+                            .store(MemFlags::new(), local_payload, heap_ptr, union_layout::PAYLOAD_OFFSET);
                     }
 
                     builder.ins().return_(&[heap_ptr]);

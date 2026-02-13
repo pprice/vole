@@ -621,7 +621,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             let payload = self
                 .builder
                 .ins()
-                .load(types::I64, MemFlags::new(), union_ptr, 8);
+                .load(types::I64, MemFlags::new(), union_ptr, union_layout::PAYLOAD_OFFSET);
             if is_interface {
                 let data_word = self
                     .builder
@@ -1578,7 +1578,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             self.builder.ins().stack_store(tag, slot, 0);
             // Reconstruct i128 from low/high and store at offset 8
             let i128_val = super::structs::reconstruct_i128(self.builder, low, high);
-            super::structs::helpers::store_i128_to_stack(self.builder, i128_val, slot, 8);
+            super::structs::helpers::store_i128_to_stack(self.builder, i128_val, slot, union_layout::PAYLOAD_OFFSET);
 
             let ptr_type = self.ptr_type();
             let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
@@ -1598,7 +1598,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             // Store tag at offset 0
             self.builder.ins().stack_store(tag, slot, 0);
             // Store payload at offset 8
-            self.builder.ins().stack_store(payload, slot, 8);
+            self.builder.ins().stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
 
             // Get pointer to stack slot
             let ptr_type = self.ptr_type();
@@ -1639,8 +1639,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 let payload = self
                     .builder
                     .ins()
-                    .load(types::I64, MemFlags::new(), src_ptr, 8);
-                self.builder.ins().stack_store(payload, slot, 8);
+                    .load(types::I64, MemFlags::new(), src_ptr, union_layout::PAYLOAD_OFFSET);
+                self.builder.ins().stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
             }
 
             let ptr_type = self.ptr_type();
@@ -1913,8 +1913,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let payload = self
             .builder
             .ins()
-            .load(types::I64, MemFlags::new(), heap_ptr, 8);
-        self.builder.ins().stack_store(payload, slot, 8);
+            .load(types::I64, MemFlags::new(), heap_ptr, union_layout::PAYLOAD_OFFSET);
+        self.builder.ins().stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
         let ptr_type = self.ptr_type();
         let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
         let mut cv = CompiledValue::new(ptr, ptr_type, union_type_id);
@@ -2479,7 +2479,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         } else {
             result
         };
-        self.builder.ins().stack_store(value_to_store, slot, 8);
+        self.builder.ins().stack_store(value_to_store, slot, union_layout::PAYLOAD_OFFSET);
 
         // Return pointer to the stack slot
         let ptr_type = self.ptr_type();
@@ -3311,7 +3311,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             value.value
         };
 
-        self.builder.ins().stack_store(value_as_i64, slot, 8);
+        self.builder.ins().stack_store(value_as_i64, slot, union_layout::PAYLOAD_OFFSET);
 
         // Return pointer to the TaggedValue
         let ptr_type = self.ptr_type();

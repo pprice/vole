@@ -292,7 +292,7 @@ pub fn compile_function_body_with_cg(
                     let low = cg
                         .builder
                         .ins()
-                        .load(types::I64, MemFlags::new(), value.value, 8);
+                        .load(types::I64, MemFlags::new(), value.value, union_layout::PAYLOAD_OFFSET);
                     let high = cg
                         .builder
                         .ins()
@@ -310,7 +310,7 @@ pub fn compile_function_body_with_cg(
                 let payload = if union_size > union_layout::TAG_ONLY_SIZE {
                     cg.builder
                         .ins()
-                        .load(types::I64, MemFlags::new(), value.value, 8)
+                        .load(types::I64, MemFlags::new(), value.value, union_layout::PAYLOAD_OFFSET)
                 } else {
                     cg.builder.ins().iconst(types::I64, 0)
                 };

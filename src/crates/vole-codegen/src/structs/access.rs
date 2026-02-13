@@ -225,7 +225,7 @@ impl Cg<'_, '_, '_> {
         let inner_obj = if union_size > union_layout::TAG_ONLY_SIZE {
             self.builder
                 .ins()
-                .load(inner_cranelift_type, MemFlags::new(), obj.value, 8)
+                .load(inner_cranelift_type, MemFlags::new(), obj.value, union_layout::PAYLOAD_OFFSET)
         } else {
             self.builder.ins().iconst(inner_cranelift_type, 0)
         };

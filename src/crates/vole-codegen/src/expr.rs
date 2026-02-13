@@ -168,7 +168,7 @@ impl Cg<'_, '_, '_> {
                 // Sentinel-only unions have union_size == 8 (tag only), no payload to read.
                 let union_size = self.type_size(*type_id);
                 let payload = if union_size > union_layout::TAG_ONLY_SIZE {
-                    self.builder.ins().load(payload_ty, MemFlags::new(), val, 8)
+                    self.builder.ins().load(payload_ty, MemFlags::new(), val, union_layout::PAYLOAD_OFFSET)
                 } else {
                     self.builder.ins().iconst(payload_ty, 0)
                 };
@@ -186,7 +186,7 @@ impl Cg<'_, '_, '_> {
             {
                 // TaggedValue layout: [tag:8][value:8]
                 // Extract the value from offset 8 and convert to proper type
-                let raw_value = self.builder.ins().load(types::I64, MemFlags::new(), val, 8);
+                let raw_value = self.builder.ins().load(types::I64, MemFlags::new(), val, union_layout::PAYLOAD_OFFSET);
                 let extracted = self.extract_unknown_value(raw_value, narrowed_type_id);
                 return Ok(extracted);
             }
@@ -1354,7 +1354,7 @@ impl Cg<'_, '_, '_> {
             let loaded = self
                 .builder
                 .ins()
-                .load(cranelift_type, MemFlags::new(), value.value, 8);
+                .load(cranelift_type, MemFlags::new(), value.value, union_layout::PAYLOAD_OFFSET);
             // RC: if the source is a variable, its union cleanup will dec the
             // payload at scope exit, so we need rc_inc to keep the extracted
             // value alive. If the source is a temporary (function call, etc.),

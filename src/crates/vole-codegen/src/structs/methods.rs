@@ -640,8 +640,8 @@ impl Cg<'_, '_, '_> {
                     let payload = self
                         .builder
                         .ins()
-                        .load(types::I64, MemFlags::new(), src_ptr, 8);
-                    self.builder.ins().stack_store(payload, local_slot, 8);
+                        .load(types::I64, MemFlags::new(), src_ptr, union_layout::PAYLOAD_OFFSET);
+                    self.builder.ins().stack_store(payload, local_slot, union_layout::PAYLOAD_OFFSET);
                 }
 
                 let ptr_type = self.ptr_type();
@@ -731,8 +731,8 @@ impl Cg<'_, '_, '_> {
                     let payload =
                         self.builder
                             .ins()
-                            .load(types::I64, MemFlags::new(), result_value, 8);
-                    self.builder.ins().stack_store(payload, local_slot, 8);
+                            .load(types::I64, MemFlags::new(), result_value, union_layout::PAYLOAD_OFFSET);
+                    self.builder.ins().stack_store(payload, local_slot, union_layout::PAYLOAD_OFFSET);
                 }
 
                 let ptr_type = self.ptr_type();

@@ -6,6 +6,7 @@ use cranelift::prelude::*;
 
 use crate::RuntimeFn;
 use crate::errors::{CodegenError, CodegenResult};
+use crate::union_layout;
 use vole_frontend::{
     self, ExprKind, LetInit, LetStmt, Pattern, PatternKind, RaiseStmt, ReturnStmt, Stmt, Symbol,
 };
@@ -1155,7 +1156,7 @@ impl Cg<'_, '_, '_> {
 
         // Sentinel types (nil, Done, user-defined) have no payload - only the tag matters
         if !self.arena().is_sentinel(actual_type_id) {
-            self.builder.ins().stack_store(actual_value, slot, 8);
+            self.builder.ins().stack_store(actual_value, slot, union_layout::PAYLOAD_OFFSET);
         }
 
         let ptr_type = self.ptr_type();

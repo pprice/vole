@@ -845,7 +845,7 @@ impl Cg<'_, '_, '_> {
         let payload = if union_size > union_layout::TAG_ONLY_SIZE {
             self.builder
                 .ins()
-                .load(payload_cranelift_type, MemFlags::new(), optional.value, 8)
+                .load(payload_cranelift_type, MemFlags::new(), optional.value, union_layout::PAYLOAD_OFFSET)
         } else {
             self.builder.ins().iconst(payload_cranelift_type, 0)
         };
