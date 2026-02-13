@@ -736,7 +736,13 @@ impl Analyzer {
                         .is_some();
                     !is_type
                 }
-                _ => false,
+                PatternKind::Literal(_)
+                | PatternKind::Type { .. }
+                | PatternKind::Val { .. }
+                | PatternKind::Success { .. }
+                | PatternKind::Error { .. }
+                | PatternKind::Tuple { .. }
+                | PatternKind::Record { .. } => false,
             }
         });
 
@@ -810,7 +816,13 @@ impl Analyzer {
                 type_name: Some(type_expr),
                 ..
             } => Some(self.resolve_pattern_type_expr_id(type_expr, scrutinee_type_id, interner)),
-            _ => None,
+            PatternKind::Wildcard
+            | PatternKind::Literal(_)
+            | PatternKind::Val { .. }
+            | PatternKind::Success { .. }
+            | PatternKind::Error { .. }
+            | PatternKind::Tuple { .. }
+            | PatternKind::Record { type_name: None, .. } => None,
         }
     }
 }
