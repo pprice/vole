@@ -1421,6 +1421,18 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: repeat literal array
+        if self.rng.gen_bool(0.02) {
+            return self.generate_repeat_literal_let(ctx);
+        }
+
+        // ~2% chance: iter().reduce() on array
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_iter_reduce_let(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -7887,6 +7899,131 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             "let {} = when {{\n    {}.length() > 0 => {}[0]\n    _ => {}\n}}",
             name, arr_name, arr_name, default_val
         ))
+    }
+
+    /// Generate a repeat literal: `let arr: [i64; 5] = [0; 5]`
+    /// Note: Fixed-size arrays [T; N] don't support .iter()/.length() in Vole,
+    /// so we don't register the local to avoid downstream generators using it.
+    fn generate_repeat_literal_let(&mut self, ctx: &mut StmtContext) -> String {
+        let name = ctx.new_local_name();
+        let count = self.rng.gen_range(2..=8);
+
+        // Pick element type and value
+        let (type_str, val) = match self.rng.gen_range(0..4u32) {
+            0 => {
+                let v = self.rng.gen_range(-50..=50);
+                ("i64".to_string(), format!("{}", v))
+            }
+            1 => {
+                let v = self.rng.gen_range(-50..=50);
+                ("i32".to_string(), format!("{}_i32", v))
+            }
+            2 => {
+                let strs = ["\"hello\"", "\"test\"", "\"\"", "\"vole\""];
+                let s = strs[self.rng.gen_range(0..strs.len())];
+                ("string".to_string(), s.to_string())
+            }
+            _ => {
+                let b = if self.rng.gen_bool(0.5) {
+                    "true"
+                } else {
+                    "false"
+                };
+                ("bool".to_string(), b.to_string())
+            }
+        };
+
+        // Don't add to ctx.locals — fixed-size arrays lack .iter()/.length()
+        format!(
+            "let {}: [{}; {}] = [{}; {}]",
+            name, type_str, count, val, count
+        )
+    }
+
+    /// Generate an iter().reduce() call on an array parameter.
+    /// E.g.: `let sum = arr.iter().reduce(0, (acc, x) => acc + x)`
+    fn try_generate_iter_reduce_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Find array params with numeric element types
+        let numeric_array_params: Vec<(String, PrimitiveType)> = ctx
+            .params
+            .iter()
+            .filter_map(|p| match &p.param_type {
+                TypeInfo::Array(inner) => match inner.as_ref() {
+                    TypeInfo::Primitive(prim @ (PrimitiveType::I64 | PrimitiveType::I32)) => {
+                        Some((p.name.clone(), *prim))
+                    }
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+
+        // Also find string array params for string reduce
+        let string_array_params: Vec<String> = ctx
+            .params
+            .iter()
+            .filter_map(|p| match &p.param_type {
+                TypeInfo::Array(inner) => match inner.as_ref() {
+                    TypeInfo::Primitive(PrimitiveType::String) => Some(p.name.clone()),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+
+        if numeric_array_params.is_empty() && string_array_params.is_empty() {
+            return None;
+        }
+
+        let name = ctx.new_local_name();
+
+        // 60% numeric reduce, 40% string reduce
+        if !numeric_array_params.is_empty() && (string_array_params.is_empty() || self.rng.gen_bool(0.6))
+        {
+            let (arr_name, prim) = &numeric_array_params
+                [self.rng.gen_range(0..numeric_array_params.len())];
+            let suffix = if matches!(prim, PrimitiveType::I32) {
+                "_i32"
+            } else {
+                ""
+            };
+            let type_annot = if matches!(prim, PrimitiveType::I32) {
+                "i32"
+            } else {
+                "i64"
+            };
+
+            let (init, op) = match self.rng.gen_range(0..3u32) {
+                0 => (format!("0{}", suffix), "+"),
+                1 => (format!("1{}", suffix), "*"),
+                _ => (format!("0{}", suffix), "+"),
+            };
+
+            ctx.add_local(
+                name.clone(),
+                TypeInfo::Primitive(*prim),
+                false,
+            );
+            Some(format!(
+                "let {} = {}.iter().reduce({}, (acc: {}, x: {}) -> {} => acc {} x)",
+                name, arr_name, init, type_annot, type_annot, type_annot, op
+            ))
+        } else {
+            let arr_name =
+                &string_array_params[self.rng.gen_range(0..string_array_params.len())];
+            let seps = [", ", " ", "-", "; "];
+            let sep = seps[self.rng.gen_range(0..seps.len())];
+
+            ctx.add_local(
+                name.clone(),
+                TypeInfo::Primitive(PrimitiveType::String),
+                false,
+            );
+            Some(format!(
+                "let {} = {}.iter().reduce(\"\", (acc, x) => acc + x + \"{}\")",
+                name, arr_name, sep
+            ))
+        }
     }
 
     fn try_generate_bool_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
