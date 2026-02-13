@@ -1443,6 +1443,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             return self.generate_empty_string_ops(ctx);
         }
 
+        // ~2% chance: manual for-loop reduce pattern
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_for_reduce_pattern(ctx) {
+                return stmt;
+            }
+        }
+
+        // ~2% chance: when containing match expression
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_when_match_combo(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -8083,6 +8097,119 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         ctx.add_local(name.clone(), ty, false);
         format!("let {} = {}", name, expr)
+    }
+
+    /// Generate a manual for-loop reduce pattern:
+    /// `let mut acc = 0; for x in arr.iter() { acc = acc + x }`
+    fn try_generate_for_reduce_pattern(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Find numeric array parameters
+        let array_params: Vec<(String, PrimitiveType)> = ctx
+            .params
+            .iter()
+            .filter_map(|p| match &p.param_type {
+                TypeInfo::Array(inner) => match inner.as_ref() {
+                    TypeInfo::Primitive(prim @ (PrimitiveType::I64 | PrimitiveType::I32)) => {
+                        Some((p.name.clone(), *prim))
+                    }
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+
+        if array_params.is_empty() {
+            return None;
+        }
+
+        let (arr_name, prim) = &array_params[self.rng.gen_range(0..array_params.len())];
+        let acc_name = ctx.new_local_name();
+        let iter_name = ctx.new_local_name();
+
+        let suffix = if matches!(prim, PrimitiveType::I32) {
+            "_i32"
+        } else {
+            ""
+        };
+
+        let op = match self.rng.gen_range(0..2u32) {
+            0 => "+",
+            _ => "+", // keep it simple — multiplication can overflow
+        };
+
+        // Protect the accumulator from compound assignment modifications
+        ctx.protected_vars.push(acc_name.clone());
+
+        ctx.add_local(
+            acc_name.clone(),
+            TypeInfo::Primitive(*prim),
+            true,
+        );
+
+        Some(format!(
+            "let mut {} = 0{}\nfor {} in {}.iter() {{\n    {} = {} {} {}\n}}",
+            acc_name, suffix, iter_name, arr_name, acc_name, acc_name, op, iter_name
+        ))
+    }
+
+    /// Generate a when expression with a match inside an arm:
+    /// `when { cond => match x { 0 => a, _ => b }, _ => default }`
+    fn try_generate_when_match_combo(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Need an i32 or i64 variable for match scrutinee
+        let int_vars: Vec<(String, PrimitiveType)> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| {
+                matches!(
+                    ty,
+                    TypeInfo::Primitive(PrimitiveType::I64 | PrimitiveType::I32)
+                )
+            })
+            .map(|(name, ty, _)| {
+                (
+                    name.clone(),
+                    match ty {
+                        TypeInfo::Primitive(p) => *p,
+                        _ => unreachable!(),
+                    },
+                )
+            })
+            .chain(ctx.params.iter().filter_map(|p| match &p.param_type {
+                TypeInfo::Primitive(prim @ (PrimitiveType::I64 | PrimitiveType::I32)) => {
+                    Some((p.name.clone(), *prim))
+                }
+                _ => None,
+            }))
+            .collect();
+
+        if int_vars.is_empty() {
+            return None;
+        }
+
+        let (var, _prim) = &int_vars[self.rng.gen_range(0..int_vars.len())];
+        let name = ctx.new_local_name();
+
+        // Result type is string — simple and safe
+        let match_val0 = self.rng.gen_range(0..=5);
+        let match_val1 = match_val0 + 1 + self.rng.gen_range(0..=3);
+
+        let strs = ["\"a\"", "\"b\"", "\"c\"", "\"d\"", "\"e\""];
+
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            false,
+        );
+        Some(format!(
+            "let {} = when {{\n    true => match {} {{\n        {} => {}\n        {} => {}\n        _ => {}\n    }}\n    _ => {}\n}}",
+            name,
+            var,
+            match_val0,
+            strs[0],
+            match_val1,
+            strs[1],
+            strs[2],
+            strs[3],
+        ))
     }
 
     fn try_generate_bool_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
