@@ -121,7 +121,10 @@ impl ResolvedMethod {
         match self {
             ResolvedMethod::Implemented { external_info, .. } => external_info.as_ref(),
             ResolvedMethod::DefaultMethod { external_info, .. } => external_info.as_ref(),
-            _ => None,
+            ResolvedMethod::Direct { .. }
+            | ResolvedMethod::FunctionalInterface { .. }
+            | ResolvedMethod::InterfaceMethod { .. }
+            | ResolvedMethod::Static { .. } => None,
         }
     }
 
@@ -130,7 +133,10 @@ impl ResolvedMethod {
         match self {
             ResolvedMethod::Direct { method_id, .. } => *method_id,
             ResolvedMethod::Static { method_id, .. } => Some(*method_id),
-            _ => None,
+            ResolvedMethod::Implemented { .. }
+            | ResolvedMethod::FunctionalInterface { .. }
+            | ResolvedMethod::DefaultMethod { .. }
+            | ResolvedMethod::InterfaceMethod { .. } => None,
         }
     }
 
@@ -165,7 +171,11 @@ impl ResolvedMethod {
     pub fn method_index(&self) -> Option<u32> {
         match self {
             ResolvedMethod::InterfaceMethod { method_index, .. } => Some(*method_index),
-            _ => None,
+            ResolvedMethod::Direct { .. }
+            | ResolvedMethod::Implemented { .. }
+            | ResolvedMethod::FunctionalInterface { .. }
+            | ResolvedMethod::DefaultMethod { .. }
+            | ResolvedMethod::Static { .. } => None,
         }
     }
 
@@ -178,7 +188,11 @@ impl ResolvedMethod {
                 concrete_return_hint,
                 ..
             } => *concrete_return_hint,
-            _ => None,
+            ResolvedMethod::Direct { .. }
+            | ResolvedMethod::FunctionalInterface { .. }
+            | ResolvedMethod::DefaultMethod { .. }
+            | ResolvedMethod::InterfaceMethod { .. }
+            | ResolvedMethod::Static { .. } => None,
         }
     }
 }
