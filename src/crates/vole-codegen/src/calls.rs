@@ -798,26 +798,7 @@ impl Cg<'_, '_, '_> {
         let union_copy = if sret_slot.is_none() && self.arena().is_union(return_type_id) {
             let results = self.builder.inst_results(call_inst);
             let src_ptr = results[0];
-            let union_size = self.type_size(return_type_id);
-            let slot = self.alloc_stack(union_size);
-
-            let tag = self
-                .builder
-                .ins()
-                .load(types::I8, MemFlags::new(), src_ptr, 0);
-            self.builder.ins().stack_store(tag, slot, 0);
-
-            if union_size > union_layout::TAG_ONLY_SIZE {
-                let payload = self
-                    .builder
-                    .ins()
-                    .load(types::I64, MemFlags::new(), src_ptr, union_layout::PAYLOAD_OFFSET);
-                self.builder.ins().stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
-            }
-
-            let ptr_type = self.ptr_type();
-            let new_ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
-            Some(self.compiled(new_ptr, return_type_id))
+            Some(self.copy_union_ptr_to_local(src_ptr, return_type_id))
         } else {
             None
         };
@@ -1253,31 +1234,7 @@ impl Cg<'_, '_, '_> {
             // overwritten on subsequent calls to the same closure.
             if self.arena().is_union(ret) {
                 let src_ptr = results[0];
-                let union_size = self.type_size(ret);
-                let slot = self.alloc_stack(union_size);
-
-                // Copy the union data (tag + payload)
-                // Tag is at offset 0 (1 byte)
-                let tag = self
-                    .builder
-                    .ins()
-                    .load(types::I8, MemFlags::new(), src_ptr, 0);
-                self.builder.ins().stack_store(tag, slot, 0);
-
-                // Payload is at offset 8 (8 bytes) - only copy if union has payload data.
-                // Sentinel-only unions (e.g. A | B where both are zero-sized) have
-                // union_size == 8 (tag only), so there's no payload to copy.
-                if union_size > union_layout::TAG_ONLY_SIZE {
-                    let payload = self
-                        .builder
-                        .ins()
-                        .load(types::I64, MemFlags::new(), src_ptr, union_layout::PAYLOAD_OFFSET);
-                    self.builder.ins().stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
-                }
-
-                let ptr_type = self.ptr_type();
-                let new_ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
-                Ok(self.compiled(new_ptr, ret))
+                Ok(self.copy_union_ptr_to_local(src_ptr, ret))
             } else {
                 Ok(self.compiled(results[0], ret))
             }

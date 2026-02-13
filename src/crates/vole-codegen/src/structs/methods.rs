@@ -627,32 +627,14 @@ impl Cg<'_, '_, '_> {
             let results = self.builder.inst_results(call);
             if !results.is_empty() {
                 let src_ptr = results[0];
-                let union_size = self.type_size(return_type_id);
-                let local_slot = self.alloc_stack(union_size);
-
-                let tag = self
-                    .builder
-                    .ins()
-                    .load(types::I8, MemFlags::new(), src_ptr, 0);
-                self.builder.ins().stack_store(tag, local_slot, 0);
-
-                if union_size > union_layout::TAG_ONLY_SIZE {
-                    let payload = self
-                        .builder
-                        .ins()
-                        .load(types::I64, MemFlags::new(), src_ptr, union_layout::PAYLOAD_OFFSET);
-                    self.builder.ins().stack_store(payload, local_slot, union_layout::PAYLOAD_OFFSET);
-                }
-
-                let ptr_type = self.ptr_type();
-                let local_ptr = self.builder.ins().stack_addr(ptr_type, local_slot, 0);
+                let union_copy = self.copy_union_ptr_to_local(src_ptr, return_type_id);
 
                 // Now consume RC receiver and arg temps
                 let mut obj = obj;
                 self.consume_rc_value(&mut obj)?;
                 self.consume_rc_args(&mut rc_temps)?;
 
-                return Ok(self.compiled(local_ptr, return_type_id));
+                return Ok(union_copy);
             }
         }
 

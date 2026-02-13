@@ -1582,33 +1582,43 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         // calls (e.g. rc_dec for temporary args) can clobber the callee's stack frame.
         if self.arena().is_union(return_type_id) {
             let src_ptr = results[0];
-            let union_size = self.type_size(return_type_id);
-            let slot = self.alloc_stack(union_size);
-
-            // Copy tag at offset 0 (1 byte)
-            let tag = self
-                .builder
-                .ins()
-                .load(types::I8, MemFlags::new(), src_ptr, 0);
-            self.builder.ins().stack_store(tag, slot, 0);
-
-            // Copy payload at offset 8 (8 bytes) if the union has payload data.
-            // Sentinel-only unions (e.g. A | B where both are zero-sized) have
-            // union_size == 8 (tag only), so there's no payload to copy.
-            if union_size > union_layout::TAG_ONLY_SIZE {
-                let payload = self
-                    .builder
-                    .ins()
-                    .load(types::I64, MemFlags::new(), src_ptr, union_layout::PAYLOAD_OFFSET);
-                self.builder.ins().stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
-            }
-
-            let ptr_type = self.ptr_type();
-            let new_ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
-            return self.compiled(new_ptr, return_type_id);
+            return self.copy_union_ptr_to_local(src_ptr, return_type_id);
         }
 
         self.compiled(results[0], return_type_id)
+    }
+
+    /// Copy a union value from a pointer (typically callee's stack) to a local stack slot.
+    ///
+    /// This prevents the returned union from being clobbered when the callee's
+    /// stack frame is reused (e.g., by RC cleanup calls after a function return).
+    pub fn copy_union_ptr_to_local(
+        &mut self,
+        src_ptr: Value,
+        union_type_id: TypeId,
+    ) -> CompiledValue {
+        let union_size = self.type_size(union_type_id);
+        let slot = self.alloc_stack(union_size);
+
+        let tag = self
+            .builder
+            .ins()
+            .load(types::I8, MemFlags::new(), src_ptr, 0);
+        self.builder.ins().stack_store(tag, slot, 0);
+
+        if union_size > union_layout::TAG_ONLY_SIZE {
+            let payload = self
+                .builder
+                .ins()
+                .load(types::I64, MemFlags::new(), src_ptr, union_layout::PAYLOAD_OFFSET);
+            self.builder
+                .ins()
+                .stack_store(payload, slot, union_layout::PAYLOAD_OFFSET);
+        }
+
+        let ptr_type = self.ptr_type();
+        let ptr = self.builder.ins().stack_addr(ptr_type, slot, 0);
+        self.compiled(ptr, union_type_id)
     }
 
     // ========== CompiledValue constructors ==========
