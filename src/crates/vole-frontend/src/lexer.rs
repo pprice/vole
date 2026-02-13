@@ -6,9 +6,9 @@ use crate::{Span, Token, TokenType};
 #[derive(Clone)]
 pub struct Lexer<'src> {
     source: &'src str,
-    chars: std::iter::Peekable<std::str::CharIndices<'src>>,
-    start: usize,
+    bytes: &'src [u8],
     current: usize,
+    start: usize,
     line: u32,
     column: u32,
     start_column: u32,
@@ -28,7 +28,7 @@ impl<'src> Lexer<'src> {
     pub fn new_with_file(source: &'src str, _filename: &str) -> Self {
         let mut lexer = Self {
             source,
-            chars: source.char_indices().peekable(),
+            bytes: source.as_bytes(),
             start: 0,
             current: 0,
             line: 1,
@@ -111,21 +111,21 @@ impl<'src> Lexer<'src> {
             ';' => self.make_token(TokenType::Semicolon),
             ':' => self.make_token(TokenType::Colon),
             '+' => {
-                if self.match_char('=') {
+                if self.match_byte(b'=') {
                     self.make_token(TokenType::PlusEq)
                 } else {
                     self.make_token(TokenType::Plus)
                 }
             }
             '*' => {
-                if self.match_char('=') {
+                if self.match_byte(b'=') {
                     self.make_token(TokenType::StarEq)
                 } else {
                     self.make_token(TokenType::Star)
                 }
             }
             '%' => {
-                if self.match_char('=') {
+                if self.match_byte(b'=') {
                     self.make_token(TokenType::PercentEq)
                 } else {
                     self.make_token(TokenType::Percent)
@@ -134,48 +134,48 @@ impl<'src> Lexer<'src> {
 
             // Single or double character tokens
             '-' => {
-                if self.match_char('>') {
+                if self.match_byte(b'>') {
                     self.make_token(TokenType::Arrow)
-                } else if self.match_char('=') {
+                } else if self.match_byte(b'=') {
                     self.make_token(TokenType::MinusEq)
                 } else {
                     self.make_token(TokenType::Minus)
                 }
             }
             '=' => {
-                if self.match_char('=') {
+                if self.match_byte(b'=') {
                     self.make_token(TokenType::EqEq)
-                } else if self.match_char('>') {
+                } else if self.match_byte(b'>') {
                     self.make_token(TokenType::FatArrow)
                 } else {
                     self.make_token(TokenType::Eq)
                 }
             }
             '!' => {
-                if self.match_char('=') {
+                if self.match_byte(b'=') {
                     self.make_token(TokenType::BangEq)
                 } else {
                     self.make_token(TokenType::Bang)
                 }
             }
             '&' => {
-                if self.match_char('&') {
+                if self.match_byte(b'&') {
                     self.make_token(TokenType::AmpAmp)
                 } else {
                     self.make_token(TokenType::Ampersand)
                 }
             }
             '|' => {
-                if self.match_char('|') {
+                if self.match_byte(b'|') {
                     self.make_token(TokenType::PipePipe)
                 } else {
                     self.make_token(TokenType::Pipe)
                 }
             }
             '?' => {
-                if self.match_char('?') {
+                if self.match_byte(b'?') {
                     self.make_token(TokenType::QuestionQuestion)
-                } else if self.match_char('.') {
+                } else if self.match_byte(b'.') {
                     self.make_token(TokenType::QuestionDot)
                 } else {
                     self.make_token(TokenType::Question)
@@ -184,18 +184,18 @@ impl<'src> Lexer<'src> {
             '^' => self.make_token(TokenType::Caret),
             '~' => self.make_token(TokenType::Tilde),
             '<' => {
-                if self.match_char('<') {
+                if self.match_byte(b'<') {
                     self.make_token(TokenType::LessLess)
-                } else if self.match_char('=') {
+                } else if self.match_byte(b'=') {
                     self.make_token(TokenType::LtEq)
                 } else {
                     self.make_token(TokenType::Lt)
                 }
             }
             '>' => {
-                if self.match_char('>') {
+                if self.match_byte(b'>') {
                     self.make_token(TokenType::GreaterGreater)
-                } else if self.match_char('=') {
+                } else if self.match_byte(b'=') {
                     self.make_token(TokenType::GtEq)
                 } else {
                     self.make_token(TokenType::Gt)
@@ -204,14 +204,12 @@ impl<'src> Lexer<'src> {
 
             // Slash or comment
             '/' => {
-                if self.match_char('/') {
-                    // Comment - skip to end of line
-                    while self.peek() != Some('\n') && self.peek().is_some() {
-                        self.advance();
-                    }
+                if self.match_byte(b'/') {
+                    // Comment - skip to end of line using byte scanning
+                    self.skip_line_comment();
                     // Don't consume the newline, let next_token handle it
                     self.next_token()
-                } else if self.match_char('=') {
+                } else if self.match_byte(b'=') {
                     self.make_token(TokenType::SlashEq)
                 } else {
                     self.make_token(TokenType::Slash)
@@ -231,8 +229,8 @@ impl<'src> Lexer<'src> {
 
             // Dot, range operators
             '.' => {
-                if self.match_char('.') {
-                    if self.match_char('=') {
+                if self.match_byte(b'.') {
+                    if self.match_byte(b'=') {
                         self.make_token(TokenType::DotDotEqual)
                     } else {
                         self.make_token(TokenType::DotDot)
@@ -252,7 +250,7 @@ impl<'src> Lexer<'src> {
 
             // Raw string literal: @"..."
             '@' => {
-                if self.match_char('"') {
+                if self.match_byte(b'"') {
                     self.raw_string()
                 } else {
                     self.error_unexpected_char(c)
@@ -263,40 +261,85 @@ impl<'src> Lexer<'src> {
         }
     }
 
-    /// Skip whitespace (spaces and tabs) and comments
+    /// Skip whitespace (spaces, tabs, carriage returns) using direct byte access
+    #[inline]
     fn skip_whitespace(&mut self) {
-        while let Some(' ') | Some('\t') | Some('\r') = self.peek() {
-            self.advance();
+        while self.current < self.bytes.len() {
+            match self.bytes[self.current] {
+                b' ' | b'\t' | b'\r' => {
+                    self.current += 1;
+                    self.column += 1;
+                }
+                _ => break,
+            }
         }
     }
 
-    /// Advance to the next character and return it
+    /// Advance to the next character and return it.
+    /// Fast path for ASCII bytes (no UTF-8 decoding needed).
+    #[inline]
     fn advance(&mut self) -> Option<char> {
-        if let Some((idx, c)) = self.chars.next() {
-            self.current = idx + c.len_utf8();
+        if self.current >= self.bytes.len() {
+            return None;
+        }
+        let b = self.bytes[self.current];
+        if b < 0x80 {
+            // ASCII fast path: single byte, no UTF-8 decoding
+            self.current += 1;
+            self.column += 1;
+            Some(b as char)
+        } else {
+            // Non-ASCII: decode UTF-8 from the source str
+            let remaining = &self.source[self.current..];
+            let c = remaining.chars().next().unwrap();
+            self.current += c.len_utf8();
             self.column += 1;
             Some(c)
-        } else {
-            None
         }
     }
 
-    /// Peek at the next character without consuming it
-    fn peek(&mut self) -> Option<char> {
-        self.chars.peek().map(|(_, c)| *c)
+    /// Peek at the next byte directly (for ASCII-only comparisons).
+    #[inline]
+    fn peek_byte(&self) -> Option<u8> {
+        self.bytes.get(self.current).copied()
     }
 
     /// Peek at the character after the next one
     fn peek_next(&self) -> Option<char> {
-        let mut iter = self.source[self.current..].chars();
-        iter.next(); // skip current
-        iter.next()
+        if self.current >= self.bytes.len() {
+            return None;
+        }
+        let b = self.bytes[self.current];
+        if b < 0x80 {
+            // Current char is ASCII (1 byte), look at next position
+            let next_pos = self.current + 1;
+            if next_pos >= self.bytes.len() {
+                return None;
+            }
+            let b2 = self.bytes[next_pos];
+            if b2 < 0x80 {
+                Some(b2 as char)
+            } else {
+                let remaining = &self.source[next_pos..];
+                remaining.chars().next()
+            }
+        } else {
+            // Current char is multi-byte, decode to find where next char starts
+            let remaining = &self.source[self.current..];
+            let mut iter = remaining.chars();
+            iter.next(); // skip current
+            iter.next()
+        }
     }
 
-    /// Consume the next character if it matches the expected character
-    fn match_char(&mut self, expected: char) -> bool {
-        if self.peek() == Some(expected) {
-            self.advance();
+    /// Consume the next character if it matches the expected byte.
+    /// All callers use ASCII characters, so we compare bytes directly.
+    #[inline]
+    fn match_byte(&mut self, expected: u8) -> bool {
+        debug_assert!(expected < 0x80, "match_byte only works for ASCII");
+        if self.current < self.bytes.len() && self.bytes[self.current] == expected {
+            self.current += 1;
+            self.column += 1;
             true
         } else {
             false
@@ -382,17 +425,25 @@ impl<'src> Lexer<'src> {
         Token::new(TokenType::Error, message, span)
     }
 
-    /// Scan an identifier or keyword (supports Unicode XID)
+    /// Scan an identifier or keyword (supports Unicode XID).
+    /// Uses a byte-level fast path for ASCII identifier characters.
     fn identifier(&mut self) -> Token<'src> {
-        while let Some(c) = self.peek() {
-            // Fast path for ASCII identifier characters (vast majority of real code)
-            let is_ident_char = c.is_ascii_alphanumeric()
-                || c == '_'
-                || (!c.is_ascii()
-                    && unicode_ident::is_xid_continue(c)
-                    && !Self::is_banned_unicode(c));
-            if is_ident_char {
-                self.advance();
+        // Fast ASCII loop: consume [a-zA-Z0-9_] bytes without UTF-8 decoding
+        while self.current < self.bytes.len() {
+            let b = self.bytes[self.current];
+            if b.is_ascii_alphanumeric() || b == b'_' {
+                self.current += 1;
+                self.column += 1;
+            } else if b >= 0x80 {
+                // Non-ASCII: decode and check Unicode XID
+                let remaining = &self.source[self.current..];
+                let c = remaining.chars().next().unwrap();
+                if unicode_ident::is_xid_continue(c) && !Self::is_banned_unicode(c) {
+                    self.current += c.len_utf8();
+                    self.column += 1;
+                } else {
+                    break;
+                }
             } else {
                 break;
             }
@@ -401,6 +452,15 @@ impl<'src> Lexer<'src> {
         let text = &self.source[self.start..self.current];
         let ty = Self::keyword_type(text).unwrap_or(TokenType::Identifier);
         self.make_token(ty)
+    }
+
+    /// Skip a line comment (everything until newline or EOF) using byte scanning.
+    #[inline]
+    fn skip_line_comment(&mut self) {
+        while self.current < self.bytes.len() && self.bytes[self.current] != b'\n' {
+            self.current += 1;
+            self.column += 1;
+        }
     }
 
     /// Check if a Unicode character is banned from identifiers
@@ -505,166 +565,185 @@ impl<'src> Lexer<'src> {
     fn number(&mut self) -> Token<'src> {
         // The first digit has already been consumed by next_token().
         // Check if it was '0' to detect hex/binary prefix.
-        let first_char = self.source.as_bytes()[self.start];
+        let first_char = self.bytes[self.start];
 
         if first_char == b'0'
-            && let Some(prefix) = self.peek()
-        {
-            if prefix == 'x' || prefix == 'X' {
-                // Hex literal: 0x...
-                self.advance(); // consume 'x'/'X'
-                let mut has_digits = false;
-                while let Some(c) = self.peek() {
-                    if c.is_ascii_hexdigit() {
-                        has_digits = true;
-                        self.advance();
-                    } else if c == '_' {
-                        // Check if this underscore starts a type suffix
-                        if self.is_type_suffix_ahead() {
-                            self.advance(); // consume '_'
-                            self.consume_suffix_name();
+            && let Some(prefix) = self.peek_byte() {
+                if prefix == b'x' || prefix == b'X' {
+                    // Hex literal: 0x...
+                    self.current += 1;
+                    self.column += 1;
+                    let mut has_digits = false;
+                    while let Some(&b) = self.bytes.get(self.current) {
+                        if b.is_ascii_hexdigit() {
+                            has_digits = true;
+                            self.current += 1;
+                            self.column += 1;
+                        } else if b == b'_' {
+                            // Check if this underscore starts a type suffix
+                            if self.is_type_suffix_ahead() {
+                                self.current += 1;
+                                self.column += 1;
+                                self.consume_suffix_name();
+                                break;
+                            }
+                            self.current += 1;
+                            self.column += 1;
+                        } else {
                             break;
                         }
-                        self.advance();
-                    } else {
-                        break;
                     }
-                }
-                if !has_digits {
-                    return self.error_invalid_number();
-                }
-                return self.make_token(TokenType::IntLiteral);
-            } else if prefix == 'b' || prefix == 'B' {
-                // Binary literal: 0b...
-                self.advance(); // consume 'b'/'B'
-                let mut has_digits = false;
-                while let Some(c) = self.peek() {
-                    if c == '0' || c == '1' {
-                        has_digits = true;
-                        self.advance();
-                    } else if c == '_' {
-                        // Check if this underscore starts a type suffix
-                        if self.is_type_suffix_ahead() {
-                            self.advance(); // consume '_'
-                            self.consume_suffix_name();
+                    if !has_digits {
+                        return self.error_invalid_number();
+                    }
+                    return self.make_token(TokenType::IntLiteral);
+                } else if prefix == b'b' || prefix == b'B' {
+                    // Binary literal: 0b...
+                    self.current += 1;
+                    self.column += 1;
+                    let mut has_digits = false;
+                    while let Some(&b) = self.bytes.get(self.current) {
+                        if b == b'0' || b == b'1' {
+                            has_digits = true;
+                            self.current += 1;
+                            self.column += 1;
+                        } else if b == b'_' {
+                            // Check if this underscore starts a type suffix
+                            if self.is_type_suffix_ahead() {
+                                self.current += 1;
+                                self.column += 1;
+                                self.consume_suffix_name();
+                                break;
+                            }
+                            self.current += 1;
+                            self.column += 1;
+                        } else {
                             break;
                         }
-                        self.advance();
-                    } else {
-                        break;
                     }
+                    if !has_digits {
+                        return self.error_invalid_number();
+                    }
+                    return self.make_token(TokenType::IntLiteral);
                 }
-                if !has_digits {
-                    return self.error_invalid_number();
-                }
-                return self.make_token(TokenType::IntLiteral);
             }
-        }
 
         // Decimal integer part (continue consuming digits and underscores)
-        while let Some(c) = self.peek() {
-            if c.is_ascii_digit() {
-                self.advance();
-            } else if c == '_' {
+        while let Some(&b) = self.bytes.get(self.current) {
+            if b.is_ascii_digit() {
+                self.current += 1;
+                self.column += 1;
+            } else if b == b'_' {
                 // Check if this underscore starts a type suffix
                 if self.is_type_suffix_ahead() {
-                    self.advance(); // consume '_'
+                    self.current += 1;
+                    self.column += 1;
                     self.consume_suffix_name();
                     // After consuming suffix, check if this is a float suffix on a decimal
                     // (we haven't seen a dot yet, so we're still in integer parsing)
                     return self.make_token(TokenType::IntLiteral);
                 }
-                self.advance();
+                self.current += 1;
+                self.column += 1;
             } else {
                 break;
             }
         }
 
         // Check for decimal point followed by digit
-        if self.peek() == Some('.')
+        if self.peek_byte() == Some(b'.')
             && let Some(next) = self.peek_next()
-            && next.is_ascii_digit()
-        {
-            // Consume the dot
-            self.advance();
-            // Consume the fractional part
-            while let Some(c) = self.peek() {
-                if c.is_ascii_digit() {
-                    self.advance();
-                } else if c == '_' {
-                    // Check if this underscore starts a type suffix
-                    if self.is_type_suffix_ahead() {
-                        self.advance(); // consume '_'
-                        self.consume_suffix_name();
-                        return self.make_token(TokenType::FloatLiteral);
+                && next.is_ascii_digit() {
+                    // Consume the dot
+                    self.current += 1;
+                    self.column += 1;
+                    // Consume the fractional part
+                    while let Some(&b) = self.bytes.get(self.current) {
+                        if b.is_ascii_digit() {
+                            self.current += 1;
+                            self.column += 1;
+                        } else if b == b'_' {
+                            // Check if this underscore starts a type suffix
+                            if self.is_type_suffix_ahead() {
+                                self.current += 1;
+                                self.column += 1;
+                                self.consume_suffix_name();
+                                return self.make_token(TokenType::FloatLiteral);
+                            }
+                            self.current += 1;
+                            self.column += 1;
+                        } else {
+                            break;
+                        }
                     }
-                    self.advance();
-                } else {
-                    break;
-                }
-            }
 
-            // Check for scientific notation exponent on float
-            if let Some(e) = self.peek()
-                && (e == 'e' || e == 'E')
-            {
-                self.advance(); // consume 'e'/'E'
-                // Optional sign
-                if let Some(sign) = self.peek()
-                    && (sign == '+' || sign == '-')
-                {
-                    self.advance();
+                    // Check for scientific notation exponent on float
+                    if let Some(&e) = self.bytes.get(self.current)
+                        && (e == b'e' || e == b'E') {
+                            self.current += 1;
+                            self.column += 1;
+                            // Optional sign
+                            if let Some(&sign) = self.bytes.get(self.current)
+                                && (sign == b'+' || sign == b'-') {
+                                    self.current += 1;
+                                    self.column += 1;
+                                }
+                            // Consume exponent digits
+                            while let Some(&b) = self.bytes.get(self.current) {
+                                if b.is_ascii_digit() {
+                                    self.current += 1;
+                                    self.column += 1;
+                                } else if b == b'_' {
+                                    // Check if this underscore starts a type suffix
+                                    if self.is_type_suffix_ahead() {
+                                        self.current += 1;
+                                        self.column += 1;
+                                        self.consume_suffix_name();
+                                        return self.make_token(TokenType::FloatLiteral);
+                                    }
+                                    self.current += 1;
+                                    self.column += 1;
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
+
+                    return self.make_token(TokenType::FloatLiteral);
                 }
+
+        // Check for scientific notation on integer (makes it a float)
+        if let Some(&e) = self.bytes.get(self.current)
+            && (e == b'e' || e == b'E') {
+                self.current += 1;
+                self.column += 1;
+                // Optional sign
+                if let Some(&sign) = self.bytes.get(self.current)
+                    && (sign == b'+' || sign == b'-') {
+                        self.current += 1;
+                        self.column += 1;
+                    }
                 // Consume exponent digits
-                while let Some(c) = self.peek() {
-                    if c.is_ascii_digit() {
-                        self.advance();
-                    } else if c == '_' {
+                while let Some(&b) = self.bytes.get(self.current) {
+                    if b.is_ascii_digit() {
+                        self.current += 1;
+                        self.column += 1;
+                    } else if b == b'_' {
                         // Check if this underscore starts a type suffix
                         if self.is_type_suffix_ahead() {
-                            self.advance(); // consume '_'
+                            self.current += 1;
+                            self.column += 1;
                             self.consume_suffix_name();
                             return self.make_token(TokenType::FloatLiteral);
                         }
-                        self.advance();
+                        self.current += 1;
+                        self.column += 1;
                     } else {
                         break;
                     }
                 }
+                return self.make_token(TokenType::FloatLiteral);
             }
-
-            return self.make_token(TokenType::FloatLiteral);
-        }
-
-        // Check for scientific notation on integer (makes it a float)
-        if let Some(e) = self.peek()
-            && (e == 'e' || e == 'E')
-        {
-            self.advance(); // consume 'e'/'E'
-            // Optional sign
-            if let Some(sign) = self.peek()
-                && (sign == '+' || sign == '-')
-            {
-                self.advance();
-            }
-            // Consume exponent digits
-            while let Some(c) = self.peek() {
-                if c.is_ascii_digit() {
-                    self.advance();
-                } else if c == '_' {
-                    // Check if this underscore starts a type suffix
-                    if self.is_type_suffix_ahead() {
-                        self.advance(); // consume '_'
-                        self.consume_suffix_name();
-                        return self.make_token(TokenType::FloatLiteral);
-                    }
-                    self.advance();
-                } else {
-                    break;
-                }
-            }
-            return self.make_token(TokenType::FloatLiteral);
-        }
 
         self.make_token(TokenType::IntLiteral)
     }
@@ -706,36 +785,33 @@ impl<'src> Lexer<'src> {
     /// Consume the alphabetic/numeric suffix name after the underscore has been consumed.
     /// Expects to be called after the `_` has been consumed.
     fn consume_suffix_name(&mut self) {
-        while let Some(c) = self.peek() {
-            if c.is_ascii_alphanumeric() {
-                self.advance();
-            } else {
-                break;
-            }
+        while self.current < self.bytes.len() && self.bytes[self.current].is_ascii_alphanumeric() {
+            self.current += 1;
+            self.column += 1;
         }
     }
 
     /// Scan a string literal (basic, with interpolation start support)
     fn string(&mut self) -> Token<'src> {
         loop {
-            match self.peek() {
+            match self.peek_byte() {
                 None => {
                     return self.error_unterminated_string();
                 }
-                Some('"') => {
+                Some(b'"') => {
                     self.advance();
                     return self.make_token(TokenType::StringLiteral);
                 }
-                Some('\\') => {
+                Some(b'\\') => {
                     // Escape sequence - consume backslash and next char
                     self.advance();
-                    if self.peek().is_some() {
+                    if self.current < self.bytes.len() {
                         self.advance();
                     }
                 }
-                Some('{') => {
+                Some(b'{') => {
                     // Check for escaped brace {{
-                    if self.peek_next() == Some('{') {
+                    if self.bytes.get(self.current + 1) == Some(&b'{') {
                         // Escaped brace - consume both and continue
                         self.advance();
                         self.advance();
@@ -747,9 +823,9 @@ impl<'src> Lexer<'src> {
                         return self.make_token(TokenType::StringInterpStart);
                     }
                 }
-                Some('}') => {
+                Some(b'}') => {
                     // Check for escaped brace }}
-                    if self.peek_next() == Some('}') {
+                    if self.bytes.get(self.current + 1) == Some(&b'}') {
                         // Escaped brace - consume both and continue
                         self.advance();
                         self.advance();
@@ -758,7 +834,7 @@ impl<'src> Lexer<'src> {
                         self.advance();
                     }
                 }
-                Some('\n') => {
+                Some(b'\n') => {
                     return self.error_unterminated_string();
                 }
                 Some(_) => {
@@ -772,15 +848,15 @@ impl<'src> Lexer<'src> {
     fn raw_string(&mut self) -> Token<'src> {
         // Opening @" already consumed
         loop {
-            match self.peek() {
+            match self.peek_byte() {
                 None => {
                     return self.error_unterminated_string();
                 }
-                Some('"') => {
+                Some(b'"') => {
                     self.advance();
                     return self.make_token(TokenType::RawStringLiteral);
                 }
-                Some('\n') => {
+                Some(b'\n') => {
                     // Raw strings can span multiple lines
                     self.line += 1;
                     self.column = 1;
@@ -799,15 +875,15 @@ impl<'src> Lexer<'src> {
         self.start = self.current - 1; // Include the '}'
 
         loop {
-            match self.peek() {
-                Some('"') => {
+            match self.peek_byte() {
+                Some(b'"') => {
                     self.advance();
                     self.in_interp_string = false;
                     return self.make_token(TokenType::StringInterpEnd);
                 }
-                Some('{') => {
+                Some(b'{') => {
                     // Check for escaped brace {{
-                    if self.peek_next() == Some('{') {
+                    if self.bytes.get(self.current + 1) == Some(&b'{') {
                         // Escaped brace - consume both and continue
                         self.advance();
                         self.advance();
@@ -817,9 +893,9 @@ impl<'src> Lexer<'src> {
                         return self.make_token(TokenType::StringInterpMiddle);
                     }
                 }
-                Some('}') => {
+                Some(b'}') => {
                     // Check for escaped brace }}
-                    if self.peek_next() == Some('}') {
+                    if self.bytes.get(self.current + 1) == Some(&b'}') {
                         // Escaped brace - consume both and continue
                         self.advance();
                         self.advance();
@@ -828,12 +904,12 @@ impl<'src> Lexer<'src> {
                         self.advance();
                     }
                 }
-                Some('\n') | None => {
+                Some(b'\n') | None => {
                     return self.error_unterminated_string();
                 }
-                Some('\\') => {
+                Some(b'\\') => {
                     self.advance();
-                    if self.peek().is_some() {
+                    if self.current < self.bytes.len() {
                         self.advance();
                     }
                 }
