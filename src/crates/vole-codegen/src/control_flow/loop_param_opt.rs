@@ -20,6 +20,7 @@
 //     ...
 //     jump block1(v12)
 
+use cranelift_codegen::flowgraph::ControlFlowGraph;
 use cranelift_codegen::ir::{Block, Function, Opcode, Value};
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -89,8 +90,12 @@ struct LoopOptimization {
 fn collect_optimizations(func: &Function, loop_info: &FunctionLoopInfo) -> Vec<LoopOptimization> {
     let mut optimizations = Vec::new();
 
+    // Reuse the CFG already computed by FunctionLoopInfo::analyze(),
+    // instead of recomputing it per-parameter in find_entry_value.
+    let cfg = loop_info.cfg();
+
     for lp in loop_info.loops() {
-        let params_to_remove = find_removable_params(func, loop_info, lp);
+        let params_to_remove = find_removable_params(func, cfg, lp);
 
         if !params_to_remove.is_empty() {
             optimizations.push(LoopOptimization {
@@ -148,7 +153,7 @@ fn resolve_transitive_replacements(optimizations: &mut [LoopOptimization]) {
 /// Find parameters that can be removed from a loop header.
 fn find_removable_params(
     func: &Function,
-    loop_info: &FunctionLoopInfo,
+    cfg: &ControlFlowGraph,
     lp: &super::loop_analysis::LoopInfo,
 ) -> Vec<ParamRemoval> {
     let mut removals = Vec::new();
@@ -162,7 +167,7 @@ fn find_removable_params(
         }
 
         // Find the value passed from outside the loop (entry edge)
-        if let Some(replacement) = find_entry_value(func, loop_info, lp, param_idx) {
+        if let Some(replacement) = find_entry_value(func, cfg, lp, param_idx) {
             removals.push(ParamRemoval {
                 param,
                 param_idx,
@@ -181,15 +186,11 @@ fn find_removable_params(
 /// so we resolve them to the underlying value.
 fn find_entry_value(
     func: &Function,
-    _loop_info: &FunctionLoopInfo,
+    cfg: &ControlFlowGraph,
     lp: &super::loop_analysis::LoopInfo,
     param_idx: usize,
 ) -> Option<Value> {
     let header = lp.header;
-
-    // Build CFG to find predecessors
-    let mut cfg = cranelift_codegen::flowgraph::ControlFlowGraph::new();
-    cfg.compute(func);
 
     // Look for entry edges (predecessors not in the loop)
     for pred in cfg.pred_iter(header) {
@@ -239,36 +240,42 @@ fn apply_optimization(func: &mut Function, opt: &LoopOptimization) {
         opt.params_to_remove.iter().map(|r| r.param_idx).collect();
 
     // Build replacement map: old param -> replacement value
-    // Also include any values that are aliased to the parameters being removed
-    let mut replacements: FxHashMap<Value, Value> = opt
+    let replacements: FxHashMap<Value, Value> = opt
         .params_to_remove
         .iter()
         .map(|r| (r.param, r.replacement))
         .collect();
 
-    // Find all values that are aliased to parameters we're removing
-    // A value v is an alias to param p if resolve_aliases(v) == p
-    let params_to_remove: FxHashSet<Value> = opt.params_to_remove.iter().map(|r| r.param).collect();
-
-    // Scan ALL values in the DFG to find aliases (not just block params and inst results)
-    // This catches "free" aliases created by change_to_alias during variable assignments
-    for value in func.dfg.values() {
-        if replacements.contains_key(&value) {
-            continue;
-        }
-        let resolved = func.dfg.resolve_aliases(value);
-        if params_to_remove.contains(&resolved)
-            && let Some(removal) = opt.params_to_remove.iter().find(|r| r.param == resolved)
-        {
-            replacements.insert(value, removal.replacement);
-        }
-    }
-
-    // Step 1: Replace uses of removed parameters (and their aliases) with their replacements
+    // Step 1: Replace uses of removed parameters (and their aliases) with their replacements.
+    // Instead of scanning ALL DFG values upfront to find aliases (O(V) where V = total values),
+    // we resolve aliases on-the-fly only for the arguments we actually encounter.
     replace_value_uses(func, &replacements);
 
     // Step 2: Remove parameters from header block and update all jumps
     remove_block_params(func, opt.header, &indices_to_remove);
+}
+
+/// Look up a value in the replacement map, resolving aliases on-the-fly.
+///
+/// First checks for a direct match, then resolves the value through aliases
+/// and checks again. This avoids the expensive upfront scan of all DFG values.
+#[inline]
+fn lookup_replacement(
+    dfg: &cranelift_codegen::ir::dfg::DataFlowGraph,
+    replacements: &FxHashMap<Value, Value>,
+    val: Value,
+) -> Option<Value> {
+    // Fast path: direct match (covers the common case where val IS the param)
+    if let Some(&r) = replacements.get(&val) {
+        return Some(r);
+    }
+    // Slow path: val might be an alias to a param being removed
+    let resolved = dfg.resolve_aliases(val);
+    if resolved != val
+        && let Some(&r) = replacements.get(&resolved) {
+            return Some(r);
+        }
+    None
 }
 
 /// Replace all uses of values in the replacement map.
@@ -284,8 +291,9 @@ fn replace_value_uses(func: &mut Function, replacements: &FxHashMap<Value, Value
             let mut arg_updates = Vec::new();
 
             // Check instruction arguments (for non-branch instructions)
+            // Resolve aliases on-the-fly instead of pre-scanning all DFG values
             for (idx, &arg) in func.dfg.inst_args(inst).iter().enumerate() {
-                if let Some(&replacement) = replacements.get(&arg) {
+                if let Some(replacement) = lookup_replacement(&func.dfg, replacements, arg) {
                     arg_updates.push((idx, replacement));
                 }
             }
@@ -305,7 +313,9 @@ fn replace_value_uses(func: &mut Function, replacements: &FxHashMap<Value, Value
                         .args(&func.dfg.value_lists)
                         .filter_map(|arg| arg.as_value())
                         .map(|val| {
-                            if let Some(&replacement) = replacements.get(&val) {
+                            if let Some(replacement) =
+                                lookup_replacement(&func.dfg, replacements, val)
+                            {
                                 any_replaced = true;
                                 replacement
                             } else {

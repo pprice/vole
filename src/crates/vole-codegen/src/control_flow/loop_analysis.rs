@@ -474,6 +474,11 @@ impl FunctionLoopInfo {
         None
     }
 
+    /// Get a reference to the computed control flow graph.
+    pub fn cfg(&self) -> &ControlFlowGraph {
+        &self.cfg
+    }
+
     /// Check if analysis is valid.
     pub fn is_valid(&self) -> bool {
         self.valid
