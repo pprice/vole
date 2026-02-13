@@ -1554,6 +1554,16 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             return self.generate_f64_literal_ops_let(ctx);
         }
 
+        // ~2% chance: f64 equality/comparison edge cases
+        if self.rng.gen_bool(0.02) {
+            return self.generate_f64_comparison_edge_let(ctx);
+        }
+
+        // ~2% chance: string with repeated characters operations
+        if self.rng.gen_bool(0.02) {
+            return self.generate_repeated_string_ops(ctx);
+        }
+
         // ~2% chance: iterator take/skip collect on parameter arrays
         if self.rng.gen_bool(0.02) {
             if let Some(stmt) = self.try_generate_iter_take_skip_collect_let(ctx) {
@@ -8993,6 +9003,72 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 "let {} = {}.iter().skip({}).collect()",
                 name, arr_name, n
             ))
+        }
+    }
+
+    /// Generate f64 equality/comparison edge cases.
+    /// Tests floating-point equality semantics: `0.0 == 0.0`, `1.0 != 2.0`, etc.
+    fn generate_f64_comparison_edge_let(&mut self, ctx: &mut StmtContext) -> String {
+        let name = ctx.new_local_name();
+        ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::Bool), false);
+
+        match self.rng.gen_range(0..5) {
+            0 => format!("let {} = 0.0 == 0.0", name),
+            1 => format!("let {} = 1.0 != 2.0", name),
+            2 => format!("let {} = 0.0 < 1.0", name),
+            3 => {
+                // Compare two f64 vars if available
+                let f64_vars: Vec<String> = ctx
+                    .locals
+                    .iter()
+                    .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::F64)))
+                    .map(|(n, _, _)| n.clone())
+                    .collect();
+                if f64_vars.len() >= 2 {
+                    format!("let {} = {} >= {}", name, f64_vars[0], f64_vars[1])
+                } else {
+                    format!("let {} = 3.14 > 2.71", name)
+                }
+            }
+            _ => format!("let {} = 1.0 <= 1.0", name),
+        }
+    }
+
+    /// Generate operations on strings with repeated characters.
+    /// Tests string method behavior on uniform content: "aaa", "   ", "111".
+    fn generate_repeated_string_ops(&mut self, ctx: &mut StmtContext) -> String {
+        let name = ctx.new_local_name();
+        let repeated_strings = ["aaa", "   ", "111", "xxx", "ZZZ"];
+        let s = repeated_strings[self.rng.gen_range(0..repeated_strings.len())];
+
+        match self.rng.gen_range(0..5) {
+            0 => {
+                // "aaa".length()
+                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::I64), false);
+                format!("let {} = \"{}\".length()", name, s)
+            }
+            1 => {
+                // "aaa".contains("a")
+                let ch = &s[0..1];
+                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::Bool), false);
+                format!("let {} = \"{}\".contains(\"{}\")", name, s, ch)
+            }
+            2 => {
+                // "aaa".replace("a", "b")
+                let ch = &s[0..1];
+                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::String), false);
+                format!("let {} = \"{}\".replace(\"{}\", \"b\")", name, s, ch)
+            }
+            3 => {
+                // "   ".trim()
+                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::String), false);
+                format!("let {} = \"{}\".trim()", name, s)
+            }
+            _ => {
+                // "aaa".to_upper()
+                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::String), false);
+                format!("let {} = \"{}\".to_upper()", name, s)
+            }
         }
     }
 
