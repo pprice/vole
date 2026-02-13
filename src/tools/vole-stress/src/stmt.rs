@@ -1583,6 +1583,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             return self.generate_for_range_tostring_build(ctx);
         }
 
+        // ~2% chance: match with when expression in arm values
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_match_when_arm_let(ctx) {
+                return stmt;
+            }
+        }
+
+        // ~2% chance: sorted iteration with accumulation
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_sorted_iter_accum(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -9152,6 +9166,107 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             iter_var,
             " ".repeat(indent * 2),
         )
+    }
+
+    /// Generate match with when expression in arm values.
+    /// E.g.: `match x { 0 => when { y > 0 => "pos", _ => "neg" }, _ => "other" }`
+    fn try_generate_match_when_arm_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Need an i64 or i32 variable for match scrutinee
+        let numeric_vars: Vec<(String, PrimitiveType)> = ctx
+            .locals
+            .iter()
+            .filter_map(|(name, ty, _)| match ty {
+                TypeInfo::Primitive(p @ (PrimitiveType::I64 | PrimitiveType::I32)) => {
+                    Some((name.clone(), *p))
+                }
+                _ => None,
+            })
+            .collect();
+
+        if numeric_vars.len() < 2 {
+            return None;
+        }
+
+        let (scrutinee, prim) = &numeric_vars[0];
+        let (cond_var, _) = &numeric_vars[1];
+        let name = ctx.new_local_name();
+        let suffix = if *prim == PrimitiveType::I32 {
+            "_i32"
+        } else {
+            ""
+        };
+
+        let val = self.rng.gen_range(0..=3);
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            false,
+        );
+        Some(format!(
+            "let {} = match {} {{ {}{} => when {{ {} > 0{} => \"match_pos\", _ => \"match_neg\" }}, _ => \"other\" }}",
+            name, scrutinee, val, suffix, cond_var, suffix
+        ))
+    }
+
+    /// Generate sorted iteration with accumulation.
+    /// E.g.: `let sorted = arr.iter().sorted().collect(); let mut acc = 0; for x in sorted.iter() { acc = acc + x }`
+    fn try_generate_sorted_iter_accum(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Need a numeric array parameter
+        let array_params: Vec<(String, PrimitiveType)> = ctx
+            .params
+            .iter()
+            .filter_map(|param| match &param.param_type {
+                TypeInfo::Array(inner) => match inner.as_ref() {
+                    TypeInfo::Primitive(prim @ (PrimitiveType::I64 | PrimitiveType::I32)) => {
+                        Some((param.name.clone(), *prim))
+                    }
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+
+        if array_params.is_empty() {
+            return None;
+        }
+
+        let (arr_name, elem_prim) = &array_params[self.rng.gen_range(0..array_params.len())];
+        let sorted_name = ctx.new_local_name();
+        let acc_name = ctx.new_local_name();
+        let iter_var = ctx.new_local_name();
+        let indent = self.indent;
+
+        let zero = if *elem_prim == PrimitiveType::I32 {
+            "0_i32"
+        } else {
+            "0"
+        };
+
+        let arr_type = TypeInfo::Array(Box::new(TypeInfo::Primitive(*elem_prim)));
+        ctx.add_local(sorted_name.clone(), arr_type, false);
+        ctx.protected_vars.push(acc_name.clone());
+        ctx.add_local(
+            acc_name.clone(),
+            TypeInfo::Primitive(*elem_prim),
+            true,
+        );
+
+        Some(format!(
+            "let {} = {}.iter().sorted().collect()\n{}let mut {} = {}\n{}for {} in {}.iter() {{\n{}  {} = {} + {}\n{}}}",
+            sorted_name,
+            arr_name,
+            " ".repeat(indent * 2),
+            acc_name,
+            zero,
+            " ".repeat(indent * 2),
+            iter_var,
+            sorted_name,
+            " ".repeat((indent + 1) * 2),
+            acc_name,
+            acc_name,
+            iter_var,
+            " ".repeat(indent * 2),
+        ))
     }
 
     fn try_generate_bool_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
