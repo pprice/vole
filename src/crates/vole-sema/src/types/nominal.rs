@@ -79,7 +79,7 @@ impl NominalType {
     pub fn as_class(&self) -> Option<&ClassType> {
         match self {
             NominalType::Class(c) => Some(c),
-            _ => None,
+            NominalType::Interface(_) | NominalType::Error(_) => None,
         }
     }
 
@@ -87,7 +87,7 @@ impl NominalType {
     pub fn as_interface(&self) -> Option<&InterfaceType> {
         match self {
             NominalType::Interface(i) => Some(i),
-            _ => None,
+            NominalType::Class(_) | NominalType::Error(_) => None,
         }
     }
 
@@ -95,7 +95,7 @@ impl NominalType {
     pub fn as_error(&self) -> Option<&ErrorTypeInfo> {
         match self {
             NominalType::Error(e) => Some(e),
-            _ => None,
+            NominalType::Class(_) | NominalType::Interface(_) => None,
         }
     }
 }
