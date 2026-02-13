@@ -1509,6 +1509,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: when with string predicate (contains/starts_with)
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_when_with_contains(ctx) {
+                return stmt;
+            }
+        }
+
+        // ~2% chance: match on array length
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_match_array_length(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -8609,6 +8623,82 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             false,
         );
         Some(format!("let {} = {}", name, expr))
+    }
+
+    /// Generate when with string predicate:
+    /// `when { s.contains("x") => "found", _ => "not found" }`
+    fn try_generate_when_with_contains(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let string_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::String)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::String)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        if string_vars.is_empty() {
+            return None;
+        }
+
+        let var = &string_vars[self.rng.gen_range(0..string_vars.len())];
+        let name = ctx.new_local_name();
+
+        let method = match self.rng.gen_range(0..3u32) {
+            0 => "contains",
+            1 => "starts_with",
+            _ => "ends_with",
+        };
+        let needles = ["hello", "test", "a", "str", ""];
+        let needle = needles[self.rng.gen_range(0..needles.len())];
+
+        let results = ["\"found\"", "\"yes\"", "\"match\"", "\"true\""];
+        let defaults = ["\"not found\"", "\"no\"", "\"miss\"", "\"false\""];
+        let idx = self.rng.gen_range(0..results.len());
+
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            false,
+        );
+        Some(format!(
+            "let {} = when {{\n    {}.{}(\"{}\") => {}\n    _ => {}\n}}",
+            name, var, method, needle, results[idx], defaults[idx]
+        ))
+    }
+
+    /// Generate match on array length:
+    /// `match arr.length() { 0 => "empty", 1 => "one", _ => "many" }`
+    fn try_generate_match_array_length(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let array_params: Vec<String> = ctx
+            .params
+            .iter()
+            .filter(|p| matches!(p.param_type, TypeInfo::Array(_)))
+            .map(|p| p.name.clone())
+            .collect();
+
+        if array_params.is_empty() {
+            return None;
+        }
+
+        let arr = &array_params[self.rng.gen_range(0..array_params.len())];
+        let name = ctx.new_local_name();
+
+        let labels = ["\"empty\"", "\"one\"", "\"two\"", "\"few\"", "\"many\""];
+
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            false,
+        );
+        Some(format!(
+            "let {} = match {}.length() {{\n    0 => {}\n    1 => {}\n    2 => {}\n    _ => {}\n}}",
+            name, arr, labels[0], labels[1], labels[2], labels[4]
+        ))
     }
 
     fn try_generate_bool_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
