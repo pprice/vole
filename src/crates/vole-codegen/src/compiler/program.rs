@@ -1155,9 +1155,9 @@ impl Compiler<'_> {
             .query()
             .function_id(program_module, func.name)
             .ok_or_else(|| {
-                format!(
-                    "Function '{}' not found in registry",
-                    self.analyzed.interner.resolve(func.name)
+                CodegenError::not_found(
+                    "function",
+                    self.analyzed.interner.resolve(func.name),
                 )
             })?;
         let (param_type_ids, return_type_id) = {

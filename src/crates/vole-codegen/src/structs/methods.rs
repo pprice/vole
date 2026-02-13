@@ -290,7 +290,7 @@ impl Cg<'_, '_, '_> {
             // Use ResolvedMethod's type_def_id and method_name_id for method_func_keys lookup
             // Uses type's NameId for stable lookup across different analyzer instances
             let type_def_id = resolved.type_def_id().ok_or_else(|| {
-                format!("Method {} requires type_def_id for lookup", method_name_str)
+                CodegenError::not_found("type_def_id", &*method_name_str)
             })?;
             let type_name_id = self.query().get_type(type_def_id).name_id;
             let resolved_method_name_id = resolved.method_name_id();
@@ -352,7 +352,7 @@ impl Cg<'_, '_, '_> {
             let type_def_id =
                 get_type_def_id_from_type_id(resolved_obj_type_id, arena, self.analyzed())
                     .ok_or_else(|| {
-                        format!("Cannot get TypeDefId for method {} lookup", method_name_str)
+                        CodegenError::not_found("TypeDefId", &*method_name_str)
                     })?;
 
             // Check for external method binding first (interface methods on primitives)
@@ -871,17 +871,11 @@ impl Cg<'_, '_, '_> {
 
         // Pure Vole function - call by mangled name
         let name_id = name_id.ok_or_else(|| {
-            format!(
-                "Module method {}::{} not interned",
-                module_path, method_name_str
-            )
+            CodegenError::not_found("module method", format!("{}::{}", module_path, method_name_str))
         })?;
         let func_key = self.funcs().intern_name_id(name_id);
         let func_id = self.funcs().func_id(func_key).ok_or_else(|| {
-            format!(
-                "Module function {}::{} not found",
-                module_path, method_name_str
-            )
+            CodegenError::not_found("module function", format!("{}::{}", module_path, method_name_str))
         })?;
         let func_ref = self
             .codegen_ctx
