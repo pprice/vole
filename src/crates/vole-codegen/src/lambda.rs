@@ -63,14 +63,11 @@ impl Cg<'_, '_, '_> {
     fn get_lambda_types(&self, node_id: NodeId) -> CodegenResult<(TypeId, Vec<TypeId>, TypeId)> {
         let lambda_type_id = self
             .get_expr_type(&node_id)
-            .ok_or_else(|| format!("Lambda type not found in sema for node {:?}", node_id))?;
+            .ok_or_else(|| CodegenError::not_found("lambda type in sema for node", format!("{node_id:?}")))?;
 
         let arena = self.arena();
         let (sema_params, ret_id, _) = arena.unwrap_function(lambda_type_id).ok_or_else(|| {
-            format!(
-                "Lambda expression has non-function type {:?}",
-                lambda_type_id
-            )
+            CodegenError::type_mismatch("lambda expression", "function type", &format!("{lambda_type_id:?}"))
         })?;
 
         // In monomorphized context, substitute type parameters in the individual
@@ -309,7 +306,7 @@ impl Cg<'_, '_, '_> {
             let (current_value, vole_type_id) = if is_self_capture {
                 // Self-capture: use the closure pointer we just created
                 let (_, ty) = self.vars.get(&capture.name).ok_or_else(|| {
-                    format!("Self-captured variable not found: {:?}", capture.name)
+                    CodegenError::not_found("self-captured variable", format!("{:?}", capture.name))
                 })?;
                 (closure_ptr, *ty)
             } else if let Some((var, ty)) = self.vars.get(&capture.name) {
@@ -320,7 +317,7 @@ impl Cg<'_, '_, '_> {
                 let captured = self.load_capture(&binding)?;
                 (captured.value, captured.type_id)
             } else {
-                return Err(format!("Captured variable not found: {:?}", capture.name).into());
+                return Err(CodegenError::not_found("captured variable", format!("{:?}", capture.name)));
             };
 
             // Self-captures are weak references (no rc_inc, no rc_dec on drop)

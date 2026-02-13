@@ -321,7 +321,7 @@ impl Cg<'_, '_, '_> {
 
         let orig_func_key = self.funcs().intern_name_id(name_id);
         let orig_func_id = self.funcs().func_id(orig_func_key).ok_or_else(|| {
-            CodegenError::not_found("function id for", self.interner().resolve(sym)).to_string()
+            CodegenError::not_found("function id for", self.interner().resolve(sym))
         })?;
 
         // Unwrap function type to get params and return type
@@ -1597,7 +1597,7 @@ impl Cg<'_, '_, '_> {
                             let captured = self.load_capture(&binding)?;
                             (captured.value, captured.type_id)
                         } else {
-                            return Err("undefined variable in val pattern".to_string().into());
+                            return Err(CodegenError::internal("undefined variable in val pattern"));
                         };
 
                     let cmp = self.compile_equality_check(var_type_id, scrutinee.value, var_val)?;
