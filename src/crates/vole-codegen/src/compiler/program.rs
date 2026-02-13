@@ -1775,7 +1775,7 @@ impl Compiler<'_> {
             let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
             let env = if let Some(path) = module_path {
                 let (_, interner) = &self.analyzed.module_programs[path];
-                let module_id = cg_module_id.unwrap();
+                let module_id = cg_module_id.expect("cg_module_id set when module_path is Some");
                 compile_env!(self, interner, &empty_inits, source_file_ptr, module_id)
             } else {
                 compile_env!(self, source_file_ptr)
@@ -1953,7 +1953,7 @@ impl Compiler<'_> {
             let builder = FunctionBuilder::new(&mut self.jit.ctx.func, &mut builder_ctx);
             let env = if let Some(path) = module_path {
                 let (_, interner) = &self.analyzed.module_programs[path];
-                let module_id = cg_module_id.unwrap();
+                let module_id = cg_module_id.expect("cg_module_id set when module_path is Some");
                 compile_env!(self, interner, &empty_inits, source_file_ptr, module_id)
             } else {
                 compile_env!(self, source_file_ptr)

@@ -566,7 +566,7 @@ impl EntityRegistry {
                             .implements
                             .iter_mut()
                             .find(|i| i.interface == mapped_interface)
-                            .unwrap();
+                            .expect("interface found per prior exists check");
                         let binding_exists = existing_impl
                             .method_bindings
                             .iter()

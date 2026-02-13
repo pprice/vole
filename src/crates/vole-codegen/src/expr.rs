@@ -2336,7 +2336,7 @@ impl Cg<'_, '_, '_> {
                 let narrowed = self
                     .builder
                     .ins()
-                    .ireduce(Type::int(to_ty.bits() as u16).unwrap(), value);
+                    .ireduce(Type::int(to_ty.bits() as u16).expect("valid integer type for narrowing"), value);
                 return self.builder.ins().bitcast(to_ty, MemFlags::new(), narrowed);
             }
         }

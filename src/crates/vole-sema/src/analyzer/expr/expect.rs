@@ -122,7 +122,7 @@ impl Analyzer {
                     }
                     let Some(best) = best_variant else {
                         // No matching integer variant - emit error unless expected is INVALID
-                        let exp_id = expected.unwrap();
+                        let exp_id = expected.expect("expected type set for integer literal mismatch");
                         self.add_type_mismatch_expected_id(exp_id, "integer literal", expr.span);
                         return Ok(ArenaTypeId::I64);
                     };
