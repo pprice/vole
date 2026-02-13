@@ -4,7 +4,7 @@ use rustc_hash::FxHashMap;
 
 use super::common::{FunctionCompileConfig, compile_function_inner_with_params};
 use super::{Compiler, SelfParam};
-use crate::errors::CodegenResult;
+use crate::errors::{CodegenError, CodegenResult};
 use crate::types::{
     CodegenCtx, MethodInfo, TypeMetadata, method_name_id_with_interner, type_id_to_cranelift,
 };
@@ -174,10 +174,9 @@ impl Compiler<'_> {
             .try_name_id(module_id, &[data.name])
             .and_then(|name_id| query.try_type_def_id(name_id))
             .ok_or_else(|| {
-                format!(
-                    "Internal error: {} {} not found in entity registry",
-                    data.type_kind,
-                    self.query().resolve_symbol(data.name)
+                CodegenError::not_found(
+                    "type",
+                    format!("{} {}", data.type_kind, self.query().resolve_symbol(data.name)),
                 )
             })?;
 
@@ -187,10 +186,9 @@ impl Compiler<'_> {
             .get(&type_def_id)
             .cloned()
             .ok_or_else(|| {
-                format!(
-                    "Internal error: {} {} not registered in type_metadata",
-                    data.type_kind,
-                    self.query().resolve_symbol(data.name)
+                CodegenError::not_found(
+                    "type_metadata",
+                    format!("{} {}", data.type_kind, self.query().resolve_symbol(data.name)),
                 )
             })?;
 
@@ -944,8 +942,7 @@ impl Compiler<'_> {
             self.func_registry.intern_name_id(method_def.full_name_id)
         };
         let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
-            let display = self.func_registry.display(func_key);
-            format!("Internal error: implement method {} not declared", display)
+            CodegenError::not_found("method", self.func_registry.display(func_key).to_string())
         })?;
 
         let sig =
@@ -1059,10 +1056,9 @@ impl Compiler<'_> {
             let method_def = self.registry().get_method(method_id);
             let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
             let jit_func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
-                let method_name_str = interner.resolve(method.name);
-                format!(
-                    "Internal error: static method {}::{} not declared",
-                    type_name, method_name_str
+                CodegenError::not_found(
+                    "static method",
+                    format!("{}::{}", type_name, interner.resolve(method.name)),
                 )
             })?;
 
@@ -1165,8 +1161,7 @@ impl Compiler<'_> {
             self.func_registry.intern_name_id(method_def.full_name_id)
         };
         let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
-            let display = self.func_registry.display(func_key);
-            format!("Internal error: implement method {} not declared", display)
+            CodegenError::not_found("method", self.func_registry.display(func_key).to_string())
         })?;
 
         let sig =
@@ -1255,9 +1250,9 @@ impl Compiler<'_> {
 
         let method_name_id = self.method_name_id(method.name);
         let method_info = metadata.method_infos.get(&method_name_id).ok_or_else(|| {
-            format!(
-                "Internal error: method {} not registered on {}",
-                method_name_str, type_name_str
+            CodegenError::not_found(
+                "method info",
+                format!("{}::{}", type_name_str, method_name_str),
             )
         })?;
         let func_key = method_info.func_key;
@@ -1275,8 +1270,7 @@ impl Compiler<'_> {
             });
 
         let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
-            let display = self.func_registry.display(func_key);
-            format!("Internal error: method {} not declared", display)
+            CodegenError::not_found("method", self.func_registry.display(func_key).to_string())
         })?;
 
         // Create method signature using pre-resolved MethodId
@@ -1360,9 +1354,9 @@ impl Compiler<'_> {
 
         let method_name_id = self.method_name_id(method.name);
         let method_info = metadata.method_infos.get(&method_name_id).ok_or_else(|| {
-            format!(
-                "Internal error: default method {} not registered on {}",
-                method_name_str, type_name_str
+            CodegenError::not_found(
+                "default method info",
+                format!("{}::{}", type_name_str, method_name_str),
             )
         })?;
         let func_key = method_info.func_key;
@@ -1380,8 +1374,7 @@ impl Compiler<'_> {
             });
 
         let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
-            let display = self.func_registry.display(func_key);
-            format!("Internal error: default method {} not declared", display)
+            CodegenError::not_found("default method", self.func_registry.display(func_key).to_string())
         })?;
 
         // Create method signature using pre-resolved MethodId
@@ -1409,10 +1402,7 @@ impl Compiler<'_> {
 
         // Compile method body (must exist for default methods)
         let body = method.body.as_ref().ok_or_else(|| {
-            format!(
-                "Internal error: default method {} has no body",
-                method_name_str
-            )
+            CodegenError::internal_with_context("default method has no body", &*method_name_str)
         })?;
 
         // Get source file pointer and self binding (use metadata.vole_type for self type)
@@ -1494,11 +1484,13 @@ impl Compiler<'_> {
                 .get_method(semantic_method_id);
             let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
             let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
-                let type_name_str = self.query().resolve_symbol(type_name);
-                let method_name_str = self.query().resolve_symbol(method.name);
-                format!(
-                    "Internal error: static method {}::{} not declared",
-                    type_name_str, method_name_str
+                CodegenError::not_found(
+                    "static method",
+                    format!(
+                        "{}::{}",
+                        self.query().resolve_symbol(type_name),
+                        self.query().resolve_symbol(method.name),
+                    ),
                 )
             })?;
 
@@ -1674,9 +1666,9 @@ impl Compiler<'_> {
                 .get_method(semantic_method_id);
             let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
             let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
-                format!(
-                    "Internal error: method {}::{} not declared",
-                    type_name_str, method_name_str
+                CodegenError::not_found(
+                    "method",
+                    format!("{}::{}", type_name_str, method_name_str),
                 )
             })?;
 
@@ -1694,7 +1686,8 @@ impl Compiler<'_> {
                 (params.to_vec(), Some(ret))
             };
 
-            let self_sym = module_info.interner
+            let self_sym = module_info
+                .interner
                 .lookup("self")
                 .expect("INTERNAL: method compilation: 'self' not interned");
             // Skip explicit `self` params — they are handled via the separate self_binding.
@@ -1792,9 +1785,9 @@ impl Compiler<'_> {
                 .get_method(semantic_method_id);
             let func_key = self.func_registry.intern_name_id(method_def.full_name_id);
             let func_id = self.func_registry.func_id(func_key).ok_or_else(|| {
-                format!(
-                    "Internal error: static method {}::{} not declared",
-                    type_name_str, method_name_str
+                CodegenError::not_found(
+                    "static method",
+                    format!("{}::{}", type_name_str, method_name_str),
                 )
             })?;
 
