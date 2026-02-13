@@ -1375,6 +1375,57 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         self.func_ref(key)
     }
 
+    /// Coerce a single Cranelift IR value from one type to another.
+    ///
+    /// Handles int↔int (sextend/ireduce), float↔int (bitcast),
+    /// int↔float (bitcast), and float↔float (fpromote/fdemote).
+    /// Returns the value unchanged if no coercion applies.
+    fn coerce_cranelift_value(
+        &mut self,
+        value: Value,
+        actual_ty: Type,
+        expected_ty: Type,
+    ) -> Value {
+        if actual_ty == expected_ty {
+            return value;
+        }
+        if actual_ty.is_int() && expected_ty.is_int() {
+            if expected_ty.bytes() > actual_ty.bytes() {
+                self.builder.ins().sextend(expected_ty, value)
+            } else {
+                self.builder.ins().ireduce(expected_ty, value)
+            }
+        } else if actual_ty.is_float() && expected_ty.is_int() {
+            // float -> int via bitcast (for generic contexts using i64 for type params)
+            if actual_ty == types::F64 && expected_ty == types::I64 {
+                self.builder
+                    .ins()
+                    .bitcast(types::I64, MemFlags::new(), value)
+            } else if actual_ty == types::F32 && expected_ty == types::I64 {
+                let f64_val = self.builder.ins().fpromote(types::F64, value);
+                self.builder
+                    .ins()
+                    .bitcast(types::I64, MemFlags::new(), f64_val)
+            } else {
+                value
+            }
+        } else if actual_ty.is_int() && expected_ty.is_float() {
+            if actual_ty == types::I64 && expected_ty == types::F64 {
+                self.builder
+                    .ins()
+                    .bitcast(types::F64, MemFlags::new(), value)
+            } else {
+                value
+            }
+        } else if actual_ty == types::F32 && expected_ty == types::F64 {
+            self.builder.ins().fpromote(types::F64, value)
+        } else if actual_ty == types::F64 && expected_ty == types::F32 {
+            self.builder.ins().fdemote(types::F32, value)
+        } else {
+            value
+        }
+    }
+
     /// Coerce call arguments to match a function signature's expected parameter types.
     ///
     /// In generic contexts, expressions may produce narrow integer types (i8, i16, i32)
@@ -1396,41 +1447,8 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let mut coerced: SmallVec<[Value; 8]> = SmallVec::with_capacity(args.len());
         for (i, &arg) in args.iter().enumerate() {
             let actual_ty = self.builder.func.dfg.value_type(arg);
-            let expected_ty = expected.get(i).copied();
-            let val = match expected_ty {
-                Some(exp) if actual_ty != exp => {
-                    if actual_ty.is_int() && exp.is_int() {
-                        if exp.bytes() > actual_ty.bytes() {
-                            self.builder.ins().sextend(exp, arg)
-                        } else {
-                            self.builder.ins().ireduce(exp, arg)
-                        }
-                    } else if actual_ty.is_float() && exp.is_int() {
-                        // float -> int via bitcast (for generic contexts using i64 for type params)
-                        if actual_ty == types::F64 && exp == types::I64 {
-                            self.builder.ins().bitcast(types::I64, MemFlags::new(), arg)
-                        } else if actual_ty == types::F32 && exp == types::I64 {
-                            let f64_val = self.builder.ins().fpromote(types::F64, arg);
-                            self.builder
-                                .ins()
-                                .bitcast(types::I64, MemFlags::new(), f64_val)
-                        } else {
-                            arg
-                        }
-                    } else if actual_ty.is_int() && exp.is_float() {
-                        if actual_ty == types::I64 && exp == types::F64 {
-                            self.builder.ins().bitcast(types::F64, MemFlags::new(), arg)
-                        } else {
-                            arg
-                        }
-                    } else if actual_ty == types::F32 && exp == types::F64 {
-                        self.builder.ins().fpromote(types::F64, arg)
-                    } else if actual_ty == types::F64 && exp == types::F32 {
-                        self.builder.ins().fdemote(types::F32, arg)
-                    } else {
-                        arg
-                    }
-                }
+            let val = match expected.get(i).copied() {
+                Some(exp) if actual_ty != exp => self.coerce_cranelift_value(arg, actual_ty, exp),
                 _ => arg,
             };
             coerced.push(val);
@@ -1532,52 +1550,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             return value;
         }
         let expected_ty = ret_types[0].value_type;
-        if value_ty == expected_ty {
-            return value;
-        }
-        // Coerce between integer types via sextend/ireduce
-        if value_ty.is_int() && expected_ty.is_int() {
-            if expected_ty.bytes() > value_ty.bytes() {
-                return self.builder.ins().sextend(expected_ty, value);
-            } else {
-                return self.builder.ins().ireduce(expected_ty, value);
-            }
-        }
-        // Coerce float to int via bitcast (for generic contexts using i64 for type params)
-        if value_ty.is_float() && expected_ty.is_int() {
-            if value_ty == types::F64 && expected_ty == types::I64 {
-                return self
-                    .builder
-                    .ins()
-                    .bitcast(types::I64, MemFlags::new(), value);
-            }
-            if value_ty == types::F32 && expected_ty == types::I64 {
-                let f64_val = self.builder.ins().fpromote(types::F64, value);
-                return self
-                    .builder
-                    .ins()
-                    .bitcast(types::I64, MemFlags::new(), f64_val);
-            }
-        }
-        // Coerce int to float (unlikely but handle for safety)
-        if value_ty.is_int()
-            && expected_ty.is_float()
-            && value_ty == types::I64
-            && expected_ty == types::F64
-        {
-            return self
-                .builder
-                .ins()
-                .bitcast(types::F64, MemFlags::new(), value);
-        }
-        // Coerce between float types
-        if value_ty == types::F32 && expected_ty == types::F64 {
-            return self.builder.ins().fpromote(types::F64, value);
-        }
-        if value_ty == types::F64 && expected_ty == types::F32 {
-            return self.builder.ins().fdemote(types::F32, value);
-        }
-        value
+        self.coerce_cranelift_value(value, value_ty, expected_ty)
     }
 
     /// Get the result of a call instruction as a CompiledValue.
