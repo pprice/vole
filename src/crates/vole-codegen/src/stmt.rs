@@ -1413,7 +1413,7 @@ impl Cg<'_, '_, '_> {
                 .fields
                 .iter()
                 .find(|f| self.interner().resolve(f.name) == field_name)
-                .ok_or_else(|| format!("Missing field {} in raise statement", &field_name))?;
+                .ok_or_else(|| CodegenError::not_found("raise field", &field_name))?;
 
             let mut field_value = self.expr(&field_init.value)?;
             // RC: if the field value is a borrow (e.g., a parameter variable),
@@ -1451,7 +1451,7 @@ impl Cg<'_, '_, '_> {
                     .fields
                     .iter()
                     .find(|f| self.interner().resolve(f.name) == field_name)
-                    .ok_or_else(|| format!("Missing field {} in raise statement", &field_name))?;
+                    .ok_or_else(|| CodegenError::not_found("raise field", &field_name))?;
 
                 let mut field_value = self.expr(&field_init.value)?;
                 // RC: inc borrowed field values for the error payload

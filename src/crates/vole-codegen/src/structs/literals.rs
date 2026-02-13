@@ -96,7 +96,7 @@ impl Cg<'_, '_, '_> {
                     None
                 }
             })
-            .ok_or_else(|| format!("Unknown type: {} (not in entity registry)", path_str))?;
+            .ok_or_else(|| CodegenError::not_found("type in entity registry", &path_str))?;
 
         // Sentinels (e.g. Done, nil) are zero-field structs represented as i8(0).
         // They may not be in type_metadata if they come from prelude modules,
@@ -120,7 +120,7 @@ impl Cg<'_, '_, '_> {
         let metadata = self
             .type_metadata()
             .get(&type_def_id)
-            .ok_or_else(|| format!("Unknown type: {} (not in type_metadata)", path_str))?;
+            .ok_or_else(|| CodegenError::not_found("type in type_metadata", &path_str))?;
 
         // Check if this is a struct type (stack-allocated value type)
         let is_struct_type = {
@@ -247,7 +247,7 @@ impl Cg<'_, '_, '_> {
             let init_name = self.interner().resolve(init.name);
             let slot = *field_slots
                 .get(init_name)
-                .ok_or_else(|| format!("Unknown field: {} in type {}", init_name, path_str))?;
+                .ok_or_else(|| CodegenError::not_found("field", format!("{} in type {}", init_name, path_str)))?;
 
             let mut value = self.expr(&init.value)?;
 
@@ -626,7 +626,7 @@ impl Cg<'_, '_, '_> {
             let init_name = self.interner().resolve(init.name);
             let field_slot = *field_slots
                 .get(init_name)
-                .ok_or_else(|| format!("Unknown field: {} in type {}", init_name, path_str))?;
+                .ok_or_else(|| CodegenError::not_found("field", format!("{} in type {}", init_name, path_str)))?;
 
             let offset = {
                 let arena = self.arena();

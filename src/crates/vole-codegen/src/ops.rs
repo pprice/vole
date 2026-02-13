@@ -392,7 +392,7 @@ impl Cg<'_, '_, '_> {
     fn call_to_string(&mut self, val: &CompiledValue) -> CodegenResult<Value> {
         let arena = self.arena();
         let impl_type_id = ImplTypeId::from_type_id(val.type_id, arena, self.registry())
-            .ok_or_else(|| format!("Cannot find ImplTypeId for type_id {:?}", val.type_id))?;
+            .ok_or_else(|| CodegenError::not_found("ImplTypeId for type_id", format!("{:?}", val.type_id)))?;
 
         // Look up to_string method via query
         let method_id = self.query().method_name_id_by_str("to_string");
@@ -933,7 +933,7 @@ impl Cg<'_, '_, '_> {
         let (var, var_type_id) = self
             .vars
             .get(&sym)
-            .ok_or_else(|| format!("undefined variable: {}", self.interner().resolve(sym)))?;
+            .ok_or_else(|| CodegenError::not_found("variable", self.interner().resolve(sym)))?;
         let var = *var;
         let var_type_id = *var_type_id;
         let current_val = self.builder.use_var(var);

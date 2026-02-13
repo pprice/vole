@@ -743,7 +743,7 @@ fn compile_external_wrapper<C: VtableCtx>(
     let native_func_ptr = ctx
         .native_registry()
         .lookup(&module_path, &native_name)
-        .ok_or_else(|| format!("native function {}::{} not found", module_path, native_name))?
+        .ok_or_else(|| CodegenError::not_found("native function", format!("{}::{}", module_path, native_name)))?
         .ptr;
 
     let mut native_sig = ctx.jit_module().make_signature();
@@ -906,12 +906,9 @@ pub(crate) fn box_interface_value_id<'a, 'ctx>(
         .analyzed
         .name_table()
         .last_segment_str(interface_def.name_id)
-        .ok_or_else(|| format!("cannot get interface name string for {:?}", type_def_id))?;
+        .ok_or_else(|| CodegenError::not_found("interface name string", format!("{:?}", type_def_id)))?;
     let interface_name = env.interner.lookup(&interface_name_str).ok_or_else(|| {
-        format!(
-            "interface name '{}' not found in interner",
-            interface_name_str
-        )
+        CodegenError::not_found("interface name in interner", &interface_name_str)
     })?;
 
     // Check if value is already an interface

@@ -1130,13 +1130,13 @@ impl Cg<'_, '_, '_> {
                     .last_segment_str(m.name_id)
                     .is_some_and(|n| n == method_name)
             })
-            .ok_or_else(|| format!("Method {} not found on Iterator", method_name))?;
+            .ok_or_else(|| CodegenError::not_found("Iterator method", method_name))?;
 
         // Get the external binding for this method
         let external_info = *self
             .registry()
             .get_external_binding(*method_id)
-            .ok_or_else(|| format!("No external binding for Iterator.{}", method_name))?;
+            .ok_or_else(|| CodegenError::not_found("external binding for Iterator", method_name))?;
 
         // Get the substituted return type from sema
         let return_type_id = self
