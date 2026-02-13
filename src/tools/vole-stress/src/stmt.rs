@@ -1611,6 +1611,16 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: character extraction via substring
+        if self.rng.gen_bool(0.02) {
+            return self.generate_string_char_at_let(ctx);
+        }
+
+        // ~2% chance: range-based iterator with map and collect
+        if self.rng.gen_bool(0.02) {
+            return self.generate_range_iter_map_collect(ctx);
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -9391,6 +9401,55 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             "let {} = when {{ {}.length() > {}.length() => \"arr_longer\", _ => \"str_longer\" }}",
             name, arr, s
         ))
+    }
+
+    /// Generate character extraction via substring on known-length strings.
+    /// E.g.: `let ch = "hello".substring(2, 3)` — extracts single character.
+    fn generate_string_char_at_let(&mut self, ctx: &mut StmtContext) -> String {
+        let name = ctx.new_local_name();
+        let strings = [
+            ("hello", 5),
+            ("world", 5),
+            ("test", 4),
+            ("abc", 3),
+            ("vole", 4),
+        ];
+        let (s, len) = strings[self.rng.gen_range(0..strings.len())];
+        let idx = self.rng.gen_range(0..len);
+
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            false,
+        );
+        format!(
+            "let {} = \"{}\".substring({}, {})",
+            name, s, idx, idx + 1
+        )
+    }
+
+    /// Generate range-based iterator with map and collect.
+    /// E.g.: `let arr = (0..5).iter().map((x) => x * 2).collect()`
+    fn generate_range_iter_map_collect(&mut self, ctx: &mut StmtContext) -> String {
+        let name = ctx.new_local_name();
+        let n = self.rng.gen_range(2..=8);
+        let multiplier = self.rng.gen_range(1..=5);
+
+        let map_op = match self.rng.gen_range(0..3) {
+            0 => format!("x * {}", multiplier),
+            1 => format!("x + {}", multiplier),
+            _ => format!("x * {} + 1", multiplier),
+        };
+
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+            false,
+        );
+        format!(
+            "let {} = (0..{}).iter().map((x) => {}).collect()",
+            name, n, map_op
+        )
     }
 
     fn try_generate_bool_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
