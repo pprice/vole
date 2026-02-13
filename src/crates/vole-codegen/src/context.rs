@@ -558,15 +558,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Emit rc_inc for a value, handling interface fat pointers by loading the
     /// data word at offset 0 before incrementing.
     pub fn emit_rc_inc_for_type(&mut self, value: Value, type_id: TypeId) -> CodegenResult<()> {
-        if self.arena().is_interface(type_id) {
-            let data_word = self
-                .builder
-                .ins()
-                .load(types::I64, MemFlags::new(), value, 0);
-            self.call_runtime_void(RuntimeFn::RcInc, &[data_word])
-        } else {
-            self.call_runtime_void(RuntimeFn::RcInc, &[value])
-        }
+        self.emit_rc_op_for_type(value, type_id, RuntimeFn::RcInc)
     }
 
     /// Increment RC for a borrowed value being stored into a container.
@@ -667,6 +659,27 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         Ok(())
     }
 
+    /// Shared implementation for `emit_rc_inc_for_type` and `emit_rc_dec_for_type`.
+    ///
+    /// For interface types, loads the data word at offset 0 before applying
+    /// the given `rc_fn`. For other types, applies `rc_fn` directly.
+    fn emit_rc_op_for_type(
+        &mut self,
+        value: Value,
+        type_id: TypeId,
+        rc_fn: RuntimeFn,
+    ) -> CodegenResult<()> {
+        if self.arena().is_interface(type_id) {
+            let data_word = self
+                .builder
+                .ins()
+                .load(types::I64, MemFlags::new(), value, 0);
+            self.call_runtime_void(rc_fn, &[data_word])
+        } else {
+            self.call_runtime_void(rc_fn, &[value])
+        }
+    }
+
     /// Emit rc_dec(value) to decrement the reference count.
     /// Used when destroying a reference (e.g., reassignment).
     pub fn emit_rc_dec(&mut self, value: Value) -> CodegenResult<()> {
@@ -676,15 +689,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Emit rc_dec for a value, handling interface fat pointers by loading the
     /// data word at offset 0 before decrementing.
     pub fn emit_rc_dec_for_type(&mut self, value: Value, type_id: TypeId) -> CodegenResult<()> {
-        if self.arena().is_interface(type_id) {
-            let data_word = self
-                .builder
-                .ins()
-                .load(types::I64, MemFlags::new(), value, 0);
-            self.call_runtime_void(RuntimeFn::RcDec, &[data_word])
-        } else {
-            self.call_runtime_void(RuntimeFn::RcDec, &[value])
-        }
+        self.emit_rc_op_for_type(value, type_id, RuntimeFn::RcDec)
     }
 
     /// Emit rc_dec for an owned RC value and mark it as consumed.
