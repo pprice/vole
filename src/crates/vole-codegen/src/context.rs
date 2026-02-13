@@ -1188,34 +1188,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         type_id_to_cranelift(ty, self.arena(), self.ptr_type())
     }
 
-    /// Convert a TypeId to a Cranelift type, returning an error if the type is INVALID.
-    ///
-    /// Use this at codegen entry points where a graceful error is preferred over
-    /// a panic for debugging sema bugs.
-    #[allow(dead_code)] // Defensive utility - available for use when graceful errors are preferred
-    pub fn try_cranelift_type(&self, ty: TypeId) -> CodegenResult<Type> {
-        super::types::try_type_id_to_cranelift(ty, self.arena(), self.ptr_type())
-    }
-
-    /// Check if a TypeId is valid for codegen. Returns an error if the type is INVALID.
-    ///
-    /// Use this to validate types at codegen entry points before processing them.
-    /// INVALID types indicate a sema bug where an unknown type was not properly
-    /// reported as an error.
-    #[allow(dead_code)] // Defensive utility - available for use when graceful errors are preferred
-    pub fn check_type_id(&self, ty: TypeId, context: &str) -> CodegenResult<()> {
-        if ty.is_invalid() {
-            return Err(CodegenError::internal_with_context(
-                "received invalid type ID (this is a sema bug)",
-                format!(
-                    "{}: unknown types should be reported as errors before reaching codegen",
-                    context
-                ),
-            ));
-        }
-        Ok(())
-    }
-
     /// Convert a slice of TypeIds to Cranelift types
     pub fn cranelift_types(&self, type_ids: &[TypeId]) -> Vec<Type> {
         let arena = self.arena();
@@ -1225,18 +1197,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .collect()
     }
 
-    /// Convert a slice of TypeIds to Cranelift types, returning an error if any type is INVALID.
-    ///
-    /// Use this at codegen entry points where a graceful error is preferred over a panic.
-    #[allow(dead_code)] // Defensive utility - available for use when graceful errors are preferred
-    pub fn try_cranelift_types(&self, type_ids: &[TypeId]) -> CodegenResult<Vec<Type>> {
-        let arena = self.arena();
-        let ptr_type = self.ptr_type();
-        type_ids
-            .iter()
-            .map(|&ty| super::types::try_type_id_to_cranelift(ty, arena, ptr_type))
-            .collect()
-    }
 
     /// Convert an i64 value back to its proper type (reverse of convert_to_i64_for_storage)
     pub fn convert_from_i64_storage(&mut self, word: Value, type_id: TypeId) -> Value {

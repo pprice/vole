@@ -281,26 +281,6 @@ pub(crate) fn type_id_to_cranelift(ty: TypeId, arena: &TypeArena, pointer_type: 
     }
 }
 
-/// Convert a TypeId to a Cranelift type, returning an error if the type is INVALID.
-///
-/// This is the fallible version of `type_id_to_cranelift` for use in entry points
-/// where a graceful error is preferred over a panic.
-#[allow(dead_code)] // Defensive utility - available for use when graceful errors are preferred
-pub(crate) fn try_type_id_to_cranelift(
-    ty: TypeId,
-    arena: &TypeArena,
-    pointer_type: Type,
-) -> CodegenResult<Type> {
-    // Defensive check: INVALID types should never reach codegen.
-    if ty.is_invalid() {
-        return Err(CodegenError::internal_with_context(
-            "received invalid type ID (this is a sema bug)",
-            "unknown types should be reported as errors before reaching codegen",
-        ));
-    }
-    Ok(type_id_to_cranelift(ty, arena, pointer_type))
-}
-
 /// Check if a type requires 2 u64 slots in class instance storage.
 /// Currently only i128 (128-bit integer) is wider than a single u64.
 pub(crate) fn is_wide_type(ty: TypeId, arena: &TypeArena) -> bool {
