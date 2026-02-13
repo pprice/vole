@@ -1433,6 +1433,16 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: i32 near-boundary operations
+        if self.rng.gen_bool(0.02) {
+            return self.generate_i32_boundary_safe(ctx);
+        }
+
+        // ~2% chance: empty string operations
+        if self.rng.gen_bool(0.02) {
+            return self.generate_empty_string_ops(ctx);
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -8024,6 +8034,55 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 name, arr_name, sep
             ))
         }
+    }
+
+    /// Generate i32 operations near the boundary values.
+    /// E.g.: `let x = 2147483647_i32 - 1_i32`, `let y = -2147483648_i32 + 1_i32`
+    fn generate_i32_boundary_safe(&mut self, ctx: &mut StmtContext) -> String {
+        let name = ctx.new_local_name();
+
+        let expr = match self.rng.gen_range(0..6u32) {
+            0 => "2147483647_i32 - 1_i32".to_string(),
+            1 => "(-2147483647_i32 + 1_i32)".to_string(),
+            2 => "(2147483646_i32 + 1_i32)".to_string(),
+            3 => "(1073741823_i32 * 2_i32)".to_string(),
+            4 => "(2147483647_i32 / 2_i32)".to_string(),
+            _ => "(2147483647_i32 % 100_i32)".to_string(),
+        };
+
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::I32),
+            false,
+        );
+        format!("let {} = {}", name, expr)
+    }
+
+    /// Generate operations on empty strings to test edge cases.
+    /// E.g.: `"".length()`, `"".to_upper()`, `"".trim()`, `"".split(",").count()`
+    fn generate_empty_string_ops(&mut self, ctx: &mut StmtContext) -> String {
+        let name = ctx.new_local_name();
+
+        let (expr, ty) = match self.rng.gen_range(0..6u32) {
+            0 => ("\"\"".to_string() + ".length()", TypeInfo::Primitive(PrimitiveType::I64)),
+            1 => ("\"\"".to_string() + ".to_upper()", TypeInfo::Primitive(PrimitiveType::String)),
+            2 => ("\"\"".to_string() + ".trim()", TypeInfo::Primitive(PrimitiveType::String)),
+            3 => (
+                "\"\"".to_string() + ".split(\",\").count()",
+                TypeInfo::Primitive(PrimitiveType::I64),
+            ),
+            4 => (
+                "\"\"".to_string() + ".contains(\"\")",
+                TypeInfo::Primitive(PrimitiveType::Bool),
+            ),
+            _ => (
+                "\"\"".to_string() + ".starts_with(\"\")",
+                TypeInfo::Primitive(PrimitiveType::Bool),
+            ),
+        };
+
+        ctx.add_local(name.clone(), ty, false);
+        format!("let {} = {}", name, expr)
     }
 
     fn try_generate_bool_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
