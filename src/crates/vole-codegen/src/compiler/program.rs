@@ -692,7 +692,7 @@ impl Compiler<'_> {
         let jit_func_id = self
             .func_registry
             .func_id(func_key)
-            .ok_or_else(|| format!("Module function {} not declared", display_name))?;
+            .ok_or_else(|| CodegenError::not_found("module function", &display_name))?;
         let module_id = self.query().module_id_or_main(module_path);
 
         // Get FunctionId and extract pre-resolved signature data
@@ -700,7 +700,7 @@ impl Compiler<'_> {
             .query()
             .registry()
             .function_by_name(name_id)
-            .ok_or_else(|| format!("Function {} not found in registry", display_name))?;
+            .ok_or_else(|| CodegenError::not_found("function in registry", &display_name))?;
         let (param_type_ids, return_type_id) = {
             let func_def = self.registry().get_function(semantic_func_id);
             (
@@ -770,13 +770,13 @@ impl Compiler<'_> {
         let jit_func_id = self
             .func_registry
             .func_id(func_key)
-            .ok_or_else(|| format!("Function {} not declared", display_name))?;
+            .ok_or_else(|| CodegenError::not_found("function", &display_name))?;
 
         // Get FunctionId and extract pre-resolved signature data
         let semantic_func_id = self
             .query()
             .function_id(program_module, func.name)
-            .ok_or_else(|| format!("Function {} not found in registry", display_name))?;
+            .ok_or_else(|| CodegenError::not_found("function in registry", &display_name))?;
         let (param_type_ids, return_type_id) = {
             let func_def = self.registry().get_function(semantic_func_id);
             (
@@ -863,7 +863,7 @@ impl Compiler<'_> {
             let func_id = self
                 .func_registry
                 .func_id(func_key)
-                .ok_or_else(|| format!("Test {} not declared", func_name))?;
+                .ok_or_else(|| CodegenError::not_found("test function", &func_name))?;
 
             // Create function signature: () -> i64
             let sig = self.jit.create_signature(&[], Some(types::I64));
@@ -1471,7 +1471,7 @@ impl Compiler<'_> {
         let func_id = self
             .func_registry
             .func_id(func_key)
-            .ok_or_else(|| format!("Monomorphized function {} not declared", mangled_name))?;
+            .ok_or_else(|| CodegenError::not_found("monomorphized function", &mangled_name))?;
 
         let param_type_ids: Vec<TypeId> = instance.func_type.params_id.to_vec();
         let return_type_id = instance.func_type.return_type_id;
@@ -1528,7 +1528,7 @@ impl Compiler<'_> {
         let func_id = self
             .func_registry
             .func_id(func_key)
-            .ok_or_else(|| format!("Monomorphized function {} not declared", mangled_name))?;
+            .ok_or_else(|| CodegenError::not_found("monomorphized function", &mangled_name))?;
 
         // Get parameter types and build config
         let param_type_ids: Vec<TypeId> = instance.func_type.params_id.to_vec();
@@ -1730,7 +1730,7 @@ impl Compiler<'_> {
         let func_id = self
             .func_registry
             .func_id(func_key)
-            .ok_or_else(|| format!("Monomorphized class method {} not declared", mangled_name))?;
+            .ok_or_else(|| CodegenError::not_found("monomorphized class method", &mangled_name))?;
 
         // Get param and return types, build config
         let param_type_ids: Vec<TypeId> = instance.func_type.params_id.to_vec();
@@ -1909,7 +1909,7 @@ impl Compiler<'_> {
         let func_id = self
             .func_registry
             .func_id(func_key)
-            .ok_or_else(|| format!("Monomorphized static method {} not declared", mangled_name))?;
+            .ok_or_else(|| CodegenError::not_found("monomorphized static method", &mangled_name))?;
 
         // Get param and return types, build config
         let param_type_ids: Vec<TypeId> = instance.func_type.params_id.to_vec();
@@ -1932,7 +1932,7 @@ impl Compiler<'_> {
         let body = method
             .body
             .as_ref()
-            .ok_or_else(|| format!("Internal error: static method {} has no body", mangled_name))?;
+            .ok_or_else(|| CodegenError::internal_with_context("static method has no body", &mangled_name))?;
 
         // Create function builder and compile
         let source_file_ptr = self.source_file_ptr();
