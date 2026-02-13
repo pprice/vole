@@ -8,7 +8,7 @@ use crate::generic::TypeParamInfo;
 use crate::implement_registry::ExternalMethodInfo;
 use crate::type_arena::TypeId;
 use vole_frontend::{Expr, NodeId};
-use vole_identity::{FieldId, FunctionId, GlobalId, MethodId, ModuleId, NameId, TypeDefId};
+use vole_identity::{FieldId, FunctionId, GlobalId, MethodId, ModuleId, NameId, NameTable, TypeDefId};
 
 /// What kind of type definition this is
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +52,15 @@ pub struct GenericTypeInfo {
     pub field_types: Vec<TypeId>,
     /// Whether each field has a default value (parallel to field_names)
     pub field_has_default: Vec<bool>,
+}
+
+impl GenericTypeInfo {
+    /// Find the index of a field by its string name, comparing via the name table.
+    pub fn field_index_by_name(&self, name: &str, name_table: &NameTable) -> Option<usize> {
+        self.field_names.iter().position(|name_id| {
+            name_table.last_segment_str(*name_id).as_deref() == Some(name)
+        })
+    }
 }
 
 /// A method binding within an implementation block.

@@ -57,10 +57,8 @@ impl Analyzer {
                         .unwrap_or_else(|| "class".to_string());
 
                     if let Some(ref generic_info) = generic_info {
-                        if let Some(idx) = generic_info.field_names.iter().position(|name_id| {
-                            self.name_table().last_segment_str(*name_id).as_deref()
-                                == Some(field_name)
-                        }) {
+                        let field_idx = generic_info.field_index_by_name(field_name, &self.name_table());
+                        if let Some(idx) = field_idx {
                             // Substitute type args via arena if any
                             let field_type_id = generic_info.field_types[idx];
                             let resolved_type_id = if type_args_id.is_empty() {
@@ -277,10 +275,8 @@ impl Analyzer {
                         .unwrap_or_else(|| "class".to_string());
 
                     if let Some(ref generic_info) = generic_info {
-                        if let Some(idx) = generic_info.field_names.iter().position(|name_id| {
-                            self.name_table().last_segment_str(*name_id).as_deref()
-                                == Some(field_name)
-                        }) {
+                        let field_idx = generic_info.field_index_by_name(field_name, &self.name_table());
+                        if let Some(idx) = field_idx {
                             // Substitute type args via arena if any
                             let field_type_id = generic_info.field_types[idx];
                             if type_args_id.is_empty() {

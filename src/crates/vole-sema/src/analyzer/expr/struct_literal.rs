@@ -407,9 +407,8 @@ impl Analyzer {
         for field_init in &struct_lit.fields {
             let field_init_name_str = interner.resolve(field_init.name);
             // Find the field index - compare by string value since Symbols may differ
-            if let Some(idx) = generic_info.field_names.iter().position(|name_id| {
-                self.name_table().last_segment_str(*name_id).as_deref() == Some(field_init_name_str)
-            }) {
+            let field_idx = generic_info.field_index_by_name(field_init_name_str, &self.name_table());
+            if let Some(idx) = field_idx {
                 // Use TypeId directly for compatibility check
                 let actual_ty_id = *field_value_type_ids
                     .get(field_init_name_str)

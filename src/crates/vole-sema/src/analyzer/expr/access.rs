@@ -28,23 +28,21 @@ impl Analyzer {
         let generic_info = self.entity_registry().type_generic_info(type_def_id)?;
 
         // Find the field by name and get substituted type
-        for (i, field_name_id) in generic_info.field_names.iter().enumerate() {
-            let name = self.name_table().last_segment_str(*field_name_id);
-            if name.as_deref() == Some(field_name) {
-                let field_type_id = generic_info.field_types[i];
+        let field_idx = generic_info.field_index_by_name(field_name, &self.name_table());
+        if let Some(idx) = field_idx {
+            let field_type_id = generic_info.field_types[idx];
 
-                // Use arena-based substitution - get raw pointer to arena to avoid borrow conflict
-                // Rc::make_mut provides copy-on-write (free when refcount is 1)
-                let mut db = self.ctx.db.borrow_mut();
-                let arena = Rc::make_mut(&mut db.types) as *mut _;
-                let substituted_id = Rc::make_mut(&mut db.entities).substitute_type_id_with_args(
-                    type_def_id,
-                    type_args_id,
-                    field_type_id,
-                    unsafe { &mut *arena },
-                );
-                return Some(substituted_id);
-            }
+            // Use arena-based substitution - get raw pointer to arena to avoid borrow conflict
+            // Rc::make_mut provides copy-on-write (free when refcount is 1)
+            let mut db = self.ctx.db.borrow_mut();
+            let arena = Rc::make_mut(&mut db.types) as *mut _;
+            let substituted_id = Rc::make_mut(&mut db.entities).substitute_type_id_with_args(
+                type_def_id,
+                type_args_id,
+                field_type_id,
+                unsafe { &mut *arena },
+            );
+            return Some(substituted_id);
         }
 
         None
