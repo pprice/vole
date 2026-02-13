@@ -1381,6 +1381,18 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: while false dead code
+        if self.rng.gen_bool(0.02) {
+            return self.generate_while_false_deadcode(ctx);
+        }
+
+        // ~2% chance: division by power of 2
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_power_of_two_div(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -7536,6 +7548,62 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             s_false,
             indent,
         ))
+    }
+
+    /// Generate `while false { ... }` — dead loop body.
+    /// Tests that the compiler handles unreachable while body correctly.
+    fn generate_while_false_deadcode(&mut self, ctx: &mut StmtContext) -> String {
+        let indent = "    ".repeat(self.indent + 1);
+        let var_name = ctx.new_local_name();
+        // Declare a mutable variable before the loop, then modify inside
+        // the dead body. The modification should never execute.
+        ctx.add_local(
+            var_name.clone(),
+            TypeInfo::Primitive(PrimitiveType::I64),
+            true,
+        );
+        ctx.protected_vars.push(var_name.clone());
+        format!(
+            "let mut {} = 42\n{}while false {{\n{}{} = 0\n{}}}",
+            var_name, indent, indent, var_name, indent,
+        )
+    }
+
+    /// Generate division by power of 2: `x / 2`, `x / 4`, `x / 8`.
+    /// Common optimization path in codegen (strength reduction).
+    fn try_generate_power_of_two_div(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let i64_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::I64)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::I64)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        if i64_vars.is_empty() {
+            return None;
+        }
+
+        let var = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+        let name = ctx.new_local_name();
+        let divisor = match self.rng.gen_range(0..4u32) {
+            0 => 2,
+            1 => 4,
+            2 => 8,
+            _ => 16,
+        };
+
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::I64),
+            false,
+        );
+        Some(format!("let {} = {} / {}", name, var, divisor))
     }
 
     fn try_generate_bool_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
