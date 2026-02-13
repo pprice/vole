@@ -8,6 +8,13 @@ use crate::type_arena::TypeId as ArenaTypeId;
 use rustc_hash::FxHashMap;
 use vole_identity::{NameId, TypeDefId};
 
+/// Generic context for recording method monomorphizations.
+struct GenericContext<'a> {
+    class_type_params: &'a [TypeParamInfo],
+    method_type_params: &'a [TypeParamInfo],
+
+    inferred: &'a FxHashMap<NameId, ArenaTypeId>,
+}
 impl Analyzer {
     /// Get field type from a struct-like type by looking up the type definition
     /// and substituting type arguments if needed. Returns TypeId directly.
@@ -1063,7 +1070,8 @@ impl Analyzer {
             let (final_param_ids, final_return_id, maybe_inferred) = if !all_type_params.is_empty()
             {
                 // Build substitution map from explicit type args if provided (TypeId version)
-                let inferred: FxHashMap<NameId, ArenaTypeId> = if !method_call.type_args.is_empty() {
+                let inferred: FxHashMap<NameId, ArenaTypeId> = if !method_call.type_args.is_empty()
+                {
                     // Resolve explicit type args and map to class type params
                     if method_call.type_args.len() != class_type_params.len() {
                         self.add_error(
@@ -1173,9 +1181,11 @@ impl Analyzer {
                     type_def_id,
                     method_call.method,
                     &func_type,
-                    &class_type_params,
-                    &method_type_params,
-                    inferred,
+                    &GenericContext {
+                        class_type_params: &class_type_params,
+                        method_type_params: &method_type_params,
+                        inferred,
+                    },
                     interner,
                 );
             }
@@ -1341,17 +1351,13 @@ impl Analyzer {
     }
 
     /// Record a static method monomorphization for generic class static method calls.
-    /// Creates or retrieves a monomorphized instance and records the call site.
-    #[allow(clippy::too_many_arguments)]
     fn record_static_method_monomorph(
         &mut self,
         expr: &Expr,
         type_def_id: TypeDefId,
         method_sym: Symbol,
         func_type: &FunctionType,
-        class_type_params: &[TypeParamInfo],
-        method_type_params: &[TypeParamInfo],
-        inferred: &FxHashMap<NameId, ArenaTypeId>,
+        generic_ctx: &GenericContext<'_>,
         interner: &Interner,
     ) {
         // Get the type def to extract name and type args
@@ -1361,15 +1367,17 @@ impl Analyzer {
         let method_name_id = self.method_name_id(method_sym, interner);
 
         // Use TypeIds directly as keys for class type params
-        let class_type_keys: Vec<_> = class_type_params
+        let class_type_keys: Vec<_> = generic_ctx
+            .class_type_params
             .iter()
-            .filter_map(|tp| inferred.get(&tp.name_id).copied())
+            .filter_map(|tp| generic_ctx.inferred.get(&tp.name_id).copied())
             .collect();
 
         // Use TypeIds directly as keys for method type params
-        let method_type_keys: Vec<_> = method_type_params
+        let method_type_keys: Vec<_> = generic_ctx
+            .method_type_params
             .iter()
-            .filter_map(|tp| inferred.get(&tp.name_id).copied())
+            .filter_map(|tp| generic_ctx.inferred.get(&tp.name_id).copied())
             .collect();
 
         // Create the monomorph key with separate class and method type keys
@@ -1410,7 +1418,7 @@ impl Analyzer {
 
             // Create the substituted function type using arena substitution (TypeId-based)
             let inferred_hb: FxHashMap<NameId, ArenaTypeId> =
-                inferred.iter().map(|(&k, &v)| (k, v)).collect();
+                generic_ctx.inferred.iter().map(|(&k, &v)| (k, v)).collect();
 
             // Eagerly substitute all field types into the arena so that codegen's
             // read-only lookup_substitute can find them later. Without this,
