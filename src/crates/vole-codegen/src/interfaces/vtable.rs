@@ -266,7 +266,7 @@ impl InterfaceVtableRegistry {
         let state = self
             .pending
             .remove(&key)
-            .ok_or_else(|| "vtable not declared - call get_or_declare first".to_string())?;
+            .ok_or_else(|| CodegenError::missing_resource("vtable"))?;
 
         let word_bytes = ctx.ptr_type().bytes() as usize;
 
@@ -552,11 +552,11 @@ fn compile_function_wrapper<C: VtableCtx>(
         let closure_get_key = ctx
             .funcs()
             .runtime_key(RuntimeFn::ClosureGetFunc)
-            .ok_or_else(|| "closure get func not registered".to_string())?;
+            .ok_or_else(|| CodegenError::missing_resource("ClosureGetFunc runtime function"))?;
         let closure_get_id = ctx
             .funcs()
             .func_id(closure_get_key)
-            .ok_or_else(|| "closure get func id missing".to_string())?;
+            .ok_or_else(|| CodegenError::not_found("function id", "ClosureGetFunc"))?;
         let closure_get_ref = ctx
             .jit_module()
             .declare_func_in_func(closure_get_id, builder.func);
@@ -647,7 +647,7 @@ fn compile_method_wrapper<C: VtableCtx>(
     let func_id = ctx
         .funcs()
         .func_id(method_info.func_key)
-        .ok_or_else(|| "method function id not found".to_string())?;
+        .ok_or_else(|| CodegenError::not_found("method function id", ""))?;
     let func_ref = ctx.jit_module().declare_func_in_func(func_id, builder.func);
     let call = builder.ins().call(func_ref, &call_args);
     Ok(builder.inst_results(call).to_vec())
@@ -1089,7 +1089,7 @@ fn resolve_vtable_target<C: VtableCtx>(
         let func_key = *ctx
             .method_func_keys()
             .get(&(type_name_id, method_name_id))
-            .ok_or_else(|| "implement method info not found in method_func_keys".to_string())?;
+            .ok_or_else(|| CodegenError::not_found("method info", "method_func_keys lookup"))?;
         let method_info = MethodInfo { func_key };
         return Ok(VtableMethod {
             param_count: impl_.func_type.params_id.len(),
@@ -1354,10 +1354,10 @@ fn runtime_heap_alloc_ref<C: VtableCtx>(
     let key = ctx
         .funcs()
         .runtime_key(RuntimeFn::HeapAlloc)
-        .ok_or_else(|| "heap allocator not registered".to_string())?;
+        .ok_or_else(|| CodegenError::missing_resource("HeapAlloc runtime function"))?;
     let func_id = ctx
         .funcs()
         .func_id(key)
-        .ok_or_else(|| "heap allocator function id missing".to_string())?;
+        .ok_or_else(|| CodegenError::not_found("function id", "HeapAlloc"))?;
     Ok(ctx.jit_module().declare_func_in_func(func_id, builder.func))
 }
