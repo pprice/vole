@@ -1537,6 +1537,18 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: guarded division (when { b != 0 => a / b, _ => 0 })
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_zero_division_guard(ctx) {
+                return stmt;
+            }
+        }
+
+        // ~2% chance: single-character string operations
+        if self.rng.gen_bool(0.02) {
+            return self.generate_single_char_string_ops(ctx);
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -8777,6 +8789,97 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             "let {} = {}.iter().reverse().collect()",
             name, arr_name
         ))
+    }
+
+    /// Generate a guarded division: `when { b != 0 => a / b, _ => 0 }`
+    /// Exercises safe division pattern with zero-check guard.
+    fn try_generate_zero_division_guard(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        // Find two numeric variables of the same type
+        let numeric_vars: Vec<(String, PrimitiveType)> = ctx
+            .locals
+            .iter()
+            .filter_map(|(name, ty, _)| match ty {
+                TypeInfo::Primitive(p @ (PrimitiveType::I64 | PrimitiveType::I32)) => {
+                    Some((name.clone(), *p))
+                }
+                _ => None,
+            })
+            .collect();
+
+        if numeric_vars.len() < 2 {
+            return None;
+        }
+
+        let idx_a = self.rng.gen_range(0..numeric_vars.len());
+        let mut idx_b = self.rng.gen_range(0..numeric_vars.len());
+        while idx_b == idx_a {
+            idx_b = self.rng.gen_range(0..numeric_vars.len());
+        }
+
+        let (a_name, a_prim) = &numeric_vars[idx_a];
+        let (b_name, b_prim) = &numeric_vars[idx_b];
+
+        // Both must be same type for division
+        if a_prim != b_prim {
+            return None;
+        }
+
+        let name = ctx.new_local_name();
+        let zero = match a_prim {
+            PrimitiveType::I64 => "0",
+            PrimitiveType::I32 => "0_i32",
+            _ => return None,
+        };
+
+        // Choose division or modulo
+        let op = if self.rng.gen_bool(0.5) { "/" } else { "%" };
+
+        ctx.add_local(name.clone(), TypeInfo::Primitive(*a_prim), false);
+        Some(format!(
+            "let {} = when {{ {} != {} => {} {} {}, _ => {} }}",
+            name, b_name, zero, a_name, op, b_name, zero
+        ))
+    }
+
+    /// Generate operations on single-character strings.
+    /// Tests edge behavior of string methods on minimal inputs.
+    fn generate_single_char_string_ops(&mut self, ctx: &mut StmtContext) -> String {
+        let chars = ["a", "Z", "0", " ", "x", "M"];
+        let ch = chars[self.rng.gen_range(0..chars.len())];
+        let name = ctx.new_local_name();
+
+        match self.rng.gen_range(0..6) {
+            0 => {
+                // "x".to_upper()
+                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::String), false);
+                format!("let {} = \"{}\".to_upper()", name, ch)
+            }
+            1 => {
+                // "x".to_lower()
+                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::String), false);
+                format!("let {} = \"{}\".to_lower()", name, ch)
+            }
+            2 => {
+                // "x".length()
+                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::I64), false);
+                format!("let {} = \"{}\".length()", name, ch)
+            }
+            3 => {
+                // "x".contains("x")
+                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::Bool), false);
+                format!("let {} = \"{}\".contains(\"{}\")", name, ch, ch)
+            }
+            4 => {
+                // "x".trim()
+                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::String), false);
+                format!("let {} = \"{}\".trim()", name, ch)
+            }
+            _ => {
+                // "x".substring(0, 1)
+                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::String), false);
+                format!("let {} = \"{}\".substring(0, 1)", name, ch)
+            }
+        }
     }
 
     fn try_generate_bool_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
