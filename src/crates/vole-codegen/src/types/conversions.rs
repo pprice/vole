@@ -8,6 +8,7 @@ use rustc_hash::FxHashMap;
 
 use crate::AnalyzedProgram;
 use crate::errors::{CodegenError, CodegenResult};
+use crate::union_layout;
 use vole_frontend::{Interner, Symbol};
 use vole_identity::{ModuleId, NameId, NameTable, NamerLookup, TypeDefId};
 use vole_runtime::native_registry::NativeType;
@@ -373,7 +374,7 @@ pub(crate) fn type_id_size(
                 })
                 .max()
                 .unwrap_or(0);
-            8 + max_payload.div_ceil(8) * 8
+            union_layout::TAG_ONLY_SIZE + max_payload.div_ceil(8) * 8
         }
         ArenaType::Error { type_def_id } => {
             let fields_size: u32 = entity_registry
@@ -415,7 +416,7 @@ pub(crate) fn type_id_size(
                 _ => 0,
             };
             let max_payload = success_size.max(error_size);
-            8 + max_payload.div_ceil(8) * 8
+            union_layout::TAG_ONLY_SIZE + max_payload.div_ceil(8) * 8
         }
         ArenaType::Tuple(elements) => elements
             .iter()

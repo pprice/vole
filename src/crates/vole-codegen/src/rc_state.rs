@@ -355,7 +355,7 @@ fn compute_type_size_aligned(arena: &TypeArena, registry: &EntityRegistry, type_
                 .map(|&v| compute_type_size_aligned(arena, registry, v))
                 .max()
                 .unwrap_or(0);
-            8 + max_payload // 8 bytes for tag (aligned), then payload
+            crate::union_layout::TAG_ONLY_SIZE as i32 + max_payload
         }
         SemaType::Tuple(elements) => {
             // Sum of aligned element sizes
@@ -597,5 +597,201 @@ mod tests {
             compute_rc_state(&arena, &registry, TypeId::RANGE),
             RcState::None
         );
+    }
+
+    // =========================================================================
+    // Tuple offset equivalence tests: compute_tuple_offsets vs tuple_layout_id
+    //
+    // These tests verify that the standalone compute_tuple_offsets (used by
+    // RcState) produces the same byte offsets as the original tuple_layout_id
+    // (used by CodegenContext). If these diverge, the RcState migration in
+    // vol-q117 is NOT safe.
+    // =========================================================================
+
+    /// Compare compute_tuple_offsets (rc_state.rs) with tuple_layout_id (types/)
+    /// for a given set of element types. Panics with a diff on mismatch.
+    fn assert_tuple_offsets_equivalent(
+        arena: &TypeArena,
+        registry: &EntityRegistry,
+        elements: &[TypeId],
+    ) {
+        use cranelift::prelude::types as cl_types;
+
+        let ptr_type = cl_types::I64; // 64-bit pointers, matching compute_type_size_aligned assumption
+
+        let new_offsets = compute_tuple_offsets(arena, registry, elements);
+        let (_total, old_offsets) =
+            crate::types::tuple_layout_id(elements, ptr_type, registry, arena);
+
+        assert_eq!(
+            new_offsets, old_offsets,
+            "Tuple offset mismatch for element types {:?}:\n  compute_tuple_offsets: {:?}\n  tuple_layout_id:      {:?}",
+            elements, new_offsets, old_offsets,
+        );
+    }
+
+    /// Also compare per-element sizes directly.
+    fn assert_type_size_equivalent(arena: &TypeArena, registry: &EntityRegistry, type_id: TypeId) {
+        use cranelift::prelude::types as cl_types;
+
+        let ptr_type = cl_types::I64;
+
+        let new_size = compute_type_size_aligned(arena, registry, type_id);
+        let old_size =
+            (crate::types::type_id_size(type_id, ptr_type, registry, arena).div_ceil(8) * 8) as i32;
+
+        assert_eq!(
+            new_size, old_size,
+            "Type size mismatch for {:?}:\n  compute_type_size_aligned: {}\n  type_id_size (aligned):    {}",
+            type_id, new_size, old_size,
+        );
+    }
+
+    #[test]
+    fn test_size_equivalence_primitives() {
+        let (arena, registry) = setup_test_arena();
+
+        for ty in [
+            TypeId::I8,
+            TypeId::I16,
+            TypeId::I32,
+            TypeId::I64,
+            TypeId::I128,
+            TypeId::U8,
+            TypeId::U16,
+            TypeId::U32,
+            TypeId::U64,
+            TypeId::F32,
+            TypeId::F64,
+            TypeId::BOOL,
+            TypeId::STRING,
+            TypeId::HANDLE,
+            TypeId::VOID,
+            TypeId::RANGE,
+        ] {
+            assert_type_size_equivalent(&arena, &registry, ty);
+        }
+    }
+
+    #[test]
+    fn test_size_equivalence_array() {
+        let (mut arena, registry) = setup_test_arena();
+
+        let array_i64 = arena.array(TypeId::I64);
+        assert_type_size_equivalent(&arena, &registry, array_i64);
+
+        let array_str = arena.array(TypeId::STRING);
+        assert_type_size_equivalent(&arena, &registry, array_str);
+    }
+
+    #[test]
+    fn test_size_equivalence_union_of_primitives() {
+        let (mut arena, registry) = setup_test_arena();
+
+        let union_type = arena.union(vec![TypeId::I64, TypeId::BOOL]);
+        assert_type_size_equivalent(&arena, &registry, union_type);
+
+        let union_with_str = arena.union(vec![TypeId::I64, TypeId::STRING]);
+        assert_type_size_equivalent(&arena, &registry, union_with_str);
+    }
+
+    #[test]
+    fn test_size_equivalence_fixed_array() {
+        let (mut arena, registry) = setup_test_arena();
+
+        let fa_i32 = arena.fixed_array(TypeId::I32, 4);
+        assert_type_size_equivalent(&arena, &registry, fa_i32);
+
+        let fa_str = arena.fixed_array(TypeId::STRING, 3);
+        assert_type_size_equivalent(&arena, &registry, fa_str);
+    }
+
+    #[test]
+    fn test_size_equivalence_tuple() {
+        let (mut arena, registry) = setup_test_arena();
+
+        let tuple = arena.tuple(vec![TypeId::I64, TypeId::STRING, TypeId::BOOL]);
+        assert_type_size_equivalent(&arena, &registry, tuple);
+    }
+
+    #[test]
+    fn test_tuple_offsets_all_primitives() {
+        let (arena, registry) = setup_test_arena();
+
+        assert_tuple_offsets_equivalent(&arena, &registry, &[TypeId::I64, TypeId::I32]);
+        assert_tuple_offsets_equivalent(
+            &arena,
+            &registry,
+            &[TypeId::I8, TypeId::I16, TypeId::I32, TypeId::I64],
+        );
+        assert_tuple_offsets_equivalent(&arena, &registry, &[TypeId::F32, TypeId::F64]);
+        assert_tuple_offsets_equivalent(&arena, &registry, &[TypeId::BOOL, TypeId::I128]);
+    }
+
+    #[test]
+    fn test_tuple_offsets_with_rc_types() {
+        let (arena, registry) = setup_test_arena();
+
+        // (i64, String, bool) — the existing RcState test case
+        assert_tuple_offsets_equivalent(
+            &arena,
+            &registry,
+            &[TypeId::I64, TypeId::STRING, TypeId::BOOL],
+        );
+
+        // (String, String) — multiple RC types
+        assert_tuple_offsets_equivalent(&arena, &registry, &[TypeId::STRING, TypeId::STRING]);
+
+        // (String, i32, String, f64)
+        assert_tuple_offsets_equivalent(
+            &arena,
+            &registry,
+            &[TypeId::STRING, TypeId::I32, TypeId::STRING, TypeId::F64],
+        );
+    }
+
+    #[test]
+    fn test_tuple_offsets_with_array_elements() {
+        let (mut arena, registry) = setup_test_arena();
+
+        let array_i64 = arena.array(TypeId::I64);
+        // (Array<i64>, i32, String)
+        assert_tuple_offsets_equivalent(
+            &arena,
+            &registry,
+            &[array_i64, TypeId::I32, TypeId::STRING],
+        );
+    }
+
+    #[test]
+    fn test_tuple_offsets_with_union_elements() {
+        let (mut arena, registry) = setup_test_arena();
+
+        // Union of primitives (no struct variants — should be safe)
+        let union_prim = arena.union(vec![TypeId::I64, TypeId::BOOL]);
+        assert_tuple_offsets_equivalent(&arena, &registry, &[union_prim, TypeId::STRING]);
+
+        // Union with RC variant
+        let union_rc = arena.union(vec![TypeId::I64, TypeId::STRING]);
+        assert_tuple_offsets_equivalent(&arena, &registry, &[union_rc, TypeId::I32]);
+        assert_tuple_offsets_equivalent(&arena, &registry, &[TypeId::BOOL, union_rc, TypeId::F64]);
+    }
+
+    #[test]
+    fn test_tuple_offsets_with_fixed_array_elements() {
+        let (mut arena, registry) = setup_test_arena();
+
+        let fa = arena.fixed_array(TypeId::STRING, 3);
+        assert_tuple_offsets_equivalent(&arena, &registry, &[fa, TypeId::I64]);
+        assert_tuple_offsets_equivalent(&arena, &registry, &[TypeId::I32, fa]);
+    }
+
+    #[test]
+    fn test_tuple_offsets_nested_tuple() {
+        let (mut arena, registry) = setup_test_arena();
+
+        let inner = arena.tuple(vec![TypeId::I32, TypeId::STRING]);
+        assert_tuple_offsets_equivalent(&arena, &registry, &[inner, TypeId::I64]);
+        assert_tuple_offsets_equivalent(&arena, &registry, &[TypeId::BOOL, inner, TypeId::F64]);
     }
 }
