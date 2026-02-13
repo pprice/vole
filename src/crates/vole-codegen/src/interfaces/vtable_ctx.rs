@@ -3,15 +3,13 @@
 // Trait for vtable compilation context.
 // Provides unified interface for vtable operations.
 
-use std::cell::RefCell;
-
 use rustc_hash::FxHashMap;
 
 use cranelift::prelude::Type;
 use cranelift_jit::JITModule;
 
 use vole_frontend::Interner;
-use vole_identity::{NameId, TypeDefId};
+use vole_identity::NameId;
 use vole_runtime::NativeRegistry;
 use vole_sema::type_arena::TypeArena;
 use vole_sema::{EntityRegistry, ProgramQuery};
@@ -23,10 +21,6 @@ use crate::{AnalyzedProgram, FunctionKey, FunctionRegistry};
 ///
 /// This trait allows vtable operations to work with VtableCtxView,
 /// which combines CodegenCtx and CompileEnv.
-///
-/// Note: Some methods may not be called in all contexts but are part of the
-/// complete interface for vtable operations.
-#[allow(dead_code)]
 pub trait VtableCtx {
     /// Get the analyzed program reference
     fn analyzed(&self) -> &AnalyzedProgram;
@@ -52,14 +46,8 @@ pub trait VtableCtx {
     /// Get mutable function registry
     fn funcs(&mut self) -> &mut FunctionRegistry;
 
-    /// Resolve a type name string with fallback to interface/class search
-    fn resolve_type_str_or_interface(&self, name: &str) -> Option<TypeDefId>;
-
     /// Get the native function registry
     fn native_registry(&self) -> &NativeRegistry;
-
-    /// Get the interface vtable registry
-    fn interface_vtables(&self) -> &RefCell<super::vtable::InterfaceVtableRegistry>;
 
     /// Get type metadata map
     fn type_metadata(&self) -> &TypeMetadataMap;
@@ -117,18 +105,8 @@ impl<'a, 'ctx> VtableCtx for VtableCtxView<'a, 'ctx> {
         self.codegen_ctx.funcs()
     }
 
-    fn resolve_type_str_or_interface(&self, name: &str) -> Option<TypeDefId> {
-        let query = self.query();
-        let module_id = self.env.analyzed.module_id;
-        query.resolve_type_def_by_str(module_id, name)
-    }
-
     fn native_registry(&self) -> &NativeRegistry {
         &self.env.state.native_registry
-    }
-
-    fn interface_vtables(&self) -> &RefCell<super::vtable::InterfaceVtableRegistry> {
-        &self.env.state.interface_vtables
     }
 
     fn type_metadata(&self) -> &TypeMetadataMap {

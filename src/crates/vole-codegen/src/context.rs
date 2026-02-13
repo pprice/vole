@@ -3620,20 +3620,8 @@ impl<'a, 'b, 'ctx> crate::interfaces::VtableCtx for Cg<'a, 'b, 'ctx> {
         self.codegen_ctx.funcs()
     }
 
-    fn resolve_type_str_or_interface(&self, name: &str) -> Option<TypeDefId> {
-        let query = self.query();
-        let module_id = self
-            .current_module_id()
-            .unwrap_or(self.env.analyzed.module_id);
-        query.resolve_type_def_by_str(module_id, name)
-    }
-
     fn native_registry(&self) -> &vole_runtime::NativeRegistry {
         &self.env.state.native_registry
-    }
-
-    fn interface_vtables(&self) -> &RefCell<crate::interfaces::InterfaceVtableRegistry> {
-        &self.env.state.interface_vtables
     }
 
     fn type_metadata(&self) -> &TypeMetadataMap {
