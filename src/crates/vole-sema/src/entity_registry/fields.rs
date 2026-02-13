@@ -120,15 +120,6 @@ impl EntityRegistry {
 
     // ===== Field and Substitution Helpers =====
 
-    /// Get all field NameIds for a type (for iteration and lookups)
-    pub fn field_name_ids(&self, type_def_id: TypeDefId) -> &[NameId] {
-        self.get_type(type_def_id)
-            .generic_info
-            .as_ref()
-            .map(|gi| gi.field_names.as_slice())
-            .unwrap_or(&[])
-    }
-
     /// Build substitution map using TypeId (for arena-based substitution)
     pub fn substitution_map_id(
         &self,

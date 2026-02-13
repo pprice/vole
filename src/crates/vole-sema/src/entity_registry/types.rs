@@ -7,11 +7,6 @@ use vole_identity::{ModuleId, NameId, TypeDefId};
 use super::EntityRegistry;
 
 impl EntityRegistry {
-    /// Count total static methods registered (for debugging)
-    pub fn static_method_count(&self) -> usize {
-        self.method_defs.iter().filter(|m| m.is_static).count()
-    }
-
     /// Register a new type definition
     pub fn register_type(
         &mut self,

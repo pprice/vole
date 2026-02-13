@@ -208,13 +208,6 @@ impl FunctionRegistry {
         }
     }
 
-    pub fn name_for_qualified(&self, key: FunctionKey) -> Option<NameId> {
-        match &self.entries[key.0 as usize].name {
-            FunctionName::Qualified(name_id) => Some(*name_id),
-            FunctionName::Runtime(_) | FunctionName::Lambda(_) | FunctionName::Test(_) => None,
-        }
-    }
-
     pub fn runtime_key(&self, runtime: RuntimeFn) -> Option<FunctionKey> {
         self.runtime_lookup.get(&runtime).copied()
     }
