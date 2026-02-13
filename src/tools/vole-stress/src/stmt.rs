@@ -1657,6 +1657,18 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             return self.generate_whitespace_string_ops(ctx);
         }
 
+        // ~2% chance: empty range (N..N) operations
+        if self.rng.gen_bool(0.02) {
+            return self.generate_empty_range_let(ctx);
+        }
+
+        // ~2% chance: .to_string().length() chained method
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_tostring_length_let(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -9721,6 +9733,59 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 format!("let {} = \"{}\".replace(\" \", \"\")", name, s)
             }
         }
+    }
+
+    /// Generate empty range (N..N) operations — produces empty collection.
+    /// E.g.: `(5..5).iter().collect()`, `(0..0).iter().count()`
+    fn generate_empty_range_let(&mut self, ctx: &mut StmtContext) -> String {
+        let name = ctx.new_local_name();
+        let n = self.rng.gen_range(0..=10);
+
+        match self.rng.gen_range(0..3) {
+            0 => {
+                // Empty range collect -> empty array
+                ctx.add_local(
+                    name.clone(),
+                    TypeInfo::Array(Box::new(TypeInfo::Primitive(PrimitiveType::I64))),
+                    false,
+                );
+                format!("let {} = ({}..{}).iter().collect()", name, n, n)
+            }
+            1 => {
+                // Empty range count -> 0
+                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::I64), false);
+                format!("let {} = ({}..{}).iter().count()", name, n, n)
+            }
+            _ => {
+                // Empty range sum -> 0
+                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::I64), false);
+                format!("let {} = ({}..{}).iter().sum()", name, n, n)
+            }
+        }
+    }
+
+    /// Generate .to_string().length() chain on numeric variables.
+    /// E.g.: `let n = x.to_string().length()`
+    fn try_generate_tostring_length_let(
+        &mut self,
+        ctx: &mut StmtContext,
+    ) -> Option<String> {
+        let i64_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::I64)))
+            .map(|(name, _, _)| name.clone())
+            .collect();
+
+        if i64_vars.is_empty() {
+            return None;
+        }
+
+        let var = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+        let name = ctx.new_local_name();
+
+        ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::I64), false);
+        Some(format!("let {} = {}.to_string().length()", name, var))
     }
 
     fn try_generate_bool_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
