@@ -1,6 +1,6 @@
 // src/codegen/structs/access.rs
 
-use super::helpers::{convert_to_i64_for_storage, get_field_slot_and_type_id_cg};
+use super::helpers::{convert_to_i64_for_storage, get_field_slot_and_type_id_cg, reconstruct_i128};
 use crate::RuntimeFn;
 use crate::union_layout;
 use crate::context::Cg;
@@ -450,12 +450,7 @@ impl Cg<'_, '_, '_> {
                 .builder
                 .ins()
                 .load(types::I64, MemFlags::new(), struct_ptr, offset + 8);
-            let low_ext = self.builder.ins().uextend(types::I128, low);
-            let high_ext = self.builder.ins().uextend(types::I128, high);
-            let sixty_four_i64 = self.builder.ins().iconst(types::I64, 64);
-            let sixty_four = self.builder.ins().uextend(types::I128, sixty_four_i64);
-            let high_shifted = self.builder.ins().ishl(high_ext, sixty_four);
-            let value = self.builder.ins().bor(high_shifted, low_ext);
+            let value = reconstruct_i128(self.builder, low, high);
             return Ok(CompiledValue::new(value, types::I128, field_type_id));
         }
 

@@ -292,13 +292,7 @@ pub(crate) fn load_wide_field(
     let high_raw = builder.ins().call(get_func_ref, &[instance_ptr, high_slot]);
     let high = builder.func.dfg.inst_results(high_raw)[0];
 
-    // Reconstruct: (high << 64) | zero_extend(low)
-    let low_ext = builder.ins().uextend(types::I128, low);
-    let high_ext = builder.ins().uextend(types::I128, high);
-    let sixty_four_i64 = builder.ins().iconst(types::I64, 64);
-    let sixty_four = builder.ins().uextend(types::I128, sixty_four_i64);
-    let high_shifted = builder.ins().ishl(high_ext, sixty_four);
-    builder.ins().bor(high_shifted, low_ext)
+    reconstruct_i128(builder, low, high)
 }
 
 // ============================================================================
