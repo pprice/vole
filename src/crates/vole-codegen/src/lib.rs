@@ -53,10 +53,16 @@ pub mod loop_param_opt {
 pub(crate) const MAX_SMALL_STRUCT_FIELDS: usize = 2;
 
 /// Union memory layout constants used across the compiler.
+///
+/// Union layout: `[tag: i8 (1 byte)][pad (7 bytes)][payload (8 bytes)]`
 pub(crate) mod union_layout {
     /// Byte size of a tag-only (sentinel) union — no payload.
-    /// Unions with `type_size > TAG_ONLY_SIZE` have payload data at offset 8.
+    /// Unions with `type_size > TAG_ONLY_SIZE` have payload data.
     pub const TAG_ONLY_SIZE: u32 = 8;
+
+    /// Byte offset of the payload within a union or optional value.
+    /// After the 1-byte tag and 7 bytes of padding.
+    pub const PAYLOAD_OFFSET: i32 = 8;
 }
 
 /// Named trap codes for Cranelift traps used across the compiler.
