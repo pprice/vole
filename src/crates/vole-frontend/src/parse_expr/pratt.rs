@@ -9,8 +9,8 @@ impl<'src> Parser<'src> {
         let mut left = self.unary()?;
 
         while self.current.ty.precedence() > min_prec {
-            let op_token = self.current.clone();
-            let op = match op_token.ty {
+            let op_ty = self.current.ty;
+            let op = match op_ty {
                 TokenType::Plus => BinaryOp::Add,
                 TokenType::Minus => BinaryOp::Sub,
                 TokenType::Star => BinaryOp::Mul,
@@ -154,7 +154,7 @@ impl<'src> Parser<'src> {
                 _ => break,
             };
 
-            let prec = op_token.ty.precedence();
+            let prec = op_ty.precedence();
             self.advance();
             let right = self.expression(prec)?;
             let span = left.span.merge(right.span);

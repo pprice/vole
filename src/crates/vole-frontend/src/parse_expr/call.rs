@@ -56,9 +56,8 @@ impl<'src> Parser<'src> {
             } else if self.match_token(TokenType::Dot) {
                 // Field access, method call, or module-qualified struct literal
                 let field_span = self.current.span;
-                let field_token = self.current.clone();
                 self.consume(TokenType::Identifier, "expected field name after '.'")?;
-                let field = self.interner.intern(&field_token.lexeme);
+                let field = self.interner.intern(&self.previous.lexeme);
 
                 // Check for type args: expr.method<T, U>(...) or direct call: expr.method(...)
                 // or module.Type<T> { ... } for qualified generic struct literals
@@ -161,9 +160,8 @@ impl<'src> Parser<'src> {
             } else if self.match_token(TokenType::QuestionDot) {
                 // Optional chaining: expr?.field
                 let field_span = self.current.span;
-                let field_token = self.current.clone();
                 self.consume(TokenType::Identifier, "expected field name after '?.'")?;
-                let field = self.interner.intern(&field_token.lexeme);
+                let field = self.interner.intern(&self.previous.lexeme);
 
                 let span = expr.span.merge(field_span);
                 expr = Expr {

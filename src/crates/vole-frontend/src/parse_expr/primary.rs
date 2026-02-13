@@ -57,12 +57,15 @@ impl<'src> Parser<'src> {
 
     /// Parse a primary expression (literals, identifiers, grouping, interpolated strings)
     pub(super) fn primary(&mut self) -> Result<Expr, ParseError> {
-        let token = self.current.clone();
+        // Capture only the cheap Copy fields up front; access lexeme from
+        // self.previous *after* advance() to avoid cloning the Cow<str>.
+        let token_ty = self.current.ty;
+        let token_span = self.current.span;
 
-        match token.ty {
+        match token_ty {
             TokenType::IntLiteral => {
                 self.advance();
-                let (num_part, suffix) = Self::split_numeric_suffix(&token.lexeme);
+                let (num_part, suffix) = Self::split_numeric_suffix(&self.previous.lexeme);
 
                 // If a float suffix on a decimal int literal, produce FloatLiteral
                 if let Some(s) = suffix
@@ -74,15 +77,15 @@ impl<'src> Parser<'src> {
                         ParseError::new(
                             ParserError::UnexpectedToken {
                                 token: "invalid float literal".to_string(),
-                                span: token.span.into(),
+                                span: token_span.into(),
                             },
-                            token.span,
+                            token_span,
                         )
                     })?;
                     return Ok(Expr {
                         id: self.next_id(),
                         kind: ExprKind::FloatLiteral(value, suffix),
-                        span: token.span,
+                        span: token_span,
                     });
                 }
 
@@ -90,34 +93,34 @@ impl<'src> Parser<'src> {
                     ParseError::new(
                         ParserError::UnexpectedToken {
                             token: "invalid integer literal".to_string(),
-                            span: token.span.into(),
+                            span: token_span.into(),
                         },
-                        token.span,
+                        token_span,
                     )
                 })?;
                 Ok(Expr {
                     id: self.next_id(),
                     kind: ExprKind::IntLiteral(value, suffix),
-                    span: token.span,
+                    span: token_span,
                 })
             }
             TokenType::FloatLiteral => {
                 self.advance();
-                let (num_part, suffix) = Self::split_numeric_suffix(&token.lexeme);
+                let (num_part, suffix) = Self::split_numeric_suffix(&self.previous.lexeme);
                 let cleaned = num_part.replace('_', "");
                 let value: f64 = cleaned.parse().map_err(|_| {
                     ParseError::new(
                         ParserError::UnexpectedToken {
                             token: "invalid float literal".to_string(),
-                            span: token.span.into(),
+                            span: token_span.into(),
                         },
-                        token.span,
+                        token_span,
                     )
                 })?;
                 Ok(Expr {
                     id: self.next_id(),
                     kind: ExprKind::FloatLiteral(value, suffix),
-                    span: token.span,
+                    span: token_span,
                 })
             }
             TokenType::KwTrue => {
@@ -125,7 +128,7 @@ impl<'src> Parser<'src> {
                 Ok(Expr {
                     id: self.next_id(),
                     kind: ExprKind::BoolLiteral(true),
-                    span: token.span,
+                    span: token_span,
                 })
             }
             TokenType::KwFalse => {
@@ -133,7 +136,7 @@ impl<'src> Parser<'src> {
                 Ok(Expr {
                     id: self.next_id(),
                     kind: ExprKind::BoolLiteral(false),
-                    span: token.span,
+                    span: token_span,
                 })
             }
             TokenType::KwUnreachable => {
@@ -141,11 +144,11 @@ impl<'src> Parser<'src> {
                 Ok(Expr {
                     id: self.next_id(),
                     kind: ExprKind::Unreachable,
-                    span: token.span,
+                    span: token_span,
                 })
             }
             TokenType::KwImport => {
-                let start_span = token.span;
+                let start_span = token_span;
                 self.advance(); // consume 'import'
 
                 // Expect a string literal for the module path
@@ -160,12 +163,12 @@ impl<'src> Parser<'src> {
                     ));
                 }
 
-                let path_token = self.current.clone();
+                let path_span = self.current.span;
                 self.advance();
 
                 // Remove surrounding quotes
-                let path = self.process_string_content(&path_token.lexeme);
-                let span = start_span.merge(path_token.span);
+                let path = self.process_string_content(&self.previous.lexeme);
+                let span = start_span.merge(path_span);
 
                 Ok(Expr {
                     id: self.next_id(),
@@ -176,28 +179,28 @@ impl<'src> Parser<'src> {
             TokenType::StringLiteral => {
                 self.advance();
                 // Remove surrounding quotes and process escape sequences
-                let content = self.process_string_content(&token.lexeme);
+                let content = self.process_string_content(&self.previous.lexeme);
                 Ok(Expr {
                     id: self.next_id(),
                     kind: ExprKind::StringLiteral(content),
-                    span: token.span,
+                    span: token_span,
                 })
             }
             TokenType::RawStringLiteral => {
                 self.advance();
                 // Remove @" prefix and " suffix, no escape processing
-                let lexeme = &token.lexeme;
+                let lexeme = &self.previous.lexeme;
                 let content = lexeme[2..lexeme.len() - 1].to_string();
                 Ok(Expr {
                     id: self.next_id(),
                     kind: ExprKind::StringLiteral(content),
-                    span: token.span,
+                    span: token_span,
                 })
             }
             TokenType::StringInterpStart => self.parse_interpolated_string(),
             TokenType::Identifier => {
                 self.advance();
-                let sym = self.interner.intern(&token.lexeme);
+                let sym = self.interner.intern(&self.previous.lexeme);
 
                 // Check for type args: Name<T, U> followed by { for struct literal
                 let type_args = if self.check(TokenType::Lt) {
@@ -211,7 +214,7 @@ impl<'src> Parser<'src> {
                 // A struct literal looks like `Name { identifier: value }` or `Name { }`
                 // A block starts with statements, keywords, or expressions without `:` after ident
                 if self.check(TokenType::LBrace) && self.looks_like_struct_literal() {
-                    return self.struct_literal(vec![sym], type_args, token.span);
+                    return self.struct_literal(vec![sym], type_args, token_span);
                 }
 
                 // If we parsed type args but no struct literal follows, that's an error
@@ -229,11 +232,11 @@ impl<'src> Parser<'src> {
                 Ok(Expr {
                     id: self.next_id(),
                     kind: ExprKind::Identifier(sym),
-                    span: token.span,
+                    span: token_span,
                 })
             }
             TokenType::LParen => {
-                let start_span = token.span;
+                let start_span = token_span;
                 self.advance(); // consume '('
 
                 // Case 1: () - empty parens, must be lambda
@@ -450,7 +453,7 @@ impl<'src> Parser<'src> {
             | TokenType::KwF64
             | TokenType::KwBool
             | TokenType::KwString => {
-                let start_span = token.span;
+                let start_span = token_span;
                 // Parse full type expression (handles unions and optionals)
                 let type_expr = self.parse_type()?;
                 Ok(Expr {
@@ -459,38 +462,42 @@ impl<'src> Parser<'src> {
                     span: start_span.merge(self.previous.span),
                 })
             }
-            TokenType::Error => Err(ParseError::new(
-                ParserError::UnexpectedToken {
-                    token: token.lexeme.into_owned(),
-                    span: token.span.into(),
-                },
-                token.span,
-            )),
+            TokenType::Error => {
+                let lexeme_owned = self.current.lexeme.clone().into_owned();
+                Err(ParseError::new(
+                    ParserError::UnexpectedToken {
+                        token: lexeme_owned,
+                        span: token_span.into(),
+                    },
+                    token_span,
+                ))
+            }
             _ => Err(ParseError::new(
                 ParserError::ExpectedExpression {
-                    found: token.ty.as_str().to_string(),
-                    span: token.span.into(),
+                    found: token_ty.as_str().to_string(),
+                    span: token_span.into(),
                 },
-                token.span,
+                token_span,
             )),
         }
     }
 
     /// Parse the count in a repeat literal [expr; N]
     fn parse_repeat_count(&mut self) -> Result<usize, ParseError> {
-        let token = self.current.clone();
-        if token.ty != TokenType::IntLiteral {
+        let token_ty = self.current.ty;
+        let token_span = self.current.span;
+        if token_ty != TokenType::IntLiteral {
             return Err(ParseError::new(
                 ParserError::ExpectedExpression {
-                    found: token.ty.as_str().to_string(),
-                    span: token.span.into(),
+                    found: token_ty.as_str().to_string(),
+                    span: token_span.into(),
                 },
-                token.span,
+                token_span,
             ));
         }
         self.advance();
         // Support hex, binary, and underscore-separated repeat counts
-        let cleaned = token.lexeme.replace('_', "");
+        let cleaned = self.previous.lexeme.replace('_', "");
         let result = if let Some(hex) = cleaned
             .strip_prefix("0x")
             .or_else(|| cleaned.strip_prefix("0X"))
@@ -508,9 +515,9 @@ impl<'src> Parser<'src> {
             ParseError::new(
                 ParserError::UnexpectedToken {
                     token: "invalid repeat count (must be non-negative integer)".to_string(),
-                    span: token.span.into(),
+                    span: token_span.into(),
                 },
-                token.span,
+                token_span,
             )
         })
     }
@@ -530,9 +537,8 @@ impl<'src> Parser<'src> {
 
         while !self.check(TokenType::RBrace) && !self.check(TokenType::Eof) {
             let field_span = self.current.span;
-            let field_name_token = self.current.clone();
             self.consume(TokenType::Identifier, "expected field name")?;
-            let field_name = self.interner.intern(&field_name_token.lexeme);
+            let field_name = self.interner.intern(&self.previous.lexeme);
 
             // Check for shorthand syntax: `Point { x, y }` as shorthand for `Point { x: x, y: y }`
             let (value, shorthand) = if self.check(TokenType::Colon) {
