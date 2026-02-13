@@ -1977,7 +1977,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     pub fn copy_struct_value(&mut self, src: CompiledValue) -> CodegenResult<CompiledValue> {
         let flat_count = self
             .struct_flat_slot_count(src.type_id)
-            .ok_or_else(|| "copy_struct_value: expected struct type".to_string())?;
+            .ok_or_else(|| CodegenError::type_mismatch("copy_struct_value", "struct type", "non-struct"))?;
 
         let total_size = (flat_count as u32) * 8;
         let dst_slot = self.alloc_stack(total_size);
@@ -2003,7 +2003,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     pub fn copy_struct_to_heap(&mut self, src: CompiledValue) -> CodegenResult<CompiledValue> {
         let flat_count = self
             .struct_flat_slot_count(src.type_id)
-            .ok_or_else(|| "copy_struct_to_heap: expected struct type".to_string())?;
+            .ok_or_else(|| CodegenError::type_mismatch("copy_struct_to_heap", "struct type", "non-struct"))?;
 
         let total_size = (flat_count as u32) * 8;
         let ptr_type = self.ptr_type();
@@ -2405,7 +2405,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     ) -> CodegenResult<CompiledValue> {
         // Find the nil and value variant positions in the union
         let nil_tag = self.find_nil_variant(return_type_id).ok_or_else(|| {
-            "checked arithmetic intrinsic: return type is not an optional".to_string()
+            CodegenError::type_mismatch("checked arithmetic intrinsic", "optional type", "non-optional")
         })?;
 
         // The value tag is the other position (0 or 1 in a 2-variant union)

@@ -1480,7 +1480,7 @@ impl Cg<'_, '_, '_> {
             let arena = self.arena();
             let (params, ret_id, _is_closure) = arena
                 .unwrap_function(func_type_id)
-                .ok_or_else(|| "Expected function type for interface dispatch".to_string())?;
+                .ok_or_else(|| CodegenError::type_mismatch("interface dispatch", "function type", "non-function"))?;
             (params.len(), params.to_vec(), ret_id, arena.is_void(ret_id))
         };
 
@@ -1766,7 +1766,7 @@ impl Cg<'_, '_, '_> {
             let arena = self.arena();
             let (params, ret, _) = arena
                 .unwrap_function(func_type_id)
-                .ok_or_else(|| "Expected function type for static method call".to_string())?;
+                .ok_or_else(|| CodegenError::type_mismatch("static method call", "function type", "non-function"))?;
             (params.clone(), ret)
         };
 
@@ -2018,7 +2018,7 @@ impl Cg<'_, '_, '_> {
         let elem_type_id = self
             .arena()
             .unwrap_array(return_type_id)
-            .ok_or_else(|| "Array.filled: expected array return type".to_string())?;
+            .ok_or_else(|| CodegenError::type_mismatch("Array.filled", "array type", "non-array"))?;
 
         // Compile count argument
         let count = self.expr(&mc.args[0])?;

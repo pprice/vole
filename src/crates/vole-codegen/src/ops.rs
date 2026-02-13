@@ -756,7 +756,7 @@ impl Cg<'_, '_, '_> {
     ) -> CodegenResult<CompiledValue> {
         let flat_count = self
             .struct_flat_slot_count(left.type_id)
-            .ok_or_else(|| "struct_equality: expected struct type".to_string())?;
+            .ok_or_else(|| CodegenError::type_mismatch("struct_equality", "struct type", "non-struct"))?;
 
         // Start with true (1) - all fields equal so far
         let mut result = self.builder.ins().iconst(types::I8, 1);

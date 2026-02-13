@@ -328,7 +328,7 @@ impl Cg<'_, '_, '_> {
             let arena = self.arena();
             let (params, ret, _is_closure) = arena
                 .unwrap_function(func_type_id)
-                .ok_or_else(|| "Expected function type".to_string())?;
+                .ok_or_else(|| CodegenError::type_mismatch("closure wrapper", "function type", "non-function"))?;
             (params.clone(), ret)
         };
 
