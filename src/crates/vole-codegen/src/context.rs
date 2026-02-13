@@ -1795,11 +1795,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// Compile a list of expression arguments into Cranelift values.
     /// This is the common pattern for function/method calls.
     pub fn compile_call_args(&mut self, args: &[Expr]) -> CodegenResult<Vec<Value>> {
-        let mut values = Vec::with_capacity(args.len());
-        for arg in args {
-            let compiled = self.expr(arg)?;
-            values.push(compiled.value);
-        }
+        let (values, _) = self.compile_call_args_tracking_rc(args)?;
         Ok(values)
     }
 
