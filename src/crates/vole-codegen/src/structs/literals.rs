@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use rustc_hash::FxHashMap;
 
-use super::helpers::{convert_to_i64_for_storage, store_field_value};
+use super::helpers::{convert_to_i64_for_storage, split_i128_for_storage, store_field_value};
 use crate::RuntimeFn;
 use crate::context::Cg;
 use crate::union_layout;
@@ -721,12 +721,8 @@ impl Cg<'_, '_, '_> {
             }
         } else if value.ty == types::I128 {
             // i128 needs 2 x 8-byte slots: low 64 bits at offset, high 64 bits at offset+8
-            let low = self.builder.ins().ireduce(types::I64, value.value);
+            let (low, high) = split_i128_for_storage(self.builder, value.value);
             self.builder.ins().stack_store(low, slot, offset);
-            let sixty_four_i64 = self.builder.ins().iconst(types::I64, 64);
-            let sixty_four = self.builder.ins().uextend(types::I128, sixty_four_i64);
-            let shifted = self.builder.ins().ushr(value.value, sixty_four);
-            let high = self.builder.ins().ireduce(types::I64, shifted);
             self.builder.ins().stack_store(high, slot, offset + 8);
         } else {
             let store_value = convert_to_i64_for_storage(self.builder, &value);

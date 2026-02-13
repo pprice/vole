@@ -259,15 +259,11 @@ pub(crate) fn store_field_value(
 
     if value.ty == types::I128 {
         // Split i128 into low/high halves and store in 2 consecutive slots
-        let low = builder.ins().ireduce(types::I64, value.value);
+        let (low, high) = split_i128_for_storage(builder, value.value);
         builder
             .ins()
             .call(set_func_ref, &[instance_ptr, slot_val, low]);
         let high_slot = builder.ins().iconst(types::I32, (slot + 1) as i64);
-        let sixty_four_i64 = builder.ins().iconst(types::I64, 64);
-        let sixty_four = builder.ins().uextend(types::I128, sixty_four_i64);
-        let shifted = builder.ins().ushr(value.value, sixty_four);
-        let high = builder.ins().ireduce(types::I64, shifted);
         builder
             .ins()
             .call(set_func_ref, &[instance_ptr, high_slot, high]);
