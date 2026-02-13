@@ -1317,6 +1317,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: string replace/replace_all
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_string_replace_let(ctx) {
+                return stmt;
+            }
+        }
+
+        // ~2% chance: nested match expression
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_nested_match_let(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -6895,6 +6909,110 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             name,
             scrutinee,
             arms.join("\n"),
+            "    ".repeat(self.indent),
+        ))
+    }
+
+    /// Generate string .replace() or .replace_all() calls.
+    /// E.g., `let s = "hello world".replace("world", "there")`
+    fn try_generate_string_replace_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let string_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::String)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| {
+                        matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::String))
+                    })
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        let name = ctx.new_local_name();
+        let method = if self.rng.gen_bool(0.5) {
+            "replace"
+        } else {
+            "replace_all"
+        };
+
+        let expr = if !string_vars.is_empty() && self.rng.gen_bool(0.5) {
+            // Use variable
+            let var = &string_vars[self.rng.gen_range(0..string_vars.len())];
+            let (old, new) = match self.rng.gen_range(0..3u32) {
+                0 => ("a", "b"),
+                1 => ("hello", "hi"),
+                _ => (" ", "_"),
+            };
+            format!("{}.{}(\"{}\", \"{}\")", var, method, old, new)
+        } else {
+            // Use literal
+            let (src, old, new) = match self.rng.gen_range(0..3u32) {
+                0 => ("hello world", "world", "there"),
+                1 => ("aabaa", "a", "x"),
+                _ => ("foo bar baz", " ", "-"),
+            };
+            format!("\"{}\".{}(\"{}\", \"{}\")", src, method, old, new)
+        };
+
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            false,
+        );
+        Some(format!("let {} = {}", name, expr))
+    }
+
+    /// Generate nested match: match inside match arm.
+    /// `let r = match x { 0 => match y { 0 => a, _ => b }, _ => c }`
+    fn try_generate_nested_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let i64_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::I64)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::I64)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        if i64_vars.len() < 2 {
+            return None;
+        }
+
+        let outer_var = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+        let inner_var = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+        let name = ctx.new_local_name();
+        let indent = "    ".repeat(self.indent + 1);
+        let indent2 = "    ".repeat(self.indent + 2);
+
+        let outer_val = self.rng.gen_range(0..=5);
+        let inner_val = self.rng.gen_range(0..=5);
+        let result_a = self.rng.gen_range(-10..=10);
+        let result_b = self.rng.gen_range(-10..=10);
+        let result_c = self.rng.gen_range(-10..=10);
+
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::I64),
+            false,
+        );
+
+        Some(format!(
+            "let {} = match {} {{\n{}{} => match {} {{\n{}{} => {}\n{}_ => {}\n{}}}\n{}_ => {}\n{}}}",
+            name,
+            outer_var,
+            indent, outer_val,
+            inner_var,
+            indent2, inner_val, result_a,
+            indent2, result_b,
+            indent,
+            indent, result_c,
             "    ".repeat(self.indent),
         ))
     }
