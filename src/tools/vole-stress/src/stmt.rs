@@ -1367,6 +1367,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             return self.generate_chained_literal_method(ctx);
         }
 
+        // ~2% chance: method call on when result
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_when_result_method(ctx) {
+                return stmt;
+            }
+        }
+
+        // ~2% chance: for-loop building string with when body
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_for_iter_when_string_body(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -7387,6 +7401,141 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 format!("let {} = \"HELLO\".to_lower().length()", name)
             }
         }
+    }
+
+    /// Generate method call on a when expression result.
+    /// `let r = when { x > 0 => "hello", _ => "world" }.length()`
+    fn try_generate_when_result_method(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let i64_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::I64)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::I64)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        if i64_vars.is_empty() {
+            return None;
+        }
+
+        let cond_var = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+        let thresh = self.rng.gen_range(-5..=10);
+        let name = ctx.new_local_name();
+
+        match self.rng.gen_range(0..3u32) {
+            0 => {
+                // when { ... => "hello", _ => "world" }.length() -> i64
+                let s1 = match self.rng.gen_range(0..3u32) {
+                    0 => "hello",
+                    1 => "abc",
+                    _ => "test",
+                };
+                let s2 = match self.rng.gen_range(0..3u32) {
+                    0 => "world",
+                    1 => "xyz",
+                    _ => "foo",
+                };
+                ctx.add_local(
+                    name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::I64),
+                    false,
+                );
+                Some(format!(
+                    "let {} = when {{ {} > {} => \"{}\", _ => \"{}\" }}.length()",
+                    name, cond_var, thresh, s1, s2
+                ))
+            }
+            1 => {
+                // when { ... => "HELLO", _ => "world" }.to_upper() -> string
+                ctx.add_local(
+                    name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::String),
+                    false,
+                );
+                Some(format!(
+                    "let {} = when {{ {} > {} => \"hello\", _ => \"world\" }}.to_upper()",
+                    name, cond_var, thresh
+                ))
+            }
+            _ => {
+                // when { ... => 42, _ => 0 }.to_string() -> string
+                let v1 = self.rng.gen_range(0..=100);
+                let v2 = self.rng.gen_range(0..=100);
+                ctx.add_local(
+                    name.clone(),
+                    TypeInfo::Primitive(PrimitiveType::String),
+                    false,
+                );
+                Some(format!(
+                    "let {} = when {{ {} > {} => {}, _ => {} }}.to_string()",
+                    name, cond_var, thresh, v1, v2
+                ))
+            }
+        }
+    }
+
+    /// Generate for-loop that builds a string using when in the body.
+    /// `for item in arr { s = s + when { item > 0 => "+", _ => "-" } }`
+    fn try_generate_for_iter_when_string_body(
+        &mut self,
+        ctx: &mut StmtContext,
+    ) -> Option<String> {
+        // Find i64 array parameters
+        let array_params: Vec<String> = ctx
+            .params
+            .iter()
+            .filter(|p| {
+                matches!(
+                    &p.param_type,
+                    TypeInfo::Array(inner) if matches!(inner.as_ref(), TypeInfo::Primitive(PrimitiveType::I64))
+                )
+            })
+            .map(|p| p.name.clone())
+            .collect();
+
+        if array_params.is_empty() {
+            return None;
+        }
+
+        let arr = &array_params[self.rng.gen_range(0..array_params.len())];
+        let s_name = ctx.new_local_name();
+        let item_name = ctx.new_local_name();
+        let indent = "    ".repeat(self.indent + 1);
+        let thresh = self.rng.gen_range(-5..=10);
+
+        let (s_true, s_false) = match self.rng.gen_range(0..3u32) {
+            0 => ("+", "-"),
+            1 => ("y", "n"),
+            _ => ("1", "0"),
+        };
+
+        ctx.add_local(
+            s_name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            true,
+        );
+        ctx.protected_vars.push(s_name.clone());
+
+        Some(format!(
+            "let mut {} = \"\"\n{}for {} in {} {{\n{}{} = {} + when {{ {} > {} => \"{}\", _ => \"{}\" }}\n{}}}",
+            s_name,
+            indent,
+            item_name,
+            arr,
+            indent,
+            s_name,
+            s_name,
+            item_name,
+            thresh,
+            s_true,
+            s_false,
+            indent,
+        ))
     }
 
     fn try_generate_bool_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
