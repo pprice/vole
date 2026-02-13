@@ -1343,6 +1343,18 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: for-loop string build with match
+        if self.rng.gen_bool(0.02) {
+            return self.generate_for_string_build_with_match(ctx);
+        }
+
+        // ~2% chance: when with string concat arm values
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_when_with_string_concat_arms(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -7110,6 +7122,121 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         Some(format!(
             "let {} = {} {} {} && {} {} {}",
             name, var, lo_op, lo, var, hi_op, hi
+        ))
+    }
+
+    /// Generate for-loop that builds a string using match on the loop variable.
+    /// `let mut s = ""; for i in 0..N { s = s + match i { 0 => "a", 1 => "b", _ => "c" } }`
+    fn generate_for_string_build_with_match(&mut self, ctx: &mut StmtContext) -> String {
+        let s_name = ctx.new_local_name();
+        let i_name = ctx.new_local_name();
+        let n = self.rng.gen_range(2..=5);
+        let indent = "    ".repeat(self.indent + 1);
+        let match_indent = "    ".repeat(self.indent + 2);
+
+        let suffixes: Vec<&str> = vec!["a", "b", "c", "d", "x"];
+        let num_arms = self.rng.gen_range(2..=3).min(n);
+        let mut arms = Vec::new();
+        for j in 0..num_arms {
+            arms.push(format!(
+                "{}{} => \"{}\"",
+                match_indent,
+                j,
+                suffixes[j as usize % suffixes.len()]
+            ));
+        }
+        arms.push(format!(
+            "{}_ => \"{}\"",
+            match_indent,
+            suffixes[num_arms as usize % suffixes.len()]
+        ));
+
+        ctx.add_local(
+            s_name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            true,
+        );
+        ctx.protected_vars.push(s_name.clone());
+
+        format!(
+            "let mut {} = \"\"\n{}for {} in 0..{} {{\n{}{} = {} + match {} {{\n{}\n{}}}\n{}}}",
+            s_name,
+            indent,
+            i_name,
+            n,
+            indent,
+            s_name,
+            s_name,
+            i_name,
+            arms.join("\n"),
+            indent,
+            indent,
+        )
+    }
+
+    /// Generate when with string concatenation as arm values.
+    /// `let s = when { x > 0 => str + " positive", _ => str + " negative" }`
+    fn try_generate_when_with_string_concat_arms(
+        &mut self,
+        ctx: &mut StmtContext,
+    ) -> Option<String> {
+        let string_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::String)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| {
+                        matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::String))
+                    })
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        let i64_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::I64)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::I64)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        if string_vars.is_empty() || i64_vars.is_empty() {
+            return None;
+        }
+
+        let str_var = &string_vars[self.rng.gen_range(0..string_vars.len())];
+        let cond_var = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+        let name = ctx.new_local_name();
+        let thresh = self.rng.gen_range(-5..=10);
+
+        let suffix_true = match self.rng.gen_range(0..3u32) {
+            0 => " yes",
+            1 => " positive",
+            _ => "_true",
+        };
+        let suffix_false = match self.rng.gen_range(0..3u32) {
+            0 => " no",
+            1 => " negative",
+            _ => "_false",
+        };
+
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            false,
+        );
+
+        Some(format!(
+            "let {} = when {{ {} > {} => {} + \"{}\", _ => {} + \"{}\" }}",
+            name, cond_var, thresh, str_var, suffix_true, str_var, suffix_false
         ))
     }
 
