@@ -140,8 +140,6 @@ pub(crate) struct Cg<'a, 'b, 'ctx> {
     /// Cache for substituted types
     substitution_cache: RefCell<FxHashMap<TypeId, TypeId>>,
     /// Cache for RC state computations
-    /// TODO(vol-eund): Remove #[allow(dead_code)] once callers are migrated
-    #[allow(dead_code)]
     rc_state_cache: RefCell<FxHashMap<TypeId, RcState>>,
     /// Module export bindings from destructuring imports: local_name -> (module_id, export_name, type_id)
     pub module_bindings: FxHashMap<Symbol, ModuleExportBinding>,
@@ -279,16 +277,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     // ========== RC scope tracking ==========
 
-    /// Check if a type needs RC cleanup in codegen.
-    ///
-    /// DEPRECATED: Use `self.rc_state(type_id).needs_cleanup()` instead.
-    /// TODO(vol-e052): Remove this method entirely.
-    #[allow(dead_code)]
-    #[inline]
-    pub fn needs_rc_cleanup(&self, type_id: TypeId) -> bool {
-        self.rc_state(type_id).needs_cleanup()
-    }
-
     /// Get or create a runtime type_id for a monomorphized generic class instance.
     ///
     /// For generic classes like `Wrapper<T>`, the base class is registered with
@@ -395,16 +383,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
             .insert(key, new_type_id);
 
         new_type_id
-    }
-
-    /// Check if a captured variable type is RC-managed and needs rc_inc/rc_dec.
-    ///
-    /// DEPRECATED: Use `self.rc_state(type_id).is_capture()` instead.
-    /// TODO(vol-e052): Remove this method entirely.
-    #[allow(dead_code)]
-    #[inline]
-    pub fn is_capture_rc(&self, type_id: TypeId) -> bool {
-        self.rc_state(type_id).is_capture()
     }
 
     /// Push a new RC scope (called when entering a block).
@@ -551,6 +529,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Emit rc_inc(value) to increment the reference count.
     /// Used when creating a new reference to an existing RC value.
+    #[inline]
     pub fn emit_rc_inc(&mut self, value: Value) -> CodegenResult<()> {
         self.call_runtime_void(RuntimeFn::RcInc, &[value])
     }
@@ -682,6 +661,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
 
     /// Emit rc_dec(value) to decrement the reference count.
     /// Used when destroying a reference (e.g., reassignment).
+    #[inline]
     pub fn emit_rc_dec(&mut self, value: Value) -> CodegenResult<()> {
         self.call_runtime_void(RuntimeFn::RcDec, &[value])
     }
@@ -906,8 +886,6 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
     /// - `RcState::Composite`: Struct/tuple with RC fields
     /// - `RcState::Union`: Union with some RC variants
     ///
-    /// TODO(vol-eund): Remove #[allow(dead_code)] once callers are migrated
-    #[allow(dead_code)]
     pub fn rc_state(&self, type_id: TypeId) -> RcState {
         // Check cache first
         if let Some(state) = self.rc_state_cache.borrow().get(&type_id) {
