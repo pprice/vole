@@ -1571,6 +1571,18 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: when expression with f64 variable conditions
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_when_f64_cond_let(ctx) {
+                return stmt;
+            }
+        }
+
+        // ~2% chance: for-range building string via i.to_string()
+        if self.rng.gen_bool(0.02) {
+            return self.generate_for_range_tostring_build(ctx);
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -9070,6 +9082,76 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 format!("let {} = \"{}\".to_upper()", name, s)
             }
         }
+    }
+
+    /// Generate a when expression with f64 variable conditions.
+    /// E.g.: `when { x > 1.0 => "big", x > 0.0 => "small", _ => "zero" }`
+    fn try_generate_when_f64_cond_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let f64_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::F64)))
+            .map(|(name, _, _)| name.clone())
+            .collect();
+
+        if f64_vars.is_empty() {
+            return None;
+        }
+
+        let var = &f64_vars[self.rng.gen_range(0..f64_vars.len())];
+        let name = ctx.new_local_name();
+        let thresholds = ["100.0", "10.0", "1.0", "0.0"];
+
+        // Build 2-3 arms + wildcard
+        let num_arms = self.rng.gen_range(2..=3);
+        let mut arms = Vec::new();
+        let labels = ["\"high\"", "\"medium\"", "\"low\"", "\"zero\""];
+
+        for i in 0..num_arms {
+            if i < thresholds.len() && i < labels.len() {
+                arms.push(format!("{} > {} => {}", var, thresholds[i], labels[i]));
+            }
+        }
+        arms.push(format!("_ => {}", labels[num_arms.min(labels.len() - 1)]));
+
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            false,
+        );
+        Some(format!(
+            "let {} = when {{ {} }}",
+            name,
+            arms.join(", ")
+        ))
+    }
+
+    /// Generate a for-range loop that builds a string from index.to_string().
+    /// E.g.: `let mut s = ""; for i in 0..5 { s = s + i.to_string() }`
+    fn generate_for_range_tostring_build(&mut self, ctx: &mut StmtContext) -> String {
+        let acc_name = ctx.new_local_name();
+        let iter_var = ctx.new_local_name();
+        let n = self.rng.gen_range(2..=5);
+
+        ctx.protected_vars.push(acc_name.clone());
+        ctx.add_local(
+            acc_name.clone(),
+            TypeInfo::Primitive(PrimitiveType::String),
+            true,
+        );
+        let indent = self.indent;
+        format!(
+            "let mut {} = \"\"\n{}for {} in 0..{} {{\n{}  {} = {} + {}.to_string()\n{}}}",
+            acc_name,
+            " ".repeat(indent * 2),
+            iter_var,
+            n,
+            " ".repeat((indent + 1) * 2),
+            acc_name,
+            acc_name,
+            iter_var,
+            " ".repeat(indent * 2),
+        )
     }
 
     fn try_generate_bool_match_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
