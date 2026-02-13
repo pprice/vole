@@ -446,7 +446,10 @@ impl Analyzer {
             TypeDefKind::Struct | TypeDefKind::Sentinel => {
                 self.type_arena_mut().struct_type(type_def_id, type_args)
             }
-            _ => self.type_arena().invalid(),
+            TypeDefKind::Interface
+            | TypeDefKind::ErrorType
+            | TypeDefKind::Primitive
+            | TypeDefKind::Alias => self.type_arena().invalid(),
         };
         self.scope.define(
             self_sym,
@@ -1186,7 +1189,10 @@ impl Analyzer {
             TypeDefKind::Struct | TypeDefKind::Sentinel => {
                 self.type_arena_mut().struct_type(type_def_id, type_args)
             }
-            _ => return None,
+            TypeDefKind::Interface
+            | TypeDefKind::ErrorType
+            | TypeDefKind::Primitive
+            | TypeDefKind::Alias => return None,
         };
 
         let instance_id = self

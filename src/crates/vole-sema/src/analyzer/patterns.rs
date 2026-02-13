@@ -340,7 +340,10 @@ impl Analyzer {
                     self.infer_pattern_type_args_for_def(type_def_id, scrutinee_type_id);
                 Some(self.type_arena_mut().struct_type(type_def_id, type_args))
             }
-            _ => None,
+            TypeDefKind::Interface
+            | TypeDefKind::ErrorType
+            | TypeDefKind::Primitive
+            | TypeDefKind::Alias => None,
         }
     }
 
