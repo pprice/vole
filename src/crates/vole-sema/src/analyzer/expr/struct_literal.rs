@@ -82,19 +82,14 @@ impl Analyzer {
             let type_name = interner.resolve(type_sym);
 
             self.module_name_id(module_info.module_id, type_name)
-                .and_then(|name_id| {
-                    module_info
-                        .exports
-                        .iter()
-                        .find(|(n, _)| *n == name_id)
-                        .and_then(|&(_, export_type_id)| {
-                            // The export_type_id is an ArenaTypeId, we need to extract the TypeDefId
-                            let arena = self.type_arena();
-                            arena
-                                .unwrap_nominal(export_type_id)
-                                .filter(|(_, _, kind)| kind.is_class_or_struct())
-                                .map(|(type_def_id, _, _)| type_def_id)
-                        })
+                .and_then(|name_id| module_info.export_type(name_id))
+                .and_then(|export_type_id| {
+                    // The export_type_id is an ArenaTypeId, we need to extract the TypeDefId
+                    let arena = self.type_arena();
+                    arena
+                        .unwrap_nominal(export_type_id)
+                        .filter(|(_, _, kind)| kind.is_class_or_struct())
+                        .map(|(type_def_id, _, _)| type_def_id)
                 })
         }
     }

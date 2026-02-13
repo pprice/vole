@@ -146,11 +146,7 @@ impl Analyzer {
             .module_name_id(module_info.module_id, type_name)
             .and_then(|name_id| {
                 tracing::debug!(?name_id, "qualified_type: got name_id for type");
-                module_info
-                    .exports
-                    .iter()
-                    .find(|(n, _)| *n == name_id)
-                    .map(|&(_, type_id)| type_id)
+                module_info.export_type(name_id)
             });
 
         let Some(base_type_id) = export_type_id else {

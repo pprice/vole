@@ -1972,11 +1972,7 @@ impl Analyzer {
 
                     // Find the export
                     let name_id = self.module_name_id(module.module_id, segment_name)?;
-                    let export_type_id = module
-                        .exports
-                        .iter()
-                        .find(|(n, _)| *n == name_id)
-                        .map(|&(_, type_id)| type_id)?;
+                    let export_type_id = module.export_type(name_id)?;
 
                     // Last segment should be an interface
                     if i == segments.len() - 1 {

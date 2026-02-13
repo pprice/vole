@@ -66,13 +66,7 @@ impl Analyzer {
                 // Find export type if name matches
                 let export_type_id =
                     self.module_name_id(module_id, field_name)
-                        .and_then(|name_id| {
-                            module
-                                .exports
-                                .iter()
-                                .find(|(n, _)| *n == name_id)
-                                .map(|&(_, type_id)| type_id)
-                        });
+                        .and_then(|name_id| module.export_type(name_id));
                 (module_id, field_name.to_string(), export_type_id)
             })
         };
@@ -745,11 +739,7 @@ impl Analyzer {
                 let type_name_id = self.module_name_id(module_info.module_id, type_name_str)?;
 
                 // Find the export and check if it's a Record or Class type
-                let export_type_id = module_info
-                    .exports
-                    .iter()
-                    .find(|(n, _)| *n == type_name_id)
-                    .map(|&(_, type_id)| type_id)?;
+                let export_type_id = module_info.export_type(type_name_id)?;
 
                 // Extract TypeDefId from the export type (class only)
                 let arena = self.type_arena();
@@ -1263,12 +1253,7 @@ impl Analyzer {
             arena.unwrap_module(object_type_id).map(|m| {
                 let method_name_str = interner.resolve(method_call.method);
                 let name_id = self.module_name_id(m.module_id, method_name_str);
-                let export_type_id = name_id.and_then(|nid| {
-                    m.exports
-                        .iter()
-                        .find(|(n, _)| *n == nid)
-                        .map(|&(_, type_id)| type_id)
-                });
+                let export_type_id = name_id.and_then(|nid| m.export_type(nid));
                 (
                     m.module_id,
                     method_name_str.to_string(),

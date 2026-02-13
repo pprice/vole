@@ -238,6 +238,16 @@ pub struct InternedModule {
     pub exports: SmallVec<[(NameId, TypeId); 8]>,
 }
 
+impl InternedModule {
+    /// Look up an export's type by name.
+    pub fn export_type(&self, name_id: NameId) -> Option<TypeId> {
+        self.exports
+            .iter()
+            .find(|(n, _)| *n == name_id)
+            .map(|&(_, type_id)| type_id)
+    }
+}
+
 /// Module metadata stored separately from the type.
 ///
 /// This contains codegen-relevant data that isn't part of the module's type identity.
