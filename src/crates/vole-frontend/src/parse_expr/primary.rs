@@ -461,7 +461,7 @@ impl<'src> Parser<'src> {
             }
             TokenType::Error => Err(ParseError::new(
                 ParserError::UnexpectedToken {
-                    token: token.lexeme.clone(),
+                    token: token.lexeme.into_owned(),
                     span: token.span.into(),
                 },
                 token.span,

@@ -348,7 +348,7 @@ impl<'src> Parser<'src> {
         result.map_err(|_| {
             ParseError::new(
                 ParserError::ExpectedExpression {
-                    found: token.lexeme.clone(),
+                    found: token.lexeme.to_string(),
                     span: token.span.into(),
                 },
                 token.span,

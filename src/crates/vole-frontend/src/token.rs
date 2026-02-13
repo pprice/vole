@@ -344,14 +344,14 @@ impl From<&Span> for miette::SourceSpan {
 
 /// A token with its location in source code
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Token {
+pub struct Token<'src> {
     pub ty: TokenType,
-    pub lexeme: String,
+    pub lexeme: std::borrow::Cow<'src, str>,
     pub span: Span,
 }
 
-impl Token {
-    pub fn new(ty: TokenType, lexeme: impl Into<String>, span: Span) -> Self {
+impl<'src> Token<'src> {
+    pub fn new(ty: TokenType, lexeme: impl Into<std::borrow::Cow<'src, str>>, span: Span) -> Self {
         Self {
             ty,
             lexeme: lexeme.into(),

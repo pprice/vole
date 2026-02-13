@@ -75,7 +75,7 @@ impl<'src> Lexer<'src> {
     }
 
     /// Get the next token from the source
-    pub fn next_token(&mut self) -> Token {
+    pub fn next_token(&mut self) -> Token<'src> {
         self.skip_whitespace();
 
         self.start = self.current;
@@ -304,7 +304,7 @@ impl<'src> Lexer<'src> {
     }
 
     /// Create a token from start to current position
-    fn make_token(&self, ty: TokenType) -> Token {
+    fn make_token(&self, ty: TokenType) -> Token<'src> {
         let lexeme = &self.source[self.start..self.current];
         Token::new(
             ty,
@@ -321,7 +321,7 @@ impl<'src> Lexer<'src> {
     }
 
     /// Create an error token and collect an error for an unexpected character.
-    fn error_unexpected_char(&mut self, c: char) -> Token {
+    fn error_unexpected_char(&mut self, c: char) -> Token<'src> {
         let span = Span::new_with_end(
             self.start,
             self.current,
@@ -341,7 +341,7 @@ impl<'src> Lexer<'src> {
     }
 
     /// Create an error token and collect an error for an unterminated string.
-    fn error_unterminated_string(&mut self) -> Token {
+    fn error_unterminated_string(&mut self) -> Token<'src> {
         let span = Span::new_with_end(
             self.start,
             self.current,
@@ -362,7 +362,7 @@ impl<'src> Lexer<'src> {
     }
 
     /// Create an error token and collect an error for an invalid number literal.
-    fn error_invalid_number(&mut self) -> Token {
+    fn error_invalid_number(&mut self) -> Token<'src> {
         let span = Span::new_with_end(
             self.start,
             self.current,
@@ -383,9 +383,15 @@ impl<'src> Lexer<'src> {
     }
 
     /// Scan an identifier or keyword (supports Unicode XID)
-    fn identifier(&mut self) -> Token {
+    fn identifier(&mut self) -> Token<'src> {
         while let Some(c) = self.peek() {
-            if unicode_ident::is_xid_continue(c) && !Self::is_banned_unicode(c) {
+            // Fast path for ASCII identifier characters (vast majority of real code)
+            let is_ident_char = c.is_ascii_alphanumeric()
+                || c == '_'
+                || (!c.is_ascii()
+                    && unicode_ident::is_xid_continue(c)
+                    && !Self::is_banned_unicode(c));
+            if is_ident_char {
                 self.advance();
             } else {
                 break;
@@ -496,7 +502,7 @@ impl<'src> Lexer<'src> {
     /// - Scientific: `1e10`, `1.5e-3`, `2E+6`
     /// - Underscores as separators in all formats
     /// - Type suffixes: `100_u8`, `3.14_f32`, `0xFF_i32`
-    fn number(&mut self) -> Token {
+    fn number(&mut self) -> Token<'src> {
         // The first digit has already been consumed by next_token().
         // Check if it was '0' to detect hex/binary prefix.
         let first_char = self.source.as_bytes()[self.start];
@@ -710,7 +716,7 @@ impl<'src> Lexer<'src> {
     }
 
     /// Scan a string literal (basic, with interpolation start support)
-    fn string(&mut self) -> Token {
+    fn string(&mut self) -> Token<'src> {
         loop {
             match self.peek() {
                 None => {
@@ -763,7 +769,7 @@ impl<'src> Lexer<'src> {
     }
 
     /// Scan a raw string literal @"..." (no escape processing)
-    fn raw_string(&mut self) -> Token {
+    fn raw_string(&mut self) -> Token<'src> {
         // Opening @" already consumed
         loop {
             match self.peek() {
@@ -788,7 +794,7 @@ impl<'src> Lexer<'src> {
     }
 
     /// Continue scanning after an interpolation expression closes
-    fn string_interp_continue(&mut self) -> Token {
+    fn string_interp_continue(&mut self) -> Token<'src> {
         // We just consumed '}', now continue scanning the string
         self.start = self.current - 1; // Include the '}'
 

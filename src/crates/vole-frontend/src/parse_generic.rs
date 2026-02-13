@@ -175,7 +175,7 @@ impl<'src> Parser<'src> {
                 if next.ty == TokenType::Identifier && digit_token.span.end == next.span.start {
                     format!("{}{}", digit_token.lexeme, next.lexeme)
                 } else {
-                    digit_token.lexeme.clone()
+                    digit_token.lexeme.to_string()
                 };
             return Err(ParseError::new(
                 ParserError::TypeParamStartsWithDigit {
@@ -193,7 +193,7 @@ impl<'src> Parser<'src> {
         if name_token.lexeme.starts_with("__") {
             return Err(ParseError::new(
                 ParserError::TypeParamReservedPrefix {
-                    name: name_token.lexeme.clone(),
+                    name: name_token.lexeme.to_string(),
                     span: name_token.span.into(),
                 },
                 name_token.span,

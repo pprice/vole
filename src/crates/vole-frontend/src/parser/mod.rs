@@ -5,8 +5,8 @@ use crate::{Interner, Lexer, Span, Token, TokenType, ast::*};
 
 pub struct Parser<'src> {
     pub(super) lexer: Lexer<'src>,
-    pub(super) current: Token,
-    pub(super) previous: Token,
+    pub(super) current: Token<'src>,
+    pub(super) previous: Token<'src>,
     pub(super) interner: Interner,
     next_node_id: u32,
     /// Tracks when we've consumed half of a '>>' token while parsing generics.
@@ -139,7 +139,7 @@ impl<'src> Parser<'src> {
     }
 
     /// Peek at the next token without consuming the current one
-    pub(super) fn peek_token(&self) -> Token {
+    pub(super) fn peek_token(&self) -> Token<'src> {
         let mut lexer_copy = self.lexer.clone();
         lexer_copy.next_token()
     }

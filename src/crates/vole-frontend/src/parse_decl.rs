@@ -24,7 +24,7 @@ impl<'src> Parser<'src> {
         }
 
         let keyword = &self.current.lexeme;
-        if !matches!(keyword.as_str(), "fn" | "def" | "function" | "void") {
+        if !matches!(&**keyword, "fn" | "def" | "function" | "void") {
             return None;
         }
 
@@ -36,7 +36,7 @@ impl<'src> Parser<'src> {
         if name_tok.ty != TokenType::Identifier {
             return None;
         }
-        let name = name_tok.lexeme;
+        let name = name_tok.lexeme.into_owned();
 
         // After identifier, expect '('
         let next = lexer_copy.next_token();
