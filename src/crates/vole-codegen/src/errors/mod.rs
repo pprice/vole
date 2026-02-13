@@ -109,6 +109,22 @@ impl CodegenError {
         }
     }
 
+    /// Wrap a Cranelift module error
+    pub fn cranelift(e: impl fmt::Display) -> Self {
+        CodegenError::InternalError {
+            message: "cranelift error",
+            context: Some(e.to_string()),
+        }
+    }
+
+    /// Wrap an IO error
+    pub fn io(e: impl fmt::Display) -> Self {
+        CodegenError::InternalError {
+            message: "io error",
+            context: Some(e.to_string()),
+        }
+    }
+
     /// Create a missing resource error
     pub fn missing_resource(resource: &'static str) -> Self {
         CodegenError::MissingResource {

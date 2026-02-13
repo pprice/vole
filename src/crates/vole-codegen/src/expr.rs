@@ -360,7 +360,7 @@ impl Cg<'_, '_, '_> {
                 cranelift_module::Linkage::Local,
                 &wrapper_sig,
             )
-            .map_err(|e| CodegenError::internal_with_context("cranelift error", e.to_string()))?;
+            .map_err(|e| CodegenError::cranelift(e))?;
 
         self.funcs().set_func_id(wrapper_func_key, wrapper_func_id);
         self.funcs()
@@ -404,7 +404,7 @@ impl Cg<'_, '_, '_> {
 
         self.jit_module()
             .define_function(wrapper_func_id, &mut wrapper_ctx)
-            .map_err(|e| CodegenError::internal_with_context("cranelift error", e.to_string()))?;
+            .map_err(|e| CodegenError::cranelift(e))?;
 
         // Get the wrapper function address
         let wrapper_func_ref = self

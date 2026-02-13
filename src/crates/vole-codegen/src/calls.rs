@@ -58,14 +58,14 @@ pub(crate) fn compile_string_literal(
     let data_name = func_registry.next_string_data_name();
     let data_id = module
         .declare_data(&data_name, Linkage::Local, false, false)
-        .map_err(|e| CodegenError::internal_with_context("cranelift error", e.to_string()))?;
+        .map_err(|e| CodegenError::cranelift(e))?;
 
     let mut data_desc = DataDescription::new();
     data_desc.define(data.into_boxed_slice());
     data_desc.set_align(8);
     module
         .define_data(data_id, &data_desc)
-        .map_err(|e| CodegenError::internal_with_context("cranelift error", e.to_string()))?;
+        .map_err(|e| CodegenError::cranelift(e))?;
 
     // The data section pointer IS the RcString pointer
     let data_gv = module.declare_data_in_func(data_id, builder.func);

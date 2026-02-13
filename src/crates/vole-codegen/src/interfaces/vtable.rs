@@ -199,7 +199,7 @@ impl InterfaceVtableRegistry {
         let data_id = ctx
             .jit_module()
             .declare_data(&vtable_name, Linkage::Local, false, false)
-            .map_err(|e| CodegenError::internal_with_context("cranelift error", e.to_string()))?;
+            .map_err(|e| CodegenError::cranelift(e))?;
 
         tracing::debug!(
             interface = %ctx.interner().resolve(interface_name),
@@ -325,7 +325,7 @@ impl InterfaceVtableRegistry {
         // Phase 3: Define data
         ctx.jit_module()
             .define_data(state.data_id, &data)
-            .map_err(|e| CodegenError::internal_with_context("cranelift error", e.to_string()))?;
+            .map_err(|e| CodegenError::cranelift(e))?;
 
         tracing::debug!(
             interface = %interface_name_str,
@@ -365,7 +365,7 @@ impl InterfaceVtableRegistry {
         let func_id = ctx
             .jit_module()
             .declare_function(&wrapper_name, Linkage::Local, &sig)
-            .map_err(|e| CodegenError::internal_with_context("cranelift error", e.to_string()))?;
+            .map_err(|e| CodegenError::cranelift(e))?;
 
         let mut func_ctx = ctx.jit_module().make_context();
         func_ctx.func.signature = sig;
@@ -501,7 +501,7 @@ impl InterfaceVtableRegistry {
 
         ctx.jit_module()
             .define_function(func_id, &mut func_ctx)
-            .map_err(|e| CodegenError::internal_with_context("cranelift error", e.to_string()))?;
+            .map_err(|e| CodegenError::cranelift(e))?;
         ctx.jit_module().clear_context(&mut func_ctx);
 
         Ok(func_id)

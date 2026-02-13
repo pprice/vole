@@ -1127,10 +1127,10 @@ impl Compiler<'_> {
                     let name = self.analyzed.interner.resolve(func.name);
                     self.build_function_ir(func)?;
                     writeln!(writer, "// func {}", name).map_err(|e| {
-                        CodegenError::internal_with_context("io error", e.to_string())
+                        CodegenError::io(e)
                     })?;
                     writeln!(writer, "{}", self.jit.ctx.func).map_err(|e| {
-                        CodegenError::internal_with_context("io error", e.to_string())
+                        CodegenError::io(e)
                     })?;
                     self.jit.clear();
                 }
@@ -1138,10 +1138,10 @@ impl Compiler<'_> {
                     for test in &tests_decl.tests {
                         self.build_test_ir(test)?;
                         writeln!(writer, "// test \"{}\"", test.name).map_err(|e| {
-                            CodegenError::internal_with_context("io error", e.to_string())
+                            CodegenError::io(e)
                         })?;
                         writeln!(writer, "{}", self.jit.ctx.func).map_err(|e| {
-                            CodegenError::internal_with_context("io error", e.to_string())
+                            CodegenError::io(e)
                         })?;
                         self.jit.clear();
                     }
