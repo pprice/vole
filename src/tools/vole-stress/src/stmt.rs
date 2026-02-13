@@ -1669,6 +1669,18 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: chained boolean literal ops
+        if self.rng.gen_bool(0.02) {
+            return self.generate_bool_chain_edge_let(ctx);
+        }
+
+        // ~2% chance: safe array first-element access via length guard
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_array_length_zero_check(ctx) {
+                return stmt;
+            }
+        }
+
         // ~2% chance: when with string replace in arms
         if self.rng.gen_bool(0.02) {
             if let Some(stmt) = self.try_generate_when_replace_result(ctx) {
@@ -9814,6 +9826,69 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::I64), false);
         Some(format!("let {} = {}.to_string().length()", name, var))
+    }
+
+    /// Generate chained boolean literal operations.
+    /// E.g.: `let b = true && false || true`
+    fn generate_bool_chain_edge_let(
+        &mut self,
+        ctx: &mut StmtContext,
+    ) -> String {
+        let name = ctx.new_local_name();
+
+        let variant = self.rng.gen_range(0..5);
+        let expr = match variant {
+            0 => "true && true".to_string(),
+            1 => "true && false || true".to_string(),
+            2 => "false || false || true".to_string(),
+            3 => "!(true && false)".to_string(),
+            _ => "true && !false".to_string(),
+        };
+
+        ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::Bool), false);
+        format!("let {} = {}", name, expr)
+    }
+
+    /// Generate safe first-element access with length guard.
+    /// E.g.: `let x = when { arr.length() > 0 => arr[0], _ => default }`
+    fn try_generate_array_length_zero_check(
+        &mut self,
+        ctx: &mut StmtContext,
+    ) -> Option<String> {
+        // Find parameter arrays (guaranteed non-empty by generation)
+        let array_params: Vec<(String, PrimitiveType)> = ctx
+            .params
+            .iter()
+            .filter_map(|p| match &p.param_type {
+                TypeInfo::Array(inner) => match inner.as_ref() {
+                    TypeInfo::Primitive(prim) => Some((p.name.clone(), *prim)),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+
+        if array_params.is_empty() {
+            return None;
+        }
+
+        let (arr_name, elem_type) = &array_params[self.rng.gen_range(0..array_params.len())];
+        let name = ctx.new_local_name();
+
+        let default = match elem_type {
+            PrimitiveType::I64 => "0",
+            PrimitiveType::I32 => "0_i32",
+            PrimitiveType::Bool => "false",
+            PrimitiveType::String => "\"\"",
+            PrimitiveType::F64 => "0.0",
+            _ => return None,
+        };
+
+        ctx.add_local(name.clone(), TypeInfo::Primitive(*elem_type), false);
+        Some(format!(
+            "let {} = when {{ {}.length() > 0 => {}[0], _ => {} }}",
+            name, arr_name, arr_name, default
+        ))
     }
 
     /// Generate when expression with string replace in arms.
