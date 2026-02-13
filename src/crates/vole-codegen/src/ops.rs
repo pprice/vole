@@ -93,6 +93,13 @@ fn integer_result_type_id(left: TypeId, right: TypeId) -> TypeId {
     }
 }
 
+/// Comparison condition codes for float, unsigned int, and signed int operations.
+struct CmpCodes {
+    float: FloatCC,
+    unsigned: IntCC,
+    signed: IntCC,
+}
+
 impl Cg<'_, '_, '_> {
     /// Compile a binary expression
     pub fn binary(&mut self, bin: &BinaryExpr, line: u32) -> CodegenResult<CompiledValue> {
@@ -656,36 +663,44 @@ impl Cg<'_, '_, '_> {
                 left_type_id,
                 left_val,
                 right_val,
-                FloatCC::LessThan,
-                IntCC::UnsignedLessThan,
-                IntCC::SignedLessThan,
+                CmpCodes {
+                    float: FloatCC::LessThan,
+                    unsigned: IntCC::UnsignedLessThan,
+                    signed: IntCC::SignedLessThan,
+                },
             ),
             BinaryOp::Gt => self.emit_cmp(
                 result_ty,
                 left_type_id,
                 left_val,
                 right_val,
-                FloatCC::GreaterThan,
-                IntCC::UnsignedGreaterThan,
-                IntCC::SignedGreaterThan,
+                CmpCodes {
+                    float: FloatCC::GreaterThan,
+                    unsigned: IntCC::UnsignedGreaterThan,
+                    signed: IntCC::SignedGreaterThan,
+                },
             ),
             BinaryOp::Le => self.emit_cmp(
                 result_ty,
                 left_type_id,
                 left_val,
                 right_val,
-                FloatCC::LessThanOrEqual,
-                IntCC::UnsignedLessThanOrEqual,
-                IntCC::SignedLessThanOrEqual,
+                CmpCodes {
+                    float: FloatCC::LessThanOrEqual,
+                    unsigned: IntCC::UnsignedLessThanOrEqual,
+                    signed: IntCC::SignedLessThanOrEqual,
+                },
             ),
             BinaryOp::Ge => self.emit_cmp(
                 result_ty,
                 left_type_id,
                 left_val,
                 right_val,
-                FloatCC::GreaterThanOrEqual,
-                IntCC::UnsignedGreaterThanOrEqual,
-                IntCC::SignedGreaterThanOrEqual,
+                CmpCodes {
+                    float: FloatCC::GreaterThanOrEqual,
+                    unsigned: IntCC::UnsignedGreaterThanOrEqual,
+                    signed: IntCC::SignedGreaterThanOrEqual,
+                },
             ),
             BinaryOp::And | BinaryOp::Or => unreachable!("handled above"),
             BinaryOp::BitAnd => self.builder.ins().band(left_val, right_val),
@@ -1039,23 +1054,20 @@ impl Cg<'_, '_, '_> {
     }
 
     /// Emit a comparison instruction, dispatching based on type (float vs int, signed vs unsigned).
-    #[allow(clippy::too_many_arguments)]
     fn emit_cmp(
         &mut self,
         result_ty: Type,
         left_type_id: TypeId,
         left_val: Value,
         right_val: Value,
-        float_cc: FloatCC,
-        unsigned_cc: IntCC,
-        signed_cc: IntCC,
+        codes: CmpCodes,
     ) -> Value {
         if result_ty == types::F64 || result_ty == types::F32 {
-            self.builder.ins().fcmp(float_cc, left_val, right_val)
+            self.builder.ins().fcmp(codes.float, left_val, right_val)
         } else if left_type_id.is_unsigned_int() {
-            self.builder.ins().icmp(unsigned_cc, left_val, right_val)
+            self.builder.ins().icmp(codes.unsigned, left_val, right_val)
         } else {
-            self.builder.ins().icmp(signed_cc, left_val, right_val)
+            self.builder.ins().icmp(codes.signed, left_val, right_val)
         }
     }
 
