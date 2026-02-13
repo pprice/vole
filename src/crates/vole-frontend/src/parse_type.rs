@@ -113,7 +113,7 @@ impl<'src> Parser<'src> {
                     })
                 } else if param_types.len() == 1 {
                     // Single type in parens - grouping
-                    Ok(param_types.into_iter().next().unwrap())
+                    Ok(param_types.into_iter().next().expect("len == 1"))
                 } else {
                     // Multiple types without -> is ambiguous/invalid
                     // (could be tuple, but we use [] for tuples)

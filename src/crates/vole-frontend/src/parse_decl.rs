@@ -593,7 +593,7 @@ impl<'src> Parser<'src> {
         // the whole point is to declare new sentinel types.
         let name_token = self.current.clone();
         if !self.current.lexeme.is_empty()
-            && self.current.lexeme.chars().next().unwrap().is_alphabetic()
+            && self.current.lexeme.chars().next().expect("non-empty lexeme").is_alphabetic()
         {
             self.advance();
         } else {
