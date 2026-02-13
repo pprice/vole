@@ -1669,6 +1669,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: when with string replace in arms
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_when_replace_result(ctx) {
+                return stmt;
+            }
+        }
+
+        // ~2% chance: match with .to_string() in arms
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_match_tostring_arms(ctx) {
+                return stmt;
+            }
+        }
+
         // ~2% chance: manual min/max via when
         if self.rng.gen_bool(0.02) {
             if let Some(stmt) = self.try_generate_manual_minmax_let(ctx) {
@@ -9800,6 +9814,84 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
 
         ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::I64), false);
         Some(format!("let {} = {}.to_string().length()", name, var))
+    }
+
+    /// Generate when expression with string replace in arms.
+    /// E.g.: `let r = when { s.contains("a") => s.replace("a", "b"), _ => s }`
+    fn try_generate_when_replace_result(
+        &mut self,
+        ctx: &mut StmtContext,
+    ) -> Option<String> {
+        let str_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::String)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::String)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        if str_vars.is_empty() {
+            return None;
+        }
+
+        let var = &str_vars[self.rng.gen_range(0..str_vars.len())];
+        let name = ctx.new_local_name();
+
+        let search_chars = ["a", "e", "i", "o", " ", "0", "1"];
+        let search = search_chars[self.rng.gen_range(0..search_chars.len())];
+        let replace = if search == " " { "_" } else { "x" };
+
+        ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::String), false);
+        Some(format!(
+            "let {} = when {{ {}.contains(\"{}\") => {}.replace(\"{}\", \"{}\"), _ => {} }}",
+            name, var, search, var, search, replace, var
+        ))
+    }
+
+    /// Generate match with .to_string() in each arm.
+    /// E.g.: `let s = match x { 0 => "zero", 1 => "one", _ => x.to_string() }`
+    fn try_generate_match_tostring_arms(
+        &mut self,
+        ctx: &mut StmtContext,
+    ) -> Option<String> {
+        let i64_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::I64)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::I64)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        if i64_vars.is_empty() {
+            return None;
+        }
+
+        let var = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+        let name = ctx.new_local_name();
+        let num_arms = self.rng.gen_range(1..=3);
+
+        let mut arms = String::new();
+        let mut used_values = std::collections::HashSet::new();
+        for _ in 0..num_arms {
+            let val = self.rng.gen_range(0..10) as i64;
+            if used_values.insert(val) {
+                arms.push_str(&format!("{} => \"{}\", ", val, val));
+            }
+        }
+        arms.push_str(&format!("_ => {}.to_string()", var));
+
+        ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::String), false);
+        Some(format!("let {} = match {} {{ {} }}", name, var, arms))
     }
 
     /// Generate manual min/max via when expression.
