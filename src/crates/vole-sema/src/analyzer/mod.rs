@@ -468,38 +468,6 @@ impl Analyzer {
         AnalyzerBuilder::new(file).build()
     }
 
-    /// Create an analyzer with a shared module cache.
-    /// The cache is shared across multiple Analyzer instances to avoid
-    /// re-analyzing the same modules (prelude, stdlib, user imports).
-    /// The analyzer uses the CompilationDb from the cache to ensure TypeIds remain valid.
-    pub fn with_cache(file: &str, cache: Rc<RefCell<ModuleCache>>) -> Self {
-        AnalyzerBuilder::new(file).with_cache(cache).build()
-    }
-
-    /// Create an analyzer with an explicit project root override.
-    /// If `project_root` is `None`, auto-detects from file path.
-    pub fn with_project_root(
-        file: &str,
-        project_root: Option<&std::path::Path>,
-    ) -> Self {
-        AnalyzerBuilder::new(file)
-            .with_project_root(project_root)
-            .build()
-    }
-
-    /// Create an analyzer with a shared module cache and an explicit project root override.
-    /// If `project_root` is `None`, auto-detects from file path.
-    pub fn with_cache_and_project_root(
-        file: &str,
-        cache: Rc<RefCell<ModuleCache>>,
-        project_root: Option<&std::path::Path>,
-    ) -> Self {
-        AnalyzerBuilder::new(file)
-            .with_cache(cache)
-            .with_project_root(project_root)
-            .build()
-    }
-
     /// Set whether to skip processing of tests blocks.
     /// When true, `Decl::Tests` is ignored in all analysis passes.
     pub fn set_skip_tests(&mut self, skip: bool) {
