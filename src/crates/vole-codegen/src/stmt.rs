@@ -352,80 +352,8 @@ impl Cg<'_, '_, '_> {
         // Look up the declared type from sema (pre-computed for let statements with type annotations)
         let declared_type_id_opt = self.get_declared_var_type(&init_expr.id);
 
-        // Track whether the value was constructed as a stack-allocated union
-        // (via construct_union_id). Only stack-allocated unions have the
-        // [tag: i8, pad(7), payload: i64] layout that union RC cleanup expects.
-        // Values from function calls are raw i64 values, not pointers to stack slots.
-        let mut is_stack_union = false;
-
-        let (mut final_value, mut final_type_id) = if let Some(declared_type_id) =
-            declared_type_id_opt
-        {
-            let arena = self.arena();
-            let is_declared_union = arena.is_union(declared_type_id);
-            let is_declared_integer = arena.is_integer(declared_type_id);
-            let is_declared_f32 = declared_type_id == arena.f32();
-            let is_declared_f64 = declared_type_id == arena.f64();
-            let is_declared_interface = arena.is_interface(declared_type_id);
-            let is_declared_unknown = arena.is_unknown(declared_type_id);
-
-            if is_declared_unknown && !self.arena().is_unknown(init.type_id) {
-                // Box value to unknown type (TaggedValue)
-                let boxed = self.box_to_unknown(init)?;
-                (boxed.value, boxed.type_id)
-            } else if is_declared_union && !self.arena().is_union(init.type_id) {
-                let wrapped = self.construct_union_id(init, declared_type_id)?;
-                is_stack_union = true;
-                (wrapped.value, wrapped.type_id)
-            } else if is_declared_integer && init.type_id.is_integer() {
-                let arena = self.arena();
-                let declared_cty = type_id_to_cranelift(declared_type_id, arena, self.ptr_type());
-                let init_cty = init.ty;
-                if declared_cty.bits() < init_cty.bits() {
-                    let narrowed = self.builder.ins().ireduce(declared_cty, init.value);
-                    (narrowed, declared_type_id)
-                } else if declared_cty.bits() > init_cty.bits() {
-                    let widened = self.builder.ins().sextend(declared_cty, init.value);
-                    (widened, declared_type_id)
-                } else {
-                    (init.value, declared_type_id)
-                }
-            } else if is_declared_f32 && init.type_id.is_float() && init.ty == types::F64 {
-                // f64 -> f32: demote to narrower float
-                let narrowed = self.builder.ins().fdemote(types::F32, init.value);
-                (narrowed, declared_type_id)
-            } else if is_declared_f64 && init.type_id.is_float() && init.ty == types::F32 {
-                // f32 -> f64: promote to wider float
-                let widened = self.builder.ins().fpromote(types::F64, init.value);
-                (widened, declared_type_id)
-            } else if is_declared_interface {
-                // For functional interfaces, keep the actual function type from the lambda
-                // This preserves the is_closure flag for proper calling convention
-                (init.value, init.type_id)
-            } else {
-                (init.value, declared_type_id)
-            }
-        } else {
-            (init.value, init.type_id)
-        };
-
-        // Box value if assigning to interface type
-        if let Some(declared_type_id) = declared_type_id_opt {
-            let arena = self.arena();
-            let is_declared_interface = arena.is_interface(declared_type_id);
-            let is_final_interface = arena.is_interface(final_type_id);
-
-            if is_declared_interface && !is_final_interface {
-                let arena = self.arena();
-                let cranelift_ty = type_id_to_cranelift(final_type_id, arena, self.ptr_type());
-                let boxed = self.box_interface_value(
-                    CompiledValue::new(final_value, cranelift_ty, final_type_id),
-                    declared_type_id,
-                )?;
-                final_value = boxed.value;
-                final_type_id = boxed.type_id;
-            }
-        }
+        let (final_value, final_type_id, is_stack_union) =
+            self.coerce_let_init(&init, declared_type_id_opt)?;
 
         // Use preregistered var for recursive lambdas, otherwise declare new
         let var = if let Some(var) = preregistered_var {
@@ -521,6 +449,90 @@ impl Cg<'_, '_, '_> {
         init.mark_consumed();
         init.debug_assert_rc_handled("Stmt::Let");
         Ok(false)
+    }
+
+    /// Coerce a let-binding's initializer to match the declared type.
+    ///
+    /// Handles: unknown boxing, union wrapping, integer narrowing/widening,
+    /// float promotion/demotion, and interface boxing. Returns the coerced
+    /// value, its type, and whether a stack-allocated union was constructed.
+    fn coerce_let_init(
+        &mut self,
+        init: &CompiledValue,
+        declared_type_id_opt: Option<TypeId>,
+    ) -> CodegenResult<(Value, TypeId, bool)> {
+        let mut is_stack_union = false;
+
+        let (mut final_value, mut final_type_id) = if let Some(declared_type_id) =
+            declared_type_id_opt
+        {
+            let arena = self.arena();
+            let is_declared_union = arena.is_union(declared_type_id);
+            let is_declared_integer = arena.is_integer(declared_type_id);
+            let is_declared_f32 = declared_type_id == arena.f32();
+            let is_declared_f64 = declared_type_id == arena.f64();
+            let is_declared_interface = arena.is_interface(declared_type_id);
+            let is_declared_unknown = arena.is_unknown(declared_type_id);
+
+            if is_declared_unknown && !self.arena().is_unknown(init.type_id) {
+                // Box value to unknown type (TaggedValue)
+                let boxed = self.box_to_unknown(*init)?;
+                (boxed.value, boxed.type_id)
+            } else if is_declared_union && !self.arena().is_union(init.type_id) {
+                let wrapped = self.construct_union_id(*init, declared_type_id)?;
+                is_stack_union = true;
+                (wrapped.value, wrapped.type_id)
+            } else if is_declared_integer && init.type_id.is_integer() {
+                let arena = self.arena();
+                let declared_cty = type_id_to_cranelift(declared_type_id, arena, self.ptr_type());
+                let init_cty = init.ty;
+                if declared_cty.bits() < init_cty.bits() {
+                    let narrowed = self.builder.ins().ireduce(declared_cty, init.value);
+                    (narrowed, declared_type_id)
+                } else if declared_cty.bits() > init_cty.bits() {
+                    let widened = self.builder.ins().sextend(declared_cty, init.value);
+                    (widened, declared_type_id)
+                } else {
+                    (init.value, declared_type_id)
+                }
+            } else if is_declared_f32 && init.type_id.is_float() && init.ty == types::F64 {
+                // f64 -> f32: demote to narrower float
+                let narrowed = self.builder.ins().fdemote(types::F32, init.value);
+                (narrowed, declared_type_id)
+            } else if is_declared_f64 && init.type_id.is_float() && init.ty == types::F32 {
+                // f32 -> f64: promote to wider float
+                let widened = self.builder.ins().fpromote(types::F64, init.value);
+                (widened, declared_type_id)
+            } else if is_declared_interface {
+                // For functional interfaces, keep the actual function type from the lambda
+                // This preserves the is_closure flag for proper calling convention
+                (init.value, init.type_id)
+            } else {
+                (init.value, declared_type_id)
+            }
+        } else {
+            (init.value, init.type_id)
+        };
+
+        // Box value if assigning to interface type
+        if let Some(declared_type_id) = declared_type_id_opt {
+            let arena = self.arena();
+            let is_declared_interface = arena.is_interface(declared_type_id);
+            let is_final_interface = arena.is_interface(final_type_id);
+
+            if is_declared_interface && !is_final_interface {
+                let arena = self.arena();
+                let cranelift_ty = type_id_to_cranelift(final_type_id, arena, self.ptr_type());
+                let boxed = self.box_interface_value(
+                    CompiledValue::new(final_value, cranelift_ty, final_type_id),
+                    declared_type_id,
+                )?;
+                final_value = boxed.value;
+                final_type_id = boxed.type_id;
+            }
+        }
+
+        Ok((final_value, final_type_id, is_stack_union))
     }
 
     /// Compile a return statement.
