@@ -1303,6 +1303,20 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: multi-arm when (4+ arms)
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_multi_arm_when(ctx) {
+                return stmt;
+            }
+        }
+
+        // ~2% chance: match with computed arm values
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_match_with_computation(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -6758,6 +6772,130 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
         Some(format!(
             "let {} = when {{ {} > {} => {}.iter().{}, _ => {}.iter().{} }}",
             name, cond_var, thresh, arr, t1, arr, t2
+        ))
+    }
+
+    /// Generate when expression with 4+ boolean condition arms.
+    /// Tests the compiler's handling of larger when expressions.
+    fn try_generate_multi_arm_when(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let i64_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::I64)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::I64)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        if i64_vars.is_empty() {
+            return None;
+        }
+
+        let var = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+        let name = ctx.new_local_name();
+        let num_arms = self.rng.gen_range(4..=7);
+        let indent = "    ".repeat(self.indent + 1);
+
+        let mut arms = Vec::new();
+        for i in 0..num_arms {
+            let thresh = (i as i64) * 10;
+            let result = self.rng.gen_range(-20..=20);
+            let op = match self.rng.gen_range(0..3u32) {
+                0 => ">",
+                1 => "<",
+                _ => ">=",
+            };
+            arms.push(format!("{}{} {} {} => {}", indent, var, op, thresh, result));
+        }
+        let default_val = self.rng.gen_range(-10..=10);
+        arms.push(format!("{}_ => {}", indent, default_val));
+
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::I64),
+            false,
+        );
+
+        Some(format!(
+            "let {} = when {{\n{}\n{}}}",
+            name,
+            arms.join("\n"),
+            "    ".repeat(self.indent),
+        ))
+    }
+
+    /// Generate match where arm values involve arithmetic computation.
+    /// `match x { 0 => a + b, 1 => c * 2, _ => d - 1 }`
+    fn try_generate_match_with_computation(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let i64_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::I64)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::I64)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        if i64_vars.len() < 2 {
+            return None;
+        }
+
+        let scrutinee = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+        let name = ctx.new_local_name();
+        let indent = "    ".repeat(self.indent + 1);
+        let num_arms = self.rng.gen_range(2..=4);
+
+        let mut arms = Vec::new();
+        let mut used_values = std::collections::HashSet::new();
+        for _ in 0..num_arms {
+            let mut val = self.rng.gen_range(-5..=10);
+            while used_values.contains(&val) {
+                val = self.rng.gen_range(-5..=10);
+            }
+            used_values.insert(val);
+
+            let v1 = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+            let op = match self.rng.gen_range(0..3u32) {
+                0 => "+",
+                1 => "-",
+                _ => "*",
+            };
+            let operand = self.rng.gen_range(1..=10);
+            arms.push(format!("{}{} => {} {} {}", indent, val, v1, op, operand));
+        }
+        // Default arm with computation
+        let v_default = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+        let default_op = match self.rng.gen_range(0..3u32) {
+            0 => "+",
+            1 => "-",
+            _ => "*",
+        };
+        let default_operand = self.rng.gen_range(1..=5);
+        arms.push(format!(
+            "{}_ => {} {} {}",
+            indent, v_default, default_op, default_operand
+        ));
+
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::I64),
+            false,
+        );
+
+        Some(format!(
+            "let {} = match {} {{\n{}\n{}}}",
+            name,
+            scrutinee,
+            arms.join("\n"),
+            "    ".repeat(self.indent),
         ))
     }
 
