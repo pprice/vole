@@ -276,7 +276,10 @@ impl FloatConstant {
             FloatConstant::F32Infinity => Some(f32::INFINITY),
             FloatConstant::F32NegInfinity => Some(f32::NEG_INFINITY),
             FloatConstant::F32Epsilon => Some(f32::EPSILON),
-            _ => None,
+            FloatConstant::F64Nan
+            | FloatConstant::F64Infinity
+            | FloatConstant::F64NegInfinity
+            | FloatConstant::F64Epsilon => None,
         }
     }
 
@@ -287,7 +290,10 @@ impl FloatConstant {
             FloatConstant::F64Infinity => Some(f64::INFINITY),
             FloatConstant::F64NegInfinity => Some(f64::NEG_INFINITY),
             FloatConstant::F64Epsilon => Some(f64::EPSILON),
-            _ => None,
+            FloatConstant::F32Nan
+            | FloatConstant::F32Infinity
+            | FloatConstant::F32NegInfinity
+            | FloatConstant::F32Epsilon => None,
         }
     }
 
