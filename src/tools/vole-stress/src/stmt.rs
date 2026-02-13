@@ -1549,6 +1549,18 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             return self.generate_single_char_string_ops(ctx);
         }
 
+        // ~2% chance: f64 literal arithmetic operations
+        if self.rng.gen_bool(0.02) {
+            return self.generate_f64_literal_ops_let(ctx);
+        }
+
+        // ~2% chance: iterator take/skip collect on parameter arrays
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_iter_take_skip_collect_let(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -8879,6 +8891,108 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
                 ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::String), false);
                 format!("let {} = \"{}\".substring(0, 1)", name, ch)
             }
+        }
+    }
+
+    /// Generate f64 literal arithmetic operations.
+    /// Tests floating-point codegen paths with known-safe values.
+    fn generate_f64_literal_ops_let(&mut self, ctx: &mut StmtContext) -> String {
+        let name = ctx.new_local_name();
+        let literals = [
+            "0.0", "1.0", "0.5", "2.5", "3.14", "100.0", "0.1", "99.9",
+        ];
+        let a = literals[self.rng.gen_range(0..literals.len())];
+        let b = literals[self.rng.gen_range(0..literals.len())];
+
+        // Find f64 variables
+        let f64_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::F64)))
+            .map(|(name, _, _)| name.clone())
+            .collect();
+
+        match self.rng.gen_range(0..5) {
+            0 => {
+                // f64 addition: 1.5 + 2.3
+                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::F64), false);
+                format!("let {} = {} + {}", name, a, b)
+            }
+            1 => {
+                // f64 multiplication: 3.14 * 2.0
+                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::F64), false);
+                format!("let {} = {} * {}", name, a, b)
+            }
+            2 => {
+                // f64 subtraction with variable if available
+                if let Some(var) = f64_vars.first() {
+                    ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::F64), false);
+                    format!("let {} = {} - {}", name, var, a)
+                } else {
+                    ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::F64), false);
+                    format!("let {} = {} - {}", name, a, b)
+                }
+            }
+            3 => {
+                // f64 comparison: a > b
+                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::Bool), false);
+                if let Some(var) = f64_vars.first() {
+                    format!("let {} = {} > {}", name, var, a)
+                } else {
+                    format!("let {} = {} > {}", name, a, b)
+                }
+            }
+            _ => {
+                // f64 division by non-zero literal
+                let divisors = ["1.0", "2.0", "0.5", "3.14", "10.0"];
+                let d = divisors[self.rng.gen_range(0..divisors.len())];
+                ctx.add_local(name.clone(), TypeInfo::Primitive(PrimitiveType::F64), false);
+                if let Some(var) = f64_vars.first() {
+                    format!("let {} = {} / {}", name, var, d)
+                } else {
+                    format!("let {} = {} / {}", name, a, d)
+                }
+            }
+        }
+    }
+
+    /// Generate `.iter().take(N).collect()` or `.iter().skip(N).collect()` on parameter arrays.
+    /// Uses parameter arrays with known length to avoid empty-array issues.
+    fn try_generate_iter_take_skip_collect_let(
+        &mut self,
+        ctx: &mut StmtContext,
+    ) -> Option<String> {
+        // Only use parameter arrays (guaranteed non-empty with known min length)
+        let array_params: Vec<(String, TypeInfo)> = ctx
+            .params
+            .iter()
+            .filter_map(|p| match &p.param_type {
+                TypeInfo::Array(_) => Some((p.name.clone(), p.param_type.clone())),
+                _ => None,
+            })
+            .collect();
+
+        if array_params.is_empty() {
+            return None;
+        }
+
+        let (arr_name, arr_type) = &array_params[self.rng.gen_range(0..array_params.len())];
+        let name = ctx.new_local_name();
+
+        // Use small N values (1-3) to keep results meaningful
+        let n = self.rng.gen_range(1..=3);
+
+        ctx.add_local(name.clone(), arr_type.clone(), false);
+        if self.rng.gen_bool(0.5) {
+            Some(format!(
+                "let {} = {}.iter().take({}).collect()",
+                name, arr_name, n
+            ))
+        } else {
+            Some(format!(
+                "let {} = {}.iter().skip({}).collect()",
+                name, arr_name, n
+            ))
         }
     }
 
