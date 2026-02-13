@@ -1331,6 +1331,18 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             }
         }
 
+        // ~2% chance: string length on literal edge cases
+        if self.rng.gen_bool(0.02) {
+            return self.generate_string_length_edge_cases(ctx);
+        }
+
+        // ~2% chance: range check boolean (x > lo && x < hi)
+        if self.rng.gen_bool(0.02) {
+            if let Some(stmt) = self.try_generate_range_check_let(ctx) {
+                return stmt;
+            }
+        }
+
         // ~10% chance to generate a widening let statement
         // (assign narrower type expression to wider type variable)
         if self.rng.gen_bool(0.10) {
@@ -7014,6 +7026,90 @@ impl<'a, R: Rng> StmtGenerator<'a, R> {
             indent,
             indent, result_c,
             "    ".repeat(self.indent),
+        ))
+    }
+
+    /// Generate string .length() on literal strings of known lengths.
+    /// Tests string-length codegen with edge cases: empty string, single char, etc.
+    fn generate_string_length_edge_cases(&mut self, ctx: &mut StmtContext) -> String {
+        let name = ctx.new_local_name();
+        let expr = match self.rng.gen_range(0..5u32) {
+            0 => "\"\".length()".to_string(),           // 0
+            1 => "\"a\".length()".to_string(),           // 1
+            2 => "\"hello\".length()".to_string(),       // 5
+            3 => "\"hello world\".length()".to_string(), // 11
+            _ => {
+                // Variable .length()
+                let string_vars: Vec<String> = ctx
+                    .locals
+                    .iter()
+                    .filter(|(_, ty, _)| {
+                        matches!(ty, TypeInfo::Primitive(PrimitiveType::String))
+                    })
+                    .map(|(name, _, _)| name.clone())
+                    .chain(
+                        ctx.params
+                            .iter()
+                            .filter(|p| {
+                                matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::String))
+                            })
+                            .map(|p| p.name.clone()),
+                    )
+                    .collect();
+                if !string_vars.is_empty() {
+                    let var = &string_vars[self.rng.gen_range(0..string_vars.len())];
+                    format!("{}.length()", var)
+                } else {
+                    "\"test\".length()".to_string() // 4
+                }
+            }
+        };
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::I64),
+            false,
+        );
+        format!("let {} = {}", name, expr)
+    }
+
+    /// Generate range-checking booleans: `x > lo && x < hi`, `x >= 0 && x <= 100`.
+    fn try_generate_range_check_let(&mut self, ctx: &mut StmtContext) -> Option<String> {
+        let i64_vars: Vec<String> = ctx
+            .locals
+            .iter()
+            .filter(|(_, ty, _)| matches!(ty, TypeInfo::Primitive(PrimitiveType::I64)))
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                ctx.params
+                    .iter()
+                    .filter(|p| matches!(p.param_type, TypeInfo::Primitive(PrimitiveType::I64)))
+                    .map(|p| p.name.clone()),
+            )
+            .collect();
+
+        if i64_vars.is_empty() {
+            return None;
+        }
+
+        let var = &i64_vars[self.rng.gen_range(0..i64_vars.len())];
+        let name = ctx.new_local_name();
+
+        let lo = self.rng.gen_range(-10..=0);
+        let hi = self.rng.gen_range(10..=100);
+        let (lo_op, hi_op) = match self.rng.gen_range(0..3u32) {
+            0 => (">", "<"),
+            1 => (">=", "<="),
+            _ => (">=", "<"),
+        };
+
+        ctx.add_local(
+            name.clone(),
+            TypeInfo::Primitive(PrimitiveType::Bool),
+            false,
+        );
+        Some(format!(
+            "let {} = {} {} {} && {} {} {}",
+            name, var, lo_op, lo, var, hi_op, hi
         ))
     }
 
