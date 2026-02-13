@@ -1919,7 +1919,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
         let flat_count = self
             .struct_flat_slot_count(ret_type_id)
             .expect("INTERNAL: struct return: missing flat slot count");
-        let mut return_vals = Vec::with_capacity(2);
+        let mut return_vals = Vec::with_capacity(crate::MAX_SMALL_STRUCT_FIELDS);
         for i in 0..flat_count {
             let offset = (i as i32) * 8;
             let val = self
@@ -1928,7 +1928,7 @@ impl<'a, 'b, 'ctx> Cg<'a, 'b, 'ctx> {
                 .load(types::I64, MemFlags::new(), struct_ptr, offset);
             return_vals.push(val);
         }
-        while return_vals.len() < 2 {
+        while return_vals.len() < crate::MAX_SMALL_STRUCT_FIELDS {
             return_vals.push(self.builder.ins().iconst(types::I64, 0));
         }
         self.builder.ins().return_(&return_vals);

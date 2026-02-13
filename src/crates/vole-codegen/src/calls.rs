@@ -1332,8 +1332,8 @@ impl Cg<'_, '_, '_> {
             for _ in 0..field_count.max(1) {
                 sig.returns.push(AbiParam::new(types::I64));
             }
-            // Pad to 2 for consistent convention
-            if field_count < 2 {
+            // Pad to MAX_SMALL_STRUCT_FIELDS for consistent calling convention
+            if field_count < crate::MAX_SMALL_STRUCT_FIELDS {
                 sig.returns.push(AbiParam::new(types::I64));
             }
 

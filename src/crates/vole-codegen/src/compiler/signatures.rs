@@ -105,7 +105,7 @@ impl Compiler<'_> {
                     returns.push(types::I64);
                 }
                 // Pad to 2 registers for consistent calling convention
-                while returns.len() < 2 {
+                while returns.len() < crate::MAX_SMALL_STRUCT_FIELDS {
                     returns.push(types::I64);
                 }
                 return self
