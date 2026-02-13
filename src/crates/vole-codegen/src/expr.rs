@@ -1461,6 +1461,215 @@ impl Cg<'_, '_, '_> {
         ))
     }
 
+    /// Compile a single match arm's pattern, returning the condition value (if any).
+    ///
+    /// Updates `arm_variables` with any bindings introduced by the pattern and
+    /// `effective_arm_block` if a conditional extraction block is created.
+    fn compile_match_arm_pattern(
+        &mut self,
+        scrutinee: &CompiledValue,
+        pattern: &Pattern,
+        arm_variables: &mut FxHashMap<Symbol, (Variable, TypeId)>,
+        arm_block: Block,
+        next_block: Block,
+        effective_arm_block: &mut Block,
+    ) -> CodegenResult<Option<Value>> {
+        let scrutinee_type_id = scrutinee.type_id;
+        match &pattern.kind {
+            PatternKind::Wildcard => Ok(None),
+            PatternKind::Identifier { name } => {
+                // Check if sema recognized this as a type pattern by looking for
+                // a pre-computed IsCheckResult. This handles all type patterns
+                // including sentinel types (Done, nil) from prelude modules.
+                if self.get_is_check_result(pattern.id).is_some() {
+                    // Type pattern - compare against union variant tag
+                    Ok(self.compile_type_pattern_check(scrutinee, pattern.id)?)
+                } else {
+                    // Regular identifier binding
+                    let var = self.builder.declare_var(scrutinee.ty);
+                    self.builder.def_var(var, scrutinee.value);
+                    arm_variables.insert(*name, (var, scrutinee_type_id));
+                    Ok(None)
+                }
+            }
+            PatternKind::Type { type_expr: _ } => {
+                Ok(self.compile_type_pattern_check(scrutinee, pattern.id)?)
+            }
+            PatternKind::Literal(lit_expr) => {
+                // Save and restore vars for pattern matching
+                let saved_vars = std::mem::replace(&mut self.vars, arm_variables.clone());
+                let lit_val = self.expr(lit_expr)?;
+                *arm_variables = std::mem::replace(&mut self.vars, saved_vars);
+
+                // Coerce literal value to match scrutinee's Cranelift type.
+                let coerced_lit = self.convert_for_select(lit_val.value, scrutinee.ty);
+
+                let cmp = self.compile_equality_check(
+                    scrutinee_type_id,
+                    scrutinee.value,
+                    coerced_lit,
+                )?;
+                Ok(Some(cmp))
+            }
+            PatternKind::Val { name } => {
+                // Val pattern - compare against existing variable's value.
+                let (var_val, var_type_id) =
+                    if let Some(&(var, var_type_id)) = arm_variables.get(name) {
+                        (self.builder.use_var(var), var_type_id)
+                    } else if let Some(binding) = self.get_capture(name).copied() {
+                        let captured = self.load_capture(&binding)?;
+                        (captured.value, captured.type_id)
+                    } else {
+                        return Err(CodegenError::internal("undefined variable in val pattern"));
+                    };
+
+                let cmp = self.compile_equality_check(var_type_id, scrutinee.value, var_val)?;
+                Ok(Some(cmp))
+            }
+            PatternKind::Success { inner } => {
+                let tag = load_fallible_tag(self.builder, scrutinee.value);
+                let is_success =
+                    self.builder
+                        .ins()
+                        .icmp_imm(IntCC::Equal, tag, FALLIBLE_SUCCESS_TAG);
+
+                if let Some(inner_pat) = inner {
+                    let fallible_types = self.arena().unwrap_fallible(scrutinee_type_id);
+                    if let Some((success_type_id, _error_type_id)) = fallible_types {
+                        let ptr_type = self.ptr_type();
+                        let payload_ty = {
+                            let arena = self.arena();
+                            type_id_to_cranelift(success_type_id, arena, ptr_type)
+                        };
+                        let payload =
+                            load_fallible_payload(self.builder, scrutinee.value, payload_ty);
+
+                        if let PatternKind::Identifier { name } = &inner_pat.kind {
+                            let var = self.builder.declare_var(payload_ty);
+                            self.builder.def_var(var, payload);
+                            arm_variables.insert(*name, (var, success_type_id));
+                        }
+                    }
+                }
+                Ok(Some(is_success))
+            }
+            PatternKind::Error { inner } => {
+                let tag = load_fallible_tag(self.builder, scrutinee.value);
+                Ok(self.compile_error_pattern(inner, scrutinee, tag, arm_variables)?)
+            }
+            PatternKind::Tuple { elements } => {
+                let elem_type_ids = self.arena().unwrap_tuple(scrutinee.type_id).cloned();
+                if let Some(elem_type_ids) = elem_type_ids {
+                    let ptr_type = self.ptr_type();
+                    let offsets = {
+                        let arena = self.arena();
+                        let (_, offsets) =
+                            tuple_layout_id(&elem_type_ids, ptr_type, self.registry(), arena);
+                        offsets
+                    };
+                    let elem_cr_types = self.cranelift_types(&elem_type_ids);
+                    for (i, pat) in elements.iter().enumerate() {
+                        if let PatternKind::Identifier { name } = &pat.kind {
+                            let offset = offsets[i];
+                            let elem_type_id = elem_type_ids[i];
+                            let elem_cr_type = elem_cr_types[i];
+                            let value = self.builder.ins().load(
+                                elem_cr_type,
+                                MemFlags::new(),
+                                scrutinee.value,
+                                offset,
+                            );
+                            let var = self.builder.declare_var(elem_cr_type);
+                            self.builder.def_var(var, value);
+                            arm_variables.insert(*name, (var, elem_type_id));
+                        }
+                    }
+                }
+                Ok(None)
+            }
+            PatternKind::Record { type_name, fields } => {
+                let (pattern_check, pattern_type_id) = if let Some(type_expr) = type_name {
+                    let pattern_check =
+                        self.compile_type_pattern_check(scrutinee, pattern.id)?;
+                    let pattern_type_id = self.pattern_type_id_for_record_arm(
+                        scrutinee_type_id,
+                        pattern.id,
+                        type_expr,
+                    );
+                    (pattern_check, pattern_type_id)
+                } else {
+                    (None, None)
+                };
+
+                let is_conditional_extract =
+                    pattern_check.is_some() && self.arena().is_union(scrutinee_type_id);
+
+                if is_conditional_extract {
+                    let extract_block = self.builder.create_block();
+
+                    let cond = pattern_check
+                        .expect("INTERNAL: match pattern: missing pattern_check condition");
+                    let cond_i32 = self.cond_to_i32(cond);
+                    self.builder
+                        .ins()
+                        .brif(cond_i32, extract_block, &[], next_block, &[]);
+                    self.builder.seal_block(arm_block);
+                    *effective_arm_block = extract_block;
+
+                    self.builder.switch_to_block(extract_block);
+
+                    let (field_source, field_source_type_id) =
+                        if let Some(pt_id) = pattern_type_id {
+                            let payload = self.builder.ins().load(
+                                types::I64,
+                                MemFlags::new(),
+                                scrutinee.value,
+                                8,
+                            );
+                            (payload, pt_id)
+                        } else {
+                            (scrutinee.value, scrutinee_type_id)
+                        };
+
+                    self.extract_record_fields(
+                        fields,
+                        field_source,
+                        field_source_type_id,
+                        arm_variables,
+                    )?;
+
+                    Ok(None)
+                } else {
+                    let (field_source, field_source_type_id) =
+                        if self.arena().is_union(scrutinee_type_id) {
+                            if let Some(pt_id) = pattern_type_id {
+                                let payload = self.builder.ins().load(
+                                    types::I64,
+                                    MemFlags::new(),
+                                    scrutinee.value,
+                                    8,
+                                );
+                                (payload, pt_id)
+                            } else {
+                                (scrutinee.value, scrutinee_type_id)
+                            }
+                        } else {
+                            (scrutinee.value, scrutinee_type_id)
+                        };
+
+                    self.extract_record_fields(
+                        fields,
+                        field_source,
+                        field_source_type_id,
+                        arm_variables,
+                    )?;
+
+                    Ok(pattern_check)
+                }
+            }
+        }
+    }
+
     /// Compile a match expression
     #[tracing::instrument(skip(self, match_expr), fields(arms = match_expr.arms.len()))]
     pub fn match_expr(
@@ -1546,233 +1755,14 @@ impl Cg<'_, '_, '_> {
             // Track the effective arm block (may change for conditional extraction)
             let mut effective_arm_block = arm_block;
 
-            let pattern_matches = match &arm.pattern.kind {
-                PatternKind::Wildcard => None,
-                PatternKind::Identifier { name } => {
-                    // Check if sema recognized this as a type pattern by looking for
-                    // a pre-computed IsCheckResult. This handles all type patterns
-                    // including sentinel types (Done, nil) from prelude modules.
-                    if self.get_is_check_result(arm.pattern.id).is_some() {
-                        // Type pattern - compare against union variant tag
-                        self.compile_type_pattern_check(&scrutinee, arm.pattern.id)?
-                    } else {
-                        // Regular identifier binding
-                        let var = self.builder.declare_var(scrutinee.ty);
-                        self.builder.def_var(var, scrutinee.value);
-                        arm_variables.insert(*name, (var, scrutinee_type_id));
-                        None
-                    }
-                }
-                PatternKind::Type { type_expr: _ } => {
-                    self.compile_type_pattern_check(&scrutinee, arm.pattern.id)?
-                }
-                PatternKind::Literal(lit_expr) => {
-                    // Save and restore vars for pattern matching
-                    let saved_vars = std::mem::replace(&mut self.vars, arm_variables.clone());
-                    let lit_val = self.expr(lit_expr)?;
-                    arm_variables = std::mem::replace(&mut self.vars, saved_vars);
-
-                    // Coerce literal value to match scrutinee's Cranelift type.
-                    // This handles suffixed literals like `191_i64` matched against
-                    // an i32 scrutinee (sema reports an error but codegen continues).
-                    let coerced_lit =
-                        self.convert_for_select(lit_val.value, scrutinee.ty);
-
-                    // Use Vole type (not Cranelift type) to determine comparison method
-                    let cmp = self.compile_equality_check(
-                        scrutinee_type_id,
-                        scrutinee.value,
-                        coerced_lit,
-                    )?;
-                    Some(cmp)
-                }
-                PatternKind::Val { name } => {
-                    // Val pattern - compare against existing variable's value.
-                    // Check local variables first, then fall back to captures
-                    // (for lambdas referencing outer scope variables).
-                    let (var_val, var_type_id) =
-                        if let Some(&(var, var_type_id)) = arm_variables.get(name) {
-                            (self.builder.use_var(var), var_type_id)
-                        } else if let Some(binding) = self.get_capture(name).copied() {
-                            let captured = self.load_capture(&binding)?;
-                            (captured.value, captured.type_id)
-                        } else {
-                            return Err(CodegenError::internal("undefined variable in val pattern"));
-                        };
-
-                    let cmp = self.compile_equality_check(var_type_id, scrutinee.value, var_val)?;
-                    Some(cmp)
-                }
-                PatternKind::Success { inner } => {
-                    // Check if tag == FALLIBLE_SUCCESS_TAG (0)
-                    let tag = load_fallible_tag(self.builder, scrutinee.value);
-                    let is_success =
-                        self.builder
-                            .ins()
-                            .icmp_imm(IntCC::Equal, tag, FALLIBLE_SUCCESS_TAG);
-
-                    // If there's an inner pattern, we need to extract payload and bind it
-                    if let Some(inner_pat) = inner {
-                        // Extract the success type from scrutinee's vole_type
-                        // Get types before using builder to avoid borrow conflict
-                        let fallible_types = self.arena().unwrap_fallible(scrutinee_type_id);
-                        if let Some((success_type_id, _error_type_id)) = fallible_types {
-                            let ptr_type = self.ptr_type();
-                            let payload_ty = {
-                                let arena = self.arena();
-                                type_id_to_cranelift(success_type_id, arena, ptr_type)
-                            };
-                            let payload =
-                                load_fallible_payload(self.builder, scrutinee.value, payload_ty);
-
-                            // Handle inner pattern (usually an identifier binding)
-                            if let PatternKind::Identifier { name } = &inner_pat.kind {
-                                let var = self.builder.declare_var(payload_ty);
-                                self.builder.def_var(var, payload);
-                                arm_variables.insert(*name, (var, success_type_id));
-                            }
-                        }
-                    }
-                    Some(is_success)
-                }
-                PatternKind::Error { inner } => {
-                    // Load the tag from fallible structure
-                    let tag = load_fallible_tag(self.builder, scrutinee.value);
-                    self.compile_error_pattern(inner, &scrutinee, tag, &mut arm_variables)?
-                }
-                PatternKind::Tuple { elements } => {
-                    // Tuple destructuring in match - extract elements and bind
-                    // Use arena methods for layout computation
-                    // Extract all type info before using builder to avoid borrow conflicts
-                    let elem_type_ids = self.arena().unwrap_tuple(scrutinee.type_id).cloned();
-                    if let Some(elem_type_ids) = elem_type_ids {
-                        let ptr_type = self.ptr_type();
-                        let offsets = {
-                            let arena = self.arena();
-                            let (_, offsets) =
-                                tuple_layout_id(&elem_type_ids, ptr_type, self.registry(), arena);
-                            offsets
-                        };
-                        // Precompute cranelift types for each element
-                        let elem_cr_types = self.cranelift_types(&elem_type_ids);
-                        for (i, pat) in elements.iter().enumerate() {
-                            if let PatternKind::Identifier { name } = &pat.kind {
-                                let offset = offsets[i];
-                                let elem_type_id = elem_type_ids[i];
-                                let elem_cr_type = elem_cr_types[i];
-                                let value = self.builder.ins().load(
-                                    elem_cr_type,
-                                    MemFlags::new(),
-                                    scrutinee.value,
-                                    offset,
-                                );
-                                let var = self.builder.declare_var(elem_cr_type);
-                                self.builder.def_var(var, value);
-                                arm_variables.insert(*name, (var, elem_type_id));
-                            }
-                            // Other pattern types in tuple (like wildcards) are ignored
-                        }
-                    }
-                    None // Tuple patterns always match (type checked in sema)
-                }
-                PatternKind::Record { type_name, fields } => {
-                    // Destructuring in match - TypeName { x, y } or { x, y }
-                    let (pattern_check, pattern_type_id) = if let Some(type_expr) = type_name {
-                        // Typed destructure pattern - need to check type first
-                        let pattern_check =
-                            self.compile_type_pattern_check(&scrutinee, arm.pattern.id)?;
-                        let pattern_type_id = self.pattern_type_id_for_record_arm(
-                            scrutinee_type_id,
-                            arm.pattern.id,
-                            type_expr,
-                        );
-                        (pattern_check, pattern_type_id)
-                    } else {
-                        // Untyped destructure pattern - always matches (type checked in sema)
-                        (None, None)
-                    };
-
-                    // For typed patterns on union types, we must defer field extraction
-                    // until after the pattern check passes to avoid accessing invalid memory
-                    let is_conditional_extract =
-                        pattern_check.is_some() && self.arena().is_union(scrutinee_type_id);
-
-                    if is_conditional_extract {
-                        // Create an extraction block that only runs if pattern matches
-                        let extract_block = self.builder.create_block();
-
-                        // Branch: if pattern matches -> extract_block, else -> next_block
-                        let cond = pattern_check
-                            .expect("INTERNAL: match pattern: missing pattern_check condition");
-                        let cond_i32 = self.cond_to_i32(cond);
-                        self.builder
-                            .ins()
-                            .brif(cond_i32, extract_block, &[], next_block, &[]);
-                        self.builder.seal_block(arm_block);
-                        // extract_block becomes the effective arm block for sealing later
-                        effective_arm_block = extract_block;
-
-                        // Extract block: extract fields from union payload
-                        self.builder.switch_to_block(extract_block);
-
-                        let (field_source, field_source_type_id) =
-                            if let Some(pt_id) = pattern_type_id {
-                                // Extract payload from union at offset 8
-                                let payload = self.builder.ins().load(
-                                    types::I64,
-                                    MemFlags::new(),
-                                    scrutinee.value,
-                                    8,
-                                );
-                                (payload, pt_id)
-                            } else {
-                                (scrutinee.value, scrutinee_type_id)
-                            };
-
-                        // Extract and bind fields
-                        self.extract_record_fields(
-                            fields,
-                            field_source,
-                            field_source_type_id,
-                            &mut arm_variables,
-                        )?;
-
-                        // extract_block continues to guard/body logic
-                        // We stay in extract_block - it becomes the effective "arm block"
-                        // Return None since the pattern check is already done via brif
-                        None
-                    } else {
-                        // Non-conditional case: extract fields directly
-                        // Determine the value to extract fields from
-                        let (field_source, field_source_type_id) =
-                            if self.arena().is_union(scrutinee_type_id) {
-                                if let Some(pt_id) = pattern_type_id {
-                                    let payload = self.builder.ins().load(
-                                        types::I64,
-                                        MemFlags::new(),
-                                        scrutinee.value,
-                                        8,
-                                    );
-                                    (payload, pt_id)
-                                } else {
-                                    (scrutinee.value, scrutinee_type_id)
-                                }
-                            } else {
-                                (scrutinee.value, scrutinee_type_id)
-                            };
-
-                        // Extract and bind fields
-                        self.extract_record_fields(
-                            fields,
-                            field_source,
-                            field_source_type_id,
-                            &mut arm_variables,
-                        )?;
-
-                        pattern_check
-                    }
-                }
-            };
+            let pattern_matches = self.compile_match_arm_pattern(
+                &scrutinee,
+                &arm.pattern,
+                &mut arm_variables,
+                arm_block,
+                next_block,
+                &mut effective_arm_block,
+            )?;
 
             // Save and restore vars for guard evaluation
             let guard_result = if let Some(guard) = &arm.guard {
